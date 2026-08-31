@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, Literal, TypedDict
 
 if TYPE_CHECKING:
     from agentworks.debian import DebianRelease
@@ -39,11 +39,6 @@ class VMCheckpointState(Enum):
     READY = "ready"
     RESTORING = "restoring"
     DELETING = "deleting"
-
-
-class VMCheckpointPurpose(Enum):
-    OPERATOR = "operator"
-    DEBIAN_UPGRADE = "debian-upgrade"
 
 
 class SessionMode(Enum):
@@ -128,11 +123,16 @@ class VMCheckpointRow:
     operation_id: str | None
     desired_state_fingerprint: str
     state: VMCheckpointState
-    purpose: VMCheckpointPurpose
     capture_release: DebianRelease
     source_release: DebianRelease | None
     target_release: DebianRelease | None
     created_at: str
+
+    @property
+    def purpose(self) -> Literal["operator", "debian-upgrade"]:
+        """Derive the operator-facing use from the optional transition pair."""
+
+        return "debian-upgrade" if self.source_release is not None else "operator"
 
 
 @dataclass

@@ -41,7 +41,6 @@ if TYPE_CHECKING:
         SessionMode,
         SessionRow,
         ShellEntry,
-        VMCheckpointPurpose,
         VMCheckpointRow,
         VMCheckpointState,
         VMEventRow,
@@ -1158,7 +1157,6 @@ class Database:
         name: str,
         operation_id: str,
         desired_state_fingerprint: str,
-        purpose: VMCheckpointPurpose,
         capture_release: DebianRelease,
         source_release: DebianRelease | None = None,
         target_release: DebianRelease | None = None,
@@ -1167,15 +1165,14 @@ class Database:
 
         self._conn.execute(
             "INSERT INTO vm_checkpoints "
-            "(vm_name, name, operation_id, desired_state_fingerprint, state, purpose, "
-            "capture_release, source_release, target_release) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "(vm_name, name, operation_id, desired_state_fingerprint, state, "
+            "capture_release, source_release, target_release) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 vm_name,
                 name,
                 operation_id,
                 desired_state_fingerprint,
                 _db.VMCheckpointState.CREATING.value,
-                purpose.value,
                 capture_release.value,
                 source_release.value if source_release is not None else None,
                 target_release.value if target_release is not None else None,

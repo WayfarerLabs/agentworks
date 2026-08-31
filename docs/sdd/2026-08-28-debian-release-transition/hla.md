@@ -244,8 +244,6 @@ CREATE TABLE vm_checkpoints (
                         CHECK (length(desired_state_fingerprint) = 64),
     state               TEXT NOT NULL
                         CHECK (state IN ('creating', 'ready', 'restoring', 'deleting')),
-    purpose             TEXT NOT NULL
-                        CHECK (purpose IN ('operator', 'debian-upgrade')),
     capture_release     TEXT NOT NULL,
     source_release      TEXT,
     target_release      TEXT,
@@ -253,7 +251,6 @@ CREATE TABLE vm_checkpoints (
     CHECK (provider_identifier IS NOT NULL OR state = 'creating'),
     CHECK ((state = 'ready') = (operation_id IS NULL)),
     CHECK ((source_release IS NULL) = (target_release IS NULL)),
-    CHECK ((purpose = 'debian-upgrade') = (source_release IS NOT NULL)),
     CHECK (source_release IS NULL OR capture_release = source_release)
 );
 ```
@@ -267,11 +264,12 @@ time, evaluated against the checkpoint's immutable `capture_release`. Standalone
 live-probe a stopped guest, so it requires and copies the VM's recognized persisted observation
 under the exclusive guard; absence fails with guidance to start and observe or reinitialize the VM,
 stop it, and retry. Upgrade uses its fresh pre-stop observation. `source_release` and
-`target_release` remain the optional transition pair owned only by upgrade-purpose checkpoints, and
-the schema requires an upgrade checkpoint's capture release to equal its source release. Releases
-remain text validated by the running registry rather than an SQL enumeration. The migration updates
-the exact schema sentinels and proves both a fresh migration ladder and a version-33 database
-advancing to version 34. It never modifies migration 33 or probes a provider.
+`target_release` remain the optional transition pair; their presence derives the operator-facing
+`debian-upgrade` purpose, while their absence derives `operator`, so purpose is not stored as a
+duplicate fact. The schema requires an upgrade checkpoint's capture release to equal its source
+release. Releases remain text validated by the running registry rather than an SQL enumeration. The
+migration updates the exact schema sentinels and proves both a fresh migration ladder and a
+version-33 database advancing to version 34. It never modifies migration 33 or probes a provider.
 
 `vm delete` owns checkpoint cleanup before backend VM deletion. A failed checkpoint deletion keeps
 both the checkpoint and VM rows addressable; the restrictive foreign key is a final orphan guard,
@@ -689,7 +687,7 @@ preliminary plan. After checkpoint capture, the durable guest plan binds both lo
 to the generated checkpoint name. The bundle uses a secure root-owned disk-backed staging directory
 such as `/var/tmp` for transfer and is removed after a verified local copy.
 
-After both local artifacts are complete, the manager claims a transition-purpose checkpoint row,
+After both local artifacts are complete, the manager claims a transition-pair checkpoint row,
 temporarily stops the VM, creates and verifies the provider artifact, and restarts the VM. It
 records the descriptor in the guest plan and the checkpoint event before the first package mutation.
 An unrelated checkpoint already occupying the slot blocks a fresh transition with exact

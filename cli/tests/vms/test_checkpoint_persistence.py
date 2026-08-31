@@ -6,7 +6,6 @@ import pytest
 
 from agentworks.db import (
     Database,
-    VMCheckpointPurpose,
     VMCheckpointState,
 )
 from agentworks.debian import DebianRelease
@@ -24,7 +23,6 @@ def test_checkpoint_repository_fences_create_restore_and_delete(db: Database) ->
         name="agw-checkpoint",
         operation_id="create-op",
         desired_state_fingerprint="a" * 64,
-        purpose=VMCheckpointPurpose.OPERATOR,
         capture_release=DebianRelease.BOOKWORM,
     )
     assert created.state is VMCheckpointState.CREATING
@@ -79,7 +77,6 @@ def test_checkpoint_repository_fences_materialized_interrupted_create_deletion(
         name="agw-checkpoint",
         operation_id="create-op",
         desired_state_fingerprint="a" * 64,
-        purpose=VMCheckpointPurpose.OPERATOR,
         capture_release=DebianRelease.BOOKWORM,
     )
 
@@ -109,7 +106,6 @@ def test_checkpoint_converter_rejects_release_unknown_to_build(db: Database) -> 
         name="agw-checkpoint",
         operation_id="create-op",
         desired_state_fingerprint="b" * 64,
-        purpose=VMCheckpointPurpose.OPERATOR,
         capture_release=DebianRelease.BOOKWORM,
     )
     db._conn.execute(
@@ -129,7 +125,6 @@ def test_vm_backup_projection_includes_checkpoint_row(db: Database) -> None:
         name="agw-checkpoint",
         operation_id="create-op",
         desired_state_fingerprint="c" * 64,
-        purpose=VMCheckpointPurpose.DEBIAN_UPGRADE,
         capture_release=DebianRelease.BOOKWORM,
         source_release=DebianRelease.BOOKWORM,
         target_release=DebianRelease.TRIXIE,

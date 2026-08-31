@@ -565,7 +565,7 @@ def vm_description(
                 name=checkpoint_row.name,
                 provider_identifier=checkpoint_row.provider_identifier,
                 state=checkpoint_row.state.value,
-                purpose=checkpoint_row.purpose.value,
+                purpose=checkpoint_row.purpose,
                 capture_release=checkpoint_row.capture_release.value,
                 source_release=(None if checkpoint_row.source_release is None else checkpoint_row.source_release.value),
                 target_release=(None if checkpoint_row.target_release is None else checkpoint_row.target_release.value),

@@ -123,7 +123,7 @@ def backup_vm(
                         "operation_id": checkpoint.operation_id,
                         "desired_state_fingerprint": checkpoint.desired_state_fingerprint,
                         "state": checkpoint.state.value,
-                        "purpose": checkpoint.purpose.value,
+                        "purpose": checkpoint.purpose,
                         "capture_release": checkpoint.capture_release.value,
                         "source_release": (
                             None if checkpoint.source_release is None else checkpoint.source_release.value

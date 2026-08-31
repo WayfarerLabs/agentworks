@@ -674,8 +674,6 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
                                       CHECK (length(desired_state_fingerprint) = 64),
             state                     TEXT NOT NULL
                                       CHECK (state IN ('creating', 'ready', 'restoring', 'deleting')),
-            purpose                   TEXT NOT NULL
-                                      CHECK (purpose IN ('operator', 'debian-upgrade')),
             capture_release           TEXT NOT NULL,
             source_release            TEXT,
             target_release            TEXT,
@@ -684,7 +682,6 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
             CHECK (provider_identifier IS NOT NULL OR state = 'creating'),
             CHECK ((state = 'ready') = (operation_id IS NULL)),
             CHECK ((source_release IS NULL) = (target_release IS NULL)),
-            CHECK ((purpose = 'debian-upgrade') = (source_release IS NOT NULL)),
             CHECK (source_release IS NULL OR capture_release = source_release)
         );
     """,
@@ -805,7 +802,6 @@ _SCHEMA_SENTINEL_ADDITIONS: dict[int, dict[str, tuple[str, ...]]] = {
             "operation_id",
             "desired_state_fingerprint",
             "state",
-            "purpose",
             "capture_release",
             "source_release",
             "target_release",

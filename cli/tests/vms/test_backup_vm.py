@@ -21,7 +21,6 @@ import pytest
 from agentworks.db import (
     AppliedStateKey,
     VersionedPayload,
-    VMCheckpointPurpose,
     VMCheckpointState,
 )
 from agentworks.debian import DebianRelease
@@ -245,7 +244,6 @@ def test_backup_exports_managed_checkpoint_metadata(
         name="agw-checkpoint",
         operation_id="create-checkpoint",
         desired_state_fingerprint="a" * 64,
-        purpose=VMCheckpointPurpose.DEBIAN_UPGRADE,
         capture_release=DebianRelease.BOOKWORM,
         source_release=DebianRelease.BOOKWORM,
         target_release=DebianRelease.TRIXIE,

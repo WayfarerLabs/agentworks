@@ -68,7 +68,8 @@ Checkpoint creation must work before Agentworks mutates Debian. Existing least-p
 credentials may need checkpoint permissions added:
 
 - AWS needs EBS snapshot create, describe, tag, and delete access; root-volume replacement task
-  create and describe access; and volume describe, untag, and delete access. See
+  create and describe access; and volume describe, delete, `ec2:CreateTags`, and `ec2:DeleteTags`
+  access. See
   [EBS snapshot creation](https://docs.aws.amazon.com/ebs/latest/userguide/ebs-creating-snapshot.html)
   and
   [EC2 root-volume replacement](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/replace-root.html).

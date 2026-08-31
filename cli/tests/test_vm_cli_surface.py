@@ -112,7 +112,7 @@ def test_vm_list_checkpoints_json_uses_machine_envelope(monkeypatch: pytest.Monk
 
 
 def test_vm_list_checkpoints_json_projects_checkpoint_fields(monkeypatch: pytest.MonkeyPatch) -> None:
-    from agentworks.db import VMCheckpointPurpose, VMCheckpointRow, VMCheckpointState
+    from agentworks.db import VMCheckpointRow, VMCheckpointState
     from agentworks.debian import DebianRelease
 
     row = VMCheckpointRow(
@@ -122,7 +122,6 @@ def test_vm_list_checkpoints_json_projects_checkpoint_fields(monkeypatch: pytest
         operation_id=None,
         desired_state_fingerprint="a" * 64,
         state=VMCheckpointState.READY,
-        purpose=VMCheckpointPurpose.DEBIAN_UPGRADE,
         capture_release=DebianRelease.BOOKWORM,
         source_release=DebianRelease.BOOKWORM,
         target_release=DebianRelease.TRIXIE,

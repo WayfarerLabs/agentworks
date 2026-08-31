@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.vm_platform import CheckpointDescriptor
-from agentworks.db import VMCheckpointPurpose, VMStatus
+from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import AuthorizationError, StateError, UserAbort
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
@@ -141,7 +141,6 @@ def test_delete_with_checkpoint_uses_one_boundary_for_both_provider_artifacts(
         name="agw-checkpoint",
         operation_id="create-op",
         desired_state_fingerprint="a" * 64,
-        purpose=VMCheckpointPurpose.OPERATOR,
         capture_release=DebianRelease.BOOKWORM,
     )
     assert db.complete_vm_checkpoint(

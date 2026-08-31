@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from agentworks.capabilities.vm_platform import CheckpointDescriptor
-from agentworks.db import Database, InitStatus, VMCheckpointPurpose, VMCheckpointState, VMStatus
+from agentworks.db import Database, InitStatus, VMCheckpointState, VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import AlreadyExistsError, StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -119,7 +119,7 @@ def test_create_checkpoint_persists_capture_release_and_one_slot(
     )
 
     assert row.state is VMCheckpointState.READY
-    assert row.purpose is VMCheckpointPurpose.OPERATOR
+    assert row.purpose == "operator"
     assert row.capture_release is DebianRelease.BOOKWORM
     assert row.provider_identifier == f"provider-{row.name}"
     assert platform.created == [CheckpointDescriptor(row.name, row.provider_identifier)]
@@ -449,7 +449,6 @@ def test_delete_checkpoint_removes_materialized_interrupted_create(
         name="agw-interrupted",
         operation_id="create-operation",
         desired_state_fingerprint="a" * 64,
-        purpose=VMCheckpointPurpose.OPERATOR,
         capture_release=DebianRelease.BOOKWORM,
         source_release=None,
         target_release=None,
@@ -481,7 +480,6 @@ def test_delete_materialized_interrupted_create_replays_after_provider_delete(
         name="agw-interrupted",
         operation_id="create-operation",
         desired_state_fingerprint="a" * 64,
-        purpose=VMCheckpointPurpose.OPERATOR,
         capture_release=DebianRelease.BOOKWORM,
         source_release=None,
         target_release=None,
@@ -538,7 +536,6 @@ def test_delete_checkpoint_finishes_an_unobserved_create_before_cleanup(
         name="agw-interrupted",
         operation_id="create-operation",
         desired_state_fingerprint="a" * 64,
-        purpose=VMCheckpointPurpose.OPERATOR,
         capture_release=DebianRelease.BOOKWORM,
         source_release=None,
         target_release=None,
@@ -570,7 +567,6 @@ def test_delete_interrupted_create_retains_row_when_provider_inventory_disagrees
         name="agw-interrupted",
         operation_id="create-operation",
         desired_state_fingerprint="a" * 64,
-        purpose=VMCheckpointPurpose.OPERATOR,
         capture_release=DebianRelease.BOOKWORM,
         source_release=None,
         target_release=None,

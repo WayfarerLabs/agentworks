@@ -450,10 +450,10 @@ incidental implementation work.
       and the vm-platform version 4 hard cutover. Complete a draft `review-requested` design cycle
       before implementation.
 - [x] Add forward migration 34 and its exact schema sentinel without modifying already-applied
-      migration 33. Persist the one-slot checkpoint lifecycle, provider descriptor, purpose, and
-      adjacent upgrade pair, immutable recognized Debian capture release, operation identity, and
-      canonical effective desired-state fingerprint; include it in database backup projection and
-      prove version-33 to version-34 plus fresh-ladder migration.
+      migration 33. Persist the one-slot checkpoint lifecycle, provider descriptor, adjacent upgrade
+      pair, immutable recognized Debian capture release, operation identity, and canonical effective
+      desired-state fingerprint; derive purpose from the adjacent pair, include it in database
+      backup projection, and prove version-33 to version-34 plus fresh-ladder migration.
 - [x] Add mandatory vm-platform create/list/restore/delete operations and implement replay-safe,
       identity-preserving checkpoints for Lima, WSL2, AWS EC2, Azure VM, GCP GCE, and Proxmox,
       including provider ownership checks, destructive-restore intermediates, permission teaching,

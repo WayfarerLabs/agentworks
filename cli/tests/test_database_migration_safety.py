@@ -106,7 +106,6 @@ def test_version_33_advances_to_forward_checkpoint_migration_34(tmp_path: Path) 
         "operation_id",
         "desired_state_fingerprint",
         "state",
-        "purpose",
         "capture_release",
         "source_release",
         "target_release",
@@ -127,15 +126,14 @@ def test_checkpoint_schema_requires_upgrade_capture_to_equal_source(tmp_path: Pa
     with pytest.raises(sqlite3.IntegrityError):
         connection.execute(
             "INSERT INTO vm_checkpoints "
-            "(vm_name, name, provider_identifier, desired_state_fingerprint, state, purpose, "
-            "capture_release, source_release, target_release) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "(vm_name, name, provider_identifier, desired_state_fingerprint, state, "
+            "capture_release, source_release, target_release) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 "release-witness",
                 "agw-invalid",
                 "provider-id",
                 "a" * 64,
                 "ready",
-                "debian-upgrade",
                 "trixie",
                 "bookworm",
                 "trixie",

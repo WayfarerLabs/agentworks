@@ -12,7 +12,6 @@ from agentworks.capabilities.vm_platform import CheckpointDescriptor
 from agentworks.db import (
     PID_STOPPED,
     InitStatus,
-    VMCheckpointPurpose,
     VMCheckpointState,
     VMStatus,
 )
@@ -116,7 +115,6 @@ def _insert_or_resume_create(
     vm: VMRow,
     *,
     capture_release: DebianRelease,
-    purpose: VMCheckpointPurpose,
     source_release: DebianRelease | None,
     target_release: DebianRelease | None,
 ) -> tuple[VMCheckpointRow, bool]:
@@ -135,7 +133,6 @@ def _insert_or_resume_create(
                 name=_new_checkpoint_name(),
                 operation_id=uuid.uuid4().hex,
                 desired_state_fingerprint=fingerprint,
-                purpose=purpose,
                 capture_release=capture_release,
                 source_release=source_release,
                 target_release=target_release,
@@ -151,8 +148,7 @@ def _insert_or_resume_create(
         )
     expected_pair = (source_release, target_release)
     if (
-        existing.purpose is not purpose
-        or existing.capture_release is not capture_release
+        existing.capture_release is not capture_release
         or (existing.source_release, existing.target_release) != expected_pair
         or existing.desired_state_fingerprint != fingerprint
     ):
@@ -216,7 +212,7 @@ def _complete_create(
                 "capture_release": completed.capture_release.value,
                 "checkpoint": completed.name,
                 "provider_identifier": completed.provider_identifier,
-                "purpose": completed.purpose.value,
+                "purpose": completed.purpose,
             },
             sort_keys=True,
         ),
@@ -265,7 +261,6 @@ def create_checkpoint(
             registry,
             vm,
             capture_release=vm.debian_release,
-            purpose=VMCheckpointPurpose.OPERATOR,
             source_release=None,
             target_release=None,
         )
@@ -319,7 +314,6 @@ def require_upgrade_checkpoint(
             row is None
             or row.name != expected_name
             or row.state is not VMCheckpointState.READY
-            or row.purpose is not VMCheckpointPurpose.DEBIAN_UPGRADE
             or row.capture_release is not source_release
             or row.source_release is not source_release
             or row.target_release is not target_release
@@ -384,8 +378,7 @@ def _create_upgrade_checkpoint(
     existing = db.get_vm_checkpoint(name)
     if existing is not None and existing.state is VMCheckpointState.READY:
         if (
-            existing.purpose is VMCheckpointPurpose.DEBIAN_UPGRADE
-            and existing.capture_release is source_release
+            existing.capture_release is source_release
             and existing.source_release is source_release
             and existing.target_release is target_release
         ):
@@ -420,7 +413,6 @@ def _create_upgrade_checkpoint(
         registry,
         vm,
         capture_release=source_release,
-        purpose=VMCheckpointPurpose.DEBIAN_UPGRADE,
         source_release=source_release,
         target_release=target_release,
     )
@@ -473,7 +465,7 @@ def checkpoint_listing_data(rows: Sequence[VMCheckpointRow]) -> JsonObject:
                 "name": row.name,
                 "provider_identifier": row.provider_identifier,
                 "state": row.state.value,
-                "purpose": row.purpose.value,
+                "purpose": row.purpose,
                 "capture_release": row.capture_release.value,
                 "source_release": None if row.source_release is None else row.source_release.value,
                 "target_release": None if row.target_release is None else row.target_release.value,
@@ -501,7 +493,7 @@ def render_checkpoint_listing(rows: Sequence[VMCheckpointRow]) -> None:
         )
         output.info(
             f"{output.truncate(row.vm_name, 20):<20} {row.name:<37} {row.state.value:<10} "
-            f"{row.purpose.value:<15} {row.capture_release.value:<10} {transition:<20} {row.created_at}"
+            f"{row.purpose:<15} {row.capture_release.value:<10} {transition:<20} {row.created_at}"
         )
 
 

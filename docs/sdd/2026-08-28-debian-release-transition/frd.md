@@ -357,15 +357,16 @@ because `vm upgrade` depends on this recovery boundary on every supported platfo
 Core persists checkpoint ownership separately from VM platform metadata in a new forward database
 migration. The already-shipped migration that added Debian observations remains byte-for-byte
 unchanged. A checkpoint row records the VM, core-generated name, provider identifier when known,
-lifecycle state and operation identity, desired-state fingerprint, purpose, optional adjacent
-upgrade pair, immutable observed Debian release at capture, and creation time. A standalone create
-copies the recognized persisted VM observation under the exclusive guard; if none exists, it fails
-with guidance to start and observe or reinitialize the VM, stop it, and retry. Upgrade instead uses
-its fresh pre-stop observation. The schema and manager enforce at most one managed checkpoint per
-VM. The provider API remains plural so Agentworks can detect duplicates, missing artifacts, and
-interrupted creation rather than trusting only local state. Checkpoints are durable VM-owned
-operational state, not manifests, registry resources, template state, or desired/applied instance
-records.
+lifecycle state and operation identity, desired-state fingerprint, optional adjacent upgrade pair,
+immutable observed Debian release at capture, and creation time. The operator-facing purpose is
+derived from whether the adjacent pair is present rather than stored as a duplicate fact. A
+standalone create copies the recognized persisted VM observation under the exclusive guard; if none
+exists, it fails with guidance to start and observe or reinitialize the VM, stop it, and retry.
+Upgrade instead uses its fresh pre-stop observation. The schema and manager enforce at most one
+managed checkpoint per VM. The provider API remains plural so Agentworks can detect duplicates,
+missing artifacts, and interrupted creation rather than trusting only local state. Checkpoints are
+durable VM-owned operational state, not manifests, registry resources, template state, or
+desired/applied instance records.
 
 Checkpoint creation is offline. The VM must be stopped before the platform captures it, and the
 platform must verify that the resulting artifact is complete, owned by Agentworks, and bound to the
@@ -388,8 +389,8 @@ agw vm delete-checkpoint NAME [-y|--yes]
 
 Operators do not choose checkpoint names or select among checkpoints while the one-slot rule is in
 force. Create never replaces. Restore does not delete. Delete is the only successful path that
-releases an occupied slot. `vm describe` includes the checkpoint's name, state, purpose, provider
-identifier, and creation time; the compact `vm list` gains no checkpoint column.
+releases an occupied slot. `vm describe` includes the checkpoint's name, state, derived purpose,
+provider identifier, and creation time; the compact `vm list` gains no checkpoint column.
 
 Restoration is explicit and destructive, never an automatic upgrade rollback. Before restore, all
 Agentworks sessions must be stopped and the VM must be stopped. The platform preserves a recoverable
