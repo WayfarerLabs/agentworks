@@ -36,11 +36,6 @@ _FINGERPRINT_PATTERN = re.compile(r"SHA256:[A-Za-z0-9+/]{43}")
 
 
 @dataclass(frozen=True, slots=True)
-class HardwareProvenance:
-    """Marker proving VM creation reached its successful terminal checkpoint."""
-
-
-@dataclass(frozen=True, slots=True)
 class VerifiedSSHAppliedState:
     """A configured private-key reference with authoritative public identity."""
 
@@ -86,19 +81,18 @@ class VMSSHIdentityComparison:
     vm_name: str
 
 
-def encode_hardware_provenance(_marker: HardwareProvenance | None = None) -> VersionedPayload:
+def encode_hardware_provenance() -> VersionedPayload:
     """Encode the version-1 empty hardware provenance marker."""
     return VersionedPayload(_PAYLOAD_VERSION, {})
 
 
-def decode_hardware_provenance(record: AppliedStateSlice) -> HardwareProvenance:
+def decode_hardware_provenance(record: AppliedStateSlice) -> None:
     """Decode a persisted VM hardware marker at its trust boundary."""
     _require_vm_slice(record, AppliedStateKey.HARDWARE_PROVENANCE)
     if record.payload.payload_version != _PAYLOAD_VERSION:
         raise _unsupported_payload_version_error(record)
     if record.payload.value:
         raise _malformed_stored_state_error(record, "payload must be an empty object")
-    return HardwareProvenance()
 
 
 def encode_ssh_identity(private_key_ref: str | Path, identity: SSHIdentity) -> VersionedPayload:
@@ -286,7 +280,8 @@ def require_vm_ssh_identity(
 def canonicalize_vm_applied_slice(record: AppliedStateSlice) -> VersionedPayload:
     """Decode and re-encode a known VM applied slice for safe export."""
     if record.key is AppliedStateKey.HARDWARE_PROVENANCE:
-        return encode_hardware_provenance(decode_hardware_provenance(record))
+        decode_hardware_provenance(record)
+        return encode_hardware_provenance()
     if record.key is AppliedStateKey.SSH_IDENTITY:
         applied = decode_ssh_identity(record)
         if isinstance(applied, VerifiedSSHAppliedState):

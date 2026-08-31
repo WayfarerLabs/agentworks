@@ -11,7 +11,6 @@ from agentworks.errors import ConfigError, StateError
 from agentworks.ssh_identity import UnverifiableSSHIdentity, VerifiedSSHIdentity
 from agentworks.vms import applied_state
 from agentworks.vms.applied_state import (
-    HardwareProvenance,
     UnsupportedAppliedStateVersionError,
     UnverifiableSSHAppliedState,
     VerifiedSSHAppliedState,
@@ -29,11 +28,9 @@ def _slice(key: AppliedStateKey, payload: VersionedPayload) -> AppliedStateSlice
 
 
 def test_hardware_marker_codec_is_strict_and_empty() -> None:
-    payload = applied_state.encode_hardware_provenance(HardwareProvenance())
+    payload = applied_state.encode_hardware_provenance()
     assert payload == VersionedPayload(1, {})
-    assert applied_state.decode_hardware_provenance(_slice(AppliedStateKey.HARDWARE_PROVENANCE, payload)) == (
-        HardwareProvenance()
-    )
+    assert applied_state.decode_hardware_provenance(_slice(AppliedStateKey.HARDWARE_PROVENANCE, payload)) is None
 
     with pytest.raises(StateError):
         applied_state.decode_hardware_provenance(

@@ -121,7 +121,6 @@ The public method set is:
 get_desired_overlay(instance_kind, instance_name) -> DesiredOverlayRecord | None
 put_desired_overlay(instance_kind, instance_name, payload) -> DesiredOverlayRecord
 clear_desired_overlay(instance_kind, instance_name) -> None
-list_desired_overlays(instance_kind) -> tuple[DesiredOverlayRecord, ...]
 has_instance_records(instance_kind, instance_name) -> bool
 has_vm_owner_tree_desired_overlay(vm_name) -> bool
 list_vm_owner_tree_desired_overlays(vm_name) -> tuple[DesiredOverlayRecord, ...]
@@ -129,7 +128,6 @@ list_vm_owner_tree_desired_overlays(vm_name) -> tuple[DesiredOverlayRecord, ...]
 get_applied_slices(instance_kind, instance_name) -> tuple[AppliedStateSlice, ...]
 replace_applied_slices(instance_kind, instance_name, operation, slices: Mapping[AppliedStateKey, VersionedPayload]) -> tuple[AppliedStateSlice, ...]
 clear_applied_slice(instance_kind, instance_name, key: AppliedStateKey) -> None
-list_applied_slices(instance_kind) -> tuple[AppliedStateSlice, ...]
 
 inspect_owner_state(instance_kind, instance_name) -> InstanceStateInspection
 inspect_all_instance_state() -> InstanceStateInspection
