@@ -126,12 +126,11 @@ def create_vm_workspace(
                 if template.repo.startswith("git@"):
                     output.warn(
                         "Hint: SSH repo URLs are not supported. Use HTTPS URLs "
-                        "and configure git credentials with 'vm add-git-credential'."
+                        "and declare the needed git credential on this user template, then reinit."
                     )
                 else:
                     output.warn(
-                        "Hint: for private repos, ensure git credentials are "
-                        "configured on the VM (see 'vm add-git-credential')."
+                        "Hint: for private repos, declare the needed git credential on this user template, then reinit."
                     )
                 raise
 

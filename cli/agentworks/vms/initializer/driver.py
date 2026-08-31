@@ -28,10 +28,10 @@ from agentworks import output
 from agentworks.db import InitStatus, ProvisioningStatus
 from agentworks.env import ResourceContext, vm_stable_identity_env
 from agentworks.git_config import ensure_safe_directory_wildcard
+from agentworks.git_credentials import configure_user_git_credentials
 from agentworks.ssh import SSHError, SSHLogger
 from agentworks.transports import SSHTransport, Transport
 
-from .credentials import _configure_git_credentials
 from .mise import (
     MISE_ACTIVATE_LINES,
     _fetch_mise_lockfile,
@@ -68,10 +68,10 @@ from .workspaces_dir import _setup_workspaces_directory
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
-    from agentworks.capabilities.git_credential.base import GitCredentialProvider
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database
+    from agentworks.git_credentials import CredentialRequest
     from agentworks.resources.registry import Registry
     from agentworks.vms.admin import AdminConfig
     from agentworks.vms.templates import ResolvedVMTemplate
@@ -246,12 +246,11 @@ def run_initialization(
     admin: AdminConfig,
     vm_name: str,
     ts_target: Transport,
-    providers: dict[str, GitCredentialProvider],
+    credential_requests: tuple[CredentialRequest, ...],
     home: str,
     admin_username: str,
     logger: SSHLogger,
     *,
-    git_tokens: dict[str, str],
     operation: VMInitializationOperation,
 ) -> None:
     """Run Phase B (initialization) with status tracking and event logging.
@@ -259,8 +258,7 @@ def run_initialization(
     This is called both from ``create_vm`` (after ``bootstrap_vm``) and
     from ``reinit_vm`` for repeatable re-initialization. The closed
     ``operation`` value also drives create-only setup behavior.
-    ``git_tokens`` is required (no provider-side fallback);
-    callers must thread the framework-resolved dict in.
+    Each credential request carries the provider's scoped context assembler.
     """
     db.insert_vm_event(vm_name, "init_started")
 
@@ -273,11 +271,10 @@ def run_initialization(
             admin,
             vm_name,
             ts_target,
-            providers,
+            credential_requests,
             home,
             admin_username,
             logger,
-            git_tokens=git_tokens,
             operation=operation,
         )
     except Exception as e:
@@ -403,19 +400,14 @@ def _phase_b_setup(
     admin: AdminConfig,
     vm_name: str,
     ts_target: Transport,
-    providers: dict[str, GitCredentialProvider],
+    credential_requests: tuple[CredentialRequest, ...],
     home: str,
     admin_username: str,
     logger: SSHLogger,
     *,
-    git_tokens: dict[str, str],
     operation: VMInitializationOperation,
 ) -> AuthorizedKeysOutcome:
-    """Phase B: Setup (over Tailscale SSH). Non-fatal steps warn and continue.
-
-    ``git_tokens`` is required: every provider listed in
-    ``providers`` must have a pre-resolved token value in the dict.
-    """
+    """Phase B: Setup (over Tailscale SSH). Non-fatal steps warn and continue."""
     with output.section("VM Initialization"):
         from agentworks.resources.access import kind_dict
 
@@ -643,8 +635,13 @@ def _phase_b_setup(
                 output.warn(msg)
 
         # Non-fatal: git credentials (before dotfiles and mise lockfile for private repos)
-        if providers:
-            _configure_git_credentials(vm_name, ts_target, providers, logger, git_tokens=git_tokens, config=config)
+        configure_user_git_credentials(
+            ts_target,
+            credential_requests,
+            config,
+            logger,
+            target_role="admin",
+        )
 
         # Non-fatal: dotfiles (can override mise config, can provide lockfile)
         if admin.dotfiles_source:

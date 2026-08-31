@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.git_credentials import CredentialRequest
     from agentworks.install_commands import UserInstallCommandEntry
     from agentworks.resources import Registry
     from agentworks.ssh import SSHLogger
@@ -35,7 +36,7 @@ def create_agent_on_vm(
     linux_user: str,
     *,
     agent_name: str,
-    git_tokens: dict[str, str],
+    credential_requests: tuple[CredentialRequest, ...],
     logger: SSHLogger,
     admin_git_force_safe_directory: bool,
 ) -> None:
@@ -237,67 +238,17 @@ def create_agent_on_vm(
         except Exception as e:
             output.warn(f"agent git safe.directory setup failed: {e}")
 
-    # Git credentials for the agent (tokens pre-resolved at the
-    # caller's boundary and read through scoped delivery off the
-    # credential nodes). The invariant: if the agent template declares
-    # git_credentials, the caller MUST have resolved every token; a
-    # missing entry is a caller bug and raises loudly rather than
-    # shipping a VM with a silently-dropped credential the operator
-    # asked for.
-    if agent_cfg.git_credentials:
-        from agentworks.vms.initializer import resolve_git_credential_providers
+    # Credential reconciliation is unconditional. An empty declared list
+    # removes any Agentworks-owned state left by an older template.
+    from agentworks.git_credentials import configure_user_git_credentials
 
-        output.info("Configuring git credentials...")
-        providers = resolve_git_credential_providers(registry, agent_cfg.git_credentials)
-        missing = [cred_name for cred_name in providers if cred_name not in git_tokens]
-        if missing:
-            from agentworks.errors import StateError
-
-            raise StateError(
-                f"agent git credential setup: token(s) not resolved by "
-                f"the framework for {missing!r}; caller must pre-resolve "
-                f"every provider's token before invoking this function",
-                entity_kind="git-credential",
-                entity_name=missing[0],
-            )
-        from agentworks.git_credentials import (
-            GIT_CRED_HELPER_PATH,
-            GIT_SCOPES_INCLUDE_PATH,
-            build_credential_materials,
-            runup_and_filter,
-        )
-
-        # Deferred git-credential runup, right before the write: a
-        # rejected token is skipped (warned) and the rest are configured,
-        # so a bad credential does not sink the agent's whole setup.
-        providers = runup_and_filter(providers, git_tokens, config, logger)
-
-        # Same materials as the VM-level (admin) flow: store lines with
-        # the unscoped-first ordering contract, the gitconfig include
-        # (just useHttpPath = true), and the selecting credential helper
-        # (its get op serves credentials; erase only diagnoses).
-        # ``git config --global`` runs as the agent user, so the
-        # tilde-literal include.path resolves to the agent's home; the
-        # write_file paths spell the home out (agent_target conventions).
-        if providers:
-            materials = build_credential_materials(providers, git_tokens)
-            agent_target.write_file(f"{home}/.git-credentials", materials.store_content, mode="600")
-            agent_target.write_file(
-                f"{home}/{GIT_SCOPES_INCLUDE_PATH.removeprefix('~/')}",
-                materials.gitconfig_content,
-                mode="600",
-            )
-            agent_target.write_file(
-                f"{home}/{GIT_CRED_HELPER_PATH.removeprefix('~/')}",
-                materials.helper_script,
-                mode="700",
-            )
-            agent_target.run(
-                f"git config --global --replace-all credential.helper '!{GIT_CRED_HELPER_PATH}' && "
-                f"(git config --global --get-all include.path | grep -qxF '{GIT_SCOPES_INCLUDE_PATH}' "
-                f"|| git config --global --add include.path '{GIT_SCOPES_INCLUDE_PATH}')"
-            )
-            output.detail(f"Git credentials configured for {output.count(len(providers), 'provider')}")
+    configure_user_git_credentials(
+        agent_target,
+        credential_requests,
+        config,
+        logger,
+        target_role="agent",
+    )
 
     # User install commands + login-shell PATH profile fragment.
     _run_agent_install_commands(

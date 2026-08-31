@@ -4,8 +4,8 @@
 the bespoke mutation an orchestrator runs in its roll-forward, between
 the boundary resolve and ``log.mark_realized``. Domain code with
 deliberately narrow duties: it frames no phases, resolves no secrets
-(``git_tokens`` arrive already resolved, read through the caller's
-scoped delivery), opens no gate, and re-checks nothing its caller
+(credential requests arrive with their scoped context assemblers prepared),
+opens no gate, and re-checks nothing its caller
 already validated (name shape, existence, the VM row). The body owns
 the mutation, the git-credential materials ops it carries (whose
 write-step runup runs under the skip-and-degrade policy inside
@@ -15,7 +15,7 @@ re-raising. Rollback of a COMPLETED agent is the pending agent node's
 ``teardown``, driven by the orchestrator's realization log, never this
 function's.
 
-This body is what dissolves the ``git_tokens`` + ``own_root`` nesting
+This body is what dissolves the old resolved-credential + ``own_root`` nesting
 hack: the nested ``create_agent`` was a full command root that had to
 be handed pre-resolved tokens and phase suppression to stop it
 re-running resolve and banners; a body never resolves and never frames
@@ -46,6 +46,7 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, VMRow
+    from agentworks.git_credentials import CredentialRequest
     from agentworks.instance_specs import InstanceOverlay
     from agentworks.resources.registry import Registry
 
@@ -60,7 +61,8 @@ def realize_agent(
     name: str,
     vm: VMRow,
     template: ResolvedAgentTemplate,
-    git_tokens: dict[str, str],
+    credential_requests: tuple[CredentialRequest, ...],
+    credential_redactions: tuple[str, ...],
     grant_all_workspaces: bool = False,
     overlay: InstanceOverlay[BaseModel] | None = None,
     defer_overlay_report: bool = False,
@@ -84,10 +86,10 @@ def realize_agent(
     from agentworks.ssh import SSHLogger
 
     linux_user = derive_linux_user(name)
-    # Supply every delivered token when the logger is constructed. A logger's
+    # Supply every declared secret input when the logger is constructed. A logger's
     # redaction set is immutable because adding a secret after the first
     # incremental write cannot protect bytes already persisted.
-    ssh_logger = SSHLogger(vm.name, "agent-create", redactions=tuple(git_tokens.values()))
+    ssh_logger = SSHLogger(vm.name, "agent-create", redactions=credential_redactions)
 
     def _safe_rollback() -> None:
         # Best-effort: rollback failures must not mask the original KI or
@@ -115,7 +117,7 @@ def realize_agent(
                 template,
                 linux_user,
                 agent_name=name,
-                git_tokens=git_tokens,
+                credential_requests=credential_requests,
                 logger=ssh_logger,
                 admin_git_force_safe_directory=resolve_admin_template(
                     db,

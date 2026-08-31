@@ -1,68 +1,69 @@
-"""GitHub git credential provider: formats credentials for ``~/.git-credentials``.
-
-Token resolution lives in the framework; this class formats the store
-line and, for scoped credentials (fine-grained PATs), contributes its
-scopes (``repos`` / ``owner``) to the generated credential helper that
-selects the right credential per repo (issue #166). Selection lives
-entirely in that helper: the managed include sets
-``credential.useHttpPath = true`` so every query carries the remote
-path, and the helper picks the most specific credential (exact repo,
-then owner, then the host default). See ``build_credential_materials``
-in ``git_credentials/__init__.py`` and ``docs/guides/resources.md`` for
-the full model.
-"""
+"""GitHub Git credential provider."""
 
 from __future__ import annotations
 
 from datetime import date
-from typing import Annotated, ClassVar, Literal
+from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 
 from pydantic import Field
 
 from agentworks.capabilities.git_credential.base import (
+    CredentialPayload,
     GitCredentialProvider,
-    HelperEntry,
-    TokenAcquiringConfig,
+    HttpsCredentialScope,
+    ManagedHelper,
+    StoredCredential,
+    require_line_safe_credential_input,
 )
+from agentworks.command_checks import check_required_commands, run_user_shell_command
+from agentworks.schema import AgwModel, NonEmptyStr, SecretRef
 from agentworks.topics import TopicProse
 
-# GitHub owner/repo name charset. Interpolated verbatim into gitconfig
-# section headers and store URLs, so anything outside this set (quotes,
-# whitespace, ...) would corrupt the VM's git config at first use, which
-# is why the charset is a constraint rather than a courtesy.
 _NAME = r"[A-Za-z0-9._-]+"
 
 GitHubName = Annotated[str, Field(pattern=rf"^{_NAME}$")]
 """A GitHub user or organization name."""
 
 GitHubRepo = Annotated[str, Field(pattern=rf"^{_NAME}/{_NAME}$")]
-"""A GitHub repository, as ``owner/name``."""
+"""A GitHub repository as ``owner/name``."""
 
 
-class GitHubConfig(TokenAcquiringConfig):
-    """Scope for a GitHub personal access token.
+class GitHubSecretSource(AgwModel):
+    """Acquire the final credential from a declared secret."""
 
-    ``repos`` contributes exact-repository scopes and ``owner`` contributes
-    every repository under one owner. When both are present their scopes
-    are combined. An unscoped credential declares neither and serves the
-    host by default.
-    """
+    mode: Literal["secret"]
+    """Resolve provider input through Agentworks' declared secret system."""
+    secret: Annotated[
+        NonEmptyStr,
+        SecretRef(usage="the GitHub credential input", default_template="git-token-{owner_name}"),
+    ]
+    """The secret input this provider reads; defaults to `git-token-<credential-name>`."""
+
+
+class GitHubCliSource(AgwModel):
+    """Acquire a fresh credential from the target user's GitHub CLI."""
+
+    mode: Literal["gh-cli"]
+    """Acquire each credential from the target user's active GitHub CLI identity."""
+
+
+GitHubSource = Annotated[GitHubSecretSource | GitHubCliSource, Field(discriminator="mode")]
+
+
+class GitHubConfig(AgwModel):
+    """GitHub credential acquisition and HTTPS scope."""
 
     name: Literal["github"]
-    """The provider this config is for."""
-
+    """Select the built-in GitHub credential provider."""
+    source: GitHubSource
+    """How this provider acquires its credential."""
     repos: list[GitHubRepo] = Field(default_factory=list, examples=[["my-org/my-repo"]])
-    """Specific repositories a fine-grained PAT covers, as ``owner/name``.
-    Empty means no repository-specific scope."""
-
+    """Exact `owner/repository` scopes this credential may serve."""
     owner: GitHubName | None = Field(default=None, examples=["my-org"])
-    """A user or organization whose repositories this credential covers.
-    Omit for no owner-wide scope."""
+    """An optional user or organization scope covering its repositories."""
 
 
 def _parse_expiration(raw: str | None) -> date | None:
-    """The header value looks like ``2026-10-01 17:24:32 UTC``; take the
-    date prefix, tolerating absence and format drift."""
     if not raw or len(raw) < 10:
         return None
     try:
@@ -71,56 +72,132 @@ def _parse_expiration(raw: str | None) -> date | None:
         return None
 
 
+_GH_HELPER = b"""#!/bin/sh
+set -u
+command -v gh >/dev/null 2>&1 || exit 1
+token=$(GH_PROMPT_DISABLED=1 gh auth token --hostname github.com 2>/dev/null) || exit 1
+case "$token" in
+    ''|*'
+'*) exit 1 ;;
+esac
+printf 'username=x-access-token\\npassword=%s\\n\\n' "$token"
+"""
+
+_GH_FAILURE_HINT = (
+    "agentworks: GitHub CLI credential acquisition failed; check that 'gh' is installed and on PATH "
+    "for this user, then authenticate the intended github.com identity"
+)
+
+_GH_AUTH_CHECK = """
+help=$(gh auth status --help) || exit 22
+case "$help" in *--active*) ;; *) exit 22 ;; esac
+GH_PROMPT_DISABLED=1 gh auth status --active --hostname github.com
+command_status=$?
+[ "$command_status" -eq 0 ] && exit 0
+[ "$command_status" -eq 1 ] && exit 21
+exit 22
+"""
+
+
 class GitHubCredentialProvider(GitCredentialProvider):
-    """Configures git credentials for GitHub via a personal access token.
+    """Produces stored or GitHub-CLI-backed credentials for github.com."""
 
-    Optionally scoped in the ``spec.provider`` table: ``repos: ["owner/name", ...]``
-    (the fine-grained PAT's selected repos), ``owner: "org"`` (every repo
-    under that owner, including ad hoc clones), or both as the union of
-    those scopes. Unscoped credentials keep the released host-level line
-    verbatim.
-    """
-
-    contract_version: ClassVar[int] = 2
+    contract_version: ClassVar[int] = 3
     name: ClassVar[str] = "github"
-    description: ClassVar[str] = "GitHub personal access token"
+    description: ClassVar[str] = "GitHub HTTPS credentials from a secret or GitHub CLI"
     config_model: ClassVar[type[GitHubConfig]] = GitHubConfig
     prose: ClassVar[TopicProse | None] = TopicProse(
         title="GitHub",
         overview="""
-        Authenticates git operations against GitHub with a personal access token, taken
-        from the secret this credential names.
+        Authenticates HTTPS git operations against GitHub. An explicit `source`
+        selects either a declared secret or the active target-user GitHub CLI identity.
+        Enabled runup checks that CLI identity read-only and warns without blocking
+        helper installation.
 
-        A classic token needs no scoping. A fine-grained token does: `repos` pins the
-        credential to specific repositories, and `owner` covers everything under one
-        user or organization, including repositories cloned ad hoc that no workspace
-        declared. When both are present, the credential covers their union.
-
-        Declaring several credentials is normal. The managed credential helper picks the
-        one whose scope matches each remote, and an unscoped credential is the fallback.
+        `repos` pins the credential to specific repositories, while `owner` covers every
+        repository under one user or organization. An unscoped credential is the
+        github.com fallback.
         """,
     )
 
     @property
     def config(self) -> GitHubConfig:
-        """This credential's validated github provider config."""
         return self._config_as(GitHubConfig)
 
-    def _verify_token(self, token: str) -> None:
-        """Check the PAT against ``GET /user``: 200 announces the login
-        and (for fine-grained PATs) the expiry; 401 is a definitive
-        rejection; anything else is indeterminate (warn, continue)."""
+    def credential_scopes(self) -> tuple[HttpsCredentialScope, ...]:
+        paths = [tuple(repo.split("/", 1)) for repo in self.config.repos]
+        if self.config.owner is not None:
+            paths.append((self.config.owner,))
+        if not paths:
+            paths.append(())
+        return tuple(HttpsCredentialScope("github.com", path) for path in dict.fromkeys(paths))
+
+    @property
+    def _username(self) -> str:
+        return self.owner_name if self.config.repos or self.config.owner else "x-access-token"
+
+    def validate_inputs(self, ctx: RunContext) -> None:
+        source = self.config.source
+        if isinstance(source, GitHubSecretSource):
+            self._secret_input(ctx, source)
+
+    @staticmethod
+    def _secret_input(ctx: RunContext, source: GitHubSecretSource) -> str:
+        return require_line_safe_credential_input(ctx.secret(source.secret), secret_name=source.secret)
+
+    def runup(self, ctx: RunContext) -> None:
+        source = self.config.source
+        if isinstance(source, GitHubCliSource):
+            self._check_cli_readiness(ctx)
+            return
+        token = self._secret_input(ctx, source)
+        self._verify_token(token, secret_name=source.secret)
+
+    def _check_cli_readiness(self, ctx: RunContext) -> None:
+        from agentworks import output
+        from agentworks.errors import StateError
+        from agentworks.ssh import SSHError
+
+        target = ctx.admin_target() or ctx.agent_target()
+        if target is None:
+            raise StateError("GitHub CLI runup requires a current user target")
+        try:
+            missing = check_required_commands(("gh",), target, timeout=10)
+            if missing:
+                output.warn(
+                    f"GitHub CLI credentials are currently unavailable for git-credential/{self.owner_name}; "
+                    "'gh' is not visible at this point in initialization. Verify again after initialization "
+                    "if it is installed later, or install it for the target user"
+                )
+                return
+            result = run_user_shell_command(_GH_AUTH_CHECK, target, timeout=10)
+        except SSHError:
+            output.warn(f"Could not determine GitHub CLI readiness for git-credential/{self.owner_name}")
+            return
+        if result.returncode == 0:
+            output.detail(f"Verified GitHub CLI readiness for git-credential/{self.owner_name}")
+        elif result.returncode == 21:
+            output.warn(
+                f"GitHub CLI credentials are currently unavailable for git-credential/{self.owner_name}; "
+                "the target user must run 'gh auth login' for the intended active github.com identity "
+                "using a current GitHub CLI"
+            )
+        else:
+            output.warn(f"Could not determine GitHub CLI readiness for git-credential/{self.owner_name}")
+
+    def _verify_token(self, token: str, *, secret_name: str) -> None:
         import json
 
         from agentworks import output
 
-        result = self._probe_pat(
+        result = self._probe_static_credential(
             "https://api.github.com/user",
             {
                 "Authorization": f"Bearer {token}",
                 "Accept": "application/vnd.github+json",
                 "User-Agent": "agentworks",
             },
+            secret_name=secret_name,
             reject_statuses=(401,),
             host_label="GitHub",
         )
@@ -143,15 +220,14 @@ class GitHubCredentialProvider(GitCredentialProvider):
         suffix = f" ({', '.join(extras)})" if extras else ""
         output.detail(f"Verified git token for git-credential/{self.owner_name}{suffix}")
 
-    @property
-    def store_username(self) -> str:
-        # Scoped: the credential's resource name doubles as the store
-        # username, the join key the credential helper selects by (GitHub
-        # accepts any username with a PAT, verified against fine-grained
-        # tokens). Unscoped keeps the released value.
-        if self.config.repos or self.config.owner:
-            return self.owner_name
-        return "x-access-token"
+    def credential_material(self, ctx: RunContext) -> CredentialPayload:
+        source = self.config.source
+        if isinstance(source, GitHubSecretSource):
+            password = self._secret_input(ctx, source)
+            payload: StoredCredential | ManagedHelper = StoredCredential(self._username, password)
+        else:
+            payload = ManagedHelper(_GH_HELPER, _GH_FAILURE_HINT)
+        return payload
 
     def review_remote(self, url: str) -> list[str]:
         from urllib.parse import urlsplit
@@ -159,26 +235,13 @@ class GitHubCredentialProvider(GitCredentialProvider):
         parts = urlsplit(url)
         if parts.scheme not in ("http", "https") or parts.hostname != "github.com":
             return []
-        # GitHub's store username is the credential's resource name (what
-        # the helper selects by), never something an operator would type.
-        # So ANY embedded username makes git hand it to the helper, whose
-        # fast path serves by it and skips the helper's path-based
-        # per-repo/owner selection.
         if parts.username:
             return [
-                f"the git remote {url!r} embeds a username, which overrides "
-                f"agentworks git credential scoping for github.com (the helper "
-                f"serves by the embedded username); use a plain https remote"
+                f"the git remote {url!r} embeds a username; use a plain HTTPS remote "
+                "so Agentworks can select the configured github.com credential by path"
             ]
         return []
 
-    def credential_lines(self, token: str) -> list[str]:
-        return [f"https://{self.store_username}:{token}@github.com"]
 
-    def helper_entry(self) -> HelperEntry:
-        return HelperEntry(
-            host="github.com",
-            username=self.store_username,
-            repos=tuple(dict.fromkeys(self.config.repos)),
-            owner=self.config.owner,
-        )
+if TYPE_CHECKING:
+    from agentworks.capabilities.base import RunContext

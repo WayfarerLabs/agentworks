@@ -37,3 +37,10 @@ At least one supported VM platform and one configured VM site must be ready. A l
 need a host tool, while a cloud platform may need an account, credentials, permissions, quota, and
 placement choices. Continue with `agw guide show concept-virtual-machines` for the installed options
 and their configuration surfaces.
+
+## Git identities for private repositories
+
+Decide whether each admin or agent user should receive a secret-backed Git credential or use its
+active `gh` or `az` CLI identity. CLI-backed credentials require the corresponding command to be
+installed and authenticated for that target user; Agentworks does not perform the login. Azure
+DevOps identities also need access to the configured organization and repositories.

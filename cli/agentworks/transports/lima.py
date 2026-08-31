@@ -51,6 +51,7 @@ class LimaTransport(Transport):
         timeout: int | None = None,
         env: dict[str, str] | None = None,
         input_text: str | None = None,
+        discard_output: bool = False,
         retries: int | None = None,
         on_retry: Callable[[int, int], None] | None = None,
     ) -> SSHResult:
@@ -63,17 +64,21 @@ class LimaTransport(Transport):
         Sensitive stdin is never logged, returned, or copied into an error.
         """
         del retries, on_retry  # Polymorphic ABC kwargs; Lima doesn't retry.
+        if input_text is not None and discard_output:
+            raise ValueError("Lima input_text cannot be combined with discard_output")
         if sudo:
             command = f"sudo -n bash -c {shlex.quote(command)}"
         env_prefix = env_assignment_prefix(env)
         args = ["limactl", "shell", self.vm_name, "bash", "-lc", f"{env_prefix}{command}"]
         t = self._resolve_timeout(timeout)
+        suppress_output = input_text is not None or discard_output
         try:
             result = subprocess.run(
                 args,
                 # Byte-mode stdin: text mode rewrites LF to CRLF on Windows (see agentworks.subprocess_io).
                 input=stdin_bytes(input_text),
-                capture_output=True,
+                stdout=subprocess.DEVNULL if suppress_output else subprocess.PIPE,
+                stderr=subprocess.DEVNULL if suppress_output else subprocess.PIPE,
                 timeout=t,
             )
         except subprocess.TimeoutExpired as err:
@@ -86,14 +91,16 @@ class LimaTransport(Transport):
             raise SSHError(f"Lima stdin command could not be executed: {command}") from None
         ssh_result = SSHResult(
             returncode=result.returncode,
-            stdout="" if input_text is not None else decode_stream(result.stdout),
-            stderr="" if input_text is not None else decode_stream(result.stderr),
+            stdout="" if suppress_output else decode_stream(result.stdout),
+            stderr="" if suppress_output else decode_stream(result.stderr),
         )
         if self.logger is not None:
             self.logger.log_command(command, ssh_result)
         if check and not ssh_result.ok:
             if input_text is not None:
                 raise SSHError(f"Lima stdin command failed (exit {result.returncode}): {command}") from None
+            if discard_output:
+                raise SSHError(f"Lima command failed (exit {result.returncode}): {command}") from None
             raise SSHError(
                 f"Lima command failed (exit {result.returncode}): {command}\nstderr: {ssh_result.stderr.strip()}"
             )

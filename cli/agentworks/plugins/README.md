@@ -242,6 +242,16 @@ its outer map key, carries no tag, and extends `AgwRootModel` rather than `AgwMo
 mapping may be a bare string. Conformance checks both backend models against their separate
 contracts.
 
+Git credential providers use contract version 3. Each provider owns its entire config model,
+including any acquisition discriminator and every `SecretRef`, and implements `credential_scopes()`
+to declare generic HTTPS routing plus `credential_material(ctx)` to return either a stored
+credential or a provider-authored runtime helper. It may override the default no-op
+`validate_inputs(ctx)` for side-effect-free checks at the pre-creation boundary. Do not derive a
+plugin provider from a shared source model or ask core to interpret its secrets. Provider runup may
+use its fresh current-user target for read-only readiness; materialization receives a separate
+context without a target. The full author contract is in
+[`capabilities/git_credential/README.md`](../capabilities/git_credential/README.md).
+
 The capability model as a whole, including how a config is offered per facet and what the framework
 does with the declaration at each lifecycle stage, is
 [`../capabilities/README.md`](../capabilities/README.md).
@@ -291,7 +301,7 @@ A plugin contributes implementations of existing capability kinds only:
 - **`vm-platform`**: a backend that runs VMs (paired with a `vm-site` resource's config).
 - **`harness-integration`**: how a session runs its harness or shell workload (paired with a
   `session-template`'s config).
-- **`git-credential-provider`**: how a git token is obtained and served.
+- **`git-credential-provider`**: how declared inputs become scoped HTTPS credential material.
 - **`secret-backend`**: where a secret's value is read from.
 
 Each impl subclasses the kind's nominal capability base class and exposes `name` / `description`

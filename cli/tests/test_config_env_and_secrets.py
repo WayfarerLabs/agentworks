@@ -878,10 +878,16 @@ def test_git_credential_token_nonconforming_warns_but_loads(tmp_path: Path) -> N
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        manifests=[ManifestDoc("git-credential", "gh", {"provider": {"name": "github", "token": "GITHUB_TOKEN"}})],
+        manifests=[
+            ManifestDoc(
+                "git-credential",
+                "gh",
+                {"provider": {"name": "github", "source": {"mode": "secret", "secret": "GITHUB_TOKEN"}}},
+            )
+        ],
     )
     registry = _load(cfg_file)
-    assert registry.lookup("git-credential", "gh").provider.config["token"] == "GITHUB_TOKEN"
+    assert registry.lookup("git-credential", "gh").provider.config["source"]["secret"] == "GITHUB_TOKEN"
     issues = _manifest_issues(cfg_file)
     assert any("GITHUB_TOKEN" in issue and "git-credential/gh" in issue for issue in issues), issues
 
@@ -895,7 +901,16 @@ def test_conforming_secret_ref_names_emit_no_warning(tmp_path: Path) -> None:
         manifests=[
             ManifestDoc("vm-template", "tester", {"tailscale_auth_key": "tailscale-auth-key"}),
             ManifestDoc("admin-template", "default", {"env": {"FOO": {"secret": "github-token"}}}),
-            ManifestDoc("git-credential", "gh", {"provider": {"name": "github", "token": "git-token-github"}}),
+            ManifestDoc(
+                "git-credential",
+                "gh",
+                {
+                    "provider": {
+                        "name": "github",
+                        "source": {"mode": "secret", "secret": "git-token-github"},
+                    }
+                },
+            ),
         ],
     )
     issues = _manifest_issues(cfg_file)

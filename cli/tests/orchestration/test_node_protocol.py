@@ -83,7 +83,7 @@ def test_real_capability_instances_are_readiness_not_nodes() -> None:
     """The shipped capability implementations gained nothing
     node-shaped: a provider or platform instance is HELD by its
     consuming-resource node and composed, never walked."""
-    provider = GitHubCredentialProvider("gh", {})
+    provider = GitHubCredentialProvider("gh", {"source": {"mode": "secret"}})
     platform = ProxmoxPlatform("px", _PROXMOX_CONFIG)
     for instance in (provider, platform):
         assert isinstance(instance, Readiness)

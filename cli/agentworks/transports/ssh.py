@@ -188,6 +188,7 @@ class SSHTransport(Transport):
         timeout: int | None = None,
         env: dict[str, str] | None = None,
         input_text: str | None = None,
+        discard_output: bool = False,
         retries: int | None = None,
         on_retry: Callable[[int, int], None] | None = None,
     ) -> SSHResult:
@@ -204,7 +205,11 @@ class SSHTransport(Transport):
         Sensitive ``input_text`` uses the shared SSH stdin primitive, which
         keeps the value out of argv and diagnostics and discards command
         output because an arbitrary remote command can reflect stdin.
+        ``discard_output`` retains ordinary TTY selection while sending both
+        process streams directly to the null device.
         """
+        if input_text is not None and discard_output:
+            raise ValueError("SSH input_text cannot be combined with discard_output")
         if sudo:
             command = f"sudo -n bash -c {shlex.quote(command)}"
 
@@ -260,7 +265,8 @@ class SSHTransport(Transport):
             try:
                 result = subprocess.run(
                     args,
-                    capture_output=True,
+                    stdout=subprocess.DEVNULL if discard_output else subprocess.PIPE,
+                    stderr=subprocess.DEVNULL if discard_output else subprocess.PIPE,
                     text=True,
                     encoding="utf-8",
                     errors="replace",
@@ -273,14 +279,14 @@ class SSHTransport(Transport):
                 continue
             ssh_result = SSHResult(
                 returncode=result.returncode,
-                stdout=result.stdout,
-                stderr=result.stderr,
+                stdout="" if discard_output else result.stdout,
+                stderr="" if discard_output else result.stderr,
             )
             if self.logger is not None:
                 self.logger.log_command(command, ssh_result)
             if check and not ssh_result.ok:
                 raise SSHError(
-                    f"SSH command failed (exit {result.returncode}): {command}\nstderr: {result.stderr.strip()}"
+                    f"SSH command failed (exit {result.returncode}): {command}\nstderr: {ssh_result.stderr.strip()}"
                 )
             return ssh_result
 

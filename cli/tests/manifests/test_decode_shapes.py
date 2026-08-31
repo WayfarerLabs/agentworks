@@ -58,9 +58,6 @@ def test_a_stray_top_level_key_names_the_one_field_this_kind_has(tmp_path: Path)
     One loop, because landing on the same message is the claim: the
     retired selector and a provider-owned field, side by side.
 
-    (``token`` is the exception that keeps its own steer, because the
-    field list alone does not say WHERE the token goes; see
-    ``test_spec_hosts.py::test_a_top_level_token_keeps_its_steer``.)
     """
     for key, value in (("type", "github"), ("org", "my-org")):
         _manifest(
@@ -105,26 +102,6 @@ def test_a_kind_owned_key_inside_the_provider_block_is_the_providers_to_refuse(
     manifests = load_manifests(tmp_path / "resources")
     with pytest.raises(ConfigError, match="provider: unknown field"):
         build_registry(_config(tmp_path), manifests)
-
-
-def test_git_credential_token_in_provider_config(tmp_path: Path) -> None:
-    """token lives inside the tagged provider table now; a top-level
-    spec.token is rejected as an unknown field."""
-    _manifest(
-        tmp_path,
-        """
-        apiVersion: agentworks/v1
-        kind: git-credential
-        metadata:
-          name: gh
-        spec:
-          provider:
-            name: github
-          token: at-top-level
-        """,
-    )
-    with pytest.raises(ConfigError, match="into\\s+the spec.provider table"):
-        load_manifests(tmp_path / "resources")
 
 
 def test_provider_must_be_a_tagged_table(tmp_path: Path) -> None:

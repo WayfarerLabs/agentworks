@@ -1,1010 +1,1327 @@
-"""Fine-grained PAT scoping for github credentials (issue #166).
-
-Selection lives in the agentworks credential helper. The provisioned
-include turns on ``credential.useHttpPath`` so git hands the helper the
-remote's host and path; the helper picks the most specific credential
-(exact repo, then owner, then the host default, then the first store
-line) and serves the matching path-less store line, keyed by a
-per-credential username. Verified against git 2.39.
-"""
+"""Structural, routing, runtime-helper, and reconciliation coverage."""
 
 from __future__ import annotations
 
+import fcntl
+import os
+import shlex
+import shutil
+import signal
+import stat
+import subprocess
+import time
 from pathlib import Path
-from textwrap import dedent
-from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.bootstrap import build_registry
-from agentworks.capabilities.config import capability_config_references, validate_capability_config
-from agentworks.capabilities.descriptor import descriptor_for
-from agentworks.capabilities.git_credential.github import GitHubCredentialProvider
-from agentworks.config import load_config
-from agentworks.errors import ConfigError, ValidationError
-from agentworks.git_credentials import (
-    CredentialMaterials,
-    build_credential_materials,
-    materialize_credential_lines,
+from agentworks.capabilities.base import RunContext
+from agentworks.capabilities.git_credential.base import (
+    HttpsCredentialScope,
+    ManagedHelper,
+    StoredCredential,
 )
-from agentworks.plugins.azure.azdo import AzDOCredentialProvider
-from agentworks.schema import RefOwner, iter_field_docs
-from agentworks.vms.initializer import resolve_git_credential_providers
-
-if TYPE_CHECKING:
-    from tests.conftest import CapturedOutput
-
-
-def _gh(
-    config_name: str,
-    *,
-    owner: str | None = None,
-    repos: tuple[str, ...] | list[str] = (),
-    secret_name: str | None = None,
-    description: str | None = None,
-) -> GitHubCredentialProvider:
-    """Construct a github provider from the pre-capability kwarg shape:
-    the scope fields and token-secret override now live in the bound
-    provider_config blob."""
-    config: dict[str, object] = {}
-    if owner is not None:
-        config["owner"] = owner
-    if repos:
-        config["repos"] = list(repos)
-    if secret_name is not None:
-        config["token"] = secret_name
-    return GitHubCredentialProvider(config_name, config, description=description)
-
-
-def _azdo(
-    config_name: str,
-    org: str,
-    *,
-    secret_name: str | None = None,
-    description: str | None = None,
-) -> AzDOCredentialProvider:
-    config: dict[str, object] = {"org": org}
-    if secret_name is not None:
-        config["token"] = secret_name
-    return AzDOCredentialProvider(config_name, config, description=description)
-
-
-# -- provider_config validation ----------------------------------------------
-#
-# Validation and reference extraction are the CORE's now, derived from the
-# provider's declared model, so these go through the core entry points
-# rather than through classmethods the providers no longer have.
-
-
-def _validate(blob: dict[str, object], name: str = "github", owner_name: str = "t") -> None:
-    validate_capability_config(
-        kind="git-credential-provider",
-        config={"name": name, **blob},
-        owner=RefOwner(kind="git-credential", name=owner_name),
-    )
-
-
-def _refs(blob: dict[str, object], owner_name: str = "t", name: str = "github") -> list[tuple[str, str]]:
-    return [
-        (ref.kind, ref.name)
-        for ref in capability_config_references(
-            kind="git-credential-provider",
-            config={"name": name, **blob},
-            owner=RefOwner(kind="git-credential", name=owner_name),
-        )
-    ]
-
-
-@pytest.mark.parametrize(
-    "blob",
-    [
-        {},
-        {"repos": ["acme/widgets"]},
-        {"owner": "acme"},
-        {"repos": ["acme/widgets"], "owner": "acme"},
-        # A deliberate loosening, recorded rather than hidden: the shipped
-        # validator rejected ``repos: []`` and the model does not, because
-        # an empty list and an absent field mean the same thing to every
-        # consumer (``store_username`` and ``helper_entry`` both test
-        # truthiness). A ``min_length=1`` would restore the rejection; it is
-        # not worth an error an operator can only hit by writing something
-        # inert.
-        {"repos": []},
-    ],
+from agentworks.capabilities.git_credential.github import (
+    GitHubCliSource,
+    GitHubCredentialProvider,
+    GitHubSecretSource,
 )
-def test_valid_scopes_accepted(blob: dict[str, object]) -> None:
-    # Extraction yields the token-secret reference the provider sources its
-    # PAT from (default git-token-<name>); validation passing (no raise)
-    # means the scope is well-formed.
-    _validate(blob)
-    assert _refs(blob) == [("secret", "git-token-t")]
-
-
-def test_token_override_in_provider_config() -> None:
-    assert _refs({"token": "my-secret"}, owner_name="gh") == [("secret", "my-secret")]
-
-
-def test_every_secret_token_spelling_extracts_the_same_secret_edge() -> None:
-    """Omitted, scalar shorthand, and the full secret arm all reach the
-    graph through the model's SecretRef declaration."""
-    assert _refs({}, owner_name="gh") == [("secret", "git-token-gh")]
-    assert _refs({"token": "my-secret"}, owner_name="gh") == [("secret", "my-secret")]
-    assert _refs({"token": {"mode": "secret", "secret": "my-secret"}}, owner_name="gh") == [("secret", "my-secret")]
-
-
-def test_token_acquisition_stays_a_one_arm_union_defaulting_only_to_secret() -> None:
-    """The ambition ceiling and omission-history rule as model facts.
-
-    A future minted mechanism grows this arm set additively, but it may
-    not become the default for declarations that omit ``token``.
-    """
-    from agentworks.capabilities.git_credential.github import GitHubConfig
-
-    token = next(doc for doc in iter_field_docs(GitHubConfig) if doc.path == ("token",))
-    assert [arm.tag for arm in token.union_arms] == ["secret"]
-    assert token.default == {"mode": "secret"}
-    assert not token.required
-
-
-def test_shipped_providers_use_the_version_2_token_acquisition_contract() -> None:
-    assert descriptor_for("git-credential-provider").contract_version == 2
-    assert GitHubCredentialProvider.contract_version == 2
-    assert AzDOCredentialProvider.contract_version == 2
-
-
-def test_empty_token_rejected_by_validation() -> None:
-    with pytest.raises(ConfigError, match="token.secret: must not be empty"):
-        _validate({"token": ""}, owner_name="gh")
-
-
-@pytest.mark.parametrize(
-    "token",
-    [
-        pytest.param(None, id="v0.13-outer-null"),
-        pytest.param({"mode": "stored", "secret": "my-secret"}, id="pre-release-stored"),
-        pytest.param({"mode": "minted"}, id="unknown-minted"),
-    ],
+from agentworks.errors import ConfigError
+from agentworks.git_credentials.reconcile import (
+    _RECONCILE_SCRIPT,
+    _state_archive,
+    reconcile_user_git_credentials,
 )
-def test_retired_and_unknown_token_acquisition_shapes_are_rejected(token: object) -> None:
-    with pytest.raises(ConfigError):
-        _validate({"token": token}, owner_name="gh")
-
-
-def test_extraction_total_on_malformed_config() -> None:
-    """Extraction never raises: a malformed ``token`` field omits the
-    (now-underivable) token edge, and a malformed scope does not raise
-    here either, because validation owns the raising."""
-    assert _refs({"token": ""}, owner_name="gh") == []
-    assert _refs({"token": 3}, owner_name="gh") == []
-    # A malformed scope still yields the default token edge (its identity
-    # does not depend on the scope fields).
-    assert _refs({"repos": "not-a-list"}, owner_name="gh") == [("secret", "git-token-gh")]
-
-
-# One case per RULE, not one per way of breaking it. Counting the rules is
-# the part that needs care: ``^[A-Za-z0-9._-]+$`` is TWO rules wearing one
-# regex, a charset and a non-emptiness quantifier, so it needs two cases.
-# An earlier pass read it as one and dropped the emptiness pair; relaxing
-# `+` to `*` then survived the entire suite. That is not a cosmetic hole.
-# ``store_username`` tests ``if self.config.repos or self.config.owner``,
-# so an empty-string owner is FALSY and a credential the operator wrote as
-# owner-scoped would silently fall through to the unscoped github.com
-# token. Scope-widening in the credential system, arrived at silently.
-#
-# The genuinely one-per-rule collapses stand: `no-slash` and `a/b/c` both
-# violate the single ``GitHubRepo`` shape and produce the one message, and
-# `repo` / `org` both hit closed-world.
-@pytest.mark.parametrize(
-    ("blob", "match"),
-    [
-        ({"repos": ["no-slash"]}, "must match `"),
-        ({"owner": "acme/"}, "must match `"),
-        # The quantifier, not the charset. See the note above.
-        ({"owner": ""}, "must match `"),
-        ({"repos": ["/leading"]}, "must match `"),
-        ({"repos": "acme/widgets"}, "repos: must be a list"),
-        ({"repo": "acme/widgets"}, "unknown field; expected one of: name, owner, repos, token"),
-        ({"repos": [123]}, r"repos\[0\]: must be a string"),
-        ({"owner": 123}, "owner: must be a string"),
-    ],
+from agentworks.git_credentials.state import (
+    UserCredentialState,
+    build_user_credential_state,
+    validate_credential_scope_claims,
 )
-def test_invalid_scopes_rejected(blob: dict[str, object], match: str) -> None:
-    with pytest.raises(ConfigError, match=match):
-        _validate(blob)
-
-
-# -- per-credential emission --------------------------------------------------
-
-
-def test_unscoped_store_line_unchanged() -> None:
-    """Loads-today: unscoped credentials keep the released host-level
-    line verbatim (x-access-token username)."""
-    p = _gh(config_name="gh")
-    assert p.credential_lines("tok") == ["https://x-access-token:tok@github.com"]
-    entry = p.helper_entry()
-    assert entry.repos == () and entry.owner is None
-
-
-@pytest.mark.parametrize(
-    "provider",
-    [_gh("gh"), _azdo("azdo", "acme")],
-    ids=["github", "azdo"],
+from agentworks.orchestration.secrets import ScopedSecrets
+from agentworks.plugins.azure.azdo import (
+    AzDOCredentialProvider,
+    AzDOSecretSource,
+    AzureCliSource,
 )
-@pytest.mark.parametrize(
-    "separator",
-    [pytest.param("\n", id="lf"), pytest.param("\r", id="cr"), pytest.param("\0", id="nul")],
-)
-def test_core_credential_materialization_rejects_line_unsafe_token_for_shipped_provider(
-    provider: GitHubCredentialProvider | AzDOCredentialProvider,
-    separator: str,
-) -> None:
-    token = f"git-sink-sentinel{separator}injected"
-
-    with pytest.raises(ValidationError) as caught:
-        materialize_credential_lines(provider, token)
-
-    assert "cannot be used for Git authentication and credential storage" in str(caught.value)
-    assert "git-sink-sentinel" not in repr((caught.value.args, vars(caught.value)))
-    assert caught.value.__cause__ is None
-    assert caught.value.__context__ is None
+from agentworks.ssh import SSHError, SSHResult
 
 
-def test_direct_builder_rejects_line_injected_by_conformant_provider() -> None:
-    class _InjectingProvider(GitHubCredentialProvider):
-        def credential_lines(self, token: str) -> list[str]:
-            return [f"https://x-access-token:{token}@github.com\nhttps://injected.invalid"]
-
-    from agentworks.capabilities.conformance import conformance_error
-    from agentworks.capabilities.git_credential.kinds import (
-        GIT_CREDENTIAL_PROVIDER_DESCRIPTOR,
-    )
-
-    assert conformance_error(GIT_CREDENTIAL_PROVIDER_DESCRIPTOR, _InjectingProvider) is None
-
-    with pytest.raises(ValidationError) as caught:
-        build_credential_materials(
-            {"gh": _InjectingProvider("gh", {})},
-            {"gh": "git-provider-output-sentinel"},
-        )
-
-    assert "cannot be used for Git authentication and credential storage" in str(caught.value)
-    assert "git-provider-output-sentinel" not in repr((caught.value.args, vars(caught.value)))
-    assert caught.value.__cause__ is None
-    assert caught.value.__context__ is None
+def _ctx(values: dict[str, str], allowed: tuple[str, ...]) -> RunContext:
+    return RunContext(secrets=ScopedSecrets(values, allowed))
 
 
-def test_repo_scope_selected_by_path(tmp_path: Path) -> None:
-    """Selection lives in the helper: an exact repo match (with or
-    without the .git suffix, with or without a leading slash) picks the
-    repo-scoped credential over the owner scope and the fallback."""
-    providers = {
-        "widgets-bot": _gh(config_name="widgets-bot", repos=["acme/widgets"]),
-        "acme-bot": _gh(config_name="acme-bot", owner="acme"),
-        "gh": _gh(config_name="gh"),
-    }
-    m = build_credential_materials(providers, {"widgets-bot": "tokR", "acme-bot": "tokO", "gh": "tokF"})
-    home = _write_home(tmp_path, m)
-    for qpath in ("acme/widgets.git", "acme/widgets", "/acme/widgets.git"):
-        out, _err = _run_helper(
-            m.helper_script,
-            home,
-            "get",
-            f"protocol=https\nhost=github.com\npath={qpath}\n",
-        )
-        assert "password=tokR" in out, qpath
-    # Owner scope catches everything else under acme, including repos
-    # nobody declared anywhere (the ad hoc clone case).
-    out, _err = _run_helper(
-        m.helper_script,
-        home,
-        "get",
-        "protocol=https\nhost=github.com\npath=acme/undeclared.git\n",
-    )
-    assert "password=tokO" in out
-    # Anything else on the host: the unscoped default.
-    out, _err = _run_helper(
-        m.helper_script,
-        home,
-        "get",
-        "protocol=https\nhost=github.com\npath=other/repo.git\n",
-    )
-    assert "password=tokF" in out
-    # No path at all (useHttpPath overridden / other tooling): serve
-    # the default, but WARN: the operator may have stepped on the
-    # setting scoping depends on.
-    out, err = _run_helper(m.helper_script, home, "get", "protocol=https\nhost=github.com\n")
-    assert "password=tokF" in out
-    assert "no repository path" in err
-    assert "useHttpPath" in err
-    # With a path present, no such warning.
-    _out, err = _run_helper(
-        m.helper_script,
-        home,
-        "get",
-        "protocol=https\nhost=github.com\npath=other/repo.git\n",
-    )
-    assert err == ""
-
-
-def test_multi_repo_list_selects_each(tmp_path: Path) -> None:
-    providers = {
-        "wf-bot": _gh(config_name="wf-bot", repos=["acme/widgets", "acme/gadgets"]),
-        "gh": _gh(config_name="gh"),
-    }
-    m = build_credential_materials(providers, {"wf-bot": "tokR", "gh": "tokF"})
-    home = _write_home(tmp_path, m)
-    for repo in ("acme/widgets", "acme/gadgets"):
-        out, _err = _run_helper(
-            m.helper_script,
-            home,
-            "get",
-            f"protocol=https\nhost=github.com\npath={repo}.git\n",
-        )
-        assert "password=tokR" in out, repo
-
-
-def test_one_credential_combines_exact_repos_with_its_owner_scope(tmp_path: Path) -> None:
-    """``repos`` plus ``owner`` is the union of both scope sets.
-
-    The existing helper already composes the two fields: exact-repository
-    matches are checked first, then the owner covers every other repo under
-    it. The provider should pass both through rather than rejecting the
-    composition at validation.
-    """
-    combined = _gh(config_name="acme-bot", repos=["other/widgets"], owner="acme")
-    entry = combined.helper_entry()
-    assert entry.repos == ("other/widgets",)
-    assert entry.owner == "acme"
-
-    providers = {"acme-bot": combined, "gh": _gh(config_name="gh")}
-    materials = build_credential_materials(providers, {"acme-bot": "tokC", "gh": "tokF"})
-    home = _write_home(tmp_path, materials)
-    for path in ("other/widgets.git", "acme/undeclared.git"):
-        out, _err = _run_helper(
-            materials.helper_script,
-            home,
-            "get",
-            f"protocol=https\nhost=github.com\npath={path}\n",
-        )
-        assert "password=tokC" in out, path
-    out, _err = _run_helper(
-        materials.helper_script,
-        home,
-        "get",
-        "protocol=https\nhost=github.com\npath=other/elsewhere.git\n",
-    )
-    assert "password=tokF" in out
-
-
-def test_azdo_org_routes_by_first_segment(tmp_path: Path) -> None:
-    providers = {
-        "ado": _azdo(config_name="ado", org="my-org"),
-    }
-    m = build_credential_materials(providers, {"ado": "tokA"})
-    home = _write_home(tmp_path, m)
-    out, _err = _run_helper(
-        m.helper_script,
-        home,
-        "get",
-        "protocol=https\nhost=dev.azure.com\npath=my-org/proj/_git/repo\n",
-    )
-    assert "username=my-org" in out
-    assert "password=tokA" in out
-
-
-def test_scoped_only_out_of_scope_serves_nothing(tmp_path: Path) -> None:
-    """With only scoped creds and no unscoped fallback, an out-of-scope
-    URL serves NO credential (a scoped credential never serves outside its
-    scope) and prints a diagnosis. A later hand-added UNSCOPED line (as
-    add-git-credential does) becomes the host default and serves."""
-    providers = {
-        "acme-bot": _gh(config_name="acme-bot", owner="acme"),
-    }
-    m = build_credential_materials(providers, {"acme-bot": "tokO"})
-    home = _write_home(tmp_path, m)
-    out, err = _run_helper(
-        m.helper_script,
-        home,
-        "get",
-        "protocol=https\nhost=github.com\npath=other/repo.git\n",
-    )
-    # No scope matches, no unscoped credential: serve nothing (no leak).
-    assert "password=" not in out
-    assert "no credential is scoped to github.com/other/repo" in err
-    # add-git-credential appends an UNSCOPED line; it becomes the fallback.
-    (home / ".git-credentials").write_text(
-        (home / ".git-credentials").read_text() + "https://x-access-token:added@github.com\n"
-    )
-    out, _err = _run_helper(
-        m.helper_script,
-        home,
-        "get",
-        "protocol=https\nhost=github.com\npath=other/repo.git\n",
-    )
-    assert "password=added" in out
-
-
-# -- cross-credential materials ----------------------------------------------
-
-
-def test_unscoped_lines_precede_scoped() -> None:
-    """Ordering still matters for the legacy first-host-line fallback:
-    the unscoped default precedes scoped lines regardless of provider
-    dict order."""
-    providers = {
-        "acme-bot": _gh(config_name="acme-bot", owner="acme"),
-        "gh": _gh(config_name="gh"),
-    }
-    m = build_credential_materials(providers, {"acme-bot": "tokA", "gh": "tokB"})
-    lines = m.store_content.splitlines()
-    assert lines == [
-        "https://x-access-token:tokB@github.com",
-        "https://acme-bot:tokA@github.com",
-    ]
-
-
-def test_scope_collision_is_loud() -> None:
-    providers = {
-        "bot-a": _gh(config_name="bot-a", owner="acme"),
-        "bot-b": _gh(config_name="bot-b", owner="acme"),
-    }
-    with pytest.raises(ConfigError, match="both claim scope"):
-        build_credential_materials(providers, {"bot-a": "x", "bot-b": "y"})
-
-
-def test_include_is_only_usehttppath() -> None:
-    """The include carries exactly the useHttpPath switch: selection
-    lives in the helper, so no context sections exist, scoped or not."""
-    for providers, tokens in (
-        ({"gh": _gh(config_name="gh")}, {"gh": "t"}),
-        (
-            {"a": _gh(config_name="a", owner="acme")},
-            {"a": "t"},
-        ),
-    ):
-        m = build_credential_materials(providers, tokens)
-        assert m.gitconfig_content.startswith("# Managed by agentworks")
-        assert "useHttpPath = true" in m.gitconfig_content
-        assert 'credential "' not in m.gitconfig_content
-
-
-# -- registry -> provider threading -------------------------------------------
-
-
-def _registry_with_scoped_cred(tmp_path: Path):  # noqa: ANN202
-    pub = tmp_path / "k.pub"
-    priv = tmp_path / "k"
-    pub.write_text("ssh-ed25519 AAAA test")
-    priv.write_text("key")
-    cfg = tmp_path / "config.toml"
-    cfg.write_text(
-        dedent(f"""\
-        [operator]
-        ssh_public_key = "{pub.as_posix()}"
-        ssh_private_key = "{priv.as_posix()}"
-        """)
-    )
-    resources = tmp_path / "resources"
-    resources.mkdir()
-    (resources / "creds.yaml").write_text(
-        dedent("""\
-        apiVersion: agentworks/v1
-        kind: git-credential
-        metadata:
-          name: widgets-bot
-        spec:
-          provider:
-            name: github
-            repos: [acme/widgets]
-        """)
-    )
-    return build_registry(load_config(cfg, warn_issues=False))
-
-
-def test_resolve_threads_scope_from_manifest(tmp_path: Path) -> None:
-    """The manifest blob's scope reaches the provider instance the
-    initializer builds (scoping is manifest-only: the flat TOML shape
-    has no github blob columns)."""
-    registry = _registry_with_scoped_cred(tmp_path)
-    providers = resolve_git_credential_providers(registry, ["widgets-bot"])
-    entry = providers["widgets-bot"].helper_entry()
-    assert entry.repos == ("acme/widgets",)
-    assert entry.username == "widgets-bot"
-
-
-def test_manifest_scope_validation_has_file_line(tmp_path: Path) -> None:
-    """The scope-shape check moved into the finalize ``validate`` pass
-    (R3), so a malformed provider_config fails at build_registry, and the
-    manifest file:line survives the move (re-attached from the resource
-    origin rather than the decode prefix)."""
-    pub = tmp_path / "k.pub"
-    priv = tmp_path / "k"
-    pub.write_text("ssh-ed25519 AAAA test")
-    priv.write_text("key")
-    cfg = tmp_path / "config.toml"
-    cfg.write_text(
-        dedent(f"""\
-        [operator]
-        ssh_public_key = "{pub.as_posix()}"
-        ssh_private_key = "{priv.as_posix()}"
-        """)
-    )
-    resources = tmp_path / "resources"
-    resources.mkdir()
-    (resources / "creds.yaml").write_text(
-        dedent("""\
-        apiVersion: agentworks/v1
-        kind: git-credential
-        metadata:
-          name: bad
-        spec:
-          provider:
-            name: github
-            repos: [not-a-repo]
-        """)
-    )
-    with pytest.raises(ConfigError, match="must match `") as exc:
-        build_registry(load_config(cfg, warn_issues=False))
-    assert "creds.yaml" in str(exc.value)
-
-
-# -- more-specific-wins is NOT a collision ------------------------------------
-
-
-def test_repo_and_owner_scopes_on_same_org_coexist() -> None:
-    """A repo under one credential and its org under another is fine --
-    exact repo beats owner in the helper's selection order (pinned by
-    execution in test_repo_scope_selected_by_path)."""
-    providers = {
-        "widgets-bot": _gh(config_name="widgets-bot", repos=["acme/widgets"]),
-        "acme-bot": _gh(config_name="acme-bot", owner="acme"),
-    }
-    build_credential_materials(providers, {"widgets-bot": "x", "acme-bot": "y"})
-
-
-# -- the credential helper ------------------------------------------------------
-
-
-def _run_helper(script: str, home: Path, op: str, query: str) -> tuple[str, str]:
-    import os
-    import subprocess
-
-    path = home / "helper.sh"
-    path.write_text(script)
-    path.chmod(0o700)
-    result = subprocess.run(
-        ["sh", str(path), op],
-        input=query,
-        capture_output=True,
+def _install(home: Path, state: UserCredentialState) -> subprocess.CompletedProcess[str]:
+    desired = "present" if state.has_credentials else "empty"
+    payload = _state_archive(state) if state.has_credentials else ""
+    env = os.environ | {"HOME": str(home)}
+    return subprocess.run(
+        ["bash", "-c", _RECONCILE_SCRIPT.replace("@DESIRED@", desired)],
+        input=payload,
         text=True,
-        timeout=10,
-        env={**os.environ, "HOME": str(home)},
-    )
-    assert result.returncode == 0  # the helper NEVER blocks the chain
-    return result.stdout, result.stderr
-
-
-def _scoped_materials() -> CredentialMaterials:
-    providers = {
-        "acme-bot": _gh(config_name="acme-bot", owner="acme"),
-        "gh": _gh(config_name="gh"),
-    }
-    return build_credential_materials(providers, {"acme-bot": "tokS", "gh": "tokF"})
-
-
-def _write_home(tmp_path: Path, m: CredentialMaterials) -> Path:
-    home = tmp_path / "home"
-    home.mkdir(exist_ok=True)
-    (home / ".git-credentials").write_text(m.store_content)
-    return home
-
-
-def test_helper_get_serves_scoped_and_fallback(tmp_path: Path) -> None:
-    m = _scoped_materials()
-    home = _write_home(tmp_path, m)
-    out, err = _run_helper(
-        m.helper_script,
-        home,
-        "get",
-        "protocol=https\nhost=github.com\nusername=acme-bot\n",
-    )
-    assert "username=acme-bot" in out
-    assert "password=tokS" in out
-    assert err == ""
-    out, err = _run_helper(m.helper_script, home, "get", "protocol=https\nhost=github.com\n")
-    # Username-less query takes the FIRST line (unscoped fallback).
-    assert "username=x-access-token" in out
-    assert "password=tokF" in out
-
-
-def test_helper_get_ignores_other_hosts(tmp_path: Path) -> None:
-    m = _scoped_materials()
-    home = _write_home(tmp_path, m)
-    out, err = _run_helper(m.helper_script, home, "get", "protocol=https\nhost=gitlab.com\n")
-    assert out == ""
-    assert err == ""
-
-
-def test_helper_warns_on_foreign_username(tmp_path: Path) -> None:
-    m = _scoped_materials()
-    home = _write_home(tmp_path, m)
-    _out, err = _run_helper(
-        m.helper_script,
-        home,
-        "get",
-        "protocol=https\nhost=github.com\nusername=alice\n",
-    )
-    assert "embeds username 'alice'" in err
-    assert "bypasses git credential scoping" in err
-
-
-def test_helper_erase_deletes_nothing_and_diagnoses(tmp_path: Path) -> None:
-    """The reason the helper exists: git invokes erase after a rejected
-    auth; credential-store DELETED the provisioned line. Ours keeps the
-    file untouched and names the credential and secret to fix."""
-    m = _scoped_materials()
-    home = _write_home(tmp_path, m)
-    before = (home / ".git-credentials").read_text()
-    out, err = _run_helper(
-        m.helper_script,
-        home,
-        "erase",
-        "protocol=https\nhost=github.com\nusername=acme-bot\npassword=tokS\n",
-    )
-    assert (home / ".git-credentials").read_text() == before
-    assert out == ""
-    assert "rejected git credential 'acme-bot'" in err
-    assert "secret 'git-token-acme-bot'" in err
-    assert "agw agent reinit" in err
-
-
-def test_helper_erase_silent_for_foreign_credentials(tmp_path: Path) -> None:
-    m = _scoped_materials()
-    home = _write_home(tmp_path, m)
-    _out, err = _run_helper(
-        m.helper_script,
-        home,
-        "erase",
-        "protocol=https\nhost=example.com\nusername=alice\npassword=x\n",
-    )
-    assert err == ""
-
-
-def test_helper_without_scopes_serves_but_never_warns(tmp_path: Path) -> None:
-    """With no scoped credentials there is no scoping to bypass: the
-    embedded-username warning is omitted, but get/erase still work."""
-    providers = {"gh": _gh(config_name="gh")}
-    m = build_credential_materials(providers, {"gh": "tokF"})
-    home = _write_home(tmp_path, m)
-    _out, err = _run_helper(
-        m.helper_script,
-        home,
-        "get",
-        "protocol=https\nhost=github.com\nusername=alice\n",
-    )
-    assert "bypasses" not in err
-    out, _err = _run_helper(m.helper_script, home, "get", "protocol=https\nhost=github.com\n")
-    assert "password=tokF" in out
-    _out, err = _run_helper(
-        m.helper_script,
-        home,
-        "erase",
-        "protocol=https\nhost=github.com\nusername=x-access-token\n",
-    )
-    assert "rejected git credential 'gh'" in err
-
-
-# -- initializer wiring --------------------------------------------------------
-
-
-def test_initializer_writes_all_three_files() -> None:
-    """The load-bearing shell: both config files + the helper written
-    with the right modes, and the include.path add is grep-guarded."""
-    from unittest.mock import MagicMock
-
-    from agentworks.vms.initializer import _configure_git_credentials
-
-    target = MagicMock()
-    writes: list[tuple[str, str, str]] = []
-    runs: list[str] = []
-    target.write_file.side_effect = lambda path, content, mode="600", **kw: writes.append((path, content, mode))
-    target.run.side_effect = lambda cmd, **kw: runs.append(cmd)
-
-    providers = {
-        "gh": _gh(config_name="gh"),
-        "acme-bot": _gh(config_name="acme-bot", owner="acme"),
-    }
-    # Runup off so this stays focused on the materials write, not the
-    # network probe (runup_and_filter is tested separately).
-    cfg = MagicMock()
-    cfg.defaults.runup_git_credentials = False
-    _configure_git_credentials(
-        "vm1",
-        target,
-        providers,
-        MagicMock(),
-        git_tokens={"gh": "t1", "acme-bot": "t2"},
-        config=cfg,
+        env=env,
+        capture_output=True,
+        check=False,
     )
 
-    by_path = {path: (content, mode) for path, content, mode in writes}
-    store, store_mode = by_path["~/.git-credentials"]
-    assert store.splitlines()[0] == "https://x-access-token:t1@github.com"
-    assert store_mode == "600"
-    include, include_mode = by_path["~/.agentworks-git-scopes.gitconfig"]
-    assert "useHttpPath = true" in include
-    assert include_mode == "600"
-    helper, helper_mode = by_path["~/.agentworks-git-cred-helper.sh"]
-    assert helper.startswith("#!/bin/sh")
-    assert helper_mode == "700"
-    (cmd,) = runs
-    assert "--replace-all credential.helper '!~/.agentworks-git-cred-helper.sh'" in cmd
-    assert "credential.helper store" not in cmd
-    assert "grep -qxF '~/.agentworks-git-scopes.gitconfig'" in cmd
-    assert "--add include.path '~/.agentworks-git-scopes.gitconfig'" in cmd
+
+def _query(
+    home: Path,
+    request: str,
+    *,
+    operation: str = "get",
+    path: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    env = os.environ | {"HOME": str(home)}
+    if path is not None:
+        env["PATH"] = f"{path}:{env['PATH']}"
+    return subprocess.run(
+        [str(home / ".agentworks/git-credentials/launch"), operation],
+        input=request,
+        text=True,
+        env=env,
+        capture_output=True,
+        check=False,
+    )
 
 
-# -- vm add-git-credential guard -----------------------------------------------
+def _request(host: str, path: str = "", *, username: str = "") -> str:
+    fields = ["protocol=https", f"host={host}"]
+    if path:
+        fields.append(f"path={path}")
+    if username:
+        fields.append(f"username={username}")
+    return "\n".join(fields) + "\n\n"
 
 
-def test_add_git_credential_line_key_preserves_scoped_lines() -> None:
-    """The merge key is (username, host/path): adding the unscoped
-    fallback must not evict scoped github lines already on the VM."""
-    from agentworks.vms.manager import _credential_line_key
-
-    scoped = "https://acme-bot:tok@github.com"
-    fallback_old = "https://x-access-token:old@github.com"
-    fallback_new = "https://x-access-token:new@github.com"
-    assert _credential_line_key(scoped) != _credential_line_key(fallback_new)
-    assert _credential_line_key(fallback_old) == _credential_line_key(fallback_new)
+def _shorten_managed_helper_timeouts(home: Path) -> None:
+    dispatch = (home / ".agentworks/git-credentials/current/dispatch").resolve()
+    script = dispatch.read_text()
+    timeout = "timeout --signal=TERM --kill-after=1s 10s"
+    assert script.count(timeout) == 2
+    dispatch.write_text(script.replace(timeout, "timeout --signal=TERM --kill-after=1s 0.1s"))
 
 
-# The former ``test_toml_github_scope_keys_warn_and_unscope`` was removed here:
-# it pinned the flat-TOML ``[git_credentials.*]`` behavior of warning that
-# github scope keys (``repos``) are manifest-only and dropping them to an empty
-# ``provider_config``. config.toml now hard-errors on any resource section
-# (ADR 0022), so a ``[git_credentials.*]`` block never loads to warn-and-unscope;
-# the manifest scope path is covered by ``test_resolve_threads_scope_from_manifest``
-# and ``test_manifest_scope_validation_has_file_line`` above.
+def test_provider_sources_are_required_closed_and_provider_owned() -> None:
+    with pytest.raises(ConfigError):
+        GitHubCredentialProvider("gh", {})
+    with pytest.raises(ConfigError):
+        GitHubCredentialProvider("gh", {"source": "secret"})
+    with pytest.raises(ConfigError):
+        GitHubCredentialProvider("gh", {"token": "old"})
+    with pytest.raises(ConfigError):
+        GitHubCredentialProvider("gh", {"source": {"mode": "az-cli"}})
+    with pytest.raises(ConfigError):
+        AzDOCredentialProvider("ado", {"org": "acme", "source": {"mode": "gh-cli"}})
+
+    github_secret = GitHubCredentialProvider("gh", {"source": {"mode": "secret"}})
+    github_cli = GitHubCredentialProvider("gh", {"source": {"mode": "gh-cli"}})
+    azdo_secret = AzDOCredentialProvider("ado", {"org": "acme", "source": {"mode": "secret"}})
+    azdo_cli = AzDOCredentialProvider("ado", {"org": "acme", "source": {"mode": "az-cli"}})
+
+    assert github_secret.config.source == GitHubSecretSource(mode="secret", secret="git-token-gh")
+    assert github_cli.config.source == GitHubCliSource(mode="gh-cli")
+    assert azdo_secret.config.source == AzDOSecretSource(mode="secret", secret="git-token-ado")
+    assert azdo_cli.config.source == AzureCliSource(mode="az-cli")
 
 
-# -- review_remote (provider-owned repo URL advice) ----------------------------
+def test_secret_and_cli_arms_return_final_material_with_identical_scope_translation() -> None:
+    github_config = {"owner": "acme", "repos": ["acme/repo"], "source": {"mode": "secret"}}
+    github_secret_provider = GitHubCredentialProvider("gh", github_config)
+    github_secret = github_secret_provider.credential_material(
+        _ctx({"git-token-gh": "secret-token"}, ("git-token-gh",))
+    )
+    github_config["source"] = {"mode": "gh-cli"}
+    github_cli_provider = GitHubCredentialProvider("gh", github_config)
+    github_cli = github_cli_provider.credential_material(_ctx({}, ()))
+    assert (
+        github_secret_provider.credential_scopes()
+        == github_cli_provider.credential_scopes()
+        == (
+            HttpsCredentialScope("github.com", ("acme", "repo")),
+            HttpsCredentialScope("github.com", ("acme",)),
+        )
+    )
+    assert github_secret == StoredCredential("gh", "secret-token")
+    assert isinstance(github_cli, ManagedHelper)
+
+    azdo_config = {"org": "acme", "source": {"mode": "secret"}}
+    azdo_secret_provider = AzDOCredentialProvider("ado", azdo_config)
+    azdo_secret = azdo_secret_provider.credential_material(_ctx({"git-token-ado": "secret-token"}, ("git-token-ado",)))
+    azdo_config["source"] = {"mode": "az-cli"}
+    azdo_cli_provider = AzDOCredentialProvider("ado", azdo_config)
+    azdo_cli = azdo_cli_provider.credential_material(_ctx({}, ()))
+    assert (
+        azdo_secret_provider.credential_scopes()
+        == azdo_cli_provider.credential_scopes()
+        == (HttpsCredentialScope("dev.azure.com", ("acme",)),)
+    )
+    assert azdo_secret == StoredCredential("acme", "secret-token")
+    assert isinstance(azdo_cli, ManagedHelper)
 
 
-def test_github_review_remote_flags_embedded_username() -> None:
-    gh = _gh("bot", owner="acme")
-    # Embedded username on github.com overrides scoping: flagged.
-    assert gh.review_remote("https://alice@github.com/acme/widgets.git")
-    # Plain https remote: fine.
-    assert gh.review_remote("https://github.com/acme/widgets.git") == []
-    # Not github's host, or not http(s): not github's concern.
-    assert gh.review_remote("https://alice@dev.azure.com/acme/_git/x") == []
-    assert gh.review_remote("git@github.com:acme/widgets.git") == []
+def test_builtin_cli_helpers_pin_external_commands_and_construct_complete_responses() -> None:
+    github = GitHubCredentialProvider("gh", {"source": {"mode": "gh-cli"}}).credential_material(_ctx({}, ()))
+    azdo = AzDOCredentialProvider("ado", {"org": "acme", "source": {"mode": "az-cli"}}).credential_material(
+        _ctx({}, ())
+    )
+    assert isinstance(github, ManagedHelper)
+    assert isinstance(azdo, ManagedHelper)
+    assert b"gh auth token --hostname github.com" in github.program
+    assert b"GH_PROMPT_DISABLED=1" in github.program
+    assert b"az account get-access-token" in azdo.program
+    assert b"499b84ac-1321-427f-aa17-267ca6975798" in azdo.program
+    assert b"--query accessToken --output tsv" in azdo.program
 
 
-def test_azdo_review_remote_allows_org_username() -> None:
-    azdo = _azdo("bot", "acme")
-    # The org as username is the standard, self-consistent AzDO form: fine.
-    assert azdo.review_remote("https://acme@dev.azure.com/acme/proj/_git/r") == []
-    assert azdo.review_remote("https://dev.azure.com/acme/proj/_git/r") == []
-    # A username that is NOT the org would not be served: flagged.
-    assert azdo.review_remote("https://someone@dev.azure.com/acme/proj/_git/r")
-    # Not AzDO's host: not its concern.
-    assert azdo.review_remote("https://acme@github.com/acme/widgets") == []
+def test_azure_cli_helper_constructs_the_provider_owned_git_response(tmp_path: Path) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    az = fake_bin / "az"
+    az.write_text(
+        "#!/bin/sh\n"
+        '[ "$*" = "account get-access-token --resource '
+        '499b84ac-1321-427f-aa17-267ca6975798 --query accessToken --output tsv" ] || exit 9\n'
+        "printf 'azure-access-token\\n'\n"
+    )
+    az.chmod(0o700)
+    provider = AzDOCredentialProvider(
+        "ado",
+        {"org": "acme", "source": {"mode": "az-cli"}},
+    )
+    material = provider.credential_material(_ctx({}, ()))
+    state = build_user_credential_state([("ado", provider.credential_scopes(), material)])
+    assert _install(tmp_path, state).returncode == 0
+
+    response = _query(tmp_path, _request("dev.azure.com", "acme/repo"), path=str(fake_bin))
+    assert response.returncode == 0
+    assert response.stdout == "username=acme\npassword=azure-access-token\n\n"
 
 
-def test_remote_advisories_unions_and_filters(tmp_path: Path) -> None:
-    from agentworks.git_credentials import remote_advisories
+def test_builder_routes_longest_prefix(tmp_path: Path) -> None:
+    state = build_user_credential_state(
+        [
+            (
+                "default-first",
+                (HttpsCredentialScope("github.com"),),
+                StoredCredential("default", "one"),
+            ),
+            (
+                "owner",
+                (HttpsCredentialScope("github.com", ("acme",)),),
+                StoredCredential("owner", "three"),
+            ),
+            (
+                "repo",
+                (HttpsCredentialScope("github.com", ("acme", "repo")),),
+                StoredCredential("repo", "four"),
+            ),
+        ]
+    )
+    result = _install(tmp_path, state)
+    assert result.returncode == 0, result.stderr
+    assert _query(tmp_path, _request("github.com", "acme/repo.git")).stdout == "username=repo\npassword=four\n\n"
+    assert _query(tmp_path, _request("github.com", "acme/other")).stdout == "username=owner\npassword=three\n\n"
+    assert _query(tmp_path, _request("github.com", "other/repo")).stdout == "username=default\npassword=one\n\n"
+    assert len(state.stored_credential_files) == 3
 
-    registry = _registry_with_scoped_cred(tmp_path)  # one github credential
-    # A github URL with an embedded username draws exactly one advisory.
-    got = remote_advisories(registry, "https://alice@github.com/acme/widgets.git")
-    assert len(got) == 1
-    # Plain remotes and non-http(s) remotes draw nothing.
-    assert remote_advisories(registry, "https://github.com/acme/widgets.git") == []
-    assert remote_advisories(registry, "git@github.com:acme/widgets.git") == []
+
+def test_duplicate_nonempty_scope_is_rejected() -> None:
+    scope = HttpsCredentialScope("github.com", ("acme",))
+    with pytest.raises(ConfigError):
+        validate_credential_scope_claims([("one", (scope,)), ("two", (scope,))])
 
 
-def test_announce_git_credentials_reinforces_names(
-    captured_output: CapturedOutput,
+def test_duplicate_host_default_scope_is_rejected() -> None:
+    scope = HttpsCredentialScope("github.com")
+    with pytest.raises(ConfigError):
+        validate_credential_scope_claims([("one", (scope,)), ("two", (scope,))])
+
+
+@pytest.mark.parametrize(
+    "scopes",
+    [
+        (),
+        (HttpsCredentialScope("UPPER.example"),),
+        (HttpsCredentialScope("example.com", ("..",)),),
+    ],
+)
+def test_preparation_rejects_malformed_provider_scopes(scopes: tuple[HttpsCredentialScope, ...]) -> None:
+    with pytest.raises(ConfigError):
+        validate_credential_scope_claims([("bad", scopes)])
+
+
+@pytest.mark.parametrize("password", ["a:b", "a@b", "a/b", "a%b", "a?b", "a#b", "a=b", r"a\b"])
+def test_stored_protocol_record_round_trips_git_and_url_delimiters(tmp_path: Path, password: str) -> None:
+    state = build_user_credential_state(
+        [
+            (
+                "credential",
+                (HttpsCredentialScope("example.com"),),
+                StoredCredential("user", password),
+            )
+        ]
+    )
+    assert _install(tmp_path, state).returncode == 0
+    response = _query(tmp_path, _request("example.com"))
+    assert response.returncode == 0
+    assert response.stdout == f"username=user\npassword={password}\n\n"
+
+
+@pytest.mark.parametrize("value", ["", "line\nfeed", "carriage\rreturn", "nul\0byte", "control\x1fbyte"])
+def test_stored_protocol_fields_reject_empty_or_control_values(value: str) -> None:
+    with pytest.raises(ConfigError):
+        build_user_credential_state(
+            [
+                (
+                    "credential",
+                    (HttpsCredentialScope("example.com"),),
+                    StoredCredential("user", value),
+                )
+            ]
+        )
+
+
+def test_stored_protocol_fields_must_fit_the_total_runtime_envelope() -> None:
+    with pytest.raises(ConfigError):
+        build_user_credential_state(
+            [
+                (
+                    "credential",
+                    (HttpsCredentialScope("example.com"),),
+                    StoredCredential("u" * 8192, "p" * 8192),
+                )
+            ]
+        )
+
+
+def test_embedded_username_does_not_override_generic_path_selection(tmp_path: Path) -> None:
+    state = build_user_credential_state(
+        [
+            (
+                "repo",
+                (HttpsCredentialScope("github.com", ("acme", "repo")),),
+                StoredCredential("selected", "token"),
+            )
+        ]
+    )
+    assert _install(tmp_path, state).returncode == 0
+    response = _query(tmp_path, _request("github.com", "acme/repo", username="foreign"))
+    assert response.stdout == "username=selected\npassword=token\n\n"
+
+
+def test_managed_helper_acquires_on_each_get_and_suppresses_upstream_failure(tmp_path: Path) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    counter = tmp_path / "counter"
+    gh = fake_bin / "gh"
+    gh.write_text(
+        "#!/bin/sh\n"
+        f"n=$(cat {counter} 2>/dev/null || echo 0)\n"
+        "n=$((n + 1))\n"
+        f"echo $n > {counter}\n"
+        "printf 'token-%s\\n' \"$n\"\n"
+    )
+    gh.chmod(0o700)
+    provider = GitHubCredentialProvider("gh", {"source": {"mode": "gh-cli"}})
+    material = provider.credential_material(_ctx({}, ()))
+    state = build_user_credential_state([("gh", provider.credential_scopes(), material)])
+    assert _install(tmp_path, state).returncode == 0
+
+    first = _query(tmp_path, _request("github.com"), path=str(fake_bin))
+    second = _query(tmp_path, _request("github.com"), path=str(fake_bin))
+    assert first.stdout == "username=x-access-token\npassword=token-1\n\n"
+    assert second.stdout == "username=x-access-token\npassword=token-2\n\n"
+
+    gh.write_text("#!/bin/sh\necho leaked-upstream-value >&2\nexit 9\n")
+    gh.chmod(0o700)
+    failed = _query(tmp_path, _request("github.com"), path=str(fake_bin))
+    assert failed.returncode != 0
+    assert "leaked-upstream-value" not in failed.stderr
+    assert "token-1" not in failed.stderr
+    assert isinstance(material, ManagedHelper)
+    assert failed.stderr.strip() == material.failure_hint
+
+
+@pytest.mark.parametrize(
+    "program",
+    [
+        b"#!/bin/sh\nprintf 'username=user\\nsecret=leaked-value\\n\\n'\n",
+        b"#!/bin/sh\nprintf 'username=user\\npassword=bad\\rvalue\\n\\n'\n",
+        b"#!/bin/sh\nprintf 'username=user\\nusername=again\\npassword=value\\n\\n'\n",
+    ],
+)
+def test_runtime_rejects_malformed_managed_response_without_relaying_it(tmp_path: Path, program: bytes) -> None:
+    helper = ManagedHelper(program, "fixed failure")
+    state = build_user_credential_state([("bad", (HttpsCredentialScope("example.com"),), helper)])
+    assert _install(tmp_path, state).returncode == 0
+    response = _query(tmp_path, _request("example.com"))
+    assert response.returncode != 0
+    assert response.stdout == ""
+    assert response.stderr == "fixed failure\n"
+
+
+def test_runtime_bounds_managed_helper_execution(tmp_path: Path) -> None:
+    helper = ManagedHelper(b"#!/bin/sh\nsleep 20\n", "bounded failure")
+    state = build_user_credential_state([("slow", (HttpsCredentialScope("example.com"),), helper)])
+    assert _install(tmp_path, state).returncode == 0
+    _shorten_managed_helper_timeouts(tmp_path)
+    started = time.monotonic()
+    response = _query(tmp_path, _request("example.com"))
+    elapsed = time.monotonic() - started
+    assert response.returncode != 0
+    assert response.stderr == "bounded failure\n"
+    assert elapsed < 1
+
+
+def test_dispatcher_has_two_production_managed_helper_timeouts() -> None:
+    helper = ManagedHelper(b"#!/bin/sh\nexit 1\n", "fixed failure")
+    state = build_user_credential_state([("runtime", (HttpsCredentialScope("example.com"),), helper)])
+    assert state.dispatcher_script.count("timeout --signal=TERM --kill-after=1s 10s") == 2
+
+
+def test_signal_exited_producer_does_not_override_a_valid_helper_response(tmp_path: Path) -> None:
+    helper = ManagedHelper(
+        b"#!/bin/sh\nprintf 'username=runtime\\npassword=value\\n\\n'\n",
+        "fixed failure",
+    )
+    state = build_user_credential_state([("runtime", (HttpsCredentialScope("example.com"),), helper)])
+    assert _install(tmp_path, state).returncode == 0
+    dispatch = (tmp_path / ".agentworks/git-credentials/current/dispatch").resolve()
+    script = dispatch.read_text()
+    producer = "printf '%s\\n\\n' \"$helper_request\""
+    assert script.count(producer) == 1
+    dispatch.write_text(script.replace(producer, "exit 141"))
+
+    response = _query(tmp_path, _request("example.com"))
+    assert response.returncode == 0
+    assert response.stdout == "username=runtime\npassword=value\n\n"
+    assert response.stderr == ""
+
+
+def test_runtime_missing_helper_command_uses_only_fixed_failure_hint(tmp_path: Path) -> None:
+    helper = ManagedHelper(
+        b"#!/bin/sh\ncommand -v agw-command-that-does-not-exist >/dev/null 2>&1 || exit 1\n",
+        "install and authenticate the required command",
+    )
+    state = build_user_credential_state([("missing", (HttpsCredentialScope("example.com"),), helper)])
+    assert _install(tmp_path, state).returncode == 0
+    response = _query(tmp_path, _request("example.com"))
+    assert response.returncode != 0
+    assert response.stdout == ""
+    assert response.stderr == "install and authenticate the required command\n"
+
+
+def test_runtime_no_match_and_non_get_operations_serve_no_value(tmp_path: Path) -> None:
+    state = build_user_credential_state(
+        [("one", (HttpsCredentialScope("example.com"),), StoredCredential("user", "secret"))]
+    )
+    assert _install(tmp_path, state).returncode == 0
+    assert _query(tmp_path, _request("other.example")).stdout == ""
+    store = _query(tmp_path, _request("example.com"), operation="store")
+    assert store.returncode == 0
+    assert store.stdout == ""
+    assert store.stderr == ""
+    erase = _query(tmp_path, _request("example.com"), operation="erase")
+    assert erase.returncode == 0
+    assert erase.stdout == ""
+    assert "one" in erase.stderr
+    assert "secret" not in erase.stderr
+    started = time.monotonic()
+    unknown = _query(tmp_path, "x" * 100_000, operation="unknown")
+    assert time.monotonic() - started < 1
+    assert unknown.returncode == 0
+    assert unknown.stdout == ""
+    assert unknown.stderr == ""
+
+
+@pytest.mark.parametrize("payload_kind", ["stored", "helper"])
+def test_inherited_bash_tracing_cannot_expose_credential_values(
+    tmp_path: Path,
+    payload_kind: str,
 ) -> None:
-    """Preflight echoes one ``Checking git-credential/<name>...`` line per
-    credential, in the ``<kind>/<name>`` form matching the vm-site /
-    vm-template context lines."""
-    from agentworks.vms.initializer import announce_git_credentials
+    marker = f"{payload_kind}-trace-secret"
+    payload = (
+        StoredCredential("user", marker)
+        if payload_kind == "stored"
+        else ManagedHelper(
+            f"#!/bin/bash\nvalue={marker}\nprintf 'username=user\\npassword=%s\\n\\n' \"$value\"\n".encode(),
+            "fixed failure",
+        )
+    )
+    state = build_user_credential_state([("one", (HttpsCredentialScope("example.com"),), payload)])
+    assert _install(tmp_path, state).returncode == 0
+    bash_env = tmp_path / "inherited-bash-env"
+    bash_env.write_text("PS4='inherited-trace: '; set -x\n")
+    result = subprocess.run(
+        [str(tmp_path / ".agentworks/git-credentials/launch"), "get"],
+        input=_request("example.com"),
+        text=True,
+        env=os.environ
+        | {
+            "HOME": str(tmp_path),
+            "BASH_ENV": str(bash_env),
+            "SHELLOPTS": "braceexpand:hashall:xtrace",
+            "BASH_XTRACEFD": "2",
+        },
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert f"password={marker}\n" in result.stdout
+    assert marker not in result.stderr
 
-    announce_git_credentials({"github": _gh("github", owner="acme"), "azdo_ifc": _azdo("azdo_ifc", "org")})
-    assert "Checking git-credential/github..." in captured_output.info
-    assert "Checking git-credential/azdo_ifc..." in captured_output.info
-    # Not the old friendly-label / display-name form.
-    assert not any(m.startswith("Git credentials:") for m in captured_output.info)
+
+@pytest.mark.parametrize("failure_point", ["cleanup-after-disable", "stage", "activation"])
+def test_reconciliation_failure_after_disable_is_unreachable_and_retry_converges(
+    tmp_path: Path,
+    failure_point: str,
+) -> None:
+    old = build_user_credential_state(
+        [("old", (HttpsCredentialScope("example.com"),), StoredCredential("user", "old"))]
+    )
+    new = build_user_credential_state(
+        [("new", (HttpsCredentialScope("example.com"),), StoredCredential("user", "new"))]
+    )
+    assert _install(tmp_path, old).returncode == 0
+    root = tmp_path / ".agentworks/git-credentials"
+    old_current = os.readlink(root / "current")
+
+    marker, replacement = {
+        "cleanup-after-disable": (
+            "remove_config_value include.path '~/.agentworks/git-credentials/current/config.gitconfig'\n",
+            "remove_config_value include.path '~/.agentworks/git-credentials/current/config.gitconfig'\nfalse\n",
+        ),
+        "stage": (
+            'chmod 700 "$stage" "$root/generations"\n',
+            'chmod 700 "$stage" "$root/generations"\nfalse\n',
+        ),
+        "activation": (
+            '    mv -Tf "$current_tmp" "$root/current"\n',
+            '    false\n    mv -Tf "$current_tmp" "$root/current"\n',
+        ),
+    }[failure_point]
+    failed_script = _RECONCILE_SCRIPT.replace(marker, replacement, 1)
+    assert failed_script != _RECONCILE_SCRIPT
+    failed = subprocess.run(
+        ["bash", "-c", failed_script.replace("@DESIRED@", "present")],
+        input=_state_archive(new),
+        text=True,
+        env=os.environ | {"HOME": str(tmp_path)},
+        capture_output=True,
+        check=False,
+    )
+    assert failed.returncode != 0
+    assert os.readlink(root / "current") == old_current
+    includes = subprocess.run(
+        ["git", "config", "--global", "--get-all", "include.path"],
+        text=True,
+        env=os.environ | {"HOME": str(tmp_path)},
+        capture_output=True,
+        check=False,
+    ).stdout.splitlines()
+    assert "~/.agentworks/git-credentials/current/config.gitconfig" not in includes
+    fill = subprocess.run(
+        ["git", "credential", "fill"],
+        input=_request("example.com"),
+        text=True,
+        env=os.environ | {"HOME": str(tmp_path), "GIT_TERMINAL_PROMPT": "0"},
+        capture_output=True,
+        check=False,
+    )
+    assert "password=old" not in fill.stdout
+    assert "password=new" not in fill.stdout
+
+    assert _install(tmp_path, new).returncode == 0
+    converged = subprocess.run(
+        ["git", "credential", "fill"],
+        input=_request("example.com"),
+        text=True,
+        env=os.environ | {"HOME": str(tmp_path), "GIT_TERMINAL_PROMPT": "0"},
+        capture_output=True,
+        check=False,
+    )
+    assert converged.returncode == 0
+    assert converged.stdout == "protocol=https\nhost=example.com\nusername=user\npassword=new\n"
 
 
-# -- real git against the generated materials ----------------------------------
+@pytest.mark.parametrize("corrupt_as", ["directories", "external-symlinks"])
+def test_reconciliation_repairs_corrupt_owned_activation_paths(tmp_path: Path, corrupt_as: str) -> None:
+    old = build_user_credential_state(
+        [("old", (HttpsCredentialScope("example.com"),), StoredCredential("user", "old"))]
+    )
+    new = build_user_credential_state(
+        [("new", (HttpsCredentialScope("example.com"),), StoredCredential("user", "new"))]
+    )
+    assert _install(tmp_path, old).returncode == 0
+    root = tmp_path / ".agentworks/git-credentials"
+    (root / "launch").unlink()
+    (root / "current").unlink()
+    if corrupt_as == "directories":
+        (root / "launch").mkdir()
+        (root / "current").mkdir()
+    else:
+        external = tmp_path / "external"
+        external.mkdir()
+        (external / "launch").write_text("outside")
+        (root / "launch").symlink_to(external / "launch")
+        (root / "current").symlink_to(external, target_is_directory=True)
+
+    assert _install(tmp_path, new).returncode == 0
+    assert (root / "launch").is_file() and not (root / "launch").is_symlink()
+    assert (root / "current").is_symlink()
+    if corrupt_as == "external-symlinks":
+        assert (tmp_path / "external/launch").read_text() == "outside"
+    assert _query(tmp_path, _request("example.com")).stdout == "username=user\npassword=new\n\n"
 
 
-def _fill(home: Path, url_line: str) -> tuple[int, str, str]:
-    import os
-    import subprocess
+def test_reconciliation_does_not_follow_corrupt_lock_or_generation_symlinks(tmp_path: Path) -> None:
+    state = build_user_credential_state(
+        [("one", (HttpsCredentialScope("example.com"),), StoredCredential("user", "value"))]
+    )
+    assert _install(tmp_path, state).returncode == 0
+    root = tmp_path / ".agentworks/git-credentials"
+    external_lock = tmp_path / "external-lock"
+    external_lock.write_text("outside-lock")
+    external_generations = tmp_path / "external-generations"
+    external_generations.mkdir()
+    (external_generations / "sentinel").write_text("outside-generation")
+    (root / "lock").unlink()
+    (root / "lock").symlink_to(external_lock)
+    current = root / "current"
+    current.unlink()
+    shutil.rmtree(root / "generations")
+    (root / "generations").symlink_to(external_generations, target_is_directory=True)
 
-    env = {
-        **os.environ,
-        "HOME": str(home),
-        "XDG_CONFIG_HOME": str(home / ".config"),
-        "GIT_CONFIG_SYSTEM": "/dev/null",
-        "GIT_TERMINAL_PROMPT": "0",
-    }
+    assert _install(tmp_path, state).returncode == 0
+    assert external_lock.read_text() == "outside-lock"
+    assert (external_generations / "sentinel").read_text() == "outside-generation"
+    assert (root / "lock").is_file() and not (root / "lock").is_symlink()
+    assert (root / "generations").is_dir() and not (root / "generations").is_symlink()
+
+
+def test_hard_linked_lock_fails_closed_then_repairs_without_mutating_external_inode(tmp_path: Path) -> None:
+    state = build_user_credential_state(
+        [("one", (HttpsCredentialScope("example.com"),), StoredCredential("user", "value"))]
+    )
+    assert _install(tmp_path, state).returncode == 0
+    root = tmp_path / ".agentworks/git-credentials"
+    lock = root / "lock"
+    external = tmp_path / "external-lock"
+    lock.write_text("external-content")
+    lock.chmod(0o640)
+    os.link(lock, external)
+    assert lock.stat().st_nlink == external.stat().st_nlink == 2
+
+    failed = _query(tmp_path, _request("example.com"))
+    assert failed.returncode != 0
+    assert failed.stdout == ""
+    assert external.read_text() == "external-content"
+    assert stat.S_IMODE(external.stat().st_mode) == 0o640
+    assert external.stat().st_nlink == 2
+
+    assert _install(tmp_path, state).returncode == 0
+    assert external.read_text() == "external-content"
+    assert stat.S_IMODE(external.stat().st_mode) == 0o640
+    assert external.stat().st_nlink == 1
+    assert lock.read_text() == ""
+    assert stat.S_IMODE(lock.stat().st_mode) == 0o600
+    assert lock.stat().st_nlink == 1
+    assert _query(tmp_path, _request("example.com")).stdout == "username=user\npassword=value\n\n"
+
+
+def test_mode_zero_lock_recovers_on_reconciliation_and_retry(tmp_path: Path) -> None:
+    state = build_user_credential_state(
+        [("one", (HttpsCredentialScope("example.com"),), StoredCredential("user", "value"))]
+    )
+    assert _install(tmp_path, state).returncode == 0
+    lock = tmp_path / ".agentworks/git-credentials/lock"
+    inode = lock.stat().st_ino
+    lock.chmod(0)
+
+    failed = _query(tmp_path, _request("example.com"))
+    assert failed.returncode != 0
+    assert failed.stdout == ""
+
+    recovered = _install(tmp_path, state)
+    assert recovered.returncode == 0, recovered.stderr
+    assert lock.stat().st_ino == inode
+    assert lock.read_text() == ""
+    assert stat.S_IMODE(lock.stat().st_mode) == 0o600
+    assert _install(tmp_path, state).returncode == 0
+    assert _query(tmp_path, _request("example.com")).stdout == "username=user\npassword=value\n\n"
+
+
+def test_nonempty_single_link_lock_converges_empty_without_replacing_inode(tmp_path: Path) -> None:
+    state = build_user_credential_state(
+        [("one", (HttpsCredentialScope("example.com"),), StoredCredential("user", "value"))]
+    )
+    assert _install(tmp_path, state).returncode == 0
+    lock = tmp_path / ".agentworks/git-credentials/lock"
+    inode = lock.stat().st_ino
+    lock.write_text("stale-owned-lock-content")
+
+    assert _install(tmp_path, state).returncode == 0
+    assert lock.stat().st_ino == inode
+    assert lock.read_text() == ""
+    assert stat.S_IMODE(lock.stat().st_mode) == 0o600
+
+
+def test_helper_and_reconciler_share_repaired_lock_identity(tmp_path: Path) -> None:
+    critical = tmp_path / "reconcile-critical"
+    overlap = tmp_path / "helper-overlap"
+    old_helper = ManagedHelper(
+        (
+            "#!/bin/sh\n"
+            f"[ ! -d {shlex.quote(str(critical))} ] || touch {shlex.quote(str(overlap))}\n"
+            "printf 'username=user\\npassword=old\\n\\n'\n"
+        ).encode(),
+        "fixed failure",
+    )
+    old = build_user_credential_state([("old", (HttpsCredentialScope("example.com"),), old_helper)])
+    new = build_user_credential_state(
+        [("new", (HttpsCredentialScope("example.com"),), StoredCredential("user", "new"))]
+    )
+    assert _install(tmp_path, old).returncode == 0
+    root = tmp_path / ".agentworks/git-credentials"
+    external_lock = tmp_path / "external-lock"
+    external_lock.write_text("outside")
+    (root / "lock").unlink()
+    (root / "lock").symlink_to(external_lock)
+
+    marker = "exec 6<&- 7<&-\n\nremove_config_value()"
+    guarded_script = (
+        _RECONCILE_SCRIPT.replace(
+            marker,
+            "exec 6<&- 7<&-\n" + f"mkdir {shlex.quote(str(critical))}\nsleep 0.3\n\nremove_config_value()",
+            1,
+        )
+        + f"\nrmdir {shlex.quote(str(critical))}\n"
+    )
+    reconcile = subprocess.Popen(
+        ["bash", "-c", guarded_script.replace("@DESIRED@", "present")],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=os.environ | {"HOME": str(tmp_path)},
+    )
+    assert reconcile.stdin is not None
+    reconcile.stdin.write(_state_archive(new))
+    reconcile.stdin.close()
+    deadline = time.monotonic() + 2
+    while not critical.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert critical.exists()
+
+    helper = _query(tmp_path, _request("example.com"))
+    assert reconcile.wait(timeout=2) == 0
+    assert helper.returncode == 0
+    assert helper.stdout == "username=user\npassword=new\n\n"
+    assert not overlap.exists()
+    assert external_lock.read_text() == "outside"
+
+
+def test_concurrent_reconcilers_share_repaired_lock_identity(tmp_path: Path) -> None:
+    old = build_user_credential_state(
+        [("old", (HttpsCredentialScope("example.com"),), StoredCredential("user", "old"))]
+    )
+    first_state = build_user_credential_state(
+        [("first", (HttpsCredentialScope("example.com"),), StoredCredential("user", "one"))]
+    )
+    second_state = build_user_credential_state(
+        [("second", (HttpsCredentialScope("example.com"),), StoredCredential("user", "two"))]
+    )
+    assert _install(tmp_path, old).returncode == 0
+    root = tmp_path / ".agentworks/git-credentials"
+    external_lock = tmp_path / "external-lock"
+    external_lock.write_text("outside")
+    (root / "lock").unlink()
+    (root / "lock").symlink_to(external_lock)
+    critical = tmp_path / "reconcile-critical"
+    overlap = tmp_path / "reconcile-overlap"
+    marker = "exec 6<&- 7<&-\n\nremove_config_value()"
+
+    def instrument(script: str, *, delay: bool) -> str:
+        body = (
+            f"[ ! -d {shlex.quote(str(critical))} ] || touch {shlex.quote(str(overlap))}\n"
+            f"mkdir {shlex.quote(str(critical))}\n"
+        )
+        if delay:
+            body += "sleep 0.3\n"
+        replacement = "exec 6<&- 7<&-\n" + body + "\nremove_config_value()"
+        return script.replace(marker, replacement, 1) + f"\nrmdir {shlex.quote(str(critical))}\n"
+
+    first = subprocess.Popen(
+        ["bash", "-c", instrument(_RECONCILE_SCRIPT, delay=True).replace("@DESIRED@", "present")],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=os.environ | {"HOME": str(tmp_path)},
+    )
+    assert first.stdin is not None
+    first.stdin.write(_state_archive(first_state))
+    first.stdin.close()
+    deadline = time.monotonic() + 2
+    while not critical.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert critical.exists()
+    second = subprocess.run(
+        ["bash", "-c", instrument(_RECONCILE_SCRIPT, delay=False).replace("@DESIRED@", "present")],
+        input=_state_archive(second_state),
+        text=True,
+        env=os.environ | {"HOME": str(tmp_path)},
+        capture_output=True,
+        check=False,
+    )
+    assert first.wait(timeout=2) == 0
+    assert second.returncode == 0, second.stderr
+    assert not overlap.exists()
+    assert external_lock.read_text() == "outside"
+    assert _query(tmp_path, _request("example.com")).stdout == "username=user\npassword=two\n\n"
+
+
+def test_reconciliation_replaces_a_symlinked_active_generation(tmp_path: Path) -> None:
+    state = build_user_credential_state(
+        [("one", (HttpsCredentialScope("example.com"),), StoredCredential("user", "value"))]
+    )
+    assert _install(tmp_path, state).returncode == 0
+    root = tmp_path / ".agentworks/git-credentials"
+    active = (root / "current").resolve()
+    external_generation = tmp_path / "external-generation"
+    shutil.copytree(active, external_generation)
+    shutil.rmtree(active)
+    active.symlink_to(external_generation, target_is_directory=True)
+
+    assert _install(tmp_path, state).returncode == 0
+    repaired = (root / "current").resolve()
+    assert repaired.is_relative_to(root / "generations")
+    assert repaired.is_dir() and not repaired.is_symlink()
+    assert (external_generation / "dispatch").exists()
+    assert _query(tmp_path, _request("example.com")).stdout == "username=user\npassword=value\n\n"
+
+
+def test_launcher_fails_closed_and_reconcile_repairs_a_symlinked_root(tmp_path: Path) -> None:
+    state = build_user_credential_state(
+        [("one", (HttpsCredentialScope("example.com"),), StoredCredential("user", "value"))]
+    )
+    assert _install(tmp_path, state).returncode == 0
+    root = tmp_path / ".agentworks/git-credentials"
+    saved_launcher = tmp_path / "saved-launch"
+    saved_launcher.write_bytes((root / "launch").read_bytes())
+    saved_launcher.chmod(0o700)
+    shutil.rmtree(root)
+    external = tmp_path / "external-root"
+    external.mkdir()
+    (external / "sentinel").write_text("outside")
+    root.symlink_to(external, target_is_directory=True)
+
+    failed = subprocess.run(
+        [str(saved_launcher), "get"],
+        input=_request("example.com"),
+        text=True,
+        env=os.environ | {"HOME": str(tmp_path)},
+        capture_output=True,
+        check=False,
+    )
+    assert failed.returncode != 0
+    assert failed.stdout == ""
+    assert (external / "sentinel").read_text() == "outside"
+
+    assert _install(tmp_path, state).returncode == 0
+    assert root.is_dir() and not root.is_symlink()
+    assert (external / "sentinel").read_text() == "outside"
+    assert _query(tmp_path, _request("example.com")).stdout == "username=user\npassword=value\n\n"
+
+
+def test_helper_and_reconciler_lock_waits_are_bounded(tmp_path: Path) -> None:
+    state = build_user_credential_state(
+        [("one", (HttpsCredentialScope("example.com"),), StoredCredential("user", "value"))]
+    )
+    assert _install(tmp_path, state).returncode == 0
+    root = tmp_path / ".agentworks/git-credentials"
+    lock_path = root / "lock"
+
+    with lock_path.open("r+") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        launcher_path = root / "launch"
+        launcher = launcher_path.read_text()
+        fast_launcher = launcher.replace("flock -s -w 10 9", "flock -s -w 0.1 9")
+        assert fast_launcher != launcher
+        launcher_path.write_text(fast_launcher)
+        started = time.monotonic()
+        blocked_helper = _query(tmp_path, _request("example.com"))
+        elapsed = time.monotonic() - started
+        assert blocked_helper.returncode != 0
+        assert elapsed < 1
+
+    with lock_path.open("r+") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_SH | fcntl.LOCK_NB)
+        fast_reconcile = _RECONCILE_SCRIPT.replace("flock -x -w 30 9", "flock -x -w 0.1 9")
+        assert fast_reconcile != _RECONCILE_SCRIPT
+        started = time.monotonic()
+        blocked_reconcile = subprocess.run(
+            ["bash", "-c", fast_reconcile.replace("@DESIRED@", "empty")],
+            text=True,
+            env=os.environ | {"HOME": str(tmp_path)},
+            capture_output=True,
+            check=False,
+        )
+        elapsed = time.monotonic() - started
+        assert blocked_reconcile.returncode != 0
+        assert elapsed < 1
+
+
+def test_launchers_share_parent_handoff_while_reconciliation_is_excluded(tmp_path: Path) -> None:
+    state = build_user_credential_state(
+        [("one", (HttpsCredentialScope("example.com"),), StoredCredential("user", "value"))]
+    )
+    assert _install(tmp_path, state).returncode == 0
+    root = tmp_path / ".agentworks/git-credentials"
+    launcher_path = root / "launch"
+    lock_path = root / "lock"
+
+    def reached_stable_lock(process: subprocess.Popen[str]) -> bool:
+        descriptor = Path(f"/proc/{process.pid}/fd/9")
+        try:
+            return descriptor.samefile(lock_path)
+        except FileNotFoundError:
+            return False
+
+    with lock_path.open("r+") as external_lock:
+        fcntl.flock(external_lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        launchers: list[subprocess.Popen[str]] = []
+        for _ in range(2):
+            launcher = subprocess.Popen(
+                [str(launcher_path), "get"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=os.environ | {"HOME": str(tmp_path)},
+                start_new_session=True,
+            )
+            assert launcher.stdin is not None
+            launcher.stdin.write(_request("example.com"))
+            launcher.stdin.close()
+            launchers.append(launcher)
+
+        deadline = time.monotonic() + 2
+        while not all(reached_stable_lock(launcher) for launcher in launchers) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert all(reached_stable_lock(launcher) for launcher in launchers)
+
+        for launcher in launchers:
+            os.killpg(launcher.pid, signal.SIGTERM)
+            assert launcher.wait(timeout=2) < 0
+            assert launcher.stdout is not None and launcher.stderr is not None
+            launcher.stdout.close()
+            launcher.stderr.close()
+
+        reconcile = subprocess.Popen(
+            ["bash", "-c", _RECONCILE_SCRIPT.replace("@DESIRED@", "empty")],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=os.environ | {"HOME": str(tmp_path)},
+        )
+        deadline = time.monotonic() + 2
+        while not reached_stable_lock(reconcile) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert reached_stable_lock(reconcile)
+
+        parent_fd = os.open(tmp_path / ".agentworks", os.O_RDONLY)
+        try:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(parent_fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        finally:
+            os.close(parent_fd)
+
+    assert reconcile.wait(timeout=2) == 0
+
+
+def test_desired_state_representations_and_scripts_do_not_contain_stored_values() -> None:
+    value = "private-built-in-value"
+    state = build_user_credential_state(
+        [("one", (HttpsCredentialScope("example.com"),), StoredCredential("user", value))]
+    )
+    assert value not in repr(state)
+    assert value not in state.include_content
+    assert value not in state.dispatcher_script
+
+
+def test_reconciliation_is_idempotent_and_empty_removes_owned_state_only(tmp_path: Path) -> None:
+    subprocess.run(
+        ["git", "config", "--global", "--add", "credential.helper", "operator-helper"],
+        env=os.environ | {"HOME": str(tmp_path)},
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "--global", "--add", "credential.helper", "!~/.agentworks-git-cred-helper.sh"],
+        env=os.environ | {"HOME": str(tmp_path)},
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "--global", "--add", "credential.helper", "operator-after"],
+        env=os.environ | {"HOME": str(tmp_path)},
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "--global", "--add", "include.path", "~/.operator-gitconfig"],
+        env=os.environ | {"HOME": str(tmp_path)},
+        check=True,
+    )
+    (tmp_path / ".git-credentials").write_text("unread-legacy-secret\n")
+    (tmp_path / ".agentworks-git-cred-helper.sh").write_text("legacy")
+    state = build_user_credential_state(
+        [("one", (HttpsCredentialScope("example.com"),), StoredCredential("user", "secret"))]
+    )
+    assert _install(tmp_path, state).returncode == 0
+    current = (tmp_path / ".agentworks/git-credentials/current").resolve()
+    assert _install(tmp_path, state).returncode == 0
+    assert (tmp_path / ".agentworks/git-credentials/current").resolve() == current
+    managed_fill = subprocess.run(
+        ["git", "credential", "fill"],
+        input=_request("example.com"),
+        text=True,
+        env=os.environ | {"HOME": str(tmp_path), "GIT_TERMINAL_PROMPT": "0"},
+        capture_output=True,
+        check=False,
+    )
+    assert managed_fill.returncode == 0
+    assert managed_fill.stdout == "protocol=https\nhost=example.com\nusername=user\npassword=secret\n"
+
+    assert _install(tmp_path, build_user_credential_state([])).returncode == 0
+    root = tmp_path / ".agentworks/git-credentials"
+    assert {path.name for path in root.iterdir()} == {"lock"}
+    assert not (tmp_path / ".git-credentials").exists()
+    assert not (tmp_path / ".agentworks-git-cred-helper.sh").exists()
+    helpers = subprocess.run(
+        ["git", "config", "--global", "--get-all", "credential.helper"],
+        env=os.environ | {"HOME": str(tmp_path)},
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.splitlines()
+    assert helpers == ["operator-helper", "operator-after"]
+    includes = subprocess.run(
+        ["git", "config", "--global", "--get-all", "include.path"],
+        env=os.environ | {"HOME": str(tmp_path)},
+        text=True,
+        capture_output=True,
+        check=False,
+    ).stdout.splitlines()
+    assert "~/.agentworks/git-credentials/current/config.gitconfig" not in includes
+    assert includes == ["~/.operator-gitconfig"]
+
+
+@pytest.mark.skipif(shutil.which("zsh") is None, reason="zsh is not installed")
+def test_legacy_cleanup_runs_under_zsh_without_mutating_command_lookup(tmp_path: Path) -> None:
+    subprocess.run(
+        ["git", "config", "--global", "--add", "credential.helper", "!~/.agentworks-git-cred-helper.sh"],
+        env=os.environ | {"HOME": str(tmp_path)},
+        check=True,
+    )
+    legacy_paths = (
+        tmp_path / ".git-credentials",
+        tmp_path / ".agentworks-git-cred-helper.sh",
+        tmp_path / ".agentworks-git-scopes.gitconfig",
+        tmp_path / ".agentworks-git-cred-warn.sh",
+    )
+    for legacy_path in legacy_paths:
+        legacy_path.write_text("legacy")
+
+    result = subprocess.run(
+        ["zsh", "-c", _RECONCILE_SCRIPT.replace("@DESIRED@", "empty")],
+        text=True,
+        env=os.environ | {"HOME": str(tmp_path)},
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert all(not legacy_path.exists() for legacy_path in legacy_paths)
+
+
+def test_empty_reconciliation_removes_directory_shaped_legacy_paths(tmp_path: Path) -> None:
+    old = build_user_credential_state(
+        [("old", (HttpsCredentialScope("example.com"),), StoredCredential("user", "old"))]
+    )
+    assert _install(tmp_path, old).returncode == 0
+    legacy_paths = (
+        tmp_path / ".git-credentials",
+        tmp_path / ".agentworks-git-cred-helper.sh",
+        tmp_path / ".agentworks-git-scopes.gitconfig",
+        tmp_path / ".agentworks-git-cred-warn.sh",
+    )
+    for path in legacy_paths:
+        if path.exists() or path.is_symlink():
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+        path.mkdir()
+        (path / "old-value").write_text("old")
+    subprocess.run(
+        ["git", "config", "--global", "--add", "credential.helper", "store"],
+        env=os.environ | {"HOME": str(tmp_path)},
+        check=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "config",
+            "--global",
+            "--add",
+            "credential.helper",
+            "!~/.agentworks-git-cred-helper.sh",
+        ],
+        env=os.environ | {"HOME": str(tmp_path)},
+        check=True,
+    )
+
+    empty = build_user_credential_state([])
+    assert _install(tmp_path, empty).returncode == 0
+    assert _install(tmp_path, empty).returncode == 0
+    assert all(not path.exists() for path in legacy_paths)
+    fill = subprocess.run(
+        ["git", "credential", "fill"],
+        input=_request("example.com"),
+        text=True,
+        env=os.environ | {"HOME": str(tmp_path), "GIT_TERMINAL_PROMPT": "0"},
+        capture_output=True,
+        check=False,
+    )
+    assert "password=old" not in fill.stdout
+    assert {path.name for path in (tmp_path / ".agentworks/git-credentials").iterdir()} == {"lock"}
+
+
+@pytest.mark.parametrize("directory_shaped", [False, True])
+def test_reconciliation_preserves_unwitnessed_git_credentials_path(
+    tmp_path: Path,
+    *,
+    directory_shaped: bool,
+) -> None:
+    legacy_store = tmp_path / ".git-credentials"
+    if directory_shaped:
+        legacy_store.mkdir()
+        content = legacy_store / "operator-owned"
+    else:
+        content = legacy_store
+    content.write_bytes(b"operator-owned-bytes\n")
+    content.chmod(0o640)
+    inode = content.stat().st_ino
+
+    assert _install(tmp_path, build_user_credential_state([])).returncode == 0
+    assert _install(tmp_path, build_user_credential_state([])).returncode == 0
+
+    assert content.read_bytes() == b"operator-owned-bytes\n"
+    assert content.stat().st_ino == inode
+    assert stat.S_IMODE(content.stat().st_mode) == 0o640
+
+
+@pytest.mark.parametrize("returncode", [20, 21, 22, 23, 24, 25, 29, 97])
+def test_reconcile_maps_remote_failures_without_exposing_remote_data(returncode: int) -> None:
+    sentinel = "remote-reflected-sensitive-payload"
+
+    class _Target:
+        kwargs: dict[str, object] | None = None
+
+        def run(self, command: str, **kwargs: object) -> SSHResult:
+            self.kwargs = kwargs
+            return SSHResult(returncode, sentinel, sentinel)
+
+    target = _Target()
+    with pytest.raises(SSHError) as caught:
+        reconcile_user_git_credentials(target, build_user_credential_state([]))  # type: ignore[arg-type]
+
+    assert sentinel not in str(caught.value)
+    assert target.kwargs is not None
+    assert target.kwargs["check"] is False
+    assert target.kwargs["timeout"] == 90
+    assert target.kwargs["input_text"] == ""
+
+
+def test_reconcile_sanitizes_transport_failure() -> None:
+    sentinel = "transport-reflected-sensitive-payload"
+
+    class _Target:
+        def run(self, command: str, **kwargs: object) -> SSHResult:
+            raise SSHError(f"{sentinel}: {command}: {kwargs['input_text']}")
+
+    with pytest.raises(SSHError) as caught:
+        reconcile_user_git_credentials(_Target(), build_user_credential_state([]))  # type: ignore[arg-type]
+
+    assert sentinel not in str(caught.value)
+    assert _RECONCILE_SCRIPT not in str(caught.value)
+
+
+def test_reconciliation_replaces_complete_scope_and_payload_state(tmp_path: Path) -> None:
+    default = ("default", (HttpsCredentialScope("example.com"),), StoredCredential("default", "one"))
+    scoped = (
+        "team",
+        (HttpsCredentialScope("example.com", ("team",)),),
+        StoredCredential("scoped", "two"),
+    )
+    helper = (
+        "other",
+        (HttpsCredentialScope("example.com", ("other",)),),
+        ManagedHelper(
+            b"#!/bin/sh\nprintf 'username=runtime\\npassword=three\\n\\n'\n",
+            "fixed failure",
+        ),
+    )
+
+    assert _install(tmp_path, build_user_credential_state([default])).returncode == 0
+    assert _install(tmp_path, build_user_credential_state([default, scoped])).returncode == 0
+    assert _query(tmp_path, _request("example.com", "team/repo")).stdout.startswith("username=scoped\n")
+
+    assert _install(tmp_path, build_user_credential_state([scoped, helper])).returncode == 0
+    assert _query(tmp_path, _request("example.com", "unscoped/repo")).stdout == ""
+    assert _query(tmp_path, _request("example.com", "other/repo")).stdout.startswith("username=runtime\n")
+
+    narrowed = (
+        "team",
+        (HttpsCredentialScope("example.com", ("team", "one")),),
+        ManagedHelper(
+            b"#!/bin/sh\nprintf 'username=runtime\\npassword=four\\n\\n'\n",
+            "fixed failure",
+        ),
+    )
+    assert _install(tmp_path, build_user_credential_state([narrowed])).returncode == 0
+    assert _query(tmp_path, _request("example.com", "team/two")).stdout == ""
+    assert _query(tmp_path, _request("example.com", "team/one/repo")).stdout.startswith("username=runtime\n")
+
+
+def test_generation_modes_and_git_credential_fill_use_the_managed_include(tmp_path: Path) -> None:
+    state = build_user_credential_state(
+        [("one", (HttpsCredentialScope("example.com"),), StoredCredential("user", "secret"))]
+    )
+    assert _install(tmp_path, state).returncode == 0
+    root = tmp_path / ".agentworks/git-credentials"
+    assert stat.S_IMODE((root / "lock").stat().st_mode) == 0o600
+    assert stat.S_IMODE((root / "launch").stat().st_mode) == 0o700
+    current = (root / "current").resolve()
+    assert stat.S_IMODE((current / "config.gitconfig").stat().st_mode) == 0o600
+    assert stat.S_IMODE((current / "dispatch").stat().st_mode) == 0o700
+    assert stat.S_IMODE(next((current / "stored").iterdir()).stat().st_mode) == 0o600
+
     result = subprocess.run(
         ["git", "credential", "fill"],
-        input=f"{url_line}\n\n",
-        capture_output=True,
+        input=_request("example.com", "owner/repo"),
         text=True,
-        timeout=30,
-        env=env,
+        env=os.environ | {"HOME": str(tmp_path)},
+        capture_output=True,
+        check=False,
     )
-    return result.returncode, result.stdout, result.stderr
+    assert result.returncode == 0
+    assert "username=user\n" in result.stdout
+    assert "password=secret\n" in result.stdout
 
 
-def test_generated_materials_work_with_real_git(tmp_path: Path) -> None:
-    """The full invocation contract, pinned against git itself: our
-    helper (registered as "!<path>" in credential.helper) serves get
-    for scoped, fallback, and foreign-username cases, and a rejected
-    auth leaves the store file BYTE-IDENTICAL while printing the
-    diagnosis: the exact behaviors credential-store got wrong."""
-    import os
-    import shutil
-    import subprocess
-
-    if shutil.which("git") is None:  # pragma: no cover
-        pytest.skip("git not available")
-
-    providers = {
-        "gh": _gh(config_name="gh"),
-        "acme-bot": _gh(config_name="acme-bot", owner="acme"),
-    }
-    m = build_credential_materials(providers, {"gh": "tokF", "acme-bot": "tokS"})
-    home = tmp_path / "home"
-    home.mkdir()
-    (home / ".git-credentials").write_text(m.store_content)
-    (home / ".agentworks-git-scopes.gitconfig").write_text(m.gitconfig_content)
-    helper = home / ".agentworks-git-cred-helper.sh"
-    helper.write_text(m.helper_script)
-    helper.chmod(0o700)
-    (home / ".gitconfig").write_text(
-        "[credential]\n\thelper = !~/.agentworks-git-cred-helper.sh\n"
-        "[include]\n\tpath = ~/.agentworks-git-scopes.gitconfig\n"
+def test_killed_managed_helper_leaves_no_credential_bearing_runtime_file(tmp_path: Path) -> None:
+    marker = tmp_path / "started"
+    runtime_tmp = tmp_path / "runtime-tmp"
+    runtime_tmp.mkdir()
+    helper = ManagedHelper(
+        f'#!/bin/sh\nvalue=abnormal\nvalue="${{value}}-token"\n'
+        f"printf 'username=user\\npassword=%s\\n\\n' \"$value\"\ntouch {marker}\nsleep 20\n".encode(),
+        "fixed failure",
     )
-    env = {
-        **os.environ,
-        "HOME": str(home),
-        "XDG_CONFIG_HOME": str(home / ".config"),
-        "GIT_CONFIG_SYSTEM": "/dev/null",
-        "GIT_TERMINAL_PROMPT": "0",
-    }
-
-    def run(op: str, url_line: str) -> tuple[int, str, str]:
-        result = subprocess.run(
-            ["git", "credential", op],
-            input=f"{url_line}\n\n",
-            capture_output=True,
-            text=True,
-            timeout=30,
-            env=env,
-        )
-        return result.returncode, result.stdout, result.stderr
-
-    # Plain URL under the scoped org: context injects the username, our
-    # helper supplies the scoped token, no warning, no invocation error.
-    rc, out, err = run("fill", "url=https://github.com/acme/anything.git")
-    assert "is not a git command" not in err, err
-    assert rc == 0, err
-    assert "username=acme-bot" in out
-    assert "password=tokS" in out
-    assert "bypasses git credential scoping" not in err
-
-    # Plain URL outside the org: the fallback line wins.
-    rc, out, err = run("fill", "url=https://github.com/other/repo.git")
-    assert rc == 0, err
-    assert "password=tokF" in out
-
-    # Foreign embedded username: the helper warns; fill fails (no such
-    # credential; prompts disabled).
-    rc, out, err = run("fill", "url=https://alice@github.com/acme/x.git")
-    assert "is not a git command" not in err, err
-    assert "bypasses git credential scoping" in err
-    assert rc != 0
-
-    # THE erase contract: a rejected credential leaves the store file
-    # byte-identical and produces the diagnosis (credential-store would
-    # have silently deleted the line here).
-    before = (home / ".git-credentials").read_text()
-    rc, out, err = run(
-        "reject",
-        "url=https://acme-bot:tokS@github.com",
+    state = build_user_credential_state([("runtime", (HttpsCredentialScope("example.com"),), helper)])
+    assert _install(tmp_path, state).returncode == 0
+    process = subprocess.Popen(
+        [str(tmp_path / ".agentworks/git-credentials/launch"), "get"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=os.environ | {"HOME": str(tmp_path), "TMPDIR": str(runtime_tmp)},
+        start_new_session=True,
     )
-    assert rc == 0, err
-    assert (home / ".git-credentials").read_text() == before
-    assert "rejected git credential 'acme-bot'" in err
-    assert "secret 'git-token-acme-bot'" in err
+    assert process.stdin is not None
+    process.stdin.write(_request("example.com"))
+    process.stdin.close()
+    deadline = time.monotonic() + 2
+    while not marker.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert marker.exists()
+    os.killpg(process.pid, signal.SIGKILL)
+    assert process.wait(timeout=2) < 0
+    assert list(runtime_tmp.iterdir()) == []
+    managed_root = tmp_path / ".agentworks/git-credentials"
+    assert all(b"abnormal-token" not in path.read_bytes() for path in managed_root.rglob("*") if path.is_file())
 
-    # And the credential still serves afterward, no self-destruct.
-    rc, out, err = run("fill", "url=https://github.com/acme/anything.git")
-    assert rc == 0, err
-    assert "password=tokS" in out
 
-
-# -- shell-safety of the generated helper --------------------------------------
-
-
-def test_hostile_secret_name_cannot_inject(tmp_path: Path) -> None:
-    """The reviewer's canary: a token secret name carrying a command
-    substitution must come out as inert text in the erase diagnosis --
-    values are single-quote-escaped, never expanded."""
-    hostile = "x$(touch " + str(tmp_path / "pwned") + ")"
-    providers = {
-        "gh": _gh(config_name="gh", secret_name=hostile),
-    }
-    m = build_credential_materials(providers, {"gh": "tok"})
-    home = _write_home(tmp_path, m)
-    _out, err = _run_helper(
-        m.helper_script,
-        home,
-        "erase",
-        "protocol=https\nhost=github.com\nusername=x-access-token\n",
+def test_escaped_helper_descendant_cannot_hold_response_capture_open(tmp_path: Path) -> None:
+    marker = "escaped-descendant-secret"
+    escaped_pid = tmp_path / "escaped-pid"
+    escaped_command = f"echo $$ > {shlex.quote(str(escaped_pid))}; printf {marker}; sleep 30"
+    helper = ManagedHelper(
+        (
+            "#!/bin/sh\n"
+            "printf 'username=user\\npassword=runtime-value\\n\\n'\n"
+            f"setsid sh -c {shlex.quote(escaped_command)} &\n"
+        ).encode(),
+        "fixed bounded failure",
     )
-    assert not (tmp_path / "pwned").exists()
-    assert hostile in err  # printed literally, not executed
+    state = build_user_credential_state([("runtime", (HttpsCredentialScope("example.com"),), helper)])
+    assert _install(tmp_path, state).returncode == 0
+    _shorten_managed_helper_timeouts(tmp_path)
+    started = time.monotonic()
+    try:
+        result = _query(tmp_path, _request("example.com"))
+        elapsed = time.monotonic() - started
+    finally:
+        deadline = time.monotonic() + 1
+        while not escaped_pid.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        if escaped_pid.exists():
+            os.killpg(int(escaped_pid.read_text()), signal.SIGKILL)
+    assert elapsed < 1
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert result.stderr == "fixed bounded failure\n"
+    assert marker not in result.stdout
+    assert marker not in result.stderr
 
 
-def test_unsafe_scope_values_rejected_at_build() -> None:
-    """Case labels and word lists must be glob- and quote-inert; the
-    generator refuses anything else loudly (defense in depth behind the
-    per-provider charset validation)."""
-    from agentworks.capabilities.git_credential.base import HelperEntry
-
-    class _Sneaky(GitHubCredentialProvider):
-        def helper_entry(self) -> HelperEntry:
-            return HelperEntry(host="github.com", username="a b")
-
-    with pytest.raises(ConfigError, match="unsafe"):
-        build_credential_materials({"s": _Sneaky("s", {})}, {"s": "t"})
-
-
-def test_azdo_org_charset_validated() -> None:
-    with pytest.raises(ConfigError, match="must match `"):
-        _validate({"org": "my org"}, name="azdo")
-
-
-def test_two_unscoped_creds_first_wins(tmp_path: Path) -> None:
-    """Two unscoped credentials on one host are NOT a scope collision
-    (released configs may carry them): first-wins by store order, and
-    the second is effectively shadowed, pinned as intended behavior."""
-    providers = {
-        "gh1": _gh(config_name="gh1"),
-        "gh2": _gh(config_name="gh2"),
-    }
-    m = build_credential_materials(providers, {"gh1": "tok1", "gh2": "tok2"})
-    home = _write_home(tmp_path, m)
-    out, _err = _run_helper(
-        m.helper_script,
-        home,
-        "get",
-        "protocol=https\nhost=github.com\npath=any/repo.git\n",
+@pytest.mark.parametrize("replacement", ["stored", "empty"])
+def test_managed_helper_open_descriptor_survives_reconciliation(tmp_path: Path, replacement: str) -> None:
+    marker = tmp_path / "started"
+    helper = ManagedHelper(
+        f"#!/bin/sh\ntouch {marker}\nsleep 1\nprintf 'username=user\\npassword=old\\n\\n'\n".encode(),
+        "fixed failure",
     )
-    assert "password=tok1" in out
-
-
-def test_add_git_credential_never_downgrades_helper() -> None:
-    """The add-git-credential path must not revert credential.helper to
-    store on a helper-provisioned VM (that would reintroduce the
-    erase-on-rejection self-destruct for every credential); on an old
-    VM without the helper script, store keeps working until reinit."""
-    import inspect as _inspect
-
-    from agentworks.vms import manager
-
-    src = _inspect.getsource(manager.add_git_credential)
-    assert "if [ -x {GIT_CRED_HELPER_PATH} ]" in src
-    assert "--replace-all credential.helper '!{GIT_CRED_HELPER_PATH}'" in src
-    # And no unconditional downgrade remains.
-    assert 'run("git config --global credential.helper store")' not in src
+    old_state = build_user_credential_state([("runtime", (HttpsCredentialScope("example.com"),), helper)])
+    new_state = (
+        build_user_credential_state([("new", (HttpsCredentialScope("example.com"),), StoredCredential("user", "new"))])
+        if replacement == "stored"
+        else build_user_credential_state([])
+    )
+    assert _install(tmp_path, old_state).returncode == 0
+    process = subprocess.Popen(
+        [str(tmp_path / ".agentworks/git-credentials/launch"), "get"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=os.environ | {"HOME": str(tmp_path)},
+    )
+    assert process.stdin is not None
+    process.stdin.write(_request("example.com"))
+    process.stdin.close()
+    deadline = time.monotonic() + 2
+    while not marker.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert marker.exists()
+    started = time.monotonic()
+    assert _install(tmp_path, new_state).returncode == 0
+    assert time.monotonic() - started < 0.8
+    assert process.stdout is not None
+    assert process.stdout.read() == "username=user\npassword=old\n\n"
+    assert process.wait(timeout=2) == 0
+    if replacement == "stored":
+        assert _query(tmp_path, _request("example.com")).stdout == "username=user\npassword=new\n\n"
+    else:
+        assert {path.name for path in (tmp_path / ".agentworks/git-credentials").iterdir()} == {"lock"}

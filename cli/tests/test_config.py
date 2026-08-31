@@ -53,8 +53,12 @@ def config_dir(tmp_path: Path) -> Path:
         ManifestDoc("workspace-template", "default"),
         ManifestDoc("workspace-template", "gruntweave", {"repo": "https://example.com/org/repo.git"}),
         ManifestDoc("workspace-template", "child", {"inherits": ["gruntweave"], "tmuxinator": False}),
-        ManifestDoc("git-credential", "github", {"provider": {"name": "github"}}),
-        ManifestDoc("git-credential", "azdo", {"provider": {"name": "azdo", "org": "my-org"}}),
+        ManifestDoc("git-credential", "github", {"provider": {"name": "github", "source": {"mode": "secret"}}}),
+        ManifestDoc(
+            "git-credential",
+            "azdo",
+            {"provider": {"name": "azdo", "org": "my-org", "source": {"mode": "secret"}}},
+        ),
     )
     return config_file
 
@@ -71,7 +75,10 @@ def test_load_valid_config(config_dir: Path) -> None:
     assert registry.lookup("workspace-template", "child").inherits == ["gruntweave"]
     assert registry.lookup("workspace-template", "child").tmuxinator is False
     assert registry.lookup("git-credential", "github").provider.name == "github"
-    assert registry.lookup("git-credential", "azdo").provider.config == {"org": "my-org"}
+    assert registry.lookup("git-credential", "azdo").provider.config == {
+        "org": "my-org",
+        "source": {"mode": "secret"},
+    }
     assert admin.git_credentials == ["github"]
     assert load_config(config_dir).database.auto_backup_before_migration is True
 
@@ -247,7 +254,7 @@ def test_git_credential_provider_key(tmp_path: Path) -> None:
     provider, matching secret-backend manifests."""
     config_file = _git_credential_config(
         tmp_path,
-        ManifestDoc("git-credential", "gh", {"provider": {"name": "github"}}),
+        ManifestDoc("git-credential", "gh", {"provider": {"name": "github", "source": {"mode": "secret"}}}),
     )
     registry = build_registry(load_config(config_file))
     assert registry.lookup("git-credential", "gh").provider.name == "github"
@@ -260,7 +267,7 @@ def test_git_credential_nonconforming_name_warns_and_loads(tmp_path: Path) -> No
     derived-secret warning now rides the manifest issues channel."""
     config_file = _git_credential_config(
         tmp_path,
-        ManifestDoc("git-credential", "GITHUB", {"provider": {"name": "github"}}),
+        ManifestDoc("git-credential", "GITHUB", {"provider": {"name": "github", "source": {"mode": "secret"}}}),
     )
     # Warn-only, non-breaking: the credential is present and unchanged.
     registry = build_registry(load_config(config_file, warn_issues=False))
@@ -273,25 +280,34 @@ def test_git_credential_conforming_name_no_warning(tmp_path: Path) -> None:
     """A conforming credential name emits no derived-secret warning."""
     config_file = _git_credential_config(
         tmp_path,
-        ManifestDoc("git-credential", "github", {"provider": {"name": "github"}}),
+        ManifestDoc("git-credential", "github", {"provider": {"name": "github", "source": {"mode": "secret"}}}),
     )
     assert not any("does not follow the naming rules" in issue for issue in _manifest_issues(config_file))
 
 
-def test_git_credential_nonconforming_name_with_explicit_token_no_derived_warning(
+def test_git_credential_nonconforming_name_with_explicit_secret_no_derived_warning(
     tmp_path: Path,
 ) -> None:
-    """When an explicit ``token`` is set, the credential name feeds no derived
+    """When an explicit secret is set, the credential name feeds no derived
     secret, so #308's derived-default warning does not fire (the explicit
     token value's own conformance is issue #279's concern, not this one)."""
     config_file = _git_credential_config(
         tmp_path,
-        ManifestDoc("git-credential", "GITHUB", {"provider": {"name": "github", "token": "git-token-github"}}),
+        ManifestDoc(
+            "git-credential",
+            "GITHUB",
+            {
+                "provider": {
+                    "name": "github",
+                    "source": {"mode": "secret", "secret": "git-token-github"},
+                }
+            },
+        ),
     )
     registry = build_registry(load_config(config_file, warn_issues=False))
     cred = registry.lookup("git-credential", "GITHUB")
     assert cred.provider.name == "github"
-    assert cred.provider.config["token"] == "git-token-github"
+    assert cred.provider.config["source"]["secret"] == "git-token-github"
     assert not any("does not follow the naming rules" in issue for issue in _manifest_issues(config_file))
 
 
@@ -305,7 +321,7 @@ def test_git_credential_name_deriving_secret_at_length_cap_no_warning(tmp_path: 
     name = "a" * (MAX_SECRET_NAME_LENGTH - len("git-token-"))
     config_file = _git_credential_config(
         tmp_path,
-        ManifestDoc("git-credential", name, {"provider": {"name": "github"}}),
+        ManifestDoc("git-credential", name, {"provider": {"name": "github", "source": {"mode": "secret"}}}),
     )
     assert not any("does not follow the naming rules" in issue for issue in _manifest_issues(config_file))
 
@@ -325,7 +341,7 @@ def test_git_credential_name_conforming_but_derived_over_cap_warns(tmp_path: Pat
     validate_name(name, max_length=MAX_SECRET_NAME_LENGTH)
     config_file = _git_credential_config(
         tmp_path,
-        ManifestDoc("git-credential", name, {"provider": {"name": "github"}}),
+        ManifestDoc("git-credential", name, {"provider": {"name": "github", "source": {"mode": "secret"}}}),
     )
     issues = _manifest_issues(config_file)
     assert any(

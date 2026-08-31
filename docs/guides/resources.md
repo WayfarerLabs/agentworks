@@ -214,41 +214,40 @@ hold:
   so it costs nothing in a real editor. Quote it (`expires: "2027-01-01"`) if you ever point a 1.1
   validator at your manifests; the loader takes the quoted form too.
 
-## Scoped GitHub credentials (fine-grained PATs)
+## Git credentials
 
-A `git-credential`'s `spec.provider` is one tagged table: its `name` key selects the provider
-capability and the remaining keys are that provider's configuration, which
-`agw resource explain git-credential-provider/<name>` documents.
+A `git-credential`'s `spec.provider` is one tagged table. Its `name` selects the provider
+capability; the remaining keys are that provider's complete configuration. Use
+`agw resource explain git-credential-provider/NAME` for the installed field reference.
 
-A provider's `token` field is a tagged acquisition choice with one supported arm:
-`token: {mode: secret, secret: my-github-token}` names the secret holding the token. Omitting
-`token` selects that arm and defaults its secret to `git-token-<credential name>`, while the scalar
-`token: my-github-token` is shorthand for the same secret arm. An outer `token: null` is invalid;
-omit `token` for the default or write `token: {mode: secret}` explicitly. Inside the secret arm,
-omitting `secret` or writing `secret: null` selects the default secret name.
+Both shipped providers require a structured `source`. GitHub accepts `secret` or `gh-cli`; Azure
+DevOps accepts `secret` or `az-cli`. Only the secret arm's inner `secret` reference defaults to
+`git-token-<credential name>`.
 
-A github credential may carry a scope there, and the choice is the part worth explaining:
-`repos: ["owner/name", ...]` pins the credential to specific repositories (always a list, even for
-one, matching a fine-grained PAT's selected repos), while `owner: "org"` covers every repository
-under that user or org, including repos an agent clones ad hoc that no workspace ever declared.
-Writing both takes the union: every exact repository in `repos`, plus every repository under
-`owner`. A credential with neither is the unscoped fallback.
+```yaml
+spec:
+  provider:
+    name: github
+    source: { mode: gh-cli }
+    owner: example-org
+```
 
-Selection lives in the agentworks credential helper: initialization sets `credential.useHttpPath`
-(via the managed include `~/.agentworks-git-scopes.gitconfig`), so git hands the helper the remote's
-host and repository path, and the helper picks the most specific credential: exact repo, then owner
-(first path segment), then the provider's host default (`x-access-token` for GitHub, the org for
-Azure DevOps), then the first stored line for the host. Two credentials claiming the same scope is a
-configuration error at initialization time, evaluated per user (admin and each agent get their own
-store, include, and helper, built from their own credential lists). Declaring a repo under one
-credential and its org under another is fine: the more specific scope wins, and org scopes cover
-repos cloned ad hoc that nothing declared.
+CLI sources use the target user's already-authenticated CLI identity and acquire a fresh credential
+when Git asks for it. They do not install or authenticate `gh` or `az`. Enabled runup checks command
+presence and read-only authentication health, but warns without blocking helper installation. The
+target user owns and may change that active identity, so verify it after authentication changes.
+Secret sources retain their provider-owned optional runup validation and install the final
+username/password privately.
 
-Clone with plain https URLs; no username is needed. The agentworks-owned helper
-(`~/.agentworks-git-cred-helper.sh`) identifies a rejected credential and the secret to fix. GitHub
-warns when an embedded username bypasses scope selection; Azure DevOps accepts its organization as
-the username. If git does not send repository paths, the helper warns and serves the host default.
-Remotes are never rewritten.
+GitHub `repos` scopes an exact `owner/repo`, while `owner` covers its repositories. A GitHub
+credential with neither is the host default. Azure DevOps always scopes to its configured
+organization under `dev.azure.com`. The generic helper selects the longest segment-aware path
+prefix; every exact duplicate scope fails initialization, including duplicate host defaults.
+
+Admin and agent initialization rebuilds the complete Agentworks-owned credential state every time,
+including removing it when no credentials remain. Add credential names to the appropriate
+admin-template or agent-template and reinitialize that VM or agent. Remotes stay plain HTTPS and are
+never rewritten.
 
 ## VM sites and platforms
 

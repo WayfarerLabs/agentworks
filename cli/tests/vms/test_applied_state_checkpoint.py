@@ -90,11 +90,10 @@ def _run(
         MagicMock(),
         "box",
         MagicMock(),
-        {},
+        (),
         "/home/agentworks",
         "agentworks",
         active_logger,
-        git_tokens={},
         operation=operation,
     )
     return active_logger

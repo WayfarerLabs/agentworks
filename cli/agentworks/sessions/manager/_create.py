@@ -171,11 +171,9 @@ def _preflight_and_resolve(
             assert graph.agent_tmpl is not None  # resolved at build above
             output.info(f"Checking agent-template/{graph.agent_tmpl.name}...")
         if graph.agent_tmpl_node is not None:
-            from agentworks.vms.initializer import announce_git_credentials
+            from agentworks.git_credentials import announce_git_credentials
 
-            announce_git_credentials(
-                {cred.provider.owner_name: cred.provider for cred in graph.agent_tmpl_node.credentials}
-            )
+            announce_git_credentials(graph.agent_tmpl_node.credentials)
 
         # Probe direct agent SSH for an EXISTING agent before any prompt
         # or mutation: a pre-rollout agent surfaces as an actionable

@@ -52,21 +52,21 @@ layer.
 
 ### Fully idempotent
 
-| Step                   | Notes                                                                         |
-| ---------------------- | ----------------------------------------------------------------------------- |
-| Apt sources            | Key downloaded if missing, source list overwritten                            |
-| SSH host key preserve  | cloud-init drop-in written so host keys survive stop/start                    |
-| Shell                  | Overwritten from config                                                       |
-| SSH authorized keys    | Overwritten from config                                                       |
-| Git credentials        | Overwritten from a non-empty config; removing all leaves prior files in place |
-| Dotfiles (git source)  | `git pull` if already cloned, fresh clone if not                              |
-| Mise packages          | Installed if missing, pruned if removed (when `mise_prune_on_reinit = true`)  |
-| Mise activation        | Overwritten from config (disabled comment written when off)                   |
-| PATH additions         | Overwritten from config                                                       |
-| Tailscale DNS          | Startup-ordering drop-in rewritten only when content differs                  |
-| sshd AcceptEnv         | Drop-in overwritten; sshd reloaded                                            |
-| sudoers env_keep       | Fragment overwritten, staged and `visudo -cf` validated before promotion      |
-| sudoers console setenv | Same; scoped to the VM's admin user                                           |
+| Step                   | Notes                                                                                  |
+| ---------------------- | -------------------------------------------------------------------------------------- |
+| Apt sources            | Key downloaded if missing, source list overwritten                                     |
+| SSH host key preserve  | cloud-init drop-in written so host keys survive stop/start                             |
+| Shell                  | Overwritten from config                                                                |
+| SSH authorized keys    | Overwritten from config                                                                |
+| Git credentials        | Complete desired list rebuilt; empty removes Agentworks-owned credential/routing state |
+| Dotfiles (git source)  | `git pull` if already cloned, fresh clone if not                                       |
+| Mise packages          | Installed if missing, pruned if removed (when `mise_prune_on_reinit = true`)           |
+| Mise activation        | Overwritten from config (disabled comment written when off)                            |
+| PATH additions         | Overwritten from config                                                                |
+| Tailscale DNS          | Startup-ordering drop-in rewritten only when content differs                           |
+| sshd AcceptEnv         | Drop-in overwritten; sshd reloaded                                                     |
+| sudoers env_keep       | Fragment overwritten, staged and `visudo -cf` validated before promotion               |
+| sudoers console setenv | Same; scoped to the VM's admin user                                                    |
 
 ### Additive only
 
@@ -118,7 +118,7 @@ access was restored.
 | Workspace group            | Skipped if exists                                                                                                                                                        |
 | Workspace grant membership | Reconciled from the agent's recorded grants: idempotent group add per granted workspace, no-op if already a member. Repairs a recreated user whose memberships were lost |
 | Shell rc (prompt)          | Overwritten from template                                                                                                                                                |
-| Git credentials            | Overwritten from a non-empty template; removing all leaves prior files in place                                                                                          |
+| Git credentials            | Complete desired list rebuilt; empty removes Agentworks-owned credential/routing state                                                                                   |
 | Dotfiles (git source)      | `git pull` if already cloned                                                                                                                                             |
 | Mise packages              | Installed if missing, pruned if removed (when `mise_prune_on_reinit = true`)                                                                                             |
 | Mise activation            | Overwritten from template                                                                                                                                                |

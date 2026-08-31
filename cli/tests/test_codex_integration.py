@@ -1577,7 +1577,7 @@ def test_readiness_probes_codex() -> None:
 
 def test_readiness_missing_codex_is_a_typed_error() -> None:
     harness_integration = _harness_integration()
-    target = _FakeTarget({"command -v codex": _FakeResult(1)})
+    target = _FakeTarget({"command -v codex": _FakeResult(20)})
     ctx = RunContext(operation_scope=_session_scope(), admin_target=target)
     with pytest.raises(StateError, match="'codex' harness integration.*requires 'codex'"):
         harness_integration.preflight(ctx)

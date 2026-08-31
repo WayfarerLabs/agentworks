@@ -83,12 +83,14 @@ before that lifecycle; operation-scoped clients own bounded provider work instea
 
 ### Git Credential Provider
 
-The `git-credential-provider` capability obtains and provisions the git credentials an agent needs
-to clone and push against git hosts over plain https without baking tokens into images. `github` and
-`azdo` (Azure DevOps) ship today, each knowing how to source a token for its host and get it onto
-the VM in the form git expects. A provider obtains its token without a pasted value, sourcing it by
-secret name, verifies it before it is relied on, and produces exactly what git needs to authenticate
-on the VM, with per-repo scoping so several credentials can serve one host. See
+The `git-credential-provider` capability turns provider-owned inputs into final HTTPS credential
+material. `github` and `azdo` (Azure DevOps) ship today. Each owns its complete source schema,
+declared secret inputs, side-effect-free input validation, optional authenticated runup, final Git
+username/password construction, and translation of forge scope into generic HTTPS path prefixes. A
+provider declares static scopes and may later return a stored credential or a first-party runtime
+helper. Core remains acquisition-agnostic: before creation it validates scopes and invokes input
+validation; later it validates and routes payloads and fully reconciles each admin or agent user's
+Agentworks-owned Git state during initialization. See
 [`git_credential/README.md`](git_credential/README.md) for what a provider must provide and the
 shipped providers.
 
@@ -442,9 +444,10 @@ Its contract mirrors preflight where it matters and differs where it must:
 - **Authenticated.** Reading resolved secrets and probing with them is the whole point; it is the
   half of readiness that only makes sense once resolution has happened.
 - **Best-effort, not an oracle**, again like preflight. It raises a typed, actionable error on a
-  _definitive_ rejection (a 401 on the token), but network indeterminacy **warns and continues,
-  never raises**: a transient outage must not block work that an unverified-but-valid credential
-  would have completed. Anything only a mutation can confirm remains the op's job.
+  _definitive_ rejection (for example, a 401 on a secret-backed credential), but network
+  indeterminacy **warns and continues, never raises**: a transient outage must not block work that
+  an unverified-but-valid credential would have completed. Anything only a mutation can confirm
+  remains the op's job.
 
 When does it run? **Deferred to right before the ops it gates**, not hoisted to the front with
 preflight. It reads the secrets the one up-front resolve pass already cached, but fires at the op
@@ -471,9 +474,9 @@ general recommendation turns on whether the failed resource is idempotently retr
   a stranded half-state.
 
 `vm create` / `vm reinit` and agent provisioning are the retryable case: each git credential's runup
-runs right before its materials op and, on rejection, that one credential is skipped and the rest of
-initialization continues to partial (fix the token, `reinit`). Same stage, same raise; different,
-deliberate handling by the caller.
+runs right before its materialization op and, on rejection, that one credential is skipped and the
+rest of initialization continues to partial (fix the configured source, `reinit`). Same stage, same
+raise; different, deliberate handling by the caller.
 
 #### Stage 5: Ops
 
@@ -501,9 +504,11 @@ lifecycle has to be safe to re-run, and the five stages divide cleanly on how th
   place as run once. Flagging is per-op, so a genuinely one-shot op can be left unflagged, but most
   provisioning ops carry it because `reinit` exists.
 
-Many ops satisfy this because they are pure functions or wholesale writes. Git credential materials,
-for example, are deterministic, overwrite files whole, register the helper with `--replace-all`, and
-guard the include addition.
+Many ops satisfy this because they are pure functions or full reconciliation. Git credential
+materialization, for example, produces one complete desired state from a scoped context with no
+target; its preceding read-only runup receives a separate fresh context with exactly the current
+user target. The core then atomically activates that state and removes Agentworks-owned files and
+registrations that are no longer desired.
 
 ### Host Readiness and the Fold
 
@@ -723,11 +728,12 @@ request field preserves ownership: platform-config secrets still use `ctx.secret
 VM domain explicitly delivers the one operation input every platform must consume during
 complete-or-raise creation.
 
-Both shipped capabilities are the reference: `git-credential-provider` (github, azdo) reads its
-token via `ctx.secret(name)` in `runup`, and `vm-platform/proxmox` reads its API token the same way
-in `runup` and in its ops (the op client is built on first need from the delivered value and reused
-for the operation); both get the accessor's typed `ConfigError` when the context carries none. A new
-capability should never hold a value source of its own.
+The shipped capabilities illustrate both shapes. A secret-backed `git-credential-provider` reads its
+declared inputs through `ctx.secret(name)` during pre-creation input validation, runup, and final
+materialization, while a CLI source may declare none. `vm-platform/proxmox` reads its API token
+through the same accessor in runup and in its ops (the op client is built on first need from the
+delivered value and reused for the operation). A provider gets the accessor's typed error if it asks
+for an undeclared or undelivered name. A new capability should never hold a value source of its own.
 
 ### Where Capabilities Live
 

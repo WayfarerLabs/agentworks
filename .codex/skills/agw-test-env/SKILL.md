@@ -129,10 +129,11 @@ Durable process lessons from running this environment.
   number (e.g. `git fetch origin pull/N/head:prN`), the local branch name is not the PR's real head
   branch; look it up first (`gh pr view N --json headRefName`) and push to that name, not a guessed
   one.
-- **Authenticate `gh` via the git credential helper, not `gh auth login`.** This environment's `gh`
-  is often not logged in. Pull a token from the repo's credential helper
-  (`~/.agentworks-git-cred-helper.sh`, path-scoped) and pass it as `GH_TOKEN` for `gh` calls instead
-  of running an interactive login. Never print the token value.
+- **Use the declared Git identity for noninteractive `gh` calls.** This environment's `gh` may not
+  have its own login. Ask Git's standard `credential fill` protocol for the complete authorized
+  repository HTTPS URL, including its owner/repository path, keep the returned password in memory,
+  and pass it as `GH_TOKEN` instead of invoking an Agentworks-owned helper path or running an
+  interactive login. Never print the credential response or token value.
 
 ## Safety protocol (invoking session's job, not the testers')
 

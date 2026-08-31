@@ -220,7 +220,7 @@ def test_create_session_aborts_on_missing_required_command(tmp_path: Path, monke
     class _MissingCmdResult:
         def __init__(self, ok: bool) -> None:
             self.ok = ok
-            self.returncode = 0 if ok else 1
+            self.returncode = 0 if ok else 20
             self.stdout = ""
             self.stderr = ""
 

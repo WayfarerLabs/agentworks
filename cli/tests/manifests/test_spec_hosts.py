@@ -129,16 +129,6 @@ def test_a_host_that_requires_a_capability_says_so() -> None:
     assert not misread
 
 
-def test_a_top_level_token_keeps_its_steer() -> None:
-    """The mistake operators make coming from the flat TOML shape. As a
-    plain unknown key it would name the valid field without saying where
-    the token goes."""
-    assert rejection("git-credential", "gh", {"token": "t"}) == (
-        "res.yaml:7: git-credential/gh: 'token' is provider config now: move it into the "
-        "spec.provider table (its 'name' key selects the provider)"
-    )
-
-
 def test_a_site_named_after_a_platform_must_declare_it() -> None:
     """``vm-site/azure-vm`` backed by lima would make every
     ``--site azure-vm`` mean something other than it says."""
@@ -172,9 +162,13 @@ def test_a_non_conforming_secret_inside_the_block_is_warned_about() -> None:
     """Found through the capability's OWN model, which is where the
     ``SecretRef`` lives: decode has no per-kind knowledge of which
     capability names a secret."""
-    (issue,) = decode_issues("git-credential", "gh", {"provider": {"name": "github", "token": "Bad_Name"}})
+    (issue,) = decode_issues(
+        "git-credential",
+        "gh",
+        {"provider": {"name": "github", "source": {"mode": "secret", "secret": "Bad_Name"}}},
+    )
 
-    assert issue.startswith("res.yaml:7: git-credential/gh: secret name 'Bad_Name' for the auth token")
+    assert "Bad_Name" in issue
 
 
 def test_an_unknown_capabilitys_block_earns_no_advisory() -> None:
@@ -233,6 +227,10 @@ def test_a_derived_secret_name_is_warned_about_without_being_written() -> None:
     non-conforming. Nothing in the document names that secret, so the
     warning comes from the marker's owner template through the same
     structural walk."""
-    (issue,) = decode_issues("git-credential", "GITHUB", {"provider": {"name": "github"}})
+    (issue,) = decode_issues(
+        "git-credential",
+        "GITHUB",
+        {"provider": {"name": "github", "source": {"mode": "secret"}}},
+    )
 
     assert "git-token-GITHUB" in issue

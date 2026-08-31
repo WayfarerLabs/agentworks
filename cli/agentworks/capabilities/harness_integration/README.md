@@ -518,7 +518,8 @@ Run probes as `"$SHELL" -lic '<inner>'` with `check=False`: login+interactive so
 dotfiles the pane's shell will (mise activation, PATH fragments), so the probe answers for the
 environment the workload actually gets. Prefer shell-neutral inner commands (the transcript probe's
 `find ... -print -quit | grep -q .` avoids bash/zsh divergence on unmatched globs).
-`require_commands` does all of this for executable checks; reuse it rather than hand-rolling.
+`require_commands` applies harness-specific refusal policy over the neutral
+`check_required_commands` mechanism; reuse it rather than hand-rolling executable checks.
 
 #### Testing a Harness Integration
 
