@@ -83,5 +83,5 @@ def verify_interface_names(target: Transport, predictions: dict[str, str]) -> No
     if not result.ok or missing:
         raise StateError(
             "Post-reboot interface names do not match the durable upgrade plan",
-            hint="Use the platform console and the recorded external checkpoint to repair connectivity.",
+            hint="Use the platform console or explicitly restore the VM's managed checkpoint.",
         )

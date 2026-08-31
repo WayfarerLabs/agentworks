@@ -43,7 +43,12 @@ from agentworks.capabilities.secret_backend import (
     SecretSourceClient,
     TtyInteractionAccess,
 )
-from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
+from agentworks.capabilities.vm_platform.base import (
+    CheckpointDescriptor,
+    ProvisionRequest,
+    ProvisionResult,
+    VMPlatform,
+)
 from agentworks.plugins import Plugin
 from agentworks.resources.graph import Readiness
 from agentworks.schema import AgwModel, AgwRootModel
@@ -90,10 +95,12 @@ def _declare_fixture_config(cls: type, kind: str) -> None:
 
 
 class ConformingVMPlatform(VMPlatform):
-    """A concrete ``VMPlatform``: the six abstract power ops implemented so
-    the class is seatable. Subclasses add ``name`` / ``description``."""
+    """A concrete ``VMPlatform`` with every abstract operation implemented.
 
-    contract_version = 3
+    Subclasses add ``name`` / ``description``.
+    """
+
+    contract_version = 4
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)
@@ -109,6 +116,38 @@ class ConformingVMPlatform(VMPlatform):
         raise NotImplementedError
 
     def delete(self, vm: VMRow, ctx: RunContext) -> None:
+        raise NotImplementedError
+
+    def create_checkpoint(
+        self,
+        vm: VMRow,
+        name: str,
+        ctx: RunContext,
+        *,
+        operation_id: str,
+        resume: bool,
+    ) -> CheckpointDescriptor:
+        raise NotImplementedError
+
+    def list_checkpoints(self, vm: VMRow, ctx: RunContext) -> tuple[CheckpointDescriptor, ...]:
+        raise NotImplementedError
+
+    def restore_checkpoint(
+        self,
+        vm: VMRow,
+        checkpoint: CheckpointDescriptor,
+        ctx: RunContext,
+        *,
+        operation_id: str,
+    ) -> None:
+        raise NotImplementedError
+
+    def delete_checkpoint(
+        self,
+        vm: VMRow,
+        checkpoint: CheckpointDescriptor,
+        ctx: RunContext,
+    ) -> None:
         raise NotImplementedError
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:

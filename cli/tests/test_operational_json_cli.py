@@ -214,6 +214,7 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
     from agentworks.vms.manager.inspect import (
         VMDescription,
         VMDetailAgent,
+        VMDetailCheckpoint,
         VMDetailEvent,
         VMDetailFacts,
         VMDetailSession,
@@ -278,6 +279,16 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
             "256 GiB",
             "64 GiB",
             "25%",
+        ),
+        checkpoint=VMDetailCheckpoint(
+            name="agw-checkpoint",
+            provider_identifier="snapshot-123",
+            state="ready",
+            purpose="debian-upgrade",
+            capture_release="bookworm",
+            source_release="bookworm",
+            target_release="trixie",
+            created_at="2026-01-03",
         ),
         agents=(VMDetailAgent("agent-b", "aw-b", True, 2), VMDetailAgent("agent-a", "aw-a", False, 1)),
         workspaces=(
@@ -389,6 +400,16 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
                 "disk_total": "256 GiB",
                 "disk_used": "64 GiB",
                 "disk_percent": "25%",
+            },
+            "checkpoint": {
+                "name": "agw-checkpoint",
+                "provider_identifier": "snapshot-123",
+                "state": "ready",
+                "purpose": "debian-upgrade",
+                "capture_release": "bookworm",
+                "source_release": "bookworm",
+                "target_release": "trixie",
+                "created_at": "2026-01-03",
             },
             "agents": cast(
                 "object",

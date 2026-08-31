@@ -34,6 +34,18 @@ class VMStatus(Enum):
     UNKNOWN = "unknown"
 
 
+class VMCheckpointState(Enum):
+    CREATING = "creating"
+    READY = "ready"
+    RESTORING = "restoring"
+    DELETING = "deleting"
+
+
+class VMCheckpointPurpose(Enum):
+    OPERATOR = "operator"
+    DEBIAN_UPGRADE = "debian-upgrade"
+
+
 class SessionMode(Enum):
     ADMIN = "admin"
     AGENT = "agent"
@@ -105,6 +117,21 @@ class VMEventRow:
     vm_name: str
     event: str
     detail: str | None
+    created_at: str
+
+
+@dataclass(frozen=True)
+class VMCheckpointRow:
+    vm_name: str
+    name: str
+    provider_identifier: str | None
+    operation_id: str | None
+    desired_state_fingerprint: str
+    state: VMCheckpointState
+    purpose: VMCheckpointPurpose
+    capture_release: DebianRelease
+    source_release: DebianRelease | None
+    target_release: DebianRelease | None
     created_at: str
 
 

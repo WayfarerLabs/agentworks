@@ -59,13 +59,18 @@ def probe_upgrade_preflight(
     guest_kernel_required: bool,
     minimum_openssh_version: str,
     blocker_probe: Callable[[Transport], tuple[str, ...]],
-    non_quiescent_sessions: Sequence[str],
+    announce: Callable[[str], None],
 ) -> UpgradePreflight:
     """Collect one complete, read-only planning snapshot."""
+    announce("Inspecting guest architecture and kernel...")
     architecture = _stdout(target, "dpkg --print-architecture")
     kernel = _stdout(target, "uname -r")
+
+    announce("Checking the package database and held packages...")
     dpkg_audit = _lines(target, "dpkg --audit")
     held = _lines(target, "apt-mark showhold")
+
+    announce("Checking Debian kernel and OpenSSH prerequisites...")
     kernel_metapackage = _kernel_metapackage(target, architecture) if guest_kernel_required else None
     openssh_ok = _command_ok(
         target,
@@ -73,11 +78,16 @@ def probe_upgrade_preflight(
         f"dpkg --compare-versions \"$(dpkg-query -W -f='${{Version}}' openssh-server)\" ge "
         f"{shlex.quote(minimum_openssh_version)}",
     )
+
+    announce("Checking package-manager activity...")
     package_owner = _package_manager_owner(target)
+
+    announce("Inspecting modified package configuration...")
     modified_conffiles = _modified_conffiles(target)
+
+    announce("Inspecting APT sources and pinning...")
     source_files = _source_files(target)
     third_party = tuple(sorted(path for path, content in source_files.items() if _is_third_party(content)))
-    non_debian_packages, obsolete_packages = _package_origin_inventory(target)
     mixed_suites = tuple(
         sorted(path for path, content in source_files.items() if _mentions_other_debian_suite(content, source_suites))
     )
@@ -86,7 +96,14 @@ def probe_upgrade_preflight(
         "{ test ! -f /etc/apt/preferences || printf '%s\\n' /etc/apt/preferences; } && "
         "find /etc/apt/preferences.d -maxdepth 1 -type f -print 2>/dev/null",
     )
+
+    announce("Inspecting installed package origins and obsolete packages...")
+    non_debian_packages, obsolete_packages = _package_origin_inventory(target)
+
+    announce("Simulating the target Debian package upgrade...")
     removals, apt_download, installed_growth, simulation_ok = _simulate_target_upgrade(target, target_suites)
+
+    announce("Checking filesystem capacity...")
     root_filesystem, _root_total, root_free = _filesystem_stats(target, "/")
     var_filesystem, _var_total, var_free = _filesystem_stats(target, "/var")
     cache_filesystem, _cache_total, cache_free = _filesystem_stats(target, "/var/cache/apt/archives")
@@ -99,10 +116,14 @@ def probe_upgrade_preflight(
         apt_download_bytes=apt_download,
         installed_growth_bytes=installed_growth,
     )
+
+    announce("Checking release-specific blockers...")
     blockers = blocker_probe(target)
     extra_issues: tuple[PreflightIssue, ...] = ()
     if not simulation_ok:
         extra_issues += (PreflightIssue.APT_SIMULATION_FAILED,)
+
+    announce("Checking automatic APT timers...")
     apt_timer_states = {
         name: (
             _stdout(target, f"systemctl is-enabled {name}", check=False) or "unknown",
@@ -122,7 +143,6 @@ def probe_upgrade_preflight(
         guest_kernel_required=guest_kernel_required,
         openssh_minimum_satisfied=openssh_ok,
         package_manager_owner=package_owner,
-        non_quiescent_sessions=tuple(non_quiescent_sessions),
         modified_conffiles=modified_conffiles,
         release_blockers=blockers,
         apt_pins=apt_pins,

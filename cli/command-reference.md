@@ -282,17 +282,17 @@ this ordered shape:
 {name, created_at, site, platform, backend, observed_status, status_disposition,
  operator_stopped, hostname, system_slug, system_slug_state, template, admin_template,
  admin_username, provisioning_status, initialization_status, tailscale_host, last_seen_at,
- debian_release, debian_release_observed_at, provisioned_resources, live_resources, agents,
- workspaces, events, instance_state}
+ debian_release, debian_release_observed_at, provisioned_resources, live_resources, checkpoint,
+ agents, workspaces, events, instance_state}
 ```
 
 `platform`, `backend`, `observed_status`, `status_disposition`, `system_slug`, `template`,
 `admin_template`, `tailscale_host`, `last_seen_at`, `debian_release`, `debian_release_observed_at`,
-and `live_resources` are nullable. Non-null release observations have the same recognized-codename
-and timestamp semantics as VM list. `observed_status` is `running`, `stopped`, `deallocated`, or
-`unknown`; `status_disposition` is `manual` or `idle` only for stopped or deallocated VMs; and
-`system_slug_state` is `set`, `declined`, or `unset`. `provisioned_resources` is
-`{cpus, memory_gib, disk_gib, swap_gib}` with nullable integers. It is the provisioning request
+`live_resources`, and `checkpoint` are nullable. Non-null release observations have the same
+recognized-codename and timestamp semantics as VM list. `observed_status` is `running`, `stopped`,
+`deallocated`, or `unknown`; `status_disposition` is `manual` or `idle` only for stopped or
+deallocated VMs; and `system_slug_state` is `set`, `declined`, or `unset`. `provisioned_resources`
+is `{cpus, memory_gib, disk_gib, swap_gib}` with nullable integers. It is the provisioning request
 recorded by Agentworks, not provider-observed realized hardware. Human VM describe labels these
 persisted values `Requested`. `live_resources` is null or this record:
 
@@ -301,20 +301,30 @@ persisted values `Requested`. `live_resources` is null or this record:
  swap_used, swap_percent, disk_total, disk_used, disk_percent}
 ```
 
+`checkpoint` is null or this record:
+
+```text
+{name, provider_identifier, state, purpose, capture_release, source_release,
+ target_release, created_at}
+```
+
+`provider_identifier`, `source_release`, and `target_release` are nullable. The provider identifier
+is opaque provider identity; the checkpoint name is Agentworks identity.
+
 `agents[]` is `{name, linux_user, grant_all, grant_count}`. `workspaces[]` is
 `{name, path, sessions}` with session entries `{name, template, mode, agent_name}`. `events[]` is
 `{created_at, event, detail}`. Event is exactly `provisioning_started`, `provisioning_complete`,
 `provisioning_failed`, `init_started`, `init_complete`, `init_partial`, `init_failed`,
-`debian_upgrade_started`, `debian_upgrade_complete`, `debian_upgrade_adopted`,
-`debian_upgrade_repair_required`, `backup_started`, `backup_completed`, `backup_failed`, `rekey`, or
-`unknown`. Historical or future raw names outside that closed set project as `unknown` and never
-echo their stored text. `detail` is reserved and always JSON `null` in v1 because persisted event
-detail is unbounded diagnostic text; no non-null detail grammar exists. `agent_name` is nullable,
-and mode is `admin`, `agent`, or `unknown`. In this nested VM JSON projection, the sentinel closes
-invalid persisted modes without echoing them. These arrays retain database order. `issues[]` is
-`{source, code}` in encounter order: source is `site_lookup`, `preflight`, `secret_resolution`, or
-`platform_status`, and code is always `unavailable`. Issues do not carry backend text or exception
-details.
+`checkpoint_created`, `checkpoint_restored`, `checkpoint_deleted`, `debian_upgrade_started`,
+`debian_upgrade_complete`, `debian_upgrade_adopted`, `debian_upgrade_repair_required`,
+`backup_started`, `backup_completed`, `backup_failed`, `rekey`, or `unknown`. Historical or future
+raw names outside that closed set project as `unknown` and never echo their stored text. `detail` is
+reserved and always JSON `null` in v1 because persisted event detail is unbounded diagnostic text;
+no non-null detail grammar exists. `agent_name` is nullable, and mode is `admin`, `agent`, or
+`unknown`. In this nested VM JSON projection, the sentinel closes invalid persisted modes without
+echoing them. These arrays retain database order. `issues[]` is `{source, code}` in encounter order:
+source is `site_lookup`, `preflight`, `secret_resolution`, or `platform_status`, and code is always
+`unavailable`. Issues do not carry backend text or exception details.
 
 VM instance state has `vm` and `admin` declaration slots. Its defined lifecycle-evidence facts are
 `hardware-request` and `ssh-identity`; their comparisons use `not-recorded`, `unverifiable`,
@@ -326,6 +336,16 @@ does not claim provider-observed realized hardware.
 agw vm list --output json
 agw vm describe build-vm --output json
 ```
+
+`agw vm list-checkpoints --output json` uses command `vm.list-checkpoints` and data:
+
+```text
+{checkpoints: [{vm_name, name, provider_identifier, state, purpose, capture_release,
+                source_release, target_release, created_at}]}
+```
+
+`provider_identifier`, `source_release`, and `target_release` are nullable. Rows retain VM-name
+order after filtering.
 
 #### Workspace and agent JSON schemas
 
@@ -557,14 +577,18 @@ just a vm-site.
 | --------------------------------------------------- | ------------------------------------------------------------- |
 | `agw vm create <name>`                              | Create a new VM (provision + initialize)                      |
 | `agw vm list`                                       | List VMs with status and resources                            |
-| `agw vm describe <name>`                            | Show VM details, workspaces, and event log                    |
+| `agw vm describe <name>`                            | Show VM details, checkpoint, workspaces, and event log        |
 | `agw vm verify-connection <name>`                   | Test the canonical admin connection without starting the VM   |
 | `agw vm shell <name> [--workspace <ws>]`            | Admin shell on a VM (optionally rooted in a workspace)        |
 | `agw vm exec <name> [--workspace <ws>] -- <cmd...>` | Run a one-shot command as admin (optionally from a workspace) |
 | `agw vm start <name>`                               | Start a stopped VM and clear its manual-stop intent           |
 | `agw vm stop <name>`                                | Stop a VM and keep it stopped (no auto-start)                 |
 | `agw vm reinit <name>`                              | Re-run initialization on a provisioned VM                     |
-| `agw vm upgrade <name> [--checkpoint <ref>]`        | Upgrade the previous Debian release to the current release    |
+| `agw vm upgrade <name>`                             | Upgrade the previous Debian release to the current release    |
+| `agw vm create-checkpoint <name>`                   | Create the VM's one managed offline checkpoint                |
+| `agw vm list-checkpoints [--vm <names>]`            | List managed VM checkpoints                                   |
+| `agw vm restore-checkpoint <name>`                  | Restore a VM's managed checkpoint                             |
+| `agw vm delete-checkpoint <name>`                   | Delete a VM's managed checkpoint and free its slot            |
 | `agw vm delete <name>`                              | Delete a VM (with confirmation)                               |
 | `agw vm backup <name>`                              | Back up a VM: metadata, agents, workspaces, and files         |
 | `agw vm rekey <name>`                               | Assign a new Tailscale auth key to a VM (logout + rejoin)     |
@@ -617,26 +641,37 @@ connect.
 
 `vm upgrade` is the supported in-place Debian release transition. It accepts only the release
 immediately before Agentworks' current release and has no target or force option. It completes local
-data and Debian-state backups, requires a reference to an operator-created checkpoint that can boot,
-brings the source suite current, shows a recomputed final plan, and asks again before switching
-suites. Package actions and reboot intent are durably recorded under
-`/var/lib/agentworks/debian-upgrades`, so rerunning the same command resumes or diagnoses the
-recorded transition instead of replaying work. On resume, omit `--checkpoint` or pass the originally
-attested reference; a different value cannot replace the pre-upgrade recovery evidence. A fresh
-upgrade and a resume paused before suite switching require an interactive terminal; a later resume
-may run non-interactively after its required authorization is durable. See
+data and Debian-state backups, creates and verifies a managed offline checkpoint, brings the source
+suite current, shows a recomputed final plan, and asks again before switching suites. Package
+actions and reboot intent are durably recorded under `/var/lib/agentworks/debian-upgrades`, so
+rerunning the same command resumes or diagnoses the recorded transition instead of replaying work.
+Resume requires the database, provider artifact, and remote journal to agree on the same checkpoint.
+A fresh upgrade and a resume paused before suite switching require an interactive terminal; a later
+resume may run non-interactively after its required authorization is durable. The checkpoint is
+retained after success for explicit `vm restore-checkpoint` or `vm delete-checkpoint`. See
 [Upgrading a Debian VM](../docs/guides/debian-vm-upgrades.md) for preflight, recovery, and
 platform-route details.
+
+Managed checkpoints are offline and limited to one operational slot per VM. Agentworks chooses the
+checkpoint name. `vm create-checkpoint` requires every session and the VM itself to be stopped and
+never replaces an existing checkpoint. `vm restore-checkpoint` is destructive, verifies that the
+current effective declarations still match the capture fingerprint, restores the provider artifact,
+attests and records the live Debian release, and returns the VM to stopped state. Run `vm reinit`
+after restore. Restore retains the checkpoint; only `vm delete-checkpoint` frees the slot. VM delete
+first deletes its managed checkpoint. `vm list-checkpoints` supports `--vm` CSV filtering,
+`--names-only`, and `--output json`.
 
 `vm delete` requires `--force` if the VM has workspaces, agents, or sessions. The confirmation
 message shows what will be deleted. Pass `--yes` to skip the prompt.
 
 `vm backup` exports the VM row and exact owner tree of agents, workspaces, sessions, events, grants,
-desired instance specs, and workspace files. On POSIX, its local timestamp directory is created with
-mode 0700 and its JSON files with mode 0600. Native Windows refuses backups containing instance
-specs until private access-control export is supported. Instance specs can contain plaintext
-environment values, so keep the configured backup path on a trusted local filesystem and protect any
-copies of the archive with equivalent access controls.
+desired instance specs, and workspace files. When the VM owns a managed checkpoint, the backup also
+contains metadata-only `checkpoint.json` and sets `checkpoint_present` in manifest version 5. It
+does not copy the provider snapshot, disk, export, or other recovery artifact. On POSIX, its local
+timestamp directory is created with mode 0700 and its JSON files with mode 0600. Native Windows
+refuses backups containing instance specs until private access-control export is supported. Instance
+specs can contain plaintext environment values, so keep the configured backup path on a trusted
+local filesystem and protect any copies of the archive with equivalent access controls.
 
 `agw vm shell` is the Agentworks-wrapped entry point; for raw SSH (VS Code Remote-SSH, `scp`, etc.),
 use the `awvm--<vm>` alias documented under [Direct SSH aliases](#direct-ssh-aliases).

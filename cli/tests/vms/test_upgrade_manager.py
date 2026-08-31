@@ -10,6 +10,7 @@ from typing import Any, cast
 
 import pytest
 
+from agentworks.db import SessionStatus
 from agentworks.debian import (
     DEBIAN_RELEASES,
     DebianRelease,
@@ -76,6 +77,16 @@ def _install_entry_fakes(
     monkeypatch.setattr(upgrade_manager, "_tailscale_auth_key_name", lambda *args: "tailscale-key")
     monkeypatch.setattr(upgrade_manager, "_tailscale_auth_key", lambda *args: "ts-key")
 
+    class _EntryJournal:
+        def __init__(self, target: object) -> None:
+            del target
+
+        def load_plan(self, pair: UpgradePair) -> dict[str, object]:
+            del pair
+            return {"checkpoint": "managed-checkpoint"}
+
+    monkeypatch.setattr(upgrade_manager, "RemoteJournal", _EntryJournal)
+
     def _states(*args: object, **kwargs: object) -> tuple[object, dict[UpgradePair, object]]:
         del args, kwargs
         if journal_pair is not None:
@@ -98,6 +109,7 @@ def test_incomplete_journal_precedes_live_release_and_new_eligibility(monkeypatc
 
     assert entry.journal_pair == pair
     assert entry.preflight is None
+    assert entry.checkpoint_ref == "managed-checkpoint"
 
 
 def test_no_journal_refuses_non_previous_release_before_preflight(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -166,6 +178,146 @@ def test_entry_inspection_resolves_the_tailscale_key_once(monkeypatch: pytest.Mo
     assert len(resolutions) == 1
 
 
+@pytest.mark.parametrize(
+    "status",
+    (SessionStatus.OK, SessionStatus.BROKEN, SessionStatus.UNKNOWN),
+)
+def test_upgrade_session_gate_fails_before_release_and_package_probes(
+    monkeypatch: pytest.MonkeyPatch,
+    status: SessionStatus,
+) -> None:
+    session = SimpleNamespace(name="working", pid=123)
+    db = SimpleNamespace(list_sessions=lambda **kwargs: [session])
+    vm = SimpleNamespace(name="box")
+    transition = upgrade_manager._transitions(DEBIAN_RELEASES)[-1]
+    monkeypatch.setattr(
+        "agentworks.sessions.manager.batch_check_status",
+        lambda *args, **kwargs: {"working": status},
+    )
+    monkeypatch.setattr(
+        upgrade_manager,
+        "probe_debian_release",
+        lambda *args, **kwargs: pytest.fail("session blocker reached the release probe"),
+    )
+    monkeypatch.setattr(
+        upgrade_manager,
+        "probe_upgrade_preflight",
+        lambda *args, **kwargs: pytest.fail("session blocker reached package preflight"),
+    )
+
+    with pytest.raises(StateError) as raised:
+        upgrade_manager._probe(
+            db,
+            vm,
+            object(),
+            transition,
+            DebianRelease.BOOKWORM.value,
+            platform_name="lima",
+        )
+
+    assert raised.value.entity_kind == "vm"
+    assert raised.value.entity_name == "box"
+
+
+def test_upgrade_package_probe_receives_an_output_callback(
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: Any,
+) -> None:
+    db = SimpleNamespace(list_sessions=lambda **kwargs: [])
+    vm = SimpleNamespace(name="box")
+    transition = upgrade_manager._transitions(DEBIAN_RELEASES)[-1]
+    marker = object()
+    monkeypatch.setattr(
+        "agentworks.sessions.manager.batch_check_status",
+        lambda *args, **kwargs: {},
+    )
+    _install_release_probe(monkeypatch, DebianRelease.BOOKWORM)
+
+    def _package_probe(*args: object, **kwargs: object) -> object:
+        del args
+        announce = kwargs["announce"]
+        assert callable(announce)
+        announce("probe group")
+        return marker
+
+    monkeypatch.setattr(upgrade_manager, "probe_upgrade_preflight", _package_probe)
+
+    result = upgrade_manager._probe(
+        db,
+        vm,
+        object(),
+        transition,
+        DebianRelease.BOOKWORM.value,
+        platform_name="lima",
+    )
+
+    assert result is marker
+    assert len(captured_output.info) == 3
+
+
+def test_upgrade_console_notice_is_structurally_a_warning(captured_output: Any) -> None:
+    vm = SimpleNamespace(name="box")
+    db = SimpleNamespace(
+        list_consoles=lambda **kwargs: [
+            SimpleNamespace(name="primary"),
+            SimpleNamespace(name="monitoring"),
+        ]
+    )
+
+    upgrade_manager._warn_upgrade_consoles(db, vm)
+
+    assert len(captured_output.warnings) == 1
+
+
+def test_upgrade_action_reports_tracked_completion(
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: Any,
+) -> None:
+    calls: list[tuple[object, ...]] = []
+
+    class _Engine:
+        def __init__(self, journal: object, execution: object) -> None:
+            calls.append((journal, execution))
+
+        def advance_action(self, pair: UpgradePair, action: UpgradeAction) -> None:
+            calls.append((pair, action))
+
+    pair = UpgradePair("bookworm", "trixie")
+    monkeypatch.setattr(upgrade_manager, "UpgradeEngine", _Engine)
+
+    upgrade_manager._advance_action(object(), object(), pair, UpgradeAction.FULL_UPGRADE)
+
+    assert calls[-1] == (pair, UpgradeAction.FULL_UPGRADE)
+    assert len(captured_output.progress_items) == 1
+    assert captured_output.progress_items[0].completed is True
+
+
+@pytest.mark.parametrize("error", (StateError("failure"), KeyboardInterrupt()))
+def test_upgrade_action_completes_progress_for_failure_and_interruption(
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: Any,
+    error: BaseException,
+) -> None:
+    class _Engine:
+        def __init__(self, journal: object, execution: object) -> None:
+            del journal, execution
+
+        def advance_action(self, pair: UpgradePair, action: UpgradeAction) -> None:
+            del pair, action
+            raise error
+
+    pair = UpgradePair("bookworm", "trixie")
+    monkeypatch.setattr(upgrade_manager, "UpgradeEngine", _Engine)
+
+    with pytest.raises(type(error)) as raised:
+        upgrade_manager._advance_action(object(), object(), pair, UpgradeAction.FULL_UPGRADE)
+
+    assert raised.value is error
+    assert len(captured_output.progress_items) == 1
+    assert captured_output.progress_items[0].completed is True
+    assert captured_output.progress_items[0].done_message is not None
+
+
 def test_proved_target_is_persisted_before_release_aware_reinit(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
 
@@ -190,6 +342,7 @@ def test_proved_target_is_persisted_before_release_aware_reinit(monkeypatch: pyt
         transition=transition,
         platform_name="lima",
         tailscale_auth_key="ts-key",
+        checkpoint_ref="managed-checkpoint",
     )
     vm = SimpleNamespace(name="box", tailscale_host="100.64.0.9")
     db = _UpgradeDatabase()
@@ -207,11 +360,15 @@ def test_proved_target_is_persisted_before_release_aware_reinit(monkeypatch: pyt
         calls.append("reinit")
 
     monkeypatch.setattr(upgrade_manager, "_resume_after_source_update", _resume)
+    monkeypatch.setattr(
+        "agentworks.vms.manager.checkpoints.require_upgrade_checkpoint",
+        lambda *args, **kwargs: SimpleNamespace(name="managed-checkpoint"),
+    )
     monkeypatch.setattr(upgrade_manager, "_require_complete_initialization", lambda *args: None)
     monkeypatch.setattr(upgrade_manager, "_restore_completed_timer_state", lambda *args, **kwargs: None)
     monkeypatch.setattr("agentworks.vms.manager.reinit_vm", _reinit)
 
-    result = upgrade_manager.upgrade_vm(db, object(), "box", interaction=object())
+    result = upgrade_manager._upgrade_vm(db, object(), "box", interaction=object())
 
     assert result is None
     assert calls == ["persist", "reinit"]
@@ -275,7 +432,10 @@ def test_reboot_closes_pre_upgrade_gate_before_fresh_post_reboot_gate(
         outcome=AttemptOutcome.SUCCEEDED,
         failure=None,
     )
-    plan: dict[str, object] = {"interface_predictions": {"eth0": "eth0"}}
+    plan: dict[str, object] = {
+        "checkpoint": "managed-checkpoint",
+        "interface_predictions": {"eth0": "eth0"},
+    }
     target = object()
 
     class _Journal:
@@ -354,7 +514,7 @@ def test_reboot_closes_pre_upgrade_gate_before_fresh_post_reboot_gate(
         vm,
         transition,
         platform_name="lima",
-        checkpoint_ref=None,
+        checkpoint_ref="managed-checkpoint",
         tailscale_auth_key="ts-key",
         interaction=object(),
     )
@@ -390,6 +550,7 @@ class _PackageStateTarget:
 
 def test_source_safe_abort_restores_timers_only_after_package_health_proof(
     monkeypatch: pytest.MonkeyPatch,
+    captured_output: Any,
 ) -> None:
     transition = upgrade_manager._transitions(DEBIAN_RELEASES)[-1]
     restored: list[object] = []
@@ -403,6 +564,7 @@ def test_source_safe_abort_restores_timers_only_after_package_health_proof(
     safe = _PackageStateTarget()
     assert upgrade_manager._restore_timers_after_source_safe_failure(safe, {}, transition) is True
     assert restored == [safe]
+    assert len(captured_output.info) == 3
 
 
 def test_source_safe_abort_keeps_timers_inhibited_when_native_lock_is_owned(
@@ -503,6 +665,7 @@ def test_source_safe_planning_exit_restores_timers_or_records_repair(
         failure=None,
     )
     plan: dict[str, object] = {
+        "checkpoint": "managed-checkpoint",
         "apt_timer_states": {
             "apt-daily.timer": ["enabled", "active"],
             "apt-daily-upgrade.timer": ["enabled", "active"],
@@ -600,7 +763,7 @@ def test_source_safe_planning_exit_restores_timers_or_records_repair(
             vm,
             transition,
             platform_name="lima",
-            checkpoint_ref=None,
+            checkpoint_ref="managed-checkpoint",
             tailscale_auth_key="ts-key",
             interaction=object(),
         )
@@ -768,7 +931,6 @@ def test_recovery_bundle_staging_is_traversable_by_admin_copy(
         vm,
         transition,
         preflight,
-        "snapshot-1",
         interaction=object(),
     )
 
@@ -949,38 +1111,14 @@ def test_adoption_keeps_persisted_target_and_records_repair_when_reinit_fails(
     assert db.events[-1][1] == "debian_upgrade_repair_required"
 
 
-@pytest.mark.parametrize("value", ["", "  ", " leading", "trailing ", "line\nbreak", "x" * 513])
-def test_checkpoint_boundary_rejects_invalid_values(value: str) -> None:
-    with pytest.raises(ValidationError):
-        upgrade_manager._resolve_checkpoint(value)
+def test_resume_checkpoint_must_match_the_managed_checkpoint() -> None:
+    plan: dict[str, object] = {"checkpoint": "checkpoint-before-upgrade"}
 
-
-def test_resume_checkpoint_must_match_the_attested_plan_reference() -> None:
-    plan: dict[str, object] = {"checkpoint": "snapshot-before-upgrade"}
-
-    upgrade_manager._require_matching_checkpoint(None, plan)
-    upgrade_manager._require_matching_checkpoint("snapshot-before-upgrade", plan)
-    with pytest.raises(ValidationError):
-        upgrade_manager._require_matching_checkpoint("snapshot-after-mutation", plan)
-
-
-def test_invalid_checkpoint_is_rejected_before_vm_inspection(monkeypatch: pytest.MonkeyPatch) -> None:
-    vm = SimpleNamespace(name="box")
-    inspections: list[object] = []
-    monkeypatch.setattr(upgrade_manager, "_require_vm", lambda *args: vm)
-    monkeypatch.setattr(upgrade_manager, "_guard_failed_vm", lambda candidate: None)
-    monkeypatch.setattr(upgrade_manager, "_inspect_entry", lambda *args, **kwargs: inspections.append(args))
-
-    with pytest.raises(ValidationError):
-        upgrade_manager._upgrade_vm(
-            object(),
-            object(),
-            "box",
-            checkpoint="invalid\ncheckpoint",
-            interaction=object(),
-        )
-
-    assert inspections == []
+    upgrade_manager._require_matching_checkpoint("checkpoint-before-upgrade", plan)
+    with pytest.raises(StateError):
+        upgrade_manager._require_matching_checkpoint("checkpoint-after-mutation", plan)
+    with pytest.raises(StateError):
+        upgrade_manager._require_matching_checkpoint("checkpoint-before-upgrade", {})
 
 
 def test_fresh_upgrade_requires_interactive_authorization_before_preflight(
@@ -1109,11 +1247,14 @@ def test_reboot_retry_dispatches_unrecorded_intent_or_redispatches_active_attemp
 @pytest.mark.parametrize(
     "event",
     [
+        "checkpoint_created",
+        "checkpoint_restored",
+        "checkpoint_deleted",
         "debian_upgrade_started",
         "debian_upgrade_complete",
         "debian_upgrade_adopted",
         "debian_upgrade_repair_required",
     ],
 )
-def test_upgrade_events_survive_json_projection(event: str) -> None:
+def test_checkpoint_and_upgrade_events_survive_json_projection(event: str) -> None:
     assert _project_vm_event_name(event) == event

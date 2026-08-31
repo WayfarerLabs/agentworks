@@ -422,6 +422,68 @@ the completed boxes remain the truthful record of the first round-three implemen
 - [x] Run the complete focused and repository gates, then obtain exact-head project, correctness,
       and complexity reviews before the signed round 3 of 4 ready handoff.
 
+### Operator-directed live-upgrade correction
+
+The historical completed Slice 1 label remains unchanged under the plan's immutability rule. The
+current design, implementation, tests, and operator guidance use the plain requirement that all
+sessions must be stopped.
+
+- [x] Fail before expensive package preflight when any VM session is not stopped, name the blocking
+      sessions in operator language, and provide the exact VM-filtered stop and verification
+      commands.
+- [x] Warn about named-console live-state loss while preserving console definitions, and make every
+      preflight group, durable package action, reconnect, and post-reboot verification visibly
+      progress.
+- [x] Update the governing FRD/HLA and permanent upgrade guide, prove the behavior without testing
+      authored prose, run the proportionate gates and independent review lanes, and push the signed
+      checkpoint while keeping PR #702 in draft.
+
+### Operator-directed managed checkpoint expansion
+
+The operator replaced the manual external-artifact attestation with an Agentworks-owned checkpoint
+lifecycle after live Lima testing showed that the old prompt could not provide a consistent or
+restorable safety boundary. This is an explicit scope amendment to the governing draft, not
+incidental implementation work.
+
+- [x] Amend the FRD, HLA, migration strategy, and provider research for one managed checkpoint per
+      VM, flat second-object CLI commands, automatic upgrade acquisition, explicit restore/delete,
+      and the vm-platform version 4 hard cutover. Complete a draft `review-requested` design cycle
+      before implementation.
+- [x] Add forward migration 34 and its exact schema sentinel without modifying already-applied
+      migration 33. Persist the one-slot checkpoint lifecycle, provider descriptor, purpose, and
+      adjacent upgrade pair, immutable recognized Debian capture release, operation identity, and
+      canonical effective desired-state fingerprint; include it in database backup projection and
+      prove version-33 to version-34 plus fresh-ladder migration.
+- [x] Add mandatory vm-platform create/list/restore/delete operations and implement replay-safe,
+      identity-preserving checkpoints for Lima, WSL2, AWS EC2, Azure VM, GCP GCE, and Proxmox,
+      including provider ownership checks, destructive-restore intermediates, permission teaching,
+      and exact contract/conformance coverage.
+- [x] Implement `vm create-checkpoint`, `vm list-checkpoints`, `vm restore-checkpoint`, and
+      `vm delete-checkpoint` with the flat second-object convention, one-slot enforcement,
+      stopped-VM and stopped-session gates, confirmations, names-only/JSON output, describe
+      projection, completion, and VM-delete cleanup.
+- [x] Remove `vm upgrade --checkpoint` and manual recovery attestation. Create the managed offline
+      checkpoint after both local backups and before the first package mutation; block unrelated
+      checkpoints, require database/journal/provider agreement on resume, retain the checkpoint
+      after success, and keep restore explicitly operator-directed.
+- [x] After restore, independently attest and persist the live Debian release, mark initialization
+      for reconciliation without rolling back desired declarations, return the VM to stopped state,
+      and preserve the checkpoint until explicit deletion. Refuse before provider mutation when the
+      current effective declarations, including inherited templates, transitive release-resolved
+      resource specs, and the complete authorized-key and non-secret site identity, differ from the
+      capture fingerprint evaluated against the checkpoint's immutable capture release.
+- [x] Add narrow shared/exclusive per-VM operation exclusion around checkpoint lifecycle, the
+      complete upgrade, and Agentworks VM/session entry points that could race an offline provider
+      operation. Preserve concurrency among ordinary shared holders and keep general ordered
+      cross-resource locking as separate follow-up work.
+- [x] Update capability, vm-platform, plugin-author, platform setup/permission, CLI reference,
+      upgrade guide, schema/sample, completion, topic, and release-note collateral in the same merge
+      unit. Do not add a checkpoint resource kind, operator name/selector, arbitrary retention
+      engine, clone API, automatic rollback, or general cross-resource locking framework.
+- [ ] Run focused provider/manager/migration tests, full unit/static/docs/generated gates,
+      exact-head implementation/project/complexity review, and the draft/ready handoff cycle. Keep
+      PR #702 draft until the operator's next ready instruction.
+
 - [ ] After live certification or an authenticated disposition, create `locked.md`, record the final
       evidence, and leave the exact green reviewed head ready to merge.
 
@@ -450,16 +512,17 @@ transitions, tests, docs, and error guidance without reopening the FRD.
 
 ## Traceability
 
-| Requirement                   | Primary phases | Proof                                         |
-| ----------------------------- | -------------- | --------------------------------------------- |
-| R1 ordered Debian model       | 1, 3, 5        | registry-tail and schema/CLI absence tests    |
-| R2 current-release creation   | 3, 5           | v3 request/selector plus live create matrix   |
-| R3 persisted observation      | 1, 3, 4        | migration/parser/reconciliation/create tests  |
-| R4 release maps               | 1, 3, 5        | apt/platform mapping and selector contracts   |
-| R5 safe `vm upgrade`          | 4, 5           | preflight, interruption/resume, real upgrades |
-| R6 relative release support   | 1, 4, 5        | classifier, warnings, adjacent-only upgrade   |
-| R7 Trixie operations          | 2, 5           | tmpfs, SSH, PAM, sysctl, NIC, deb822 proofs   |
-| R8 operator recovery teaching | 4, 5           | CLI/docs review and failure-stage runbook     |
+| Requirement                   | Primary phases | Proof                                          |
+| ----------------------------- | -------------- | ---------------------------------------------- |
+| R1 ordered Debian model       | 1, 3, 5        | registry-tail and schema/CLI absence tests     |
+| R2 current-release creation   | 3, 5           | v4 request/selector plus live create matrix    |
+| R3 persisted observation      | 1, 3, 4        | migration/parser/reconciliation/create tests   |
+| R4 release maps               | 1, 3, 5        | apt/platform mapping and selector contracts    |
+| R5 safe `vm upgrade`          | 4, 5           | preflight, interruption/resume, real upgrades  |
+| R6 relative release support   | 1, 4, 5        | classifier, warnings, adjacent-only upgrade    |
+| R7 Trixie operations          | 2, 5           | tmpfs, SSH, PAM, sysctl, NIC, deb822 proofs    |
+| R8 operator recovery teaching | 4, 5           | CLI/docs review and failure-stage runbook      |
+| R9 managed VM checkpoints     | 3, 4, 5        | v4 contract, migration 34, lifecycle/live test |
 
 ## Research disposition
 

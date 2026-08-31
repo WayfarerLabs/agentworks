@@ -632,17 +632,57 @@ class TestPowerOps:
         rec = install_fakes(monkeypatch)
         _platform().start(_vm(), RunContext())  # type: ignore[arg-type]
         assert rec.kwargs_for("start_instances")["InstanceIds"] == ["i-123"]
+        assert rec.kwargs_for("get_waiter")["name"] == "instance_running"
 
     def test_stop_calls_stop_instances(self, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = install_fakes(monkeypatch)
         _platform().stop(_vm(), RunContext())  # type: ignore[arg-type]
         assert rec.kwargs_for("stop_instances")["InstanceIds"] == ["i-123"]
+        assert rec.kwargs_for("get_waiter")["name"] == "instance_stopped"
+
+    def test_power_operations_wait_through_transitional_states(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        class _Waiter:
+            def __init__(self, client: _AsyncEC2, final_state: str) -> None:
+                self.client = client
+                self.final_state = final_state
+
+            def wait(self, **kwargs: object) -> None:
+                del kwargs
+                self.client.state = self.final_state
+
+        class _AsyncEC2:
+            def __init__(self) -> None:
+                self.state = "stopped"
+
+            def start_instances(self, **kwargs: object) -> None:
+                del kwargs
+                self.state = "pending"
+
+            def stop_instances(self, **kwargs: object) -> None:
+                del kwargs
+                self.state = "stopping"
+
+            def get_waiter(self, name: str) -> _Waiter:
+                return _Waiter(self, "running" if name == "instance_running" else "stopped")
+
+            def describe_instances(self, **kwargs: object) -> dict[str, object]:
+                del kwargs
+                return {"Reservations": [{"Instances": [{"State": {"Name": self.state}}]}]}
+
+        client = _AsyncEC2()
+        platform = _platform()
+        monkeypatch.setattr(platform, "_client", lambda *args, **kwargs: client)
+
+        platform.start(_vm(), RunContext())  # type: ignore[arg-type]
+        assert platform.status(_vm(), RunContext()) is VMStatus.RUNNING  # type: ignore[arg-type]
+        platform.stop(_vm(), RunContext())  # type: ignore[arg-type]
+        assert platform.status(_vm(), RunContext()) is VMStatus.STOPPED  # type: ignore[arg-type]
 
     @pytest.mark.parametrize(
         ("state", "expected"),
         [
             ("running", VMStatus.RUNNING),
-            ("stopping", VMStatus.STOPPED),
+            ("stopping", VMStatus.UNKNOWN),
             ("stopped", VMStatus.STOPPED),
             ("pending", VMStatus.UNKNOWN),
             ("shutting-down", VMStatus.UNKNOWN),

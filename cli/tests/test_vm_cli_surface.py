@@ -5,6 +5,7 @@ removed `--vm-host` / `vm-host` group, and the doctor VM-sites group.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import TYPE_CHECKING, Any, cast
 
@@ -25,12 +26,13 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 def _invoke(monkeypatch: pytest.MonkeyPatch, argv: list[str], target: str, capture: dict[str, Any]):
     def _spy(*args: object, **kwargs: object) -> None:
+        capture["_args"] = args
         capture.update(kwargs)
 
     monkeypatch.setattr(target, _spy)
     monkeypatch.setattr("agentworks.cli._helpers.get_db", lambda: object())
     monkeypatch.setattr("agentworks.cli.commands.vm.get_db", lambda: object())
-    monkeypatch.setattr("agentworks.config.load_config", lambda: object())
+    monkeypatch.setattr("agentworks.config.load_config", lambda *_args, **_kwargs: object())
     return CliRunner().invoke(app, argv)
 
 
@@ -46,17 +48,108 @@ def test_vm_create_site_flag_forwards(monkeypatch: pytest.MonkeyPatch) -> None:
     assert captured["site"] == "azure-dev"
 
 
-def test_vm_upgrade_checkpoint_forwards(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_vm_upgrade_uses_managed_checkpoint_without_operator_reference(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
     result = _invoke(
         monkeypatch,
-        ["vm", "upgrade", "box", "--checkpoint", "snapshot-17"],
+        ["vm", "upgrade", "box"],
         "agentworks.vms.manager.upgrade_vm",
         captured,
     )
     assert result.exit_code == 0, result.output
     assert captured["name"] == "box"
-    assert captured["checkpoint"] == "snapshot-17"
+    assert "checkpoint" not in captured
+
+
+@pytest.mark.parametrize(
+    ("command", "target"),
+    [
+        ("create-checkpoint", "agentworks.vms.manager.create_checkpoint"),
+        ("restore-checkpoint", "agentworks.vms.manager.restore_checkpoint"),
+        ("delete-checkpoint", "agentworks.vms.manager.delete_checkpoint"),
+    ],
+)
+def test_vm_checkpoint_commands_forward_vm_name(
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+    target: str,
+) -> None:
+    captured: dict[str, Any] = {}
+    argv = ["vm", command, "box"]
+    if command != "create-checkpoint":
+        argv.append("--yes")
+    result = _invoke(monkeypatch, argv, target, captured)
+    assert result.exit_code == 0, result.output
+    assert captured["_args"][2] == "box"
+    if command != "create-checkpoint":
+        assert captured["yes"] is True
+
+
+def test_vm_list_checkpoints_names_only_forwards_csv_filter(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+    result = _invoke(
+        monkeypatch,
+        ["vm", "list-checkpoints", "--vm", "one,two", "--names-only"],
+        "agentworks.vms.manager.list_checkpoints",
+        captured,
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["vm_names"] == ["one", "two"]
+    assert captured["names_only"] is True
+
+
+def test_vm_list_checkpoints_json_uses_machine_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("agentworks.cli.commands.vm.get_db", lambda: object())
+    monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
+    monkeypatch.setattr("agentworks.vms.manager.list_checkpoints", lambda *_args, **_kwargs: [])
+
+    result = CliRunner().invoke(app, ["vm", "list-checkpoints", "--output", "json"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["command"] == "vm.list-checkpoints"
+    assert payload["data"] == {"checkpoints": []}
+
+
+def test_vm_list_checkpoints_json_projects_checkpoint_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.db import VMCheckpointPurpose, VMCheckpointRow, VMCheckpointState
+    from agentworks.debian import DebianRelease
+
+    row = VMCheckpointRow(
+        vm_name="box",
+        name="agw-checkpoint",
+        provider_identifier="snapshot-123",
+        operation_id=None,
+        desired_state_fingerprint="a" * 64,
+        state=VMCheckpointState.READY,
+        purpose=VMCheckpointPurpose.DEBIAN_UPGRADE,
+        capture_release=DebianRelease.BOOKWORM,
+        source_release=DebianRelease.BOOKWORM,
+        target_release=DebianRelease.TRIXIE,
+        created_at="2026-08-31T12:00:00Z",
+    )
+    monkeypatch.setattr("agentworks.cli.commands.vm.get_db", lambda: object())
+    monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
+    monkeypatch.setattr("agentworks.vms.manager.list_checkpoints", lambda *_args, **_kwargs: [row])
+
+    result = CliRunner().invoke(app, ["vm", "list-checkpoints", "--output", "json"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["data"] == {
+        "checkpoints": [
+            {
+                "vm_name": "box",
+                "name": "agw-checkpoint",
+                "provider_identifier": "snapshot-123",
+                "state": "ready",
+                "purpose": "debian-upgrade",
+                "capture_release": "bookworm",
+                "source_release": "bookworm",
+                "target_release": "trixie",
+                "created_at": "2026-08-31T12:00:00Z",
+            }
+        ]
+    }
 
 
 def test_vm_create_admin_template_flag_forwards(

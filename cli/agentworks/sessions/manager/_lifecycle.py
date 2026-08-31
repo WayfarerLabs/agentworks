@@ -387,7 +387,16 @@ def resume_session(
     from agentworks.vms.manager import require_vm_ssh_boundary
 
     require_vm_ssh_boundary(db, config, vm)
-    with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
+    from agentworks.vms.manager.operation_guard import shared_vm_operation_guard
+
+    with (
+        shared_vm_operation_guard(
+            db,
+            vm.name,
+            operation="resume session",
+        ),
+        activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)),
+    ):
         if vm.tailscale_host is None:
             raise StateError(
                 f"VM '{vm.name}' has no Tailscale address",

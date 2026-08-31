@@ -129,6 +129,9 @@ class VMEventName(StrEnum):
     BACKUP_STARTED = "backup_started"
     BACKUP_COMPLETED = "backup_completed"
     BACKUP_FAILED = "backup_failed"
+    CHECKPOINT_CREATED = "checkpoint_created"
+    CHECKPOINT_RESTORED = "checkpoint_restored"
+    CHECKPOINT_DELETED = "checkpoint_deleted"
     DEBIAN_UPGRADE_STARTED = "debian_upgrade_started"
     DEBIAN_UPGRADE_COMPLETE = "debian_upgrade_complete"
     DEBIAN_UPGRADE_ADOPTED = "debian_upgrade_adopted"
@@ -229,6 +232,18 @@ class VMLiveResources:
 
 
 @dataclass(frozen=True)
+class VMDetailCheckpoint:
+    name: str
+    provider_identifier: str | None
+    state: str
+    purpose: str
+    capture_release: str
+    source_release: str | None
+    target_release: str | None
+    created_at: str
+
+
+@dataclass(frozen=True)
 class VMDescription:
     vm: VMDetailFacts
     platform: str | None
@@ -244,6 +259,7 @@ class VMDescription:
     issues: tuple[VMIssue, ...]
     diagnostics: tuple[VMDiagnostic, ...]
     instance_state: InstanceStateDescription
+    checkpoint: VMDetailCheckpoint | None = None
 
 
 def vm_listing_data(listing: VMListing) -> JsonObject:
@@ -315,6 +331,18 @@ def vm_description_data(description: VMDescription) -> JsonObject:
                 "disk_total": live_resources.disk_total,
                 "disk_used": live_resources.disk_used,
                 "disk_percent": live_resources.disk_percent,
+            },
+            "checkpoint": None
+            if description.checkpoint is None
+            else {
+                "name": description.checkpoint.name,
+                "provider_identifier": description.checkpoint.provider_identifier,
+                "state": description.checkpoint.state,
+                "purpose": description.checkpoint.purpose,
+                "capture_release": description.checkpoint.capture_release,
+                "source_release": description.checkpoint.source_release,
+                "target_release": description.checkpoint.target_release,
+                "created_at": description.checkpoint.created_at,
             },
             "agents": [
                 {
@@ -529,6 +557,21 @@ def vm_description(
             VMDetailEvent(created_at=event.created_at, event=event.event, detail=event.detail)
             for event in db.list_vm_events(name)
         )
+        checkpoint_row = db.get_vm_checkpoint(name)
+        checkpoint = (
+            None
+            if checkpoint_row is None
+            else VMDetailCheckpoint(
+                name=checkpoint_row.name,
+                provider_identifier=checkpoint_row.provider_identifier,
+                state=checkpoint_row.state.value,
+                purpose=checkpoint_row.purpose.value,
+                capture_release=checkpoint_row.capture_release.value,
+                source_release=(None if checkpoint_row.source_release is None else checkpoint_row.source_release.value),
+                target_release=(None if checkpoint_row.target_release is None else checkpoint_row.target_release.value),
+                created_at=checkpoint_row.created_at,
+            )
+        )
         vm_facts = VMDetailFacts.from_row(vm)
 
     _warn_legacy_release(vm)
@@ -617,6 +660,7 @@ def vm_description(
         system_slug=system_slug,
         system_slug_state=system_slug_state,
         live_resources=live_resources,
+        checkpoint=checkpoint,
         agents=agents,
         workspaces=workspaces,
         events=events,

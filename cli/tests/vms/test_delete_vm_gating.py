@@ -24,7 +24,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import VMStatus
+from agentworks.capabilities.vm_platform import CheckpointDescriptor
+from agentworks.db import VMCheckpointPurpose, VMStatus
+from agentworks.debian import DebianRelease
 from agentworks.errors import AuthorizationError, StateError, UserAbort
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -123,6 +125,60 @@ def test_delete_never_gates(
     assert counts["status"] == 0
     assert counts["delete"] == 1
     assert resolve_counter == [["proxmox-token"]]
+    assert db.get_vm("dvm") is None
+
+
+def test_delete_with_checkpoint_uses_one_boundary_for_both_provider_artifacts(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed(db)
+    counts = _fake_backend(monkeypatch)
+    checkpoint = db.insert_vm_checkpoint(
+        vm_name="dvm",
+        name="agw-checkpoint",
+        operation_id="create-op",
+        desired_state_fingerprint="a" * 64,
+        purpose=VMCheckpointPurpose.OPERATOR,
+        capture_release=DebianRelease.BOOKWORM,
+    )
+    assert db.complete_vm_checkpoint(
+        "dvm",
+        expected_state=checkpoint.state,
+        operation_id="create-op",
+        provider_identifier="agw-checkpoint",
+    )
+    inventory = [CheckpointDescriptor("agw-checkpoint", "agw-checkpoint")]
+    monkeypatch.setattr(
+        ProxmoxPlatform,
+        "list_checkpoints",
+        lambda self, row, ctx: tuple(inventory),
+    )
+
+    def _delete_checkpoint(
+        self: ProxmoxPlatform,
+        row: VMRow,
+        descriptor: CheckpointDescriptor,
+        ctx: object,
+    ) -> None:
+        inventory.remove(descriptor)
+
+    monkeypatch.setattr(ProxmoxPlatform, "delete_checkpoint", _delete_checkpoint)
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
+
+    vm_manager.delete_vm(
+        db,
+        make_config(),
+        "dvm",
+        yes=True,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+
+    assert resolve_counter == [["proxmox-token"]]
+    assert inventory == []
+    assert counts["delete"] == 1
     assert db.get_vm("dvm") is None
 
 

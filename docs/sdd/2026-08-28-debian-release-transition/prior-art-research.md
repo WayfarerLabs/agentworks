@@ -9,8 +9,9 @@
 Debian supports a direct Bookworm-to-Trixie in-place upgrade and documents the preparation,
 two-stage package procedure, reboot, and recovery posture in detail. Agentworks can orchestrate that
 procedure, but it cannot honestly promise automatic rollback: its current VM backup contains
-metadata and workspace data rather than a bootable disk, and the six platforms expose incompatible
-snapshot, retention, and restore models.
+metadata and workspace data rather than a bootable disk. The six platforms expose different native
+recovery models, but each can implement an owned create/list/restore/delete checkpoint lifecycle
+while preserving the logical VM identity.
 
 Official Trixie artifacts exist for every current platform. Proxmox is different because it has no
 provider-wide image selector; the operator must build a Trixie template and map the release to its
@@ -21,8 +22,9 @@ The smallest safe product shape is therefore:
 - fixed Trixie creation from platform-owned release maps;
 - live release validation and first-class persistence;
 - a durable, resumable `vm upgrade` that follows Debian's documented procedure;
-- local application/config backups plus an operator-attested external recovery artifact; and
-- no provider snapshot lifecycle until Agentworks can also own restore, retention, and cleanup.
+- local application/config backups plus one automatically created managed recovery checkpoint; and
+- explicit checkpoint restore/delete with retained provider intermediates where restore is
+  destructive, but no automatic rollback or general snapshot manager.
 
 ## Debian's supported path
 
@@ -62,8 +64,8 @@ Design consequences:
   for the mutation window. It restores them only from a Bookworm-safe abort or verified healthy
   Trixie state, not while the package system is mixed or unhealthy.
 - Agentworks creates local workspace/metadata and Debian configuration/package-state artifacts.
-- The command requires an external checkpoint reference that identifies an actual recoverable
-  artifact and shows platform console guidance.
+- The command creates and verifies one offline Agentworks-managed checkpoint before package
+  mutation, while platform console guidance remains the out-of-band repair path.
 - Those artifacts are not described as an automatic or bootable rollback.
 
 Source:
@@ -183,33 +185,41 @@ Sources: [HashiCorp Terraform installation](https://developer.hashicorp.com/terr
 [tofuutils Cloudsmith setup](https://cloudsmith.io/~tofuutils/repos/tenv/setup/),
 [ngrok Linux installation](https://ngrok.com/download/linux)
 
-## Recovery primitives do not form one product contract
+## Recovery primitives can support one owned checkpoint lifecycle
 
-Every platform has some recovery primitive, but its creation, consistency, retention, restore, and
-cleanup differ:
+Every platform has a different implementation primitive, but all six can implement create, list,
+restore, and delete while preserving the logical VM identity:
 
-- AWS exposes EBS snapshots and recommends stopping an instance for a consistent root-volume
-  snapshot.
-- Azure exposes VM restore points containing restore points for attached disks.
-- GCP disk snapshots restore by creating disks rather than overwriting the source disk.
-- WSL documents `wsl --export` and `wsl --import` for backup/recovery.
-- Lima has snapshot commands, but marks the snapshot family experimental and driver-dependent.
-- Proxmox offers `vzdump` and Proxmox Backup Server; storage capabilities and permissions determine
-  snapshot behavior. Agentworks' current least-privilege Proxmox role intentionally lacks backup and
-  snapshot permissions.
+- AWS can snapshot the stopped instance's root EBS volume. Its root-volume replacement task requires
+  a running instance and reboots it, so the platform must temporarily start the stopped VM, wait for
+  the task, then stop and prove it stopped before returning to the common restore contract.
+- Azure can snapshot the managed OS disk, create a disk from that snapshot, and swap the OS disk on
+  the same deallocated VM.
+- GCP snapshots restore by creating a new disk; a stopped instance can detach its old boot disk and
+  attach the restored disk as boot.
+- WSL can export a stopped distribution and restore under the same name/install path. Because
+  `--unregister` is destructive, safe restore first exports the current distribution as a retained
+  emergency intermediate.
+- Lima exposes native snapshot create, list, apply, and delete commands using caller-assigned tags.
+  Driver support remains a runtime precondition that must fail before upgrade mutation.
+- Proxmox exposes named QEMU snapshots and rollback on the same VMID when its storage supports
+  snapshots. The Agentworks role must gain the corresponding snapshot permission.
 
-Adding only snapshot creation would leave Agentworks owning chargeable artifacts without a common
-restore or cleanup contract. The first transition therefore requires an operator-created external
-checkpoint reference. Automatic provider checkpoint lifecycle is deferred until its restore,
-retention, cleanup, and permission model can be designed as one owned feature.
+This research rejects creation-only automation, not a complete abstraction. The common contract is
+an offline Agentworks-managed checkpoint whose provider proves ownership and source binding, with
+explicit restore and delete. Core can generate a safe name, persist one slot per VM, and retain the
+provider identifier without pretending all backends use the same storage primitive. Destructive
+boot-disk or WSL restore keeps an intermediate until core re-attests the restored guest.
 
 Sources:
-[AWS EBS snapshot guidance](https://docs.aws.amazon.com/ebs/latest/userguide/ebs-create-snapshot.html),
-[Azure VM restore points](https://learn.microsoft.com/en-us/azure/virtual-machines/backup-and-disaster-recovery-for-azure-iaas-disks),
-[GCP disk snapshots](https://cloud.google.com/compute/docs/disks/snapshots),
-[WSL backup guidance](https://learn.microsoft.com/en-us/windows/wsl/faq),
-[Lima snapshot command](https://lima-vm.io/docs/reference/limactl_snapshot_create/),
-[Lima experimental features](https://lima-vm.io/docs/releases/experimental/), and
+[AWS EBS snapshot guidance](https://docs.aws.amazon.com/ebs/latest/userguide/ebs-creating-snapshot.html),
+[AWS root-volume replacement](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/replace-root.html),
+[Azure OS disk swap](https://learn.microsoft.com/en-us/azure/virtual-machines/linux/os-disk-swap),
+[GCP snapshot restore](https://docs.cloud.google.com/compute/docs/disks/restore-snapshot),
+[GCP boot-disk detach/reattach](https://docs.cloud.google.com/compute/docs/disks/detach-reattach-boot-disk),
+[WSL basic commands](https://learn.microsoft.com/en-us/windows/wsl/basic-commands),
+[Lima snapshot create](https://lima-vm.io/docs/reference/limactl_snapshot_create/),
+[Lima snapshot apply](https://lima-vm.io/docs/reference/limactl_snapshot_apply/), and
 [Proxmox VE administration guide](https://pve.proxmox.com/pve-docs/pve-admin-guide.pdf)
 
 Provider consoles are also not uniform or guaranteed. AWS serial console is disabled by default and
@@ -277,8 +287,9 @@ Lima and WSL have strong local native paths. AWS, Azure, and GCP native paths st
 guest networking and sshd. Proxmox returns no post-create native transport. Ordinary VM operations
 use canonical Tailscale SSH and do not silently fall back.
 
-Design consequence: native transport can repair Tailscale after reboot where available, but it is
-not the external recovery checkpoint required before upgrade.
+Design consequence: native transport can repair Tailscale after reboot where available, but
+checkpoint recovery remains a vm-platform lifecycle operation and core re-attests the restored guest
+independently.
 
 Evidence: `cli/agentworks/capabilities/vm_platform/base.py`, each platform's `native_transport`, and
 `cli/agentworks/transports/__init__.py`.

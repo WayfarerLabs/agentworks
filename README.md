@@ -148,7 +148,8 @@ for the decision record.
 Every newly created managed VM uses Debian Trixie, the same admin-user setup, and the same Tailscale
 network model. See [ADR 0025](docs/adrs/0025-manage-one-current-debian-release.md) for the release
 lifecycle decision. VMs are long-lived, backed by declarative templates, and can be idempotently
-reinitialized to pick up changes without being replaced.
+reinitialized to pick up changes without being replaced. Each VM also has one managed offline
+checkpoint slot for explicit recovery and for the supported adjacent Debian upgrade workflow.
 
 ### Workspaces - The Project
 

@@ -384,9 +384,17 @@ def create_session(
     # through the whole command, with its just-in-time values seeding
     # the boundary resolver so nothing resolves or prompts twice.
     from agentworks.vms.manager import require_vm_ssh_boundary
+    from agentworks.vms.manager.operation_guard import shared_vm_operation_guard
 
     require_vm_ssh_boundary(db, config, graph.vm_node.row)
-    with activation_gate(graph.vm_node, gate_secret_resolver(config, registry, graph.resolver)):
+    with (
+        shared_vm_operation_guard(
+            db,
+            plan.target_vm_name,
+            operation="create session",
+        ),
+        activation_gate(graph.vm_node, gate_secret_resolver(config, registry, graph.resolver)),
+    ):
         vm = _reload_vm(db, plan.target_vm_name)
         target, run_command = _build_live_transport(vm, config)
 

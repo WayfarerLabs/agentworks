@@ -40,16 +40,25 @@ Before declaring a site:
 
 1. Enable the Compute Engine API (`compute.googleapis.com`) in the target project.
 2. Give the selected host identity permission to read the project, zone, machine/image/disk types,
-   network and firewall state, and to create, start, stop, and delete instances, disks, and classic
-   VPC firewall rules. The predefined `Compute Instance Admin (v1)` and `Compute Security Admin`
-   roles are a straightforward starting point. A narrower custom role must also allow use of the
-   selected subnet and an external IPv4 address. No guest service-account impersonation permission
-   is required: Agentworks explicitly attaches no guest service account or OAuth scopes.
+   network and firewall state; create, start, stop, and delete instances, disks, and classic VPC
+   firewall rules; and create, get, list, and delete Compute Engine snapshots. Managed checkpoint
+   restore also replaces the boot disk and may retain a detached emergency disk until the operation
+   is proved complete. The predefined `Compute Instance Admin (v1)` and `Compute Security Admin`
+   roles are a straightforward starting point. A narrower custom role must include the equivalent
+   `compute.snapshots.create`, `compute.snapshots.get`, `compute.snapshots.list`,
+   `compute.snapshots.delete`, and `compute.snapshots.useReadOnly`; `compute.disks.create`,
+   `compute.disks.get`, `compute.disks.list`, `compute.disks.delete`, and `compute.disks.setLabels`;
+   and `compute.instances.attachDisk` and `compute.instances.detachDisk`. It must also allow use of
+   the selected subnet and an external IPv4 address. No guest service-account impersonation
+   permission is required: Agentworks explicitly attaches no guest service account or OAuth scopes.
 3. Provide either the project's `default` network or a subnet in the zone's region. The subnet and
    network must belong to the target project; this version does not support Shared VPC host-project
    indirection.
-4. Ensure quota exists for the instance, vCPU, balanced persistent disk, ephemeral external IPv4,
-   two create-time firewall rules, and one additional rule per simultaneous native SSH route.
+4. Ensure quota exists for the instance, vCPU, balanced persistent disks, snapshot storage,
+   ephemeral external IPv4, two create-time firewall rules, and one additional rule per simultaneous
+   native SSH route. Checkpoint restore temporarily needs capacity for a replacement boot disk and
+   may retain the previous boot disk as an emergency recovery artifact until the restore is proved
+   complete.
 5. Allow outbound HTTPS from the VM so Debian packages and Tailscale can be reached.
 
 The selected VPC network must report

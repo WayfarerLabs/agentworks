@@ -54,7 +54,7 @@ class _VMPlatformKind:
         A vm-platform knows how to create, start, stop, and delete VMs on one backend,
         and how to reach them over SSH once they exist.
 
-        Contract version 3 receives core's concrete current Debian release, resolves it
+        Contract version 4 receives core's concrete current Debian release, resolves it
         to a platform-owned artifact, and verifies the live guest while backend rollback
         is still possible. Missing mappings fail before backend mutation; a platform
         completes its Tailscale join before returning transport and backend identity,
@@ -62,7 +62,10 @@ class _VMPlatformKind:
         backend state before propagating failure. Core independently verifies the returned
         transport before persisting the observed release. A successful result may omit only
         the Tailscale IP; the VM domain then retries IP discovery and verifies Tailscale SSH
-        without replaying bootstrap.
+        without replaying bootstrap. It also creates, lists, restores, and deletes named
+        Agentworks-managed offline checkpoints. Those operations bind artifacts to the exact
+        VM incarnation, are replay-safe, preserve the logical VM identity, and leave restored
+        guests stopped for core attestation.
 
         Platforms are code, not config: a vm-site selects one by writing its name inside
         `spec.platform`, and the keys allowed beside that name are the platform's own,
@@ -128,11 +131,22 @@ def _readiness(name: str, impl: Any) -> Readiness:
 
 VM_PLATFORM_DESCRIPTOR = CapabilityKindDescriptor(
     kind="vm-platform",
-    contract_version=3,
+    contract_version=4,
     implementation_contract=VMPlatform,
     registry=_registry,
     required_operations=frozenset(
-        {"create", "start", "stop", "delete", "status", "display_backend_name"},
+        {
+            "create",
+            "start",
+            "stop",
+            "delete",
+            "status",
+            "display_backend_name",
+            "create_checkpoint",
+            "list_checkpoints",
+            "restore_checkpoint",
+            "delete_checkpoint",
+        },
     ),
     # Empty: VMPlatform supplies every non-operation member a subclass needs.
     required_attributes=frozenset(),

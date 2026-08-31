@@ -57,6 +57,29 @@ def create_console(
     fill_all: bool = False,
     add_admin_shell: bool = False,
 ) -> None:
+    """Create a console while preserving checkpoint fingerprint integrity."""
+    from agentworks.vms.manager.operation_guard import shared_vm_operation_guard
+
+    with shared_vm_operation_guard(db, vm_name, operation="create console"):
+        _create_console(
+            db,
+            name=name,
+            vm_name=vm_name,
+            session_specs=session_specs,
+            fill_all=fill_all,
+            add_admin_shell=add_admin_shell,
+        )
+
+
+def _create_console(
+    db: Database,
+    *,
+    name: str,
+    vm_name: str,
+    session_specs: list[str],
+    fill_all: bool = False,
+    add_admin_shell: bool = False,
+) -> None:
     """Create a new console with the given sessions.
 
     Explicit *session_specs* keep their argument order. *fill_all* appends
@@ -122,6 +145,30 @@ def create_console(
 
 
 def add_sessions(
+    db: Database,
+    config: Config,
+    *,
+    console_name: str,
+    session_specs: list[str],
+    interaction: TtyInteractionPolicy,
+    start_index: int | None = None,
+) -> None:
+    """Add members while preserving checkpoint fingerprint integrity."""
+    console = _require_console(db, console_name)
+    from agentworks.vms.manager.operation_guard import shared_vm_operation_guard
+
+    with shared_vm_operation_guard(db, console.vm_name, operation="add console sessions"):
+        _add_sessions(
+            db,
+            config,
+            console_name=console_name,
+            session_specs=session_specs,
+            interaction=interaction,
+            start_index=start_index,
+        )
+
+
+def _add_sessions(
     db: Database,
     config: Config,
     *,
@@ -293,6 +340,28 @@ def remove_sessions(
     session_names: list[str],
     yes: bool = False,
 ) -> None:
+    """Remove members while preserving checkpoint fingerprint integrity."""
+    console = _require_console(db, console_name)
+    from agentworks.vms.manager.operation_guard import shared_vm_operation_guard
+
+    with shared_vm_operation_guard(db, console.vm_name, operation="remove console sessions"):
+        _remove_sessions(
+            db,
+            config,
+            console_name=console_name,
+            session_names=session_names,
+            yes=yes,
+        )
+
+
+def _remove_sessions(
+    db: Database,
+    config: Config,
+    *,
+    console_name: str,
+    session_names: list[str],
+    yes: bool = False,
+) -> None:
     """Remove sessions from a console. Raises if any are not members. Atomic
     at the DB layer; if the console is live, also kills the corresponding
     windows (best-effort).
@@ -334,6 +403,30 @@ def remove_sessions(
 
 
 def reorder_sessions(
+    db: Database,
+    config: Config,
+    *,
+    console_name: str,
+    session_names: list[str],
+    start_index: int | None = None,
+    to_back: bool = False,
+) -> None:
+    """Reorder members while preserving checkpoint fingerprint integrity."""
+    console = _require_console(db, console_name)
+    from agentworks.vms.manager.operation_guard import shared_vm_operation_guard
+
+    with shared_vm_operation_guard(db, console.vm_name, operation="reorder console sessions"):
+        _reorder_sessions(
+            db,
+            config,
+            console_name=console_name,
+            session_names=session_names,
+            start_index=start_index,
+            to_back=to_back,
+        )
+
+
+def _reorder_sessions(
     db: Database,
     config: Config,
     *,
@@ -439,9 +532,12 @@ def delete_console_record(db: Database, *, name: str) -> None:
 
     Tmux teardown is the caller's responsibility.
     """
-    _require_console(db, name)
-    db.delete_console(name)
-    output.info(f"Console '{name}' deleted.")
+    console = _require_console(db, name)
+    from agentworks.vms.manager.operation_guard import shared_vm_operation_guard
+
+    with shared_vm_operation_guard(db, console.vm_name, operation="delete console"):
+        db.delete_console(name)
+        output.info(f"Console '{name}' deleted.")
 
 
 def _validate_cwd(cwd: str | None) -> None:
@@ -457,6 +553,32 @@ def _validate_cwd(cwd: str | None) -> None:
 
 
 def add_shell(
+    db: Database,
+    config: Config,
+    *,
+    console_name: str,
+    session_name: str,
+    cwd: str | None = None,
+    admin: bool = False,
+    interaction: TtyInteractionPolicy,
+) -> None:
+    """Add a configured shell while preserving checkpoint fingerprint integrity."""
+    console = _require_console(db, console_name)
+    from agentworks.vms.manager.operation_guard import shared_vm_operation_guard
+
+    with shared_vm_operation_guard(db, console.vm_name, operation="add console shell"):
+        _add_shell(
+            db,
+            config,
+            console_name=console_name,
+            session_name=session_name,
+            cwd=cwd,
+            admin=admin,
+            interaction=interaction,
+        )
+
+
+def _add_shell(
     db: Database,
     config: Config,
     *,

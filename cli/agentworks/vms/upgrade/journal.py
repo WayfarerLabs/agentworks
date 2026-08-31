@@ -606,7 +606,7 @@ def _cli(argv: Sequence[str] | None = None) -> int:
     elif args.command == "dispatch-reboot":
         with store.locked(pair):
             state = store.load(pair)
-            if not _package_locks_quiescent():
+            if not _package_locks_clear():
                 raise JournalError("reboot cannot be dispatched while package-manager ownership is uncertain")
             state = state.claim(UpgradeAction.REBOOT, boot_id_before=args.boot_id)
             store.write_state(pair, state)
@@ -620,7 +620,7 @@ def _cli(argv: Sequence[str] | None = None) -> int:
     elif args.command == "redispatch-reboot":
         with store.locked(pair):
             state = store.load(pair).redispatch_reboot(args.boot_id, args.attempt_id)
-            if not _package_locks_quiescent():
+            if not _package_locks_clear():
                 raise JournalError("reboot cannot be redispatched while package-manager ownership is uncertain")
             store.write_state(pair, state)
             subprocess.Popen(
@@ -667,7 +667,7 @@ def _cli(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-def _package_locks_quiescent() -> bool:
+def _package_locks_clear() -> bool:
     fuser = shutil.which("fuser")
     if fuser is not None:
         fuser_result = subprocess.run([fuser, *_PACKAGE_LOCK_PATHS], capture_output=True, check=False)

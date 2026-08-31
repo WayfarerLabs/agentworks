@@ -12,7 +12,12 @@ from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
 from pydantic import Field, model_validator
 
 from agentworks import output
-from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
+from agentworks.capabilities.vm_platform.base import (
+    CheckpointDescriptor,
+    ProvisionRequest,
+    ProvisionResult,
+    VMPlatform,
+)
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.debian_release import (
@@ -36,6 +41,10 @@ if TYPE_CHECKING:
 
     from agentworks.capabilities.base import RunContext
     from agentworks.db import VMRow
+
+
+_CHECKPOINT_READY_TIMEOUT_SECONDS = 300.0
+_CHECKPOINT_READY_POLL_SECONDS = 2.0
 
 
 def _warn_bootstrap_file_residue() -> None:
@@ -118,7 +127,7 @@ class ProxmoxConfig(AgwModel):
 class ProxmoxPlatform(VMPlatform):
     """Runs VMs on a Proxmox VE cluster."""
 
-    contract_version: ClassVar[int] = 3
+    contract_version: ClassVar[int] = 4
     name: ClassVar[str] = "proxmox"
     description: ClassVar[str] = "Proxmox VE cluster VMs (clone + cloud-init)"
     config_model: ClassVar[type[ProxmoxConfig]] = ProxmoxConfig
@@ -470,6 +479,175 @@ class ProxmoxPlatform(VMPlatform):
         # The stop-then-delete sequence lives in the teardown module,
         # shared with create's rollback arms.
         stop_and_delete_vm(self._api(ctx), self._vm_node(vm), self._vmid(vm))
+
+    def _checkpoint_description(self, vm: VMRow) -> str:
+        return f"agentworks checkpoint for {vm.name} on vmid {self._vmid(vm)}"
+
+    def _managed_snapshot(self, vm: VMRow, entry: Mapping[str, Any]) -> CheckpointDescriptor | None:
+        name = entry.get("name")
+        if not isinstance(name, str) or not name.startswith("agw-"):
+            return None
+        if entry.get("description") != self._checkpoint_description(vm):
+            return None
+        return CheckpointDescriptor(name=name, identifier=name)
+
+    def _wait_for_checkpoint_ready(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        name: str,
+    ) -> CheckpointDescriptor:
+        node = self._vm_node(vm)
+        vmid = self._vmid(vm)
+        deadline = time.monotonic() + _CHECKPOINT_READY_TIMEOUT_SECONDS
+        while True:
+            entry = next((item for item in self._api(ctx).list_snapshots(node, vmid) if item.get("name") == name), None)
+            if entry is None:
+                raise StateError(
+                    f"Proxmox checkpoint '{name}' disappeared before completion",
+                    entity_kind="vm",
+                    entity_name=vm.name,
+                )
+            descriptor = self._managed_snapshot(vm, entry)
+            if descriptor is None:
+                raise StateError(
+                    f"Proxmox snapshot name '{name}' is already in use by an unmanaged artifact",
+                    entity_kind="vm",
+                    entity_name=vm.name,
+                )
+            snapshot_state = entry.get("snapstate")
+            if snapshot_state in {None, ""}:
+                return descriptor
+            if snapshot_state != "prepare":
+                raise StateError(
+                    f"Proxmox checkpoint '{name}' is in failed state {snapshot_state!r}",
+                    entity_kind="vm",
+                    entity_name=vm.name,
+                    hint="Inspect or delete the failed Proxmox snapshot before retrying.",
+                )
+            if time.monotonic() >= deadline:
+                raise StateError(
+                    f"Proxmox checkpoint '{name}' did not finish in time",
+                    entity_kind="vm",
+                    entity_name=vm.name,
+                    hint="Inspect the Proxmox snapshot task before retrying because its outcome is not yet known.",
+                )
+            time.sleep(_CHECKPOINT_READY_POLL_SECONDS)
+
+    def _require_checkpoint_ready(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        checkpoint: CheckpointDescriptor,
+    ) -> None:
+        if checkpoint.identifier != checkpoint.name:
+            raise StateError(
+                f"Proxmox checkpoint '{checkpoint.name}' has a conflicting provider identifier",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+        entries = self._api(ctx).list_snapshots(self._vm_node(vm), self._vmid(vm))
+        entry = next((item for item in entries if item.get("name") == checkpoint.name), None)
+        if entry is None or self._managed_snapshot(vm, entry) != checkpoint or entry.get("snapstate") not in {None, ""}:
+            raise StateError(
+                f"Proxmox checkpoint '{checkpoint.name}' is missing, incomplete, or not owned by Agentworks",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+
+    def create_checkpoint(
+        self,
+        vm: VMRow,
+        name: str,
+        ctx: RunContext,
+        *,
+        operation_id: str,
+        resume: bool,
+    ) -> CheckpointDescriptor:
+        del operation_id, resume
+        node = self._vm_node(vm)
+        vmid = self._vmid(vm)
+        if self.status(vm, ctx) is not VMStatus.STOPPED:
+            raise StateError(
+                f"Proxmox VM '{vm.name}' must be stopped before creating a checkpoint",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+        snapshots = self._api(ctx).list_snapshots(node, vmid)
+        for entry in snapshots:
+            if entry.get("name") != name:
+                continue
+            descriptor = self._managed_snapshot(vm, entry)
+            if descriptor is None:
+                raise StateError(
+                    f"Proxmox snapshot name '{name}' is already in use by an unmanaged artifact",
+                    entity_kind="vm",
+                    entity_name=vm.name,
+                )
+            return self._wait_for_checkpoint_ready(vm, ctx, name=name)
+        upid = self._api(ctx).create_snapshot(
+            node,
+            vmid,
+            name,
+            description=self._checkpoint_description(vm),
+        )
+        self._api(ctx).wait_for_task(node, upid)
+        return self._wait_for_checkpoint_ready(vm, ctx, name=name)
+
+    def list_checkpoints(self, vm: VMRow, ctx: RunContext) -> tuple[CheckpointDescriptor, ...]:
+        entries = self._api(ctx).list_snapshots(self._vm_node(vm), self._vmid(vm))
+        return tuple(
+            sorted(
+                (descriptor for entry in entries if (descriptor := self._managed_snapshot(vm, entry)) is not None),
+                key=lambda descriptor: descriptor.name,
+            )
+        )
+
+    def restore_checkpoint(
+        self,
+        vm: VMRow,
+        checkpoint: CheckpointDescriptor,
+        ctx: RunContext,
+        *,
+        operation_id: str,
+    ) -> None:
+        del operation_id
+        self._require_checkpoint_ready(vm, ctx, checkpoint)
+        if self.status(vm, ctx) is not VMStatus.STOPPED:
+            raise StateError(
+                f"Proxmox VM '{vm.name}' must be stopped before restoring a checkpoint",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+        node = self._vm_node(vm)
+        upid = self._api(ctx).rollback_snapshot(node, self._vmid(vm), checkpoint.name)
+        self._api(ctx).wait_for_task(node, upid)
+        if self.status(vm, ctx) is not VMStatus.STOPPED:
+            raise StateError(
+                f"Proxmox checkpoint restore did not leave VM '{vm.name}' stopped",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+
+    def delete_checkpoint(
+        self,
+        vm: VMRow,
+        checkpoint: CheckpointDescriptor,
+        ctx: RunContext,
+    ) -> None:
+        descriptors = self.list_checkpoints(vm, ctx)
+        if checkpoint not in descriptors:
+            return
+        node = self._vm_node(vm)
+        upid = self._api(ctx).delete_snapshot(node, self._vmid(vm), checkpoint.name)
+        self._api(ctx).wait_for_task(node, upid)
+        if checkpoint in self.list_checkpoints(vm, ctx):
+            raise StateError(
+                f"Proxmox checkpoint '{checkpoint.name}' still exists after deletion",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
         try:

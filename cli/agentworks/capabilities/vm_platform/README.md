@@ -87,6 +87,12 @@ A vm-platform stands up a machine and hands Agentworks an administrative foothol
   VM's status; `create` **MUST** be collision-checked and either fail loudly on a name that already
   exists or pick and persist a new, collision-free backend name, never impacting an existing VM
   outside its control.
+- **MUST** implement contract version 4's managed checkpoint lifecycle: create a core-named offline
+  checkpoint, list only Agentworks-owned checkpoints for the exact VM incarnation, restore the
+  recorded descriptor while preserving the logical VM identity, and delete the artifact plus any
+  retained emergency recovery intermediate. These operations are mandatory because Debian upgrade
+  depends on them. A version-3 or incomplete third-party platform is rejected as out of date before
+  it can serve a vm-site.
 - **MUST** provide a stop that preserves all system state for a later resume. Snapshotting and
   restoring running state is preferable, but a platform **MAY** implement stop as a full OS
   shutdown/restart, since Agentworks is built to be robust against restarts and the loss of running
@@ -194,8 +200,40 @@ and DB migration.
   provider-ID-owned instance absence before removing its lifetime deny. Only auxiliary-resource
   stragglers stay warn-and-continue. Lima, WSL2, Proxmox, and EC2 do not yet verify; their teardown
   verbs remain fire-and-forget (tracked in #356).
+- `create_checkpoint(vm, name, ctx, *, operation_id, resume) -> CheckpointDescriptor` creates or
+  discovers the same completed offline artifact when replayed with the core-generated `agw-*` name
+  and persisted create operation identity. `resume` is false for the first provider attempt and true
+  for an interrupted creating row. A provider with an ambiguous create response must reconcile that
+  operation before submitting another request. The VM is stopped on entry. The returned `name` is
+  core identity and `identifier` is opaque provider identity; both must bind to the exact backend VM
+  incarnation. The operation is `@idempotent_op` and must prove completion before returning.
+- `list_checkpoints(vm, ctx) -> tuple[CheckpointDescriptor, ...]` returns only Agentworks-managed
+  artifacts bound to that VM incarnation, including an incomplete artifact left after create
+  mutation so core can resume or delete it safely. It must not adopt, expose, or mutate
+  operator-created snapshots. The API is plural so core can detect provider duplicates and
+  interrupted state even though the current product permits one checkpoint per VM. A descriptor in
+  this inventory proves identity and ownership, not readiness; replaying `create_checkpoint` drives
+  and proves completion.
+- `restore_checkpoint(vm, checkpoint, ctx, *, operation_id)` is `@idempotent_op`, requires the VM
+  stopped, restores the same logical VM, and returns with it stopped. The operation identity is
+  stable while one interrupted restore replays and changes for a later explicit restore; the latter
+  must reapply the checkpoint rather than treating an earlier restored disk as success. A backend
+  that swaps or replaces a boot disk retains one deterministic pre-first-restore emergency artifact
+  until checkpoint deletion, reuses it on later restores, and preserves both artifacts on an
+  incomplete destructive swap. Core starts the guest only after the platform returns, attests Debian
+  independently, and stops it again.
+- `delete_checkpoint(vm, checkpoint, ctx)` is `@idempotent_op`, treats absence as success, and
+  proves the managed artifact and any retained emergency intermediate are gone before returning.
 - `status(vm, ctx) -> VMStatus` is a read-only query.
 - `display_backend_name(vm) -> str` is pure display and takes no `ctx`.
+
+The hard contract cutover is intentional. A third-party platform cannot claim version 4 while
+leaving checkpoint methods abstract. Exact registration conformance rejects an older contract or
+missing abstract implementation with an upgrade-the-plugin error. Returning unsupported or
+implementing a no-op still violates the version 4 contract and must be caught by plugin review and
+conformance testing; registration does not attempt to infer method semantics. Platform checkpoint
+state is provider-owned; core persists only the descriptor and lifecycle fence, compares every live
+list result with that record, and never asks a platform to interpret Debian's current release.
 
 **Transport and lifecycle hooks** (sensible defaults on `VMPlatform`; implementations override only
 what their backends need). All are entered by callers that gate first, so on entry the VM is running
@@ -293,7 +331,7 @@ a contract change is a hard cutover rather than a silent re-certification.
 - `legacy_platform_metadata(cls, row, legacy) -> dict[str, str]` maps pre-migration DB rows into the
   `platform_metadata` shape, consumed only by the one-shot DB migration.
 
-**Inputs and outputs** are uniform under vm-platform contract version 3. Every `create` receives the
+**Inputs and outputs** are uniform under vm-platform contract version 4. Every `create` receives the
 same `ProvisionRequest`, including the concrete core-selected `debian_release`, a required resolved
 Tailscale auth key, and a required value-free bootstrap-progress sink. The platform resolves the
 release through its local artifact map before backend mutation. A missing code-owned mapping names

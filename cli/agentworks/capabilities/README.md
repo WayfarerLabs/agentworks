@@ -49,7 +49,10 @@ infrastructure: `lima` and `wsl2` provide local VMs on macOS and Windows, while 
 `proxmox`, `aws-ec2`, and `gcp-gce` target cloud or datacenter capacity. Whatever the backend, each
 delivers the same foundation: a Debian VM with a passwordless-sudo admin login reachable over
 Tailscale, whose whole lifecycle (create, start, a cost-saving stop that resumes with state intact,
-delete) Agentworks drives through that one admin foothold. See
+delete) Agentworks drives through that one admin foothold. Contract version 4 also requires every
+platform, including third-party plugins, to create, list, restore, and delete Agentworks-managed VM
+checkpoints. Core uses that common offline recovery boundary for Debian upgrade and rejects an
+out-of-date platform before it can serve a vm-site. See
 [`vm_platform/README.md`](vm_platform/README.md) for what a platform must provide and the specifics
 of each.
 
@@ -720,7 +723,7 @@ secret set from the node graph, resolves once, and exposes only declared values 
 
 A consuming domain can also own required operation values that every implementation must honor. The
 VM domain resolves its template's Tailscale auth-key reference once and selects the concrete Debian
-release from core policy. Vm-platform contract version 3 carries both through `ProvisionRequest`,
+release from core policy. Vm-platform contract version 4 carries both through `ProvisionRequest`,
 alongside a value-free progress sink. A platform must not redeclare either value in its config, read
 a substitute from ambient state, or infer its own meaning of "current." It translates the requested
 release through a platform-owned artifact map and verifies the live guest before returning so it can

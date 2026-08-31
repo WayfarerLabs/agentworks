@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.capabilities.vm_platform.base import (
     BootstrapProgress,
+    CheckpointDescriptor,
     ProvisionRequest,
     ProvisionResult,
     VMPlatform,
@@ -34,6 +35,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BootstrapProgress",
+    "CheckpointDescriptor",
     "VM_PLATFORM_REGISTRY",
     "LimaPlatform",
     "ProvisionRequest",

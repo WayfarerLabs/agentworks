@@ -16,6 +16,9 @@ from agentworks.db.models import (
     ConsoleSessionRow,
     SessionRow,
     ShellEntry,
+    VMCheckpointPurpose,
+    VMCheckpointRow,
+    VMCheckpointState,
     VMEventRow,
     VMRow,
     WorkspaceRow,
@@ -97,6 +100,49 @@ def _to_vm(row: sqlite3.Row) -> VMRow:
         debian_release_observed_at=observed_at,
         platform_metadata=platform_metadata,
         operator_stopped=bool(row["operator_stopped"]),
+    )
+
+
+def _to_vm_checkpoint(row: sqlite3.Row) -> VMCheckpointRow:
+    """Decode one checkpoint row and reject releases unknown to this build."""
+
+    releases: list[DebianRelease | None] = []
+    for column in ("capture_release", "source_release", "target_release"):
+        raw = row[column]
+        if raw is None:
+            releases.append(None)
+            continue
+        try:
+            release = DebianRelease(raw)
+            profile_for_release(release)
+        except (ValueError, StateError):
+            raise StateError(
+                "stored VM checkpoint Debian release is not supported by this Agentworks build",
+                entity_kind="vm",
+                entity_name=row["vm_name"],
+                hint="Upgrade Agentworks to a build that supports the recorded Debian release.",
+            ) from None
+        releases.append(release)
+    capture_release = releases[0]
+    if capture_release is None:
+        raise StateError(
+            "stored VM checkpoint is missing its capture release",
+            entity_kind="vm",
+            entity_name=row["vm_name"],
+            hint="Restore a database backup from checkpoint creation time or delete the invalid checkpoint row.",
+        )
+    return VMCheckpointRow(
+        vm_name=row["vm_name"],
+        name=row["name"],
+        provider_identifier=row["provider_identifier"],
+        operation_id=row["operation_id"],
+        desired_state_fingerprint=row["desired_state_fingerprint"],
+        state=VMCheckpointState(row["state"]),
+        purpose=VMCheckpointPurpose(row["purpose"]),
+        capture_release=capture_release,
+        source_release=releases[1],
+        target_release=releases[2],
+        created_at=row["created_at"],
     )
 
 

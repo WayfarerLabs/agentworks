@@ -29,7 +29,6 @@ class PreflightIssue(StrEnum):
 
     RELEASE_MISMATCH = "release-mismatch"
     UNSUPPORTED_ARCHITECTURE = "unsupported-architecture"
-    SESSION_NOT_QUIESCENT = "session-not-quiescent"
     PACKAGE_DATABASE_BROKEN = "package-database-broken"
     APT_SIMULATION_FAILED = "apt-simulation-failed"
     PACKAGE_MANAGER_BUSY = "package-manager-busy"
@@ -61,7 +60,6 @@ class UpgradePreflight:
     guest_kernel_required: bool = True
     openssh_minimum_satisfied: bool = True
     package_manager_owner: str | None = None
-    non_quiescent_sessions: tuple[str, ...] = ()
     modified_conffiles: tuple[str, ...] = ()
     release_blockers: tuple[str, ...] = ()
     apt_pins: tuple[str, ...] = ()
@@ -95,8 +93,6 @@ class UpgradePreflight:
             found.append(PreflightIssue.RELEASE_MISMATCH)
         if self.architecture not in supported_architectures:
             found.append(PreflightIssue.UNSUPPORTED_ARCHITECTURE)
-        if self.non_quiescent_sessions:
-            found.append(PreflightIssue.SESSION_NOT_QUIESCENT)
         if self.dpkg_audit:
             found.append(PreflightIssue.PACKAGE_DATABASE_BROKEN)
         if self.package_manager_owner is not None:
@@ -179,7 +175,6 @@ class UpgradePreflight:
             "guest_kernel_required": self.guest_kernel_required,
             "openssh_minimum_satisfied": self.openssh_minimum_satisfied,
             "package_manager_owner": self.package_manager_owner,
-            "non_quiescent_sessions": list(self.non_quiescent_sessions),
             "apt_pins": list(self.apt_pins),
             "mixed_suites": list(self.mixed_suites),
             "third_party_sources": list(self.third_party_sources),

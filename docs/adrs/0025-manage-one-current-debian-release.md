@@ -39,6 +39,14 @@ understands them. Supporting a future Debian stable release means adding and cer
 platform artifacts, APT values, and adjacent transition policy, then appending that profile as the
 new current release.
 
+The adjacent upgrade automatically acquires one managed offline checkpoint after local backups and
+before its first package mutation. The vm-platform contract requires create, list, restore, and
+delete operations for that checkpoint on every supported platform. Agentworks owns its generated
+name and durable descriptor, limits each VM to one operational checkpoint slot, retains it after
+upgrade or restore, and restores it only on an explicit operator command. Restore verifies that the
+current effective declarations still match the captured fingerprint, independently attests the live
+Debian release afterward, and returns the VM to stopped state for reinitialization.
+
 Operators cannot select another Debian creation release or bring another operating system into the
 managed lifecycle. A provider-specific artifact identifier may remain operator configuration where
 that provider already requires it, but core still chooses the release key it must satisfy. Live
@@ -51,6 +59,8 @@ release verification has no operator bypass.
 - Agentworks can reinitialize existing current and previous-release VMs using their observed release
   instead of current creation policy.
 - The supported upgrade graph stays one edge: current-1 to current.
+- Every supported platform provides the same managed recovery boundary before an adjacent upgrade;
+  the one-slot rule avoids introducing a general snapshot-retention product.
 - A future stable promotion reuses the registry, persistence, platform contract, and durable upgrade
   framework, while still requiring release-specific engineering and certification.
 - Multi-distribution support, operator-selected releases, downgrades, and multi-hop upgrades remain

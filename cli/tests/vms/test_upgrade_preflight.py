@@ -45,7 +45,6 @@ def test_each_persisted_safety_class_blocks_before_mutation() -> None:
     cases = (
         (replace(_safe(), live_release="trixie"), PreflightIssue.RELEASE_MISMATCH),
         (replace(_safe(), architecture="i386"), PreflightIssue.UNSUPPORTED_ARCHITECTURE),
-        (replace(_safe(), non_quiescent_sessions=("dev:ok",)), PreflightIssue.SESSION_NOT_QUIESCENT),
         (replace(_safe(), dpkg_audit=("half-configured",)), PreflightIssue.PACKAGE_DATABASE_BROKEN),
         (replace(_safe(), package_manager_owner="42"), PreflightIssue.PACKAGE_MANAGER_BUSY),
         (

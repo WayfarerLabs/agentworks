@@ -203,6 +203,32 @@ class TestVMOperations:
         assert req.get_method() == "PUT"
         assert "/resize" in req.full_url
 
+    @patch("urllib.request.urlopen")
+    def test_create_snapshot_is_disk_only(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
+        mock_urlopen.return_value = _mock_response("UPID:pve:snapshot")
+        result = api.create_snapshot("pve", 100, "agw-123", description="managed")
+
+        req = mock_urlopen.call_args[0][0]
+        assert result == "UPID:pve:snapshot"
+        assert req.get_method() == "POST"
+        assert req.full_url.endswith("/nodes/pve/qemu/100/snapshot")
+        assert b"snapname=agw-123" in req.data
+        assert b"vmstate=0" in req.data
+
+    @patch("urllib.request.urlopen")
+    def test_snapshot_restore_and_delete_encode_name(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
+        mock_urlopen.return_value = _mock_response("UPID:pve:checkpoint")
+
+        api.rollback_snapshot("pve", 100, "agw name")
+        restore = mock_urlopen.call_args[0][0]
+        api.delete_snapshot("pve", 100, "agw name")
+        delete = mock_urlopen.call_args[0][0]
+
+        assert restore.get_method() == "POST"
+        assert restore.full_url.endswith("/snapshot/agw%20name/rollback")
+        assert delete.get_method() == "DELETE"
+        assert delete.full_url.endswith("/snapshot/agw%20name")
+
 
 class TestTaskOperations:
     """Test task control methods build correct requests."""

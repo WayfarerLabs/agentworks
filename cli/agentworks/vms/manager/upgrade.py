@@ -85,6 +85,7 @@ class _EntryInspection:
     adoption: bool
     platform_name: str
     tailscale_auth_key: str
+    checkpoint_ref: str | None = None
 
 
 def upgrade_vm(
@@ -92,19 +93,21 @@ def upgrade_vm(
     config: Config,
     name: str,
     *,
-    checkpoint: str | None = None,
     interaction: TtyInteractionPolicy,
 ) -> None:
     """Upgrade one verified previous-release VM to core's current release."""
-    try:
-        return _upgrade_vm(db, config, name, checkpoint=checkpoint, interaction=interaction)
-    except JournalError as error:
-        raise StateError(
-            f"VM '{name}' has an invalid or unavailable Debian upgrade journal",
-            entity_kind="vm",
-            entity_name=name,
-            hint=str(error),
-        ) from error
+    from .operation_guard import exclusive_vm_operation_guard
+
+    with exclusive_vm_operation_guard(db, name, operation="upgrade Debian"):
+        try:
+            return _upgrade_vm(db, config, name, interaction=interaction)
+        except JournalError as error:
+            raise StateError(
+                f"VM '{name}' has an invalid or unavailable Debian upgrade journal",
+                entity_kind="vm",
+                entity_name=name,
+                hint=str(error),
+            ) from error
 
 
 def _upgrade_vm(
@@ -112,14 +115,14 @@ def _upgrade_vm(
     config: Config,
     name: str,
     *,
-    checkpoint: str | None = None,
     interaction: TtyInteractionPolicy,
 ) -> None:
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
 
-    checkpoint_ref = _validate_checkpoint(checkpoint) if checkpoint is not None else None
-    entry = _inspect_entry(db, config, vm, interaction=interaction)
+    with output.section("Debian Upgrade Preflight"):
+        output.info(f"Inspecting VM '{name}'...")
+        entry = _inspect_entry(db, config, vm, interaction=interaction)
     vm = _require_vm(db, name)
     if entry.adoption:
         _require_interactive_upgrade_authorization()
@@ -149,13 +152,6 @@ def _upgrade_vm(
 
         from agentworks.vms.backup import backup_vm
 
-        _render_checkpoint_guidance(entry.platform_name)
-        checkpoint_ref = _resolve_checkpoint(checkpoint_ref)
-        if not output.confirm(
-            "Confirm that the named external recovery artifact exists and console or rescue access was tested?",
-            default=False,
-        ):
-            raise UserAbort("VM upgrade cancelled before local backup because checkpoint creation was not attested")
         ordinary_backup = backup_vm(db, config, name, interaction=interaction)
         recovery_bundle = _create_recovery_bundle(
             db,
@@ -163,12 +159,21 @@ def _upgrade_vm(
             vm,
             entry.transition,
             entry.preflight,
-            checkpoint_ref,
             interaction=interaction,
         )
-        output.warn("Agentworks backups protect data, but they are not bootable VM checkpoints.")
         output.detail(f"VM backup: {format_host_path(ordinary_backup)}")
         output.detail(f"Debian recovery bundle: {format_host_path(recovery_bundle)}")
+        from .checkpoints import create_upgrade_checkpoint
+
+        checkpoint_row = create_upgrade_checkpoint(
+            db,
+            config,
+            name,
+            source_release=DebianRelease(entry.transition.pair.source),
+            target_release=DebianRelease(entry.transition.pair.target),
+            interaction=interaction,
+        )
+        checkpoint_ref = checkpoint_row.name
         if not output.confirm(
             f"Bring Debian {entry.transition.pair.source} fully current within its existing suite?",
             default=False,
@@ -186,6 +191,21 @@ def _upgrade_vm(
             platform_name=entry.platform_name,
             interaction=interaction,
         )
+    else:
+        from .checkpoints import require_upgrade_checkpoint
+
+        if entry.checkpoint_ref is None:
+            raise StateError("Debian upgrade journal has no valid managed checkpoint identity")
+        checkpoint_row = require_upgrade_checkpoint(
+            db,
+            config,
+            name,
+            expected_name=entry.checkpoint_ref,
+            source_release=DebianRelease(entry.transition.pair.source),
+            target_release=DebianRelease(entry.transition.pair.target),
+            interaction=interaction,
+        )
+        checkpoint_ref = checkpoint_row.name
 
     _resume_after_source_update(
         db,
@@ -201,6 +221,7 @@ def _upgrade_vm(
     import agentworks.vms.manager as manager
 
     try:
+        output.info("Running release-aware VM initialization...")
         manager.reinit_vm(db, config, name, interaction=interaction)
         _require_complete_initialization(db, name)
     except Exception as error:
@@ -219,6 +240,7 @@ def _upgrade_vm(
             ),
         ) from error
     try:
+        output.info("Restoring automatic APT timers...")
         _restore_completed_timer_state(db, config, vm, entry.transition, interaction=interaction)
     except Exception as error:
         db.insert_vm_event(
@@ -252,6 +274,7 @@ def _inspect_entry(
 
     from agentworks.bootstrap import load_request_registry
 
+    output.info("Loading Agentworks VM resources...")
     registry = load_request_registry(config, live_database=db)
     auth_key_name = _tailscale_auth_key_name(db, registry, vm)
     with gated_vm_boundary(
@@ -264,6 +287,7 @@ def _inspect_entry(
     ) as (vm_node, resolver, ops_ctx):
         platform_name = vm_node.site.platform.name
         tailscale_auth_key = _tailscale_auth_key(resolver, auth_key_name)
+        output.info("Inspecting durable Debian upgrade state...")
         target, states = _read_entry_states_with_repair(
             db,
             config,
@@ -280,7 +304,16 @@ def _inspect_entry(
         pair = incomplete[0] if incomplete else None
         if pair is not None:
             transition = by_pair[pair]
-            return _EntryInspection(transition, pair, None, False, platform_name, tailscale_auth_key)
+            checkpoint_ref = _checkpoint_ref_from_plan(RemoteJournal(target).load_plan(pair))
+            return _EntryInspection(
+                transition,
+                pair,
+                None,
+                False,
+                platform_name,
+                tailscale_auth_key,
+                checkpoint_ref,
+            )
 
         pending_completion = [
             pair
@@ -292,8 +325,18 @@ def _inspect_entry(
             raise JournalError(f"multiple completed Debian upgrades need finalization: {names}")
         if pending_completion:
             pair = pending_completion[0]
-            return _EntryInspection(by_pair[pair], pair, None, False, platform_name, tailscale_auth_key)
+            checkpoint_ref = _checkpoint_ref_from_plan(RemoteJournal(target).load_plan(pair))
+            return _EntryInspection(
+                by_pair[pair],
+                pair,
+                None,
+                False,
+                platform_name,
+                tailscale_auth_key,
+                checkpoint_ref,
+            )
 
+        output.info("Confirming the live Debian release...")
         live_release = probe_debian_release(target)
         recorded = _recorded_release(vm)
         if recorded is None:
@@ -324,6 +367,7 @@ def _inspect_entry(
                     "Multi-hop upgrade is not supported."
                 ),
             )
+        _warn_upgrade_consoles(db, vm)
         preflight = _probe(
             db,
             vm,
@@ -361,6 +405,7 @@ def _initialize_and_update_source(
     ):
         target = transport(vm, config)
         journal = RemoteJournal(target)
+        output.info("Installing the durable Debian upgrade journal...")
         journal.install()
         if journal.select_incomplete(tuple(item.pair for item in _transitions(DEBIAN_RELEASES))) is not None:
             raise StateError(
@@ -369,14 +414,15 @@ def _initialize_and_update_source(
                 entity_name=vm.name,
                 hint="Rerun vm upgrade to inspect the existing journal.",
             )
-        fresh = _probe(
-            db,
-            vm,
-            target,
-            transition,
-            transition.pair.source,
-            platform_name=platform_name,
-        )
+        with output.section("Debian Upgrade Safety Recheck"):
+            fresh = _probe(
+                db,
+                vm,
+                target,
+                transition,
+                transition.pair.source,
+                platform_name=platform_name,
+            )
         _require_safe_preflight(fresh, transition)
         plan = fresh.to_plan()
         plan.update(
@@ -389,6 +435,7 @@ def _initialize_and_update_source(
         )
         journal.initialize(transition.pair, plan)
         try:
+            output.info("Inhibiting automatic APT timers...")
             _inhibit_apt_timers(target)
             db.insert_vm_event(
                 vm.name,
@@ -396,6 +443,7 @@ def _initialize_and_update_source(
                 json.dumps({"checkpoint": checkpoint, "target": transition.pair.target}, sort_keys=True),
             )
             execution = _execution(target, transition)
+            output.info("Installing the durable Debian upgrade runner...")
             execution.install_script()
         except (Exception, KeyboardInterrupt) as error:
             _restore_timers_or_raise_repair(
@@ -425,7 +473,7 @@ def _resume_after_source_update(
     transition: _Transition,
     *,
     platform_name: str,
-    checkpoint_ref: str | None,
+    checkpoint_ref: str,
     tailscale_auth_key: str,
     interaction: TtyInteractionPolicy,
 ) -> None:
@@ -442,15 +490,18 @@ def _resume_after_source_update(
     ):
         target = transport(vm, config)
         journal = RemoteJournal(target)
+        output.info("Loading durable Debian upgrade state...")
         journal.install()
         state = journal.load(transition.pair)
         plan = journal.load_plan(transition.pair)
         _require_matching_checkpoint(checkpoint_ref, plan)
         execution = _execution(target, transition)
+        output.info("Preparing the durable Debian upgrade runner...")
         execution.install_script()
         if state.last_completed is JournalProgress.PREPARED or state.active_action is UpgradeAction.SOURCE_UPDATE:
             timers = _timer_states_from_plan(plan)
             try:
+                output.info("Inhibiting automatic APT timers...")
                 _inhibit_apt_timers(target)
             except (Exception, KeyboardInterrupt) as error:
                 _restore_timers_or_raise_repair(db, vm, target, timers, transition, error)
@@ -462,14 +513,15 @@ def _resume_after_source_update(
             timer_states = _timer_states_from_plan(plan)
             try:
                 _require_interactive_upgrade_authorization()
-                final = _probe(
-                    db,
-                    vm,
-                    target,
-                    transition,
-                    transition.pair.source,
-                    platform_name=platform_name,
-                )
+                with output.section("Final Debian Upgrade Preflight"):
+                    final = _probe(
+                        db,
+                        vm,
+                        target,
+                        transition,
+                        transition.pair.source,
+                        platform_name=platform_name,
+                    )
                 _require_safe_preflight(final, transition)
                 _render_plan(final, transition, heading="Final Debian suite-switch plan")
                 if plan.get("preliminary_material_plan") != final.material_plan():
@@ -484,6 +536,7 @@ def _resume_after_source_update(
                     raise UserAbort("VM upgrade paused before suite switching; rerun vm upgrade to continue")
                 plan["final_plan"] = final.to_plan()
                 journal.update_plan(transition.pair, plan)
+                output.info("Inhibiting automatic APT timers...")
                 _inhibit_apt_timers(target)
             except (Exception, KeyboardInterrupt) as error:
                 _restore_timers_or_raise_repair(db, vm, target, timer_states, transition, error)
@@ -500,6 +553,7 @@ def _resume_after_source_update(
 
         state = journal.load(transition.pair)
         if state.last_completed is JournalProgress.FULL_UPGRADE_COMPLETE and state.active_action is None:
+            output.info("Predicting post-upgrade network interface names...")
             predictions = (
                 snapshot_provider_interface_names(target)
                 if platform_name == "wsl2"
@@ -510,8 +564,11 @@ def _resume_after_source_update(
             plan["interface_predictions"] = predictions
             journal.update_plan(transition.pair, plan)
         checkpoint_value = plan.get("checkpoint")
-        checkpoint = checkpoint_value if isinstance(checkpoint_value, str) else None
+        if not isinstance(checkpoint_value, str):
+            raise StateError("Debian upgrade plan has no valid managed checkpoint identity")
+        checkpoint = checkpoint_value
         if state.active_action is UpgradeAction.REBOOT or state.next_action is UpgradeAction.REBOOT:
+            output.info("Dispatching the required VM reboot...")
             prior_boot_id: str | None = _advance_reboot(journal, execution, transition.pair)
         elif state.last_completed is JournalProgress.REBOOT_COMPLETE:
             prior_boot_id = None
@@ -539,7 +596,7 @@ def _finish_after_reboot(
     *,
     platform_name: str,
     prior_boot_id: str | None,
-    checkpoint: str | None,
+    checkpoint: str,
     tailscale_auth_key: str,
     interaction: TtyInteractionPolicy,
 ) -> None:
@@ -558,6 +615,7 @@ def _finish_after_reboot(
         target = transport(vm, config)
         if prior_boot_id is not None:
             journal = RemoteJournal(target)
+            output.info("Waiting for the upgraded VM to reboot and reconnect...")
             reconnected = _reconnect_after_reboot(
                 db,
                 config,
@@ -592,7 +650,7 @@ def _finish_after_reboot(
                     f"VM '{vm.name}' did not reconnect after reboot",
                     entity_kind="vm",
                     entity_name=vm.name,
-                    hint="Use the platform console or restore the recorded external checkpoint.",
+                    hint=f"Repair through the platform console or run 'agw vm restore-checkpoint {vm.name}'.",
                 )
             target = reconnected
             journal = RemoteJournal(target)
@@ -624,9 +682,11 @@ def _finish_after_reboot(
         else:
             journal = RemoteJournal(target)
 
+        output.info(f"Confirming Debian {transition.pair.target} after reboot...")
         live = probe_debian_release(target, expected=transition.target_profile.release)
         _persist_release(db, vm.name, live)
         try:
+            output.info("Verifying post-upgrade network interface names...")
             verify_interface_names(target, _interface_predictions(journal.load_plan(transition.pair)))
         except StateError:
             plan = journal.load_plan(transition.pair)
@@ -636,6 +696,7 @@ def _finish_after_reboot(
                 json.dumps({"checkpoint": plan.get("checkpoint"), "stage": "interface-names"}, sort_keys=True),
             )
             raise
+        output.info("Verifying post-upgrade VM health...")
         _verify_target_health(db, vm, target, transition, platform_name=platform_name)
 
 
@@ -645,13 +706,35 @@ def _advance_action(
     pair: UpgradePair,
     action: UpgradeAction,
 ) -> None:
+    progress = output.progress(_upgrade_action_label(pair, action))
     try:
         UpgradeEngine(journal, execution).advance_action(pair, action)
     except UpgradeActionError as error:
+        progress.done("failed")
         raise StateError(
             f"Debian upgrade action failed: {action.value}",
-            hint=("Repair forward using the retained log, or restore the external checkpoint. " + error.detail),
+            hint=("Repair forward using the retained log, or restore the VM's managed checkpoint. " + error.detail),
         ) from error
+    except (KeyboardInterrupt, UserAbort):
+        progress.done("interrupted")
+        raise
+    except BaseException:
+        progress.done("failed")
+        raise
+    progress.done()
+
+
+def _upgrade_action_label(pair: UpgradePair, action: UpgradeAction) -> str:
+    labels = {
+        UpgradeAction.SOURCE_UPDATE: f"Updating Debian {pair.source} packages",
+        UpgradeAction.SWITCH_SOURCES: f"Switching APT sources to Debian {pair.target}",
+        UpgradeAction.MINIMAL_UPGRADE: f"Running the minimal Debian {pair.target} upgrade",
+        UpgradeAction.FULL_UPGRADE: f"Running the full Debian {pair.target} upgrade",
+    }
+    try:
+        return labels[action]
+    except KeyError as error:
+        raise StateError(f"Debian upgrade action does not support tracked execution: {action.value}") from error
 
 
 def _advance_source_action(
@@ -721,15 +804,19 @@ def _probe(
 ) -> UpgradePreflight:
     from agentworks.sessions.manager import batch_check_status
 
+    output.info("Checking Agentworks sessions...")
     sessions = db.list_sessions(vm_name=vm.name)
     statuses = batch_check_status(sessions, target=target)
-    unsafe: list[str] = []
+    unsafe: list[tuple[str, SessionStatus]] = []
     for session in sessions:
         if session.pid == PID_STOPPED:
             continue
         status = statuses.get(session.name, SessionStatus.UNKNOWN)
         if status is not SessionStatus.STOPPED:
-            unsafe.append(f"{session.name}:{status.value}")
+            unsafe.append((session.name, status))
+    _require_stopped_sessions(vm.name, unsafe)
+    output.detail(f"{output.count(len(sessions), 'Agentworks session')} checked; all are stopped.")
+    output.info("Reconfirming the live Debian release...")
     live = probe_debian_release(target).value
     return probe_upgrade_preflight(
         target,
@@ -740,7 +827,51 @@ def _probe(
         guest_kernel_required=platform_name != "wsl2",
         minimum_openssh_version=transition.policy.minimum_openssh_version,
         blocker_probe=transition.policy.blocker_probe,
-        non_quiescent_sessions=unsafe,
+        announce=output.info,
+    )
+
+
+def _require_stopped_sessions(
+    vm_name: str,
+    unsafe: Sequence[tuple[str, SessionStatus]],
+) -> None:
+    if not unsafe:
+        return
+    descriptions = ", ".join(f"{name} ({_session_upgrade_state(status)})" for name, status in unsafe)
+    raise StateError(
+        f"VM '{vm_name}' has {output.count(len(unsafe), 'Agentworks session')} "
+        f"that must be stopped before Debian upgrade: {descriptions}",
+        entity_kind="vm",
+        entity_name=vm_name,
+        hint=(
+            f"Run 'agw session stop --all --vm {vm_name}', verify with "
+            f"'agw session list --vm {vm_name}', then rerun 'agw vm upgrade {vm_name}'. "
+            "A broken session may require --force."
+        ),
+    )
+
+
+def _session_upgrade_state(status: SessionStatus) -> str:
+    labels = {
+        SessionStatus.OK: "running",
+        SessionStatus.BROKEN: "broken",
+        SessionStatus.UNKNOWN: "status unavailable",
+    }
+    try:
+        return labels[status]
+    except KeyError as error:
+        raise StateError(f"unexpected session status at Debian upgrade boundary: {status.value}") from error
+
+
+def _warn_upgrade_consoles(db: Database, vm: VMRow) -> None:
+    consoles = db.list_consoles(vm_name=vm.name)
+    if not consoles:
+        return
+    names = ", ".join(console.name for console in consoles)
+    output.warn(
+        f"The required reboot will end live tmux state for "
+        f"{output.count(len(consoles), 'named console')} on VM '{vm.name}': {names}. "
+        "Console definitions survive and rebuild on the next attach, but console-only shell processes do not."
     )
 
 
@@ -783,50 +914,25 @@ def _render_plan(preflight: UpgradePreflight, transition: _Transition, *, headin
             output.detail(f"Debian release note: {url}")
 
 
-def _resolve_checkpoint(value: str | None) -> str:
-    if value is None:
-        output.warn("Create a bootable provider snapshot, WSL export, Proxmox backup, or equivalent before continuing.")
-        value = output.prompt("External recovery artifact reference").strip()
-    return _validate_checkpoint(value)
-
-
-def _validate_checkpoint(value: str) -> str:
-    if value != value.strip() or not value or len(value) > 512 or "\n" in value or "\r" in value:
-        raise ValidationError("checkpoint reference must be a non-blank, bounded single line")
-    return value
-
-
 def _require_interactive_upgrade_authorization() -> None:
     if not output.is_interactive():
         raise ValidationError("vm upgrade requires an interactive terminal at each pending authorization boundary")
 
 
-def _require_matching_checkpoint(value: str | None, plan: dict[str, object]) -> None:
-    if value is None:
-        return
-    recorded = plan.get("checkpoint")
-    if not isinstance(recorded, str):
-        raise StateError("Debian upgrade plan has no valid external checkpoint reference")
+def _require_matching_checkpoint(value: str, plan: dict[str, object]) -> None:
+    recorded = _checkpoint_ref_from_plan(plan)
     if value != recorded:
-        raise ValidationError(
-            "--checkpoint cannot replace the attested pre-upgrade recovery artifact on resume; "
-            "omit it or pass the originally recorded reference"
+        raise StateError(
+            "Debian upgrade journal and managed checkpoint identity disagree",
+            hint="Do not continue until the matching Agentworks database backup is restored.",
         )
 
 
-def _render_checkpoint_guidance(platform_name: str) -> None:
-    guidance = {
-        "azure-vm": "Create an Azure managed-disk snapshot and verify Azure serial-console access.",
-        "aws-ec2": "Create an EBS snapshot or recoverable AMI and verify EC2 console access.",
-        "gcp-gce": "Create a persistent-disk snapshot and verify Google Cloud serial-console access.",
-        "lima": "Create a recoverable Lima instance or disk copy and verify limactl shell access.",
-        "proxmox": "Create a Proxmox backup or snapshot and verify VM console access.",
-        "wsl2": "Export the WSL distribution and verify that the export can be imported on this host.",
-    }.get(
-        platform_name,
-        f"Create a recoverable {platform_name} VM checkpoint and verify provider console access.",
-    )
-    output.warn(guidance)
+def _checkpoint_ref_from_plan(plan: dict[str, object]) -> str:
+    recorded = plan.get("checkpoint")
+    if not isinstance(recorded, str) or not recorded:
+        raise StateError("Debian upgrade plan has no valid managed checkpoint identity")
+    return recorded
 
 
 def _create_recovery_bundle(
@@ -835,7 +941,6 @@ def _create_recovery_bundle(
     vm: VMRow,
     transition: _Transition,
     preflight: UpgradePreflight,
-    checkpoint: str,
     *,
     interaction: TtyInteractionPolicy,
 ) -> Path:
@@ -860,7 +965,6 @@ def _create_recovery_bundle(
                 "vm": vm.name,
                 "source": transition.pair.source,
                 "target": transition.pair.target,
-                "checkpoint": checkpoint,
                 "created_at": datetime.now(UTC).isoformat(),
                 "preflight": preflight.to_plan(),
             }
@@ -906,10 +1010,12 @@ def _restore_timers_after_source_safe_failure(
     transition: _Transition,
 ) -> bool:
     """Restore timers only when the source release is provably package-safe."""
+    output.info("Checking whether automatic APT timers can be safely restored...")
     if not _source_state_is_safe_for_timer_restore(target, transition):
         output.warn("Automatic APT timers remain inhibited because package state is not provably safe.")
         return False
     try:
+        output.info("Restoring automatic APT timers after the source-safe stop...")
         _restore_apt_timers(target, states)
     except Exception as error:
         output.warn(
@@ -1345,7 +1451,7 @@ def _read_entry_states_with_repair(
             f"VM '{vm.name}' did not recover its canonical Tailscale route",
             entity_kind="vm",
             entity_name=vm.name,
-            hint="Use the platform console and recorded external checkpoint before resuming the upgrade.",
+            hint="Use the platform console and retained managed checkpoint before resuming the upgrade.",
         )
     return repaired, RemoteJournal(repaired).read_states(retained_pairs)
 

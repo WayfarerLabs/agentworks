@@ -556,8 +556,9 @@ reinitialize. Some platform transports also depend on the configured key; use pr
 recovery or recreate the VM when that path cannot connect.
 
 Debian distribution changes use the separate, resumable `agw vm upgrade <name>` workflow. It moves
-only from Agentworks' previous Debian release to its current release and requires an
-operator-created checkpoint that can boot. See
+only from Agentworks' previous Debian release to its current release. After local backups, it
+creates and verifies the VM's managed offline checkpoint before the first package mutation. The
+checkpoint is retained for explicit restore or deletion. See
 [Upgrading a Debian VM](../docs/guides/debian-vm-upgrades.md).
 
 Non-fatal initialization failures (packages, dotfiles) produce a `partial` status rather than

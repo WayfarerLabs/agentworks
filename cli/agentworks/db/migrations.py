@@ -659,6 +659,35 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
         ALTER TABLE vms ADD COLUMN debian_release_observed_at TEXT
             CHECK ((debian_release IS NULL) = (debian_release_observed_at IS NULL));
     """,
+    # -- One Agentworks-managed recovery checkpoint per VM. Operation -----
+    # -- identity fences interrupted lifecycle retries; the desired-state -
+    # -- fingerprint lets core refuse an unsafe whole-VM restore after ----
+    # -- the VM-owned desired database subtree has changed. ---------------
+    34: """
+        CREATE TABLE vm_checkpoints (
+            vm_name                   TEXT PRIMARY KEY
+                                      REFERENCES vms(name) ON DELETE RESTRICT,
+            name                      TEXT NOT NULL UNIQUE,
+            provider_identifier       TEXT,
+            operation_id              TEXT UNIQUE,
+            desired_state_fingerprint TEXT NOT NULL
+                                      CHECK (length(desired_state_fingerprint) = 64),
+            state                     TEXT NOT NULL
+                                      CHECK (state IN ('creating', 'ready', 'restoring', 'deleting')),
+            purpose                   TEXT NOT NULL
+                                      CHECK (purpose IN ('operator', 'debian-upgrade')),
+            capture_release           TEXT NOT NULL,
+            source_release            TEXT,
+            target_release            TEXT,
+            created_at                TEXT NOT NULL
+                                      DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            CHECK (provider_identifier IS NOT NULL OR state = 'creating'),
+            CHECK ((state = 'ready') = (operation_id IS NULL)),
+            CHECK ((source_release IS NULL) = (target_release IS NULL)),
+            CHECK ((purpose = 'debian-upgrade') = (source_release IS NOT NULL)),
+            CHECK (source_release IS NULL OR capture_release = source_release)
+        );
+    """,
 }
 
 LATEST_VERSION = max(MIGRATIONS)
@@ -768,6 +797,21 @@ _SCHEMA_SENTINEL_ADDITIONS: dict[int, dict[str, tuple[str, ...]]] = {
         )
     },
     33: {"vms": ("debian_release", "debian_release_observed_at")},
+    34: {
+        "vm_checkpoints": (
+            "vm_name",
+            "name",
+            "provider_identifier",
+            "operation_id",
+            "desired_state_fingerprint",
+            "state",
+            "purpose",
+            "capture_release",
+            "source_release",
+            "target_release",
+            "created_at",
+        )
+    },
 }
 
 _SCHEMA_SENTINEL_REMOVED_TABLES: dict[int, tuple[str, ...]] = {

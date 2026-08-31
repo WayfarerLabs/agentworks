@@ -200,11 +200,11 @@ class ExampleCloudConfig(AgwModel):
 class ExampleCloudPlatform(VMPlatform):
     name: ClassVar[str] = "example-cloud"
     description: ClassVar[str] = "Example Cloud VMs (region-scoped)"
-    contract_version: ClassVar[int] = 3
+    contract_version: ClassVar[int] = 4
     config_model: ClassVar[type[AgwModel]] = ExampleCloudConfig
 ```
 
-For vm-platform contract version 3, `create()` receives a concrete core-selected Debian release, a
+For vm-platform contract version 4, `create()` receives a concrete core-selected Debian release, a
 required Tailscale auth key, and a value-free bootstrap-progress sink in `ProvisionRequest`. The
 platform resolves the release through a local artifact map before mutation, with no default or
 fallback. It must finish the Tailscale join, probe `/etc/os-release` while backend rollback remains
@@ -214,6 +214,19 @@ missing code-owned map entry says that Agentworks or the plugin is out of date; 
 catalog miss names the exact vm-site field. A successful result may omit the Tailscale IP only when
 join succeeded but IP discovery did not; the manager then performs IP-only rediscovery and Tailscale
 SSH verification. There is no older-contract adapter.
+
+Version 4 also requires `create_checkpoint`, `list_checkpoints`, `restore_checkpoint`, and
+`delete_checkpoint`. They are not optional capability probes. Creation is offline and replay-safe by
+the core-generated `agw-*` name plus the keyword-only `operation_id` and `resume` inputs; listing
+returns only Agentworks-owned artifacts bound to the exact VM incarnation, including incomplete
+create artifacts that still require cleanup. Restore receives its own keyword-only `operation_id`,
+preserves the logical VM identity, replays only that attempt, and returns it stopped; deletion
+proves the artifact and any retained emergency intermediate are absent. Registration rejects a
+plugin that still declares version 3 or leaves a required method abstract. A concrete method that
+reports checkpoints unsupported still violates the contract, but registration cannot infer that
+semantic failure; plugin conformance tests must exercise the lifecycle. The full descriptor and
+destructive-restore rules are in
+[`../capabilities/vm_platform/README.md`](../capabilities/vm_platform/README.md).
 
 An operator-owned release catalog also overrides the pure `validate_create_release(release)` hook.
 Core calls it with the concrete selection before resolving secrets or running authenticated platform

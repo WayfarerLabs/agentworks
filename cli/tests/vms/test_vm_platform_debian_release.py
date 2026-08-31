@@ -1,4 +1,4 @@
-"""Contract-v3 Debian release selection at the VM-platform boundary."""
+"""Contract-v4 Debian release selection at the VM-platform boundary."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ from agentworks.plugins.proxmox.platform import ProxmoxConfig, ProxmoxPlatform
 from agentworks.transports import Transport
 
 
-def test_all_platforms_declare_contract_version_three() -> None:
+def test_all_platforms_declare_contract_version_four() -> None:
     assert {
         LimaPlatform.contract_version,
         WSL2Platform.contract_version,
@@ -33,7 +33,7 @@ def test_all_platforms_declare_contract_version_three() -> None:
         AzureVMPlatform.contract_version,
         GCEPlatform.contract_version,
         ProxmoxPlatform.contract_version,
-    } == {3}
+    } == {4}
 
 
 def test_every_code_owned_platform_map_has_the_trixie_selector() -> None:

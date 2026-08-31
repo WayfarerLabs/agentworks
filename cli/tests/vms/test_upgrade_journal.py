@@ -430,7 +430,7 @@ def test_initial_reboot_dispatch_refuses_uncertain_package_ownership(
         assert state.attempt_id is not None
         state = state.complete_active(state.attempt_id)
     store.write_state(pair, state)
-    monkeypatch.setattr(journal_module, "_package_locks_quiescent", lambda: False)
+    monkeypatch.setattr(journal_module, "_package_locks_clear", lambda: False)
     monkeypatch.setattr(
         subprocess,
         "Popen",
@@ -455,4 +455,4 @@ def test_reboot_lock_proof_falls_back_to_lslocks_when_fuser_is_absent(
         lambda *args, **kwargs: type("Result", (), {"returncode": 0, "stdout": ""})(),
     )
 
-    assert journal_module._package_locks_quiescent() is True
+    assert journal_module._package_locks_clear() is True

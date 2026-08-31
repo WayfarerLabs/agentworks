@@ -84,6 +84,66 @@ def test_latest_schema_enforces_atomic_debian_release_observation(tmp_path: Path
     connection.close()
 
 
+def test_version_33_advances_to_forward_checkpoint_migration_34(tmp_path: Path) -> None:
+    path = tmp_path / "state.db"
+    _build_schema(path, 33)
+    before = sqlite3.connect(path)
+    assert (
+        before.execute("SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'vm_checkpoints'").fetchone()
+        is None
+    )
+    before.close()
+
+    Database(path).close()
+
+    after = sqlite3.connect(path)
+    assert _version(path) == 34
+    columns = tuple(row[1] for row in after.execute("PRAGMA table_info(vm_checkpoints)"))
+    assert columns == (
+        "vm_name",
+        "name",
+        "provider_identifier",
+        "operation_id",
+        "desired_state_fingerprint",
+        "state",
+        "purpose",
+        "capture_release",
+        "source_release",
+        "target_release",
+        "created_at",
+    )
+    after.close()
+
+
+def test_checkpoint_schema_requires_upgrade_capture_to_equal_source(tmp_path: Path) -> None:
+    path = tmp_path / "state.db"
+    _build_schema(path, LATEST_VERSION)
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "INSERT INTO vms (name, site, hostname, template) VALUES (?, ?, ?, ?)",
+        ("release-witness", "lima-local", "lima--release-witness", None),
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        connection.execute(
+            "INSERT INTO vm_checkpoints "
+            "(vm_name, name, provider_identifier, desired_state_fingerprint, state, purpose, "
+            "capture_release, source_release, target_release) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "release-witness",
+                "agw-invalid",
+                "provider-id",
+                "a" * 64,
+                "ready",
+                "debian-upgrade",
+                "trixie",
+                "bookworm",
+                "trixie",
+            ),
+        )
+    connection.close()
+
+
 def _serialized_open_worker(
     path: Path,
     plan: object,

@@ -8,7 +8,7 @@ import sys
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 from agentworks import output
-from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
+from agentworks.capabilities.vm_platform.base import CheckpointDescriptor, ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES, generate_cloud_init
 from agentworks.capabilities.vm_platform.debian_release import (
@@ -18,6 +18,7 @@ from agentworks.capabilities.vm_platform.debian_release import (
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
 from agentworks.errors import NotFoundError, StateError
+from agentworks.plugins.azure import checkpoints
 from agentworks.plugins.azure.auth import (
     _build_ambient_credential,
     _build_service_principal_credential,
@@ -81,7 +82,7 @@ class AzureVMPlatform(VMPlatform):
     one specific Azure service, and other Azure services could plausibly
     back platforms of their own someday."""
 
-    contract_version: ClassVar[int] = 3
+    contract_version: ClassVar[int] = 4
     name: ClassVar[str] = "azure-vm"
     description: ClassVar[str] = "Azure Virtual Machines (subscription + resource group)"
     config_model: ClassVar[type[AzureVMConfig]] = AzureVMConfig
@@ -106,6 +107,15 @@ class AzureVMPlatform(VMPlatform):
         Azure retains a credential-free bootstrap payload. After cloud-init is ready,
         creation sends the required Tailscale key through one fixed SSH command on stdin
         and returns only after join succeeds. Failure rolls the new Azure resources back.
+
+        Managed checkpoints snapshot the OS disk and restore through a replacement
+        managed disk on the same deallocated VM. The site identity needs Azure actions
+        for `Microsoft.Compute/snapshots/read`, `write`, and `delete`;
+        `Microsoft.Compute/disks/read`, `write`, and `delete`; and
+        `Microsoft.Compute/virtualMachines/read`, `write`, `start/action`,
+        `deallocate/action`, and `instanceView/read`. Snapshot storage and retained
+        emergency managed disks consume regional quota and incur charges until the
+        checkpoint is deleted.
 
         Ships as the opt-in `azure` system plugin, so a site stays not-ready until
         `[plugins] system` lists it.
@@ -744,6 +754,64 @@ class AzureVMPlatform(VMPlatform):
         # row is orphaned with nothing left to target it.
         verify_vm_deleted(compute, rg, name, vm_delete_exc)
         output.info(f"Azure VM '{vm.name}' deleted")
+
+    def create_checkpoint(
+        self,
+        vm: VMRow,
+        name: str,
+        ctx: RunContext,
+        *,
+        operation_id: str,
+        resume: bool,
+    ) -> CheckpointDescriptor:
+        rg, vm_name, az_cfg = _parse_resource_id(_resource_id(vm))
+        return checkpoints.create_checkpoint(
+            self._compute_client(az_cfg, ctx),
+            resource_group=rg,
+            vm_name=vm_name,
+            name=name,
+            operation_id=operation_id,
+            resume=resume,
+        )
+
+    def list_checkpoints(self, vm: VMRow, ctx: RunContext) -> tuple[CheckpointDescriptor, ...]:
+        rg, vm_name, az_cfg = _parse_resource_id(_resource_id(vm))
+        return checkpoints.list_checkpoints(
+            self._compute_client(az_cfg, ctx),
+            resource_group=rg,
+            vm_name=vm_name,
+        )
+
+    def restore_checkpoint(
+        self,
+        vm: VMRow,
+        checkpoint: CheckpointDescriptor,
+        ctx: RunContext,
+        *,
+        operation_id: str,
+    ) -> None:
+        rg, vm_name, az_cfg = _parse_resource_id(_resource_id(vm))
+        checkpoints.restore_checkpoint(
+            self._compute_client(az_cfg, ctx),
+            resource_group=rg,
+            vm_name=vm_name,
+            checkpoint=checkpoint,
+            operation_id=operation_id,
+        )
+
+    def delete_checkpoint(
+        self,
+        vm: VMRow,
+        checkpoint: CheckpointDescriptor,
+        ctx: RunContext,
+    ) -> None:
+        rg, vm_name, az_cfg = _parse_resource_id(_resource_id(vm))
+        checkpoints.delete_checkpoint(
+            self._compute_client(az_cfg, ctx),
+            resource_group=rg,
+            vm_name=vm_name,
+            checkpoint=checkpoint,
+        )
 
     # The route-state helpers below are thin delegates into the network
     # module (which owns the mechanics and full docstrings). They stay

@@ -18,7 +18,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentworks.db import AppliedStateKey, VersionedPayload
+from agentworks.db import (
+    AppliedStateKey,
+    VersionedPayload,
+    VMCheckpointPurpose,
+    VMCheckpointState,
+)
+from agentworks.debian import DebianRelease
 from agentworks.errors import BackupError, StateError
 from agentworks.instance_specs import parse_vm_instance_specs
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -227,6 +233,60 @@ def test_backup_does_not_decode_an_unrelated_malformed_applied_payload(
     assert [(record["instance_name"], record["key"]) for record in applied] == [("bvm", "hardware-provenance")]
 
 
+def test_backup_exports_managed_checkpoint_metadata(
+    db: Database,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db.insert_vm("bvm", site="lima-local", hostname="bvm")
+    db.update_vm_tailscale("bvm", "100.64.0.8")
+    db.insert_vm_checkpoint(
+        vm_name="bvm",
+        name="agw-checkpoint",
+        operation_id="create-checkpoint",
+        desired_state_fingerprint="a" * 64,
+        purpose=VMCheckpointPurpose.DEBIAN_UPGRADE,
+        capture_release=DebianRelease.BOOKWORM,
+        source_release=DebianRelease.BOOKWORM,
+        target_release=DebianRelease.TRIXIE,
+    )
+    assert db.complete_vm_checkpoint(
+        "bvm",
+        expected_state=VMCheckpointState.CREATING,
+        operation_id="create-checkpoint",
+        provider_identifier="snapshot-123",
+    )
+    checkpoint = db.get_vm_checkpoint("bvm")
+    assert checkpoint is not None
+    _install_metadata_only_backup_fakes(monkeypatch)
+    config = SimpleNamespace(paths=SimpleNamespace(backups=tmp_path))
+
+    destination = vm_backup.backup_vm(
+        db,
+        config,  # type: ignore[arg-type]
+        "bvm",
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+
+    manifest = loads((destination / "manifest.json").read_text(encoding="utf-8"))
+    exported = loads((destination / "checkpoint.json").read_text(encoding="utf-8"))
+    assert manifest["version"] == 5
+    assert manifest["checkpoint_present"] is True
+    assert exported == {
+        "vm_name": "bvm",
+        "name": "agw-checkpoint",
+        "provider_identifier": "snapshot-123",
+        "operation_id": None,
+        "desired_state_fingerprint": "a" * 64,
+        "state": "ready",
+        "purpose": "debian-upgrade",
+        "capture_release": "bookworm",
+        "source_release": "bookworm",
+        "target_release": "trixie",
+        "created_at": checkpoint.created_at,
+    }
+
+
 @pytest.mark.parametrize("legacy", [False, True], ids=("composite-v2", "legacy-flat-v1"))
 @pytest.mark.skipif(os.name == "nt", reason="native Windows intentionally refuses overlay-bearing backups")
 def test_vm_backup_exports_versioned_instance_specs(
@@ -292,7 +352,8 @@ def test_vm_backup_exports_versioned_instance_specs(
     manifest = loads((destination / "manifest.json").read_text(encoding="utf-8"))
     specs = loads((destination / "instance-specs.json").read_text(encoding="utf-8"))
     applied = loads((destination / "instance-applied-state.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == 4
+    assert manifest["version"] == 5
+    assert manifest["checkpoint_present"] is False
     assert manifest["instance_spec_count"] == 1
     assert manifest["applied_state_count"] == 2
     expected_value = (

@@ -176,7 +176,7 @@ class _NotAPlatform:
     nothing of the vm-platform contract. This is the class the old
     ``isinstance(impl, type)`` gate and ``cast`` waved through."""
 
-    contract_version = 3
+    contract_version = 4
     name = "not-a-platform"
     description = "has the metadata and none of the contract"
 
@@ -188,7 +188,7 @@ class _PlatformWithoutAConfigModel(ConformingVMPlatform):
 
     name = "no-config-model-platform"
     description = "declares no config model"
-    contract_version = 3
+    contract_version = 4
     config_model = None  # type: ignore[assignment]
 
 
@@ -196,7 +196,7 @@ class _AbstractPlatform(VMPlatform):
     """Derives from the contract but implements none of its power ops, so it
     can never be constructed."""
 
-    contract_version = 3
+    contract_version = 4
     name = "abstract-platform"
     description = "abstract: no power ops implemented"
 

@@ -345,6 +345,16 @@ def _batch_vm_boundary_impl(
         return _resolve
 
     with contextlib.ExitStack() as stack:
+        from agentworks.vms.manager.operation_guard import shared_vm_operation_guard
+
+        for vm in sorted(vms, key=lambda item: item.name):
+            stack.enter_context(
+                shared_vm_operation_guard(
+                    db,
+                    vm.name,
+                    operation="operate on sessions",
+                )
+            )
         for vm_node in vm_nodes:
             stack.enter_context(activation_gate(vm_node, _gate_resolver(vm_node)))
         yield

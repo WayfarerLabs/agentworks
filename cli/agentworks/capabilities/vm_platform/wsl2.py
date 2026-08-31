@@ -6,6 +6,7 @@ import contextlib
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 import urllib.request
@@ -13,7 +14,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from agentworks import output
-from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
+from agentworks.capabilities.vm_platform.base import (
+    CheckpointDescriptor,
+    ProvisionRequest,
+    ProvisionResult,
+    VMPlatform,
+)
 from agentworks.capabilities.vm_platform.debian_release import (
     code_owned_release_value,
     verify_provisioned_release,
@@ -187,6 +193,11 @@ def _cache_dir() -> Path:
     return _local_app_data() / "agentworks" / "cache"
 
 
+def _checkpoint_root() -> Path:
+    """Private host-side storage for Agentworks-managed WSL exports."""
+    return _local_app_data() / "agentworks" / "checkpoints" / "wsl2"
+
+
 def _ps_quote(path: Path | str) -> str:
     """Quote a path for safe inclusion in a PowerShell single-quoted string."""
     return "'" + str(path).replace("'", "''") + "'"
@@ -199,6 +210,9 @@ _DOCKER_BLOBS_URL = "https://registry-1.docker.io/v2/library/debian/blobs"
 _DEBIAN_OCI_TAGS: dict[DebianRelease, str] = {
     DebianRelease.TRIXIE: "trixie",
 }
+_MANAGED_CHECKPOINT_NAME = re.compile(r"agw-[a-z0-9](?:[a-z0-9-]*[a-z0-9])?")
+_SAFE_DISTRO_NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?")
+_CHECKPOINT_TIMEOUT_SECONDS = 3600
 
 # Map Python's platform.machine() to OCI architecture names
 _ARCH_MAP = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}
@@ -497,7 +511,7 @@ class Wsl2Config(AgwModel):
 class WSL2Platform(VMPlatform):
     """Runs VMs as WSL2 Debian distributions on Windows."""
 
-    contract_version: ClassVar[int] = 3
+    contract_version: ClassVar[int] = 4
     name: ClassVar[str] = "wsl2"
     description: ClassVar[str] = "WSL2 Debian distributions on Windows"
     config_model: ClassVar[type[Wsl2Config]] = Wsl2Config
@@ -887,6 +901,257 @@ class WSL2Platform(VMPlatform):
         output.info(f"Unregistering WSL2 distro '{vm.name}'...")
         self._teardown_distro(self._distro_name(vm))
         output.info(f"WSL2 distro '{vm.name}' deleted")
+
+    @staticmethod
+    def _require_checkpoint_name(name: str, *, vm_name: str) -> str:
+        """Validate a checkpoint name crossing a durable/filesystem boundary."""
+        if _MANAGED_CHECKPOINT_NAME.fullmatch(name) is None:
+            raise StateError(
+                f"WSL2 checkpoint name {name!r} is not an Agentworks-managed name",
+                entity_kind="vm",
+                entity_name=vm_name,
+            )
+        return name
+
+    def _checkpoint_dir(self, vm: VMRow, *, create: bool) -> Path | None:
+        distro_name = self._distro_name(vm)
+        if _SAFE_DISTRO_NAME.fullmatch(distro_name) is None:
+            raise StateError(
+                f"WSL2 distro name {distro_name!r} cannot safely identify checkpoint storage",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+        base = _local_app_data() / "agentworks"
+        path = base
+        for child in ("checkpoints", "wsl2", distro_name):
+            if path.is_symlink() or (path.exists() and not path.is_dir()):
+                raise StateError(
+                    f"WSL2 checkpoint storage for VM '{vm.name}' is not a private directory",
+                    entity_kind="vm",
+                    entity_name=vm.name,
+                )
+            if not path.exists():
+                if not create:
+                    return None
+                path.mkdir(mode=0o700)
+            path = path / child
+        if path.is_symlink() or (path.exists() and not path.is_dir()):
+            raise StateError(
+                f"WSL2 checkpoint storage for VM '{vm.name}' is not a private directory",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+        if not path.exists():
+            if not create:
+                return None
+            path.mkdir(mode=0o700)
+        return path
+
+    def _checkpoint_paths(self, vm: VMRow, name: str, *, create_dir: bool) -> tuple[Path, Path]:
+        name = self._require_checkpoint_name(name, vm_name=vm.name)
+        directory = self._checkpoint_dir(vm, create=create_dir)
+        if directory is None:
+            directory = _checkpoint_root() / self._distro_name(vm)
+        return directory / f"{name}.tar", directory / f"{name}.pre-restore.tar"
+
+    def _checkpoint_identifier(self, vm: VMRow, name: str) -> str:
+        return f"wsl2:{self._distro_name(vm)}:{name}"
+
+    @staticmethod
+    def _complete_export(path: Path) -> bool:
+        return not path.is_symlink() and path.is_file() and path.stat().st_size > 0
+
+    def _export_distro(self, vm: VMRow, destination: Path) -> None:
+        """Export atomically without replacing an already-proved artifact."""
+        if destination.exists() or destination.is_symlink():
+            if self._complete_export(destination):
+                return
+            raise StateError(
+                f"WSL2 checkpoint artifact '{destination.name}' is incomplete",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+        partial = destination.with_name(destination.name + ".partial")
+        if partial.is_symlink():
+            raise StateError(
+                f"WSL2 checkpoint staging path '{partial.name}' is not safe",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+        if partial.exists():
+            partial.unlink()
+        _wsl(
+            ["--export", self._distro_name(vm), str(partial)],
+            timeout=_CHECKPOINT_TIMEOUT_SECONDS,
+        )
+        if not self._complete_export(partial):
+            raise StateError(
+                f"WSL2 did not produce a complete export for VM '{vm.name}'",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+        partial.chmod(0o600)
+        try:
+            os.link(partial, destination)
+        except FileExistsError as e:
+            raise StateError(
+                f"WSL2 checkpoint artifact '{destination.name}' appeared during export",
+                entity_kind="vm",
+                entity_name=vm.name,
+            ) from e
+        partial.unlink()
+
+    def _require_checkpoint_vm_stopped(self, vm: VMRow, ctx: RunContext) -> None:
+        if self.status(vm, ctx) is VMStatus.STOPPED:
+            return
+        raise StateError(
+            f"WSL2 distro '{vm.name}' must be stopped for this checkpoint operation",
+            entity_kind="vm",
+            entity_name=vm.name,
+        )
+
+    def create_checkpoint(
+        self,
+        vm: VMRow,
+        name: str,
+        ctx: RunContext,
+        *,
+        operation_id: str,
+        resume: bool,
+    ) -> CheckpointDescriptor:
+        del operation_id, resume
+        name = self._require_checkpoint_name(name, vm_name=vm.name)
+        self._require_checkpoint_vm_stopped(vm, ctx)
+        descriptor = CheckpointDescriptor(name=name, identifier=self._checkpoint_identifier(vm, name))
+        checkpoint, _ = self._checkpoint_paths(vm, name, create_dir=True)
+        if self._complete_export(checkpoint):
+            return descriptor
+        self._export_distro(vm, checkpoint)
+        if not self._complete_export(checkpoint):
+            raise StateError(
+                f"WSL2 did not report completed checkpoint '{name}'",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+        return descriptor
+
+    def list_checkpoints(self, vm: VMRow, ctx: RunContext) -> tuple[CheckpointDescriptor, ...]:
+        del ctx
+        directory = self._checkpoint_dir(vm, create=False)
+        if directory is None:
+            return ()
+        names: set[str] = set()
+        for path in directory.iterdir():
+            filename = path.name
+            if filename.endswith(".tar.partial"):
+                name = filename.removesuffix(".tar.partial")
+            elif filename.endswith(".tar") and not filename.endswith(".pre-restore.tar"):
+                name = filename.removesuffix(".tar")
+            else:
+                continue
+            if _MANAGED_CHECKPOINT_NAME.fullmatch(name) is None:
+                continue
+            if path.is_symlink() or not path.is_file():
+                raise StateError(
+                    f"WSL2 checkpoint path '{filename}' is not a regular managed artifact",
+                    entity_kind="vm",
+                    entity_name=vm.name,
+                )
+            names.add(name)
+        return tuple(
+            CheckpointDescriptor(name=name, identifier=self._checkpoint_identifier(vm, name)) for name in sorted(names)
+        )
+
+    def restore_checkpoint(
+        self,
+        vm: VMRow,
+        checkpoint: CheckpointDescriptor,
+        ctx: RunContext,
+        *,
+        operation_id: str,
+    ) -> None:
+        del operation_id
+        name = self._require_checkpoint_name(checkpoint.name, vm_name=vm.name)
+        expected = CheckpointDescriptor(name=name, identifier=self._checkpoint_identifier(vm, name))
+        if checkpoint != expected or expected not in self.list_checkpoints(vm, ctx):
+            raise StateError(
+                f"WSL2 checkpoint '{name}' is missing or is not owned by this VM",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+        artifact, emergency = self._checkpoint_paths(vm, name, create_dir=False)
+        distro_name = self._distro_name(vm)
+        if self._distro_exists(distro_name):
+            self._require_checkpoint_vm_stopped(vm, ctx)
+            self._export_distro(vm, emergency)
+        elif not self._complete_export(emergency):
+            raise StateError(
+                f"WSL2 distro '{vm.name}' is absent without a recoverable restore intermediate",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+
+        install_path = _wsl_base_path() / distro_name
+        _wsl(["--unregister", distro_name], check=False)
+        if self._distro_exists(distro_name):
+            raise StateError(
+                f"WSL2 could not unregister distro '{vm.name}' before checkpoint restore",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+        _powershell(
+            f"Remove-Item -Recurse -Force -Path {_ps_quote(install_path)} -ErrorAction SilentlyContinue",
+            check=False,
+        )
+        _powershell(f"New-Item -ItemType Directory -Force -Path {_ps_quote(install_path)}")
+        _wsl(
+            ["--import", distro_name, str(install_path), str(artifact), "--version", "2"],
+            timeout=_CHECKPOINT_TIMEOUT_SECONDS,
+        )
+        _wsl(["--terminate", distro_name], check=False)
+        if not self._distro_exists(distro_name) or self.status(vm, ctx) is not VMStatus.STOPPED:
+            raise StateError(
+                f"WSL2 checkpoint restore did not leave VM '{vm.name}' registered and stopped",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+
+    def delete_checkpoint(
+        self,
+        vm: VMRow,
+        checkpoint: CheckpointDescriptor,
+        ctx: RunContext,
+    ) -> None:
+        del ctx
+        name = self._require_checkpoint_name(checkpoint.name, vm_name=vm.name)
+        expected_identifier = self._checkpoint_identifier(vm, name)
+        if checkpoint.identifier != expected_identifier:
+            raise StateError(
+                f"WSL2 checkpoint '{name}' has a conflicting provider identifier",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+        artifact, emergency = self._checkpoint_paths(vm, name, create_dir=False)
+        for path in (
+            artifact,
+            emergency,
+            artifact.with_name(artifact.name + ".partial"),
+            emergency.with_name(emergency.name + ".partial"),
+        ):
+            if path.is_symlink():
+                raise StateError(
+                    f"WSL2 checkpoint path '{path.name}' is not safe to delete",
+                    entity_kind="vm",
+                    entity_name=vm.name,
+                )
+            if path.exists():
+                path.unlink()
+        if artifact.exists() or emergency.exists():
+            raise StateError(
+                f"WSL2 checkpoint '{name}' still exists after deletion",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
 
     def display_backend_name(self, vm: VMRow) -> str:
         return str(vm.platform_metadata.get("distro_name", vm.name))

@@ -90,6 +90,42 @@ def _gated_vm_boundary(
     scope: OperationScope | None = None,
     interaction: TtyInteractionPolicy,
 ) -> Iterator[tuple[LiveVMNode, Resolver, RunContext]]:
+    """Hold the shared VM-operation guard across a gated command span."""
+
+    from .operation_guard import shared_vm_operation_guard
+
+    with (
+        shared_vm_operation_guard(
+            db,
+            vm.name,
+            operation="activate or operate on VM",
+        ),
+        _gated_vm_boundary_unlocked(
+            db,
+            config,
+            registry,
+            vm,
+            targets=targets,
+            secret_names=secret_names,
+            scope=scope,
+            interaction=interaction,
+        ) as boundary,
+    ):
+        yield boundary
+
+
+@contextlib.contextmanager
+def _gated_vm_boundary_unlocked(
+    db: Database,
+    config: Config,
+    registry: Registry,
+    vm: VMRow,
+    *,
+    targets: Sequence[SecretTarget] = (),
+    secret_names: Sequence[str] = (),
+    scope: OperationScope | None = None,
+    interaction: TtyInteractionPolicy,
+) -> Iterator[tuple[LiveVMNode, Resolver, RunContext]]:
     """Compose a gated VM span after its caller selects SSH policy.
 
     This is the gate-opening commands' shared implementation (vm/agent

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from agentworks import output
-from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
+from agentworks.capabilities.vm_platform.base import CheckpointDescriptor, ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.debian_release import (
@@ -21,6 +21,7 @@ from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs,
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
 from agentworks.errors import AgentworksError, ConnectivityError, StateError
+from agentworks.plugins.gcp import checkpoints
 from agentworks.plugins.gcp.auth import GcpClientCache
 from agentworks.plugins.gcp.bootstrap import (
     GCE_READINESS_COMMAND,
@@ -180,7 +181,7 @@ class _VMIdentity:
 class GCEPlatform(VMPlatform):
     """Runs VMs on Google Compute Engine with provider-ID-owned cleanup."""
 
-    contract_version: ClassVar[int] = 3
+    contract_version: ClassVar[int] = 4
     name: ClassVar[str] = "gcp-gce"
     description: ClassVar[str] = "Google Compute Engine (project + zone)"
     config_model: ClassVar[type[GcpGCEConfig]] = GcpGCEConfig
@@ -551,6 +552,76 @@ class GCEPlatform(VMPlatform):
             )
         if not report.clean:
             output.warn(guidance)
+
+    def create_checkpoint(
+        self,
+        vm: VMRow,
+        name: str,
+        ctx: RunContext,
+        *,
+        operation_id: str,
+        resume: bool,
+    ) -> CheckpointDescriptor:
+        identity = _VMIdentity.from_row(vm)
+        return checkpoints.create_checkpoint(
+            self._clients,
+            ctx,
+            project_id=identity.project_id,
+            zone=identity.zone,
+            instance_name=identity.instance_name,
+            instance_id=identity.instance_id,
+            name=name,
+            operation_id=operation_id,
+            resume=resume,
+        )
+
+    def list_checkpoints(self, vm: VMRow, ctx: RunContext) -> tuple[CheckpointDescriptor, ...]:
+        identity = _VMIdentity.from_row(vm)
+        return checkpoints.list_checkpoints(
+            self._clients,
+            ctx,
+            project_id=identity.project_id,
+            zone=identity.zone,
+            instance_name=identity.instance_name,
+            instance_id=identity.instance_id,
+        )
+
+    def restore_checkpoint(
+        self,
+        vm: VMRow,
+        checkpoint: CheckpointDescriptor,
+        ctx: RunContext,
+        *,
+        operation_id: str,
+    ) -> None:
+        identity = _VMIdentity.from_row(vm)
+        checkpoints.restore_checkpoint(
+            self._clients,
+            ctx,
+            project_id=identity.project_id,
+            zone=identity.zone,
+            instance_name=identity.instance_name,
+            instance_id=identity.instance_id,
+            checkpoint=checkpoint,
+            operation_id=operation_id,
+        )
+
+    def delete_checkpoint(
+        self,
+        vm: VMRow,
+        checkpoint: CheckpointDescriptor,
+        ctx: RunContext,
+    ) -> None:
+        identity = _VMIdentity.from_row(vm)
+        checkpoints.delete_checkpoint(
+            self._clients,
+            ctx,
+            project_id=identity.project_id,
+            zone=identity.zone,
+            instance_name=identity.instance_name,
+            instance_id=identity.instance_id,
+            checkpoint=checkpoint,
+        )
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
         identity = _VMIdentity.from_row(vm)
