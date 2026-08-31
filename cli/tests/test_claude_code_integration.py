@@ -524,7 +524,7 @@ def test_readiness_probes_claude() -> None:
 
 def test_readiness_missing_claude_is_a_typed_error() -> None:
     harness_integration = _harness_integration()
-    target = _FakeTarget({"command -v claude": _FakeResult(1)})
+    target = _FakeTarget({"command -v claude": _FakeResult(20)})
     ctx = RunContext(operation_scope=_session_scope(), admin_target=target)
     with pytest.raises(StateError, match="'claude-code' harness integration.*requires 'claude'"):
         harness_integration.preflight(ctx)

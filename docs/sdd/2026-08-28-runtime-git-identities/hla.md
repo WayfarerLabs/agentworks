@@ -201,12 +201,22 @@ optional validation work. The current provider-specific HTTP probes and caller p
 
 - multi-credential initialization skips a definitively rejected static token and records partial;
 - network indeterminacy warns and continues;
-- current CLI-backed arms check target-user command presence and read-only authentication health,
-  suppress all CLI output, and warn without preventing helper installation.
+- current CLI-backed arms use the shared `check_required_commands` mechanism in the target user's
+  login/interactive shell, then run provider-owned read-only authentication checks in that same
+  environment; they suppress all CLI output and warn without preventing helper installation.
 
 GitHub uses `gh auth status --active --hostname github.com`, which checks only the account used by
 the runtime token command. Azure uses `az account show` and does not request an Azure DevOps token.
-Disabling runup skips both secret and CLI checks. Preflight remains dependency-blind and unchanged.
+The shared target-user shell runner uses a fixed descriptor status channel so a shell-startup
+failure remains indeterminate instead of colliding with a reserved command result. The providers
+treat only their explicit authentication-failure status as unhealthy and every other nonzero status
+as indeterminate. The transport's existing output-discarding execution path prevents outer and inner
+shell-startup or CLI output from reaching returned results and command logs. Its dedicated
+`discard_output` option sends both streams directly to the null device while preserving ordinary TTY
+selection and the exit status. A command can become visible during later install/profile steps, so
+an absent-command warning describes the current point in initialization and asks for a later
+verification rather than claiming final misconfiguration. Disabling runup skips both secret and CLI
+checks. Preflight remains dependency-blind and unchanged.
 
 ### Materialization
 
@@ -283,7 +293,7 @@ reversible write. The exact command and prior-art evidence live in the LLD and r
 | Missing declared secret                    | resolution   | existing secret-resolution failure                          |
 | Provider rejects or cannot materialize     | runup/op     | existing skip/partial or initialization failure semantics   |
 | Static probe network indeterminate         | runup        | warning; helper is installed                                |
-| CLI absent or unauthenticated at runup     | runup        | value-safe warning; managed helper is still installed       |
+| CLI absent, unauthenticated, indeterminate | runup        | value-safe warning; managed helper is still installed       |
 | required command absent/helper fails       | Git runtime  | nonzero helper with fixed value-safe diagnostic             |
 | Shared/exclusive lock contention           | runtime/init | bounded failure with fixed value-safe retry guidance        |
 | CLI token empty, malformed, or timed out   | Git runtime  | nonzero helper with fixed value-safe diagnostic             |

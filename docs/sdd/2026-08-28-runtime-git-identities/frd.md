@@ -25,9 +25,10 @@ effects. It later validates the returned payload shape and reconciles every Agen
 and Git configuration artifact, including the transition to no configured credentials.
 
 Secret-backed tokens retain their current runup validation. CLI-backed providers use the same
-optional runup stage for a read-only check of the target user's current CLI readiness while always
-installing their helper. The helper still acquires the final credential only at Git-operation time
-and returns a clear, value-safe failure if readiness later changes.
+optional runup stage for a read-only check in the target user's login/interactive shell while always
+installing their helper. The check reports only the state at that point in initialization. The
+helper still acquires the final credential only at Git-operation time and returns a clear,
+value-safe failure if readiness later changes.
 
 ## Goals
 
@@ -151,11 +152,18 @@ acquisition.
 ### R4: Runtime CLI acquisition
 
 For `gh-cli` and `az-cli`, provider runup MUST perform a read-only check in the current target-user
-environment when runup is enabled. GitHub MUST distinguish a missing `gh` from an unsuccessful
-`gh auth status --active --hostname github.com`; Azure MUST distinguish a missing `az` from an
-unsuccessful `az account show`. The checks MUST suppress arbitrary CLI output, MUST NOT authenticate
-or mutate identity state, and MUST be advisory: core still installs the returned helper on every
-readiness outcome. Azure runup MUST NOT request an Azure DevOps access token.
+login/interactive shell environment when runup is enabled. One generic target-user command check
+MUST report required commands that are absent and MUST treat any other lookup result as
+indeterminate without exposing transport output. GitHub MUST distinguish a missing `gh` from an
+unsuccessful `gh auth status --active --hostname github.com`; Azure MUST distinguish a missing `az`
+from an unsuccessful `az account show`. Only the provider's explicit authentication-failure status
+is unhealthy; every other nonzero status is indeterminate. Shell-startup failure MUST also be
+indeterminate rather than colliding with a reserved command result. The outer target-user shell
+boundary MUST suppress arbitrary startup and CLI output, MUST NOT authenticate or mutate identity
+state, and MUST be advisory: core still installs the returned helper on every readiness outcome.
+Command absence is a point-in-time result before later user-install and profile steps, so recovery
+MUST tell the operator to verify again after initialization when appropriate. Azure runup MUST NOT
+request an Azure DevOps access token.
 
 The managed-helper definition MUST contain the provider-owned helper program and a fixed,
 actionable, value-safe failure hint. Core installs and invokes that program but does not model or

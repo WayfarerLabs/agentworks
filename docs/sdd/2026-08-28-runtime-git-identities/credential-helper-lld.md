@@ -213,15 +213,27 @@ configured arm has optional readiness work:
 
 ```text
 current secret arm -> provider performs its existing authenticated probe
-current CLI arm    -> provider checks command presence and read-only authentication health
+current CLI arm    -> shared command lookup, then provider-owned read-only authentication health
 ```
 
 A definitive secret rejection retains current skip/warn/partial semantics. Network indeterminacy
-warns and continues. CLI readiness failure also warns and continues to helper materialization.
-GitHub checks `gh auth status --active --hostname github.com`, restricting status and its exit code
-to the account used by the runtime token command. Azure checks `az account show` without minting an
-Azure DevOps token. Both suppress arbitrary process output. Disabling runup skips optional
-validation only; it never skips materialization.
+warns and continues. CLI readiness failure also warns and continues to helper materialization. The
+neutral `check_required_commands` mechanism checks the target user's login/interactive shell and
+returns only absent command names; an unexpected result fails value-safely as indeterminate. The
+runner captures the inner command status through one fixed descriptor and sets the transport's
+`discard_output` option. Every transport sends both process streams directly to the null device,
+returns and logs empty streams, and preserves its ordinary TTY selection and the command exit
+status. The option is mutually exclusive with sensitive `input_text`, whose separate transport
+contract already suppresses returned and logged output. Output from both the transport's outer shell
+and the explicit inner login shell therefore cannot enter returned results or command logs.
+Missing/malformed status or shell-startup failure maps to indeterminate, so a startup exit cannot
+impersonate reserved status 20 or 21. GitHub then checks
+`gh auth status --active --hostname github.com`, restricting status and its exit code to the account
+used by the runtime token command. Azure checks `az account show` without minting an Azure DevOps
+token. Each provider maps the CLI's ordinary failure status 1 to reserved status 21; other nonzero
+statuses are indeterminate. Because runup precedes later user-install/profile steps, an absent
+command is reported as the current state with later verification guidance. Disabling runup skips
+optional validation only; it never skips materialization.
 
 ## Built-in Provider Output
 

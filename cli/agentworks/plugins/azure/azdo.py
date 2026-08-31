@@ -14,6 +14,7 @@ from agentworks.capabilities.git_credential.base import (
     StoredCredential,
     require_line_safe_credential_input,
 )
+from agentworks.command_checks import check_required_commands, run_user_shell_command
 from agentworks.schema import AgwModel, NonEmptyStr, SecretRef
 from agentworks.topics import TopicProse
 
@@ -64,9 +65,12 @@ _AZ_FAILURE_HINT = (
     "for this user, then authenticate an identity with access to the configured Azure DevOps organization"
 )
 
-_AZ_READINESS = """
-command -v az >/dev/null 2>&1 || exit 20
-az account show --output none >/dev/null 2>&1 || exit 21
+_AZ_AUTH_CHECK = """
+az account show --output none
+command_status=$?
+[ "$command_status" -eq 0 ] && exit 0
+[ "$command_status" -eq 1 ] && exit 21
+exit 22
 """
 
 
@@ -141,22 +145,27 @@ class AzDOCredentialProvider(GitCredentialProvider):
         if target is None:
             raise StateError("Azure CLI runup requires a current user target")
         try:
-            result = target.run(_AZ_READINESS, check=False, timeout=10)
+            missing = check_required_commands(("az",), target, timeout=10)
+            if missing:
+                output.warn(
+                    f"Azure CLI credentials are currently unavailable for git-credential/{self.owner_name}; "
+                    "'az' is not visible at this point in initialization. Verify again after initialization "
+                    "if it is installed later, or install it for the target user"
+                )
+                return
+            result = run_user_shell_command(_AZ_AUTH_CHECK, target, timeout=10)
         except SSHError:
-            output.warn(f"Could not check Azure CLI readiness for git-credential/{self.owner_name}")
+            output.warn(f"Could not determine Azure CLI readiness for git-credential/{self.owner_name}")
             return
         if result.returncode == 0:
             output.detail(f"Verified Azure CLI readiness for git-credential/{self.owner_name}")
-        elif result.returncode == 20:
+        elif result.returncode == 21:
             output.warn(
                 f"Azure CLI credentials are currently unavailable for git-credential/{self.owner_name}; "
-                "the target user must install 'az' on PATH and authenticate it as the intended identity"
+                "the target user must authenticate the intended identity with the appropriate 'az login' form"
             )
         else:
-            output.warn(
-                f"Azure CLI credentials are currently unavailable for git-credential/{self.owner_name}; "
-                "the target user must authenticate 'az' as the intended identity"
-            )
+            output.warn(f"Could not determine Azure CLI readiness for git-credential/{self.owner_name}")
 
     def _verify_token(self, token: str, *, secret_name: str) -> None:
         import base64

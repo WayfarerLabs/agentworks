@@ -93,10 +93,12 @@ a stored credential or a managed helper.
 
 ### GitHub CLI
 
-When runup is enabled, `source.mode: gh-cli` checks whether `gh` exists and whether
-`gh auth status --active --hostname github.com` succeeds for the identity the runtime token command
-will use. The check is read-only and advisory: arbitrary CLI output is suppressed and the managed
-helper is installed even when the check warns. On each matching Git `get`, that helper runs exactly:
+When runup is enabled, `source.mode: gh-cli` checks the target user's login/interactive shell for
+`gh`, then checks whether `gh auth status --active --hostname github.com` succeeds for the identity
+the runtime token command will use. The check is read-only and advisory: arbitrary CLI output is
+suppressed and the managed helper is installed even when the check warns. The readiness check
+requires GitHub CLI 2.57.0 or newer for `--active`. On each matching Git `get`, that helper runs
+exactly:
 
 ```text
 GH_PROMPT_DISABLED=1 gh auth token --hostname github.com
@@ -109,10 +111,10 @@ and the freshly acquired token as the password.
 
 ### Azure CLI
 
-When runup is enabled, `source.mode: az-cli` checks whether `az` exists and whether
-`az account show` succeeds in the current target-user environment. It does not request an Azure
-DevOps token during runup, and a warning does not prevent helper installation. Its managed helper
-runs exactly:
+When runup is enabled, `source.mode: az-cli` checks the target user's login/interactive shell for
+`az`, then checks whether `az account show` succeeds in the current target-user environment. It does
+not request an Azure DevOps token during runup, and a warning does not prevent helper installation.
+Its managed helper runs exactly:
 
 ```text
 az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 --query accessToken --output tsv
@@ -125,12 +127,14 @@ after authentication changes. The provider returns the configured organization a
 fresh access token as password. The helper neither selects nor mutates Azure tenant or subscription
 state.
 
-If a CLI is absent or unauthenticated during enabled runup, initialization warns but still installs
-the helper. If it is absent, unauthenticated, times out, or returns malformed output at Git runtime,
-the wrapper suppresses its stdout and stderr and prints only the provider's fixed recovery hint.
-Authenticate or repair the target user's CLI identity and retry Git; reinitialization is needed only
-when the manifest or generated helper changes. Setting `defaults.runup_git_credentials = false`
-skips both secret-source verification and these CLI readiness checks, not helper installation.
+If a CLI is not visible at this point in initialization, or its authentication check fails or is
+indeterminate, initialization warns but still installs the helper. Later user-install/profile steps
+may make a CLI visible, so verify again after initialization when applicable. If it is absent,
+unauthenticated, times out, or returns malformed output at Git runtime, the wrapper suppresses its
+stdout and stderr and prints only the provider's fixed recovery hint. Authenticate or repair the
+target user's CLI identity and retry Git; reinitialization is needed only when the manifest or
+generated helper changes. Setting `defaults.runup_git_credentials = false` skips both secret-source
+verification and these CLI readiness checks, not helper installation.
 
 ## Scope and selection
 

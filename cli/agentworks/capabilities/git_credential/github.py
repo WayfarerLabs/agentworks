@@ -15,6 +15,7 @@ from agentworks.capabilities.git_credential.base import (
     StoredCredential,
     require_line_safe_credential_input,
 )
+from agentworks.command_checks import check_required_commands, run_user_shell_command
 from agentworks.schema import AgwModel, NonEmptyStr, SecretRef
 from agentworks.topics import TopicProse
 
@@ -87,9 +88,14 @@ _GH_FAILURE_HINT = (
     "for this user, then authenticate the intended github.com identity"
 )
 
-_GH_READINESS = """
-command -v gh >/dev/null 2>&1 || exit 20
-GH_PROMPT_DISABLED=1 gh auth status --active --hostname github.com >/dev/null 2>&1 || exit 21
+_GH_AUTH_CHECK = """
+help=$(gh auth status --help) || exit 22
+case "$help" in *--active*) ;; *) exit 22 ;; esac
+GH_PROMPT_DISABLED=1 gh auth status --active --hostname github.com
+command_status=$?
+[ "$command_status" -eq 0 ] && exit 0
+[ "$command_status" -eq 1 ] && exit 21
+exit 22
 """
 
 
@@ -156,22 +162,28 @@ class GitHubCredentialProvider(GitCredentialProvider):
         if target is None:
             raise StateError("GitHub CLI runup requires a current user target")
         try:
-            result = target.run(_GH_READINESS, check=False, timeout=10)
+            missing = check_required_commands(("gh",), target, timeout=10)
+            if missing:
+                output.warn(
+                    f"GitHub CLI credentials are currently unavailable for git-credential/{self.owner_name}; "
+                    "'gh' is not visible at this point in initialization. Verify again after initialization "
+                    "if it is installed later, or install it for the target user"
+                )
+                return
+            result = run_user_shell_command(_GH_AUTH_CHECK, target, timeout=10)
         except SSHError:
-            output.warn(f"Could not check GitHub CLI readiness for git-credential/{self.owner_name}")
+            output.warn(f"Could not determine GitHub CLI readiness for git-credential/{self.owner_name}")
             return
         if result.returncode == 0:
             output.detail(f"Verified GitHub CLI readiness for git-credential/{self.owner_name}")
-        elif result.returncode == 20:
+        elif result.returncode == 21:
             output.warn(
                 f"GitHub CLI credentials are currently unavailable for git-credential/{self.owner_name}; "
-                "the target user must install 'gh' on PATH and run 'gh auth login'"
+                "the target user must run 'gh auth login' for the intended active github.com identity "
+                "using a current GitHub CLI"
             )
         else:
-            output.warn(
-                f"GitHub CLI credentials are currently unavailable for git-credential/{self.owner_name}; "
-                "the target user must run 'gh auth login' for the intended active github.com identity"
-            )
+            output.warn(f"Could not determine GitHub CLI readiness for git-credential/{self.owner_name}")
 
     def _verify_token(self, token: str, *, secret_name: str) -> None:
         import json

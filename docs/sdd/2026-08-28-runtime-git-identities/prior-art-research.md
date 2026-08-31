@@ -62,7 +62,9 @@ without parsing its config files.
 `gh auth status` tests every known account on the selected host and exits nonzero if any has an
 authentication issue. Its `--active` flag limits both display and status to the active account, the
 same account `gh auth token --hostname github.com` uses. Runup therefore includes `--active`; a
-stale inactive account must not make the current runtime identity appear unhealthy.
+stale inactive account must not make the current runtime identity appear unhealthy. `--active` was
+added in GitHub CLI 2.57.0, so readiness requires that version or newer. An older user-supplied CLI
+produces a non-blocking indeterminate-readiness advisory; the runtime helper remains installed.
 
 `gh auth login --with-token` accepts a supplied token, but that is an authentication operation and
 belongs to the future user-feature layer, not a Git helper. A fine-grained token in environment is
@@ -72,14 +74,16 @@ also explicitly recommended over storing it through `gh auth login` for headless
 
 - `gh-cli` invokes `gh auth token --hostname github.com` at Git runtime;
 - the helper disables prompting and treats the active CLI account as operator-selected state;
-- enabled runup checks `gh auth status --active --hostname github.com` read-only in the target-user
-  environment, warns without blocking helper installation, and never authenticates `gh`;
+- enabled runup checks `gh auth status --active --hostname github.com` read-only in the target
+  user's login/interactive shell, warns without blocking helper installation, and never
+  authenticates `gh`;
 - enterprise hosts are deferred rather than inferred.
 
 Sources:
 
 - [`gh auth token`](https://cli.github.com/manual/gh_auth_token)
 - [`gh auth status`](https://cli.github.com/manual/gh_auth_status)
+- [`cli/cli#9520`](https://github.com/cli/cli/pull/9520) (`--active` in 2.57.0)
 - [`gh` environment variables](https://cli.github.com/manual/gh_help_environment)
 - [`gh auth login`](https://cli.github.com/manual/gh_auth_login)
 
@@ -169,9 +173,11 @@ CLI identity.
 Accepted as advisory provider behavior. Tool installation and manual/future-feature authentication
 can still occur later, so readiness failure cannot block helper installation and success cannot be
 treated as a durable guarantee. The provider checks command presence and its CLI's read-only account
-status in the current target-user environment, suppresses arbitrary output, and never authenticates
-or acquires the final Git token. The runtime helper independently checks again at actual use; core
-adds no dependency model or forge-specific probe.
+status in the target user's login/interactive shell, suppresses arbitrary output, and never
+authenticates or acquires the final Git token. Command lookup is shared with harness readiness, but
+provider authentication policy remains provider-owned. Runup precedes later installation/profile
+steps, so absence is explicitly point-in-time. The runtime helper independently checks again at
+actual use; core adds no dependency model or forge-specific probe.
 
 ### Remove static token validation for symmetry
 

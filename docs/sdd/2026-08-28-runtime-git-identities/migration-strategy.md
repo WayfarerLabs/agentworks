@@ -219,9 +219,11 @@ duplicates, missing files, and malformed Agentworks files. Every case preserves 
   never exposes a partial new generation. A failure before a preexisting mechanism is disabled may
   leave that complete mechanism unchanged; a later failure leaves the Agentworks include absent
   until retry. Existing logger semantics mark initialization partial.
-- CLI readiness warnings do not block helper installation. If a helper later fails at runtime, the
-  operator authenticates/fixes the CLI identity and retries Git; reinit is needed only for
-  config/helper changes.
+- CLI readiness warnings do not block helper installation. Command checks use the target user's
+  login/interactive shell, but run before later install/profile steps and therefore report only the
+  state at that point. Verify again after initialization when those steps may add the CLI. If a
+  helper later fails at runtime, the operator authenticates/fixes the CLI identity and retries Git;
+  reinit is needed only for config/helper changes.
 - Downgrading Agentworks after new-format reconciliation is unsupported as an active-management or
   recovery workflow. Paired binary/config rollback is available only before the first successful
   new-format reinit; afterward recovery fixes forward with the new CLI.

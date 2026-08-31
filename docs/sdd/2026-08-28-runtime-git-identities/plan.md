@@ -2,7 +2,7 @@
 
 <!-- cspell:ignore sdds -->
 
-- Status: Ready for merge
+- Status: Implementation review
 - Date: 2026-08-28
 - Requirements: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
@@ -334,6 +334,20 @@ assert structure, behavior, state, and value containment; they do not police aut
       `gh auth status --active`, sharpen missing/unhealthy CLI recovery guidance without blocking
       helper installation, and collapse overlapping readiness tests to the ten behavioral cases that
       cover provider outcomes, transport suppression, nonfatal retention, and policy skip.
+- [x] Incorporate the post-handoff live-test correction: use one neutral `check_required_commands`
+      mechanism in the target user's login/interactive shell, run provider-owned authentication
+      checks in that same environment, describe pre-install command absence as a point-in-time
+      result, and distinguish explicit authentication failure from indeterminate command or
+      transport failure.
+- [x] Replace the initial empty-sensitive-stdin output suppression with a dedicated transport
+      `discard_output` path that preserves ordinary TTY selection while discarding outer and inner
+      shell output at the process boundary. This supersedes only that mechanism in the preceding
+      completed correction; its command-check and provider-readiness decisions remain unchanged.
+- [ ] Re-run exact-head project, correctness/security, and Muntz review for the correction; publish
+      the corrected head and hosted gates; obtain the tester's live target-user-shell revalidation;
+      then replace the pending `locked.md` paragraph and restore ready-for-merge status. This
+      supersedes the earlier checked review/live/handoff rows only for the post-handoff correction;
+      their completed historical evidence remains unchanged.
 - [x] Run focused and full Python, static, lint, locked-SDD, Rulesync, website, installed-wheel, and
       live integration gates.
 - [x] Obtain private `agentworks-reviewer`, Muntz, and generic correctness/security reviews; resolve

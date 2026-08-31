@@ -243,9 +243,10 @@ appropriate admin or agent template and reinitialize. A generic operator-managed
 reading it only when `!~/.agentworks-git-cred-helper.sh` was registered at the start of that
 reconciliation; otherwise a file or directory at that generic path is left untouched.
 
-If initialization warns about CLI readiness or a CLI-backed helper fails later, authenticate or
-repair that target user's CLI identity and retry Git. Reinitialize only after changing a manifest or
-generated helper.
+If initialization reports that a CLI is not yet visible, verify again after initialization because
+later user-install/profile steps may add it. For another readiness warning or a later CLI-backed
+helper failure, authenticate or repair that target user's CLI identity and retry Git. Reinitialize
+only after changing a manifest or generated helper.
 
 ## Update third-party Git credential providers
 

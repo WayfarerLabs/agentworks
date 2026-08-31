@@ -402,13 +402,15 @@ lives in `agw secret list` and `agw secret describe`. `AGENTWORKS_*` identity ov
 the Configuration group (they're a config-load warning). Broken `{ secret: ... }` references are
 caught earlier as a hard config-load error before doctor runs. A secret-backed git credential's
 declared inputs report as ordinary secret rows. CLI-backed credentials declare no secret. Their
-optional target-user readiness check occurs during initialization, and final token acquisition
-remains at Git runtime. Doctor uses no-impact provider preview. It may read and discard a value when
-the backend classifies that work as no-impact, but it cannot ask for operator action and never
-returns the value. Use `agw secret verify NAME... --allow-interaction` when you want the strongest
-provider answer. Secret-backed capability authentication still occurs at the capability `runup()`
-stage inside provisioning operations. The Tailscale group checks only workstation connectivity; the
-auth key is the `tailscale-auth-key` secret row.
+optional target-user readiness check uses the target user's login/interactive shell during
+initialization, and final token acquisition remains at Git runtime. That check can precede later
+install/profile steps, so its result describes only that point in initialization. Doctor uses
+no-impact provider preview. It may read and discard a value when the backend classifies that work as
+no-impact, but it cannot ask for operator action and never returns the value. Use
+`agw secret verify NAME... --allow-interaction` when you want the strongest provider answer.
+Secret-backed capability authentication still occurs at the capability `runup()` stage inside
+provisioning operations. The Tailscale group checks only workstation connectivity; the auth key is
+the `tailscale-auth-key` secret row.
 
 `--non-interactive` is not a general unattended fail-fast mode. It only disables TTY interaction;
 out-of-band application authentication may still raise an approval request and wait until the

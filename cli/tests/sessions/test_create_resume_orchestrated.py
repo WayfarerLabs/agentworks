@@ -59,7 +59,7 @@ def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
 class _Result:
     def __init__(self, ok: bool = True) -> None:
         self.ok = ok
-        self.returncode = 0 if ok else 1
+        self.returncode = 0 if ok else 20
         self.stdout = ""
         self.stderr = ""
 

@@ -17,11 +17,12 @@ from agentworks.capabilities.git_credential.base import (
     ManagedHelper,
     StoredCredential,
 )
-from agentworks.capabilities.git_credential.github import GitHubCredentialProvider
+from agentworks.capabilities.git_credential.github import _GH_AUTH_CHECK, GitHubCredentialProvider
+from agentworks.command_checks import run_user_shell_command
 from agentworks.errors import StateError, TokenRejectedError, ValidationError
 from agentworks.git_credentials import CredentialRequest, materialize_credential_state
 from agentworks.orchestration.secrets import ScopedSecrets
-from agentworks.plugins.azure.azdo import AzDOCredentialProvider
+from agentworks.plugins.azure.azdo import _AZ_AUTH_CHECK, AzDOCredentialProvider
 from agentworks.schema import AgwModel, NonEmptyStr, SecretRef
 from agentworks.ssh import SSHError, SSHResult
 
@@ -87,16 +88,27 @@ class _ShellTarget:
         self.bin_dir = bin_dir
         self.args_path = args_path
         self.status = status
+        self.home = bin_dir.parent / "home"
+        self.home.mkdir()
+        self.shell = bin_dir.parent / "login-shell"
+        self.shell.write_text(
+            '#!/bin/sh\ntest "$1" = -lic || exit 90\nPATH="$AGW_TEST_LOGIN_PATH" exec /bin/sh -c "$2"\n'
+        )
+        self.shell.chmod(0o755)
 
     def run(self, command: str, **kwargs: object) -> SSHResult:
         assert kwargs["check"] is False
+        assert kwargs["discard_output"] is True
         result = subprocess.run(
             ["/bin/sh", "-c", command],
             check=False,
             capture_output=True,
             text=True,
             env={
-                "PATH": str(self.bin_dir),
+                "PATH": "/usr/bin:/bin",
+                "HOME": str(self.home),
+                "SHELL": str(self.shell),
+                "AGW_TEST_LOGIN_PATH": str(self.bin_dir),
                 "AGW_TEST_ARGS": str(self.args_path),
                 "AGW_TEST_STATUS": str(self.status),
             },
@@ -109,9 +121,21 @@ def _stub_cli(bin_dir: Path, name: str) -> None:
     executable.write_text(
         "#!/bin/sh\n"
         'printf \'%s\\n\' "$@" > "$AGW_TEST_ARGS"\n'
+        '[ "$1 $2 $3" = "auth status --help" ] && { printf -- \'--active\\n\'; exit 0; }\n'
         "printf 'untrusted-stdout'\n"
         "printf 'untrusted-stderr' >&2\n"
         'exit "$AGW_TEST_STATUS"\n'
+    )
+    executable.chmod(0o755)
+
+
+def _stub_unsupported_gh(bin_dir: Path) -> None:
+    executable = bin_dir / "gh"
+    executable.write_text(
+        "#!/bin/sh\n"
+        'printf \'%s\\n\' "$@" > "$AGW_TEST_ARGS"\n'
+        '[ "$1 $2 $3" = "auth status --help" ] && exit 1\n'
+        "exit 90\n"
     )
     executable.chmod(0o755)
 
@@ -174,17 +198,68 @@ def test_cli_runup_checks_current_target_without_forwarding_process_output(
         AzDOCredentialProvider("ado", {"org": "my-org", "source": {"mode": "az-cli"}}),
     ],
 )
+@pytest.mark.parametrize(
+    "outcomes",
+    [
+        (SSHError("untrusted transport detail"),),
+        (SSHResult(0, "", ""), SSHResult(255, "untrusted stdout", "untrusted stderr")),
+    ],
+)
 def test_cli_runup_suppresses_transport_diagnostics(
     monkeypatch: pytest.MonkeyPatch,
     provider: GitCredentialProvider,
+    outcomes: tuple[SSHError | SSHResult, ...],
 ) -> None:
     target = MagicMock()
-    target.run.side_effect = SSHError("untrusted transport detail")
+    target.run.side_effect = outcomes
     warnings: list[str] = []
     monkeypatch.setattr("agentworks.output.warn", warnings.append)
     provider.runup(RunContext(agent_target=cast("Transport", target), secrets=ScopedSecrets({}, ())))
     assert len(warnings) == 1
-    assert "untrusted transport detail" not in warnings[0]
+    assert "untrusted" not in warnings[0]
+
+
+def test_github_cli_checks_active_status_support_before_authentication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _stub_unsupported_gh(bin_dir)
+    details: list[str] = []
+    warnings: list[str] = []
+    monkeypatch.setattr("agentworks.output.detail", details.append)
+    monkeypatch.setattr("agentworks.output.warn", warnings.append)
+    provider = GitHubCredentialProvider("gh", {"source": {"mode": "gh-cli"}})
+
+    args_path = tmp_path / "args"
+    provider.runup(
+        RunContext(
+            agent_target=cast("Transport", _ShellTarget(bin_dir, args_path, 0)),
+            secrets=ScopedSecrets({}, ()),
+        )
+    )
+
+    assert not details
+    assert len(warnings) == 1
+    assert tuple(args_path.read_text().splitlines()) == ("auth", "status", "--help")
+
+
+@pytest.mark.parametrize(
+    ("auth_check", "command_name"),
+    [(_GH_AUTH_CHECK, "gh"), (_AZ_AUTH_CHECK, "az")],
+)
+def test_cli_auth_probe_does_not_treat_native_status_21_as_auth_failure(
+    tmp_path: Path,
+    auth_check: str,
+    command_name: str,
+) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _stub_cli(bin_dir, command_name)
+    target = cast("Transport", _ShellTarget(bin_dir, tmp_path / "args", 21))
+
+    assert run_user_shell_command(auth_check, target, timeout=10).returncode == 22
 
 
 def test_cli_runup_warning_keeps_managed_helper(tmp_path: Path) -> None:

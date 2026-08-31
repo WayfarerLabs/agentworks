@@ -49,7 +49,7 @@ class _Probe:
     def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
         self.commands.append(cmd)
         ok = not any(f"command -v {m} " in cmd for m in self._missing)
-        return SimpleNamespace(ok=ok)
+        return SimpleNamespace(ok=ok, returncode=0 if ok else 20)
 
 
 def _vm_node(db: Database, name: str = "box") -> LiveVMNode:

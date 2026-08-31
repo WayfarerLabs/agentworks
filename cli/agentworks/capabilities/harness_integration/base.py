@@ -25,6 +25,7 @@ from abc import abstractmethod
 from typing import TYPE_CHECKING, ClassVar, Literal, Protocol
 
 from agentworks.capabilities.base import Capability, ScopeLevel
+from agentworks.command_checks import check_required_commands
 from agentworks.errors import StateError
 
 if TYPE_CHECKING:
@@ -94,12 +95,7 @@ def require_commands(
     imperative call sites do (``VM '<vm>'`` in admin/no-target mode,
     ``agent '<name>'`` otherwise) and hands it in.
     """
-    missing: list[str] = []
-    for cmd in commands:
-        inner = f"command -v {shlex.quote(cmd)} >/dev/null 2>&1"
-        probe = transport.run(f'"$SHELL" -lic {shlex.quote(inner)}', check=False)
-        if not probe.ok:
-            missing.append(cmd)
+    missing = check_required_commands(commands, transport)
     if not missing:
         return
     joined = ", ".join(repr(c) for c in missing)

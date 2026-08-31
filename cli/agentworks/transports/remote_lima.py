@@ -78,6 +78,7 @@ class RemoteLimaTransport(Transport):
         timeout: int | None = None,
         env: dict[str, str] | None = None,
         input_text: str | None = None,
+        discard_output: bool = False,
         retries: int | None = None,
         on_retry: Callable[[int, int], None] | None = None,
     ) -> SSHResult:
@@ -89,6 +90,8 @@ class RemoteLimaTransport(Transport):
         the inner SSH hop.
         """
         del tty  # tty doesn't apply to non-interactive remote_lima
+        if input_text is not None and discard_output:
+            raise ValueError("Remote Lima input_text cannot be combined with discard_output")
         if sudo:
             command = f"sudo -n bash -c {shlex.quote(command)}"
         env_prefix = env_assignment_prefix(env)
@@ -98,6 +101,7 @@ class RemoteLimaTransport(Transport):
             check=check,
             timeout=timeout,
             input_text=input_text,
+            discard_output=discard_output,
             retries=retries,
             on_retry=on_retry,
         )
