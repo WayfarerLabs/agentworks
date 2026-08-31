@@ -55,10 +55,17 @@ def _realize_ephemerals(
     from agentworks.capabilities.base import RunContext
     from agentworks.orchestration.secrets import ScopedSecrets
 
-    def scoped_ctx(secret_names: tuple[str, ...]) -> RunContext:
+    def scoped_ctx(
+        secret_names: tuple[str, ...],
+        *,
+        admin_target: Transport | None = None,
+        agent_target: Transport | None = None,
+    ) -> RunContext:
         return RunContext(
             config=config,
             operation_scope=graph.scope,
+            admin_target=admin_target,
+            agent_target=agent_target,
             secrets=ScopedSecrets(secret_values, secret_names),
         )
 
@@ -88,18 +95,18 @@ def _realize_ephemerals(
             else:
                 log.mark_realized(graph.pending_workspace)
     if graph.pending_agent is not None:
-        from agentworks.agents.nodes import credential_tokens
         from agentworks.agents.realize import realize_agent
+        from agentworks.git_credentials import (
+            credential_redactions,
+            credential_requests,
+        )
 
         assert plan.agent_name is not None  # defaulted to ``name`` above
         assert graph.agent_tmpl is not None and graph.agent_tmpl_node is not None
         with output.section("Creating Agent"):
             output.info(f"Creating agent '{plan.agent_name}' on VM '{vm.name}' (template: {graph.agent_tmpl.name})...")
-            # Each credential's token, read through its node's SCOPED
-            # delivery (the boundary pass above covered them; the
-            # graph-derived fold replaces the nested create_agent's
-            # git_tokens hand-off).
-            git_tokens = credential_tokens(graph.agent_tmpl_node, scoped_ctx)
+            credential_ops = credential_requests(graph.agent_tmpl_node.credentials, scoped_ctx)
+            git_redactions = credential_redactions(graph.agent_tmpl_node.credentials, secret_values)
             try:
                 realize_agent(
                     db,
@@ -108,7 +115,8 @@ def _realize_ephemerals(
                     name=plan.agent_name,
                     vm=vm,
                     template=graph.agent_tmpl,
-                    git_tokens=git_tokens,
+                    credential_requests=credential_ops,
+                    credential_redactions=git_redactions,
                     overlay=graph.agent_overlay,
                     defer_overlay_report=True,
                 )

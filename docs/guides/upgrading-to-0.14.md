@@ -11,6 +11,9 @@ outright a release or two after 0.14 ships. Nothing here describes permanent beh
 setting up a new host, or reading to understand how resources work, you want
 [resources.md](resources.md) instead.
 
+If upgrading onward to 0.17, complete this resource-model migration first, then follow
+[upgrading-to-0.17.md](upgrading-to-0.17.md) for the later breaking Git credential source rewrite.
+
 ## Before the first 0.14 state open
 
 The resource rewrite below is separate from Agentworks' SQLite schema migration. The first normal
@@ -660,8 +663,9 @@ Tagged `mode: stored` appeared only in pre-release 0.14 snapshots; it was not a 
 you used one of those snapshots, change written tagged token values from `mode: stored` to
 `mode: secret`. The pre-release `stored` mode is not accepted.
 
-Plugin authors use `TokenAcquiringConfig` for version 2 providers and read the named secret from
-`self.config.token.secret`.
+At the 0.14 boundary, plugin authors used the version-2 provider contract described here. That
+contract is removed in 0.17; plugin authors crossing that later boundary must follow
+[upgrading-to-0.17.md](upgrading-to-0.17.md).
 
 ### Authentication and placement are one tagged field now
 

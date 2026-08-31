@@ -68,6 +68,7 @@ class Transport(abc.ABC):
         timeout: int | None = None,
         env: dict[str, str] | None = None,
         input_text: str | None = None,
+        discard_output: bool = False,
         retries: int | None = None,
         on_retry: Callable[[int, int], None] | None = None,
     ) -> SSHResult:
@@ -84,6 +85,11 @@ class Transport(abc.ABC):
         so a guest ``read -r`` binds exactly the value that was sent. A
         forced TTY would break that promise, so SSH refuses the pairing
         rather than delivering a corrupted value.
+
+        ``discard_output=True`` sends stdout and stderr directly to the null
+        device and returns/logs empty streams while preserving the normal TTY
+        choice and exit status. It cannot be combined with ``input_text``;
+        sensitive stdin already has its own output-suppression contract.
 
         ``retries`` and ``on_retry`` are best-effort across transports:
         SSH retries on connection-level timeouts (default 1 attempt);

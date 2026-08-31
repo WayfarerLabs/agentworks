@@ -70,7 +70,11 @@ def test_declared_git_credential_does_not_error(tmp_path: Path) -> None:
     cfg = _write_cfg(
         tmp_path,
         manifests=[
-            ManifestDoc("git-credential", "github", {"provider": {"name": "github"}}),
+            ManifestDoc(
+                "git-credential",
+                "github",
+                {"provider": {"name": "github", "source": {"mode": "secret"}}},
+            ),
             ManifestDoc(
                 "admin-template",
                 "default",

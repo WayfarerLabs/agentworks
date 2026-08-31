@@ -174,11 +174,10 @@ def test_phase_b_resolves_all_release_maps_before_any_guest_call(monkeypatch: py
             MagicMock(),
             "mapped-vm",
             target,
-            {},
+            (),
             "/home/operator",
             "operator",
             MagicMock(),
-            git_tokens={},
             debian_release=DebianRelease.BOOKWORM,
             operation=VMInitializationOperation.VM_REINIT,
         )

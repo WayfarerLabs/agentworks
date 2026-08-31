@@ -414,16 +414,3 @@ def _vm_scope(db: Database, vm_name: str) -> OperationScope:
         system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
         vm=vm_name,
     )
-
-
-def _credential_line_key(line: str) -> tuple[str, str] | None:
-    """Identity of a ``~/.git-credentials`` line: (username, host/path).
-
-    Scoped github lines are path-less and share the host, so a
-    host-only key would evict every github line at once; the username
-    disambiguates. Non-URL lines get ``None`` (never matched).
-    """
-    if "@" not in line or "//" not in line:
-        return None
-    userinfo = line.split("//", 1)[1].split("@", 1)[0]
-    return (userinfo.split(":", 1)[0], line.split("@", 1)[1])

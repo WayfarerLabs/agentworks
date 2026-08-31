@@ -65,7 +65,11 @@ _AZURE_SITE = ManifestDoc(
 
 # An azdo git-credential (the R14 propagate hook makes the credential not-ready
 # when azdo is disabled).
-_AZDO_CRED = ManifestDoc("git-credential", "azdo", {"provider": {"name": "azdo", "org": "my-org"}})
+_AZDO_CRED = ManifestDoc(
+    "git-credential",
+    "azdo",
+    {"provider": {"name": "azdo", "org": "my-org", "source": {"mode": "secret"}}},
+)
 
 # A vm-template whose system_install_commands draws on the az-cli row (the
 # Phase 7 recipe gate refuses the template while azure is disabled).
@@ -230,11 +234,11 @@ def test_credential_on_disabled_azdo_is_not_ready_with_hint(tmp_path: Path) -> N
 def test_resolve_git_credential_refuses_disabled_azdo(tmp_path: Path) -> None:
     """The provider-construction chokepoint refuses an azdo credential while the
     plugin is disabled, before any credential materials are built."""
-    from agentworks.vms.initializer import resolve_git_credential_providers
+    from agentworks.git_credentials.nodes import git_credential_node
 
     registry = build_registry(_config(tmp_path, manifests=[_AZDO_CRED]))
     with pytest.raises(StateError) as exc:
-        resolve_git_credential_providers(registry, ["azdo"])
+        git_credential_node(registry, "azdo")
     assert "not ready" in str(exc.value)
 
 
@@ -293,7 +297,7 @@ def test_enabling_azure_makes_all_three_work(tmp_path: Path) -> None:
     and constructible, and the vm-template's az-cli reference passes the recipe
     gate. One opt-in, three kinds."""
     from agentworks.capabilities.vm_platform.base import VMPlatform
-    from agentworks.vms.initializer import resolve_git_credential_providers
+    from agentworks.git_credentials.nodes import git_credential_node
     from agentworks.vms.sites import resolve_site
 
     registry = build_registry(_config(tmp_path, enabled=True, manifests=[_AZURE_SITE, _AZDO_CRED, _AZ_CLI_TEMPLATE]))
@@ -309,8 +313,8 @@ def test_enabling_azure_makes_all_three_work(tmp_path: Path) -> None:
     assert isinstance(platform, VMPlatform)
     assert platform.name == "azure-vm"
 
-    providers = resolve_git_credential_providers(registry, ["azdo"])  # no raise
-    assert providers["azdo"].name == "azdo"
+    credential = git_credential_node(registry, "azdo")  # no raise
+    assert credential.provider.name == "azdo"
 
     ensure_recipe_enabled(registry, "vm-template", "azcli")  # no raise
 

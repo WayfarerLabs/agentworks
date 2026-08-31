@@ -89,7 +89,11 @@ installation needs different storage or non-interactive resolution.
 
 Git credentials are declared resources. Inspect existing choices with
 `agw resource list --kind git-credential --include-disabled` and use
-`agw resource explain git-credential` before authoring another one.
+`agw resource explain git-credential-provider/NAME` before authoring another one. Each provider
+requires a structured source. A secret source lets Agentworks resolve the provider's declared input;
+a CLI source uses the target admin or agent user's already-authenticated `gh` or `az` identity when
+Git requests a credential. Add the credential name to the relevant template and reinitialize that
+user after changing it.
 
 ## Review templates and harness integrations
 

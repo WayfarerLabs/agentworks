@@ -86,8 +86,9 @@ eight of them behind in one change, which is why the check exists.
   reappearing in any of the four would be the probe this pattern bans, which is
   why the allow-list below records their absence as deliberate rather than
   simply omitting them.
-- ``git_credentials/__init__.py`` / ``vms/initializer/credentials.py``: op-time
-  CONSTRUCTION of a capability instance to run an operation, not a graph query.
+- ``git_credentials/__init__.py``: op-time construction for remote advisories,
+  not a graph query. Credential-node construction reads its implementation from
+  the finalized graph.
 - ``manifests/decode.py``: a decode-time shadow check (a code-registry
   membership test), before the graph exists.
 - ``secrets/inspect.py``: the secret describe view
@@ -345,7 +346,6 @@ _REGISTRY_READ_ALLOWLIST = frozenset(
         # Op-time construction of a capability instance.
         "vms/sites.py",  # resolve_site: the one chokepoint every VM op passes
         "git_credentials/__init__.py",
-        "vms/initializer/credentials.py",
         # Deliberately ABSENT since declarative-schema step 2.3: edge
         # production and finalize validate no longer fetch a capability
         # class at all. Each of the four asks the core instead

@@ -391,25 +391,6 @@ def vm_port_forward(
     )
 
 
-@vm_app.command("add-git-credential")
-def vm_add_git_credential(
-    name: Annotated[str, typer.Argument(help="VM name")],
-    credential: Annotated[str, typer.Argument(help="Git credential name from config")],
-) -> None:
-    """Add or update a git credential on a VM."""
-    interaction = ordinary_tty_interaction_policy()
-    from agentworks.config import load_config
-    from agentworks.vms.manager import add_git_credential
-
-    add_git_credential(
-        get_db(),
-        load_config(),
-        name,
-        credential,
-        interaction=interaction,
-    )
-
-
 @vm_app.command("logs")
 def vm_logs(
     name: Annotated[str, typer.Argument(help="VM name")],

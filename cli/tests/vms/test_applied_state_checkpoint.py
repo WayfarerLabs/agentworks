@@ -91,11 +91,10 @@ def _run(
         MagicMock(),
         "box",
         MagicMock(),
-        {},
+        (),
         "/home/agentworks",
         "agentworks",
         active_logger,
-        git_tokens={},
         debian_release=DebianRelease.TRIXIE,
         operation=operation,
     )

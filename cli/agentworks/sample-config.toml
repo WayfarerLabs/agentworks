@@ -126,9 +126,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
                                             # an error; naming one that exists but
                                             # is not ready here is not (it warns in
                                             # `agw doctor` and errors only on use).
-#runup_git_credentials = true               # run the git-credential runup: authenticate each
-                                            # token against its provider API before it is
-                                            # written (false for airgapped setups)
+#runup_git_credentials = true               # run optional provider-owned validation for
+                                            # secret-backed git credentials before storing
+                                            # their final material (false for airgapped setups)
 
 # --- State database safety ---
 #

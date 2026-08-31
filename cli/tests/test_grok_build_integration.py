@@ -367,7 +367,7 @@ def test_extra_args_are_quoted_and_appended_last() -> None:
 
 
 def test_readiness_requires_grok() -> None:
-    target = _FakeTarget({"command -v grok": _FakeResult(1)})
+    target = _FakeTarget({"command -v grok": _FakeResult(20)})
     with pytest.raises(StateError):
         _integration().preflight(RunContext(operation_scope=_scope(), admin_target=target))
 

@@ -680,44 +680,6 @@ def test_create_rejects_multiline_tailscale_key_before_runup_db_or_platform(
     assert auth_key not in repr((caught.value.args, vars(caught.value)))
 
 
-def test_create_rejects_multiline_git_token_before_runup_db_or_platform(
-    db: Database,
-    make_config,
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output: object,
-) -> None:
-    from agentworks.capabilities.vm_platform.lima import LimaPlatform
-
-    token = "ghp-prefix\nghp-suffix\n"
-    monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GITHUB", token)
-    config = make_config(
-        manifests=[
-            ManifestDoc(
-                "admin-template",
-                "default",
-                {"shell": "zsh", "git_credentials": ["github"]},
-            ),
-            ManifestDoc("git-credential", "github", {"provider": {"name": "github"}}),
-        ]
-    )
-    monkeypatch.setattr(
-        LimaPlatform,
-        "runup",
-        lambda *args, **kwargs: pytest.fail("platform runup reached with a line-unsafe Git token"),
-    )
-    monkeypatch.setattr(
-        LimaPlatform,
-        "create",
-        lambda *args, **kwargs: pytest.fail("platform create reached with a line-unsafe Git token"),
-    )
-
-    with pytest.raises(ValidationError) as caught:
-        vm_manager.create_vm(db, config, name="unsafe-git", interaction=TtyInteractionPolicy.REFUSE)
-
-    assert db.get_vm("unsafe-git") is None
-    assert token not in repr((caught.value.args, vars(caught.value)))
-
-
 def test_r11_hostname_and_vnet_bound_by_construction() -> None:
     """The VM-name cap is the MIN over two composed sinks. At slug max 20 and
     name max 38 (MAX_VM_NAME_LENGTH): the {slug}-{name} hostname is 59 chars

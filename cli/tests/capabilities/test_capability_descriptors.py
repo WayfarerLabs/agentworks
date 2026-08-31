@@ -30,7 +30,6 @@ from agentworks.capabilities.descriptor import (
     capability_descriptors,
     descriptor_for,
 )
-from agentworks.capabilities.git_credential.base import TokenAcquiringConfig
 from agentworks.capabilities.git_credential.kinds import GitCredentialProviderEntry
 from agentworks.capabilities.harness_integration.kinds import HarnessIntegrationEntry
 from agentworks.capabilities.publish import publish_capability_rows
@@ -353,7 +352,7 @@ def test_each_kinds_config_contract_matches_how_its_config_is_dispatched() -> No
     assert contracts["harness-integration"].layered_merge is True
     assert all(not contract.layered_merge for kind, contract in contracts.items() if kind != "harness-integration")
 
-    assert contracts["git-credential-provider"].base is TokenAcquiringConfig
+    assert contracts["git-credential-provider"].base is AgwModel
     assert contracts["git-credential-provider"].discriminator == "name"
 
     backend = descriptor_for("secret-backend")

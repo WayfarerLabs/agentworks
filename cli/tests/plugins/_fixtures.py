@@ -25,7 +25,11 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 from pydantic import BaseModel, create_model
 
 from agentworks.capabilities.descriptor import descriptor_for
-from agentworks.capabilities.git_credential.base import GitCredentialProvider, HelperEntry
+from agentworks.capabilities.git_credential.base import (
+    CredentialPayload,
+    GitCredentialProvider,
+    HttpsCredentialScope,
+)
 from agentworks.capabilities.harness_integration.base import HarnessIntegration
 from agentworks.capabilities.secret_backend import (
     BackendPreview,
@@ -138,19 +142,16 @@ class ConformingGitCredentialProvider(GitCredentialProvider):
     """A concrete ``GitCredentialProvider``. Subclasses add ``name`` /
     ``description``."""
 
-    contract_version = 2
+    contract_version = 3
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)
         _declare_fixture_config(cls, "git-credential-provider")
 
-    def _verify_token(self, token: str) -> None:
-        raise NotImplementedError
+    def credential_scopes(self) -> tuple[HttpsCredentialScope, ...]:
+        return (HttpsCredentialScope("example.test"),)
 
-    def helper_entry(self) -> HelperEntry:
-        raise NotImplementedError
-
-    def credential_lines(self, token: str) -> list[str]:
+    def credential_material(self, ctx: RunContext) -> CredentialPayload:
         raise NotImplementedError
 
 

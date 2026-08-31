@@ -34,5 +34,22 @@ If Tailscale itself needs repair, `agw vm shell NAME --platform` provides a plat
 path where the selected platform supports one. It is an explicit recovery tool, not the routine
 connection path.
 
+## Git authentication
+
+First inspect the selected `git-credential` and its provider with `agw resource show` and
+`agw resource explain`. A secret source reports failures during resolution or optional runup. A
+`gh-cli` or `az-cli` source receives a read-only readiness check in that user's login/interactive
+shell during enabled runup, but a warning does not block helper installation. The check can run
+before later install/profile steps, so verify again after initialization when those steps may add
+the CLI. Confirm that the matching CLI is on that user's `PATH` and authenticated as the intended
+identity. Azure DevOps also requires that identity to have access to the configured organization and
+repository. Final credential acquisition still happens only when the target user's Git operation
+invokes the helper.
+
+Fixing CLI authentication takes effect on the next Git operation because the helper reacquires each
+time. After changing a manifest or a template's `git_credentials`, reinitialize the VM admin or
+agent so Agentworks can rebuild the complete managed state. Removing every declared credential and
+reinitializing removes Agentworks-owned credential state.
+
 After one change, rerun the narrow check that exposed the problem. Use
 `agw guide show concept-reporting-bugs` when the failure needs to be reported.

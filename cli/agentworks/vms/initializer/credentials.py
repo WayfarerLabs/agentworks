@@ -1,7 +1,4 @@
-"""Tailscale connectivity preflight/rejoin and git-credential setup on the
-VM. Grouped together because both are the provisioning-time credential
-family: the local machine's Tailscale membership and the VM's git tokens.
-"""
+"""Tailscale connectivity preflight/rejoin and Git credential preparation."""
 
 from __future__ import annotations
 
@@ -11,14 +8,11 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.tailscale_join import join_tailscale_ephemerally
-from agentworks.errors import ConnectivityError, NotFoundError, StateError
-from agentworks.ssh import SSHError, SSHLogger
+from agentworks.errors import ConnectivityError
+from agentworks.ssh import SSHError
 
 if TYPE_CHECKING:
-    from agentworks.capabilities.git_credential.base import GitCredentialProvider
-    from agentworks.config import Config
     from agentworks.db import Database
-    from agentworks.resources.registry import Registry
     from agentworks.transports import Transport
 
 
@@ -44,84 +38,6 @@ def verify_tailscale_available() -> None:
             "VM initialization requires Tailscale to switch from the provisioning "
             "transport to direct SSH. Run 'tailscale up' first."
         )
-
-
-def resolve_git_credential_providers(
-    registry: Registry,
-    names: list[str],
-) -> dict[str, GitCredentialProvider]:
-    """Construct git credential provider (capability) instances from the
-    registry.
-
-    ``names`` are the credential names to construct (from the admin
-    row's or an agent template's ``git_credentials`` list). Each
-    provider is built from its ``provider_config`` and re-validates that
-    config at construct (so a bad scope value fails loudly here, never
-    silently WIDENING the credential). The declared token secrets join
-    an operation's boundary union through the holding node's
-    ``secret_refs``; construction touches no secret machinery.
-    """
-    from agentworks.capabilities.git_credential import (
-        GIT_CREDENTIAL_PROVIDER_REGISTRY,
-    )
-    from agentworks.resources.access import git_credential
-
-    providers: dict[str, GitCredentialProvider] = {}
-    if not names:
-        return providers
-
-    for name in names:
-        cred_config = git_credential(registry, name)
-        if cred_config is None:
-            raise NotFoundError(
-                f"git credential '{name}' not found in config",
-                entity_kind="git-credential",
-                entity_name=name,
-            )
-        # A disabled provider cannot be constructed even if a resource names it
-        # (R14): read the credential's stored propagated verdict off the graph
-        # (the ``not_ready`` hook already folded the provider's disabled state,
-        # so the "enable plugin `<name>`" reason is in hand), mirroring
-        # ``ensure_site_ready``. No separate origin lookup needed.
-        readiness = registry.graph.readiness_of("git-credential", name)
-        if not readiness.is_ready:
-            raise StateError(
-                f"git-credential '{name}' is not ready: {readiness.reason}",
-                entity_kind="git-credential",
-                entity_name=name,
-                hint="`agw doctor` lists each git-credential's state; enable the required plugin or use a ready one",
-            )
-        provider_cls = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(cred_config.provider.name)
-        if provider_cls is None:
-            # Unknown provider names are caught by the framework's
-            # git-credential-provider miss policy at build_registry; this
-            # guards direct callers that bypass that path.
-            raise NotFoundError(
-                f"git credential '{name}' names unknown provider {cred_config.provider.name!r}",
-                entity_kind="git-credential-provider",
-                entity_name=cred_config.provider.name,
-            )
-        providers[name] = provider_cls(
-            name,
-            cred_config.provider.config,
-            description=cred_config.description,
-        )
-    return providers
-
-
-def announce_git_credentials(providers: dict[str, GitCredentialProvider]) -> None:
-    """Echo the git credentials the operation will configure, one
-    ``Checking git-credential/<name>...`` line each so the Preflight
-    context matches the ``vm-site`` / ``vm-template`` lines above, in the
-    ``<kind>/<name>`` form operators pass to ``agw resource`` and the
-    like. (The former per-provider auth pre-flight was vestigial: every
-    provider's check returned True unconditionally once token resolution
-    moved to the secret framework. Token health reports through doctor's
-    Secrets group and resolution failures surface as
-    ``SecretUnavailableError`` at collect time.)
-    """
-    for name in providers:
-        output.info(f"Checking git-credential/{name}...")
 
 
 def rejoin_tailscale(
@@ -181,93 +97,3 @@ def _join_tailscale(
     output.detail(f"Tailscale IP: {tailscale_ip}")
     db.update_vm_tailscale(vm_name, tailscale_ip)
     return tailscale_ip
-
-
-def _configure_git_credentials(
-    vm_name: str,
-    ts_target: Transport,
-    providers: dict[str, GitCredentialProvider],
-    logger: SSHLogger,
-    *,
-    git_tokens: dict[str, str],
-    config: Config,
-) -> None:
-    """Configure git credential store on the VM with the pre-resolved
-    framework tokens.
-
-    ``git_tokens`` is required
-    (no provider-side fallback); the framework resolves every token
-    at manager-entry and threads the ``{credential_name: value}``
-    dict in. Any name in ``providers`` that doesn't have a matching
-    key in ``git_tokens`` is a contract violation (caller bug); we
-    raise loudly rather than silently dropping the credential, since
-    silently shipping a VM with a missing credential the operator
-    asked for is the worst kind of footgun.
-
-    Two distinct error semantics here, deliberately: the deferred RUNUP
-    (``runup_and_filter``) is per-credential and forgiving. A token an
-    authenticated probe rejects is skipped (warned, so init goes PARTIAL)
-    and the rest are still configured, because a bad token is
-    idempotently fixable (fix it, reinit). But the MATERIALS BUILD over
-    whatever survived runup is atomic: a failure there (e.g. a scope
-    collision) is a config error, not a bad token, so it aborts
-    credential config as a whole rather than shipping a partial store.
-    """
-    logger.step("Git credentials")
-    output.info("Configuring git credentials...")
-
-    missing = [name for name in providers if name not in git_tokens]
-    if missing:
-        raise StateError(
-            f"git credential setup: token(s) not resolved by the framework "
-            f"for {missing!r}; caller must pre-resolve every provider's "
-            f"token through the operation's resolve pass before invoking "
-            f"this function",
-            entity_kind="git-credential",
-            entity_name=missing[0],
-        )
-
-    from agentworks.git_credentials import (
-        GIT_CRED_HELPER_PATH,
-        GIT_SCOPES_INCLUDE_PATH,
-        build_credential_materials,
-        runup_and_filter,
-    )
-
-    # Deferred git-credential runup: authenticate each token right before
-    # it is written. A rejected credential is skipped (logged as a warning
-    # -> PARTIAL) and the rest are still configured; the operator fixes the
-    # token and reruns reinit. Runs here, not at the command root, so a
-    # bad token never blocks the VM from provisioning.
-    providers = runup_and_filter(providers, git_tokens, config, logger)
-    if not providers:
-        return
-    # Store lines + the useHttpPath include + the selecting helper (the
-    # helper picks the per-repo/per-owner credential from the remote path
-    # git now sends; issue #166). Scope collisions raise here, before
-    # anything is written; the check sees only the runup SURVIVORS, so a
-    # collision masked by a rejected token surfaces on the next reinit.
-    materials = build_credential_materials(providers, git_tokens)
-
-    # Write credentials and configure git on the VM. The context
-    # sections live in an agentworks-owned include file (overwritten
-    # wholesale every init, so removing scopes from config is
-    # idempotent) rather than in ~/.gitconfig itself.
-    try:
-        ts_target.write_file("~/.git-credentials", materials.store_content, mode="600")
-        ts_target.write_file(GIT_SCOPES_INCLUDE_PATH, materials.gitconfig_content, mode="600")
-        ts_target.write_file(GIT_CRED_HELPER_PATH, materials.helper_script, mode="700")
-        # Our helper REPLACES credential-store in the same config slot
-        # (single-value replace also migrates released VMs off 'store'
-        # on their next reinit; store deletes the provisioned line on
-        # every rejected auth).
-        ts_target.run(
-            f"git config --global --replace-all credential.helper '!{GIT_CRED_HELPER_PATH}' && "
-            f"(git config --global --get-all include.path | grep -qxF '{GIT_SCOPES_INCLUDE_PATH}' "
-            f"|| git config --global --add include.path '{GIT_SCOPES_INCLUDE_PATH}')",
-        )
-        output.detail(f"Git credentials configured for {output.count(len(providers), 'provider')}")
-    except SSHError as e:
-        msg = f"git credential store setup failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)

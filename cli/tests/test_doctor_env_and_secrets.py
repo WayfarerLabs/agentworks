@@ -529,7 +529,11 @@ def test_r9_3_manifest_malformed_block_surfaces_under_resource_registry(
     cfg = _write_config(tmp_path, settings='[plugins]\nsystem = ["azure"]')
     write_manifests(
         tmp_path,
-        ManifestDoc("git-credential", "ado", {"provider": {"name": "azdo", "org": "my-org", "bogus": 1}}),
+        ManifestDoc(
+            "git-credential",
+            "ado",
+            {"provider": {"name": "azdo", "org": "my-org", "source": {"mode": "secret"}, "bogus": 1}},
+        ),
         filename="res.yaml",
     )
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)

@@ -7,7 +7,7 @@ re-exported here so ``from agentworks.vms.manager import create_vm`` (and
 the many ``agentworks.vms.manager.<name>`` attribute / monkeypatch
 references across the codebase and test suite) keep working unchanged.
 
-The five names imported from ``agentworks.vms.initializer`` are the
+The four names imported from ``agentworks.vms.initializer`` are the
 canonical entry point into that package from ``manager``: submodules that
 call them (``lifecycle.py``'s ``create_vm`` / ``reinit_vm``,
 ``tailscale.py``'s ``_ensure_tailscale``) do so via
@@ -22,7 +22,6 @@ from __future__ import annotations
 
 from agentworks.vms.initializer import (
     VMInitializationOperation,
-    announce_git_credentials,
     bootstrap_vm,
     rejoin_tailscale,
     run_initialization,
@@ -31,7 +30,6 @@ from agentworks.vms.initializer import (
 
 from ._helpers import (
     _SLUG_PROMPT,
-    _credential_line_key,
     _guard_failed_vm,
     _human_bytes,
     _init_log_hint,
@@ -53,7 +51,7 @@ from .boundary import (
     gated_vm_platform_recovery_boundary,
     require_vm_ssh_boundary,
 )
-from .exec import add_git_credential, exec_vm, shell_vm
+from .exec import exec_vm, shell_vm
 from .inspect import (
     describe_vm,
     list_vms,
@@ -78,7 +76,6 @@ from .verification import VMConnectionVerification, verify_vm_connection
 __all__ = [
     "_SLUG_PROMPT",
     "_VmAdminEnvScopes",
-    "_credential_line_key",
     "_ensure_tailscale",
     "_guard_failed_vm",
     "_human_bytes",
@@ -97,8 +94,6 @@ __all__ = [
     "_vm_scope",
     "_vm_secret_target",
     "_warned_tailscale_missing",
-    "add_git_credential",
-    "announce_git_credentials",
     "bootstrap_vm",
     "create_vm",
     "delete_vm",

@@ -14,7 +14,7 @@ Coverage, kind by kind through the ACTUAL consumer (R9 capability side, R14):
   but NOT from secret-mapping validation, which is unconditional over
   enablement (inert for resolution and validated are separate properties).
 - git-credential-provider: a ``git-credential`` on a disabled plugin provider is
-  not-ready (new propagate hook), ``resolve_git_credential_providers`` refuses
+  not-ready (new propagate hook), node construction refuses
   it, and ``remote_advisories`` skips it.
 - harness integration: a ``session-template`` on a disabled plugin harness integration lists ready, but
   ``ensure_harness_integration_enabled`` raises the enable-plugin error while the read-only
@@ -39,6 +39,7 @@ from agentworks.capabilities.secret_backend import LookupDescription, LookupDisp
 from agentworks.errors import ConfigError, StateError
 from agentworks.git_credentials import remote_advisories
 from agentworks.git_credentials.credential import GitCredentialConfig
+from agentworks.git_credentials.nodes import git_credential_node
 from agentworks.origin import Origin
 from agentworks.plugins import Plugin, capability_adapters, seated_plugin
 from agentworks.plugins.enablement import plugin_enablement_source
@@ -55,7 +56,6 @@ from agentworks.secrets.resolve import active_sources
 from agentworks.secrets.sources import SecretSourceDecl
 from agentworks.sessions.manager._env import _display_harness_integration
 from agentworks.sessions.template import SessionTemplate
-from agentworks.vms.initializer.credentials import resolve_git_credential_providers
 from agentworks.vms.sites import VMSiteDecl, resolve_site
 from tests.plugins._fixtures import (
     ConformingGitCredentialProvider,
@@ -449,12 +449,12 @@ def test_git_credential_ready_when_provider_enabled() -> None:
         assert registry.graph.is_ready("git-credential", "cred")
 
 
-def test_resolve_git_credential_providers_refuses_a_disabled_provider() -> None:
+def test_git_credential_node_refuses_a_disabled_provider() -> None:
     with seated_plugin(_capable_plugin()):
         registry = _git_registry()
         registry.finalize(enablement_sources=[_plugin_source()])
         with pytest.raises(StateError, match="enable plugin `cap-plugin`"):
-            resolve_git_credential_providers(registry, ["cred"])
+            git_credential_node(registry, "cred")
 
 
 def test_remote_advisories_skips_a_disabled_git_credential() -> None:

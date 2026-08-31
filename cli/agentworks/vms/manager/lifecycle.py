@@ -1,7 +1,7 @@
 """The two full-initialization VM flows: create and reinit.
 
 Both call into ``agentworks.vms.initializer`` (``bootstrap_vm`` /
-``run_initialization`` / ``announce_git_credentials`` /
+``run_initialization`` /
 ``verify_tailscale_available``); see the module-level note near the
 imports below for why those calls are routed through the package object
 rather than a plain top-level import.
@@ -48,9 +48,10 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.transports import Transport
 
 # NOTE on the initializer imports (``verify_tailscale_available``,
-# ``announce_git_credentials``, ``bootstrap_vm``, ``run_initialization``):
+# ``bootstrap_vm``, ``run_initialization``):
 # tests monkeypatch these as attributes of the PACKAGE
 # (``agentworks.vms.manager.verify_tailscale_available`` etc, set by
 # ``manager/__init__.py``'s top-level import from
@@ -270,7 +271,6 @@ def create_vm(
     # machinery; the walk union below is the boundary's source.
     # Nothing resolves yet.
     cred_nodes = tuple(git_credential_node(registry, cred_name) for cred_name in admin.git_credentials)
-    providers = {node.provider.owner_name: node.provider for node in cred_nodes}
 
     # System slug: first interactive create prompts once (a blank
     # answer is final; see _resolve_system_slug). Runs before any
@@ -295,10 +295,17 @@ def create_vm(
 
     scope = OperationScope(level=ScopeLevel.VM, system_slug=slug, vm=vm_name)
 
-    def scoped_ctx(secret_names: tuple[str, ...]) -> RunContext:
+    def scoped_ctx(
+        secret_names: tuple[str, ...],
+        *,
+        admin_target: Transport | None = None,
+        agent_target: Transport | None = None,
+    ) -> RunContext:
         return RunContext(
             config=config,
             operation_scope=scope,
+            admin_target=admin_target,
+            agent_target=agent_target,
             secrets=ScopedSecrets(resolver.values, secret_names),
         )
 
@@ -310,9 +317,11 @@ def create_vm(
     # own composition roots), which is why the template node's
     # secret_refs carry only the Tailscale key.
     with output.section("Preflight"):
+        from agentworks.git_credentials import announce_git_credentials
+
         output.info(f"Checking vm-site/{site}...")
         output.info(f"Checking vm-template/{vm_tmpl.name}...")
-        _mgr.announce_git_credentials(providers)
+        announce_git_credentials(cred_nodes)
         preflight_all(
             nodes,
             RunContext(config=config, operation_scope=scope),
@@ -370,14 +379,13 @@ def create_vm(
                 use=LineOrientedSecretUse.TAILSCALE,
                 secret_name=vm_tmpl.tailscale_auth_key,
             )
-            # Each credential's token, read through its node's SCOPED delivery.
-            git_tokens = {
-                node.provider.owner_name: scoped_ctx(node.secret_refs()).secret(node.provider.secret_name)
-                for node in cred_nodes
-            }
-            from agentworks.git_credentials import validate_git_tokens
+            from agentworks.git_credentials import (
+                credential_redactions,
+                credential_requests,
+            )
 
-            git_tokens = validate_git_tokens(providers, git_tokens)
+            credential_ops = credential_requests(cred_nodes, scoped_ctx)
+            git_redactions = credential_redactions(cred_nodes, resolver.values)
             site_node.runup(scoped_ctx(site_node.secret_refs()))
 
             # The VM's OS hostname, computed once at create time and recorded on the
@@ -435,7 +443,7 @@ def create_vm(
                 logger = SSHLogger(
                     vm_name,
                     "vm-create",
-                    redactions=(tailscale_auth_key, *git_tokens.values()),
+                    redactions=(tailscale_auth_key, *git_redactions),
                 )
             except (KeyboardInterrupt, UserAbort):
                 log.unwind()
@@ -621,11 +629,10 @@ def create_vm(
                 admin,
                 vm_name,
                 ts_target,
-                providers,
+                credential_ops,
                 home,
                 resolved_admin_username,
                 logger,
-                git_tokens=git_tokens,
                 debian_release=observed_release,
                 operation=_mgr.VMInitializationOperation.VM_CREATE,
             )
@@ -798,7 +805,6 @@ def reinit_vm(
 
     _mgr.verify_tailscale_available()
     cred_nodes = tuple(git_credential_node(registry, cred_name) for cred_name in admin.git_credentials)
-    providers = {node.provider.owner_name: node.provider for node in cred_nodes}
 
     # The reinit graph: the live VM (whose row's site field is its edge
     # to the vm-site node) plus each declared credential as its own
@@ -816,10 +822,17 @@ def reinit_vm(
         vm=name,
     )
 
-    def scoped_ctx(secret_names: tuple[str, ...]) -> RunContext:
+    def scoped_ctx(
+        secret_names: tuple[str, ...],
+        *,
+        admin_target: Transport | None = None,
+        agent_target: Transport | None = None,
+    ) -> RunContext:
         return RunContext(
             config=config,
             operation_scope=scope,
+            admin_target=admin_target,
+            agent_target=agent_target,
             secrets=ScopedSecrets(resolver.values, secret_names),
         )
 
@@ -830,8 +843,10 @@ def reinit_vm(
         # prompted at reinit; they get prompted at the use site (vm
         # shell, session create, etc.).
         with output.section("Preflight"):
+            from agentworks.git_credentials import announce_git_credentials
+
             output.info(f"Checking vm-site/{vm.site}...")
-            _mgr.announce_git_credentials(providers)
+            announce_git_credentials(cred_nodes)
             preflight_all(
                 nodes,
                 RunContext(config=config, operation_scope=scope),
@@ -848,13 +863,13 @@ def reinit_vm(
         # Initialization phase (the skip-and-degrade policy at the
         # write step). So the next banner the operator sees is
         # Initialization.
-        git_tokens = {
-            node.provider.owner_name: scoped_ctx(node.secret_refs()).secret(node.provider.secret_name)
-            for node in cred_nodes
-        }
-        from agentworks.git_credentials import validate_git_tokens
+        from agentworks.git_credentials import (
+            credential_redactions,
+            credential_requests,
+        )
 
-        git_tokens = validate_git_tokens(providers, git_tokens)
+        credential_ops = credential_requests(cred_nodes, scoped_ctx)
+        git_redactions = credential_redactions(cred_nodes, resolver.values)
 
         # Build Tailscale SSH target with logging
         from agentworks.ssh import SSHLogger
@@ -862,8 +877,9 @@ def reinit_vm(
         # The activation gate and any conditional Tailscale rejoin finish
         # before this logger exists. The rejoin path separately enforces that
         # its auth-key-bearing transport has no logger, so this operation log's
-        # complete secret set is exactly the git tokens used by initialization.
-        logger = SSHLogger(name, "vm-reinit", redactions=tuple(git_tokens.values()))
+        # complete secret set is exactly the secret-backed credential inputs
+        # used by initialization.
+        logger = SSHLogger(name, "vm-reinit", redactions=git_redactions)
         ts_target = transport(vm, config, default_timeout=60, logger=logger)
 
         home = f"/home/{vm.admin_username}"
@@ -883,11 +899,10 @@ def reinit_vm(
                     admin,
                     name,
                     ts_target,
-                    providers,
+                    credential_ops,
                     home,
                     vm.admin_username,
                     logger,
-                    git_tokens=git_tokens,
                     debian_release=verified_release,
                     operation=_mgr.VMInitializationOperation.VM_REINIT,
                 )

@@ -49,7 +49,7 @@ class _Probe:
     def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
         self.commands.append(cmd)
         ok = not any(f"command -v {m} " in cmd for m in self._missing)
-        return SimpleNamespace(ok=ok)
+        return SimpleNamespace(ok=ok, returncode=0 if ok else 20)
 
 
 def _vm_node(db: Database, name: str = "box") -> LiveVMNode:
@@ -852,8 +852,8 @@ def test_agent_template_node_derives_credential_edges(tmp_path, monkeypatch: pyt
     cfg.write_text(f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n')
     write_manifests(
         tmp_path,
-        ManifestDoc("git-credential", "gh", {"provider": {"name": "github"}}),
-        ManifestDoc("git-credential", "gh2", {"provider": {"name": "github"}}),
+        ManifestDoc("git-credential", "gh", {"provider": {"name": "github", "source": {"mode": "secret"}}}),
+        ManifestDoc("git-credential", "gh2", {"provider": {"name": "github", "source": {"mode": "secret"}}}),
         ManifestDoc("agent-template", "default", {"git_credentials": ["gh", "gh2"]}),
     )
     config = load_config(cfg, warn_issues=False, warn_deprecations=False)

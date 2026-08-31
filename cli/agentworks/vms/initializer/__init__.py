@@ -31,11 +31,8 @@ that caller must switch to package-object indirection.
 from __future__ import annotations
 
 from .credentials import (
-    _configure_git_credentials,
     _join_tailscale,
-    announce_git_credentials,
     rejoin_tailscale,
-    resolve_git_credential_providers,
     verify_tailscale_available,
 )
 from .driver import (
@@ -106,7 +103,6 @@ __all__ = [
     "VMInitializationOperation",
     "_apply_sve_mask",
     "_configure_apt_sources",
-    "_configure_git_credentials",
     "_ensure_agentworks_files_sourced",
     "_harden_admin_home",
     "_install_apt_packages",
@@ -123,11 +119,9 @@ __all__ = [
     "_write_sshd_accept_env",
     "_write_sudoers_console_setenv",
     "_write_sudoers_env_keep",
-    "announce_git_credentials",
     "bootstrap_vm",
     "install_claude_plugins",
     "rejoin_tailscale",
-    "resolve_git_credential_providers",
     "run_initialization",
     "verify_tailscale_available",
 ]

@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
     from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.transports import Transport
     from agentworks.vms.nodes import LiveVMNode
 
 # ``_mgr`` binds this module's own package object (safe: by the time
@@ -137,7 +138,6 @@ def create_agent(
     # fails here, before any prompt.
     from agentworks.agents.nodes import (
         agent_template_node,
-        credential_tokens,
         pending_agent_node,
     )
     from agentworks.capabilities.base import (
@@ -146,6 +146,7 @@ def create_agent(
         ScopeLevel,
     )
     from agentworks.db import SYSTEM_SLUG_KEY
+    from agentworks.git_credentials import announce_git_credentials
     from agentworks.orchestration.activation import (
         activation_gate,
         gate_secret_resolver,
@@ -154,7 +155,6 @@ def create_agent(
     from agentworks.orchestration.secrets import ScopedSecrets, secret_union
     from agentworks.orchestration.walk import walk
     from agentworks.secrets.resolver import Resolver
-    from agentworks.vms.initializer import announce_git_credentials
     from agentworks.vms.nodes import live_vm_node
 
     resolver = Resolver(config, registry, interaction=interaction)
@@ -177,7 +177,6 @@ def create_agent(
     # site (agent shell, session create, etc.).
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
-    providers = {node.provider.owner_name: node.provider for node in tmpl_node.credentials}
 
     scope = OperationScope(
         level=ScopeLevel.AGENT,
@@ -195,7 +194,7 @@ def create_agent(
         # (proxmox's API token) resolve in one prompt session.
         with output.section("Preflight"):
             output.info(f"Checking agent-template/{agent_tmpl.name}...")
-            announce_git_credentials(providers)
+            announce_git_credentials(tmpl_node.credentials)
             preflight_all(
                 nodes,
                 RunContext(config=config, operation_scope=scope),
@@ -206,17 +205,27 @@ def create_agent(
         with output.section("Resolving Secrets"):
             resolver.resolve()
 
-        def scoped_ctx(secret_names: tuple[str, ...]) -> RunContext:
+        def scoped_ctx(
+            secret_names: tuple[str, ...],
+            *,
+            admin_target: Transport | None = None,
+            agent_target: Transport | None = None,
+        ) -> RunContext:
             return RunContext(
                 config=config,
                 operation_scope=scope,
+                admin_target=admin_target,
+                agent_target=agent_target,
                 secrets=ScopedSecrets(resolver.values, secret_names),
             )
 
-        # Each credential's token, read through its node's SCOPED
-        # delivery; the write-step runup inside the body applies the
-        # skip-and-degrade policy as before.
-        git_tokens = credential_tokens(tmpl_node, scoped_ctx)
+        from agentworks.git_credentials import (
+            credential_redactions,
+            credential_requests,
+        )
+
+        credential_ops = credential_requests(tmpl_node.credentials, scoped_ctx)
+        git_redactions = credential_redactions(tmpl_node.credentials, resolver.values)
 
         with output.section("Agent Initialization"):
             from agentworks.agents.realize import realize_agent
@@ -233,7 +242,8 @@ def create_agent(
                 name=name,
                 vm=vm,
                 template=agent_tmpl,
-                git_tokens=git_tokens,
+                credential_requests=credential_ops,
+                credential_redactions=git_redactions,
                 grant_all_workspaces=grant_all_workspaces,
                 overlay=overlay,
             )
@@ -555,7 +565,6 @@ def reinit_agent(
         # agent's row carries no template edge, so the walk is multi-root.
         from agentworks.agents.nodes import (
             agent_template_node,
-            credential_tokens,
             live_agent_node,
         )
         from agentworks.capabilities.base import (
@@ -564,6 +573,7 @@ def reinit_agent(
             ScopeLevel,
         )
         from agentworks.db import SYSTEM_SLUG_KEY
+        from agentworks.git_credentials import announce_git_credentials
         from agentworks.orchestration.activation import (
             activation_gate,
             gate_secret_resolver,
@@ -572,7 +582,6 @@ def reinit_agent(
         from agentworks.orchestration.secrets import ScopedSecrets, secret_union
         from agentworks.orchestration.walk import walk
         from agentworks.secrets.resolver import Resolver
-        from agentworks.vms.initializer import announce_git_credentials
         from agentworks.vms.nodes import live_vm_node
 
         resolver = Resolver(config, registry, interaction=interaction)
@@ -583,7 +592,6 @@ def reinit_agent(
         nodes = walk(agent_node, tmpl_node)
         for secret_name in secret_union(nodes):
             resolver.register_name(secret_name)
-        providers = {node.provider.owner_name: node.provider for node in tmpl_node.credentials}
 
         scope = OperationScope(
             level=ScopeLevel.AGENT,
@@ -613,7 +621,7 @@ def reinit_agent(
         # operator-env secrets are prompted at reinit.
         with output.section("Preflight"):
             output.info(f"Checking agent-template/{agent_tmpl.name}...")
-            announce_git_credentials(providers)
+            announce_git_credentials(tmpl_node.credentials)
             preflight_all(
                 nodes,
                 RunContext(config=config, operation_scope=scope),
@@ -624,20 +632,33 @@ def reinit_agent(
         with output.section("Resolving Secrets"):
             resolver.resolve()
 
-        def scoped_ctx(secret_names: tuple[str, ...]) -> RunContext:
+        def scoped_ctx(
+            secret_names: tuple[str, ...],
+            *,
+            admin_target: Transport | None = None,
+            agent_target: Transport | None = None,
+        ) -> RunContext:
             return RunContext(
                 config=config,
                 operation_scope=scope,
+                admin_target=admin_target,
+                agent_target=agent_target,
                 secrets=ScopedSecrets(resolver.values, secret_names),
             )
 
-        git_tokens = credential_tokens(tmpl_node, scoped_ctx)
+        from agentworks.git_credentials import (
+            credential_redactions,
+            credential_requests,
+        )
+
+        credential_ops = credential_requests(tmpl_node.credentials, scoped_ctx)
+        git_redactions = credential_redactions(tmpl_node.credentials, resolver.values)
 
         with output.section("Agent Initialization"):
             from agentworks.agents.initializer import create_agent_on_vm
             from agentworks.ssh import SSHLogger
 
-            ssh_logger = SSHLogger(vm.name, "agent-reinit", redactions=tuple(git_tokens.values()))
+            ssh_logger = SSHLogger(vm.name, "agent-reinit", redactions=git_redactions)
             try:
                 try:
                     from agentworks.vms.admin_templates import resolve_live_template as resolve_admin_template
@@ -649,7 +670,7 @@ def reinit_agent(
                         agent_tmpl,
                         agent.linux_user,
                         agent_name=agent.name,
-                        git_tokens=git_tokens,
+                        credential_requests=credential_ops,
                         logger=ssh_logger,
                         admin_git_force_safe_directory=resolve_admin_template(
                             db,

@@ -11,16 +11,17 @@ from __future__ import annotations
 
 import contextlib
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock
 
 import pytest
 
+from agentworks.capabilities.git_credential.base import StoredCredential
 from agentworks.capabilities.vm_platform import ProvisionResult
 from agentworks.config import load_config
 from agentworks.db import VersionedPayload, VMStatus
 from agentworks.debian import DebianRelease
-from agentworks.errors import ConfigError, StateError
+from agentworks.errors import ConfigError, StateError, ValidationError
 from agentworks.output import Role
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
@@ -37,6 +38,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from agentworks.db import Database
+    from agentworks.git_credentials import CredentialRequest
 
 # Proxmox ships in the opt-in ``proxmox`` system plugin since Phase 10 (R11),
 # so a config that uses the proxmox site enables the plugin, exactly as a real
@@ -47,7 +49,7 @@ PLUGINS_ENABLED = """
 system = ["proxmox"]
 """
 
-GIT_CRED_GH = ManifestDoc("git-credential", "gh", {"provider": {"name": "github"}})
+GIT_CRED_GH = ManifestDoc("git-credential", "gh", {"provider": {"name": "github", "source": {"mode": "secret"}}})
 
 
 @pytest.fixture
@@ -96,6 +98,70 @@ def test_create_unknown_template_precedes_unrelated_unsupported_live_overlay(
         )
 
     assert (caught.value.entity_kind, caught.value.entity_name) == ("vm-template", "missing")
+
+
+def test_create_refuses_invalid_provider_input_before_db_or_platform_mutation(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    config = make_config(
+        manifests=[
+            GIT_CRED_GH,
+            ManifestDoc("admin-template", "default", {"git_credentials": ["gh"]}),
+        ]
+    )
+    monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GH", "invalid\nvalue")
+    create = MagicMock()
+    initialize = MagicMock()
+    monkeypatch.setattr(LimaPlatform, "create", create)
+    monkeypatch.setattr(vm_manager, "run_initialization", initialize)
+
+    with pytest.raises(ValidationError):
+        vm_manager.create_vm(db, config, name="invalid-git", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_vm("invalid-git") is None
+    create.assert_not_called()
+    initialize.assert_not_called()
+
+
+def test_create_refuses_duplicate_static_scopes_before_db_or_platform_mutation(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    credentials = [
+        ManifestDoc(
+            "git-credential",
+            name,
+            {"provider": {"name": "github", "source": {"mode": "secret"}}},
+        )
+        for name in ("first", "second")
+    ]
+    config = make_config(
+        manifests=[
+            *credentials,
+            ManifestDoc(
+                "admin-template",
+                "default",
+                {"git_credentials": ["first", "second"]},
+            ),
+        ]
+    )
+    monkeypatch.setenv("AW_SECRET_GIT_TOKEN_FIRST", "first-token")
+    monkeypatch.setenv("AW_SECRET_GIT_TOKEN_SECOND", "second-token")
+    create = MagicMock()
+    monkeypatch.setattr(LimaPlatform, "create", create)
+
+    with pytest.raises(ConfigError):
+        vm_manager.create_vm(db, config, name="duplicate-git", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_vm("duplicate-git") is None
+    create.assert_not_called()
 
 
 def test_create_graph_derives_from_declared_resources(make_config, db: Database) -> None:
@@ -205,10 +271,12 @@ def test_create_admin_spec_credential_joins_graph_and_logger_redactions(
     def _phase_b(*args: object, **kwargs: object) -> None:
         events.append("phase-b")
         assert args[10] is loggers[0]
-        providers = args[7]
-        assert isinstance(providers, dict)
-        assert list(providers) == ["gh"]
-        assert kwargs["git_tokens"] == {"gh": "ghtok"}
+        providers = cast("tuple[CredentialRequest, ...]", args[7])
+        assert [request.name for request in providers] == ["gh"]
+        request = providers[0]
+        payload = request.provider.credential_material(request.context())
+        assert isinstance(payload, StoredCredential)
+        assert payload.password == "ghtok"
 
     monkeypatch.setattr(vm_manager, "run_initialization", _phase_b)
 
@@ -799,7 +867,6 @@ def test_reinit_runs_initialization_through_the_gate(
     monkeypatch.setattr(vm_manager, "verified_vm_release", _verified_release)
 
     def _fake_init(*args: object, **kwargs: object) -> None:
-        captured["git_tokens"] = kwargs["git_tokens"]
         captured["providers"] = args[7]
         captured["held"] = list(holds)
         captured["debian_release"] = kwargs["debian_release"]
@@ -811,12 +878,12 @@ def test_reinit_runs_initialization_through_the_gate(
 
     vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
 
-    assert captured["git_tokens"] == {"gh": "ghtok"}
     assert captured["debian_release"] is DebianRelease.BOOKWORM
     assert len(observed_targets) == 1
     assert legacy_checked == ["rvm"]
     assert logger_redactions == [("ghtok",)]
-    assert list(captured["providers"]) == ["gh"]  # type: ignore[call-overload]
+    requests = cast("tuple[CredentialRequest, ...]", captured["providers"])
+    assert [request.name for request in requests] == ["gh"]
     assert captured["held"] == ["open"]  # init ran inside the span
     assert holds == ["open", "close"]  # span closed at the end
     assert any("reinitialized successfully" in m for m in captured_output.info)
@@ -905,7 +972,6 @@ def test_reinit_resolves_the_stored_admin_template(
     captured: dict[str, object] = {}
 
     def _fake_init(*args: object, **kwargs: object) -> None:
-        captured["git_tokens"] = kwargs["git_tokens"]
         captured["providers"] = args[7]
         captured["admin"] = args[4]
 
@@ -916,8 +982,8 @@ def test_reinit_resolves_the_stored_admin_template(
 
     vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
 
-    assert captured["git_tokens"] == {"gh": "ghtok"}
-    assert list(captured["providers"]) == ["gh"]  # type: ignore[call-overload]
+    requests = cast("tuple[CredentialRequest, ...]", captured["providers"])
+    assert [request.name for request in requests] == ["gh"]
     assert isinstance(captured["admin"], AdminConfig)
     assert captured["admin"].shell == "zsh"
 

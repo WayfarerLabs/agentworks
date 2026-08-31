@@ -138,7 +138,12 @@ def test_git_credential_miss_returns_none(tmp_path: Path) -> None:
 def test_git_credential_hit_returns_entry(tmp_path: Path) -> None:
     registry = _registry(
         tmp_path,
-        ManifestDoc("git-credential", "github", {"provider": {"name": "github"}}, description="gh"),
+        ManifestDoc(
+            "git-credential",
+            "github",
+            {"provider": {"name": "github", "source": {"mode": "secret"}}},
+            description="gh",
+        ),
     )
     cred = git_credential(registry, "github")
     assert cred is not None

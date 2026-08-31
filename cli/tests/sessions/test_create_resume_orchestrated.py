@@ -59,7 +59,7 @@ def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
 class _Result:
     def __init__(self, ok: bool = True) -> None:
         self.ok = ok
-        self.returncode = 0 if ok else 1
+        self.returncode = 0 if ok else 20
         self.stdout = ""
         self.stderr = ""
 
@@ -1040,7 +1040,7 @@ def test_resume_pane_command_uses_resume_command_and_session_workspace(
 
 # -- gate-prompt parity: the walk-away invariant, per command ----------------
 #
-# Mirrors the add-git-credential gate parity proof for the session
+# Mirrors the VM activation-gate parity proof for the session
 # commands: on a STOPPED proxmox VM the gate resolves its API token
 # just-in-time (first backend pass), SEEDS the boundary resolver so
 # the token never resolves or prompts again, and every remaining

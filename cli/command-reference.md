@@ -570,7 +570,6 @@ just a vm-site.
 | `agw vm rekey <name>`                               | Assign a new Tailscale auth key to a VM (logout + rejoin)     |
 | `agw vm port-forward <name> <ports...>`             | Forward local port(s) to a VM (like kubectl port-forward)     |
 | `agw vm logs <name>`                                | Show SSH logs for a VM                                        |
-| `agw vm add-git-credential <name> <cred>`           | Add or update a git credential                                |
 
 **Power-state semantics:** a VM that stopped on its own (idle timeout, host reboot) is started
 automatically, on demand, by any command that needs it live. A VM stopped with `agw vm stop` is

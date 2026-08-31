@@ -11,6 +11,7 @@ and the on-VM mutation (``create_agent_on_vm``) are the fakes.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -19,8 +20,9 @@ from agentworks.agents import grants as agent_grants
 from agentworks.agents import initializer as agent_initializer
 from agentworks.agents import manager as agent_manager
 from agentworks.capabilities.base import RunContext
+from agentworks.capabilities.git_credential.base import StoredCredential
 from agentworks.db import VersionedPayload
-from agentworks.errors import ExternalError, NotFoundError, StateError
+from agentworks.errors import ExternalError, NotFoundError, StateError, ValidationError
 from agentworks.output import Role
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -35,7 +37,7 @@ if TYPE_CHECKING:
     from agentworks.db import Database
 
 AGENT_MANIFESTS = [
-    ManifestDoc("git-credential", "gh", {"provider": {"name": "github"}}),
+    ManifestDoc("git-credential", "gh", {"provider": {"name": "github", "source": {"mode": "secret"}}}),
     ManifestDoc("agent-template", "default", {"git_credentials": ["gh"]}),
     ManifestDoc("agent-template", "other", {"git_credentials": ["gh"]}),
 ]
@@ -66,7 +68,12 @@ def mutation(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     captured: dict[str, Any] = {}
 
     def _fake_mutation(*args: Any, **kwargs: Any) -> None:
-        captured["git_tokens"] = kwargs["git_tokens"]
+        requests = kwargs["credential_requests"]
+        materials = {request.name: request.provider.credential_material(request.context()) for request in requests}
+        assert all(isinstance(material, StoredCredential) for material in materials.values())
+        captured["credential_passwords"] = {
+            name: material.password for name, material in materials.items() if isinstance(material, StoredCredential)
+        }
         captured["agent_name"] = kwargs["agent_name"]
 
     monkeypatch.setattr(agent_initializer, "create_agent_on_vm", _fake_mutation)
@@ -100,6 +107,31 @@ def test_create_with_missing_vm_preserves_domain_error_and_state(
     assert caught.value.entity_name == "missing"
     assert db.get_agent("dev") is None
     assert db.instance_state.get_desired_overlay("agent", "dev") is None
+
+
+def test_create_refuses_invalid_provider_input_before_user_or_db_mutation(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GH", "invalid\nvalue")
+    mutation = MagicMock()
+    monkeypatch.setattr(agent_initializer, "create_agent_on_vm", mutation)
+
+    with pytest.raises(ValidationError):
+        agent_manager.create_agent(
+            db,
+            config,
+            name="invalid-git",
+            vm_name="box",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert db.get_agent("invalid-git") is None
+    mutation.assert_not_called()
 
 
 def _reachable(monkeypatch: pytest.MonkeyPatch, value: bool) -> None:
@@ -162,7 +194,7 @@ def test_agent_mutation_refuses_ssh_identity_before_activation(
     assert mutation == {}
 
 
-def test_create_and_reinit_loggers_receive_all_git_tokens(
+def test_create_and_reinit_loggers_receive_all_git_credential_inputs(
     db: Database,
     make_config,
     mutation: dict[str, Any],
@@ -295,7 +327,7 @@ def test_create_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
 
     assert resolve_counter == [["proxmox-token"], ["git-token-gh"]]
     assert events == ["status", "start", "tailscale"]  # the gate ran
-    assert mutation["git_tokens"] == {"gh": "ghtok"}
+    assert mutation["credential_passwords"] == {"gh": "ghtok"}
     row = db.get_agent("dev")
     assert row is not None and row.linux_user == "agt-dev"
     # Banner parity: the orchestrator frames the same phases the
@@ -334,7 +366,7 @@ def test_reinit_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
 
     assert resolve_counter == [["proxmox-token"], ["git-token-gh"]]
     assert events == ["status", "start", "tailscale"]
-    assert mutation["git_tokens"] == {"gh": "ghtok"}
+    assert mutation["credential_passwords"] == {"gh": "ghtok"}
     assert mutation["agent_name"] == "dev"
     assert any("reinitialized" in m for m in captured_output.info)
     # The terminal outcome routes through result(): RESULT role at level 0.
@@ -370,7 +402,7 @@ def test_create_reachable_vm_fast_path_costs_no_gate_resolve(
     # first-encounter order (the union's only source since the
     # construct-time registration seam closed).
     assert resolve_counter == [["git-token-gh", "proxmox-token"]]
-    assert mutation["git_tokens"] == {"gh": "ghtok"}
+    assert mutation["credential_passwords"] == {"gh": "ghtok"}
 
 
 # -- failure parity -----------------------------------------------------------
