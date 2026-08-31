@@ -55,12 +55,13 @@ class _VMPlatformKind:
         and how to reach them over SSH once they exist.
 
         Contract version 3 receives core's concrete current Debian release, resolves it
-        to a platform-owned artifact, and returns the matching release observed from the
-        live guest while backend rollback is still possible. Missing mappings fail before
-        backend mutation; a platform completes its Tailscale join before returning,
+        to a platform-owned artifact, and verifies the live guest while backend rollback
+        is still possible. Missing mappings fail before backend mutation; a platform
+        completes its Tailscale join before returning transport and backend identity,
         reports bootstrap through the manager-owned progress sink, and rolls back partial
-        backend state before propagating failure. A successful result may omit only the
-        Tailscale IP; the VM domain then retries IP discovery and verifies Tailscale SSH
+        backend state before propagating failure. Core independently verifies the returned
+        transport before persisting the observed release. A successful result may omit only
+        the Tailscale IP; the VM domain then retries IP discovery and verifies Tailscale SSH
         without replaying bootstrap.
 
         Platforms are code, not config: a vm-site selects one by writing its name inside

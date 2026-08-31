@@ -40,8 +40,6 @@ from agentworks.plugins.proxmox.api import ProxmoxAPIError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.transports import SSHTransport
 
-pytestmark = pytest.mark.usefixtures("verified_debian_release")
-
 if TYPE_CHECKING:
     from agentworks.db import VMRow
     from tests.conftest import CapturedOutput

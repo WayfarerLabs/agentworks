@@ -18,9 +18,10 @@ The transition has five cooperating parts:
    profile, classifies relative support, parses `/etc/os-release`, and attaches each direct upgrade
    policy to its target profile.
 2. Vm-platform contract version 3 requires `ProvisionRequest` to carry the concrete core-selected
-   release. Platform-local maps turn it into the provider image selector, and create returns the
-   release verified during the rollback-capable bootstrap window. Old contract implementations fail
-   conformance; missing release mappings fail clearly before backend mutation.
+   release. Platform-local maps turn it into the provider image selector, and platforms verify the
+   live guest during their rollback-capable create window. Core independently probes the returned
+   transport and owns the persisted observation. Old contract implementations fail conformance;
+   missing release mappings fail clearly before backend mutation.
 3. `vms.debian_release` and `vms.debian_release_observed_at` retain the last verified observation.
    Legacy rows begin unknown and are populated by a live probe.
 4. A release value resolver chooses platform and APT values from explicit maps. The selected VM
@@ -681,10 +682,10 @@ semantics.
   access;
 - Proxmox repeats the same mapping lookup inside `create`, and the manager preserves typed create
   failures, their remediation hints, and provisional-row unwind;
-- every create path passes the request to the shared verifier and returns its matching live result
-  before success;
-- a nonconforming platform that returns a mismatched result leaves one failed, uninitialized row
-  with the backend metadata needed for deletion and a typed delete/retry diagnostic;
+- every platform create path passes the request to the shared verifier before its rollback window
+  closes, then core independently verifies the returned transport before success;
+- a failed core verification leaves one failed, uninitialized row with the backend metadata needed
+  for deletion and a typed delete/retry diagnostic;
 - Proxmox legacy scalar maps only to Bookworm and cannot satisfy current-release creation;
 - APT scalar/map exclusivity, codename scalar rejection, selected-map resolution, missing-map
   failure-before-mutation, generated samples, and plugin parity;
@@ -716,10 +717,10 @@ semantics.
 The contract-version merge unit updates `cli/agentworks/capabilities/README.md`,
 `cli/agentworks/capabilities/vm_platform/README.md`, and `cli/agentworks/plugins/README.md`. The
 plugin example advertises version 3 and teaches the required release request, release-keyed lookup,
-live verification, matching result, and failure contract. Review checks all three documents without
-tests that assert on authored prose. The kind's published topic prose and the `VMPlatform.create`,
-request, and result docstrings change in that same merge unit so generated capability teaching does
-not retain the version 2 contract.
+platform-local live verification, returned transport, core-owned matching observation, and failure
+contract. Review checks all three documents without tests that assert on authored prose. The kind's
+published topic prose and the `VMPlatform.create`, request, and result docstrings change in that
+same merge unit so generated capability teaching does not retain the version 2 contract.
 
 ### Live certification
 

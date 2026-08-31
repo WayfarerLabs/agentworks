@@ -529,9 +529,9 @@ def create_vm(
                     entity_kind="vm",
                     entity_name=vm_name,
                 ) from e
-            # The unwind window closes here: provisioning succeeded, the VM
-            # exists, and initialization failures keep it (with recovery
-            # guidance), exactly as before.
+            # The platform's rollback window closes here: its create returned
+            # and the VM exists. Core acceptance is still pending below; a
+            # failure there keeps an addressable row with recovery guidance.
             from agentworks.instance_specs import render_overlay_outcome
 
             # Persist the platform's opaque identifiers verbatim; the owning

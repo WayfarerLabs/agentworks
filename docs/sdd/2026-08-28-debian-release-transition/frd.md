@@ -328,9 +328,9 @@ release through a controlled, recorded product lifecycle.
   release mapping fails before backend mutation with a clear platform-update or site-configuration
   error and never falls back.
 - The create exception boundary preserves both missing-map error kinds and their remediation hints.
-  A platform-returned release mismatch never reports success or orphans a backend: compliant
-  implementations roll back, while the manager safety net retains a failed row with the backend
-  identifiers needed for deletion.
+  A platform-observed release mismatch rolls back inside its create window. After any platform
+  returns, core independently probes the returned transport; a failed core probe never reports
+  success and retains a failed row with the backend identifiers needed for deletion.
 - A migrated legacy row stays `null` until a live probe establishes its release, including a Proxmox
   row created from an operator template.
 - Reinitializing a recognized VM selects values for its observed release regardless of support tier.

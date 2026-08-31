@@ -280,7 +280,7 @@ def test_create_vm_preserves_typed_release_mapping_failure(
     ("failure", "wrapped"),
     [
         pytest.param(StateError("guest release mismatch"), True, id="mismatch"),
-        pytest.param(RuntimeError("transport failed"), True, id="transport-failure"),
+        pytest.param(RuntimeError("private-transport-sentinel"), True, id="transport-failure"),
         pytest.param(KeyboardInterrupt("stop"), False, id="interrupt"),
         pytest.param(UserAbort("stop"), False, id="user-abort"),
     ],
@@ -345,6 +345,7 @@ def test_create_vm_core_release_attestation_uses_core_release_and_retains_failed
         assert wrapped_caught.value.entity_kind == "vm"
         assert wrapped_caught.value.entity_name == "unverified"
         assert wrapped_caught.value.__cause__ is failure
+        assert "private-transport-sentinel" not in str(wrapped_caught.value)
     else:
         with pytest.raises((KeyboardInterrupt, UserAbort)) as control_caught:
             _create()
