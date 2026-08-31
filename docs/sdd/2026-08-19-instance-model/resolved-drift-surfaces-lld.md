@@ -1,6 +1,6 @@
 # R5 Resolved Spec and Drift Surfaces: Low-Level Design
 
-- Status: Implemented; final verification in progress
+- Status: Implemented and verified; closeout validation pending
 - Date: 2026-08-29
 - Last revised: 2026-08-30
 - Requirements: R5 in `frd.md`

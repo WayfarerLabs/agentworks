@@ -476,15 +476,6 @@ class InstanceStateRepository:
                 (instance_kind, instance_name, _DESIRED_OVERLAY, _DESIRED_KEY),
             )
 
-    def list_desired_overlays(self, instance_kind: InstanceKind) -> tuple[DesiredOverlayRecord, ...]:
-        _validate_instance_kind(instance_kind)
-        rows = self._connection.execute(
-            "SELECT * FROM instance_records WHERE instance_kind = ? AND record_type = ? "
-            "ORDER BY instance_name, record_key",
-            (instance_kind, _DESIRED_OVERLAY),
-        ).fetchall()
-        return tuple(self._to_desired(row) for row in rows)
-
     def has_vm_owner_tree_desired_overlay(self, vm_name: str) -> bool:
         """Whether a VM or any of its current descendants has a desired overlay."""
         return bool(self._vm_owner_tree_desired_overlay_rows(vm_name, limit_one=True))
@@ -598,15 +589,6 @@ class InstanceStateRepository:
                 "AND record_key = ?",
                 (instance_kind, instance_name, _APPLIED_STATE, key),
             )
-
-    def list_applied_slices(self, instance_kind: InstanceKind) -> tuple[AppliedStateSlice, ...]:
-        _validate_instance_kind(instance_kind)
-        rows = self._connection.execute(
-            "SELECT * FROM instance_records WHERE instance_kind = ? AND record_type = ? "
-            "ORDER BY instance_name, record_key",
-            (instance_kind, _APPLIED_STATE),
-        ).fetchall()
-        return tuple(record for row in rows if (record := self._to_applied(row)) is not None)
 
     def inspect_owner_state(
         self,

@@ -561,6 +561,12 @@ creates and verifies the VM's managed offline checkpoint before the first packag
 checkpoint is retained for explicit restore or deletion. See
 [Upgrading a Debian VM](../docs/guides/debian-vm-upgrades.md).
 
+Passphrase-protected OpenSSH private keys remain supported: Agentworks reads the public identity
+embedded in the private-key envelope without decrypting it or consulting a sibling public-key file.
+Recognized encrypted legacy key formats that do not expose a public identity are reported as
+unverifiable, not mismatched. SSH-agent identity selection is not part of this comparison contract;
+the configured private-key path remains the identity source.
+
 Non-fatal initialization failures (packages, dotfiles) produce a `partial` status rather than
 aborting. Fatal failures prompt for deletion or reinit. Use `vm describe` to view the full event
 log, current VM and admin declarations, recorded lifecycle evidence, and structural drift. The

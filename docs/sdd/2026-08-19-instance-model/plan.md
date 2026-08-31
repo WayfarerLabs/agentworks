@@ -2,7 +2,7 @@
 
 <!-- cspell:ignore sdds -->
 
-- Status: R1-R4 and merge strategy merged; R5 implemented, final verification pending
+- Status: Implementation complete; closeout validation pending
 - Date: 2026-08-23
 - Last revised: 2026-08-30
 - Requirements: [frd.md](./frd.md)
@@ -11,25 +11,18 @@
 - Instance-spec CLI: [instance-spec-cli.md](./instance-spec-cli.md)
 - Merge strategy: [merge-strategy-lld.md](./merge-strategy-lld.md)
 - R5 design: [resolved-drift-surfaces-lld.md](./resolved-drift-surfaces-lld.md)
-- Code basis: `79e555a6` on `main`
-- Delivery vehicle: merged R1 artifact PR #632, merged R2 store and R4 design PR #636, merged R4
-  implementation PR #670; merged merge-strategy SDD checkpoint and implementation PR #686; merged R3
-  SDD checkpoint and implementation PR #700; R5 SDD checkpoint and implementation on one draft PR
-  from `main`
+- Code basis: `9444c5f4` on `main`
+- Delivery vehicle: merged R1 artifact PR #632; merged R2 store and R4 design PR #636; merged R4
+  overlay and live-publication PR #670; merged merge-strategy SDD and implementation PR #686; merged
+  R3 SDD and implementation PR #700; merged R5 SDD and implementation PR #703; merged R5 YAML
+  correction PR #706; final closeout PR from `main`
 
 ## Delivery posture
 
-R1 is an independently reviewed coordination artifact merged through PR #632. R2 is an independently
-valuable, always-green persistence increment merged through PR #636: it establishes the store
-contract needed by this effort and wave 4 without exposing the later SSH, merge, CLI, and diagnostic
-risk in the same review. Its accepted R4 design artifacts remain response material for the later
-implementation.
-
-PR #670 merged the complete R4 overlay and live-publication work. The merge-strategy correction uses
-one PR in two explicit stages: an SDD-only draft checkpoint under `review-requested`, followed after
-checkpoint convergence by implementation on the same draft PR. The PR becomes ready only at the
-complete implementation handoff. Each later delivery starts from `main` and is independently
-complete, reviewed, and green. Stack only actual dependencies and merge a stack bottom-up.
+PRs #632, #636, #670, #686, #700, #703, and #706 delivered the effort as independently green,
+reviewed increments from `main`. The final closeout records permanent teaching and exact evidence,
+removes unused contract surface identified by the final complexity review, and locks the child SDD
+only after ready-stage live validation and saga review converge.
 
 Completed checkboxes are immutable. The effort lead updates them only after the named behavior,
 tests, permanent collateral, and independent review are complete.
@@ -373,13 +366,16 @@ provider-realized hardware.
 ## Phase 6: complete verification and closeout
 
 - [x] Run focused tests after every phase and the full gate on the complete exact head.
+- [x] Remove the unused by-kind desired-overlay and applied-slice list reads and the value-less
+      hardware marker carrier identified by final complexity review; update their tests and the
+      closed store contract while retaining every exact-owner, owner-tree, and fleet consumer.
 - [ ] Run equal-capability project review, independent fresh-eyes review, and the saga review
       campaign scaled to the final blast radius; resolve every material finding.
 - [x] Run isolated-home CLI acceptance for overlay declaration, resolved template and instance show,
       doctor comparison output, malformed state, and JSON v1 compatibility.
 - [ ] Run live VM validation for create-time capture, matching preflight, deliberate identity drift,
       password-protected OpenSSH keys, safe cleanup, and independent residue verification.
-- [ ] Promote all load-bearing contract and operator teaching into permanent docs, confirm no
+- [x] Promote all load-bearing contract and operator teaching into permanent docs, confirm no
       permanent artifact depends on this SDD path, and add `locked.md` only in the final PR.
 - [ ] Record exact evidence, commit with the required session trailer, push, hand off the green
       head, and set ready only when the operator supplies merge intent.
@@ -402,7 +398,6 @@ SDD is ready to lock with the final implementation.
 
 ## Research disposition
 
-External prior-art research is unnecessary for R2. The governing facts are the repository's SQLite
-migration, backup, transaction, and typed-facade mechanics. SSH private-key envelope parsing will be
-checked against the OpenSSH format specification during R3 design rather than inferred from local
-examples alone.
+External prior-art research was unnecessary for R2. The governing facts were the repository's SQLite
+migration, backup, transaction, and typed-facade mechanics. R3 checked SSH private-key envelope
+parsing against the OpenSSH format specification rather than inferring it from local examples alone.

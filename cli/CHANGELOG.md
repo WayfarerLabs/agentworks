@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.17.0](https://github.com/WayfarerLabs/agentworks/compare/v0.16.0...v0.17.0) (2026-08-31)
+
+
+### ⚠ BREAKING CHANGES
+
+* **cli:** Git credential manifests now require a provider-owned structured `source`; rewrite released `provider.token` forms and follow `docs/guides/upgrading-to-0.17.md` before reinitializing users.
+* **vm:** Existing VMs require one successful agw vm reinit NAME before ordinary Agentworks SSH operations proceed. If the installed key no longer works, use platform or provider recovery or recreate the VM.
+* **schema:** harness-integration contract version 2 removes merge_config; third-party integrations must express merge behavior on their config model.
+
+### Features
+
+* **cli:** render instance descriptions as YAML ([9444c5f](https://github.com/WayfarerLabs/agentworks/commit/9444c5f47948229f4492ff438a0466fa26c17362))
+* **cli:** render instance specs as YAML ([38b9110](https://github.com/WayfarerLabs/agentworks/commit/38b9110f3431dcc97016a923a8b4d59b3dc58be9))
+* **cli:** support runtime Git identities ([60d8805](https://github.com/WayfarerLabs/agentworks/commit/60d88050414cfab343629c1cad5dbbd148036fe1))
+* **cli:** support runtime Git identities ([15ba89e](https://github.com/WayfarerLabs/agentworks/commit/15ba89ecd26eb81166eb7dad5d0adfa30c7ce416))
+* **console:** support indexed session additions ([261ca00](https://github.com/WayfarerLabs/agentworks/commit/261ca0092b0c9cefd8a92f288e7074cef35a6088))
+* **schema:** add model-directed merge strategies ([2818de9](https://github.com/WayfarerLabs/agentworks/commit/2818de9c716e0e4edf1deb7b0ebee490eb0d8f62))
+* **schema:** direct layer merging from models ([eab13fb](https://github.com/WayfarerLabs/agentworks/commit/eab13fb31f5e80229d7de2c5d63d66e3922e1e5a))
+* **vm:** record applied SSH identity ([d551de5](https://github.com/WayfarerLabs/agentworks/commit/d551de510c12452774d0f89abde9826c204e0b74))
+* **vm:** record applied SSH identity ([68961b7](https://github.com/WayfarerLabs/agentworks/commit/68961b788b6a7c861a6a0dd40d21f0ffa63a8921))
+
+
+### Bug Fixes
+
+* address merge strategy review feedback ([8073287](https://github.com/WayfarerLabs/agentworks/commit/80732870aca9190702d9bd65d00e9bb6d63fd254))
+* **cli:** clarify lifecycle evidence inspection ([b426178](https://github.com/WayfarerLabs/agentworks/commit/b426178f799dabe7b2db4a5b5106380d1416705a))
+* **cli:** complete doctor database counts ([8c9057c](https://github.com/WayfarerLabs/agentworks/commit/8c9057ceed5da37a0789fc44b7f8774813ccc406))
+* **cli:** complete doctor database counts ([063ee6a](https://github.com/WayfarerLabs/agentworks/commit/063ee6ae1703a51ea38acbcc782d310f924a5226))
+* **cli:** correct Git credential preparation ([59c105f](https://github.com/WayfarerLabs/agentworks/commit/59c105fb65ea2ff5a7079fdd7ec0f094c79dcac9))
+* **cli:** degrade workspace and agent inspection ([167239c](https://github.com/WayfarerLabs/agentworks/commit/167239c15bf761651a2eec6d1d512ee25e68ccba))
+* **cli:** harden credential reconciliation portability ([dbb7e0a](https://github.com/WayfarerLabs/agentworks/commit/dbb7e0ac98cd3e40ae2b5963ed1fd23418bc74aa))
+* **cli:** keep instance records independent ([38a4539](https://github.com/WayfarerLabs/agentworks/commit/38a4539196486ba2aaab7dc7c87443cbc02e059f))
+* **cli:** report healthy secret sources as ok ([d92dfd6](https://github.com/WayfarerLabs/agentworks/commit/d92dfd6f419faddcdae243a9cd6f1898c9e6a95e))
+* **console:** preflight identity before secret prompts ([dc41c37](https://github.com/WayfarerLabs/agentworks/commit/dc41c3745cd9b0729efd289380f324903d9c8d57))
+* **console:** preflight live changes before mutation ([69051b7](https://github.com/WayfarerLabs/agentworks/commit/69051b7d7ebf09ae2ddd3e5241f7b94fe34ed79b))
+* **console:** preflight live changes before mutation ([863a733](https://github.com/WayfarerLabs/agentworks/commit/863a733a6958d586c7af0b0ad9ee403754394f1d))
+* **console:** preserve typed concurrent add errors ([d9561ff](https://github.com/WayfarerLabs/agentworks/commit/d9561ff4ebabbc37b1b119531cd45b1129e7ae3d))
+* **git-credentials:** check active GitHub identity ([11e1e62](https://github.com/WayfarerLabs/agentworks/commit/11e1e62ba31fad06d8aa9bb578c502f30974fa39))
+* **git-credentials:** check target CLI readiness ([f72884f](https://github.com/WayfarerLabs/agentworks/commit/f72884fddc7cf847a84d472a3d21c0debc8df7a4))
+* **git-credentials:** check target user commands ([b2f1dc9](https://github.com/WayfarerLabs/agentworks/commit/b2f1dc99272448db1fa681897d6a0ca026c55985))
+* **vm:** surface SSH evidence upgrade boundary ([4bc0c79](https://github.com/WayfarerLabs/agentworks/commit/4bc0c797807ca1fb05bad8b57bed2e988d848d3e))
+
+
+### Documentation
+
+* **sdd:** clarify lifecycle evidence ([f870b90](https://github.com/WayfarerLabs/agentworks/commit/f870b9030b3b34fa7f718039253d3224dcac2638))
+* **sdd:** prepare instance model closeout ([4237dde](https://github.com/WayfarerLabs/agentworks/commit/4237dde681a6d2f703bbc23a02003718f521cdc9))
+
 ## [0.16.0](https://github.com/WayfarerLabs/agentworks/compare/v0.15.0...v0.16.0) (2026-08-28)
 
 
