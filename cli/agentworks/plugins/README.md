@@ -217,7 +217,10 @@ There is no older-contract adapter.
 An operator-owned release catalog also overrides the pure `validate_create_release(release)` hook.
 Core calls it with the concrete selection before resolving secrets or running authenticated platform
 readiness, while `create()` repeats the lookup before mutation. Do not turn that operation-specific
-requirement into load-time rejection when the same site can still operate existing VMs.
+requirement into load-time rejection when the same site can still operate existing VMs. When the
+backend can inspect an operator-owned artifact after boot but before Agentworks bootstrap, attest
+`/etc/os-release` at that boundary and roll back a mismatch. Retain the final live probe that
+supplies `ProvisionResult.debian_release`; neither verification gets an operator bypass.
 
 A site then writes `platform: {name: example-cloud, region: us-west-2}`, and `api_token` resolves to
 the `example-cloud-token` secret because the field was omitted. An OMITTED reference field and an

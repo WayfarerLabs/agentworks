@@ -219,7 +219,20 @@ def probe_debian_release(
 ) -> DebianRelease:
     """Read and validate a VM's live Debian release through its transport."""
 
-    observed = parse_os_release(transport.run("cat /etc/os-release").stdout)
+    return verify_os_release(
+        transport.run("cat /etc/os-release").stdout,
+        expected=expected,
+    )
+
+
+def verify_os_release(
+    text: str,
+    *,
+    expected: DebianRelease | None = None,
+) -> DebianRelease:
+    """Validate one externally observed ``os-release`` payload."""
+
+    observed = parse_os_release(text)
     if expected is not None and observed is not expected:
         raise StateError(
             f"VM reports Debian {observed}, expected {expected}",

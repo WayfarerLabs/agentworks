@@ -24,6 +24,8 @@ Agentworks continues to support Debian as its one managed guest operating system
 registry of recognized Debian release profiles, and the final profile is the sole current release
 for new VM creation. Core passes that concrete release through the vm-platform capability; each
 platform maps it to its own reviewed artifact and verifies the live guest before create succeeds.
+When the artifact catalog is operator-owned, the platform also verifies the live release before
+Agentworks bootstrap mutates the guest.
 
 The database stores the last release observed from each live VM. Existing unknown rows are observed
 rather than guessed. A recognized release immediately before current is supported for an explicit
@@ -38,7 +40,8 @@ new current release.
 
 Operators cannot select another Debian creation release or bring another operating system into the
 managed lifecycle. A provider-specific artifact identifier may remain operator configuration where
-that provider already requires it, but core still chooses the release key it must satisfy.
+that provider already requires it, but core still chooses the release key it must satisfy. Live
+release verification has no operator bypass.
 
 ## Consequences
 

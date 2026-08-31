@@ -134,7 +134,11 @@ current Trixie creation.
 
 A site without `template_vmids.trixie` remains loadable for best-effort operations on existing VMs.
 New VM creation validates the concrete core-selected release during preflight and fails before the
-command's secret-resolution phase or Proxmox API authentication when that mapping is missing.
+command's secret-resolution phase or Proxmox API authentication when that mapping is missing. After
+cloning and starting the mapped template, Agentworks verifies the live guest's `/etc/os-release`
+through the QEMU guest agent before running its Debian-specific bootstrap. It checks again before
+creation succeeds. A missing, non-Debian, or wrong-release observation rolls the clone back; there
+is no configuration switch to skip either check.
 
 For 0.13 configuration migration, see [Upgrading to 0.14](upgrading-to-0.14.md).
 

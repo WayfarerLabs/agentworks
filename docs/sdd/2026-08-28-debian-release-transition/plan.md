@@ -1,6 +1,6 @@
 # Plan: Debian Release Transition
 
-- Status: Ready-triggered feedback round 2 corrections complete; ready handoff pending
+- Status: Operator-directed feedback round 3 implementation complete; full review pending
 - Date: 2026-08-28
 - Governing artifacts: `frd.md`, `hla.md`, `prior-art-research.md`, and `migration-strategy.md`
 
@@ -399,6 +399,17 @@ the product cannot ship consistently within the agreed scope.
       setup script's no-selector current-release behavior.
 - [x] Reconcile current `main`, run the complete focused and repository gates, and obtain exact-head
       project, correctness, and complexity reviews before the signed round 2 of 4 ready handoff.
+
+### Operator-directed feedback round 3
+
+- [x] Record that core requests only its single current release for creation, while older entries in
+      an operator-owned catalog do not create a release-selection surface.
+- [x] Attest a cloned Proxmox guest through QEMU guest-agent `/etc/os-release` before Agentworks
+      bootstrap, retain the final post-bootstrap probe, and expose no verification bypass.
+- [x] Prove wrong, unreadable, and mismatched templates roll back before bootstrap while successful
+      creation executes both attestation boundaries.
+- [ ] Run the complete focused and repository gates, then obtain exact-head project, correctness,
+      and complexity reviews before the signed round 3 of 4 ready handoff.
 
 - [ ] After live certification or an authenticated disposition, create `locked.md`, record the final
       evidence, and leave the exact green reviewed head ready to merge.

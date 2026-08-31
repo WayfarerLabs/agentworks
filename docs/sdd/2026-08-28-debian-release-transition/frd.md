@@ -79,7 +79,9 @@ The following surfaces remain absent:
 
 Every successful `vm create` provisions the core's current release, which is Trixie after this
 cutover. The VM manager writes that concrete release into the common provision request. Each
-platform consumes the request value and selects its own artifact from a release-keyed mapping:
+platform consumes the request value and selects its own artifact from a release-keyed mapping. Core
+never sends `current-1` for creation, even when an operator-owned catalog retains that entry for
+compatibility with existing VMs:
 
 | Platform | Trixie source                                                        |
 | -------- | -------------------------------------------------------------------- |
@@ -103,6 +105,12 @@ rollback-capable create window and return the observed release. A mismatch, miss
 non-Debian guest, unavailable official image, or missing Proxmox Trixie template fails creation
 before Agentworks reports success. New creation never falls back to Bookworm or an operator-supplied
 generic image.
+
+An operator-owned artifact requires an additional fail-closed boundary. Once the guest is live
+enough to inspect, the platform verifies its release before running Agentworks bootstrap. Proxmox
+does this through the QEMU guest agent after the clone starts, then repeats the ordinary live probe
+after bootstrap before returning success. The first check prevents Debian-specific mutation of a
+wrong template; the second attests the final handoff. Neither check has an operator bypass.
 
 The manager preserves the distinct code-owned and operator-owned missing-map errors, including their
 remediation hints, across its provisioning wrapper. A compliant platform rolls back a live release

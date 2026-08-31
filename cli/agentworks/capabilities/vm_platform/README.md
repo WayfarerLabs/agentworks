@@ -315,6 +315,12 @@ overrides it so a missing create entry fails before authenticated `runup`. `crea
 mapping again before mutation. This timing does not make the current artifact a load-time config
 requirement, so a legacy site can still load for operations on existing VMs.
 
+An operator-owned artifact is also untrusted until the live guest proves what it contains. When the
+backend exposes guest execution before Agentworks bootstrap, verify `/etc/os-release` there and roll
+back a mismatch before running the Debian-specific bootstrap. Keep the final live probe too; the
+early check guards mutation, while the final probe supplies the successful result observation. Do
+not add a configuration bypass for either check.
+
 Add a platform-specific **input** by adding a field to `ProvisionRequest`, not by changing the
 protocol. But note the opposite pattern is also right: purely internal translation stays inside the
 platform. Azure's VM-size selection (mapping the request's `cpus`/`memory_gib`/`disk_gib` onto a

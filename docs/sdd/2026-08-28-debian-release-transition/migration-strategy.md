@@ -110,6 +110,12 @@ It supports resolving the site for existing VM operations but does not satisfy a
 new create on that site fails with a focused message that names `template_vmids.trixie` and the
 setup guide.
 
+For a configured Trixie mapping, creation treats the VMID as an operator assertion until the cloned
+guest proves it. Proxmox starts the clone, reads `/etc/os-release` through the QEMU guest agent, and
+rolls the clone back before Agentworks bootstrap when the observation is missing, non-Debian, or not
+Trixie. The ordinary post-bootstrap probe remains the final success attestation. There is no bypass
+for either check.
+
 The CLI does not automatically rewrite operator YAML. The guide instructs the operator to:
 
 1. update `scripts/proxmox-setup.sh` from the implementation release;

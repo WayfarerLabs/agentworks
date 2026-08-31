@@ -143,6 +143,14 @@ the platform's rollback window. A platform-specific bootstrap that cannot execut
 current-release certified. Contract tests require `ProvisionResult.debian_release` to contain the
 probe's return; the manager persists that verified value rather than the requested intent.
 
+Proxmox has an earlier check because its template catalog is operator-owned. After clone and start
+make the QEMU guest agent available, but before the Agentworks bootstrap script runs, Proxmox reads
+`/etc/os-release` through one-shot guest-agent exec and compares it with `request.debian_release`. A
+missing, unreadable, non-Debian, or mismatched observation rolls back the clone. The final transport
+probe still runs after bootstrap and supplies the result observation. The early check protects the
+mutation boundary; the final check protects the success boundary. There is no
+`danger_skip_debian_check` or equivalent escape hatch.
+
 The database row begins with a null observed release. After `platform.create` returns, the manager
 first persists the result's platform metadata so the backend remains addressable. It then
 defensively compares the result release with the request. A mismatch is a platform contract
