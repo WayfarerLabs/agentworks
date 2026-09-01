@@ -4,7 +4,7 @@
 Each harness integration implementation is a ``Capability`` (see
 ``capabilities/README.md``): it declares its own config block, owns the
 session's launch-target readiness, and produces the tmux pane command as its
-op (``start`` / ``resume``). The consuming resource is the ``session`` node,
+op (``start(force_new=...)``). The consuming resource is the ``session`` node,
 which HOLDS a harness integration instance and composes its readiness; that node lives in
 the ``sessions`` domain, not here. Capabilities depend only on the framework,
 never on their consuming domain (FRD R1): this package imports neither
@@ -22,7 +22,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from agentworks.capabilities.harness_integration.base import HarnessIntegration, quote_literal_argv, require_commands
+from agentworks.capabilities.harness_integration.base import (
+    HarnessIntegration,
+    HarnessStart,
+    quote_literal_argv,
+    require_commands,
+)
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
 
 if TYPE_CHECKING:
@@ -31,6 +36,7 @@ if TYPE_CHECKING:
 __all__ = [
     "HARNESS_INTEGRATION_REGISTRY",
     "HarnessIntegration",
+    "HarnessStart",
     "ShellIntegration",
     "ensure_harness_integration_enabled",
     "harness_integration_for",
@@ -87,8 +93,8 @@ def ensure_harness_integration_enabled(registry: Registry, name: str) -> None:
     non-plugin origin (a direct test) falls back to a generic tail.
 
     Called at the two session-build call sites that hold the registry and the
-    resolved template (``_create_build.py`` create, ``_lifecycle.py`` resume /
-    reattach), NOT inside the node factories (which thread no registry) and NOT
+    resolved template (``_create_build.py`` create, ``_lifecycle.py`` start /
+    restart), NOT inside the node factories (which thread no registry) and NOT
     on the read-only ``_display_harness_integration`` listing path (an enabled template that
     references a disabled harness integration still shows the harness integration name; only its use
     fails).

@@ -11,6 +11,7 @@ import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
 from agentworks.capabilities.config import capability_config_references, validate_capability_config
+from agentworks.capabilities.harness_integration import HarnessStart
 from agentworks.errors import ConfigError, StateError
 from agentworks.plugins.grok.harness_integration import GrokBuildConfig, GrokBuildIntegration
 from agentworks.schema import RefOwner, merge_model
@@ -66,7 +67,9 @@ def _validate(blob: dict[str, object]) -> None:
     )
 
 
-def _grok_argv(command: str) -> list[str]:
+def _grok_argv(command: str | HarnessStart) -> list[str]:
+    if isinstance(command, HarnessStart):
+        command = command.command
     outer = shlex.split(command)
     assert outer[:2] == ["sh", "-c"]
     inner = shlex.split(outer[2])
@@ -168,18 +171,17 @@ def test_absent_summary_starts_fresh() -> None:
 def test_start_and_resume_use_the_same_state_based_decision() -> None:
     target = _FakeTarget({"summary.json": _FakeResult(0)})
     integration = _integration()
-    assert integration.start(_op_ctx(target)) == integration.resume(_op_ctx(target))
+    assert integration.start(_op_ctx(target)) == integration.start(_op_ctx(target))
 
 
 def test_launch_note_reports_the_selected_branch() -> None:
     integration = _integration()
-    assert integration.launch_note() is None
-    integration.start(_op_ctx(_FakeTarget({"summary.json": _FakeResult(0)})))
-    assert integration.launch_note() is not None
+    resumed = integration.start(_op_ctx(_FakeTarget({"summary.json": _FakeResult(0)})))
+    assert resumed.note is not None
 
     integration = _integration()
-    integration.start(_op_ctx(_FakeTarget({"summary.json": _FakeResult(1)})))
-    assert integration.launch_note() is not None
+    fresh = integration.start(_op_ctx(_FakeTarget({"summary.json": _FakeResult(1)})))
+    assert fresh.note is not None
 
 
 def test_probe_uses_grok_home_and_the_persisted_summary_boundary() -> None:
@@ -211,7 +213,7 @@ def test_transport_failure_refuses_to_guess() -> None:
 
 def test_first_start_mints_and_records_a_uuid() -> None:
     state: dict[str, object] = {}
-    command = _integration(state=state).start(_op_ctx(_FakeTarget({"summary.json": _FakeResult(1)})))
+    command = _integration(state=state).start(_op_ctx(_FakeTarget({"summary.json": _FakeResult(1)}))).command
     sid = state["session_id"]
     assert isinstance(sid, str) and len(sid) == 36
     assert sid in command
@@ -227,7 +229,7 @@ def test_wrong_typed_session_id_is_replaced_with_a_canonical_uuid() -> None:
 
 def test_existing_session_id_is_reused_verbatim() -> None:
     state: dict[str, object] = {"session_id": _SID}
-    command = _integration(state=state).resume(_op_ctx(_FakeTarget({"summary.json": _FakeResult(0)})))
+    command = _integration(state=state).start(_op_ctx(_FakeTarget({"summary.json": _FakeResult(0)})))
     assert _grok_argv(command)[:2] == ["--resume", _SID]
     assert state == {"session_id": _SID}
 
@@ -236,7 +238,7 @@ def test_existing_session_id_is_reused_verbatim() -> None:
 def test_invalid_persisted_session_id_is_rejected_before_probe(sid: str) -> None:
     target = _FakeTarget({"summary.json": _FakeResult(0)})
     with pytest.raises(StateError) as exc:
-        _integration(state={"session_id": sid}).resume(_op_ctx(target))
+        _integration(state={"session_id": sid}).start(_op_ctx(target))
     assert exc.value.entity_name == "s1"
     assert target.commands == []
 
@@ -266,11 +268,11 @@ def test_probe_executes_against_groks_real_filesystem_boundary(tmp_path: Path) -
 
     stub = grok_home / "sessions" / "encoded-cwd" / _SID
     stub.mkdir(parents=True)
-    incomplete = _integration().resume(_op_ctx(target))  # type: ignore[arg-type]
+    incomplete = _integration().start(_op_ctx(target))  # type: ignore[arg-type]
     assert _grok_argv(incomplete)[:2] == ["--session-id", _SID]
 
     (stub / "summary.json").write_text("{}")
-    persisted = _integration().resume(_op_ctx(target))  # type: ignore[arg-type]
+    persisted = _integration().start(_op_ctx(target))  # type: ignore[arg-type]
     assert _grok_argv(persisted)[:2] == ["--resume", _SID]
 
 
@@ -347,7 +349,7 @@ def test_resume_reapplies_process_controls_but_not_fresh_conversation_content() 
             "agent": "reviewer",
             "rules": "Fresh rules",
         }
-    ).resume(_op_ctx(_FakeTarget({"summary.json": _FakeResult(0)})))
+    ).start(_op_ctx(_FakeTarget({"summary.json": _FakeResult(0)})))
     argv = _grok_argv(command)
     assert argv[argv.index("--agent") + 1] == "reviewer"
     assert argv[argv.index("--rules") + 1] == "Fresh rules"
@@ -363,7 +365,7 @@ def test_extra_args_are_quoted_and_appended_last() -> None:
     argv = _grok_argv(command)
     assert argv[-2:] == ["--future-flag", payload]
     assert argv.index("managed") < argv.index("--future-flag")
-    assert "touch" not in shlex.split(shlex.split(command)[2])
+    assert "touch" not in shlex.split(shlex.split(command.command)[2])
 
 
 def test_readiness_requires_grok() -> None:

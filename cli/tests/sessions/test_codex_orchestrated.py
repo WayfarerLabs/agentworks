@@ -141,6 +141,11 @@ def _capture_pane_command(monkeypatch: pytest.MonkeyPatch, events: list[str], ca
         return ("/tmp/s1.sock", 4243)
 
     monkeypatch.setattr(tmux_mod, "create_session", _capture)
+    monkeypatch.setattr(
+        tmux_mod,
+        "capture_tmux_server_fingerprint",
+        lambda **kwargs: SimpleNamespace(pid=4243, boot_id="boot-x", start_ticks=1),
+    )
 
 
 def _common_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -150,6 +155,7 @@ def _common_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
     stub_vm_gates(monkeypatch)
     stub_session_resolvers(monkeypatch)
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *a, **k: None)
+    monkeypatch.setattr(tmux_mod, "session_exists", lambda *a, **k: False)
     monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: "boot-x")
     monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
 
@@ -186,13 +192,12 @@ def _resume_stubs(
 
 
 def _resume(db: Database) -> None:
-    from agentworks.sessions.manager import resume_session
+    from agentworks.sessions.manager import restart_session
 
-    resume_session(
+    restart_session(
         db,
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),
         name="s1",
-        yes=True,
         interaction=TtyInteractionPolicy.REFUSE,
     )  # type: ignore[arg-type]
 
@@ -204,11 +209,11 @@ def test_create_launches_fresh_without_probing_any_session_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``session create`` mints a brand-new row, which by definition owns no
-    codex conversation, so the op adopts nothing and probes nothing: this
+    codex conversation, so the op adopts nothing. This
     target would happily report a recording AND a discovery candidate, and
-    neither probe is even issued. Only readiness talks to the target. The
-    row's codex namespace stays empty, and the pane provisions the recorder
-    so the FOLLOWING resume has something to bind."""
+    rollout-discovery probe is not issued; the recorder is only fingerprinted
+    so a stale notification cannot undo ``--force-new``. The pane provisions
+    the recorder so the following start has something new to bind."""
     from agentworks.sessions.manager import create_session
 
     db = _seed_db(tmp_path)
@@ -228,10 +233,10 @@ def test_create_launches_fresh_without_probing_any_session_state(
         interaction=TtyInteractionPolicy.REFUSE,
     )
 
-    assert set(events) == {"probe", "tmux_create"}  # readiness only: no state probe
+    assert set(events) == {"probe", "read_recorder", "tmux_create"}
     session = db.get_session("s1")
     assert session is not None
-    assert session.harness_integration_state == {"codex": {}}  # no id adopted at create
+    assert session.harness_integration_state == {"codex": {"fresh_pending": _SID}}
     command = captured["command"]
     assert "starting new session s1" in command
     assert 'chmod +x "$HOME"/.agentworks/codex/.record-thread-v1.sh."$$"' in command

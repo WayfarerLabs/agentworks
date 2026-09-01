@@ -776,10 +776,10 @@ Manage sessions (persistent tmux sessions running in workspaces). Session names 
 | `agw session list`            | List sessions with status      |
 | `agw session attach <name>`   | Attach to a running session    |
 | `agw session stop <name>`     | Stop a running session         |
-| `agw session resume <name>`   | Resume a session               |
+| `agw session start <name>`    | Start a stopped session        |
+| `agw session restart <name>`  | Replace the session runtime    |
 | `agw session delete <name>`   | Stop and delete a session      |
 | `agw session logs <name>`     | Dump session scrollback buffer |
-| `agw console attach <name>`   | Attach to a named console      |
 
 `session list` accepts `--workspace`, `--vm`, `--agent`, and `--admin` to narrow the result set.
 Filters compose with AND. The name filters (`--workspace`, `--vm`, `--agent`) accept a single value
@@ -787,14 +787,17 @@ or a comma-separated list (`--vm vm1,vm2`); commas within a filter are OR-ed tog
 name in a filter is an error, not an empty result. `--agent <name>` matches agent-mode sessions
 only; `--admin` matches admin-mode sessions only (the two are mutually exclusive).
 
-`session stop` and `session resume` operate on a single session by default. Pass `--all`
-(`session stop`/`session resume`) or `--all-stopped` (`session resume`) to batch over the sessions
-on the VM. The batch form accepts `--vm <vm>`, `--workspace <ws>`, `--agent <agent>`, and `--admin`
-to narrow the set; filters compose with AND and require one of the batch flags. The name filters
-accept a single value or a comma-separated list (`--vm vm1,vm2`); commas within a filter are OR-ed
-together, and an unknown name in a filter is an error, not an empty result. `--agent` matches
-agent-mode sessions only; `--admin` matches admin-mode sessions only (the two are mutually
-exclusive). Pass `--force` to stop/resume broken sessions via PID kill.
+`session stop`, `session start`, and `session restart` operate on a single session by default. Pass
+`--all` to batch over matching sessions. The batch form accepts `--vm <vm>`, `--workspace <ws>`,
+`--agent <agent>`, and `--admin` to narrow the set; filters compose with AND and require one of the
+batch flags. The name filters accept a single value or a comma-separated list (`--vm vm1,vm2`);
+commas within a filter are OR-ed together, and an unknown name in a filter is an error, not an empty
+result. `--agent` matches agent-mode sessions only; `--admin` matches admin-mode sessions only (the
+two are mutually exclusive). Pass `--force` only to recover broken state after Agentworks proves the
+prior managed tmux server is absent; Agentworks never signals a stored numeric PID. Start and
+restart continue the harness conversation when possible; `--force-new` requires a fresh conversation
+when the operation launches a runtime. A running `session start --force-new` is refused rather than
+silently replacing the runtime.
 
 Maintainers: [Session status internals](../docs/guides/session-status.md) documents the persisted
 PID and boot-ID model, live status derivation, automatic repair, and the safety boundary for
@@ -834,7 +837,10 @@ panes you want preloaded into a session's window.
 | `agw console create <name> [sessions...]`           | Create a console with the given sessions                          |
 | `agw console list`                                  | List consoles                                                     |
 | `agw console describe <name>`                       | Show membership and shell layout                                  |
-| `agw console attach <name>`                         | Attach (builds tmux state on first attach)                        |
+| `agw console start <name>`                          | Start a stopped console                                           |
+| `agw console restart <name>`                        | Rebuild a console                                                 |
+| `agw console stop <name>`                           | Stop a running console                                            |
+| `agw console attach <name>`                         | Attach to a running console                                       |
 | `agw console delete <name>`                         | Tear down and remove the console                                  |
 | `agw console add-sessions <name> <sessions...>`     | Add session windows (accepts `--to-index N`)                      |
 | `agw console remove-sessions <name> <sessions...>`  | Remove session windows (accepts `-y`/`--yes`)                     |
@@ -899,16 +905,16 @@ agw console add-shell backend auth-server --cwd src/api --admin
 `console restore-session` repairs a single session window in a running console: it re-adds shell
 panes you killed by accident (each back in its configured position) and rebuilds the window from
 config if it is gone entirely. It is additive and never kills a live pane or window, so it refuses,
-pointing you at `console attach --recreate`, when the fix would require destroying live state: more
-panes live than configured, shell panes it can't map back to the config (untagged, duplicated, or
-out of range), or a window whose session pane itself was killed (the console then shows a plain
-shell where the session should be).
+pointing you at `console restart`, when the fix would require destroying live state: more panes live
+than configured, shell panes it can't map back to the config (untagged, duplicated, or out of
+range), or a window whose session pane itself was killed (the console then shows a plain shell where
+the session should be).
 
-Memberships and shell layouts persist in the database. `agw console attach` builds the tmux session
-on first attach (or with `--recreate`); subsequent attaches reuse the running tmux session. Adding
-or removing sessions/shells while a console is attached updates the live tmux state immediately
-(best-effort); when the console isn't running on the VM, only the DB is updated and changes appear
-on next attach.
+Memberships and shell layouts persist in the database. `agw console create` stores the definition
+and builds it, `console start` realizes a stopped definition, `console restart` rebuilds it, and
+`console attach` only attaches to an already-running console. Adding or removing sessions/shells
+while a console is attached updates the live tmux state immediately (best-effort); when the console
+isn't running on the VM, only the DB is updated and changes appear on its next start.
 
 When `console remove-sessions` (or the session-delete cascade) leaves a console with no configured
 sessions, the console is a dead end (`console attach` would just warn "has no members"). It offers
@@ -986,7 +992,7 @@ via `--workspace <ws>`). Use these when you just need a terminal without the con
 - **Nesting protection**: the console commands refuse to run inside an existing tmux session to
   avoid prefix key conflicts. Pass `--allow-nesting` to override.
 - **Console lifecycle**: consoles are independent of sessions. Killing or detaching a console does
-  not affect running sessions. `--recreate` rebuilds from scratch.
+  not affect running sessions. `console restart` rebuilds from scratch.
 - **Dropped connections restore your terminal**: an attach reconfigures your local terminal
   (alternate screen, mouse reporting, bracketed paste), and tmux only undoes that on a clean detach.
   When the connection dies instead (laptop suspends, lid closes, Wi-Fi drops), agentworks restores
@@ -1041,18 +1047,18 @@ cryptic downstream tmux failure.
 Those keys live only inside the `harness_integration` table; spelling any of them at the `spec` top
 level is a load error that points you at the nested shape.
 
-The `claude-code` integration runs Claude Code as the session: `session create` starts a new Claude
-session and `session resume` resumes the same conversation when its transcript still exists on disk
-(launching fresh when Claude never wrote one). It ships as the opt-in `claude` system plugin (see
-[System Plugins](README.md#system-plugins)), disabled by default: a session-template naming it still
-lists ready, but creating a session on it is refused with an "enable plugin `claude`" hint until you
-add `claude` to `[plugins].system`. (The built-in `shell` integration stays the default and needs no
-opt-in.) Once enabled, it needs only that `claude` is installed on the launch target, and announces
-the chosen action (resume vs new session) in the pane, so the decision is never silent. Its config
-is all optional and documented by `agw resource explain harness-integration/claude-code`. The fields
-that forward a value to `claude` are not validated here, because the choice sets are Claude's and
-they move between its releases; and each `extra_args` element is one argv token (shell-quoted, never
-re-split).
+The `claude-code` integration runs Claude Code as the session. Session creation and `--force-new`
+start a new Claude conversation; ordinary `session start` and `session restart` continue the same
+conversation when its transcript still exists on disk (launching fresh when Claude never wrote one).
+It ships as the opt-in `claude` system plugin (see [System Plugins](README.md#system-plugins)),
+disabled by default: a session-template naming it still lists ready, but creating a session on it is
+refused with an "enable plugin `claude`" hint until you add `claude` to `[plugins].system`. (The
+built-in `shell` integration stays the default and needs no opt-in.) Once enabled, it needs only
+that `claude` is installed on the launch target, and announces the chosen action (resume vs new
+session) in the pane, so the decision is never silent. Its config is all optional and documented by
+`agw resource explain harness-integration/claude-code`. The fields that forward a value to `claude`
+are not validated here, because the choice sets are Claude's and they move between its releases; and
+each `extra_args` element is one argv token (shell-quoted, never re-split).
 
 ```yaml
 apiVersion: agentworks/v1
@@ -1067,27 +1073,27 @@ spec:
     model: opus
 ```
 
-The `codex` integration runs Codex the same way: `session create` starts a new Codex session and
-`session resume` resumes the same conversation once Codex has recorded a turn in it. Codex mints its
-own session ids, so the integration learns which conversation is this session's from Codex itself:
-every launch installs a small recorder script that Codex runs after each completed turn (through
-Codex's `notify` hook, so nothing is added to the conversation), and the next `session resume`
-resumes what it recorded (a session archived with `codex archive` is deliberately treated as not
-resumable: the binding is dropped and the fallback below decides what happens instead, which is not
-always a fresh session). With nothing recorded yet, resume falls back to a single interactive Codex
-conversation recorded in this workspace directory, and on several it opens Codex's own session
-picker in the pane instead of guessing: picking one binds this session to it from its next turn, and
-esc starts a fresh conversation. `session create` is always a brand-new conversation and adopts
-nothing, so reusing a deleted session's name cannot silently pick its conversation back up; the
-fallback remains a heuristic, though, so if that conversation is the only one recorded in the
-workspace the new session's first resume can still adopt it, announced with the id it chose. It
-ships as the opt-in `codex` system plugin, disabled by default with the same gating as `claude-code`
-above. Once enabled, it needs only that `codex` is installed on the launch target, and announces
-which of those it did, both in the command output and in the pane. Its config is all optional and
-documented by `agw resource explain harness-integration/codex`; the
-[resources guide](../docs/guides/resources.md) covers the Codex behavior behind the fields (network
-off by default under `workspace-write`, who adjudicates an approval escalation, and why the
-integration always passes `--strict-config`):
+The `codex` integration runs Codex the same way: `session create` and `--force-new` start a new
+Codex conversation, while ordinary start/restart continue it once Codex has recorded a turn. Codex
+mints its own session ids, so the integration learns which conversation is this session's from Codex
+itself: every launch installs a small recorder script that Codex runs after each completed turn
+(through Codex's `notify` hook, so nothing is added to the conversation), and the next ordinary
+start/restart resumes what it recorded (a session archived with `codex archive` is deliberately
+treated as not resumable: the binding is dropped and the fallback below decides what happens
+instead, which is not always a fresh session). With nothing recorded yet, resume falls back to a
+single interactive Codex conversation recorded in this workspace directory, and on several it opens
+Codex's own session picker in the pane instead of guessing: picking one binds this session to it
+from its next turn, and esc starts a fresh conversation. `session create` and `--force-new` always
+launch a brand-new conversation and adopt nothing, so reusing a deleted session's name cannot
+silently pick its conversation back up; the fallback remains a heuristic, though, so if that
+conversation is the only one recorded in the workspace the new session's first resume can still
+adopt it, announced with the id it chose. It ships as the opt-in `codex` system plugin, disabled by
+default with the same gating as `claude-code` above. Once enabled, it needs only that `codex` is
+installed on the launch target, and announces which of those it did, both in the command output and
+in the pane. Its config is all optional and documented by
+`agw resource explain harness-integration/codex`; the [resources guide](../docs/guides/resources.md)
+covers the Codex behavior behind the fields (network off by default under `workspace-write`, who
+adjudicates an approval escalation, and why the integration always passes `--strict-config`):
 
 ```yaml
 apiVersion: agentworks/v1

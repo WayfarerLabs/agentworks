@@ -42,12 +42,12 @@ def check_session_status(
     No DB side effects. Raises ``StateError`` when the session row predates
     the per-session-socket model introduced by the env-and-secrets SDD
     (``socket_path is None`` for an admin session). The hint points the
-    operator at ``agw session resume <name>``, which migrates the row to
+    operator at ``agw session restart <name>``, which migrates the row to
     the new shape via a surgical kill of the named session on the default
     tmux server + a fresh ``create_tmux_session`` under a per-session
-    socket. Callers that aren't ``resume_session`` (attach, stop, etc.)
+    socket. Callers that aren't a launch operation (attach, stop, etc.)
     can't safely migrate, so they surface the typed error and let the
-    operator resume.
+    operator restart.
     """
     if session.pid == PID_STOPPED:
         return SessionStatus.STOPPED
@@ -66,7 +66,7 @@ def check_session_status(
         entity_name=session.name,
         hint=(
             "This session predates the per-session-socket model introduced by "
-            f"the env-and-secrets SDD. Run `agw session resume {session.name}` "
+            f"the env-and-secrets SDD. Run `agw session restart {session.name}` "
             "to migrate it to the new shape."
         ),
     )
@@ -79,13 +79,19 @@ def _check_dedicated_session(session: SessionRow, *, target: Transport) -> Sessi
     """
     from agentworks.sessions.tmux import tmux_cmd
 
-    q_session = shlex.quote(session.name)
+    q_session = shlex.quote(f"={session.name}")
     cmd = tmux_cmd(f"has-session -t {q_session}", session.socket_path) + " 2>/dev/null"
     result = target.run(cmd, check=False)
     if result.returncode == SSH_TRANSPORT_ERROR:
         return SessionStatus.UNKNOWN  # SSH transport failure, not a session state
     if result.ok:
         return SessionStatus.OK
+
+    server = target.run(tmux_cmd("list-sessions", session.socket_path) + " 2>/dev/null", check=False)
+    if server.returncode == SSH_TRANSPORT_ERROR:
+        return SessionStatus.UNKNOWN
+    if server.ok:
+        return SessionStatus.RESIDUAL
 
     # has-session failed -- STOPPED or BROKEN?
     assert session.pid is not None and session.pid > 0
@@ -123,29 +129,32 @@ def batch_check_status(
     # legacy and new sessions still surfaces the new ones cleanly; the
     # operator-facing single-session paths (`session attach`, etc.) go
     # through `check_session_status`, which raises a typed StateError
-    # pointing at `agw session resume` (the primitive that auto-migrates).
+    # pointing at `agw session restart` (the primitive that auto-migrates).
     legacy = [s.name for s in checkable if s.socket_path is None]
     if legacy:
         names = ", ".join(sorted(legacy))
         output.warn(
             f"{len(legacy)} session(s) predate the per-session-socket model; "
-            f"`agw session resume` migrates them to the new shape: {names}"
+            f"`agw session restart` migrates them to the new shape: {names}"
         )
 
     parts = []
     for s in checkable:
         if s.socket_path is None:
             continue
-        q_session = shlex.quote(s.name)  # quoted for tmux -t argument
+        q_session = shlex.quote(f"={s.name}")  # exact tmux target
         name = s.name  # raw for output field (names are validated, no shell-special chars)
         has_cmd = tmux_cmd(f"has-session -t {q_session}", s.socket_path)
+        server_cmd = tmux_cmd("list-sessions", s.socket_path)
         parts.append(
             f"{has_cmd} 2>/dev/null; "
             f"if [ $? -ne 0 ]; then "
+            f"{server_cmd} >/dev/null 2>&1; "
+            f'if [ $? -eq 0 ]; then echo "S:{name}:2"; else '
             f"BOOT=$(cat /proc/sys/kernel/random/boot_id); "
             f"test -d /proc/{s.pid}; "
             f'echo "S:{name}:1:$BOOT:$?"; '
-            f'else echo "S:{name}:0"; fi'
+            f'fi; else echo "S:{name}:0"; fi'
         )
     if not parts:
         return {}
@@ -169,6 +178,8 @@ def batch_check_status(
 
         if exit_code == "0":
             status_map[name] = SessionStatus.OK
+        elif exit_code == "2":
+            status_map[name] = SessionStatus.RESIDUAL
         elif len(fields) == 5:
             # Agent session failure: S:name:1:<boot_id>:<pid_exit>
             current_boot = fields[3]

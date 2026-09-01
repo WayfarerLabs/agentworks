@@ -373,10 +373,10 @@ spec:
 The `claude-code` integration runs Claude Code as the session. It ships as the opt-in `claude`
 system plugin (see "System plugins" below), so a `session-template` naming it still lists ready, but
 creating a session on it is refused with an "enable plugin `claude`" hint until you set
-`[plugins] system = ["claude"]`. It selects the launch-and-resume conventions in one table instead
-of restating command strings: `session create` starts a new Claude session, and `session resume`
-continues the same conversation when its transcript still exists (and launches fresh when Claude
-never wrote one), so a resume continues where the session left off:
+`[plugins] system = ["claude"]`. It selects the launch-and-continuation conventions in one table
+instead of restating command strings: `session create` starts a new Claude conversation, while
+`session start` and `session restart` continue the bound conversation when its transcript still
+exists (and launch fresh when Claude never wrote one):
 
 ```yaml
 apiVersion: agentworks/v1
@@ -427,26 +427,26 @@ The `codex` integration runs Codex the same way and ships as the opt-in `codex` 
 Codex mints its own session ids, so instead of assigning one the integration learns the id from
 Codex itself: every launch installs a small recorder script that Codex runs after each completed
 turn (via Codex's `notify` hook, so nothing is ever added to your conversation), which writes down
-which conversation the pane is in. `session resume` then resumes exactly that conversation whenever
-its session file still exists. A session archived with `codex archive` is deliberately treated as
-not resumable, since un-archiving it behind your back would undo a decision you made: the binding is
-dropped, and the fallback below then decides, so the next resume may adopt a different conversation
-in the workspace or open the picker rather than simply starting fresh (`codex unarchive` brings the
-archived one back). When nothing has been recorded yet, `session resume` falls back to looking for a
-single interactive Codex conversation recorded in this workspace directory; if it finds several, it
-opens Codex's own session picker in the pane rather than guessing, so pick the conversation you want
-(the session binds to it from its next turn) or press esc to start a fresh one. `session create`
-does none of that: a new session always starts a brand-new conversation and adopts nothing, so
-reusing a deleted session's name can never silently pick that session's conversation back up. Note
-the limit of that, because the fallback is still a heuristic: if the deleted session's conversation
-is the only Codex conversation recorded in the workspace, the new session's first `session resume`
-can still adopt it. Whichever way it went is announced in the command's output and as the pane's
-first line: `session create` always reports a brand-new conversation, while the adoption and picker
-outcomes belong to `session resume`, and an adoption names the Codex conversation id it chose, so
-you can see it happen and fix it (pick the right conversation from the picker, or archive the stale
-one) rather than discovering it later. Overriding `notify` yourself through `extra_args` turns the
-recording off (yours wins, because `extra_args` follows generated options), which leaves resume
-relying on that fallback.
+which conversation the pane is in. Ordinary `session start` and `session restart` then resume
+exactly that conversation whenever its session file still exists. A session archived with
+`codex archive` is deliberately treated as not resumable, since un-archiving it behind your back
+would undo a decision you made: the binding is dropped, and the fallback below then decides, so the
+next start may adopt a different conversation in the workspace or open the picker rather than simply
+starting fresh (`codex unarchive` brings the archived one back). When nothing has been recorded yet,
+an ordinary start falls back to looking for a single interactive Codex conversation recorded in this
+workspace directory; if it finds several, it opens Codex's own session picker in the pane rather
+than guessing, so pick the conversation you want (the session binds to it from its next turn) or
+press esc to start a fresh one. `session create` does none of that: a new session always starts a
+brand-new conversation and adopts nothing, so reusing a deleted session's name can never silently
+pick that session's conversation back up. Note the limit of that, because the fallback is still a
+heuristic: if the deleted session's conversation is the only Codex conversation recorded in the
+workspace, the new session's first `session start` can still adopt it. Whichever way it went is
+announced in the command's output and as the pane's first line: `session create` always reports a
+brand-new conversation, while the adoption and picker outcomes belong to ordinary start or restart,
+and an adoption names the Codex conversation id it chose, so you can see it happen and fix it (pick
+the right conversation from the picker, or archive the stale one) rather than discovering it later.
+Overriding `notify` yourself through `extra_args` turns the recording off (yours wins, because
+`extra_args` follows generated options), which leaves resume relying on that fallback.
 
 Its config is all optional, and `agw resource explain harness-integration/codex` documents every
 field. The field reference omits these details because they describe Codex behavior rather than the
@@ -490,14 +490,15 @@ fields themselves:
   prompt-mediated and is not another route for agent model, reasoning, sandbox, MCP, skills, or
   other settings. Native config parsing and the positional `--` boundary were checked locally with
   Codex CLI 0.149.1.
-- **Fresh prompt setup is never replayed on a real resume.** Goal, initial prompt, and
-  prompt-mediated primary-thread agent setup apply on `session create` and on an Agentworks resume
-  decision that finds no resumable Codex conversation, including the archived-or-gone fallback. The
-  ambiguity picker is different: choosing an existing conversation must not receive fresh prompt
-  setup, so Codex's own Esc path cannot receive it conditionally either. Native
+- **Fresh prompt setup is never replayed when a conversation resumes.** Goal, initial prompt, and
+  prompt-mediated primary-thread agent setup apply on `session create`, `--force-new`, and on an
+  ordinary start decision that finds no resumable Codex conversation, including the archived-or-gone
+  fallback. The ambiguity picker is different: choosing an existing conversation must not receive
+  fresh prompt setup, so Codex's own Esc path cannot receive it conditionally either. Native
   `developer_instructions` still configure the picker process and its Esc-created conversation. If
   you want the declared fresh prompt setup after seeing the picker, exit it, remove or archive the
-  unwanted candidates, and run `agw session resume` again so Agentworks can make the fresh decision.
+  unwanted candidates, and run `agw session restart` again so Agentworks can make the fresh
+  decision.
 
 The only launch-target requirement is that `codex` is installed:
 

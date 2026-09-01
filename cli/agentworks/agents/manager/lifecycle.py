@@ -364,9 +364,7 @@ def delete_agent(
     with boundary:
         # Kill running sessions for this agent (status-aware)
         if agent_sessions:
-            from agentworks.db import SessionStatus
-            from agentworks.sessions.manager import check_session_status, ensure_pids_batch
-            from agentworks.sessions.tmux import force_kill_tmux_server, kill_session
+            from agentworks.sessions.manager import _teardown_session, ensure_pids_batch
 
             target = _mgr.transport(vm, config, logger=ssh_logger)
             agent_sessions = ensure_pids_batch(agent_sessions, db=db, config=config)
@@ -374,28 +372,15 @@ def delete_agent(
             console_pairs = [(c.name, s.name) for s in agent_sessions for c in db.list_consoles_for_session(s.name)]
             unstoppable: list[str] = []
             for session in agent_sessions:
-                status = check_session_status(session, target=target)
-                if status == SessionStatus.OK:
-                    if not kill_session(session.name, run_command=target.run, socket_path=session.socket_path):
-                        # Race: session may have exited between check and kill. Recheck.
-                        recheck = check_session_status(session, target=target)
-                        if recheck != SessionStatus.STOPPED:
-                            unstoppable.append(session.name)
-                            continue
-                elif status == SessionStatus.BROKEN:
-                    if (
-                        session.pid
-                        and session.pid > 0
-                        and force_kill_tmux_server(
-                            session.pid,
-                            target=target,
-                            socket_path=session.socket_path,
-                        )
-                    ):
-                        pass  # killed successfully
-                    else:
-                        unstoppable.append(session.name)
-                elif status == SessionStatus.UNKNOWN:
+                try:
+                    _teardown_session(
+                        session,
+                        target=target,
+                        target_owns_session=False,
+                        db=db,
+                        force=True,
+                    )
+                except Exception:
                     unstoppable.append(session.name)
             if unstoppable:
                 raise StateError(

@@ -62,6 +62,7 @@ def console_create(
     ] = False,
 ) -> None:
     """Create a named console with a curated set of sessions."""
+    from agentworks.config import load_config
     from agentworks.sessions.multi_console import (
         create_console,
         infer_vm_from_session_specs,
@@ -92,8 +93,6 @@ def console_create(
         # reality, not stale DB state. If the probe finds nothing and the
         # operator didn't list sessions or pass --add-admin-shell,
         # create_console below raises the canonical "empty console" error.
-        from agentworks.config import load_config
-
         running = running_session_names(db, load_config(), resolved_vm.name)
         explicit_names = {parse_session_spec(s).name for s in specs}
         extras = [n for n in running if n not in explicit_names]
@@ -101,11 +100,13 @@ def console_create(
 
     create_console(
         db,
+        load_config(),
         name=name,
         vm_name=resolved_vm.name,
         session_specs=specs,
         fill_all=all_sessions,
         add_admin_shell=add_admin_shell,
+        interaction=ordinary_tty_interaction_policy(),
     )
 
 
@@ -188,25 +189,74 @@ def console_describe(
 @console_app.command("attach")
 def console_attach(
     name: Annotated[str, typer.Argument(help="Console name")],
-    recreate: Annotated[bool, typer.Option("--recreate", help="Kill and rebuild the console's tmux state")] = False,
+    recreate: Annotated[bool, typer.Option("--recreate", hidden=True)] = False,
     allow_nesting: Annotated[
         bool, typer.Option("--allow-nesting", help="Allow attaching from inside an existing tmux")
     ] = False,
 ) -> None:
-    """Attach to a named console (creating its tmux state on first attach)."""
+    """Attach to a running named console."""
     interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config
-    from agentworks.sessions.multi_console import attach_console
+    from agentworks.sessions.multi_console import attach_console, restart_console
+
+    db = get_db()
+    config = load_config()
+    if recreate:
+        from agentworks import output
+
+        output.deprecation("`console attach --recreate` is deprecated; use `console restart` then `console attach`.")
+        restart_console(db, config, name=name, interaction=interaction)
 
     raise typer.Exit(
         attach_console(
-            get_db(),
-            load_config(),
+            db,
+            config,
             name=name,
-            recreate=recreate,
             allow_nesting=allow_nesting,
             interaction=interaction,
         )
+    )
+
+
+@console_app.command("start")
+def console_start(name: Annotated[str, typer.Argument(help="Console name")]) -> None:
+    """Start a stopped console."""
+    from agentworks.config import load_config
+    from agentworks.sessions.multi_console import start_console
+
+    start_console(
+        get_db(),
+        load_config(),
+        name=name,
+        interaction=ordinary_tty_interaction_policy(),
+    )
+
+
+@console_app.command("restart")
+def console_restart(name: Annotated[str, typer.Argument(help="Console name")]) -> None:
+    """Replace a console runtime from its stored definition."""
+    from agentworks.config import load_config
+    from agentworks.sessions.multi_console import restart_console
+
+    restart_console(
+        get_db(),
+        load_config(),
+        name=name,
+        interaction=ordinary_tty_interaction_policy(),
+    )
+
+
+@console_app.command("stop")
+def console_stop(name: Annotated[str, typer.Argument(help="Console name")]) -> None:
+    """Stop a console without deleting its definition."""
+    from agentworks.config import load_config
+    from agentworks.sessions.multi_console import stop_console
+
+    stop_console(
+        get_db(),
+        load_config(),
+        name=name,
+        interaction=ordinary_tty_interaction_policy(),
     )
 
 
@@ -349,8 +399,8 @@ def console_restore_session(
     Never kills a live pane or window: if you have more panes live than
     configured, or the window's session pane itself was killed (so the console
     shows a plain shell instead of the session), it refuses and points you at
-    `console attach --recreate`. Consoles created before pane-tagging existed
-    require `attach --recreate` once to retag from scratch.
+    `console restart`. Consoles created before pane-tagging existed require one
+    restart to retag from scratch.
     """
     interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config

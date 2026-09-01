@@ -26,6 +26,7 @@ from pydantic import Field
 
 from agentworks.capabilities.harness_integration.base import (
     HarnessIntegration,
+    HarnessStart,
     quote_literal_argv,
     require_commands,
 )
@@ -103,7 +104,7 @@ _SESSIONS_DIR = "${GROK_HOME:-$HOME/.grok}/sessions"
 class GrokBuildIntegration(HarnessIntegration):
     """Run Grok Build, resuming its persisted session when one exists."""
 
-    contract_version: ClassVar[int] = 2
+    contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "grok-build"
     description: ClassVar[str] = "Run Grok Build, resuming its session when one exists"
     config_model: ClassVar[type[GrokBuildConfig]] = GrokBuildConfig
@@ -126,27 +127,20 @@ class GrokBuildIntegration(HarnessIntegration):
         """This session's validated Grok Build config."""
         return self._config_as(GrokBuildConfig)
 
-    def start(self, ctx: RunContext) -> str:
-        """Start a new Agentworks session, or resume matching Grok state."""
-        return self._resume_or_launch(ctx)
-
-    def resume(self, ctx: RunContext) -> str:
-        """Restart the workload against the same persisted Grok UUID."""
-        return self._resume_or_launch(ctx)
-
-    def launch_note(self) -> str | None:
-        if self._resumed is None:
-            return None
-        return (
+    def start(self, ctx: RunContext, *, force_new: bool = False) -> HarnessStart:
+        """Choose continuation when usable, or rotate the binding when forced."""
+        command = self._resume_or_launch(ctx, force_new=force_new)
+        note = (
             "Existing Grok Build session found. Resuming..."
             if self._resumed
             else "No existing Grok Build session. Starting a new one..."
         )
+        return HarnessStart(command, note)
 
-    def _resume_or_launch(self, ctx: RunContext) -> str:
-        sid = self._session_id()
+    def _resume_or_launch(self, ctx: RunContext, *, force_new: bool) -> str:
+        sid = self._session_id(force_new=force_new)
         launch_target = ctx.admin_target() if self._admin else ctx.agent_target()
-        resume = launch_target is not None and self._session_exists(launch_target, sid)
+        resume = not force_new and launch_target is not None and self._session_exists(launch_target, sid)
         self._resumed = resume
 
         if resume:
@@ -168,7 +162,7 @@ class GrokBuildIntegration(HarnessIntegration):
         inner = f"echo {shlex.quote(message)}; exec grok {argv}"
         return f"sh -c {shlex.quote(inner)}"
 
-    def _session_id(self) -> str:
+    def _session_id(self, *, force_new: bool = False) -> str:
         """Read or mint the UUID persisted in this integration's namespace.
 
         The state blob crosses executions and is therefore a validation
@@ -176,7 +170,7 @@ class GrokBuildIntegration(HarnessIntegration):
         owned by Agentworks, so malformed persisted strings fail before they
         can influence the filesystem probe or die opaquely in the pane.
         """
-        sid = self._state.get("session_id")
+        sid = None if force_new else self._state.get("session_id")
         if not isinstance(sid, str):
             sid = str(uuid.uuid4())
             self._state["session_id"] = sid

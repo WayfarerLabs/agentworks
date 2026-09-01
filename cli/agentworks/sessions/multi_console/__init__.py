@@ -18,8 +18,8 @@ outgrew a single 500-line file. The submodules are organized by concern:
   building a console from scratch).
 - ``restore``: reconciling a session window's live tmux state against its
   configured shell list.
-- ``attach``: live-tmux probing, the attach loop, and the high-level
-  attach/delete/list/describe entrypoints.
+- ``attach``: live-tmux probing, VM target preparation, and the high-level
+  lifecycle/list/describe entrypoints.
 
 Every name below is re-exported here so ``agentworks.sessions.multi_console``
 keeps working as the single public import path this package replaces
@@ -33,21 +33,23 @@ from __future__ import annotations
 from ._helpers import (
     ADMIN_SHELL_WINDOW,
     TMUX_PREFIX,
+    TMUX_STAGING_PREFIX,
     SessionSpec,
     default_shells,
     infer_vm_from_session_specs,
     parse_session_spec,
     running_session_names,
     tmux_session_name,
+    tmux_staging_name,
 )
 from .attach import (
     _attach_loop_wrapper,
     _console_tmux_exists,
-    _kill_console_tmux,
     _live_best_effort,
     _live_target,
-    _prepare_vm_target_for_attach,
+    _prepare_vm_target,
     _session_linux_user,
+    _teardown_console_tmux,
     attach_console,
     console_description,
     console_listing,
@@ -58,6 +60,9 @@ from .attach import (
     offer_delete_if_empty_consoles,
     render_console_description,
     render_console_listing,
+    restart_console,
+    start_console,
+    stop_console,
 )
 from .crud import (
     _validate_cwd,
@@ -93,6 +98,7 @@ __all__ = [
     "SessionSpec",
     "SessionWindowBuild",
     "TMUX_PREFIX",
+    "TMUX_STAGING_PREFIX",
     "_SUDO_PRESERVE_PROBE_VAR",
     "_add_session_window",
     "_admin_only_secret_target",
@@ -100,11 +106,11 @@ __all__ = [
     "_build_console_tmux",
     "_console_build_secret_targets",
     "_console_tmux_exists",
-    "_kill_console_tmux",
+    "_teardown_console_tmux",
     "_live_best_effort",
     "_live_target",
     "_pane_secret_target",
-    "_prepare_vm_target_for_attach",
+    "_prepare_vm_target",
     "_resolve_pane_env",
     "_resolve_workspace_path",
     "_restore_session_secret_targets",
@@ -131,7 +137,11 @@ __all__ = [
     "reorder_sessions",
     "render_console_description",
     "render_console_listing",
+    "restart_console",
     "restore_session",
+    "start_console",
+    "stop_console",
     "running_session_names",
     "tmux_session_name",
+    "tmux_staging_name",
 ]

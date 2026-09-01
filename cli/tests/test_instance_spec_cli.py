@@ -26,4 +26,5 @@ def test_instance_spec_options_exist_only_on_supported_lifecycle_commands() -> N
     assert "--spec" not in _option_names("vm", "reinit")
     assert "--spec" not in _option_names("workspace", "repair")
     assert "--spec" not in _option_names("workspace", "copy")
-    assert "--spec" not in _option_names("session", "resume")
+    assert "--spec" not in _option_names("session", "start")
+    assert "--spec" not in _option_names("session", "restart")

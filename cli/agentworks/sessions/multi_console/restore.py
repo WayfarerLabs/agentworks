@@ -1,7 +1,7 @@
 """Reconcile a console session window's live tmux state against its
 configured shell list.
 
-``_prepare_vm_target_for_attach``, ``_console_tmux_exists``,
+``_prepare_vm_target``, ``_console_tmux_exists``,
 ``_restore_session_secret_targets``, and ``_add_session_window`` are
 monkeypatched by tests directly on the ``agentworks.sessions.multi_console``
 package object (so a test can drive ``restore_session`` against a fake
@@ -51,7 +51,7 @@ def restore_session(
     fills in any shell panes the operator accidentally killed (each back in its
     configured position), but it never destroys a live pane or window. Where the
     only repair would be destructive, it raises and points the operator at
-    `attach --recreate` so the call is theirs. Three states take that path:
+    `console restart` so the call is theirs. Three states take that path:
 
     - More live panes than configured: removing one is not ours to choose.
     - Shell panes that can't be mapped back to the config (untagged, duplicated,
@@ -81,7 +81,7 @@ def restore_session(
     # base.VMPlatform.vm_active's docstring). The gate's held-active span
     # wraps the SSH-heavy body so a freshly booted WSL2 distro doesn't
     # idle out between the window probe and the pane reconciliation.
-    with _mc._prepare_vm_target_for_attach(
+    with _mc._prepare_vm_target(
         db,
         config,
         console.vm_name,
@@ -94,12 +94,12 @@ def restore_session(
                 entity_kind="console",
                 entity_name=console_name,
                 hint=(
-                    f"Run `agw console attach {console_name}` to build it; "
+                    f"Run `agw console start {console_name}` to build it; "
                     f"restore-session only repairs an already-running console."
                 ),
             )
 
-        q_con = shlex.quote(tmux_session_name(console_name))
+        q_con = shlex.quote(f"={tmux_session_name(console_name)}")
         q_win = shlex.quote(session_name)
         layout = named_console_template(registry).tmux_layout
         configured_count = len(member.shells)
@@ -189,21 +189,21 @@ def restore_session(
                     f"failed to rebuild window '{session_name}' in console '{console_name}' (see warnings above).",
                     entity_kind="console",
                     entity_name=console_name,
-                    hint=(f"Run `agw console attach {console_name} --recreate` to rebuild the console from scratch."),
+                    hint=(f"Run `agw console restart {console_name}` to rebuild the console from scratch."),
                 )
             if result.failed_shells:
                 # The window is up but a shell pane failed to split or, worse,
                 # split without getting its @agentworks-shell-index tag. An
                 # untagged pane would make the next restore-session hit the
                 # untagged-pane refusal, converting a repairable window into a
-                # --recreate-only one. Escalate now, symmetric with the additive
+                # restart-only one. Escalate now, symmetric with the additive
                 # repair path below, rather than reporting a clean rebuild.
                 raise ExternalError(
                     f"restore-session rebuilt window '{session_name}' but failed to "
                     f"create/tag config indices {result.failed_shells} (see warnings above).",
                     entity_kind="console",
                     entity_name=console_name,
-                    hint=(f"Run `agw console attach {console_name} --recreate` to rebuild from scratch."),
+                    hint=(f"Run `agw console restart {console_name}` to rebuild from scratch."),
                 )
             output.result(f"Rebuilt window '{session_name}' in console '{console_name}'.")
             return
@@ -247,7 +247,7 @@ def restore_session(
                 entity_kind="console",
                 entity_name=console_name,
                 hint=(
-                    f"Run `agw console attach {console_name} --recreate` to rebuild the console; "
+                    f"Run `agw console restart {console_name}` to rebuild the console; "
                     f"restore-session is additive and will not kill the live panes in this window."
                 ),
             )
@@ -266,7 +266,7 @@ def restore_session(
                 f"window '{session_name}' has {len(untagged)} shell pane(s) with no agentworks tag.",
                 entity_kind="console",
                 entity_name=console_name,
-                hint=(f"Run `agw console attach {console_name} --recreate` to rebuild and retag from scratch."),
+                hint=(f"Run `agw console restart {console_name}` to rebuild and retag from scratch."),
             )
 
         # Validate that the tag values form a subset of 0..configured_count-1 with
@@ -298,7 +298,7 @@ def restore_session(
                 f"window '{session_name}' has shell panes with inconsistent tags ({'; '.join(parts)}).",
                 entity_kind="console",
                 entity_name=console_name,
-                hint=(f"Run `agw console attach {console_name} --recreate` to rebuild and retag from scratch."),
+                hint=(f"Run `agw console restart {console_name}` to rebuild and retag from scratch."),
             )
 
         # tag_values is now a subset of 0..configured_count-1 with no duplicates,
@@ -391,7 +391,7 @@ def restore_session(
                 f"create/tag config indices {failed} (see warnings above).",
                 entity_kind="console",
                 entity_name=console_name,
-                hint=(f"Run `agw console attach {console_name} --recreate` to rebuild from scratch."),
+                hint=(f"Run `agw console restart {console_name}` to rebuild from scratch."),
             )
 
         # New panes land at the tail; reorder so visual pane_index matches

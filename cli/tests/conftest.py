@@ -625,7 +625,7 @@ def stub_session_resolvers(monkeypatch: pytest.MonkeyPatch) -> None:
     config.
 
     Also stubs the Phase 6 eager-prompting orchestration: ``create_session``
-    and ``resume_session`` call ``_session_secret_target`` +
+    and ``restart_session`` call ``_session_secret_target`` +
     ``resolve_for_command`` before the first mutation. Tests that don't
     care about secret resolution patch both out.
     """
@@ -645,7 +645,7 @@ def stub_session_resolvers(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda *a, **k: empty_secret_target(),
     )
     # ``resolve_for_command`` is imported locally inside create_session /
-    # resume_session, so patch its module-level home; the import inside
+    # restart_session, so patch its module-level home; the import inside
     # the function picks up the patched version.
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
 

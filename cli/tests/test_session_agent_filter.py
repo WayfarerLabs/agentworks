@@ -1,11 +1,11 @@
 """Tests for the ``--agent`` and ``--admin`` filters on
-``session stop`` / ``session resume``.
+``session stop`` / ``session start``.
 
 Pins the new flags' plumbing (CLI → manager), the mode-mutex
 (``--admin`` and ``--agent`` are mutually exclusive), and the
 precondition that the batch filters (``--vm``, ``--workspace``,
 ``--agent``, ``--admin``) require one of the batch flags
-(``--all`` / ``--all-stopped``).
+(``--all`` / ``--all``).
 """
 
 from __future__ import annotations
@@ -142,40 +142,38 @@ def test_session_stop_agent_without_all_errors(
 
 
 # ---------------------------------------------------------------------------
-# session resume --agent
+# session start --agent
 # ---------------------------------------------------------------------------
 
 
-def test_session_resume_agent_filter_flows_to_manager(
+def test_session_start_agent_filter_flows_to_manager(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``session resume --all-stopped --agent a1`` must pass
-    ``agent_name='a1'`` through to ``resume_all_sessions``."""
+    """``session start --all --agent a1`` must pass
+    ``agent_name='a1'`` through to ``start_all_sessions``."""
     captured: dict[str, Any] = {}
-    monkeypatch.setattr(session_manager, "resume_all_sessions", _capture_kwargs(captured))
+    monkeypatch.setattr(session_manager, "start_all_sessions", _capture_kwargs(captured))
     monkeypatch.setattr("agentworks.cli._helpers.get_db", lambda: object())
     monkeypatch.setattr("agentworks.config.load_config", lambda: object())
 
     result = CliRunner().invoke(
         app,
-        ["session", "resume", "--all-stopped", "--agent", "a1"],
+        ["session", "start", "--all", "--agent", "a1"],
     )
     assert result.exit_code == 0, result.output
     assert captured.get("agent_name") == "a1"
     assert captured.get("vm_name") is None
     assert captured.get("workspace_name") is None
-    assert captured.get("include_running") is False
 
 
-def test_session_resume_agent_without_batch_errors(
+def test_session_start_agent_without_batch_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``session resume --agent a1`` without ``--all`` or
-    ``--all-stopped`` must error."""
+    """``session start --agent a1`` without ``--all`` must error."""
     monkeypatch.setattr("agentworks.cli._helpers.get_db", lambda: object())
     monkeypatch.setattr("agentworks.config.load_config", lambda: object())
 
-    result = CliRunner().invoke(app, ["session", "resume", "--agent", "a1"])
+    result = CliRunner().invoke(app, ["session", "start", "--agent", "a1"])
     assert result.exit_code != 0
     assert "--agent" in _plain(result.output)
 
@@ -205,10 +203,10 @@ def test_stop_all_sessions_passes_agent_name_to_filter(
     assert captured.get("agent_name") == "a1"
 
 
-def test_resume_all_sessions_passes_agent_name_to_filter(
+def test_start_all_sessions_passes_agent_name_to_filter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``resume_all_sessions(agent_name='a1')`` must pass that
+    """``start_all_sessions(agent_name='a1')`` must pass that
     through to ``filter_sessions``."""
     captured: dict[str, Any] = {}
 
@@ -218,7 +216,7 @@ def test_resume_all_sessions_passes_agent_name_to_filter(
 
     monkeypatch.setattr(session_manager, "filter_sessions", _capture_filter)
 
-    session_manager.resume_all_sessions(  # type: ignore[arg-type]
+    session_manager.start_all_sessions(  # type: ignore[arg-type]
         db=None, config=None, agent_name="a1", interaction=TtyInteractionPolicy.REFUSE
     )
     assert captured.get("agent_name") == "a1"
@@ -276,40 +274,40 @@ def test_session_stop_admin_without_all_errors(
 
 
 # ---------------------------------------------------------------------------
-# session resume --admin
+# session start --admin
 # ---------------------------------------------------------------------------
 
 
-def test_session_resume_admin_filter_flows_to_manager(
+def test_session_start_admin_filter_flows_to_manager(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``session resume --all-stopped --admin`` must pass
-    ``admin_only=True`` through to ``resume_all_sessions``."""
+    """``session start --all --admin`` must pass
+    ``admin_only=True`` through to ``start_all_sessions``."""
     captured: dict[str, Any] = {}
-    monkeypatch.setattr(session_manager, "resume_all_sessions", _capture_kwargs(captured))
+    monkeypatch.setattr(session_manager, "start_all_sessions", _capture_kwargs(captured))
     monkeypatch.setattr("agentworks.cli._helpers.get_db", lambda: object())
     monkeypatch.setattr("agentworks.config.load_config", lambda: object())
 
     result = CliRunner().invoke(
         app,
-        ["session", "resume", "--all-stopped", "--admin"],
+        ["session", "start", "--all", "--admin"],
     )
     assert result.exit_code == 0, result.output
     assert captured.get("admin_only") is True
     assert captured.get("agent_name") is None
 
 
-def test_session_resume_admin_and_agent_are_mutually_exclusive(
+def test_session_start_admin_and_agent_are_mutually_exclusive(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``--admin`` and ``--agent`` are mutually exclusive on
-    ``session resume`` too."""
+    ``session start`` too."""
     monkeypatch.setattr("agentworks.cli._helpers.get_db", lambda: object())
     monkeypatch.setattr("agentworks.config.load_config", lambda: object())
 
     result = CliRunner().invoke(
         app,
-        ["session", "resume", "--all-stopped", "--admin", "--agent", "a1"],
+        ["session", "start", "--all", "--admin", "--agent", "a1"],
     )
     assert result.exit_code != 0
     assert "--admin" in _plain(result.output)
@@ -340,10 +338,10 @@ def test_stop_all_sessions_passes_admin_only_to_filter(
     assert captured.get("admin_only") is True
 
 
-def test_resume_all_sessions_passes_admin_only_to_filter(
+def test_start_all_sessions_passes_admin_only_to_filter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``resume_all_sessions(admin_only=True)`` must reach
+    """``start_all_sessions(admin_only=True)`` must reach
     ``filter_sessions``."""
     captured: dict[str, Any] = {}
 
@@ -353,7 +351,7 @@ def test_resume_all_sessions_passes_admin_only_to_filter(
 
     monkeypatch.setattr(session_manager, "filter_sessions", _capture_filter)
 
-    session_manager.resume_all_sessions(  # type: ignore[arg-type]
+    session_manager.start_all_sessions(  # type: ignore[arg-type]
         db=None, config=None, admin_only=True, interaction=TtyInteractionPolicy.REFUSE
     )
     assert captured.get("admin_only") is True

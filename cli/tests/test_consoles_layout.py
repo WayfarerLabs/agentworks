@@ -12,7 +12,6 @@ from agentworks.db import Database
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.multi_console import (
     add_shell,
-    create_console,
     restore_session,
 )
 from tests._consoles_support import (  # noqa: F401
@@ -23,6 +22,7 @@ from tests._consoles_support import (  # noqa: F401
     _StubVerticalLayoutConfig,
 )
 from tests.conftest import _FakeResult, _FakeTarget
+from tests.console_helpers import create_console_record as create_console
 
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
@@ -34,9 +34,9 @@ def test_apply_layout_preset_emits_simple_select_layout(
     """Tmux preset layout names go straight to `select-layout`."""
     from agentworks.sessions.multi_console_layout import _apply_layout
 
-    _apply_layout(fake_target, "aw-console-con", "alpha", "tiled")  # type: ignore[arg-type]
+    _apply_layout(fake_target, "=aw-console-con", "alpha", "tiled")  # type: ignore[arg-type]
     assert fake_target.commands == [
-        "tmux select-layout -t aw-console-con:alpha tiled",
+        "tmux select-layout -t =aw-console-con:alpha tiled",
     ]
 
 
@@ -50,13 +50,13 @@ def test_apply_layout_aw_session_vertical_queries_then_applies_string(
 
     # First call returns geometry + pane ids; the helper builds a layout
     # string from this and applies it via the second call.
-    fake_target.responses["display-message -t aw-console-con:alpha"] = _FakeResult(
+    fake_target.responses["display-message -t =aw-console-con:alpha"] = _FakeResult(
         returncode=0, stdout="80x36\n0 %31\n1 %32\n2 %33\n"
     )
 
     _apply_layout(
         fake_target,  # type: ignore[arg-type]
-        "aw-console-con",
+        "=aw-console-con",
         "alpha",
         "aw-session-vertical",
     )
@@ -64,12 +64,12 @@ def test_apply_layout_aw_session_vertical_queries_then_applies_string(
     # Expect two commands: the geometry/pane query and the select-layout apply.
     assert len(fake_target.commands) == 2
     query_cmd, apply_cmd = fake_target.commands
-    assert "display-message -t aw-console-con:alpha" in query_cmd
-    assert "list-panes -t aw-console-con:alpha" in query_cmd
+    assert "display-message -t =aw-console-con:alpha" in query_cmd
+    assert "list-panes -t =aw-console-con:alpha" in query_cmd
     # The apply command holds the computed string with a tmux checksum prefix.
     # For 80x36 with 3 panes: session=18, shells=8+8, full geometry inside [].
     assert (
-        "tmux select-layout -t aw-console-con:alpha '3b1b,80x36,0,0[80x18,0,0,31,80x8,0,19,32,80x8,0,28,33]'"
+        "tmux select-layout -t =aw-console-con:alpha '3b1b,80x36,0,0[80x18,0,0,31,80x8,0,19,32,80x8,0,28,33]'"
     ) in apply_cmd
 
 
@@ -174,11 +174,13 @@ def test_apply_layout_aw_session_vertical_silent_on_single_pane(
         _apply_aw_session_vertical_layout,
     )
 
-    fake_target.responses["display-message -t aw-console-con:alpha"] = _FakeResult(returncode=0, stdout="80x36\n0 %1\n")
+    fake_target.responses["display-message -t =aw-console-con:alpha"] = _FakeResult(
+        returncode=0, stdout="80x36\n0 %1\n"
+    )
 
     _apply_aw_session_vertical_layout(
         fake_target,
-        "aw-console-con",
+        "=aw-console-con",
         "alpha",  # type: ignore[arg-type]
     )
 
@@ -196,13 +198,13 @@ def test_apply_layout_aw_session_vertical_warns_on_genuine_failure(
         _apply_aw_session_vertical_layout,
     )
 
-    fake_target.responses["display-message -t aw-console-con:alpha"] = _FakeResult(
+    fake_target.responses["display-message -t =aw-console-con:alpha"] = _FakeResult(
         returncode=0, stdout="80x4\n0 %1\n1 %2\n2 %3\n3 %4\n"
     )
 
     _apply_aw_session_vertical_layout(
         fake_target,
-        "aw-console-con",
+        "=aw-console-con",
         "alpha",  # type: ignore[arg-type]
     )
 
@@ -219,26 +221,26 @@ def test_apply_layout_aw_session_vertical_applies_under_pane_base_index_one(
         _apply_aw_session_vertical_layout,
     )
 
-    fake_target.responses["display-message -t aw-console-con:alpha"] = _FakeResult(
+    fake_target.responses["display-message -t =aw-console-con:alpha"] = _FakeResult(
         returncode=0, stdout="80x36\n1 %1\n2 %2\n"
     )
 
     _apply_aw_session_vertical_layout(
         fake_target,
-        "aw-console-con",
+        "=aw-console-con",
         "alpha",  # type: ignore[arg-type]
     )
 
-    assert any("select-layout -t aw-console-con:alpha" in c for c in fake_target.commands)
+    assert any("select-layout -t =aw-console-con:alpha" in c for c in fake_target.commands)
     assert not any("could not build aw-session-vertical" in w for w in captured_output.warnings)
 
 
 def test_focus_session_pane_emits_select_pane(fake_target: _FakeTarget) -> None:
     from agentworks.sessions.multi_console_layout import _focus_session_pane
 
-    _focus_session_pane(fake_target, "aw-console-con", "alpha", 0)  # type: ignore[arg-type]
+    _focus_session_pane(fake_target, "=aw-console-con", "alpha", 0)  # type: ignore[arg-type]
     assert fake_target.commands == [
-        "tmux select-pane -t aw-console-con:alpha.0",
+        "tmux select-pane -t =aw-console-con:alpha.0",
     ]
 
 
@@ -248,31 +250,10 @@ def test_focus_session_pane_targets_base_index(fake_target: _FakeTarget) -> None
     literal 0 (which tmux rejects with `can't find pane: 0`)."""
     from agentworks.sessions.multi_console_layout import _focus_session_pane
 
-    _focus_session_pane(fake_target, "aw-console-con", "alpha", 1)  # type: ignore[arg-type]
+    _focus_session_pane(fake_target, "=aw-console-con", "alpha", 1)  # type: ignore[arg-type]
     assert fake_target.commands == [
-        "tmux select-pane -t aw-console-con:alpha.1",
+        "tmux select-pane -t =aw-console-con:alpha.1",
     ]
-
-
-def test_attach_console_focuses_session_pane_per_window(db: Database, fake_target: _FakeTarget) -> None:
-    """First-attach builds windows; each window ends with select-pane on
-    pane 0 so the operator lands on the session output, not the
-    most-recently-created shell pane."""
-    from agentworks.sessions.multi_console import attach_console
-
-    _seed_vm(db, with_tailscale=True)
-    _seed_sessions(db, ["alpha", "beta"])
-    create_console(db, name="con", vm_name="vm1", session_specs=["alpha+1", "beta"])
-    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
-    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(
-        returncode=0, stdout="_PLACEHOLDER\nalpha\nbeta\n"
-    )
-
-    attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=TtyInteractionPolicy.REFUSE)
-
-    selects = [c for c in fake_target.commands if "select-pane" in c]
-    assert "tmux select-pane -t aw-console-con:alpha.0" in selects
-    assert "tmux select-pane -t aw-console-con:beta.0" in selects
 
 
 def test_restore_session_focuses_session_pane(db: Database, fake_target: _FakeTarget) -> None:
@@ -282,16 +263,16 @@ def test_restore_session_focuses_session_pane(db: Database, fake_target: _FakeTa
     create_console(db, name="con", vm_name="vm1", session_specs=["a+2"])
 
     fake_target.commands.clear()
-    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
-    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(returncode=0, stdout="a\n")
+    fake_target.responses["has-session -t =aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["list-windows -t =aw-console-con"] = _FakeResult(returncode=0, stdout="a\n")
     # One shell pane present (config_index=0), the second is missing.
-    fake_target.responses["list-panes -t aw-console-con:a"] = _FakeResult(returncode=0, stdout="%5|0|\n%6|1|0\n")
+    fake_target.responses["list-panes -t =aw-console-con:a"] = _FakeResult(returncode=0, stdout="%5|0|\n%6|1|0\n")
     # split-window must return a fresh pane id so the tag step succeeds.
-    fake_target.responses["split-window -t aw-console-con:a"] = _FakeResult(stdout="%9\n")
+    fake_target.responses["split-window -t =aw-console-con:a"] = _FakeResult(stdout="%9\n")
 
     restore_session(db, _StubConfig(), console_name="con", session_name="a", interaction=TtyInteractionPolicy.REFUSE)
 
-    assert "tmux select-pane -t aw-console-con:a.0" in fake_target.commands
+    assert "tmux select-pane -t =aw-console-con:a.0" in fake_target.commands
 
 
 def test_add_shell_does_not_focus_session_pane(db: Database, fake_target: _FakeTarget) -> None:
@@ -302,40 +283,9 @@ def test_add_shell_does_not_focus_session_pane(db: Database, fake_target: _FakeT
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
 
     fake_target.commands.clear()
-    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["has-session -t =aw-console-con"] = _FakeResult(returncode=0)
     add_shell(db, _StubConfig(), console_name="con", session_name="a", interaction=TtyInteractionPolicy.REFUSE)
 
     assert not any("select-pane" in c for c in fake_target.commands)
     # But the layout still re-applies for the new pane count.
-    assert any("select-layout -t aw-console-con:a tiled" in c for c in fake_target.commands)
-
-
-def test_attach_console_aw_session_vertical_layout(db: Database, fake_target: _FakeTarget) -> None:
-    """When the config picks aw-session-vertical, the build queries window
-    geometry + pane IDs, then applies a hand-computed layout string."""
-    from agentworks.sessions.multi_console import attach_console
-
-    _seed_vm(db, with_tailscale=True)
-    _seed_sessions(db, ["alpha"])
-    create_console(db, name="con", vm_name="vm1", session_specs=["alpha+1"])
-    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
-    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(returncode=0, stdout="_PLACEHOLDER\nalpha\n")
-    fake_target.responses["display-message -t aw-console-con:alpha"] = _FakeResult(
-        returncode=0, stdout="80x36\n0 %1\n1 %2\n"
-    )
-
-    attach_console(
-        db,
-        _StubVerticalLayoutConfig(),
-        name="con",
-        allow_nesting=True,  # type: ignore[arg-type]
-        interaction=TtyInteractionPolicy.REFUSE,
-    )
-
-    # One select-layout with the hand-computed string for 1-shell case
-    # (session 18, shell 17).
-    layout_cmds = [c for c in fake_target.commands if "select-layout" in c]
-    assert any(
-        "tmux select-layout -t aw-console-con:alpha '67a5,80x36,0,0[80x18,0,0,1,80x17,0,19,2]'" in c
-        for c in layout_cmds
-    ), layout_cmds
+    assert any("select-layout -t =aw-console-con:a tiled" in c for c in fake_target.commands)

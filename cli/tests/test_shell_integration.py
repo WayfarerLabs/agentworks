@@ -155,11 +155,6 @@ def test_omitted_fields_arrive_defaulted_not_none() -> None:
     assert (config.command, config.resume_command, config.required_commands) == ("", "", [])
 
 
-def test_shell_launch_note_is_silent() -> None:
-    # shell has no resume-vs-new notion, so it adds no op-output note.
-    assert _harness_integration().launch_note() is None
-
-
 def test_validation_rejects_unknown_field() -> None:
     with pytest.raises(ConfigError, match="commnad: unknown field; expected one of:"):
         _validate({"commnad": "typo"})
@@ -247,28 +242,30 @@ def test_merge_default_shape_when_neither_declares_required() -> None:
     assert "required_commands" not in merged
 
 
-# -- the ops: start / restart pane strings -----------------------------------
+# -- the op: start pane strings ----------------------------------------------
 
 
 def test_start_returns_the_command() -> None:
-    assert _harness_integration({"command": "claude"}).start(RunContext()) == "claude"
+    result = _harness_integration({"command": "claude"}).start(RunContext(), force_new=True)
+    assert result.command == "claude"
+    assert result.note is None
 
 
 def test_start_empty_config_is_a_login_shell() -> None:
-    assert _harness_integration({}).start(RunContext()) == ""
+    assert _harness_integration({}).start(RunContext(), force_new=True).command == ""
 
 
-def test_resume_prefers_resume_command() -> None:
+def test_start_prefers_resume_command() -> None:
     harness_integration = _harness_integration({"command": "claude", "resume_command": "claude --resume"})
-    assert harness_integration.resume(RunContext()) == "claude --resume"
+    assert harness_integration.start(RunContext()).command == "claude --resume"
 
 
-def test_resume_falls_back_to_command() -> None:
-    assert _harness_integration({"command": "claude"}).resume(RunContext()) == "claude"
+def test_start_falls_back_to_command() -> None:
+    assert _harness_integration({"command": "claude"}).start(RunContext()).command == "claude"
 
 
-def test_resume_empty_config_is_a_login_shell() -> None:
-    assert _harness_integration({}).resume(RunContext()) == ""
+def test_start_empty_config_is_a_login_shell_when_resume_is_enabled() -> None:
+    assert _harness_integration({}).start(RunContext()).command == ""
 
 
 def test_shell_leaves_the_state_blob_untouched() -> None:
@@ -277,7 +274,7 @@ def test_shell_leaves_the_state_blob_untouched() -> None:
     state: dict[str, object] = {}
     harness_integration = _harness_integration({"command": "claude"}, state=state)
     harness_integration.start(RunContext())
-    harness_integration.resume(RunContext())
+    harness_integration.start(RunContext())
     assert state == {}
     assert harness_integration.state == {}
 

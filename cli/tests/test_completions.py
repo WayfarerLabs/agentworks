@@ -627,14 +627,19 @@ class TestOptionFlagsInSpec:
         for shell in ("bash", "zsh", "powershell"):
             assert "--output" in generate(shell)
 
-    def test_session_resume_is_discoverable_and_restart_is_absent(self) -> None:
+    def test_canonical_lifecycle_is_discoverable_and_compatibility_is_hidden(self) -> None:
         spec = build_spec(app)
-        session = _walk_commands(spec)["agentworks.session"]
-        assert "resume" in session.subcommands
-        assert "restart" not in session.subcommands
+        commands = _walk_commands(spec)
+        session = commands["agentworks.session"]
+        assert {"start", "restart"} <= session.subcommands.keys()
+        assert "resume" not in session.subcommands
         for parameter in ("name", "vm", "workspace", "agent"):
-            assert ("session.resume", parameter) in DYNAMIC_COMPLETIONS
-            assert ("session.restart", parameter) not in DYNAMIC_COMPLETIONS
+            assert ("session.start", parameter) in DYNAMIC_COMPLETIONS
+            assert ("session.restart", parameter) in DYNAMIC_COMPLETIONS
+            assert ("session.resume", parameter) not in DYNAMIC_COMPLETIONS
+
+        console_attach = commands["agentworks.console.attach"]
+        assert "recreate" not in {parameter.name for parameter in console_attach.params}
 
 
 class TestGeneration:

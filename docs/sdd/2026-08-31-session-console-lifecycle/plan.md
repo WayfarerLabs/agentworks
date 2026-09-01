@@ -117,17 +117,17 @@ appropriate live tests. Tests assert behavior and structure, never the wording o
 
 ## Phase 1: CLI Grammar and Harness Contract
 
-- [ ] Add canonical session start/restart commands with thin CLI bodies, exact positional/option
+- [x] Add canonical session start/restart commands with thin CLI bodies, exact positional/option
       shapes, and typed manager errors.
-- [ ] Add `--force-new` and thread the exact `force_new` spelling through CLI, services, and harness
+- [x] Add `--force-new` and thread the exact `force_new` spelling through CLI, services, and harness
       start; keep it independent from broken-runtime `--force`.
-- [ ] Replace harness-integration contract v2 with the version-1 `HarnessStart` and
+- [x] Replace harness-integration contract v2 with the version-1 `HarnessStart` and
       `start(ctx, *, force_new=False)` contract.
-- [ ] Delete capability `resume`, mutable `launch_note`, v2 descriptor requirements, adapters, and
+- [x] Delete capability `resume`, mutable `launch_note`, v2 descriptor requirements, adapters, and
       old lifecycle vocabulary from every built-in implementation and fake.
-- [ ] Add one suppressible output deprecation helper and make completion introspection omit hidden
+- [x] Add one suppressible output deprecation helper and make completion introspection omit hidden
       subcommands as well as hidden parameters.
-- [ ] Update the shared completion spec so canonical session verbs complete resource names and flags
+- [x] Update the shared completion spec so canonical session verbs complete resource names and flags
       in Bash, Zsh, and PowerShell.
 
 ### Phase 1 Definition of Done
@@ -138,25 +138,25 @@ appropriate live tests. Tests assert behavior and structure, never the wording o
 
 ## Phase 2: Session Start, Restart, and Integration Bindings
 
-- [ ] Reshape current resume orchestration into explicit `start_session`, `restart_session`, batch
+- [x] Reshape current resume orchestration into explicit `start_session`, `restart_session`, batch
       variants, and one private absent-runtime launch path without duplicating graph preparation,
       readiness, secret resolution, environment, or tmux creation.
-- [ ] Implement the full status matrix, including ordinary running-start no-op, running
+- [x] Implement the full status matrix, including ordinary running-start no-op, running
       `start --force-new` refusal, broken-state force, stopped restart, and per-session aggregate
       batch results without replacing running selections.
-- [ ] Preserve state-before-tmux ordering and every foreign integration namespace for create, start,
+- [x] Preserve state-before-tmux ordering and every foreign integration namespace for create, start,
       restart, and failed-launch retry.
-- [ ] Implement shell ordinary/forced command selection without renaming truthful `resume_command`
+- [x] Implement shell ordinary/forced command selection without renaming truthful `resume_command`
       configuration.
-- [ ] Implement Claude and Grok forced UUID rotation, no old-state probe, old-conversation
+- [x] Implement Claude and Grok forced UUID rotation, no old-state probe, old-conversation
       preservation, prelaunch persistence, and ordinary retry reuse.
-- [ ] Implement Codex forced-fresh binding/recorder cleanup plus a persisted marker containing the
+- [x] Implement Codex forced-fresh binding/recorder cleanup plus a persisted marker containing the
       rejected recorder identity, so pre-exec failure and ordinary retry cannot adopt it before a
       different recorder ID is known.
-- [ ] Validate the flat Codex pending-marker type and make malformed persisted state converge
+- [x] Validate the flat Codex pending-marker type and make malformed persisted state converge
       through a safe fresh launch without degrading to ordinary discovery; only `null` or a
       canonical recorder UUID is valid.
-- [ ] Preserve legacy per-session socket migration and current environment/template/overlay
+- [x] Preserve legacy per-session socket migration and current environment/template/overlay
       semantics under the new operations.
 
 ### Phase 2 Definition of Done
@@ -169,22 +169,22 @@ appropriate live tests. Tests assert behavior and structure, never the wording o
 
 ## Phase 3: One Session Teardown Authority
 
-- [ ] Inventory and route direct stop, restart, direct delete, batch stop, workspace delete, agent
+- [x] Inventory and route direct stop, restart, direct delete, batch stop, workspace delete, agent
       delete, and reachable VM-delete session cleanup through one session-domain teardown authority.
-- [ ] Delete pane `C-c` and its grace sleep; use `kill-server` for each reachable dedicated runtime,
+- [x] Delete pane `C-c` and its grace sleep; use `kill-server` for each reachable dedicated runtime,
       verify all operator-added sessions/panes/windows are gone, and retain exact
       `kill-session -t =NAME` only for reachable legacy shared-server rows.
-- [ ] Add the explicit residual status for a reachable dedicated server whose canonical session is
+- [x] Add the explicit residual status for a reachable dedicated server whose canonical session is
       absent; route stop/delete through teardown, start/restart through teardown then launch, and
       make attach refuse without requiring `--force`.
-- [ ] Add nullable `tmux_server_start_ticks`, atomic fingerprint persistence/clearing, and safe
+- [x] Add nullable `tmux_server_start_ticks`, atomic fingerprint persistence/clearing, and safe
       reachable-row backfill; make missing or mismatched broken-state identity fail closed.
-- [ ] Delete raw numeric-PID force kill; permit exact admin/agent stale-socket cleanup only after
+- [x] Delete raw numeric-PID force kill; permit exact admin/agent stale-socket cleanup only after
       the stored boot/PID/start-time fingerprint proves the old server already exited, and fail
       closed on a matching live process, missing identity, or indeterminate result.
-- [ ] Preserve each parent deletion path's existing best-effort or fail-closed policy when targets
+- [x] Preserve each parent deletion path's existing best-effort or fail-closed policy when targets
       cannot be reached or reconstructed.
-- [ ] Delete superseded session kill loops and prove all intended teardown consumers use the shared
+- [x] Delete superseded session kill loops and prove all intended teardown consumers use the shared
       authority.
 
 ### Phase 3 Definition of Done
@@ -195,26 +195,26 @@ appropriate live tests. Tests assert behavior and structure, never the wording o
 
 ## Phase 4: Console Lifecycle
 
-- [ ] Add canonical console start/stop/restart commands with thin CLI bodies, exact
+- [x] Add canonical console start/stop/restart commands with thin CLI bodies, exact
       positional/option shapes, typed manager errors, and Bash/Zsh/PowerShell name/flag completion.
-- [ ] Introduce the internal prospective console definition and make build-secret target planning
+- [x] Introduce the internal prospective console definition and make build-secret target planning
       work before database insertion without adding persisted runtime state.
-- [ ] Extract one verified console teardown that owns canonical and staging artifacts, and retain
+- [x] Extract one verified console teardown that owns canonical and staging artifacts, and retain
       `_build_console_tmux` as the sole realization implementation.
-- [ ] Make the console builder construct under the reserved, canonical-name-disjoint
+- [x] Make the console builder construct under the reserved, canonical-name-disjoint
       `aw-console-build+NAME` staging name, fail on every required tmux operation, publish the
       canonical name only after complete success, and verify staging cleanup on failure.
-- [ ] Convert every console tmux target to exact `=NAME` selection and prove canonical and staging
+- [x] Convert every console tmux target to exact `=NAME` selection and prove canonical and staging
       isolation with related valid names such as `foo` and `foobar`.
-- [ ] Make create validate and prepare, remove/verify a stale predecessor, insert atomically, then
+- [x] Make create validate and prepare, remove/verify a stale predecessor, insert atomically, then
       build; roll back before insertion and retain the row after a later build failure.
-- [ ] Implement idempotent start, state-aware restart, idempotent stop, and attach-only attach using
+- [x] Implement idempotent start, state-aware restart, idempotent stop, and attach-only attach using
       the canonical/staging LLD state matrix.
-- [ ] Ensure attach does not load build plans or resolve pane secrets, while retaining ordinary VM
+- [x] Ensure attach does not load build plans or resolve pane secrets, while retaining ordinary VM
       activation and transport authorization.
-- [ ] Repoint full-rebuild recovery hints and restore flows to canonical console restart while
+- [x] Repoint full-rebuild recovery hints and restore flows to canonical console restart while
       preserving live best-effort membership synchronization.
-- [ ] Keep console list, describe, names-only, and completion database-only.
+- [x] Keep console list, describe, names-only, and completion database-only.
 
 ### Phase 4 Definition of Done
 
@@ -233,27 +233,28 @@ cleanup PR.
 
 ### Session and harness PR
 
-- [ ] Add the hidden 0.19 session resume wrapper and normalize named, all-stopped, and all forms
+- [x] Add the hidden 0.19 session resume wrapper and normalize named, all-stopped, and all forms
       into canonical manager operations; accept only the bounded legacy parser surface.
-- [ ] Prove the wrapper respects `--no-deprecations`, remains absent from help/completion, and
+- [x] Prove the wrapper respects `--no-deprecations`, remains absent from help/completion, and
       carries no service implementation.
-- [ ] Update session-facing CLI README/command reference/resources/guide/release/upgrade material,
+- [x] Update session-facing CLI README/command reference/resources/guide/release/upgrade material,
       harness capability/root/plugin READMEs, sample configuration, and ADR 0020 with a supersession
       note.
-- [ ] Record explicit 0.20 session-wrapper removal work, update machine identities/logs/comments
+- [x] Record explicit 0.20 session-wrapper removal work, update machine identities/logs/comments
       that misuse resume for runtime replacement, and run the one-time scoped vocabulary review;
-      keep persistent guards structural rather than lexical.
+      keep persistent guards structural rather than lexical. Issue #720 owns removal.
 
 ### Console PR
 
-- [ ] Add the hidden 0.19 console attach `--recreate` wrapper as restart followed by attach and
+- [x] Add the hidden 0.19 console attach `--recreate` wrapper as restart followed by attach and
       prove it respects `--no-deprecations`, stays absent from help/completion, and carries no
       service implementation.
-- [ ] Update console-facing CLI README/command reference/resources/guide/release/upgrade material
+- [x] Update console-facing CLI README/command reference/resources/guide/release/upgrade material
       and sample configuration, without duplicating compatibility teaching across permanent
       surfaces.
-- [ ] Record explicit 0.20 console-wrapper removal work and update machine identities, operation
+- [x] Record explicit 0.20 console-wrapper removal work and update machine identities, operation
       labels, tests, fixtures, comments, and docstrings that misuse attach for runtime mutation.
+      Issue #720 owns removal.
 
 ### Phase 5 Definition of Done
 
@@ -266,9 +267,9 @@ cleanup PR.
 
 The implementation, review, CI, and live-evidence steps below apply to the complete integrated PR.
 
-- [ ] Add structural and behavioral coverage from the LLD verification matrix without assertions on
+- [x] Add structural and behavioral coverage from the LLD verification matrix without assertions on
       authored prose.
-- [ ] Run focused session, console, capability, secret-boundary, completion, and cascade suites,
+- [x] Run focused session, console, capability, secret-boundary, completion, and cascade suites,
       then the full non-integration, static, docs, generation, website, and installed-wheel gates.
 - [ ] Run private project, Muntz, and cold correctness/security reviews on one clean exact head and
       resolve every material finding.
@@ -277,8 +278,8 @@ The implementation, review, CI, and live-evidence steps below apply to the compl
 - [ ] Run authorized live validation for console create/start/stop/restart/attach, session
       start/restart/force-new/attach, one Agentworks-minted UUID integration, and Codex's
       tool-assigned identity path where the environment supports them.
-- [ ] Confirm the release notes identify the CLI and in-repository capability breaks, the upgrade
-      guide is actionable, and 0.20 removal work has an owner.
+- [x] Confirm the breaking-change release input identifies the CLI and in-repository capability
+      breaks, the upgrade guide is actionable, and issue #720 owns 0.20 wrapper removal.
 - [ ] Create `locked.md` only after implementation, live evidence, reviews, and final acceptance are
       complete; run locked-SDD checks and merge through the operator-owned flow.
 

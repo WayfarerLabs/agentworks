@@ -39,9 +39,9 @@ workloads:
   which provides for both persistence and the ability to attach to and detach as needed.
 - Each session invokes a **harness integration** that knows how to run a particular workload (e.g. a
   full agentic harness such as Claude Code, Codex, etc. or just a plain login shell). The harness
-  integration owns start/resume semantics (e.g. resuming a Claude Code or Codex conversation right
-  where it left off) as well as validating the target environment for its workload. It also owns
-  workload-specific configuration and integration behavior.
+  integration owns launch and continuation semantics (e.g. resuming a Claude Code or Codex
+  conversation right where it left off) as well as validating the target environment for its
+  workload. It also owns workload-specific configuration and integration behavior.
 - Sessions can be organized into **named consoles**: curated tmux views that organize active
   sessions along with optional extra shell panes.
 - Both **config** and **secrets** (together with configured **secret sources**) can be managed and

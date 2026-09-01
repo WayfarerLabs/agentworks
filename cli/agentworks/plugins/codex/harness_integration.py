@@ -58,7 +58,7 @@ sibling rollouts with the same cwd as their parent):
    with the recorder attached: the operator picks their conversation (or esc
    for a fresh one) and the next completed turn binds the id through layer 1.
 
-**Only ``resume`` ever adopts an id; ``create`` is always fresh.** Both
+**Only an ordinary start can adopt an id; ``create`` is always fresh.** Both
 identity channels above are name-derived on the launch target (the recorder
 file is ``<session-name>.thread``, and discovery matches the workspace
 directory), so at create time either would hand a brand-new session the
@@ -68,7 +68,7 @@ conversation yet, so ``start`` probes nothing at all and additionally clears
 any leftover recording. That closes the recorder channel outright: a recreated
 namesake can never resume the dead conversation as a BOUND id. It NARROWS but
 does not close layer 2, whose candidate set is the workspace: if the dead
-session's rollout is the only interactive one there, the first resume can still
+session's rollout is the only interactive one there, the first later start can still
 adopt it, announced (see ``start`` for why that is tolerable and what closing
 it would cost). The split is the correct semantics for deferred discovery
 rather than an asymmetry to work around.
@@ -109,7 +109,12 @@ from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, NamedTuple
 
 from pydantic import Field
 
-from agentworks.capabilities.harness_integration.base import HarnessIntegration, quote_literal_argv, require_commands
+from agentworks.capabilities.harness_integration.base import (
+    HarnessIntegration,
+    HarnessStart,
+    quote_literal_argv,
+    require_commands,
+)
 from agentworks.errors import StateError
 from agentworks.plugins.codex.recorder import home_word, notify_value_word, provision_fragment, thread_tail
 from agentworks.schema import AgwModel, MergeStrategy
@@ -363,7 +368,7 @@ class _Layer2(NamedTuple):
 class CodexIntegration(HarnessIntegration):
     """Runs Codex, resuming or launching fresh per on-disk state."""
 
-    contract_version: ClassVar[int] = 2
+    contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "codex"
     description: ClassVar[str] = "Run Codex, resuming its session when one exists"
     config_model: ClassVar[type[CodexConfig]] = CodexConfig
@@ -383,7 +388,7 @@ class CodexIntegration(HarnessIntegration):
         """,
     )
 
-    # Set by start / _resume_or_launch on each op; drives launch_note().
+    # Set by start / _resume_or_launch on each op; drives the HarnessStart note.
     # None until the op runs (nothing decided yet).
     _decision: Literal["resumed", "adopted", "picker", "stale", "fresh"] | None = None
     # The uuid the "adopted" leaf settled on, so both operator surfaces can
@@ -403,14 +408,14 @@ class CodexIntegration(HarnessIntegration):
         """This session's validated codex config."""
         return self._config_as(CodexConfig)
 
-    def start(self, ctx: RunContext) -> str:
-        """The pane command for ``session create``: ALWAYS a fresh launch.
+    def start(self, ctx: RunContext, *, force_new: bool = False) -> HarnessStart:
+        """Choose an ordinary continuation or a deliberately fresh launch.
 
         ``session create`` mints a brand-new session row, so by definition
         no codex conversation belongs to this session yet: there is nothing
         to resume and nothing legitimate to adopt. So create probes nothing
         (no recorder read, no rollout probe, no discovery) and needs no
-        launch target: only :meth:`resume` ever adopts an id.
+        launch target: only a later ordinary start can adopt an id.
 
         Both of this integration's identity channels are name-derived on
         the target (the recorder file is ``<session-name>.thread``;
@@ -423,7 +428,7 @@ class CodexIntegration(HarnessIntegration):
         resume a dead namesake's id as a BOUND one. The DISCOVERY channel
         is narrowed, not closed, and this is the honest limit of what
         ships: if the dead session's rollout is the only interactive one in
-        the workspace, this session's FIRST resume can still adopt it
+        the workspace, this session's first later start can still adopt it
         through layer 2. That is tolerable rather than invisible: the
         adoption is announced on both surfaces and names the uuid, the
         candidate is a prior Agentworks conversation in the same workspace
@@ -438,26 +443,13 @@ class CodexIntegration(HarnessIntegration):
         asymmetry to apologize for: a fresh launch resumes nothing, while its
         effective workload config may provide initial input.
         """
-        self._decision = "fresh"
-        return self._fresh_command(
-            msg=f"agentworks harness integration (codex): starting new session {self._session_name}",
-            legacy_marker=self._take_legacy_marker(),
-        )
+        self._decision = None
+        self._adopted_id = None
+        self._dropped_stale = False
+        command = self._force_new(ctx) if force_new else self._resume_or_launch(ctx)
+        return HarnessStart(command, self._decision_note())
 
-    def resume(self, ctx: RunContext) -> str:
-        """The pane command for ``session resume``: the full three-layer
-        decision (see :meth:`_resume_or_launch`), and the ONLY op that ever
-        adopts a codex session id.
-
-        The orchestrator kills the old tmux BEFORE calling this, so the
-        probes decide with the old process already dead. Adopting here is
-        safe in the way it would not be at create time: the row has existed
-        continuously since a create that launched fresh and cleared any
-        stale recording, so whatever the recorder now holds was reported by
-        a codex running in THIS session's pane."""
-        return self._resume_or_launch(ctx)
-
-    def launch_note(self) -> str | None:
+    def _decision_note(self) -> str | None:
         """The console line for the op that just ran, one per decision
         leaf (operator-decided 2026-08-04: the console must say what is
         happening, in the same resume vocabulary as the pane echo).
@@ -495,6 +487,18 @@ class CodexIntegration(HarnessIntegration):
         if disclosure := self._fresh_setup_disclosure():
             note = f"{note} {disclosure}"
         return note
+
+    def _force_new(self, ctx: RunContext) -> str:
+        """Reject the visible recorder binding and launch bare Codex."""
+        launch_target = ctx.admin_target() if self._admin else ctx.agent_target()
+        recorded = self._recorded_thread_id(launch_target) if launch_target is not None else None
+        self._state.pop("session_id", None)
+        self._state["fresh_pending"] = recorded
+        self._decision = "fresh"
+        return self._fresh_command(
+            msg=f"agentworks harness integration (codex): starting new session {self._session_name}",
+            legacy_marker=self._take_legacy_marker(),
+        )
 
     def _resume_or_launch(self, ctx: RunContext) -> str:
         """The RESUME decision, from codex's own durable state on the launch
@@ -545,6 +549,33 @@ class CodexIntegration(HarnessIntegration):
                 hint="Retry once the launch target is reachable.",
             )
         legacy_marker = self._take_legacy_marker()
+        if "fresh_pending" in self._state:
+            pending = self._state["fresh_pending"]
+            valid_pending = pending is None or (isinstance(pending, str) and _RECORDED_ID_RE.fullmatch(pending))
+            recorded = self._recorded_thread_id(launch_target)
+            if not valid_pending:
+                from agentworks import output
+
+                output.warn(
+                    f"session '{self._session_name}': malformed Codex fresh-pending state; "
+                    "launching fresh instead of adopting prior state"
+                )
+                self._state.pop("session_id", None)
+                self._state["fresh_pending"] = recorded
+                self._decision = "fresh"
+                return self._fresh_command(
+                    msg=f"agentworks harness integration (codex): starting new session {self._session_name}",
+                    legacy_marker=legacy_marker,
+                )
+            if recorded is None or recorded == pending:
+                self._state.pop("session_id", None)
+                self._decision = "fresh"
+                return self._fresh_command(
+                    msg=f"agentworks harness integration (codex): starting new session {self._session_name}",
+                    legacy_marker=legacy_marker,
+                )
+            self._state["session_id"] = recorded
+            self._state.pop("fresh_pending", None)
         sid = self._bound_session_id(launch_target)
         if sid is not None:
             if self._rollout_exists(launch_target, sid):

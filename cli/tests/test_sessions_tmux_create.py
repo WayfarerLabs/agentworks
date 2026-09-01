@@ -24,7 +24,9 @@ from agentworks.sessions.tmux import (
     _tmux_env_flags,
     _trim_captured_output,
     admin_socket_path,
+    capture_tmux_server_fingerprint,
     create_session,
+    parse_process_start_ticks,
 )
 
 # ---------------------------------------------------------------------------
@@ -89,6 +91,56 @@ def test_tmux_env_flags_round_trip_through_shlex_for_single_quotes() -> None:
 
 def test_admin_socket_path_under_admin_socket_root() -> None:
     assert admin_socket_path("agentworks", "s1") == ("/run/agentworks/admin-tmux-sockets/agentworks/s1.sock")
+
+
+def test_process_start_ticks_parser_uses_the_final_comm_delimiter() -> None:
+    fields_after_comm = ["S", *[str(value) for value in range(4, 23)]]
+    fields_after_comm[-1] = "98765"
+    stat = f"42 (tmux: server) with ) chars) {' '.join(fields_after_comm)}"
+    assert parse_process_start_ticks(stat) == 98765
+
+
+class _FingerprintTarget:
+    def __init__(self, *, second_pid: int = 42, second_ticks: int = 98765) -> None:
+        self.second_pid = second_pid
+        self.second_ticks = second_ticks
+        self.pid_reads = 0
+        self.stat_reads = 0
+
+    def run(self, command: str, **kwargs: object) -> _SpyResult:
+        if "display-message" in command:
+            self.pid_reads += 1
+            pid = 42 if self.pid_reads == 1 else self.second_pid
+            return _SpyResult(stdout=f"{pid}\n")
+        if "/proc/42/stat" in command:
+            self.stat_reads += 1
+            ticks = 98765 if self.stat_reads == 1 else self.second_ticks
+            fields_after_comm = ["S", *[str(value) for value in range(4, 23)]]
+            fields_after_comm[-1] = str(ticks)
+            return _SpyResult(stdout=f"42 (tmux: server) {' '.join(fields_after_comm)}\n")
+        if "boot_id" in command:
+            return _SpyResult(stdout="boot-x\n")
+        raise AssertionError(command)
+
+
+def test_fingerprint_capture_requires_two_matching_pid_and_stat_reads() -> None:
+    stable = capture_tmux_server_fingerprint(target=_FingerprintTarget(), socket_path="/run/s1.sock")  # type: ignore[arg-type]
+    assert stable is not None
+    assert (stable.pid, stable.boot_id, stable.start_ticks) == (42, "boot-x", 98765)
+    assert (
+        capture_tmux_server_fingerprint(
+            target=_FingerprintTarget(second_pid=43),  # type: ignore[arg-type]
+            socket_path="/run/s1.sock",
+        )
+        is None
+    )
+    assert (
+        capture_tmux_server_fingerprint(
+            target=_FingerprintTarget(second_ticks=98766),  # type: ignore[arg-type]
+            socket_path="/run/s1.sock",
+        )
+        is None
+    )
 
 
 # ---------------------------------------------------------------------------

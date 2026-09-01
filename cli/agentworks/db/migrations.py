@@ -716,6 +716,10 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
     # -- development installations, but never discard a provider-artifact -
     # -- ownership record implicitly. ------------------------------------
     35: _retire_vm_checkpoints,
+    # Linux process start time completes the tmux-server fingerprint. -------
+    36: """
+        ALTER TABLE sessions ADD COLUMN tmux_server_start_ticks INTEGER;
+    """,
 }
 
 LATEST_VERSION = max(MIGRATIONS)
@@ -839,6 +843,7 @@ _SCHEMA_SENTINEL_ADDITIONS: dict[int, dict[str, tuple[str, ...]]] = {
             "created_at",
         )
     },
+    36: {"sessions": ("tmux_server_start_ticks",)},
 }
 
 _SCHEMA_SENTINEL_REMOVED_TABLES: dict[int, tuple[str, ...]] = {

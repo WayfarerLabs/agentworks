@@ -25,7 +25,6 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.multi_console import (
     add_sessions,
     add_shell,
-    create_console,
     delete_console,
     delete_console_record,
     describe_console,
@@ -33,8 +32,12 @@ from agentworks.sessions.multi_console import (
     remove_sessions,
     reorder_sessions,
 )
+from agentworks.sessions.multi_console import (
+    create_console as _real_create_console,
+)
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
 from tests.conftest import _FakeResult, _FakeTarget
+from tests.console_helpers import create_console_record as create_console
 
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
@@ -42,6 +45,15 @@ if TYPE_CHECKING:
 
 def _refuse_live_target(*args: object, **kwargs: object) -> None:
     raise ConnectivityError("SSH identity unavailable")
+
+
+def _validate_create(db: Database, **kwargs: object) -> None:
+    _real_create_console(
+        db,
+        _StubConfig(),
+        interaction=TtyInteractionPolicy.REFUSE,
+        **kwargs,  # type: ignore[arg-type]
+    )
 
 
 # -- Orchestration: create_console -----------------------------------------
@@ -99,7 +111,7 @@ def test_running_session_names_uses_live_status_check(db: Database, fake_target:
     # claims the session is gone.
     def stub_run(command: str, **kwargs: object) -> _FakeResult:
         fake_target.commands.append(command)
-        if "has-session -t alpha" in command and "has-session -t beta" in command:
+        if "has-session -t =alpha" in command and "has-session -t =beta" in command:
             return _FakeResult(
                 returncode=0,
                 stdout="S:alpha:0\nS:beta:0\nS:gamma:1\n",
@@ -157,13 +169,13 @@ def test_create_console_rejects_empty_without_all(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a"])
     with pytest.raises(ValidationError, match="specify at least one session"):
-        create_console(db, name="empty", vm_name="vm1", session_specs=[])
+        _validate_create(db, name="empty", vm_name="vm1", session_specs=[])
 
 
 def test_create_console_rejects_empty_fill_all(db: Database) -> None:
     _seed_vm(db)  # no sessions seeded
     with pytest.raises(ValidationError, match="VM 'vm1' has no sessions"):
-        create_console(db, name="empty", vm_name="vm1", session_specs=[], fill_all=True)
+        _validate_create(db, name="empty", vm_name="vm1", session_specs=[], fill_all=True)
 
 
 def test_create_console_rejects_duplicate_name(db: Database) -> None:
@@ -171,18 +183,18 @@ def test_create_console_rejects_duplicate_name(db: Database) -> None:
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
     with pytest.raises(AlreadyExistsError, match="already exists"):
-        create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+        _validate_create(db, name="con", vm_name="vm1", session_specs=["a"])
 
 
 def test_create_console_rejects_unknown_vm(db: Database) -> None:
     with pytest.raises(NotFoundError, match="not found"):
-        create_console(db, name="con", vm_name="ghost", session_specs=["a"])
+        _validate_create(db, name="con", vm_name="ghost", session_specs=["a"])
 
 
 def test_create_console_rejects_unknown_session(db: Database) -> None:
     _seed_vm(db)
     with pytest.raises(NotFoundError, match="not found"):
-        create_console(db, name="con", vm_name="vm1", session_specs=["ghost"])
+        _validate_create(db, name="con", vm_name="vm1", session_specs=["ghost"])
 
 
 def test_create_console_rejects_cross_vm_session(db: Database) -> None:
@@ -190,14 +202,14 @@ def test_create_console_rejects_cross_vm_session(db: Database) -> None:
     _seed_vm(db, "vm2")
     _seed_sessions(db, ["a"], workspace_name="ws-vm2")
     with pytest.raises(ValidationError, match="is not on VM 'vm1'"):
-        create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+        _validate_create(db, name="con", vm_name="vm1", session_specs=["a"])
 
 
 def test_create_console_rejects_dup_in_args(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a"])
     with pytest.raises(ValidationError, match="listed more than once"):
-        create_console(db, name="con", vm_name="vm1", session_specs=["a", "a+1"])
+        _validate_create(db, name="con", vm_name="vm1", session_specs=["a", "a+1"])
 
 
 def test_create_console_rolls_back_on_failure(db: Database) -> None:
@@ -206,7 +218,7 @@ def test_create_console_rolls_back_on_failure(db: Database) -> None:
     _seed_sessions(db, ["a"])
     db.insert_console("con", "vm1")
     with pytest.raises(AlreadyExistsError, match="already exists"):
-        create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+        _validate_create(db, name="con", vm_name="vm1", session_specs=["a"])
     assert db.list_console_sessions("con") == []
 
 
