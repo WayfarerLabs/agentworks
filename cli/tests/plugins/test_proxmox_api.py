@@ -127,6 +127,31 @@ class TestResponseParsing:
         assert len(result) == 2
         assert result[1]["name"] == "eth0"
 
+    @pytest.mark.parametrize("snapshot_data", [None, ["not-an-object"], [{}], [{"name": ""}]])
+    @patch("urllib.request.urlopen")
+    def test_snapshot_inventory_rejects_malformed_data(
+        self,
+        mock_urlopen: MagicMock,
+        api: ProxmoxAPI,
+        snapshot_data: Any,
+    ) -> None:
+        mock_urlopen.return_value = _mock_response(snapshot_data)
+
+        with pytest.raises(ProxmoxAPIError):
+            api.list_snapshots("pve", 100)
+
+    @pytest.mark.parametrize("snapshot_data", [[], [{"name": "agw-123", "description": "managed"}]])
+    @patch("urllib.request.urlopen")
+    def test_snapshot_inventory_accepts_named_objects(
+        self,
+        mock_urlopen: MagicMock,
+        api: ProxmoxAPI,
+        snapshot_data: list[dict[str, Any]],
+    ) -> None:
+        mock_urlopen.return_value = _mock_response(snapshot_data)
+
+        assert api.list_snapshots("pve", 100) == snapshot_data
+
 
 class TestErrorHandling:
     """Test error handling."""
@@ -163,6 +188,21 @@ class TestErrorHandling:
             api.next_id()
 
         assert isinstance(caught.value.__cause__, json.JSONDecodeError)
+
+    @pytest.mark.parametrize("response_body", [None, {}])
+    @patch("urllib.request.urlopen")
+    def test_malformed_response_envelope_is_typed(
+        self,
+        mock_urlopen: MagicMock,
+        api: ProxmoxAPI,
+        response_body: Any,
+    ) -> None:
+        response = _mock_response(None)
+        response.read.return_value = json.dumps(response_body).encode()
+        mock_urlopen.return_value = response
+
+        with pytest.raises(ProxmoxAPIError):
+            api.next_id()
 
     @patch("urllib.request.urlopen")
     def test_task_failure_raises(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:

@@ -319,4 +319,4 @@ class Transport(abc.ABC):
         finally:
             Path(tmp_path).unlink(missing_ok=True)
         if mode:
-            self.run(f"chmod {mode} {remote_path}")
+            self.run(f"chmod -- {shlex.quote(mode)} {shlex.quote(remote_path)}")

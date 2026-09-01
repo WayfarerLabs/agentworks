@@ -96,7 +96,9 @@ class ProxmoxAPI:
             parsed = json.loads(resp_body)
         except json.JSONDecodeError as e:
             raise ProxmoxAPIError(f"Proxmox API {method} {path} returned invalid JSON") from e
-        return parsed.get("data")
+        if not isinstance(parsed, dict) or "data" not in parsed:
+            raise ProxmoxAPIError(f"Proxmox API {method} {path} returned a malformed response")
+        return parsed["data"]
 
     # -- Cluster ---------------------------------------------------------------
 
@@ -171,7 +173,12 @@ class ProxmoxAPI:
     def list_snapshots(self, node: str, vmid: int) -> list[dict[str, Any]]:
         """List QEMU snapshots for one VM."""
         result = self._request("GET", f"/nodes/{node}/qemu/{vmid}/snapshot")
-        return result if isinstance(result, list) else []
+        if not isinstance(result, list) or any(
+            not isinstance(entry, dict) or not isinstance(entry.get("name"), str) or not entry["name"]
+            for entry in result
+        ):
+            raise ProxmoxAPIError("Proxmox API returned a malformed snapshot inventory")
+        return result
 
     def create_snapshot(self, node: str, vmid: int, name: str, *, description: str) -> str:
         """Create a disk-only QEMU snapshot and return its task UPID."""
