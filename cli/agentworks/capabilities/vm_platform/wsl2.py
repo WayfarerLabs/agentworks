@@ -889,6 +889,13 @@ class WSL2Platform(VMPlatform):
             return False
         return any(line.strip() == distro_name for line in listing.splitlines())
 
+    @staticmethod
+    def _checkpoint_distro_exists(distro_name: str) -> bool:
+        """Strictly prove distro presence across a destructive checkpoint boundary."""
+
+        listing = _wsl(["--list", "--quiet"])
+        return any(line.strip() == distro_name for line in listing.splitlines())
+
     def start(self, vm: VMRow, ctx: RunContext) -> None:
         # Idempotent by construction (the ABC flags start): running a
         # command boots a stopped distro and is a plain exec on a
@@ -1117,7 +1124,8 @@ class WSL2Platform(VMPlatform):
                 hint="Delete the incomplete checkpoint and create it again before restoring.",
             )
         distro_name = self._distro_name(vm)
-        if self._distro_exists(distro_name):
+        distro_exists = self._checkpoint_distro_exists(distro_name)
+        if distro_exists:
             self._require_checkpoint_vm_stopped(vm, ctx)
             self._export_distro(vm, emergency)
         elif not self._complete_export(emergency):
@@ -1128,13 +1136,14 @@ class WSL2Platform(VMPlatform):
             )
 
         install_path = _wsl_base_path() / distro_name
-        _wsl(["--unregister", distro_name], check=False)
-        if self._distro_exists(distro_name):
-            raise StateError(
-                f"WSL2 could not unregister distro '{vm.name}' before checkpoint restore",
-                entity_kind="vm",
-                entity_name=vm.name,
-            )
+        if distro_exists:
+            _wsl(["--unregister", distro_name])
+            if self._checkpoint_distro_exists(distro_name):
+                raise StateError(
+                    f"WSL2 could not unregister distro '{vm.name}' before checkpoint restore",
+                    entity_kind="vm",
+                    entity_name=vm.name,
+                )
         _powershell(
             f"Remove-Item -Recurse -Force -Path {_ps_quote(install_path)} -ErrorAction SilentlyContinue",
             check=False,
@@ -1145,7 +1154,7 @@ class WSL2Platform(VMPlatform):
             timeout=_CHECKPOINT_TIMEOUT_SECONDS,
         )
         _wsl(["--terminate", distro_name], check=False)
-        if not self._distro_exists(distro_name) or self.status(vm, ctx) is not VMStatus.STOPPED:
+        if not self._checkpoint_distro_exists(distro_name) or self.status(vm, ctx) is not VMStatus.STOPPED:
             raise StateError(
                 f"WSL2 checkpoint restore did not leave VM '{vm.name}' registered and stopped",
                 entity_kind="vm",

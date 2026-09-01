@@ -600,10 +600,9 @@ class TestOrphanBackstopWarning:
 
 
 class TestTransportFailureDuringRollback:
-    """ProxmoxAPI types only HTTP failures as ProxmoxAPIError; a
-    transport-level failure (URLError/OSError) during the rollback must
-    be contained by the wrappers, never replacing the original
-    interrupt or masking the original error."""
+    """Even an unexpected raw transport failure from a fake API must be
+    contained by rollback, never replacing the original interrupt or
+    masking the original error. The real API normalizes these failures."""
 
     def test_interrupt_path_absorbs_it_with_the_abandon_warning(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput

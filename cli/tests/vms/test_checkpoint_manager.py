@@ -812,7 +812,7 @@ def test_force_delete_checkpoint_abandons_failed_provider_cleanup(
     assert db.list_vm_events("box")[-1].event == "checkpoint_abandoned"
 
 
-def test_force_delete_checkpoint_abandons_raw_provider_cleanup_failure(
+def test_force_delete_checkpoint_preserves_ownership_on_programming_failure(
     monkeypatch: pytest.MonkeyPatch,
     db: Database,
 ) -> None:
@@ -827,20 +827,21 @@ def test_force_delete_checkpoint_abandons_raw_provider_cleanup_failure(
     monkeypatch.setattr(
         platform,
         "delete_checkpoint",
-        lambda *args, **kwargs: (_ for _ in ()).throw(PermissionError("provider artifact is read-only")),
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("unexpected provider state")),
     )
 
-    checkpoints.delete_checkpoint(
-        db,
-        object(),
-        "box",
-        yes=True,
-        force=True,
-        interaction=TtyInteractionPolicy.REFUSE,
-    )
+    with pytest.raises(AssertionError):
+        checkpoints.delete_checkpoint(
+            db,
+            object(),
+            "box",
+            yes=True,
+            force=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
 
-    assert db.get_vm_checkpoint("box") is None
-    assert db.list_vm_events("box")[-1].event == "checkpoint_abandoned"
+    assert db.get_vm_checkpoint("box") is not None
+    assert db.list_vm_events("box")[-1].event == "checkpoint_created"
 
 
 def test_checkpoint_abandonment_rolls_back_when_audit_insert_fails(

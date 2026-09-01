@@ -416,12 +416,15 @@ claim rule and removes the row only after provider absence is proved. Every term
 both lifecycle state and operation identifier.
 
 `delete-checkpoint --force` never skips that reconciliation. It attempts the ordinary provider
-cleanup first and reaches the fallback only after boundary or provider failure. The fallback shows
-the known provider identifier when one exists, warns that late, incomplete, emergency, or duplicate
-artifacts may remain and continue billing, confirms separately unless `--yes` was supplied, removes
-the row by state-and-operation compare-and-delete, and records a distinct abandonment event in the
-same database transaction. Forced VM deletion uses the same fallback only after checkpoint cleanup
-fails. Without force, both delete commands preserve the rows and return repair/retry guidance.
+cleanup first and reaches the fallback only after a typed Agentworks boundary or provider failure.
+The fallback shows the known provider identifier when one exists, warns that late, incomplete,
+emergency, or duplicate artifacts may remain and continue billing, confirms separately unless
+`--yes` was supplied, removes the row by state-and-operation compare-and-delete, and records a
+distinct abandonment event in the same database transaction. Forced VM deletion uses the same
+fallback only after checkpoint cleanup fails. Unexpected programming errors propagate while
+Agentworks retains checkpoint ownership; each bundled platform normalizes expected transport,
+permission, and provider API failures into typed Agentworks errors at its boundary. Without force,
+both delete commands preserve the rows and return repair/retry guidance.
 
 A narrow, private, per-VM shared/exclusive operation guard closes the race that database transitions
 alone cannot: another process must not start, delete, reinitialize, access, or resume a session on
@@ -458,7 +461,7 @@ All built-ins preserve the same logical VM and existing `platform_metadata`:
 | Platform | Managed checkpoint and restore                                                                                                                                                                                                                                                                                                                                                     |
 | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Lima     | `limactl snapshot create/list/apply/delete` with the generated tag on the placement host. Unsupported Lima drivers fail clearly before upgrade mutation.                                                                                                                                                                                                                           |
-| WSL2     | A stopped-distro export under the Agentworks WSL storage root. Restore refuses a partial export before unregistering anything, first exports the current distro as an emergency intermediate, unregisters/imports under the same name and install path, and keeps both artifacts if recovery cannot be proved.                                                                     |
+| WSL2     | A stopped-distro export under the Agentworks WSL storage root. Restore refuses a partial export before unregistering anything, strictly proves distro inventory across the destructive boundary, first exports the current distro as an emergency intermediate, unregisters/imports under the same name and install path, and keeps both artifacts if recovery cannot be proved.         |
 | AWS EC2  | A tagged root-volume EBS snapshot. Restore enters stopped, announces and temporarily starts the instance, submits the replacement task with a stable checkpoint-derived client token, survives its provider reboot, then stops and proves the same instance stopped. Stop cleanup never masks the primary restore error; replay discovers the task rather than submitting another. |
 | Azure VM | A tagged managed-OS-disk snapshot. Snapshot, disk, update, and tag requests use typed Azure SDK models. Restore creates a replacement managed disk, swaps it onto the same VM, and retains the displaced disk until the swap and core attestation are recoverable.                                                                                                                 |
 | GCP GCE  | A labeled boot-disk snapshot. Restore creates a replacement zonal disk, swaps it onto the same stopped instance, and retains the displaced disk until recovery is proved.                                                                                                                                                                                                          |

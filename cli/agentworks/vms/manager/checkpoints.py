@@ -15,7 +15,7 @@ from agentworks.db import (
     VMCheckpointState,
     VMStatus,
 )
-from agentworks.errors import AlreadyExistsError, StateError, UserAbort
+from agentworks.errors import AgentworksError, AlreadyExistsError, StateError, UserAbort
 
 from ._helpers import _guard_failed_vm, _require_vm
 from .boundary import _live_vm_boundary
@@ -789,7 +789,7 @@ def delete_checkpoint(
             vm_node, ops_ctx = _live_vm_boundary(db, config, vm, interaction=interaction)
         except UserAbort:
             raise
-        except Exception as error:
+        except AgentworksError as error:
             if not force:
                 _raise_checkpoint_cleanup_failure(name, error)
             _abandon_checkpoint(db, name, error=error, yes=yes)
@@ -819,7 +819,7 @@ def _delete_checkpoint_with_boundary(
         _delete_checkpoint_reconciled(db, vm, platform, ops_ctx, yes=yes)
     except UserAbort:
         raise
-    except Exception as error:
+    except AgentworksError as error:
         if not force:
             _raise_checkpoint_cleanup_failure(vm.name, error)
         _abandon_checkpoint(db, vm.name, error=error, yes=yes)
@@ -935,9 +935,8 @@ def _delete_checkpoint_reconciled(
     output.result(f"Checkpoint '{row.name}' deleted for VM '{name}'.")
 
 
-def _raise_checkpoint_cleanup_failure(name: str, error: Exception) -> None:
-    error_hint = getattr(error, "hint", None)
-    provider_hint = f"{error_hint} " if error_hint else ""
+def _raise_checkpoint_cleanup_failure(name: str, error: AgentworksError) -> None:
+    provider_hint = f"{error.hint} " if error.hint else ""
     raise StateError(
         f"Managed checkpoint cleanup for VM '{name}' could not complete: {error}",
         entity_kind="vm",

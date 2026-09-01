@@ -304,18 +304,21 @@ persisted values `Requested`. `live_resources` is null or this record:
 `checkpoint` is null or this record:
 
 ```text
-{name, provider_identifier, state, purpose, capture_release, source_release,
- target_release, created_at}
+{name, provider_identifier, state, restore_status, purpose, capture_release,
+ source_release, target_release, created_at}
 ```
 
 `provider_identifier`, `source_release`, and `target_release` are nullable. The provider identifier
-is opaque provider identity; the checkpoint name is Agentworks identity.
+is opaque provider identity; the checkpoint name is Agentworks identity. `restore_status` is
+`available`, `declarations-changed`, `resume-required`, or `unavailable`; it is derived from the
+persisted lifecycle state, current declarations, and live provider inventory rather than persisted.
 
 `agents[]` is `{name, linux_user, grant_all, grant_count}`. `workspaces[]` is
 `{name, path, sessions}` with session entries `{name, template, mode, agent_name}`. `events[]` is
 `{created_at, event, detail}`. Event is exactly `provisioning_started`, `provisioning_complete`,
 `provisioning_failed`, `init_started`, `init_complete`, `init_partial`, `init_failed`,
-`checkpoint_created`, `checkpoint_restored`, `checkpoint_deleted`, `debian_upgrade_started`,
+`checkpoint_created`, `checkpoint_restored`, `checkpoint_deleted`, `checkpoint_abandoned`,
+`debian_upgrade_started`,
 `debian_upgrade_complete`, `debian_upgrade_adopted`, `debian_upgrade_repair_required`,
 `backup_started`, `backup_completed`, `backup_failed`, `rekey`, or `unknown`. Historical or future
 raw names outside that closed set project as `unknown` and never echo their stored text. `detail` is
@@ -323,8 +326,9 @@ reserved and always JSON `null` in v1 because persisted event detail is unbounde
 no non-null detail grammar exists. `agent_name` is nullable, and mode is `admin`, `agent`, or
 `unknown`. In this nested VM JSON projection, the sentinel closes invalid persisted modes without
 echoing them. These arrays retain database order. `issues[]` is `{source, code}` in encounter order:
-source is `site_lookup`, `preflight`, `secret_resolution`, or `platform_status`, and code is always
-`unavailable`. Issues do not carry backend text or exception details.
+source is `site_lookup`, `preflight`, `secret_resolution`, `platform_status`, or
+`checkpoint_inventory`, and code is always `unavailable`. Issues do not carry backend text or
+exception details.
 
 VM instance state has `vm` and `admin` declaration slots. Its defined lifecycle-evidence facts are
 `hardware-request` and `ssh-identity`; their comparisons use `not-recorded`, `unverifiable`,
@@ -340,12 +344,12 @@ agw vm describe build-vm --output json
 `agw vm list-checkpoints --output json` uses command `vm.list-checkpoints` and data:
 
 ```text
-{checkpoints: [{vm_name, name, provider_identifier, state, purpose, capture_release,
-                source_release, target_release, created_at}]}
+{checkpoints: [{vm_name, name, provider_identifier, state, restore_status, purpose,
+                capture_release, source_release, target_release, created_at}]}
 ```
 
 `provider_identifier`, `source_release`, and `target_release` are nullable. Rows retain VM-name
-order after filtering.
+`restore_status` uses the same derived values as VM describe.
 
 #### Workspace and agent JSON schemas
 

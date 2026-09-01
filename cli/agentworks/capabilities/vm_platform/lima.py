@@ -779,7 +779,7 @@ class LimaPlatform(VMPlatform):
         instance_name = shlex.quote(self._instance_name(vm))
         try:
             listing = self._run_lima(f"limactl snapshot list {instance_name} --quiet")
-        except SSHError as e:
+        except (OSError, SSHError) as e:
             raise StateError(
                 f"Lima checkpoint inventory is unavailable for VM '{vm.name}'",
                 entity_kind="vm",
@@ -836,7 +836,7 @@ class LimaPlatform(VMPlatform):
         instance_name = shlex.quote(self._instance_name(vm))
         try:
             self._run_lima(f"limactl snapshot create {instance_name} --tag {name}")
-        except SSHError as e:
+        except (OSError, SSHError) as e:
             raise StateError(
                 f"Lima could not create checkpoint '{name}' for VM '{vm.name}'",
                 entity_kind="vm",
@@ -876,7 +876,7 @@ class LimaPlatform(VMPlatform):
         instance_name = shlex.quote(self._instance_name(vm))
         try:
             self._run_lima(f"limactl snapshot apply {instance_name} --tag {name}")
-        except SSHError as e:
+        except (OSError, SSHError) as e:
             raise StateError(
                 f"Lima could not restore checkpoint '{name}' for VM '{vm.name}'",
                 entity_kind="vm",
@@ -907,7 +907,7 @@ class LimaPlatform(VMPlatform):
         instance_name = shlex.quote(self._instance_name(vm))
         try:
             self._run_lima(f"limactl snapshot delete {instance_name} --tag {name}")
-        except SSHError as e:
+        except (OSError, SSHError) as e:
             raise StateError(
                 f"Lima could not delete checkpoint '{name}' for VM '{vm.name}'",
                 entity_kind="vm",

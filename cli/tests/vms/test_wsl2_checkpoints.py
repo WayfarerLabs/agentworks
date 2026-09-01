@@ -31,10 +31,14 @@ class _WslBackend:
         self.imports: list[list[str]] = []
         self.fail_import = False
         self.fail_unregister = False
+        self.fail_list = False
+        self.fail_list_after_unregister = False
 
     def run(self, args: list[str], *, check: bool = True, timeout: int = 300) -> str:
         del check, timeout
         if args[:2] == ["--list", "--quiet"]:
+            if self.fail_list:
+                raise RuntimeError("provider list failed")
             return "agw-dev\n" if self.registered else ""
         if args[:2] == ["--list", "--verbose"]:
             if not self.registered:
@@ -47,6 +51,8 @@ class _WslBackend:
             self.exports.append(destination)
             return ""
         if args[0] == "--unregister":
+            if self.fail_list_after_unregister:
+                self.fail_list = True
             if not self.fail_unregister:
                 self.registered = False
                 self.running = False
@@ -314,6 +320,26 @@ def test_wsl_restore_proves_unregister_before_import(
     assert backend.registered
     assert backend.imports == []
     assert (wsl2_mod._checkpoint_root() / "agw-dev" / "agw-checkpoint-1.pre-restore.tar").exists()
+
+
+def test_wsl_restore_fails_closed_when_unregister_and_proof_both_fail(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    backend = _WslBackend()
+    platform = _platform(monkeypatch, tmp_path, backend)
+    vm = _vm()
+    ctx = RunContext()
+    descriptor = _create_checkpoint(platform, vm, "agw-checkpoint-1", ctx)
+    backend.fail_unregister = True
+    backend.fail_list_after_unregister = True
+
+    with pytest.raises(ExternalError) as caught:
+        platform.restore_checkpoint(vm, descriptor, ctx, operation_id="restore-1")  # type: ignore[arg-type]
+
+    assert isinstance(caught.value.__cause__, RuntimeError)
+    assert backend.registered
+    assert backend.imports == []
 
 
 def test_wsl_checkpoint_storage_rejects_symlinked_owned_ancestor(

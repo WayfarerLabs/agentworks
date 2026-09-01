@@ -144,6 +144,27 @@ class TestErrorHandling:
             api.next_id()
 
     @patch("urllib.request.urlopen")
+    def test_transport_error_is_typed(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
+        source = urllib.error.URLError("provider unavailable")
+        mock_urlopen.side_effect = source
+
+        with pytest.raises(ProxmoxAPIError) as caught:
+            api.next_id()
+
+        assert caught.value.__cause__ is source
+
+    @patch("urllib.request.urlopen")
+    def test_invalid_json_is_typed(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
+        response = _mock_response(None)
+        response.read.return_value = b"not-json"
+        mock_urlopen.return_value = response
+
+        with pytest.raises(ProxmoxAPIError) as caught:
+            api.next_id()
+
+        assert isinstance(caught.value.__cause__, json.JSONDecodeError)
+
+    @patch("urllib.request.urlopen")
     def test_task_failure_raises(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
         task_data = {"status": "stopped", "exitstatus": "ERROR: clone failed"}
         mock_urlopen.return_value = _mock_response(task_data)
