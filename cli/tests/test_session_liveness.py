@@ -71,6 +71,24 @@ def _session(
     )
 
 
+def _batch_row(
+    name: str,
+    *,
+    has_returncode: int = 0,
+    has_diagnostic: str = "",
+    server_returncode: int = 0,
+    server_diagnostic: str = "",
+    boot_returncode: int = 0,
+    boot_id: str = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    pid_returncode: int = 0,
+) -> str:
+    return (
+        f"S:{name}:{has_returncode}:{has_diagnostic.encode().hex()}:"
+        f"{server_returncode}:{server_diagnostic.encode().hex()}:"
+        f"{boot_returncode}:{boot_id.encode().hex()}:{pid_returncode}"
+    )
+
+
 # -- batch_check_status -----------------------------------------------------
 
 
@@ -85,7 +103,20 @@ def test_batch_mixed() -> None:
         {
             "has-session": _FakeResult(
                 ok=True,
-                stdout=f"S:a1:0\nS:s1:1:{BOOT_STALE.encode().hex()}:1\n",
+                stdout=(
+                    _batch_row("a1")
+                    + "\n"
+                    + _batch_row(
+                        "s1",
+                        has_returncode=1,
+                        has_diagnostic="can't find session: s1",
+                        server_returncode=1,
+                        server_diagnostic="no server running on /sock2",
+                        boot_id=BOOT_STALE,
+                        pid_returncode=1,
+                    )
+                    + "\n"
+                ),
             ),
         }
     )
@@ -110,7 +141,7 @@ def test_batch_builds_compound_command() -> None:
         _session("a1", pid=100, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT),
         _session("s1", pid=200, socket_path="/sock2", mode="admin", boot_id=BOOT_CURRENT),
     ]
-    target = _FakeTarget({"has-session": _FakeResult(ok=True, stdout="S:a1:0\nS:s1:0\n")})
+    target = _FakeTarget({"has-session": _FakeResult(ok=True, stdout=f"{_batch_row('a1')}\n{_batch_row('s1')}\n")})
     batch_check_status(sessions, target=target)
     assert len(target.commands) == 1
     assert "has-session" in target.commands[0]
@@ -290,7 +321,7 @@ def test_batch_status_pid_stopped_not_unknown() -> None:
         _session("ok1", pid=100, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT),
         _session("stopped1", pid=PID_STOPPED, boot_id=BOOT_CURRENT),
     ]
-    target = _FakeTarget({"has-session": _FakeResult(ok=True, stdout="S:ok1:0\n")})
+    target = _FakeTarget({"has-session": _FakeResult(ok=True, stdout=f"{_batch_row('ok1')}\n")})
     result = batch_check_status(sessions, target=target)
 
     # ok1 should be in the map, stopped1 should NOT (excluded by design)
@@ -366,11 +397,47 @@ def test_batch_empty_boot_id_is_unknown() -> None:
     # Agent failure with empty boot_id field
     target = _FakeTarget(
         {
-            "has-session": _FakeResult(ok=True, stdout="S:a1:1::0\n"),
+            "has-session": _FakeResult(
+                ok=True,
+                stdout=(
+                    _batch_row(
+                        "a1",
+                        has_returncode=1,
+                        has_diagnostic="can't find session: a1",
+                        server_returncode=1,
+                        server_diagnostic="no server running on /sock",
+                        boot_id="",
+                    )
+                    + "\n"
+                ),
+            ),
         }
     )
     result = batch_check_status(sessions, target=target)
     assert result["a1"] == SessionStatus.UNKNOWN
+
+
+def test_batch_malformed_stored_boot_id_does_not_drop_valid_sibling() -> None:
+    sessions = [
+        _session("valid", pid=100, socket_path="/valid", mode="agent", boot_id=BOOT_CURRENT),
+        _session("invalid", pid=200, socket_path="/invalid", mode="agent", boot_id="not-a-uuid"),
+    ]
+    output = "\n".join(
+        _batch_row(
+            name,
+            has_returncode=1,
+            has_diagnostic=f"can't find session: {name}",
+            server_returncode=1,
+            server_diagnostic=f"no server running on /{name}",
+            pid_returncode=1,
+        )
+        for name in ("valid", "invalid")
+    )
+
+    result = batch_check_status(sessions, target=_FakeTarget({"has-session": _FakeResult(stdout=output)}))
+
+    assert result["valid"] is SessionStatus.STOPPED
+    assert result["invalid"] is SessionStatus.UNKNOWN
 
 
 # -- _ensure_pid strict gate ------------------------------------------------

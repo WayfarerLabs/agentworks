@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shlex
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
@@ -128,23 +129,10 @@ def batch_check_status(
     if not checkable:
         return {}
 
-    # Build compound command: has-session with inline boot_id + PID for any
-    # session whose has-session probe fails. Admin and agent sessions now
-    # follow the same dedicated-socket model after the env-and-secrets SDD.
-    # Capture tmux diagnostics only long enough to distinguish its documented
-    # missing-server/socket/target cases. Other rc=1 outcomes (including
-    # permission errors) remain indeterminate, and none of the remote text is
-    # emitted back through the batch protocol.
-    classifier = (
-        "NL=$(printf '\\nx'); NL=${NL%x}; "
-        'tmux_absent() { D=$1; K=$2; case "$D" in '
-        '*"$NL"*) return 1 ;; '
-        '"no server running on "?*) return 0 ;; '
-        '"error connecting to "?*" (No such file or directory)"|'
-        '"error connecting to "?*" (Connection refused)") return 0 ;; '
-        '"can\'t find session: "?*) [ "$K" = target ] && return 0 ;; '
-        "esac; return 1; }; "
-    )
+    # Preserve one SSH round-trip while returning only hex-encoded probe facts.
+    # Python owns the tmux diagnostic vocabulary; the remote shell captures
+    # facts without interpreting or exposing third-party text.
+    encoder = "hex() { od -An -tx1 | tr -d ' \\n'; }; "
     parts = []
     for s in checkable:
         if s.socket_path is None:
@@ -155,21 +143,17 @@ def batch_check_status(
         server_cmd = tmux_cmd("list-sessions", s.socket_path)
         parts.append(
             f"HERR=$({has_cmd} 2>&1 >/dev/null); H=$?; "
-            f'if [ "$H" -eq 0 ]; then echo "S:{name}:0"; '
-            f'elif [ "$H" -ne 1 ] || ! tmux_absent "$HERR" target; then echo "S:{name}:U"; else '
+            'HHEX=$(printf %s "$HERR" | hex); '
             f"SERR=$({server_cmd} 2>&1 >/dev/null); S=$?; "
-            f'if [ "$S" -eq 0 ]; then echo "S:{name}:2"; '
-            f'elif [ "$S" -ne 1 ] || ! tmux_absent "$SERR" server; then echo "S:{name}:U"; else '
+            'SHEX=$(printf %s "$SERR" | hex); '
             f"BOOT=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null); B=$?; "
-            f'if [ "$B" -ne 0 ] || [ -z "$BOOT" ]; then echo "S:{name}:U"; else '
-            "BOOT_HEX=$(printf %s \"$BOOT\" | od -An -tx1 | tr -d ' \\n'); "
+            'BOOT_HEX=$(printf %s "$BOOT" | hex); '
             f"test -d /proc/{s.pid}; P=$?; "
-            f'if [ "$P" -le 1 ]; then echo "S:{name}:1:$BOOT_HEX:$P"; '
-            f'else echo "S:{name}:U"; fi; fi; fi; fi'
+            f'printf "S:{name}:%s:%s:%s:%s:%s:%s:%s\\n" "$H" "$HHEX" "$S" "$SHEX" "$B" "$BOOT_HEX" "$P"'
         )
     if not parts:
         return {}
-    cmd = classifier + "; ".join(parts)
+    cmd = encoder + "; ".join(parts)
 
     result = target.run(cmd, check=False)
     stdout = getattr(result, "stdout", "") or ""
@@ -177,8 +161,7 @@ def batch_check_status(
     status_map: dict[str, SessionStatus] = {
         session.name: SessionStatus.UNKNOWN for session in checkable if session.socket_path is not None
     }
-    # Build a quick lookup for stored boot_ids
-    boot_ids = {s.name: _mgr._validated_stored_boot_id(s) for s in checkable}
+    sessions_by_name = {session.name: session for session in checkable}
 
     if result.returncode not in {0, 1}:
         return status_map
@@ -186,38 +169,62 @@ def batch_check_status(
     for line in stdout.strip().splitlines():
         if not line.startswith("S:"):
             continue
-        fields = line.split(":", maxsplit=4)
-        if len(fields) < 3:
+        fields = line.split(":")
+        if len(fields) != 9:
             continue
         name = fields[1]
-        exit_code = fields[2]
+        session = sessions_by_name.get(name)
+        if session is None or name not in status_map:
+            continue
 
-        if exit_code == "0":
+        has_presence = _batch_tmux_presence(fields[2], fields[3], missing_target_is_absent=True)
+        if has_presence is ProbeStatus.PRESENT:
             status_map[name] = SessionStatus.OK
-        elif exit_code == "2":
+            continue
+        if has_presence is ProbeStatus.UNKNOWN:
+            continue
+
+        server_presence = _batch_tmux_presence(fields[4], fields[5], missing_target_is_absent=False)
+        if server_presence is ProbeStatus.PRESENT:
             status_map[name] = SessionStatus.RESIDUAL
-        elif len(fields) == 5:
-            # Agent session failure: S:name:1:<boot_id>:<pid_exit>
-            try:
-                observed_boot = bytes.fromhex(fields[3]).decode("ascii")
-            except (UnicodeDecodeError, ValueError):
-                continue
-            current_boot = canonical_boot_id(observed_boot)
-            pid_exit = fields[4]
-            if current_boot is None:
-                # Boot ID read failed -- can't safely determine STOPPED vs BROKEN
-                continue
-            else:
-                stored_boot = boot_ids.get(name)
-                if stored_boot and stored_boot != current_boot:
-                    status_map[name] = SessionStatus.STOPPED  # stale boot
-                elif pid_exit == "0":
-                    status_map[name] = SessionStatus.BROKEN  # PID alive, socket unreachable
-                else:
-                    status_map[name] = SessionStatus.STOPPED  # PID dead
-        # U or malformed output deliberately leaves the initialized UNKNOWN.
+            continue
+        if server_presence is ProbeStatus.UNKNOWN:
+            continue
+
+        try:
+            boot_returncode = int(fields[6])
+            observed_boot = bytes.fromhex(fields[7]).decode("ascii")
+            pid_returncode = int(fields[8])
+            stored_boot = _mgr._validated_stored_boot_id(session)
+        except (StateError, UnicodeDecodeError, ValueError):
+            continue
+        current_boot = canonical_boot_id(observed_boot) if boot_returncode == 0 else None
+        if current_boot is None or pid_returncode not in {0, 1}:
+            continue
+        if stored_boot != current_boot or pid_returncode == 1:
+            status_map[name] = SessionStatus.STOPPED
+        else:
+            status_map[name] = SessionStatus.BROKEN
 
     return status_map
+
+
+def _batch_tmux_presence(
+    returncode: str,
+    diagnostic_hex: str,
+    *,
+    missing_target_is_absent: bool,
+) -> ProbeStatus:
+    """Decode one batch fact and delegate classification to tmux authority."""
+    from agentworks.sessions.tmux import _tmux_presence_from_result
+
+    try:
+        code = int(returncode)
+        diagnostic = bytes.fromhex(diagnostic_hex).decode("utf-8")
+    except (UnicodeDecodeError, ValueError):
+        return ProbeStatus.UNKNOWN
+    result = SimpleNamespace(returncode=code, stdout="", stderr=diagnostic)
+    return _tmux_presence_from_result(result, missing_target_is_absent=missing_target_is_absent)
 
 
 def batch_check_all_sessions(

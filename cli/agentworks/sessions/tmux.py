@@ -18,6 +18,8 @@ from agentworks.errors import StateError
 from agentworks.naming import LINUX_USERNAME_MAX_LENGTH
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agentworks.transports import Transport
 
 RESTRICTED_CONFIG_PATH = "/opt/agentworks/tmux-session.conf"
@@ -828,7 +830,7 @@ def kill_server(*, run_command: RunCommand, socket_path: str) -> bool:
 def kill_server_and_probe(*, run_command: RunCommand, socket_path: str) -> ProbeStatus:
     """Request dedicated-server teardown and return its verified presence."""
     kill_server(run_command=run_command, socket_path=socket_path)
-    return probe_tmux_server(run_command=run_command, socket_path=socket_path)
+    return probe_tmux_server_after_teardown(run_command=run_command, socket_path=socket_path)
 
 
 def probe_tmux_session(
@@ -850,6 +852,29 @@ def probe_tmux_server(*, run_command: RunCommand, socket_path: str) -> ProbeStat
     """Probe a dedicated tmux server without conflating failure with absence."""
     result = run_command(tmux_cmd("list-sessions", socket_path), check=False)
     return _tmux_presence_from_result(result, missing_target_is_absent=False)
+
+
+def _stable_absence_probe(probe: Callable[[], ProbeStatus]) -> ProbeStatus:
+    """Re-probe one indeterminate post-teardown transition without waiting."""
+    status = probe()
+    return probe() if status is ProbeStatus.UNKNOWN else status
+
+
+def probe_tmux_session_after_teardown(
+    session_name: str,
+    *,
+    run_command: RunCommand,
+    socket_path: str | None = None,
+) -> ProbeStatus:
+    """Probe a removed session twice only across an indeterminate transition."""
+    return _stable_absence_probe(
+        lambda: probe_tmux_session(session_name, run_command=run_command, socket_path=socket_path)
+    )
+
+
+def probe_tmux_server_after_teardown(*, run_command: RunCommand, socket_path: str) -> ProbeStatus:
+    """Probe a stopped server twice only across an indeterminate transition."""
+    return _stable_absence_probe(lambda: probe_tmux_server(run_command=run_command, socket_path=socket_path))
 
 
 def capture_output(

@@ -17,6 +17,7 @@ from __future__ import annotations
 import shlex
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -174,53 +175,61 @@ def test_fingerprint_capture_fails_closed_for_untrusted_boot_identity(target: _F
 
 
 @pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux is not installed")
-def test_tmux_presence_classifier_distinguishes_absence_from_permission_failure(tmp_path: Path) -> None:
+def test_tmux_presence_classifier_distinguishes_absence_from_permission_failure() -> None:
     from agentworks.sessions.tmux import ProbeStatus, _test_presence_from_result, _tmux_presence_from_result
 
-    socket_dir = tmp_path / "tmux"
-    socket_dir.mkdir()
-    socket_path = socket_dir / "server.sock"
-    subprocess.run(
-        ["tmux", "-S", str(socket_path), "new-session", "-d", "-s", "probe", "sleep 30"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    try:
-        missing_target = subprocess.run(
-            ["tmux", "-S", str(socket_path), "has-session", "-t", "=missing"],
+    with tempfile.TemporaryDirectory(prefix="agw-tmux-", dir="/tmp") as temporary_dir:
+        socket_dir = Path(temporary_dir)
+        missing_server = subprocess.run(
+            ["tmux", "-S", str(socket_dir / "never-started.sock"), "list-sessions"],
             check=False,
             capture_output=True,
             text=True,
         )
-        assert _tmux_presence_from_result(missing_target, missing_target_is_absent=True) is ProbeStatus.ABSENT
-        assert _tmux_presence_from_result(missing_target, missing_target_is_absent=False) is ProbeStatus.UNKNOWN
+        assert _tmux_presence_from_result(missing_server, missing_target_is_absent=False) is ProbeStatus.ABSENT
 
-        socket_dir.chmod(0)
-        permission_denied = subprocess.run(
-            ["tmux", "-S", str(socket_path), "list-sessions"],
-            check=False,
-            capture_output=True,
-            text=True,
+        transition = subprocess.CompletedProcess(
+            args=["tmux"],
+            returncode=1,
+            stdout="",
+            stderr="server exited unexpectedly\n",
         )
-        assert _tmux_presence_from_result(permission_denied, missing_target_is_absent=False) is ProbeStatus.UNKNOWN
-        assert _test_presence_from_result(permission_denied) is ProbeStatus.ABSENT
-    finally:
-        socket_dir.chmod(0o700)
+        assert _tmux_presence_from_result(transition, missing_target_is_absent=False) is ProbeStatus.UNKNOWN
+
+        socket_path = socket_dir / "server.sock"
         subprocess.run(
-            ["tmux", "-S", str(socket_path), "kill-server"],
-            check=False,
+            ["tmux", "-S", str(socket_path), "new-session", "-d", "-s", "probe", "sleep 30"],
+            check=True,
             capture_output=True,
             text=True,
         )
+        try:
+            missing_target = subprocess.run(
+                ["tmux", "-S", str(socket_path), "has-session", "-t", "=missing"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            assert _tmux_presence_from_result(missing_target, missing_target_is_absent=True) is ProbeStatus.ABSENT
+            assert _tmux_presence_from_result(missing_target, missing_target_is_absent=False) is ProbeStatus.UNKNOWN
 
-    missing_server = subprocess.run(
-        ["tmux", "-S", str(socket_path), "list-sessions"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    assert _tmux_presence_from_result(missing_server, missing_target_is_absent=False) is ProbeStatus.ABSENT
+            socket_dir.chmod(0)
+            permission_denied = subprocess.run(
+                ["tmux", "-S", str(socket_path), "list-sessions"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            assert _tmux_presence_from_result(permission_denied, missing_target_is_absent=False) is ProbeStatus.UNKNOWN
+            assert _test_presence_from_result(permission_denied) is ProbeStatus.ABSENT
+        finally:
+            socket_dir.chmod(0o700)
+            subprocess.run(
+                ["tmux", "-S", str(socket_path), "kill-server"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
 
 
 def test_stale_socket_cleanup_removes_only_a_canonically_absent_server() -> None:
@@ -248,6 +257,24 @@ def test_stale_socket_cleanup_removes_only_a_canonically_absent_server() -> None
     absent = _CleanupTarget("no server running on /run/agentworks/s.sock")
     assert _cleanup_stale_sockets_under(absent, "/run/agentworks") == 1  # type: ignore[arg-type]
     assert sum(command.startswith("rm -f ") for command in absent.commands) == 1
+
+
+def test_post_teardown_probe_retries_one_indeterminate_transition() -> None:
+    from agentworks.sessions.tmux import ProbeStatus, probe_tmux_server_after_teardown
+
+    diagnostics = iter(("server exited unexpectedly", "no server running on /run/agentworks/s.sock"))
+    commands: list[str] = []
+
+    def run(command: str, **kwargs: object) -> _SpyResult:
+        commands.append(command)
+        result = _SpyResult(returncode=1)
+        result.stderr = next(diagnostics)
+        return result
+
+    status = probe_tmux_server_after_teardown(run_command=run, socket_path="/run/agentworks/s.sock")
+
+    assert status is ProbeStatus.ABSENT
+    assert len(commands) == 2
 
 
 # ---------------------------------------------------------------------------

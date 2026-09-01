@@ -141,7 +141,12 @@ def _teardown_legacy_session(
     db: Database,
 ) -> None:
     """Destroy one exact session on a reachable legacy shared tmux server."""
-    from agentworks.sessions.tmux import ProbeStatus, kill_session, probe_tmux_session
+    from agentworks.sessions.tmux import (
+        ProbeStatus,
+        kill_session,
+        probe_tmux_session,
+        probe_tmux_session_after_teardown,
+    )
 
     def run_runtime(command: str, *, check: bool = True, env: dict[str, str] | None = None) -> object:
         return target.run(command, sudo=not target_owns_session, check=check, env=env)
@@ -155,7 +160,7 @@ def _teardown_legacy_session(
         )
     if presence is ProbeStatus.PRESENT:
         kill_session(session.name, run_command=run_runtime, socket_path=None)
-        presence = probe_tmux_session(session.name, run_command=run_runtime, socket_path=None)
+        presence = probe_tmux_session_after_teardown(session.name, run_command=run_runtime, socket_path=None)
     if presence is not ProbeStatus.ABSENT:
         raise ExternalError(
             f"failed to verify legacy session '{session.name}' stopped",
