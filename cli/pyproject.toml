@@ -22,6 +22,7 @@ dependencies = [
     # so declaring it here keeps our imports valid.
     "click>=8.3",
     "azure-identity>=1.25.1",
+    "azure-mgmt-authorization>=4.0.0",
     "azure-mgmt-compute>=38.0.0",
     "azure-mgmt-network>=32.0.0",
     "azure-mgmt-resource>=26.0.0",

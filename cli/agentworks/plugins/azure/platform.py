@@ -16,7 +16,7 @@ from agentworks.capabilities.vm_platform.debian_release import (
 )
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
-from agentworks.errors import NotFoundError, StateError
+from agentworks.errors import AuthorizationError, NotFoundError, StateError
 from agentworks.plugins.azure.auth import (
     _build_ambient_credential,
     _build_service_principal_credential,
@@ -51,12 +51,14 @@ from agentworks.plugins.azure.network import (
     verify_vm_deleted,
     wrap_azure_error,
 )
+from agentworks.plugins.azure.permissions import check_resource_group_permissions
 from agentworks.topics import TopicProse
 from agentworks.transports import SSHTransport
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
+    from azure.mgmt.authorization import AuthorizationManagementClient
     from azure.mgmt.compute import ComputeManagementClient
     from azure.mgmt.network import NetworkManagementClient
     from azure.mgmt.resource.resources import ResourceManagementClient
@@ -91,10 +93,9 @@ class AzureVMPlatform(VMPlatform):
         one vm-site per subscription and group you target.
 
         The resource group must already exist: `vm create` checks it at runup, with an
-        authenticated read-only probe, and fails cleanly before provisioning anything.
-        Sizes come from a built-in B-series catalog unless the site overrides it, and
-        `vm create` picks the smallest entry that satisfies the vm-template's request
-        (an off-ratio request rounds up and warns).
+        authenticated read-only probe, then checks any complete permission listing for
+        required create and rollback grants. Definitive omissions fail; inconclusive queries
+        warn. `vm create` picks the smallest matching entry from the site's B-series catalog.
 
         `auth` says how the site authenticates and defaults to `{mode: ambient}`, the
         ambient Azure credential chain (`az login`, `AZURE_*` variables, managed
@@ -149,6 +150,7 @@ class AzureVMPlatform(VMPlatform):
         self._compute_cached: dict[str, ComputeManagementClient] = {}
         self._network_cached: dict[str, NetworkManagementClient] = {}
         self._resource_cached: dict[str, ResourceManagementClient] = {}
+        self._authorization_cached: dict[str, AuthorizationManagementClient] = {}
 
     # No preflight override, on either credential path. A
     # ``service-principal`` site DOES declare a config secret, and an
@@ -261,10 +263,19 @@ class AzureVMPlatform(VMPlatform):
             self._resource_cached[az.subscription_id] = resource
         return resource
 
+    def _authorization_client(self, az: _HasSubscriptionId, ctx: RunContext) -> AuthorizationManagementClient:
+        """The cached authorization client for ``az``'s subscription."""
+        from azure.mgmt.authorization import AuthorizationManagementClient
+
+        authorization = self._authorization_cached.get(az.subscription_id)
+        if authorization is None:
+            authorization = AuthorizationManagementClient(self._get_credential(ctx), az.subscription_id)  # type: ignore[arg-type]
+            self._authorization_cached[az.subscription_id] = authorization
+        return authorization
+
     def runup(self, ctx: RunContext) -> None:
-        """Provisioning-phase runup: an authenticated, read-only check that
-        the site's configured resource group exists before ``create``
-        provisions into it. A missing group is a definitive rejection
+        """Provisioning runup: read-only resource-group existence and Azure
+        permission checks before create. A missing group is a definitive rejection
         (fatal, before the DB row or any Azure resource exists), so
         ``vm create`` aborts here with a clear message instead of failing
         partway through creating a public IP / NSG / VNet / NIC in a group
@@ -299,6 +310,10 @@ class AzureVMPlatform(VMPlatform):
         rejection and an unreachable Entra identically, as
         ``ClientAuthenticationError`` (see
         :func:`_build_service_principal_credential`).
+
+        Permission discovery has the opposite classification: only a complete,
+        well-formed listing can prove a grant absent. Otherwise runup warns.
+        Finding no omission is not preauthorization; Azure remains authoritative.
         """
         from types import SimpleNamespace
 
@@ -331,6 +346,29 @@ class AzureVMPlatform(VMPlatform):
                     f"-l {az.region}', or point vm-site '{self.site_name}' at an "
                     f"existing resource group"
                 ),
+            )
+
+        # A query or response failure cannot prove a grant absent, so warn and
+        # leave the real create operations authoritative.
+        try:
+            authorization = self._authorization_client(az, ctx)
+            blocks = authorization.permissions.list_for_resource_group(az.resource_group)
+            permission_check = check_resource_group_permissions(blocks)
+        except Exception as exc:
+            output.warn(
+                f"could not verify Azure create permissions for resource group "
+                f"'{az.resource_group}' ({wrap_azure_error(exc).summary}); continuing unverified"
+            )
+            return
+
+        if permission_check.missing_actions:
+            missing = ", ".join(permission_check.missing_actions)
+            raise AuthorizationError(
+                f"the active Azure credential lacks required create or rollback permissions "
+                f"on resource group '{az.resource_group}': {missing}",
+                entity_kind="resource-group",
+                entity_name=az.resource_group,
+                hint="grant a role containing the missing actions at this resource group or a parent scope, then retry",
             )
 
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
