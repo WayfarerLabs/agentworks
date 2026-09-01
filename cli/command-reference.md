@@ -318,17 +318,16 @@ persisted lifecycle state, current declarations, and live provider inventory rat
 `{created_at, event, detail}`. Event is exactly `provisioning_started`, `provisioning_complete`,
 `provisioning_failed`, `init_started`, `init_complete`, `init_partial`, `init_failed`,
 `checkpoint_created`, `checkpoint_restored`, `checkpoint_deleted`, `checkpoint_abandoned`,
-`debian_upgrade_started`,
-`debian_upgrade_complete`, `debian_upgrade_adopted`, `debian_upgrade_repair_required`,
-`backup_started`, `backup_completed`, `backup_failed`, `rekey`, or `unknown`. Historical or future
-raw names outside that closed set project as `unknown` and never echo their stored text. `detail` is
-reserved and always JSON `null` in v1 because persisted event detail is unbounded diagnostic text;
-no non-null detail grammar exists. `agent_name` is nullable, and mode is `admin`, `agent`, or
-`unknown`. In this nested VM JSON projection, the sentinel closes invalid persisted modes without
-echoing them. These arrays retain database order. `issues[]` is `{source, code}` in encounter order:
-source is `site_lookup`, `preflight`, `secret_resolution`, `platform_status`, or
-`checkpoint_inventory`, and code is always `unavailable`. Issues do not carry backend text or
-exception details.
+`debian_upgrade_started`, `debian_upgrade_complete`, `debian_upgrade_adopted`,
+`debian_upgrade_repair_required`, `backup_started`, `backup_completed`, `backup_failed`, `rekey`, or
+`unknown`. Historical or future raw names outside that closed set project as `unknown` and never
+echo their stored text. `detail` is reserved and always JSON `null` in v1 because persisted event
+detail is unbounded diagnostic text; no non-null detail grammar exists. `agent_name` is nullable,
+and mode is `admin`, `agent`, or `unknown`. In this nested VM JSON projection, the sentinel closes
+invalid persisted modes without echoing them. These arrays retain database order. `issues[]` is
+`{source, code}` in encounter order: source is `site_lookup`, `preflight`, `secret_resolution`,
+`platform_status`, or `checkpoint_inventory`, and code is always `unavailable`. Issues do not carry
+backend text or exception details.
 
 VM instance state has `vm` and `admin` declaration slots. Its defined lifecycle-evidence facts are
 `hardware-request` and `ssh-identity`; their comparisons use `not-recorded`, `unverifiable`,
