@@ -342,63 +342,89 @@ def remove_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) 
             )
 
 
-def delete_security_group(ec2: Any, security_group_id: str) -> None:
-    """Delete the per-VM security group, waiting out the ENI detach a just
-    terminated instance leaves behind: the delete raises ``DependencyViolation``
-    until the network interface is gone, so retry with a bounded backoff.
-    Already-gone (``InvalidGroup.NotFound``) is success."""
-    for _attempt in range(12):
+def cleanup_created_resources(ec2: Any, instance_id: str | None, security_group_id: str | None) -> None:
+    """Clean up known create-time resources or raise so core retains their row.
+
+    A just-created EC2 identifier can answer ``NotFound`` while it propagates.
+    Unlike explicit delete of an older, account-bound row, rollback must never
+    interpret that response as proof the new resource disappeared. It retries
+    the exact mutation and leaves an addressable failed row if AWS never gives
+    a positive result.
+    """
+    failures: list[AgentworksError] = []
+    if instance_id is not None:
+        try:
+            _terminate_created_instance(ec2, instance_id)
+        except Exception as exc:
+            failures.append(wrap_ec2_error(exc))
+    if security_group_id is not None:
+        try:
+            _delete_created_security_group(ec2, security_group_id)
+        except Exception as exc:
+            failures.append(wrap_ec2_error(exc))
+    if failures:
+        raise EC2Error(
+            "AWS could not confirm cleanup of newly created resources",
+            detail="; ".join(str(failure) for failure in failures),
+        )
+
+
+def _terminate_created_instance(ec2: Any, instance_id: str) -> None:
+    """Obtain a positive termination response for a newly returned ID."""
+    attempts = 6
+    for attempt in range(attempts):
+        try:
+            ec2.terminate_instances(InstanceIds=[instance_id])
+        except Exception as exc:
+            if error_code(exc) not in _INSTANCE_NOT_FOUND_CODES:
+                raise wrap_ec2_error(exc) from exc
+            # Read the exact ID for diagnostics, but do not accept absence: the
+            # preceding RunInstances response proves this can be propagation.
+            describe_instance_exact(ec2, instance_id)
+            if attempt + 1 == attempts:
+                raise EC2Error(
+                    f"AWS never accepted termination of newly created instance '{instance_id}'",
+                    detail=f"TerminateInstances returned NotFound for {attempts} attempts",
+                    entity_kind="instance",
+                    entity_name=instance_id,
+                ) from exc
+            output.detail(f"Waiting for newly created instance '{instance_id}' to become visible for cleanup...")
+            time.sleep(2**attempt)
+            continue
+        try:
+            ec2.get_waiter("instance_terminated").wait(InstanceIds=[instance_id])
+        except Exception as exc:
+            raise wrap_ec2_error(exc) from exc
+        return
+
+
+def _delete_created_security_group(ec2: Any, security_group_id: str) -> None:
+    """Obtain a positive delete response for a newly returned group ID."""
+    attempts = 12
+    for attempt in range(attempts):
         try:
             ec2.delete_security_group(GroupId=security_group_id)
             return
         except Exception as exc:
             code = error_code(exc)
+            retryable = code == "DependencyViolation" or code in _GROUP_NOT_FOUND_CODES
+            if not retryable:
+                raise wrap_ec2_error(exc) from exc
             if code in _GROUP_NOT_FOUND_CODES:
-                return
-            if code == "DependencyViolation":
-                time.sleep(5)
-                continue
-            output.warn(f"could not delete security group '{security_group_id}': {wrap_ec2_error(exc)}")
-            return
-    output.warn(f"security group '{security_group_id}' still had dependencies after retries; leaving it")
-
-
-def terminate_and_cleanup(ec2: Any, instance_id: str, security_group_id: str | None) -> None:
-    """Terminate the instance, wait out its ENI detach, then delete the per-VM
-    security group. Best-effort per resource, idempotent (already-gone
-    succeeds). Used only while unwinding create or interrupt rollback, where
-    cleanup must keep progressing after an individual resource failure.
-
-    Unexpected failures WARN (mirroring :func:`delete_security_group`), rather
-    than being swallowed silently: a real ``AuthFailure`` on terminate must not
-    hide behind the later security-group ``DependencyViolation`` warning and
-    misattribute the cause. Already-gone stays silent."""
-    already_gone = _terminate_instance(ec2, instance_id)
-    if not already_gone:
-        try:
-            ec2.get_waiter("instance_terminated").wait(InstanceIds=[instance_id])
-        except Exception as exc:
-            output.warn(
-                f"waiting for instance '{instance_id}' to terminate failed: {wrap_ec2_error(exc)}; "
-                f"the security-group delete will retry through any lingering dependency"
+                # As with the instance, a read informs the retry but cannot
+                # turn create-time propagation into a false cleanup success.
+                describe_security_group_exact(ec2, security_group_id)
+            if attempt + 1 == attempts:
+                raise EC2Error(
+                    f"AWS never accepted deletion of newly created security group '{security_group_id}'",
+                    detail=f"DeleteSecurityGroup remained retryable for {attempts} attempts",
+                    entity_kind="security-group",
+                    entity_name=security_group_id,
+                ) from exc
+            output.detail(
+                f"Waiting for newly created security group '{security_group_id}' to become deletable for cleanup..."
             )
-    if security_group_id:
-        delete_security_group(ec2, security_group_id)
-
-
-def _terminate_instance(ec2: Any, instance_id: str) -> bool:
-    """Terminate ``instance_id``; return True when it was already gone (so the
-    caller can skip the termination waiter). An already-terminated / absent
-    instance is silent success; any other failure warns rather than raising,
-    because the cleanup paths must keep unwinding."""
-    try:
-        ec2.terminate_instances(InstanceIds=[instance_id])
-        return False
-    except Exception as exc:
-        if error_code(exc) in _INSTANCE_NOT_FOUND_CODES:
-            return True
-        output.warn(f"could not terminate instance '{instance_id}': {wrap_ec2_error(exc)}")
-        return False
+            time.sleep(5)
 
 
 def describe_instance_exact(ec2: Any, instance_id: str) -> dict[str, Any] | None:
@@ -477,11 +503,50 @@ def _confirm_absent(lookup: Callable[[], object | None], *, entity_kind: str, en
 
 def terminate_and_cleanup_strict(
     ec2: Any,
-    instance_id: str,
+    instance_id: str | None,
     security_group_id: str,
     backend_name: str,
+    *,
+    account_bound: bool,
+    partial_create: bool,
 ) -> None:
     """Strict explicit-delete teardown with positive permission and absence proof."""
+    instance = describe_instance_exact(ec2, instance_id) if instance_id is not None else None
+    if instance_id is not None and instance is None:
+        if not account_bound:
+            raise EC2Error(
+                f"cannot confirm absent legacy instance '{instance_id}' belongs to the current AWS account",
+                detail="the VM row predates AWS account binding and the instance is not visible",
+                entity_kind="instance",
+                entity_name=instance_id,
+            )
+        _confirm_absent(
+            partial(describe_instance_exact, ec2, instance_id),
+            entity_kind="instance",
+            entity_name=instance_id,
+        )
+    elif instance is not None:
+        tags = instance.get("Tags")
+        groups = instance.get("SecurityGroups")
+        owns_instance = isinstance(tags, list) and any(
+            isinstance(tag, dict) and tag.get("Key") == VM_TAG_KEY and tag.get("Value") == backend_name for tag in tags
+        )
+        has_security_group = isinstance(groups, list) and any(
+            isinstance(group, dict) and group.get("GroupId") == security_group_id for group in groups
+        )
+        if not owns_instance or (not partial_create and not has_security_group):
+            raise EC2Error(
+                f"instance '{instance_id}' is not owned by backend '{backend_name}' with security group "
+                f"'{security_group_id}'",
+                detail=(
+                    f"the exact {VM_TAG_KEY} tag did not match"
+                    if partial_create
+                    else f"the exact {VM_TAG_KEY} tag or recorded security-group association did not match"
+                ),
+                entity_kind="instance",
+                entity_name=instance_id,
+            )
+
     security_group = describe_security_group_exact(ec2, security_group_id)
     if security_group is None:
         _confirm_absent(
@@ -503,22 +568,23 @@ def terminate_and_cleanup_strict(
             )
         _check_security_group_delete_permission(ec2, security_group_id)
 
-    try:
-        ec2.terminate_instances(InstanceIds=[instance_id])
-    except Exception as exc:
-        if error_code(exc) in _INSTANCE_NOT_FOUND_CODES:
-            _confirm_absent(
-                partial(describe_instance_exact, ec2, instance_id),
-                entity_kind="instance",
-                entity_name=instance_id,
-            )
-        else:
-            raise wrap_ec2_error(exc) from exc
-    else:
+    if instance_id is not None and instance is not None:
         try:
-            ec2.get_waiter("instance_terminated").wait(InstanceIds=[instance_id])
+            ec2.terminate_instances(InstanceIds=[instance_id])
         except Exception as exc:
-            raise wrap_ec2_error(exc) from exc
+            if error_code(exc) in _INSTANCE_NOT_FOUND_CODES:
+                _confirm_absent(
+                    partial(describe_instance_exact, ec2, instance_id),
+                    entity_kind="instance",
+                    entity_name=instance_id,
+                )
+            else:
+                raise wrap_ec2_error(exc) from exc
+        else:
+            try:
+                ec2.get_waiter("instance_terminated").wait(InstanceIds=[instance_id])
+            except Exception as exc:
+                raise wrap_ec2_error(exc) from exc
 
     if security_group is not None:
         _delete_security_group_strict(ec2, security_group_id)
@@ -551,52 +617,6 @@ def _delete_security_group_strict(ec2: Any, security_group_id: str) -> None:
                     entity_name=security_group_id,
                 ) from exc
             raise wrap_ec2_error(exc) from exc
-
-
-def cleanup_partial(ec2: Any, instance_id: str | None, security_group_id: str | None) -> None:
-    """Best-effort teardown of the resources ``create`` built before a plain
-    (non-interrupt) failure: terminate the instance if one launched, delete the
-    security group once the ENI detaches. This is the platform's own
-    partial-work sweep, distinct from (and composing under) the orchestrator's
-    DB-row unwind."""
-    if instance_id:
-        terminate_and_cleanup(ec2, instance_id, security_group_id)
-    elif security_group_id:
-        delete_security_group(ec2, security_group_id)
-
-
-def rollback_create_on_interrupt(
-    ec2: Any,
-    region: str,
-    backend_name: str,
-    instance_id: str | None,
-    security_group_id: str | None,
-) -> None:
-    """Roll back a partially created resource set after an operator interrupt
-    inside ``EC2Platform.create``.
-
-    The instance may fully exist here (the likeliest interrupt point is the
-    minutes-long inline bootstrap wait, after every resource is up), so this
-    mirrors the delete op: terminate the instance, then delete the security
-    group once the ENI detaches. Best-effort per resource. A SECOND interrupt
-    during the cleanup abandons it cleanly instead of wedging: the surviving
-    resources are named for manual removal, and the original interrupt still
-    propagates to ``create_vm``, whose unwind then deletes the DB row it no
-    longer needs."""
-    output.warn(
-        f"Interrupted: cleaning up partial AWS resources for '{backend_name}', "
-        f"please wait (Ctrl-C again to abandon them)..."
-    )
-    try:
-        if instance_id:
-            terminate_and_cleanup(ec2, instance_id, security_group_id)
-        elif security_group_id:
-            delete_security_group(ec2, security_group_id)
-    except KeyboardInterrupt:
-        output.warn(
-            f"Cleanup abandoned: EC2 resources tagged '{VM_TAG_KEY}={backend_name}' may remain "
-            f"in region '{region}'; terminate the instance and delete its security group there manually."
-        )
 
 
 def first_instance_state(describe_result: Mapping[str, Any]) -> str | None:

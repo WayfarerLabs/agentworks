@@ -29,8 +29,7 @@ def client_error(code: str, message: str = "boom", operation: str = "Op") -> Cli
 
 
 def unreachable() -> EndpointConnectionError:
-    """A representative transport-level failure (endpoint unreachable), the
-    ``BotoCoreError`` branch the runup classifier warns-and-continues on."""
+    """A representative transport-level failure (endpoint unreachable)."""
     return EndpointConnectionError(endpoint_url="https://ec2.example")
 
 
@@ -46,6 +45,7 @@ class Controls:
     instance_public_ip: str = "203.0.113.10"
     instance_backend_name: str = "dev"
     instance_security_group_id: str = "sg-123"
+    security_group_backend_name: str = "dev"
     instance_presence_outcomes: list[bool | Exception] = field(default_factory=list)
     # Whether a describe_instances(Filters=...) collision preflight finds one.
     collision: bool = False
@@ -192,7 +192,7 @@ class _FakeEC2:
             "SecurityGroups": [
                 {
                     "GroupId": group_id,
-                    "Tags": [{"Key": "agentworks:vm", "Value": self._c.instance_backend_name}],
+                    "Tags": [{"Key": "agentworks:vm", "Value": self._c.security_group_backend_name}],
                 }
             ]
         }

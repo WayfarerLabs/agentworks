@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 from agentworks.capabilities.base import Capability, idempotent_op
+from agentworks.errors import ProvisioningError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -107,6 +108,26 @@ class ProvisionResult:
     native_transport: Transport
     platform_metadata: dict[str, str] = field(default_factory=dict)
     tailscale_ip: str | None = None
+
+
+class RetainedProvisioningError(ProvisioningError):
+    """Create failed after backend resources became unsafe to forget.
+
+    The manager persists ``platform_metadata`` on the provisional VM row and
+    leaves that row in failed state so the owning platform can target the
+    surviving resources through an explicit ``vm delete`` retry.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        platform_metadata: dict[str, str],
+        entity_name: str,
+        hint: str,
+    ) -> None:
+        super().__init__(message, entity_kind="vm", entity_name=entity_name, hint=hint)
+        self.platform_metadata = dict(platform_metadata)
 
 
 class VMPlatform(Capability):
@@ -244,6 +265,9 @@ class VMPlatform(Capability):
           resource left behind is orphaned with nothing to target it.
           All in-tree platforms implement both arms: Azure (#338),
           proxmox (#343), lima and wsl2 (#340/#344), and EC2.
+          If a platform cannot confirm that rollback completed, it raises
+          ``RetainedProvisioningError`` with the identifiers needed by its
+          ``delete`` op. Core persists them and retains the failed VM row.
         - Return ``ProvisionResult`` with ``platform_metadata``
           capturing whatever identifiers subsequent ops need, without
           relying on live configuration (e.g. proxmox records the node

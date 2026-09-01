@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.vm_platform import ProvisionRequest, ProvisionResult
+from agentworks.capabilities.vm_platform import ProvisionRequest, ProvisionResult, RetainedProvisioningError
 from agentworks.config import load_config
 from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError, NotFoundError, ProvisioningError, StateError, UserAbort, ValidationError
@@ -195,6 +195,41 @@ def test_create_vm_request_build_failure_unwinds_owner_and_overlay_without_outco
     assert db.get_vm("request-fail") is None
     assert db.instance_state.get_desired_overlay("vm", "request-fail") is None
     assert outcomes == []
+
+
+def test_create_vm_retains_platform_metadata_when_rollback_is_unconfirmed(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.db import ProvisioningStatus
+
+    failure = RetainedProvisioningError(
+        "backend cleanup was not confirmed",
+        platform_metadata={"instance_name": "retained-backend", "create_incomplete": "true"},
+        entity_name="retained",
+        hint="delete the retained VM",
+    )
+    monkeypatch.setattr(
+        LimaPlatform,
+        "create",
+        lambda *args, **kwargs: (_ for _ in ()).throw(failure),
+    )
+
+    with pytest.raises(RetainedProvisioningError) as caught:
+        vm_manager.create_vm(
+            db,
+            make_config(),
+            name="retained",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert caught.value is failure
+    row = db.get_vm("retained")
+    assert row is not None
+    assert row.platform_metadata == {"instance_name": "retained-backend", "create_incomplete": "true"}
+    assert row.provisioning_status == ProvisioningStatus.FAILED.value
 
 
 def test_create_vm_metadata_failure_retains_owner_and_reports_once(

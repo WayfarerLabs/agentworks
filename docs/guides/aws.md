@@ -70,11 +70,13 @@ KMS key may also require the KMS actions that key policy and EBS encryption requ
 
 ## What Agentworks verifies
 
-`vm create` authenticates with STS and performs its resource reads before creating anything. AWS
-does not provide a reliable general answer for whether an identity can operate future resources,
-especially when policies use resource ARNs, request tags, resource tags, VPCs, or region conditions.
-Agentworks therefore does not use IAM policy simulation or claim that the runup check certifies the
-whole lifecycle. New VMs record the validated 12-digit AWS account ID alongside their provider IDs.
+`vm create` authenticates with STS and performs its resource reads before creating anything. A
+credential, permission, transport, or invalid-response failure from that identity call stops runup;
+create cannot safely continue without the account binding recorded on the new VM. AWS does not
+provide a reliable general answer for whether an identity can operate future resources, especially
+when policies use resource ARNs, request tags, resource tags, VPCs, or region conditions. Agentworks
+therefore does not use IAM policy simulation or claim that the runup check certifies the whole
+lifecycle. New VMs record the validated 12-digit AWS account ID alongside their provider IDs.
 
 EC2 does provide exact-request `DryRun` authorization. Agentworks uses it where a later missing
 permission would make an earlier mutation unsafe:
@@ -98,9 +100,17 @@ first for bootstrap and later for a native platform shell. It revokes only the t
 opened.
 
 `agw vm delete <name>` refreshes the STS identity and refuses an account mismatch. It reads the
-recorded security group and verifies its `agentworks:vm` ownership tag before the dry run or any
-termination, then waits for termination and deletes the group after its network interface detaches.
-A mutation-time `NotFound` succeeds only after bounded, consecutive read-only absence checks.
+recorded instance and security group, verifies their `agentworks:vm` ownership and recorded
+association before the dry run or any termination, then waits for termination and deletes the group
+after its network interface detaches. A mutation-time `NotFound` succeeds only after bounded,
+consecutive read-only absence checks.
+
+Create rollback never accepts `NotFound` for a newly returned provider ID as proof of cleanup. It
+retries the exact termination or group deletion because the resource may still be propagating. If
+AWS never positively accepts cleanup, Agentworks retains the VM row in failed state with its
+account, region, instance, group, and ownership identity. Correct the provider failure and run
+`agw vm delete <name>`; that explicit path also handles a retained row whose create stopped after
+creating only the security group.
 
 Rows created before account binding carry no account ID. Agentworks deletes one only when the live
 instance's ID, ownership tag, and security-group association prove that the current account owns the

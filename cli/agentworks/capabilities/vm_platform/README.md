@@ -179,7 +179,10 @@ and DB migration.
 - `create(request, ctx) -> ProvisionResult` is deliberately **not** `@idempotent_op`: it runs a
   pre-flight collision check, then either raises `StateError` (all six in-tree platforms) or, for a
   soft-name backend, selects a different collision-free backend name and records that identifier in
-  `platform_metadata`. A re-run must never target or replace an existing VM.
+  `platform_metadata`. A re-run must never target or replace an existing VM. A create that cannot
+  confirm rollback raises `RetainedProvisioningError` with addressable platform metadata; core
+  persists that metadata and retains the provisional row in failed state so `vm delete` can finish
+  cleanup.
 - `start(vm, ctx)`, `stop(vm, ctx)`, `delete(vm, ctx)` are flagged `@idempotent_op` and must land in
   the same place run twice as run once. The marker is inherited through the MRO, so an override does
   not restate the decorator. `reinit` re-applies everything and failed commands are retried, so the
@@ -315,10 +318,10 @@ after persisting the metadata, it probes the returned transport and persists onl
 observation. This is not a security sandbox for in-process plugin code. The metadata is written
 verbatim to `vms.platform_metadata` and read back only by the owning platform (Lima stores
 `instance_name`, WSL2 `distro_name`, Azure `resource_id`, Proxmox `vmid` + `node`, EC2
-`instance_id` + `security_group_id` + `region` + `backend_name`, and never the public IP, which it
-reads live). An omitted IP means discovery failed after a successful join, not that bootstrap is
-incomplete. Phase A retries only `tailscale ip -4` before it records the address and verifies
-Tailscale SSH.
+`instance_id` + `security_group_id` + `region` + `backend_name` + `account_id` as its
+provider-identity subset, and never the public IP, which it reads live). An omitted IP means
+discovery failed after a successful join, not that bootstrap is incomplete. Phase A retries only
+`tailscale ip -4` before it records the address and verifies Tailscale SSH.
 
 Before the create boundary resolves secrets, the pending VM node calls
 `validate_create_release(release)` with that same concrete core selection. The hook is pure and
@@ -499,7 +502,10 @@ The three managed cloud platforms therefore use different evidence:
   `DryRunOperation` is positive evidence; unknown results stop before the guarded mutation. IAM
   policy simulation is not used as an authorization gate. New rows bind provider IDs to the creating
   AWS account. Explicit delete raises on missing or mismatched identity, ownership, termination,
-  confirmation, or security-group cleanup failure so core retains the VM row for retry.
+  confirmation, or security-group cleanup failure so core retains the VM row for retry. Create
+  rollback retries propagation-time `NotFound` instead of treating it as absence; if positive
+  cleanup never arrives, `RetainedProvisioningError` makes the provisional row and exact provider
+  identifiers durable for explicit deletion.
 - GCE makes its definitive project, zone, network, image, and shape reads before mutation, then lets
   exact mutations authorize themselves under provider-ID-owned rollback. Its IAM test methods apply
   to existing resources and are advisory; the future VM, boot disk, and firewall rules do not exist

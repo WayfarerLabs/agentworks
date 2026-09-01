@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.vm_platform import ProvisionRequest
+from agentworks.capabilities.vm_platform import ProvisionRequest, RetainedProvisioningError
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
@@ -366,6 +366,70 @@ class TestCreateRollback:
         assert "terminate_instances" in methods
         assert "delete_security_group" in methods
 
+    def test_rollback_retries_a_new_instance_not_found(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("agentworks.plugins.aws.network.time.sleep", lambda _seconds: None)
+        rec = install_fakes(
+            monkeypatch,
+            Controls(terminate_errors=[client_error("InvalidInstanceID.NotFound", "propagating", "Terminate")]),
+        )
+        monkeypatch.setattr(
+            EphemeralTailscaleBootstrap,
+            "complete",
+            lambda self, auth_key: (_ for _ in ()).throw(OSError("bootstrap failed")),
+        )
+
+        with pytest.raises(EC2Error):
+            _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
+
+        assert rec.methods("ec2").count("terminate_instances") == 2
+        assert rec.methods("ec2").count("describe_instances") == 3
+
+    def test_unconfirmed_rollback_retains_exact_metadata(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("agentworks.plugins.aws.network.time.sleep", lambda _seconds: None)
+        not_found = client_error("InvalidInstanceID.NotFound", "propagating", "Terminate")
+        install_fakes(monkeypatch, Controls(terminate_errors=[not_found] * 6))
+        monkeypatch.setattr(
+            EphemeralTailscaleBootstrap,
+            "complete",
+            lambda self, auth_key: (_ for _ in ()).throw(OSError("bootstrap failed")),
+        )
+
+        with pytest.raises(RetainedProvisioningError) as caught:
+            _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
+
+        assert caught.value.platform_metadata["instance_id"] == "i-123"
+        assert caught.value.platform_metadata["security_group_id"] == "sg-123"
+        assert caught.value.platform_metadata["account_id"] == "111122223333"
+        assert caught.value.platform_metadata["create_incomplete"] == "true"
+
+    def test_security_group_only_failure_remains_deletable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = install_fakes(
+            monkeypatch,
+            Controls(sg_delete_errors=[client_error("AccessDenied", "denied", "DeleteSecurityGroup")]),
+        )
+        monkeypatch.setattr(
+            "tests._aws_fakes._FakeEC2.run_instances",
+            lambda self, **kwargs: (_ for _ in ()).throw(client_error("RunFailed", "failed", "RunInstances")),
+        )
+        platform = _platform()
+
+        with pytest.raises(RetainedProvisioningError) as caught:
+            platform.create(_request(), RunContext(config=_config()))
+
+        metadata = caught.value.platform_metadata
+        assert "instance_id" not in metadata
+        platform.delete(SimpleNamespace(name="dev", platform_metadata=metadata), RunContext())  # type: ignore[arg-type]
+        assert rec.methods("ec2").count("delete_security_group") == 3
+
+    def test_retained_partial_create_allows_detached_group_cleanup(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = install_fakes(monkeypatch, Controls(instance_security_group_id="sg-detached"))
+        metadata = _vm().platform_metadata | {"create_incomplete": "true"}
+
+        _platform().delete(SimpleNamespace(name="dev", platform_metadata=metadata), RunContext())  # type: ignore[arg-type]
+
+        assert "terminate_instances" in rec.methods("ec2")
+        assert rec.methods("ec2").count("delete_security_group") == 2
+
     @pytest.mark.parametrize(
         ("failure_command", "message", "expected_commands"),
         [
@@ -483,16 +547,13 @@ class TestCreateRollback:
         ],
         ids=("ssh-readiness", "cloud-init-wait"),
     )
-    def test_second_interrupt_abandons_cleanup_loudly(
+    def test_second_interrupt_retains_cleanup_metadata(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        captured_output: CapturedOutput,
         failure_command: str,
         expected_commands: list[str],
     ) -> None:
-        """A second Ctrl-C during the rollback abandons it (naming the region
-        and tag for manual cleanup) instead of wedging; the ORIGINAL interrupt
-        still propagates."""
+        """A second Ctrl-C leaves an addressable failed-create result."""
         install_fakes(monkeypatch)
         interrupt = KeyboardInterrupt(f"interrupted during {failure_command}")
         calls: list[tuple[str, dict[str, object]]] = []
@@ -512,17 +573,21 @@ class TestCreateRollback:
 
         monkeypatch.setattr(SSHTransport, "run", _interrupt_readiness)
         monkeypatch.setattr("tests._aws_fakes._FakeEC2.terminate_instances", _interrupt_cleanup)
-        with pytest.raises(KeyboardInterrupt) as caught:
+        with pytest.raises(RetainedProvisioningError) as caught:
             _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
-        assert caught.value is interrupt
+        assert caught.value.__cause__ is interrupt
+        assert caught.value.platform_metadata == {
+            "region": "us-east-1",
+            "backend_name": "dev",
+            "account_id": "111122223333",
+            "bootstrap_ssh_prefixes": _DETECTED_PREFIX,
+            "instance_id": "i-123",
+            "security_group_id": "sg-123",
+            "create_incomplete": "true",
+        }
         assert [command for command, _kwargs in calls] == expected_commands
         assert all("input_text" not in kwargs for _command, kwargs in calls)
         assert cleanup_calls == [{"InstanceIds": ["i-123"]}]
-        abandoned = [warning for warning in captured_output.warnings if "Cleanup abandoned" in warning]
-        assert abandoned == [
-            "Cleanup abandoned: EC2 resources tagged 'agentworks:vm=dev' may remain in region "
-            "'us-east-1'; terminate the instance and delete its security group there manually."
-        ]
 
 
 class TestCloseProvisioningHooks:
@@ -833,6 +898,7 @@ class TestDelete:
         _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
         assert [(service, method, kwargs.get("DryRun", False)) for service, method, kwargs in rec.calls] == [
             ("sts", "get_caller_identity", False),
+            ("ec2", "describe_instances", False),
             ("ec2", "describe_security_groups", False),
             ("ec2", "delete_security_group", True),
             ("ec2", "terminate_instances", False),
@@ -860,18 +926,34 @@ class TestDelete:
     def test_absent_legacy_instance_is_not_idempotent_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = install_fakes(monkeypatch, Controls(instance_presence_outcomes=[False]))
 
-        with pytest.raises(StateError):
+        with pytest.raises(EC2Error):
             _platform().delete(_vm(legacy=True), RunContext())  # type: ignore[arg-type]
 
         assert rec.methods("ec2") == ["describe_instances"]
 
-    def test_mismatched_security_group_tag_prevents_mutation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_account_bound_row_requires_exact_live_ownership(self, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = install_fakes(monkeypatch, Controls(instance_backend_name="other"))
 
         with pytest.raises(EC2Error):
             _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
 
-        assert rec.methods("ec2") == ["describe_security_groups"]
+        assert rec.methods("ec2") == ["describe_instances"]
+
+    def test_account_bound_row_requires_recorded_group_association(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = install_fakes(monkeypatch, Controls(instance_security_group_id="sg-other"))
+
+        with pytest.raises(EC2Error):
+            _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
+
+        assert rec.methods("ec2") == ["describe_instances"]
+
+    def test_mismatched_security_group_tag_prevents_mutation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = install_fakes(monkeypatch, Controls(security_group_backend_name="other"))
+
+        with pytest.raises(EC2Error):
+            _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
+
+        assert rec.methods("ec2") == ["describe_instances", "describe_security_groups"]
 
     def test_security_group_delete_denial_prevents_all_mutation(self, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = install_fakes(
@@ -886,6 +968,7 @@ class TestDelete:
         assert exc.value.entity_name == "sg-123"
         assert rec.calls == [
             ("sts", "get_caller_identity", {}),
+            ("ec2", "describe_instances", {"InstanceIds": ["i-123"]}),
             ("ec2", "describe_security_groups", {"GroupIds": ["sg-123"]}),
             ("ec2", "delete_security_group", {"GroupId": "sg-123", "DryRun": True}),
         ]
@@ -908,15 +991,21 @@ class TestDelete:
             monkeypatch,
             Controls(
                 terminate_errors=[client_error("InvalidInstanceID.NotFound", "gone", "Terminate")],
-                instance_presence_outcomes=[False, False],
+                instance_presence_outcomes=[True, False, False],
             ),
         )
 
         _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
 
         methods = rec.methods("ec2")
-        assert methods.index("terminate_instances") < methods.index("describe_instances")
-        assert methods.count("describe_instances") == 2
+        assert methods[:4] == [
+            "describe_instances",
+            "describe_security_groups",
+            "delete_security_group",
+            "terminate_instances",
+        ]
+        assert methods[4:6] == ["describe_instances", "describe_instances"]
+        assert methods.count("describe_instances") == 3
         assert self._sg_deleted(rec) == 1
 
     def test_unconfirmed_terminate_not_found_is_strict(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -929,7 +1018,7 @@ class TestDelete:
         with pytest.raises(EC2Error):
             _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
 
-        assert rec.methods("ec2").count("describe_instances") == 3
+        assert rec.methods("ec2").count("describe_instances") == 4
         assert self._sg_deleted(rec) == 0
 
     def test_group_not_found_requires_confirmed_group_absence(self, monkeypatch: pytest.MonkeyPatch) -> None:
