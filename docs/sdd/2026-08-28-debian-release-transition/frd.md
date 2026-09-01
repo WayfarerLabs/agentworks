@@ -388,14 +388,15 @@ because Lima does not implement native VZ snapshots. Restore keeps the original 
 instance as a protected emergency artifact, returns the recovered instance to the original Lima
 name, and must converge after interruption at any clone or atomic move boundary. Lima 2.2's public
 rename is not used because it moves instance files one at a time. Instead, Agentworks validates
-Lima-reported absolute sibling directories and stopped VZ ownership metadata, then uses same-parent
-atomic directory moves and proves the resulting inventory. The recovery clone is never started;
-operator output warns that starting it would duplicate guest and Tailscale identity. Deletion
-removes the checkpoint clone, emergency instance, and interrupted restore intermediates only after
-validating each artifact's role and VM incarnation. VZ checkpoint creation refuses Lima instances
-with `additionalDisks` rather than presenting a primary-instance clone as whole-VM recovery. Lima's
-driver choice for new VMs remains its own host default, and existing instances cannot change drivers
-through this work.
+Lima-reported absolute sibling directories and stopped VZ ownership metadata, then uses an
+exact-path exclusive OS rename locally or standard SFTP rename for SSH placement and proves the
+resulting inventory. Neither path can fall back to a cross-filesystem copy. The recovery clone is
+never started; operator output warns that starting it would duplicate guest and Tailscale identity.
+Deletion removes the checkpoint clone, emergency instance, and interrupted restore intermediates
+only after validating each artifact's role and VM incarnation. VZ checkpoint creation refuses Lima
+instances with `additionalDisks` rather than presenting a primary-instance clone as whole-VM
+recovery. Lima's driver choice for new VMs remains its own host default, and existing instances
+cannot change drivers through this work.
 
 The operator-facing surface follows the existing flat second-object convention:
 

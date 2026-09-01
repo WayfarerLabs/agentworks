@@ -409,13 +409,11 @@ def test_wsl2_not_ready_additionally_needs_wsl_exe(
     assert _readiness(WSL2Platform, {}).is_ready
 
 
-def test_lima_not_ready_is_local_only(
+def test_lima_not_ready_matches_the_placement_dependency(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """lima the platform is supported everywhere; the limactl
-    requirement binds to LOCAL sites only (ssh-placed sites run limactl
-    on the placement host over SSH). ``not_ready`` reads the config
-    directly, non-constructing.
+    """Lima is supported everywhere; readiness checks the executable
+    used by the selected local or SSH placement without constructing it.
 
     Keyed on the TAG saying local, never on a guess: a WRITTEN placement
     that does not say local is not treated as local, so a shape error is
@@ -435,19 +433,23 @@ def test_lima_not_ready_is_local_only(
     local = _readiness(LimaPlatform, {"placement": {"mode": "local"}})
     assert not local.is_ready
     assert local.reason is not None
-    assert "limactl" in local.reason
-    assert _readiness(LimaPlatform, {"placement": {"mode": "ssh", "host": "me@box"}}).is_ready
+    remote = _readiness(LimaPlatform, {"placement": {"mode": "ssh", "host": "me@box"}})
+    assert not remote.is_ready
+    assert remote.reason is not None
     # Absent: the declared default is local, so the verdict matches the
     # written local's rather than inventing a different site.
     absent = _readiness(LimaPlatform, {})
     assert not absent.is_ready
-    assert absent.reason == local.reason
     # Unreadable: NOT local, so no limactl verdict is invented. Raw
     # rather than through _readiness, deliberately: the model refuses
     # this, and answering it anyway is the totality that ``not_ready``
     # exists for.
     assert LimaPlatform.not_ready({"placement": "junk"}).is_ready
 
-    monkeypatch.setattr("shutil.which", lambda name: "/x/limactl")
+    monkeypatch.setattr("shutil.which", lambda name: "/x/limactl" if name == "limactl" else None)
     assert _readiness(LimaPlatform, {"placement": {"mode": "local"}}).is_ready
     assert _readiness(LimaPlatform, {}).is_ready
+    assert not _readiness(LimaPlatform, {"placement": {"mode": "ssh", "host": "me@box"}}).is_ready
+
+    monkeypatch.setattr("shutil.which", lambda name: f"/x/{name}")
+    assert _readiness(LimaPlatform, {"placement": {"mode": "ssh", "host": "me@box"}}).is_ready

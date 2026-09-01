@@ -13,16 +13,26 @@ from agentworks.errors import StateError
 from agentworks.ssh import SSHError
 
 LimaRunner = Callable[..., str]
+LimaDirectoryRename = Callable[[str, str], None]
 
 
 class LimaCheckpointHost:
     """Treat Lima's reported host state as an external trust boundary."""
 
-    def __init__(self, *, vm_name: str, run: LimaRunner) -> None:
+    def __init__(self, *, vm_name: str, run: LimaRunner, rename: LimaDirectoryRename) -> None:
         self.vm_name = vm_name
         self.run = run
+        self.rename = rename
 
-    def names(self) -> tuple[str, ...]:
+    @staticmethod
+    def _partial_recovery_hint(instance_name: str) -> str:
+        return (
+            f"Confirm that no limactl clone is still running for '{instance_name}', then inspect it with "
+            f"'limactl list --json {instance_name}'. If Lima cannot read the instance, move that exact "
+            "instance directory out of Lima's instance root before retrying."
+        )
+
+    def names(self, *, recovery_target: str | None = None) -> tuple[str, ...]:
         try:
             listing = self.run("limactl list --quiet")
         except (OSError, SSHError) as error:
@@ -30,7 +40,11 @@ class LimaCheckpointHost:
                 f"Lima instance inventory is unavailable for VM '{self.vm_name}'",
                 entity_kind="vm",
                 entity_name=self.vm_name,
-                hint="Correct the Lima inventory error, then retry the checkpoint operation.",
+                hint=(
+                    self._partial_recovery_hint(recovery_target)
+                    if recovery_target is not None
+                    else "Correct the Lima inventory error, then retry the checkpoint operation."
+                ),
             ) from error
         return tuple(name for line in listing.splitlines() if (name := line.strip()))
 
@@ -49,6 +63,11 @@ class LimaCheckpointHost:
                 f"Lima instance '{instance_name}' could not be inspected",
                 entity_kind="vm",
                 entity_name=self.vm_name,
+                hint=(
+                    self._partial_recovery_hint(instance_name)
+                    if instance_name.startswith(("agwcp-", "agwem-", "agwrs-", "agwrd-"))
+                    else None
+                ),
             ) from error
         for line in listing.splitlines():
             try:
@@ -74,9 +93,16 @@ class LimaCheckpointHost:
             )
         return backend.lower()
 
-    def require_stopped(self, instance_name: str, *, purpose: str) -> None:
-        record = self.record(instance_name)
-        assert record is not None
+    def require_stopped(
+        self,
+        instance_name: str,
+        *,
+        purpose: str,
+        record: dict[str, Any] | None = None,
+    ) -> None:
+        if record is None:
+            record = self.record(instance_name)
+            assert record is not None
         status = record.get("status")
         if isinstance(status, str) and status.lower() == "stopped":
             return
@@ -141,6 +167,23 @@ class LimaCheckpointHost:
                 hint="Inspect the Lima instance directories before retrying the checkpoint operation.",
             )
 
+    def require_stopped_vz_source(
+        self,
+        record: dict[str, Any],
+        instance_name: str,
+        checkpoint_record: dict[str, Any],
+        checkpoint_name: str,
+    ) -> None:
+        if self.backend(record, instance_name) != "vz":
+            raise StateError(
+                f"Lima VM '{self.vm_name}' no longer uses the VZ checkpoint driver",
+                entity_kind="vm",
+                entity_name=self.vm_name,
+            )
+        self.require_stopped(instance_name, purpose="checkpoint restore", record=record)
+        self.require_no_additional_disks(instance_name, record=record)
+        self.require_same_parent(checkpoint_record, checkpoint_name, record, instance_name)
+
     def protect(self, instance_name: str) -> None:
         try:
             self.run(f"limactl protect {instance_name}")
@@ -170,8 +213,8 @@ class LimaCheckpointHost:
     def move_atomically(self, source: str, target: str) -> None:
         source_record = self.record(source)
         assert source_record is not None
-        self.require_stopped(source, purpose="checkpoint restore")
-        if target in self.names() or self.record(target, required=False) is not None:
+        self.require_stopped(source, purpose="checkpoint restore", record=source_record)
+        if target in self.names():
             raise StateError(
                 f"Lima recovery target '{target}' already exists",
                 entity_kind="vm",
@@ -181,7 +224,14 @@ class LimaCheckpointHost:
         source_dir = self.instance_dir(source_record, source)
         target_dir = posixpath.join(posixpath.dirname(source_dir), target)
         try:
-            self.run(f"/bin/mv {shlex.quote(source_dir)} {shlex.quote(target_dir)}")
+            # Lima inventory ignores filesystem entries such as broken symlinks.
+            # Prove the host paths themselves before an exact-path, exclusive
+            # rename so a target entry cannot become a destination directory.
+            self.run(f"/bin/test -d {shlex.quote(source_dir)}")
+            self.run(f"/bin/test ! -L {shlex.quote(source_dir)}")
+            self.run(f"/bin/test ! -e {shlex.quote(target_dir)}")
+            self.run(f"/bin/test ! -L {shlex.quote(target_dir)}")
+            self.rename(source_dir, target_dir)
         except (OSError, SSHError) as error:
             raise StateError(
                 f"Lima could not atomically move recovery instance '{source}' to '{target}'",
@@ -205,7 +255,7 @@ class LimaCheckpointHost:
                 entity_kind="vm",
                 entity_name=self.vm_name,
             )
-        self.require_stopped(target, purpose="checkpoint restore")
+        self.require_stopped(target, purpose="checkpoint restore", record=target_record)
 
     def delete_recovery_instance(self, instance_name: str) -> None:
         if instance_name not in self.names():

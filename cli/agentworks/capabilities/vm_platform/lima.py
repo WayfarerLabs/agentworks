@@ -4,9 +4,14 @@ the site's tagged platform ``placement`` selects."""
 from __future__ import annotations
 
 import contextlib
+import ctypes
+import errno
 import json
+import os
 import re
 import shlex
+import stat
+import subprocess
 import sys
 import textwrap
 
@@ -62,6 +67,75 @@ _REBOOT_CLEAR_MARKER = "AGW_REBOOT_CLEAR"
 _REMOTE_TEMPLATE_ROOT = "/tmp"
 _REMOTE_TEMPLATE_PREFIX = "agentworks-lima-template."
 _REMOTE_TEMPLATE_RANDOM_LENGTH = 10
+
+
+def _rename_directory_exclusive(source: str, target: str) -> None:
+    """Atomically rename one real directory without replacing a target."""
+    source_stat = os.lstat(source)
+    if not stat.S_ISDIR(source_stat.st_mode):
+        raise OSError(errno.EINVAL, "rename source is not a directory", source)
+    parent_stat = os.stat(os.path.dirname(source))
+    if source_stat.st_dev != parent_stat.st_dev:
+        raise OSError(errno.EXDEV, "rename source is a mounted filesystem", source)
+    try:
+        os.lstat(target)
+    except FileNotFoundError:
+        pass
+    else:
+        raise FileExistsError(errno.EEXIST, "rename target already exists", target)
+
+    libc = ctypes.CDLL(None, use_errno=True)
+    encoded_source = os.fsencode(source)
+    encoded_target = os.fsencode(target)
+    try:
+        if sys.platform == "darwin":
+            rename = libc.renamex_np
+            rename.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint)
+            result = rename(encoded_source, encoded_target, 0x00000004)  # RENAME_EXCL
+        elif sys.platform.startswith("linux"):
+            rename = libc.renameat2
+            rename.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
+            result = rename(-100, encoded_source, -100, encoded_target, 1)  # AT_FDCWD, RENAME_NOREPLACE
+        else:
+            raise AttributeError
+    except AttributeError as error:
+        raise OSError(errno.ENOTSUP, "exclusive directory rename is unsupported on this host") from error
+    if result != 0:
+        error_number = ctypes.get_errno()
+        raise OSError(error_number, os.strerror(error_number), target)
+
+
+def _sftp_quote(path: str) -> str:
+    if any(character in path for character in ("\0", "\n", "\r")):
+        raise ValueError("SFTP path contains a control character")
+    return '"' + path.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _rename_remote_directory_exclusive(host: str, source: str, target: str) -> None:
+    """Use SFTP's exact-path, no-overwrite rename on a remote Lima host."""
+    # -l forces the standard SFTP rename instead of OpenSSH's overwriting
+    # posix-rename extension. The server either renames the exact path or fails;
+    # it never falls back to a cross-filesystem copy.
+    batch = f"rename -l {_sftp_quote(source)} {_sftp_quote(target)}\n"
+    proc = subprocess.run(
+        [
+            "sftp",
+            "-q",
+            "-b",
+            "-",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-o",
+            "BatchMode=yes",
+            "--",
+            host,
+        ],
+        input=stdin_bytes(batch),
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        raise SSHError(f"SFTP rename failed: {decode_stream(proc.stderr).strip()}")
+
 
 # Lima template for Debian cloud VMs (values substituted at create time).
 # The provision block runs the non-secret bootstrap script (user, packages,
@@ -140,7 +214,8 @@ class LimaLocalPlacement(AgwModel):
 class LimaSshPlacement(AgwModel):
     """Run limactl on another host over SSH.
 
-    The VMs live on a shared box and nothing but SSH is needed here.
+    The VMs live on a shared box and the local OpenSSH client suite is
+    required, including SFTP for exact-path VZ recovery moves.
     """
 
     mode: Literal["ssh"]
@@ -180,7 +255,7 @@ class LimaPlatform(VMPlatform):
         to `{mode: local}`: `limactl` runs on this machine, which is what the
         built-in `lima-local` site is. `placement: {mode: ssh, host: me@gpu-box}`
         runs `limactl` on that host over SSH, so the VMs live on a shared box and
-        nothing but SSH is needed here.
+        the local OpenSSH client suite is the only host dependency.
 
         Creation retains a credential-free provision script, then sends the required
         Tailscale key through one fixed guest command on stdin. It returns only after
@@ -194,12 +269,12 @@ class LimaPlatform(VMPlatform):
         no Lima additional disks.
 
         Local sites need `limactl` installed here and report not-ready without it.
-        Remote sites need nothing locally.
+        Remote sites need the OpenSSH client suite, including `sftp`.
         """,
     )
     # No unsupported_reason override: the platform is supported on
     # every host, because remote-Lima sites run limactl on the placement
-    # host over SSH and need nothing locally.
+    # host and need only the portable OpenSSH client suite locally.
 
     @classmethod
     def not_ready(cls, config: Mapping[str, object]) -> Readiness:
@@ -214,12 +289,18 @@ class LimaPlatform(VMPlatform):
         if "placement" in config:
             placement = config.get("placement")
             local = isinstance(placement, Mapping) and placement.get("mode") == "local"
+            remote = isinstance(placement, Mapping) and placement.get("mode") == "ssh"
         else:
             local = isinstance(LimaConfig.model_fields["placement"].default, LimaLocalPlacement)
-        if not local:
-            return Readiness.ready()
+            remote = False
         import shutil
 
+        if not local:
+            if not remote:
+                return Readiness.ready()
+            if not shutil.which("sftp"):
+                return Readiness.blocked("sftp not installed")
+            return Readiness.ready()
         if not shutil.which("limactl"):
             return Readiness.blocked("limactl not installed")
         return Readiness.ready()
@@ -267,8 +348,6 @@ class LimaPlatform(VMPlatform):
             target = SSHTarget(host=self._remote_host, user=None, login_shell=True)
             return ssh_run(target, command, check=check, input_text=input_text).stdout
         else:
-            import subprocess
-
             proc = subprocess.run(
                 shlex.split(command),
                 # Byte-mode stdin: text mode rewrites LF to CRLF on Windows (see agentworks.subprocess_io).
@@ -770,7 +849,15 @@ class LimaPlatform(VMPlatform):
             vm_name=vm.name,
             instance_name=self._instance_name(vm),
             run=self._run_lima,
+            rename=self._rename_lima_instance_directory,
         )
+
+    def _rename_lima_instance_directory(self, source: str, target: str) -> None:
+        if self.is_remote:
+            assert self._remote_host is not None
+            _rename_remote_directory_exclusive(self._remote_host, source, target)
+            return
+        _rename_directory_exclusive(source, target)
 
     def create_checkpoint(
         self,
@@ -781,11 +868,10 @@ class LimaPlatform(VMPlatform):
         operation_id: str,
         resume: bool,
     ) -> CheckpointDescriptor:
-        del ctx
+        del ctx, resume
         return self._checkpoint_operations(vm).create(
             name,
             operation_id=operation_id,
-            resume=resume,
         )
 
     def list_checkpoints(self, vm: VMRow, ctx: RunContext) -> tuple[CheckpointDescriptor, ...]:
