@@ -87,12 +87,6 @@ A vm-platform stands up a machine and hands Agentworks an administrative foothol
   VM's status; `create` **MUST** be collision-checked and either fail loudly on a name that already
   exists or pick and persist a new, collision-free backend name, never impacting an existing VM
   outside its control.
-- **MUST** implement contract version 1's managed checkpoint lifecycle: create a core-named offline
-  checkpoint, list only Agentworks-owned checkpoints for the exact VM incarnation, restore the
-  recorded descriptor while preserving the logical VM identity, and delete the artifact plus any
-  retained emergency recovery intermediate. These operations are mandatory because Debian upgrade
-  depends on them. Registration rejects an incomplete bundled platform before it can serve a
-  vm-site.
 - **MUST** provide a stop that preserves all system state for a later resume. Snapshotting and
   restoring running state is preferable, but a platform **MAY** implement stop as a full OS
   shutdown/restart, since Agentworks is built to be robust against restarts and the loss of running
@@ -200,65 +194,15 @@ and DB migration.
   provider-ID-owned instance absence before removing its lifetime deny. Only auxiliary-resource
   stragglers stay warn-and-continue. Lima, WSL2, Proxmox, and EC2 do not yet verify; their teardown
   verbs remain fire-and-forget (tracked in #356).
-- `create_checkpoint(vm, name, ctx, *, operation_id, resume) -> CheckpointDescriptor` creates or
-  discovers the same completed offline artifact when replayed with the core-generated `agw-*` name
-  and persisted create operation identity. `resume` is false for the first provider attempt and true
-  for an interrupted creating row. A provider with an ambiguous create response must reconcile that
-  operation before submitting another request. The VM is stopped on entry. The returned `name` is
-  core identity and `identifier` is opaque provider identity; both must bind to the exact backend VM
-  incarnation. The operation is `@idempotent_op` and must prove completion before returning.
-- `list_checkpoints(vm, ctx) -> tuple[CheckpointDescriptor, ...]` returns only Agentworks-managed
-  artifacts bound to that VM incarnation, including an incomplete artifact left after create
-  mutation so core can resume or delete it safely. It must not adopt, expose, or mutate
-  operator-created snapshots. The API is plural so core can detect provider duplicates and
-  interrupted state even though the current product permits one checkpoint per VM. A descriptor in
-  this inventory proves identity and ownership, not readiness; replaying `create_checkpoint` drives
-  and proves completion.
-- `restore_checkpoint(vm, checkpoint, ctx, *, operation_id)` is `@idempotent_op`, requires the VM
-  stopped, restores the same logical VM, and returns with it stopped. The operation identity is
-  stable while one interrupted restore replays and changes for a later explicit restore; the latter
-  must reapply the checkpoint rather than treating an earlier restored disk as success. A backend
-  that swaps or replaces a boot disk retains one deterministic pre-first-restore emergency artifact
-  until checkpoint deletion, reuses it on later restores, and preserves both artifacts on an
-  incomplete destructive swap. Core starts the guest only after the platform returns, attests Debian
-  independently, and stops it again.
-- `delete_checkpoint(vm, checkpoint, ctx)` is `@idempotent_op`, treats absence as success, and
-  proves the managed artifact and any retained emergency intermediate are gone before returning.
 - `status(vm, ctx) -> VMStatus` is a read-only query.
 - `display_backend_name(vm) -> str` is pure display and takes no `ctx`.
-
-Lima selects the checkpoint primitive from the existing instance's reported `vmType`; site
-configuration does not select or change the driver. QEMU uses Lima's native snapshot commands. VZ,
-the normal Lima default on supported macOS hosts, uses a stopped instance clone because Lima does
-not implement native VZ snapshots. The clone has a deterministic Agentworks name, is protected
-against `limactl delete`, and carries the same Agentworks incarnation marker as its source so a
-reused Lima name cannot adopt an old clone. It must never be started because it contains the guest's
-VM and Tailscale identity. Restore clones that recovery instance into a temporary stopped instance,
-marks every intermediate with its role and restore identity, and retains the exact pre-first-restore
-instance directory under a protected emergency name. Lima 2.2's public rename walks and moves files,
-so Agentworks does not use it: after validating Lima-reported absolute sibling paths, VZ ownership,
-stopped state, and target absence, Agentworks uses an exact-path exclusive OS rename locally or
-refuses VZ checkpoint creation and restore before mutation for SSH placement, where Agentworks
-cannot prove a no-clobber directory rename. Run those VZ operations on the placement host through a
-local Lima site. Remote QEMU snapshots remain supported. The local rename has no cross-filesystem
-copy fallback, and Agentworks proves the recovered instance at the original name. The stopped public
-clone has already omitted runtime files, protection state, and the old VZ identifier as Lima
-requires; the emergency move preserves the original directory exactly and that duplicate must never
-be started. A retry of the same restore converges; a later explicit restore reapplies the
-checkpoint. An unreadable partial clone fails closed with exact repair guidance instead of being
-adopted by name. Checkpoint deletion validates the role and VM incarnation of the clone, emergency
-instance, and any interrupted restore intermediates before removing them. VZ checkpoint creation
-refuses an instance with Lima `additionalDisks`, because a cloned primary instance would not own or
-recover those separately managed disks. Lima attempts copy-on-write cloning when the host filesystem
-supports it, but operators must still budget storage for divergence until checkpoint deletion.
 
 Vm-platform is an internal capability API. Its complete bundled contract remains version 1, and all
 six implementations change atomically with the descriptor. Exact registration conformance rejects an
 inconsistent version or missing abstract implementation as a curation error. Returning unsupported
 or implementing a no-op still violates the contract and must be caught by review and provider tests;
-registration does not attempt to infer method semantics. Platform checkpoint state is
-provider-owned; core persists only the descriptor and lifecycle fence, compares every live list
-result with that record, and never asks a platform to interpret Debian's current release.
+registration does not attempt to infer method semantics or ask a platform to interpret Debian's
+current release.
 
 **Transport and lifecycle hooks** (sensible defaults on `VMPlatform`; implementations override only
 what their backends need). All are entered by callers that gate first, so on entry the VM is running

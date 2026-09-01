@@ -23,7 +23,7 @@ import gzip
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from agentworks import output
-from agentworks.capabilities.vm_platform.base import CheckpointDescriptor, ProvisionRequest, ProvisionResult, VMPlatform
+from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.debian_release import (
@@ -35,7 +35,6 @@ from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscal
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError, NotFoundError, StateError, TokenRejectedError
-from agentworks.plugins.aws import checkpoints
 from agentworks.plugins.aws.auth import _build_access_key_session, _build_ambient_session
 from agentworks.plugins.aws.config import (
     AwsAmbientAuth,
@@ -128,15 +127,6 @@ class EC2Platform(VMPlatform):
         EC2 retains credential-free UserData. After cloud-init is ready, creation sends
         the required Tailscale key through one fixed SSH command on stdin and returns
         only after join succeeds. Failure terminates the new instance and security group.
-
-        Managed checkpoints use a tagged EBS snapshot of the root volume and EC2 root
-        volume replacement. In addition to the instance lifecycle permissions, the site
-        credential needs `ec2:CreateSnapshot`, `ec2:DescribeSnapshots`,
-        `ec2:DeleteSnapshot`, `ec2:CreateTags`, `ec2:DeleteTags`,
-        `ec2:DescribeVolumes`, `ec2:DeleteVolume`,
-        `ec2:CreateReplaceRootVolumeTask`, and
-        `ec2:DescribeReplaceRootVolumeTasks`. Snapshot storage and a retained emergency
-        root volume consume EBS quota and incur charges until the checkpoint is deleted.
 
         Ships as the opt-in `aws` system plugin, so a site stays not-ready until
         `[plugins] system` lists it.
@@ -562,53 +552,6 @@ class EC2Platform(VMPlatform):
         ec2 = self._client("ec2", self._region_of(vm), ctx)
         terminate_and_cleanup(ec2, str(instance_id), vm.platform_metadata.get("security_group_id"))
         output.info(f"EC2 instance '{vm.name}' deleted")
-
-    def create_checkpoint(
-        self,
-        vm: VMRow,
-        name: str,
-        ctx: RunContext,
-        *,
-        operation_id: str,
-        resume: bool,
-    ) -> CheckpointDescriptor:
-        ec2 = self._client("ec2", self._region_of(vm), ctx)
-        return checkpoints.create_checkpoint(
-            ec2,
-            instance_id=self._instance_id(vm),
-            name=name,
-            operation_id=operation_id,
-            resume=resume,
-        )
-
-    def list_checkpoints(self, vm: VMRow, ctx: RunContext) -> tuple[CheckpointDescriptor, ...]:
-        ec2 = self._client("ec2", self._region_of(vm), ctx)
-        return checkpoints.list_checkpoints(ec2, instance_id=self._instance_id(vm))
-
-    def restore_checkpoint(
-        self,
-        vm: VMRow,
-        checkpoint: CheckpointDescriptor,
-        ctx: RunContext,
-        *,
-        operation_id: str,
-    ) -> None:
-        ec2 = self._client("ec2", self._region_of(vm), ctx)
-        checkpoints.restore_checkpoint(
-            ec2,
-            instance_id=self._instance_id(vm),
-            checkpoint=checkpoint,
-            operation_id=operation_id,
-        )
-
-    def delete_checkpoint(
-        self,
-        vm: VMRow,
-        checkpoint: CheckpointDescriptor,
-        ctx: RunContext,
-    ) -> None:
-        ec2 = self._client("ec2", self._region_of(vm), ctx)
-        checkpoints.delete_checkpoint(ec2, instance_id=self._instance_id(vm), checkpoint=checkpoint)
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
         instance_id = vm.platform_metadata.get("instance_id")

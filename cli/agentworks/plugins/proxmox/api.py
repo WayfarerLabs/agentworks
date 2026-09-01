@@ -170,37 +170,6 @@ class ProxmoxAPI:
         result = self._request("GET", f"/nodes/{node}/qemu/{vmid}/status/current")
         return result  # type: ignore[no-any-return]
 
-    def list_snapshots(self, node: str, vmid: int) -> list[dict[str, Any]]:
-        """List QEMU snapshots for one VM."""
-        result = self._request("GET", f"/nodes/{node}/qemu/{vmid}/snapshot")
-        if not isinstance(result, list) or any(
-            not isinstance(entry, dict) or not isinstance(entry.get("name"), str) or not entry["name"]
-            for entry in result
-        ):
-            raise ProxmoxAPIError("Proxmox API returned a malformed snapshot inventory")
-        return result
-
-    def create_snapshot(self, node: str, vmid: int, name: str, *, description: str) -> str:
-        """Create a disk-only QEMU snapshot and return its task UPID."""
-        result = self._request(
-            "POST",
-            f"/nodes/{node}/qemu/{vmid}/snapshot",
-            {"snapname": name, "vmstate": 0, "description": description},
-        )
-        return str(result)
-
-    def rollback_snapshot(self, node: str, vmid: int, name: str) -> str:
-        """Roll a VM back to a named snapshot and return its task UPID."""
-        encoded = urllib.parse.quote(name, safe="")
-        result = self._request("POST", f"/nodes/{node}/qemu/{vmid}/snapshot/{encoded}/rollback")
-        return str(result)
-
-    def delete_snapshot(self, node: str, vmid: int, name: str) -> str:
-        """Delete a named snapshot and return its task UPID."""
-        encoded = urllib.parse.quote(name, safe="")
-        result = self._request("DELETE", f"/nodes/{node}/qemu/{vmid}/snapshot/{encoded}")
-        return str(result)
-
     # -- Tasks -----------------------------------------------------------------
 
     def stop_task(self, node: str, upid: str) -> None:

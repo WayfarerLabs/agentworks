@@ -330,33 +330,6 @@ def test_base_platform_vm_active_is_nullcontext() -> None:
         def delete(self, vm: Any, ctx: Any) -> None:
             raise NotImplementedError
 
-        def create_checkpoint(
-            self,
-            vm: Any,
-            name: str,
-            ctx: Any,
-            *,
-            operation_id: str,
-            resume: bool,
-        ) -> Any:
-            raise NotImplementedError
-
-        def list_checkpoints(self, vm: Any, ctx: Any) -> tuple[Any, ...]:
-            raise NotImplementedError
-
-        def restore_checkpoint(
-            self,
-            vm: Any,
-            checkpoint: Any,
-            ctx: Any,
-            *,
-            operation_id: str,
-        ) -> None:
-            raise NotImplementedError
-
-        def delete_checkpoint(self, vm: Any, checkpoint: Any, ctx: Any) -> None:
-            raise NotImplementedError
-
         def status(self, vm: Any, ctx: Any) -> Any:
             raise NotImplementedError
 

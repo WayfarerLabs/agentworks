@@ -4,13 +4,9 @@ the site's tagged platform ``placement`` selects."""
 from __future__ import annotations
 
 import contextlib
-import ctypes
-import errno
 import json
-import os
 import re
 import shlex
-import stat
 import subprocess
 import sys
 import textwrap
@@ -23,12 +19,7 @@ from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
 from pydantic import Field
 
 from agentworks import output
-from agentworks.capabilities.vm_platform.base import (
-    CheckpointDescriptor,
-    ProvisionRequest,
-    ProvisionResult,
-    VMPlatform,
-)
+from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.capabilities.vm_platform.bootstrap_script import (
     REBOOT_SENTINEL_PATH,
     generate_bootstrap_script,
@@ -39,7 +30,6 @@ from agentworks.capabilities.vm_platform.debian_release import (
     code_owned_release_value,
     verify_provisioned_release,
 )
-from agentworks.capabilities.vm_platform.lima_checkpoints import LimaCheckpointOperations
 from agentworks.capabilities.vm_platform.tailscale_join import TAILSCALE_JOIN_STDIN_COMMAND
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
@@ -67,43 +57,6 @@ _REBOOT_CLEAR_MARKER = "AGW_REBOOT_CLEAR"
 _REMOTE_TEMPLATE_ROOT = "/tmp"
 _REMOTE_TEMPLATE_PREFIX = "agentworks-lima-template."
 _REMOTE_TEMPLATE_RANDOM_LENGTH = 10
-
-
-def _rename_directory_exclusive(source: str, target: str) -> None:
-    """Atomically rename one real directory without replacing a target."""
-    source_stat = os.lstat(source)
-    if not stat.S_ISDIR(source_stat.st_mode):
-        raise OSError(errno.EINVAL, "rename source is not a directory", source)
-    parent_stat = os.stat(os.path.dirname(source))
-    if source_stat.st_dev != parent_stat.st_dev:
-        raise OSError(errno.EXDEV, "rename source is a mounted filesystem", source)
-    try:
-        os.lstat(target)
-    except FileNotFoundError:
-        pass
-    else:
-        raise FileExistsError(errno.EEXIST, "rename target already exists", target)
-
-    libc = ctypes.CDLL(None, use_errno=True)
-    encoded_source = os.fsencode(source)
-    encoded_target = os.fsencode(target)
-    try:
-        if sys.platform == "darwin":
-            rename = libc.renamex_np
-            rename.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint)
-            result = rename(encoded_source, encoded_target, 0x00000004)  # RENAME_EXCL
-        elif sys.platform.startswith("linux"):
-            rename = libc.renameat2
-            rename.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
-            result = rename(-100, encoded_source, -100, encoded_target, 1)  # AT_FDCWD, RENAME_NOREPLACE
-        else:
-            raise AttributeError
-    except AttributeError as error:
-        raise OSError(errno.ENOTSUP, "exclusive directory rename is unsupported on this host") from error
-    if result != 0:
-        error_number = ctypes.get_errno()
-        raise OSError(error_number, os.strerror(error_number), target)
-
 
 # Lima template for Debian cloud VMs (values substituted at create time).
 # The provision block runs the non-secret bootstrap script (user, packages,
@@ -227,15 +180,6 @@ class LimaPlatform(VMPlatform):
         Creation retains a credential-free provision script, then sends the required
         Tailscale key through one fixed guest command on stdin. It returns only after
         the join succeeds, or raises after removing the partial instance.
-
-        Managed checkpoints use native snapshots for QEMU instances and stopped,
-        protected recovery clones for VZ instances. Never start a recovery clone: it
-        contains the same guest and Tailscale identity. VZ restore validates Lima's
-        reported sibling directories and uses atomic stopped-instance moves because
-        Lima 2.2's public rename is not atomic. VZ checkpoint creation and restore
-        must run on the Lima host through local placement; SSH placement refuses
-        before mutation. VZ checkpoints require the VM to have no Lima additional
-        disks.
 
         Local sites need `limactl` installed here and report not-ready without it.
         Remote sites need `ssh` installed locally.
@@ -810,53 +754,6 @@ class LimaPlatform(VMPlatform):
         output.info(f"Deleting Lima VM '{vm.name}'...")
         self._delete_instance(self._instance_name(vm))
         output.info(f"Lima VM '{vm.name}' deleted")
-
-    def _checkpoint_operations(self, vm: VMRow) -> LimaCheckpointOperations:
-        return LimaCheckpointOperations(
-            vm_name=vm.name,
-            instance_name=self._instance_name(vm),
-            run=self._run_lima,
-            rename=None if self.is_remote else _rename_directory_exclusive,
-        )
-
-    def create_checkpoint(
-        self,
-        vm: VMRow,
-        name: str,
-        ctx: RunContext,
-        *,
-        operation_id: str,
-        resume: bool,
-    ) -> CheckpointDescriptor:
-        del ctx, resume
-        return self._checkpoint_operations(vm).create(
-            name,
-            operation_id=operation_id,
-        )
-
-    def list_checkpoints(self, vm: VMRow, ctx: RunContext) -> tuple[CheckpointDescriptor, ...]:
-        del ctx
-        return self._checkpoint_operations(vm).list()
-
-    def restore_checkpoint(
-        self,
-        vm: VMRow,
-        checkpoint: CheckpointDescriptor,
-        ctx: RunContext,
-        *,
-        operation_id: str,
-    ) -> None:
-        del ctx
-        self._checkpoint_operations(vm).restore(checkpoint, operation_id=operation_id)
-
-    def delete_checkpoint(
-        self,
-        vm: VMRow,
-        checkpoint: CheckpointDescriptor,
-        ctx: RunContext,
-    ) -> None:
-        del ctx
-        self._checkpoint_operations(vm).delete(checkpoint)
 
     def display_backend_name(self, vm: VMRow) -> str:
         instance = str(vm.platform_metadata.get("instance_name", vm.name))

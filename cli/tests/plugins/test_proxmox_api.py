@@ -127,31 +127,6 @@ class TestResponseParsing:
         assert len(result) == 2
         assert result[1]["name"] == "eth0"
 
-    @pytest.mark.parametrize("snapshot_data", [None, ["not-an-object"], [{}], [{"name": ""}]])
-    @patch("urllib.request.urlopen")
-    def test_snapshot_inventory_rejects_malformed_data(
-        self,
-        mock_urlopen: MagicMock,
-        api: ProxmoxAPI,
-        snapshot_data: Any,
-    ) -> None:
-        mock_urlopen.return_value = _mock_response(snapshot_data)
-
-        with pytest.raises(ProxmoxAPIError):
-            api.list_snapshots("pve", 100)
-
-    @pytest.mark.parametrize("snapshot_data", [[], [{"name": "agw-123", "description": "managed"}]])
-    @patch("urllib.request.urlopen")
-    def test_snapshot_inventory_accepts_named_objects(
-        self,
-        mock_urlopen: MagicMock,
-        api: ProxmoxAPI,
-        snapshot_data: list[dict[str, Any]],
-    ) -> None:
-        mock_urlopen.return_value = _mock_response(snapshot_data)
-
-        assert api.list_snapshots("pve", 100) == snapshot_data
-
 
 class TestErrorHandling:
     """Test error handling."""
@@ -263,32 +238,6 @@ class TestVMOperations:
         req = mock_urlopen.call_args[0][0]
         assert req.get_method() == "PUT"
         assert "/resize" in req.full_url
-
-    @patch("urllib.request.urlopen")
-    def test_create_snapshot_is_disk_only(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
-        mock_urlopen.return_value = _mock_response("UPID:pve:snapshot")
-        result = api.create_snapshot("pve", 100, "agw-123", description="managed")
-
-        req = mock_urlopen.call_args[0][0]
-        assert result == "UPID:pve:snapshot"
-        assert req.get_method() == "POST"
-        assert req.full_url.endswith("/nodes/pve/qemu/100/snapshot")
-        assert b"snapname=agw-123" in req.data
-        assert b"vmstate=0" in req.data
-
-    @patch("urllib.request.urlopen")
-    def test_snapshot_restore_and_delete_encode_name(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
-        mock_urlopen.return_value = _mock_response("UPID:pve:checkpoint")
-
-        api.rollback_snapshot("pve", 100, "agw name")
-        restore = mock_urlopen.call_args[0][0]
-        api.delete_snapshot("pve", 100, "agw name")
-        delete = mock_urlopen.call_args[0][0]
-
-        assert restore.get_method() == "POST"
-        assert restore.full_url.endswith("/snapshot/agw%20name/rollback")
-        assert delete.get_method() == "DELETE"
-        assert delete.full_url.endswith("/snapshot/agw%20name")
 
 
 class TestTaskOperations:

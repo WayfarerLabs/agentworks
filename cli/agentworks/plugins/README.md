@@ -214,20 +214,6 @@ names the exact vm-site field. A successful result may omit the Tailscale IP onl
 succeeded but IP discovery did not; the manager then performs IP-only rediscovery and Tailscale SSH
 verification.
 
-Version 1 also requires `create_checkpoint`, `list_checkpoints`, `restore_checkpoint`, and
-`delete_checkpoint`. They are not optional capability probes. Creation is offline and replay-safe by
-the core-generated `agw-*` name plus the keyword-only `operation_id` and `resume` inputs; listing
-returns only Agentworks-owned artifacts bound to the exact VM incarnation, including incomplete
-create artifacts that still require cleanup. Restore receives its own keyword-only `operation_id`,
-preserves the logical VM identity, replays only that attempt, and returns it stopped; deletion
-proves the artifact and any retained emergency intermediate are absent. Vm-platform is internal, so
-the descriptor and every bundled implementation mutate together without an older-contract adapter.
-Registration rejects an inconsistent bundled implementation or a required method left abstract. A
-concrete method that reports checkpoints unsupported still violates the contract, but registration
-cannot infer that semantic failure; provider tests must exercise the lifecycle. The full descriptor
-and destructive-restore rules are in
-[`../capabilities/vm_platform/README.md`](../capabilities/vm_platform/README.md).
-
 An operator-owned release catalog also overrides the pure `validate_create_release(release)` hook.
 Core calls it with the concrete selection before resolving secrets or running authenticated platform
 readiness, while `create()` repeats the lookup before mutation. Do not turn that operation-specific

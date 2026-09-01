@@ -109,14 +109,6 @@ class ProvisionResult:
     tailscale_ip: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class CheckpointDescriptor:
-    """Opaque identity of one Agentworks-managed platform checkpoint."""
-
-    name: str
-    identifier: str
-
-
 class VMPlatform(Capability):
     """Capability: the code that runs VMs on one backend kind.
 
@@ -137,12 +129,13 @@ class VMPlatform(Capability):
     ``contract_version``, ``config_model``, and
     ``legacy_platform_metadata``.
 
-    Idempotency: ops flagged with ``@idempotent_op`` (power lifecycle plus
-    checkpoint create, restore, and delete) must land in the same place run
-    twice as run once. ``create`` is deliberately unflagged: it is one-shot
-    per VM. A platform must collision-check its intended backend name and
-    either fail loudly or select and persist a different collision-free name,
-    never target or replace the existing resource.
+    Idempotency: ops flagged with ``@idempotent_op`` (``start``,
+    ``stop``, ``delete``) must land in the same place run twice as run
+    once (``reinit`` re-applies everything and failed commands are
+    retried). ``create`` is deliberately unflagged: it is one-shot per
+    VM. A platform must collision-check its intended backend name and
+    either fail loudly or select and persist a different collision-free
+    name, never target or replace the existing resource.
     """
 
     owner_kind: ClassVar[str] = "vm-site"
@@ -299,59 +292,6 @@ class VMPlatform(Capability):
         auxiliary resources an operator can still find and remove
         (azure's NIC/IP/NSG/disk sweep); the VM itself is the gate,
         which azure enforces with a post-teardown existence probe."""
-
-    @idempotent_op
-    @abstractmethod
-    def create_checkpoint(
-        self,
-        vm: VMRow,
-        name: str,
-        ctx: RunContext,
-        *,
-        operation_id: str,
-        resume: bool,
-    ) -> CheckpointDescriptor:
-        """Create or discover a completed offline checkpoint named by core.
-
-        The VM is stopped before entry. Implementations bind the artifact to
-        the exact backend VM incarnation, make replay by ``name`` and the
-        persisted ``operation_id`` safe, and return only after completion and
-        ownership are proved. ``resume`` distinguishes a retry of an existing
-        creating row from its first provider attempt.
-        """
-
-    @abstractmethod
-    def list_checkpoints(self, vm: VMRow, ctx: RunContext) -> tuple[CheckpointDescriptor, ...]:
-        """List only Agentworks-managed checkpoints bound to this VM incarnation."""
-
-    @idempotent_op
-    @abstractmethod
-    def restore_checkpoint(
-        self,
-        vm: VMRow,
-        checkpoint: CheckpointDescriptor,
-        ctx: RunContext,
-        *,
-        operation_id: str,
-    ) -> None:
-        """Restore the same logical VM from ``checkpoint`` and leave it stopped.
-
-        A destructive implementation retains a recoverable intermediate until
-        core can attest the restored guest. Replay with the same
-        ``operation_id`` must converge or raise with precise repair guidance;
-        a different operation identity is a new explicit restore and must
-        reapply the checkpoint.
-        """
-
-    @idempotent_op
-    @abstractmethod
-    def delete_checkpoint(
-        self,
-        vm: VMRow,
-        checkpoint: CheckpointDescriptor,
-        ctx: RunContext,
-    ) -> None:
-        """Delete ``checkpoint`` and prove it absent; absence is success."""
 
     @abstractmethod
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
