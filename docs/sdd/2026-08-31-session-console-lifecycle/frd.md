@@ -153,8 +153,9 @@ start.
 sessions unchanged. The existing VM, workspace, agent, and admin filters MUST remain available and
 retain their current composition rules. `--force-new` MUST apply the fresh policy to every selected
 stopped session, while an already-running selected session MUST produce the same actionable error as
-the named command rather than be replaced. The canonical start command MUST NOT need a redundant
-`--all-stopped` spelling.
+the named command rather than be replaced. That per-session error MUST NOT prevent other selected
+stopped sessions from starting; the batch MUST retain aggregate partial-failure reporting. The
+canonical start command MUST NOT need a redundant `--all-stopped` spelling.
 
 ### R3: Session restart
 
@@ -202,7 +203,8 @@ stoppable session. A destructive parent-resource teardown MUST remain able to ap
 best-effort or fail-closed cleanup policy when an integration cannot be reconstructed or its hook
 cannot run; the optional cooperative hook does not become a new deletion dependency. Batch stop,
 restart, and cascading teardown MUST retain one bounded, scalable grace phase rather than waiting
-serially for every session.
+serially for every session. Cooperative hook commands in a batch MUST be dispatched within one
+batch-wide request budget; they MUST NOT add one serial timeout per session before the grace phase.
 
 Shared teardown logic used by stop, restart, direct delete, and cascading delete MUST have one core
 authority with explicit policy inputs for their real differences. The implementation MUST remove
@@ -223,22 +225,29 @@ start MUST use the same realization operation as `console start`; create MUST NO
 console-building implementation. If the definition is valid and persisted but remote realization
 fails, Agentworks MUST retain the definition, report that it was created but is not running, and
 identify `console start NAME` as the retry. It MUST NOT report an unqualified successful create.
-Because a deleted predecessor may have left a same-name tmux runtime behind after best-effort
-cleanup, initial create MUST never adopt an existing runtime by name. After resolving everything
-needed for the replacement, it MUST prove the predecessor runtime absent or remove it through the
-console's core teardown operation and verify removal. Until that boundary succeeds, create MUST fail
-without leaving the new durable definition addressable. Only after predecessor absence is verified
-may a later build failure retain the definition for an ordinary `console start` retry. This is a
-policy input to the one realization operation, not a second builder or a new persisted
-runtime-generation model.
+Realization MUST publish the canonical runtime identity only after every required construction step
+succeeds. Any managed partial-build artifact MUST have an identity that cannot collide with another
+console's canonical runtime and MUST be removed and verified absent before an ordinary build failure
+is reported. Because a deleted predecessor may have left a same-name tmux runtime behind after
+best-effort cleanup, initial create MUST never adopt an existing runtime by name. After resolving
+everything needed for the replacement, it MUST prove the predecessor runtime absent or remove it
+through the console's core teardown operation and verify removal. Until that boundary succeeds,
+create MUST fail without leaving the new durable definition addressable. Only after predecessor
+absence is verified may a later build failure retain the definition for an ordinary `console start`
+retry. This is a policy input to the one realization operation, not a second builder or a new
+persisted runtime-generation model.
 
 `console start NAME` MUST build the tmux runtime from the complete current definition when it is
 absent. If it is already running, start MUST succeed without rebuilding it or resolving pane
 secrets. Pane environment secrets and other inputs needed to open new shells MUST resolve before the
-first runtime mutation.
+first construction mutation. A residual managed partial-build artifact is not a running console:
+start MUST remove and verify it before resolving construction-only secrets or building, while attach
+MUST refuse without mutating it. That cleanup is an intentional recovery step, not construction, and
+MUST NOT prompt for pane secrets that may never be used.
 
-`console stop NAME` MUST remove only the live Agentworks console tmux runtime. It MUST retain the
-console definition, membership, ordering, and shell declarations. Repeated stop of an absent runtime
+`console stop NAME` MUST remove only the live Agentworks console tmux runtime and any managed
+partial-build artifact for that definition. It MUST retain the console definition, membership,
+ordering, and shell declarations. Repeated stop after both managed runtime identities are absent
 MUST be an idempotent success.
 
 `console restart NAME` MUST rebuild the runtime from the complete current definition. It MUST
@@ -252,11 +261,15 @@ transport credential boundaries required to reach the machine, just as session a
 the console runtime is absent, it MUST fail with guidance to run `console start NAME`.
 
 `console delete` MUST continue to remove the durable definition and perform best-effort cleanup of
-its runtime. It MUST remain distinct from stop.
+both canonical and partial managed runtime artifacts. It MUST remain distinct from stop.
 
 Console list, describe, names-only output, and shell completion MUST remain DB-only and free of live
 runtime probes. Operators can invoke idempotent start or receive attach's actionable not-running
 error without turning inspection into a remote operation.
+
+Every tmux target used by console lifecycle MUST select the full generated session name exactly.
+Prefix matching MUST NOT permit one console or staging artifact to inspect, attach to, rename, or
+remove another console whose name merely shares a prefix.
 
 ### R6: Harness start and graceful-stop boundary
 
@@ -323,7 +336,7 @@ operation actually does. The cutover includes:
   manifests, plugin-author guidance, and capability documentation;
 - guide concepts, CLI and command reference documentation, operator guides, root and package
   READMEs, upgrade guidance, and release notes; and
-- tests, fixtures, fakes, and structural drift guards.
+- tests, fixtures, fakes, and structural contract coverage.
 
 The word `resume` MAY remain only where it truthfully describes harness-level continuation, such as
 an external tool's resume flag, a continuation decision, or historical material. It MUST NOT remain
@@ -400,12 +413,13 @@ attach. Runtime creation MUST not be hidden behind inspection, list, completion,
    redundant canonical `--all-stopped` form.
 10. The bounded compatibility commands dispatch through canonical operations and are absent from
     canonical help, completion, examples, and documentation.
-11. A scoped current-surface inventory finds retired lifecycle terminology only in bounded
+11. A one-time scoped current-surface review finds retired lifecycle terminology only in bounded
     compatibility code, genuine harness continuation behavior, third-party commands, or historical
-    artifacts.
+    artifacts; persistent tests guard removed APIs and canonical behavior rather than words.
 12. Permanent docs and guide content explain the lifecycle without depending on this SDD.
-13. Focused CLI, service, orchestration, secret-boundary, capability-contract, completion, and live
-    console/session tests demonstrate the new state transitions on every supported target shape.
+13. Focused deterministic CLI, service, orchestration, secret-boundary, capability-contract, and
+    completion tests demonstrate the full state matrix; representative live console/session tests
+    cover admin and agent targets plus continuation and forced-fresh behavior.
 14. Direct and cascading session teardown route through one core stop authority; the harness hook is
     offered where possible, and an unavailable optional hook does not prevent required deletion
     cleanup.
