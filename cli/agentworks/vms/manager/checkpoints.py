@@ -685,7 +685,13 @@ def restore_checkpoint(
                     entity_name=name,
                     hint=f"Run 'agw vm stop {name}', then retry.",
                 )
-        descriptor = _reconcile_ready_checkpoint(platform, vm, ops_ctx, row)
+        if row.state is VMCheckpointState.READY:
+            descriptor = _reconcile_ready_checkpoint(platform, vm, ops_ctx, row)
+        else:
+            # The platform owns reconciliation once a restore is durable.
+            # Its provider may be inside a transient state that ordinary
+            # checkpoint inventory cannot represent or even enumerate.
+            descriptor = _descriptor_from_row(row)
         if not yes and not output.confirm(
             f"Restore VM '{name}' to its managed checkpoint? Current guest disk changes will be replaced.",
             default=False,

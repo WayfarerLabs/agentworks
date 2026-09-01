@@ -334,12 +334,12 @@ process having warmed a credential cache.
   answers "could any config of this platform ever work on this host," and is the **platform node's
   own** readiness in the fold. WSL2 is the only platform that overrides it (`"Windows only"` off
   Windows). Lima deliberately does not: an ssh-placed site runs `limactl` on the placement host and
-  needs nothing locally.
+  needs only the local `ssh` client.
 - `not_ready(config) -> Readiness` (inherited from `Capability`, default ready) is a
   **non-constructing classmethod**: "is a site with THIS config ready," host-introspection only, no
-  network or secrets, no instance built. A local Lima site with no `limactl` is not-ready. WSL2
-  reports a site with no `wsl` on PATH not-ready even on Windows. The fold calls it off the
-  graph-carried impl to fold into the vm-site's verdict.
+  network or secrets, no instance built. A local Lima site with no `limactl` and an ssh-placed site
+  with no `ssh` are not-ready. WSL2 reports a site with no `wsl` on PATH not-ready even on Windows.
+  The fold calls it off the graph-carried impl to fold into the vm-site's verdict.
 
 **Class-level contract**. `contract_version`, `config_model`, `name`, and `description` are all
 REQUIRED and none is defaulted, because a default would let an unmigrated implementation inherit a

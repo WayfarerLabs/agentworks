@@ -57,9 +57,8 @@ class LimaCheckpointHost:
         instance_name: str,
         *,
         required: bool = True,
-        recovery_target: str | None = None,
     ) -> dict[str, Any] | None:
-        if not required and instance_name not in self.names(recovery_target=recovery_target):
+        if not required and instance_name not in self.names():
             return None
         try:
             listing = self.run(f"limactl list --json {shlex.quote(instance_name)}")
@@ -259,13 +258,6 @@ class LimaCheckpointHost:
         source_dir = self.instance_dir(source_record, source)
         target_dir = posixpath.join(posixpath.dirname(source_dir), target)
         try:
-            # Lima inventory ignores filesystem entries such as broken symlinks.
-            # Prove the host paths themselves before an exact-path, exclusive
-            # rename so a target entry cannot become a destination directory.
-            self.run(f"/bin/test -d {shlex.quote(source_dir)}")
-            self.run(f"/bin/test ! -L {shlex.quote(source_dir)}")
-            self.run(f"/bin/test ! -e {shlex.quote(target_dir)}")
-            self.run(f"/bin/test ! -L {shlex.quote(target_dir)}")
             self.rename(source_dir, target_dir)
         except (OSError, SSHError) as error:
             raise StateError(

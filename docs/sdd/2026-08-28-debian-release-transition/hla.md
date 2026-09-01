@@ -423,8 +423,9 @@ both lifecycle state and operation identifier.
 
 A persisted `restoring` row is the one exception to requiring the original provider identity to be
 observable at resume entry. A destructive platform can be interrupted between renaming or replacing
-the old resource and installing the recovered resource. Core permits `unknown` status only for that
-already-claimed restore and delegates reconciliation with the same operation identity. A reported
+the old resource and installing the recovered resource. Core resumes from the persisted descriptor
+without requiring ordinary provider inventory first, permits `unknown` status only for that
+already-claimed restore, and delegates reconciliation with the same operation identity. A reported
 running state still fails with stop guidance, and the platform must return and prove the logical VM
 stopped before core begins restored-guest attestation.
 

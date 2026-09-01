@@ -182,7 +182,7 @@ class LimaLocalPlacement(AgwModel):
 class LimaSshPlacement(AgwModel):
     """Run limactl on another host over SSH.
 
-    The VMs live on a shared box and nothing but SSH is needed here.
+    The VMs live on a shared box and the local OpenSSH client is required.
     """
 
     mode: Literal["ssh"]
@@ -222,7 +222,7 @@ class LimaPlatform(VMPlatform):
         to `{mode: local}`: `limactl` runs on this machine, which is what the
         built-in `lima-local` site is. `placement: {mode: ssh, host: me@gpu-box}`
         runs `limactl` on that host over SSH, so the VMs live on a shared box and
-        nothing but SSH is needed here.
+        only the local OpenSSH client is needed here.
 
         Creation retains a credential-free provision script, then sends the required
         Tailscale key through one fixed guest command on stdin. It returns only after
@@ -238,12 +238,12 @@ class LimaPlatform(VMPlatform):
         disks.
 
         Local sites need `limactl` installed here and report not-ready without it.
-        Remote sites need nothing locally.
+        Remote sites need `ssh` installed locally.
         """,
     )
     # No unsupported_reason override: the platform is supported on
     # every host, because remote-Lima sites run limactl on the placement
-    # host and need nothing locally.
+    # host and need only the portable OpenSSH client locally.
 
     @classmethod
     def not_ready(cls, config: Mapping[str, object]) -> Readiness:
@@ -258,11 +258,15 @@ class LimaPlatform(VMPlatform):
         if "placement" in config:
             placement = config.get("placement")
             local = isinstance(placement, Mapping) and placement.get("mode") == "local"
+            remote = isinstance(placement, Mapping) and placement.get("mode") == "ssh"
         else:
             local = isinstance(LimaConfig.model_fields["placement"].default, LimaLocalPlacement)
+            remote = False
         import shutil
 
         if not local:
+            if remote and not shutil.which("ssh"):
+                return Readiness.blocked("ssh not installed")
             return Readiness.ready()
         if not shutil.which("limactl"):
             return Readiness.blocked("limactl not installed")
@@ -812,11 +816,8 @@ class LimaPlatform(VMPlatform):
             vm_name=vm.name,
             instance_name=self._instance_name(vm),
             run=self._run_lima,
-            rename=None if self.is_remote else self._rename_lima_instance_directory,
+            rename=None if self.is_remote else _rename_directory_exclusive,
         )
-
-    def _rename_lima_instance_directory(self, source: str, target: str) -> None:
-        _rename_directory_exclusive(source, target)
 
     def create_checkpoint(
         self,

@@ -527,6 +527,11 @@ def test_interrupted_restore_reuses_its_persisted_operation_identity(
     # provider identity while it swaps in the recovered one. The provider's
     # replay-safe restore owns reconciliation from this persisted state.
     platform.power = VMStatus.UNKNOWN
+    monkeypatch.setattr(
+        platform,
+        "list_checkpoints",
+        lambda *args, **kwargs: (_ for _ in ()).throw(StateError("transient inventory is unreadable")),
+    )
     monkeypatch.setattr("agentworks.transports.native_transport", lambda *args, **kwargs: object())
     monkeypatch.setattr(
         "agentworks.debian.probe_debian_release",

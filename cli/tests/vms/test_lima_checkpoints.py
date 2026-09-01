@@ -50,7 +50,6 @@ class _LimaBackend:
         self.incomplete_instances: set[str] = set()
         self.broken_instances: set[str] = set()
         self.inventory_failure = False
-        self.symlink_paths: set[str] = set()
         self.interrupt_after_move: int | None = None
         self.interrupt_after_role: str | None = None
         self.move_count = 0
@@ -78,22 +77,6 @@ class _LimaBackend:
                 )
             record = self.instances.get(argv[3])
             return json.dumps(record) if record is not None else ""
-        if argv[0] == "/bin/test":
-            negated = argv[1] == "!"
-            predicate_index = 2 if negated else 1
-            predicate = argv[predicate_index]
-            path = argv[predicate_index + 1]
-            existing_dirs = {str(record["dir"]) for record in self.instances.values()}
-            result = {
-                "-d": path in existing_dirs,
-                "-e": path in existing_dirs,
-                "-L": path in self.symlink_paths,
-            }[predicate]
-            if negated:
-                result = not result
-            if not result:
-                raise OSError(f"test failed: {command}")
-            return ""
         if argv[1:3] == ["snapshot", "list"]:
             return "\n".join(self.snapshots)
         if argv[1:3] == ["snapshot", "create"]:
@@ -125,12 +108,6 @@ class _LimaBackend:
         if argv[1] == "unprotect":
             if argv[2] in self.instances:
                 self.instances[argv[2]]["protected"] = False
-            return ""
-        if argv[1] == "rename":
-            source, target = argv[-2:]
-            record = self.instances.pop(source)
-            record.update(name=target, dir=f"/fake-lima/{target}")
-            self.instances[target] = record
             return ""
         if argv[1] == "delete":
             self.instances.pop(argv[-1], None)
@@ -176,7 +153,8 @@ def _platform(monkeypatch: pytest.MonkeyPatch, backend: _LimaBackend) -> LimaPla
         lambda self, command, **kwargs: backend.run(command, **kwargs),
     )
     monkeypatch.setattr(
-        LimaPlatform, "_rename_lima_instance_directory", lambda self, source, target: backend.rename(source, target)
+        "agentworks.capabilities.vm_platform.lima._rename_directory_exclusive",
+        backend.rename,
     )
     return platform
 
@@ -299,7 +277,16 @@ def test_remote_vz_checkpoint_creation_refuses_before_mutation(
         _create_checkpoint(platform, _vm(), _CHECKPOINT_NAME, RunContext())
 
     assert not any(
-        command.startswith(("limactl clone ", "limactl edit ", "limactl protect ", "limactl snapshot "))
+        command.startswith(
+            (
+                "limactl clone ",
+                "limactl edit ",
+                "limactl protect ",
+                "limactl unprotect ",
+                "limactl delete ",
+                "limactl snapshot ",
+            )
+        )
         for command in backend.commands
     )
 
@@ -329,7 +316,19 @@ def test_remote_vz_checkpoint_restore_refuses_before_mutation(
         )
 
     assert backend.move_count == 0
-    assert not any(command.startswith("limactl clone ") for command in backend.commands[command_count:])
+    assert not any(
+        command.startswith(
+            (
+                "limactl clone ",
+                "limactl edit ",
+                "limactl protect ",
+                "limactl unprotect ",
+                "limactl delete ",
+                "limactl snapshot ",
+            )
+        )
+        for command in backend.commands[command_count:]
+    )
 
 
 def test_restore_rejects_a_foreign_provider_identifier(
@@ -647,23 +646,6 @@ def test_vz_restore_refuses_a_noncanonical_lima_instance_directory(
     with pytest.raises(StateError):
         platform.restore_checkpoint(vm, descriptor, RunContext(), operation_id="restore-1")  # type: ignore[arg-type]
 
-    assert backend.move_count == 0
-
-
-def test_vz_restore_refuses_a_hidden_target_symlink_before_move(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    backend = _LimaBackend(vm_type="vz")
-    platform = _platform(monkeypatch, backend)
-    vm = _vm()
-    descriptor = _create_checkpoint(platform, vm, _CHECKPOINT_NAME, RunContext())
-    emergency = f"agwem-{descriptor.identifier.removeprefix('agwcp-')}"
-    backend.symlink_paths.add(f"/fake-lima/{emergency}")
-
-    with pytest.raises(StateError):
-        platform.restore_checkpoint(vm, descriptor, RunContext(), operation_id="restore-1")  # type: ignore[arg-type]
-
-    assert "agw-dev" in backend.instances
     assert backend.move_count == 0
 
 
