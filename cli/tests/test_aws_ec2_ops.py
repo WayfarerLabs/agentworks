@@ -10,12 +10,11 @@ import gzip
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
-from uuid import UUID
 
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.vm_platform import ProvisionRequest, RetainedDeletionError, RetainedProvisioningError
+from agentworks.capabilities.vm_platform import ProvisionRequest, RetainedProvisioningError
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
@@ -203,7 +202,6 @@ class TestCreate:
         _platform(subnet_id="subnet-abc").create(_request(), RunContext(config=_config()))
 
         kw = rec.kwargs_for("run_instances")
-        assert UUID(kw["ClientToken"]).version == 4
         assert "SecurityGroupIds" not in kw
         assert "SubnetId" not in kw
         (nic,) = kw["NetworkInterfaces"]
@@ -405,6 +403,19 @@ class TestCreateRollback:
         assert caught.value.platform_metadata["account_id"] == "111122223333"
         assert caught.value.platform_metadata["create_incomplete"] == "true"
 
+    def test_run_failure_cleans_the_known_security_group(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = install_fakes(monkeypatch)
+        monkeypatch.setattr(
+            "tests._aws_fakes._FakeEC2.run_instances",
+            lambda self, **kwargs: (_ for _ in ()).throw(unreachable()),
+        )
+
+        with pytest.raises(EC2Error):
+            _platform().create(_request(), RunContext(config=_config()))
+
+        assert "terminate_instances" not in rec.methods("ec2")
+        assert rec.methods("ec2").count("delete_security_group") == 1
+
     def test_security_group_only_failure_remains_deletable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = install_fakes(
             monkeypatch,
@@ -423,138 +434,6 @@ class TestCreateRollback:
         assert "instance_id" not in metadata
         platform.delete(SimpleNamespace(name="dev", platform_metadata=metadata), RunContext())  # type: ignore[arg-type]
         assert rec.methods("ec2").count("delete_security_group") == 3
-
-    def test_lost_run_response_reconciles_and_cleans_the_owned_instance(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        controls = Controls(client_token_instance=True)
-        rec = install_fakes(monkeypatch, controls)
-
-        def _lose_response(self: Any, **kwargs: object) -> object:
-            self._record("run_instances", **kwargs)
-            raise unreachable()
-
-        monkeypatch.setattr("tests._aws_fakes._FakeEC2.run_instances", _lose_response)
-
-        with pytest.raises(EC2Error):
-            _platform().create(_request(), RunContext(config=_config()))
-
-        token = rec.kwargs_for("run_instances")["ClientToken"]
-        token_reads = [
-            kwargs
-            for service, method, kwargs in rec.calls
-            if service == "ec2" and method == "describe_instances" and kwargs.get("Filters")
-        ]
-        assert {
-            item["Values"][0] for read in token_reads for item in read["Filters"] if item["Name"] == "client-token"
-        } == {token}
-        assert rec.kwargs_for("terminate_instances") == {"InstanceIds": ["i-123"]}
-
-    def test_interrupt_during_lost_response_reconciliation_retains_the_token(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        from tests import _aws_fakes
-
-        rec = install_fakes(monkeypatch)
-        original_describe = _aws_fakes._FakeEC2.describe_instances
-
-        def _lose_response(self: Any, **kwargs: object) -> object:
-            self._record("run_instances", **kwargs)
-            raise unreachable()
-
-        def _interrupt_token_read(self: Any, **kwargs: Any) -> dict[str, Any]:
-            filters = kwargs.get("Filters", [])
-            if any(item.get("Name") == "client-token" for item in filters):
-                raise KeyboardInterrupt("stop reconciliation")
-            return original_describe(self, **kwargs)
-
-        monkeypatch.setattr("tests._aws_fakes._FakeEC2.run_instances", _lose_response)
-        monkeypatch.setattr("tests._aws_fakes._FakeEC2.describe_instances", _interrupt_token_read)
-
-        with pytest.raises(RetainedProvisioningError) as caught:
-            _platform().create(_request(), RunContext(config=_config()))
-
-        assert isinstance(caught.value.__cause__, KeyboardInterrupt)
-        assert caught.value.platform_metadata["client_token"] == rec.kwargs_for("run_instances")["ClientToken"]
-        assert "instance_id" not in caught.value.platform_metadata
-        assert "terminate_instances" not in rec.methods("ec2")
-        assert "delete_security_group" not in rec.methods("ec2")
-
-    @pytest.mark.parametrize(
-        ("backend_name", "security_group_id"),
-        [("other", "sg-123"), ("dev", "sg-other")],
-    )
-    def test_lost_run_response_retains_an_unowned_reconciliation(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        backend_name: str,
-        security_group_id: str,
-    ) -> None:
-        install_fakes(
-            monkeypatch,
-            Controls(
-                client_token_instance=True,
-                instance_backend_name=backend_name,
-                instance_security_group_id=security_group_id,
-            ),
-        )
-
-        def _lose_response(self: Any, **kwargs: object) -> object:
-            self._record("run_instances", **kwargs)
-            raise unreachable()
-
-        monkeypatch.setattr("tests._aws_fakes._FakeEC2.run_instances", _lose_response)
-
-        with pytest.raises(RetainedProvisioningError) as caught:
-            _platform().create(_request(), RunContext(config=_config()))
-
-        assert "instance_id" not in caught.value.platform_metadata
-        assert "client_token" in caught.value.platform_metadata
-
-    def test_retained_lost_response_resolves_by_token_on_delete(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        controls = Controls(sg_delete_errors=[client_error("AccessDenied", "denied", "DeleteSecurityGroup")])
-        rec = install_fakes(monkeypatch, controls)
-
-        def _lose_response(self: Any, **kwargs: object) -> object:
-            self._record("run_instances", **kwargs)
-            raise unreachable()
-
-        monkeypatch.setattr("tests._aws_fakes._FakeEC2.run_instances", _lose_response)
-        platform = _platform()
-
-        with pytest.raises(RetainedProvisioningError) as caught:
-            platform.create(_request(), RunContext(config=_config()))
-
-        metadata = caught.value.platform_metadata
-        assert "instance_id" not in metadata
-        assert metadata["client_token"] == rec.kwargs_for("run_instances")["ClientToken"]
-
-        controls.client_token_instance = True
-        with pytest.raises(RetainedDeletionError) as retained:
-            platform.delete(SimpleNamespace(name="dev", platform_metadata=metadata), RunContext())  # type: ignore[arg-type]
-        assert retained.value.platform_metadata["instance_id"] == "i-123"
-        with pytest.raises(RetainedDeletionError) as accepted:
-            platform.delete(  # type: ignore[arg-type]
-                SimpleNamespace(name="dev", platform_metadata=retained.value.platform_metadata),
-                RunContext(),
-            )
-        assert accepted.value.platform_metadata["termination_accepted"] == "true"
-        assert "client_token" not in accepted.value.platform_metadata
-        platform.delete(  # type: ignore[arg-type]
-            SimpleNamespace(name="dev", platform_metadata=accepted.value.platform_metadata), RunContext()
-        )
-        assert rec.kwargs_for("terminate_instances") == {"InstanceIds": ["i-123"]}
-
-    def test_retained_partial_create_allows_detached_group_cleanup(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        rec = install_fakes(monkeypatch, Controls(instance_security_group_id="sg-detached"))
-        metadata = _vm().platform_metadata | {"create_incomplete": "true"}
-
-        _platform().delete(SimpleNamespace(name="dev", platform_metadata=metadata), RunContext())  # type: ignore[arg-type]
-
-        assert "terminate_instances" in rec.methods("ec2")
-        assert rec.methods("ec2").count("delete_security_group") == 2
 
     @pytest.mark.parametrize(
         ("failure_command", "message", "expected_commands"),
@@ -1032,124 +911,6 @@ class TestDelete:
             ("ec2", "delete_security_group", False),
         ]
 
-    def test_token_reconciliation_never_forgets_an_observed_instance(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        monkeypatch.setattr("agentworks.plugins.aws.network.time.sleep", lambda _seconds: None)
-        rec = install_fakes(
-            monkeypatch,
-            Controls(
-                client_token_instance_outcomes=[False, True],
-                instance_security_group_id="sg-detached",
-                instance_presence_outcomes=[False],
-                security_group_presence_outcomes=[False, False, False],
-            ),
-        )
-        metadata = _vm().platform_metadata | {
-            "create_incomplete": "true",
-            "client_token": "retained-token",
-        }
-        del metadata["instance_id"]
-
-        platform = _platform()
-        with pytest.raises(RetainedDeletionError) as retained:
-            platform.delete(SimpleNamespace(name="dev", platform_metadata=metadata), RunContext())  # type: ignore[arg-type]
-        with pytest.raises(RetainedDeletionError) as accepted:
-            platform.delete(  # type: ignore[arg-type]
-                SimpleNamespace(name="dev", platform_metadata=retained.value.platform_metadata),
-                RunContext(),
-            )
-        platform.delete(  # type: ignore[arg-type]
-            SimpleNamespace(name="dev", platform_metadata=accepted.value.platform_metadata), RunContext()
-        )
-
-        token_reads = [
-            kwargs
-            for service, method, kwargs in rec.calls
-            if service == "ec2" and method == "describe_instances" and kwargs.get("Filters")
-        ]
-        assert len(token_reads) == 2
-        assert rec.kwargs_for("terminate_instances") == {"InstanceIds": ["i-123"]}
-
-    def test_token_observation_requires_positive_termination(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("agentworks.plugins.aws.network.time.sleep", lambda _seconds: None)
-        not_found = client_error("InvalidInstanceID.NotFound", "propagating", "Terminate")
-        rec = install_fakes(
-            monkeypatch,
-            Controls(
-                client_token_instance=True,
-                instance_security_group_id="sg-detached",
-                security_group_presence_outcomes=[False, False, False],
-                instance_presence_outcomes=[False, False, False],
-                terminate_errors=[not_found] * 6,
-            ),
-        )
-        metadata = _vm().platform_metadata | {
-            "create_incomplete": "true",
-            "client_token": "retained-token",
-        }
-        del metadata["instance_id"]
-
-        platform = _platform()
-        with pytest.raises(RetainedDeletionError) as retained:
-            platform.delete(SimpleNamespace(name="dev", platform_metadata=metadata), RunContext())  # type: ignore[arg-type]
-        with pytest.raises(EC2Error):
-            platform.delete(  # type: ignore[arg-type]
-                SimpleNamespace(name="dev", platform_metadata=retained.value.platform_metadata),
-                RunContext(),
-            )
-
-        assert rec.methods("ec2").count("terminate_instances") == 6
-        assert rec.methods("ec2").count("describe_instances") == 2
-
-    def test_accepted_termination_survives_wait_interrupt_and_later_absence(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        from tests import _aws_fakes
-
-        rec = install_fakes(
-            monkeypatch,
-            Controls(
-                instance_presence_outcomes=[True, True, False],
-                instance_security_group_id="sg-detached",
-            ),
-        )
-        metadata = _vm().platform_metadata | {
-            "create_incomplete": "true",
-            "client_token": "retained-token",
-        }
-        platform = _platform()
-        interrupt_wait = True
-        original_wait = _aws_fakes._FakeWaiter.wait
-
-        def _interrupt_once(self: Any, **kwargs: object) -> None:
-            nonlocal interrupt_wait
-            if interrupt_wait:
-                interrupt_wait = False
-                raise KeyboardInterrupt("interrupt after termination acceptance")
-            original_wait(self, **kwargs)
-
-        monkeypatch.setattr("tests._aws_fakes._FakeWaiter.wait", _interrupt_once)
-
-        with pytest.raises(RetainedDeletionError) as accepted:
-            platform.delete(SimpleNamespace(name="dev", platform_metadata=metadata), RunContext())  # type: ignore[arg-type]
-
-        accepted_metadata = accepted.value.platform_metadata
-        assert accepted_metadata["termination_accepted"] == "true"
-        assert "client_token" not in accepted_metadata
-        with pytest.raises(KeyboardInterrupt):
-            platform.delete(  # type: ignore[arg-type]
-                SimpleNamespace(name="dev", platform_metadata=accepted_metadata), RunContext()
-            )
-        platform.delete(  # type: ignore[arg-type]
-            SimpleNamespace(name="dev", platform_metadata=accepted_metadata), RunContext()
-        )
-
-        assert rec.methods("ec2").count("terminate_instances") == 1
-        assert self._sg_deleted(rec) == 1
-
     def test_account_mismatch_prevents_all_ec2_calls(self, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = install_fakes(monkeypatch, Controls(account_id="999988887777"))
 
@@ -1158,6 +919,14 @@ class TestDelete:
 
         assert rec.methods("sts") == ["get_caller_identity"]
         assert rec.methods("ec2") == []
+
+    def test_account_bound_absent_instance_cleans_owned_group(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = install_fakes(monkeypatch, Controls(instance_presence_outcomes=[False]))
+
+        _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
+
+        assert "terminate_instances" not in rec.methods("ec2")
+        assert self._sg_deleted(rec) == 1
 
     def test_legacy_row_requires_exact_live_ownership(self, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = install_fakes(monkeypatch)
@@ -1218,65 +987,47 @@ class TestDelete:
         ]
 
     def test_already_absent_security_group_needs_no_delete_permission(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        rec = install_fakes(
-            monkeypatch,
-            Controls(security_group_presence_outcomes=[False, False, False]),
-        )
+        rec = install_fakes(monkeypatch, Controls(security_group_presence_outcomes=[False]))
 
         _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
 
         assert rec.kwargs_for("terminate_instances") == {"InstanceIds": ["i-123"]}
-        assert rec.methods("ec2").count("describe_security_groups") == 3
+        assert rec.methods("ec2").count("describe_security_groups") == 1
         assert rec.dry_runs("delete_security_group") == []
         assert self._sg_deleted(rec) == 0
 
-    def test_terminate_not_found_requires_confirmed_instance_absence(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_account_bound_terminate_not_found_proceeds_to_group_cleanup(self, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = install_fakes(
             monkeypatch,
-            Controls(
-                terminate_errors=[client_error("InvalidInstanceID.NotFound", "gone", "Terminate")],
-                instance_presence_outcomes=[True, False, False],
-            ),
+            Controls(terminate_errors=[client_error("InvalidInstanceID.NotFound", "gone", "Terminate")]),
         )
 
         _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
 
-        methods = rec.methods("ec2")
-        assert methods[:4] == [
-            "describe_instances",
-            "describe_security_groups",
-            "delete_security_group",
-            "terminate_instances",
-        ]
-        assert methods[4:6] == ["describe_instances", "describe_instances"]
-        assert methods.count("describe_instances") == 3
+        assert rec.methods("ec2").count("describe_instances") == 1
         assert self._sg_deleted(rec) == 1
 
-    def test_unconfirmed_terminate_not_found_is_strict(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("agentworks.plugins.aws.network.time.sleep", lambda _seconds: None)
+    def test_legacy_terminate_not_found_is_strict(self, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = install_fakes(
             monkeypatch,
             Controls(terminate_errors=[client_error("InvalidInstanceID.NotFound", "gone", "Terminate")]),
         )
 
         with pytest.raises(EC2Error):
-            _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
+            _platform().delete(_vm(legacy=True), RunContext())  # type: ignore[arg-type]
 
-        assert rec.methods("ec2").count("describe_instances") == 4
+        assert rec.methods("ec2").count("describe_instances") == 1
         assert self._sg_deleted(rec) == 0
 
-    def test_group_not_found_requires_confirmed_group_absence(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_group_not_found_after_owned_read_is_idempotent(self, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = install_fakes(
             monkeypatch,
-            Controls(
-                security_group_presence_outcomes=[True, False, False],
-                sg_delete_errors=[client_error("InvalidGroup.NotFound", "gone", "DeleteSecurityGroup")],
-            ),
+            Controls(sg_delete_errors=[client_error("InvalidGroup.NotFound", "gone", "DeleteSecurityGroup")]),
         )
 
         _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
 
-        assert rec.methods("ec2").count("describe_security_groups") == 3
+        assert rec.methods("ec2").count("describe_security_groups") == 1
         assert self._sg_deleted(rec) == 1
 
     def test_credential_rejection_during_terminate_is_strict(self, monkeypatch: pytest.MonkeyPatch) -> None:

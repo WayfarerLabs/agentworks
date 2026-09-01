@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import contextlib
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.vm_platform.base import RetainedDeletionError
 from agentworks.db import VMStatus
 from agentworks.errors import StateError, UserAbort
 from agentworks.naming import NAME_RE
@@ -282,31 +280,7 @@ def delete_vm(
         # nothing left to target it (#329). ``--force`` does not soften
         # this: force skips the child-count guard and the confirm
         # prompt, never a failed backend delete.
-        retained_transitions = 0
-        while True:
-            try:
-                platform.delete(vm, ops_ctx)
-                break
-            except RetainedDeletionError as retained:
-                # A provider-side fact became safer to remember than to infer
-                # again. Persist up to two changed transitions before ANY later
-                # provider call. More transitions or an unchanged replacement
-                # are platform contract bugs, not progress to spin on.
-                if retained.platform_metadata == vm.platform_metadata:
-                    raise StateError(
-                        f"VM platform '{platform.name}' repeated retained deletion metadata without progress",
-                        entity_kind="vm",
-                        entity_name=name,
-                    ) from retained
-                if retained_transitions >= 2:
-                    raise StateError(
-                        f"VM platform '{platform.name}' exceeded the retained deletion transition limit",
-                        entity_kind="vm",
-                        entity_name=name,
-                    ) from retained
-                db.update_vm_platform_metadata(name, retained.platform_metadata)
-                vm = replace(vm, platform_metadata=retained.platform_metadata)
-                retained_transitions += 1
+        platform.delete(vm, ops_ctx)
 
     # Clean up logs
     from agentworks.ssh import LOG_DIR
