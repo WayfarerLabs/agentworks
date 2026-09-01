@@ -120,7 +120,3 @@ Rows created before account binding carry no account ID. Agentworks deletes one 
 instance's ID, ownership tag, and security-group association prove that the current account owns the
 target. An already-absent legacy target is intentionally ambiguous, so Agentworks retains the row
 instead of risking a wrong-account orphan.
-
-If any required step fails, retain the VM row and retry after correcting the provider failure. When
-investigating residue, match the stored account, instance ID, security-group ID, and `agentworks:vm`
-tag before deleting anything manually.
