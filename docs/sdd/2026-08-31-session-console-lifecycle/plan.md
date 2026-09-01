@@ -91,9 +91,9 @@ appropriate live tests. Tests assert behavior and structure, never the wording o
 - [x] Run file lint, spelling, links, locked-SDD, and diff checks on the complete artifact set.
 - [x] Obtain clean private project-reviewer and Muntz passes on one exact head and incorporate every
       material finding.
-- [ ] Commit and push the coherent complete-design head, refresh the PR body/comment, and reapply
+- [x] Commit and push the coherent complete-design head, refresh the PR body/comment, and reapply
       `review-requested`.
-- [ ] Collect the authorized published design feedback window and complete up to three converging
+- [x] Collect the authorized published design feedback window and complete up to three converging
       correction cycles using the 20-minute minimum interval.
 - [ ] Record final design clearance and merge PR #710 before implementation begins.
 
