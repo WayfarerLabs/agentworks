@@ -87,8 +87,6 @@ _DUPLICATE_PERMISSION_CODE = "InvalidPermission.Duplicate"
 _PERMISSION_NOT_FOUND_CODE = "InvalidPermission.NotFound"
 _GROUP_NOT_FOUND_CODES = frozenset({"InvalidGroup.NotFound", "InvalidGroupId.NotFound"})
 _INSTANCE_NOT_FOUND_CODES = frozenset({"InvalidInstanceID.NotFound"})
-_ABSENCE_CONFIRM_ATTEMPTS = 3
-_ABSENCE_CONFIRM_SUCCESSES = 2
 
 
 class EC2Error(ProvisioningError):
@@ -435,36 +433,12 @@ def describe_instance_exact(ec2: Any, instance_id: str) -> dict[str, Any] | None
     )
 
 
-def describe_instance_by_client_token(ec2: Any, client_token: str) -> dict[str, Any] | None:
-    """Resolve the one instance created by an idempotent RunInstances token."""
-    try:
-        result = ec2.describe_instances(Filters=[{"Name": "client-token", "Values": [client_token]}])
-    except Exception as exc:
-        raise wrap_ec2_error(exc) from exc
-    try:
-        instances = [
-            instance for reservation in result.get("Reservations", []) for instance in reservation.get("Instances", [])
-        ]
-    except Exception as exc:
-        raise EC2Error("EC2 returned malformed client-token instance data", detail=str(exc)) from exc
-    if not instances:
-        return None
-    if len(instances) == 1:
-        return dict(instances[0])
-    raise EC2Error(
-        "EC2 returned multiple instances for one RunInstances client token",
-        detail=f"client token matched {len(instances)} instances",
-    )
-
-
 def require_owned_instance(
     instance: Mapping[str, Any],
     backend_name: str,
     security_group_id: str,
-    *,
-    require_security_group: bool,
 ) -> str:
-    """Return a reconciled instance ID only after exact ownership checks."""
+    """Return an instance ID only after exact ownership checks."""
     instance_id = instance.get("InstanceId")
     tags = instance.get("Tags")
     groups = instance.get("SecurityGroups")
@@ -475,14 +449,10 @@ def require_owned_instance(
     has_security_group = isinstance(groups, list) and any(
         isinstance(group, dict) and group.get("GroupId") == security_group_id for group in groups
     )
-    if not valid_instance_id or not owns_instance or (require_security_group and not has_security_group):
+    if not valid_instance_id or not owns_instance or not has_security_group:
         raise EC2Error(
-            f"the reconciled instance is not owned by backend '{backend_name}'",
-            detail=(
-                f"the exact {VM_TAG_KEY} tag or recorded security-group association did not match"
-                if require_security_group
-                else f"the instance ID or exact {VM_TAG_KEY} tag did not match"
-            ),
+            f"instance is not owned by backend '{backend_name}'",
+            detail=f"the exact {VM_TAG_KEY} tag or recorded security-group association did not match",
             entity_kind="instance",
             entity_name=str(instance_id or backend_name),
         )
@@ -516,40 +486,6 @@ def describe_security_group_exact(ec2: Any, security_group_id: str) -> dict[str,
     )
 
 
-def _confirm_absent(lookup: Callable[[], object | None], *, entity_kind: str, entity_name: str) -> None:
-    """Require bounded read-only absence confirmation after mutation NotFound."""
-    consecutive_absences = 0
-    for attempt in range(_ABSENCE_CONFIRM_ATTEMPTS):
-        if lookup() is None:
-            consecutive_absences += 1
-            if consecutive_absences == _ABSENCE_CONFIRM_SUCCESSES:
-                return
-        else:
-            consecutive_absences = 0
-        if attempt + 1 < _ABSENCE_CONFIRM_ATTEMPTS:
-            time.sleep(1)
-    raise EC2Error(
-        f"AWS did not confirm {entity_kind} '{entity_name}' was absent",
-        detail=(
-            f"the exact resource was not absent for {_ABSENCE_CONFIRM_SUCCESSES} consecutive checks "
-            f"within {_ABSENCE_CONFIRM_ATTEMPTS} attempts"
-        ),
-        entity_kind=entity_kind,
-        entity_name=entity_name,
-    )
-
-
-def reconcile_instance_by_client_token(ec2: Any, client_token: str) -> dict[str, Any] | None:
-    """Resolve a retained launch token without forgetting observed existence."""
-    for attempt in range(_ABSENCE_CONFIRM_SUCCESSES):
-        instance = describe_instance_by_client_token(ec2, client_token)
-        if instance is not None:
-            return instance
-        if attempt + 1 < _ABSENCE_CONFIRM_SUCCESSES:
-            time.sleep(1)
-    return None
-
-
 def terminate_and_cleanup_strict(
     ec2: Any,
     instance_id: str | None,
@@ -557,13 +493,10 @@ def terminate_and_cleanup_strict(
     backend_name: str,
     *,
     account_bound: bool,
-    partial_create: bool,
-    positively_observed_instance: bool = False,
-    termination_accepted: bool = False,
-) -> bool:
-    """Strict teardown, returning when termination acceptance needs persistence."""
+) -> None:
+    """Verify exact ownership, terminate the instance, and delete its group."""
     instance = describe_instance_exact(ec2, instance_id) if instance_id is not None else None
-    if instance_id is not None and instance is None and not positively_observed_instance and not termination_accepted:
+    if instance_id is not None and instance is None:
         if not account_bound:
             raise EC2Error(
                 f"cannot confirm absent legacy instance '{instance_id}' belongs to the current AWS account",
@@ -571,17 +504,11 @@ def terminate_and_cleanup_strict(
                 entity_kind="instance",
                 entity_name=instance_id,
             )
-        _confirm_absent(
-            partial(describe_instance_exact, ec2, instance_id),
-            entity_kind="instance",
-            entity_name=instance_id,
-        )
     elif instance is not None:
         owned_instance_id = require_owned_instance(
             instance,
             backend_name,
             security_group_id,
-            require_security_group=not partial_create,
         )
         if owned_instance_id != instance_id:
             raise EC2Error(
@@ -592,13 +519,7 @@ def terminate_and_cleanup_strict(
             )
 
     security_group = describe_security_group_exact(ec2, security_group_id)
-    if security_group is None:
-        _confirm_absent(
-            partial(describe_security_group_exact, ec2, security_group_id),
-            entity_kind="security-group",
-            entity_name=security_group_id,
-        )
-    else:
+    if security_group is not None:
         tags = security_group.get("Tags")
         owned = isinstance(tags, list) and any(
             isinstance(tag, dict) and tag.get("Key") == VM_TAG_KEY and tag.get("Value") == backend_name for tag in tags
@@ -612,42 +533,20 @@ def terminate_and_cleanup_strict(
             )
         _check_security_group_delete_permission(ec2, security_group_id)
 
-    if instance_id is not None and (instance is not None or positively_observed_instance or termination_accepted):
-        if termination_accepted:
-            # Termination acceptance is already durable. A visible instance
-            # may still be shutting down, while an absent one has aged out;
-            # neither case should issue or require another termination.
-            if instance is not None:
-                try:
-                    ec2.get_waiter("instance_terminated").wait(InstanceIds=[instance_id])
-                except Exception as exc:
-                    raise wrap_ec2_error(exc) from exc
-        elif positively_observed_instance:
-            # Return immediately after EC2 accepts termination. The caller
-            # persists that monotonic phase before any waiter or cleanup call.
-            _request_created_instance_termination(ec2, instance_id)
-            return True
+    if instance_id is not None and instance is not None:
+        try:
+            ec2.terminate_instances(InstanceIds=[instance_id])
+        except Exception as exc:
+            if error_code(exc) not in _INSTANCE_NOT_FOUND_CODES or not account_bound:
+                raise wrap_ec2_error(exc) from exc
         else:
             try:
-                ec2.terminate_instances(InstanceIds=[instance_id])
+                ec2.get_waiter("instance_terminated").wait(InstanceIds=[instance_id])
             except Exception as exc:
-                if error_code(exc) in _INSTANCE_NOT_FOUND_CODES:
-                    _confirm_absent(
-                        partial(describe_instance_exact, ec2, instance_id),
-                        entity_kind="instance",
-                        entity_name=instance_id,
-                    )
-                else:
-                    raise wrap_ec2_error(exc) from exc
-            else:
-                try:
-                    ec2.get_waiter("instance_terminated").wait(InstanceIds=[instance_id])
-                except Exception as exc:
-                    raise wrap_ec2_error(exc) from exc
+                raise wrap_ec2_error(exc) from exc
 
     if security_group is not None:
         _delete_security_group_strict(ec2, security_group_id)
-    return False
 
 
 def _delete_security_group_strict(ec2: Any, security_group_id: str) -> None:
@@ -660,11 +559,6 @@ def _delete_security_group_strict(ec2: Any, security_group_id: str) -> None:
         except Exception as exc:
             code = error_code(exc)
             if code in _GROUP_NOT_FOUND_CODES:
-                _confirm_absent(
-                    partial(describe_security_group_exact, ec2, security_group_id),
-                    entity_kind="security-group",
-                    entity_name=security_group_id,
-                )
                 return
             if code == "DependencyViolation" and attempt + 1 < attempts:
                 time.sleep(5)

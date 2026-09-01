@@ -26,7 +26,6 @@ from agentworks import output
 from agentworks.capabilities.vm_platform.base import (
     ProvisionRequest,
     ProvisionResult,
-    RetainedDeletionError,
     RetainedProvisioningError,
     VMPlatform,
 )
@@ -58,16 +57,13 @@ from agentworks.plugins.aws.network import (
     EC2Error,
     cleanup_created_resources,
     create_security_group,
-    describe_instance_by_client_token,
     error_code,
     first_instance_public_ip,
     first_instance_state,
     is_authorization_denial,
     is_credential_rejection,
     poke_ssh_allow,
-    reconcile_instance_by_client_token,
     remove_ssh_allow,
-    require_owned_instance,
     terminate_and_cleanup_strict,
     vm_tag,
     wrap_ec2_error,
@@ -344,8 +340,6 @@ class EC2Platform(VMPlatform):
                 output.warn(f"could not reach AWS for '{self.site_name}' ({exc}); continuing unverified")
 
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
-        from uuid import uuid4
-
         region = self.config.region
         account_id = self._current_account_id(ctx)
         subnet_id = self.config.subnet_id
@@ -456,8 +450,6 @@ class EC2Platform(VMPlatform):
 
         security_group_id: str | None = None
         instance_id: str | None = None
-        client_token = str(uuid4())
-        launch_attempted = False
         prov_transport: Transport | None = None
         tailscale_ip: str | None = None
 
@@ -474,84 +466,24 @@ class EC2Platform(VMPlatform):
                 metadata["security_group_id"] = security_group_id
             if incomplete:
                 metadata["create_incomplete"] = "true"
-                if launch_attempted and instance_id is None:
-                    metadata["client_token"] = client_token
             return metadata
 
-        def _run_instances_may_have_succeeded(failure: BaseException) -> bool:
-            from botocore.exceptions import ClientError
-
-            if not isinstance(failure, ClientError):
-                return True
-            response = failure.response if isinstance(failure.response, dict) else {}
-            metadata = response.get("ResponseMetadata", {})
-            status = metadata.get("HTTPStatusCode") if isinstance(metadata, dict) else None
-            return isinstance(status, int) and status >= 500
-
-        def _error_summary(failure: BaseException) -> str:
-            if isinstance(failure, EC2Error):
-                return failure.detail
-            if isinstance(failure, Exception):
-                return str(wrap_ec2_error(failure))
-            return "operation was interrupted"
-
-        def _raise_retained(
-            cause: BaseException,
-            *,
-            reconciliation_error: BaseException | None = None,
-            cleanup_error: BaseException | None = None,
-        ) -> None:
-            summaries = []
-            if reconciliation_error is not None:
-                summaries.append(f"launch reconciliation failed: {_error_summary(reconciliation_error)}")
-            if cleanup_error is not None:
-                summaries.append(f"resource cleanup failed: {_error_summary(cleanup_error)}")
-            instance_label = instance_id or "not returned; reconcile with the recorded client token"
-            group_label = security_group_id or "not created"
-            raise RetainedProvisioningError(
-                f"AWS cleanup for VM '{request.vm_name}' could not be confirmed: {'; '.join(summaries)}",
-                platform_metadata=_metadata(incomplete=True),
-                entity_name=request.vm_name,
-                hint=(
-                    f"Instance: {instance_label}; security group: {group_label}; region: {region}; "
-                    f"ownership tag: agentworks:vm={backend_name}. After AWS permissions or service availability "
-                    f"recover, run 'agw vm delete {request.vm_name}'."
-                ),
-            ) from cause
-
-        def _cleanup_or_retain(primary: BaseException) -> None:
-            nonlocal instance_id
-
-            reconciliation_error: Exception | None = None
-            if launch_attempted and instance_id is None and _run_instances_may_have_succeeded(primary):
-                try:
-                    reconciled = describe_instance_by_client_token(ec2, client_token)
-                    if reconciled is None:
-                        raise EC2Error(
-                            "AWS did not return the outcome of RunInstances",
-                            detail="the idempotency token did not yet resolve to an instance",
-                        )
-                    assert security_group_id is not None
-                    instance_id = require_owned_instance(
-                        reconciled,
-                        backend_name,
-                        security_group_id,
-                        require_security_group=True,
-                    )
-                except KeyboardInterrupt as interrupt:
-                    _raise_retained(interrupt, reconciliation_error=interrupt)
-                except Exception as exc:
-                    reconciliation_error = exc
+        def _cleanup_or_retain() -> None:
             try:
                 cleanup_created_resources(ec2, instance_id, security_group_id)
             except (Exception, KeyboardInterrupt) as cleanup_error:
-                _raise_retained(
-                    cleanup_error,
-                    reconciliation_error=reconciliation_error,
-                    cleanup_error=cleanup_error,
-                )
-            if reconciliation_error is not None:
-                _raise_retained(reconciliation_error, reconciliation_error=reconciliation_error)
+                detail = cleanup_error.detail if isinstance(cleanup_error, EC2Error) else "cleanup was interrupted"
+                raise RetainedProvisioningError(
+                    f"AWS cleanup for VM '{request.vm_name}' could not be confirmed: {detail}",
+                    platform_metadata=_metadata(incomplete=True),
+                    entity_name=request.vm_name,
+                    hint=(
+                        f"Instance: {instance_id or 'not returned'}; "
+                        f"security group: {security_group_id or 'not created'}; region: {region}; "
+                        f"ownership tag: agentworks:vm={backend_name}. After AWS permissions or service availability "
+                        f"recover, run 'agw vm delete {request.vm_name}'."
+                    ),
+                ) from cleanup_error
 
         # The WHOLE fallible region is guarded by both arms of the create
         # rollback contract: a failure (including a non-SSHError from transport
@@ -585,7 +517,6 @@ class EC2Platform(VMPlatform):
                 "InstanceType": selected.type,
                 "MinCount": 1,
                 "MaxCount": 1,
-                "ClientToken": client_token,
                 "UserData": user_data_gz,
                 "NetworkInterfaces": [network_interface],
                 "TagSpecifications": [
@@ -598,7 +529,6 @@ class EC2Platform(VMPlatform):
             }
             if block_device_mappings:
                 run_kwargs["BlockDeviceMappings"] = block_device_mappings
-            launch_attempted = True
             run_result = ec2.run_instances(**run_kwargs)
             returned_instance_id = run_result["Instances"][0]["InstanceId"]
             if not isinstance(returned_instance_id, str) or not returned_instance_id:
@@ -633,16 +563,16 @@ class EC2Platform(VMPlatform):
             # The provider-retained bootstrap installed Tailscale without a
             # credential. Wait for it, then join once over stdin.
             tailscale_ip = EphemeralTailscaleBootstrap(prov_transport).complete(request.tailscale_auth_key)
-        except KeyboardInterrupt as exc:
+        except KeyboardInterrupt:
             output.warn(
                 f"Interrupted: cleaning up partial AWS resources for '{backend_name}', "
                 f"please wait (Ctrl-C again retains them for explicit deletion)..."
             )
-            _cleanup_or_retain(exc)
+            _cleanup_or_retain()
             raise
         except Exception as exc:
             output.detail("Cleaning up resources...")
-            _cleanup_or_retain(exc)
+            _cleanup_or_retain()
             if isinstance(exc, (AuthorizationError, StateError, TokenRejectedError)):
                 raise
             raise wrap_ec2_error(exc) from exc
@@ -687,8 +617,6 @@ class EC2Platform(VMPlatform):
         output.info(f"Deleting EC2 instance '{vm.name}'...")
         partial_create = vm.platform_metadata.get("create_incomplete") == "true"
         instance_id = self._optional_metadata(vm, "instance_id") if partial_create else self._instance_id(vm)
-        client_token = self._optional_metadata(vm, "client_token") if partial_create else None
-        termination_accepted = partial_create and vm.platform_metadata.get("termination_accepted") == "true"
         security_group_id = self._security_group_id(vm)
         backend_name = self._backend_name(vm)
         recorded_account_id = self._recorded_account_id(vm)
@@ -700,50 +628,13 @@ class EC2Platform(VMPlatform):
                 entity_name=vm.name,
             )
         ec2 = self._client("ec2", self._region_of(vm), ctx)
-        if instance_id is None and client_token is not None:
-            reconciled = reconcile_instance_by_client_token(ec2, client_token)
-            if reconciled is not None:
-                # A prior termination may already have detached the group, so
-                # token reconciliation requires the exact ownership tag but
-                # permits that one expected lifecycle transition.
-                instance_id = require_owned_instance(
-                    reconciled,
-                    backend_name,
-                    security_group_id,
-                    require_security_group=False,
-                )
-                durable_metadata = dict(vm.platform_metadata)
-                durable_metadata["instance_id"] = instance_id
-                # Stop before the next provider call. Core persists this exact
-                # identity and retries with the client token retained as proof
-                # that the ID came from positive launch reconciliation.
-                raise RetainedDeletionError(
-                    f"AWS reconciled retained VM '{vm.name}' to instance '{instance_id}'",
-                    platform_metadata=durable_metadata,
-                    entity_name=vm.name,
-                )
-        accepted_now = terminate_and_cleanup_strict(
+        terminate_and_cleanup_strict(
             ec2,
             instance_id,
             security_group_id,
             backend_name,
             account_bound=recorded_account_id is not None,
-            partial_create=partial_create,
-            positively_observed_instance=(
-                instance_id is not None and client_token is not None and not termination_accepted
-            ),
-            termination_accepted=termination_accepted,
         )
-        if accepted_now:
-            assert instance_id is not None
-            durable_metadata = dict(vm.platform_metadata)
-            durable_metadata["termination_accepted"] = "true"
-            durable_metadata.pop("client_token", None)
-            raise RetainedDeletionError(
-                f"AWS accepted termination of retained VM '{vm.name}' instance '{instance_id}'",
-                platform_metadata=durable_metadata,
-                entity_name=vm.name,
-            )
         output.info(f"EC2 instance '{vm.name}' deleted")
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
