@@ -60,12 +60,6 @@ if TYPE_CHECKING:
 # and reader.
 VM_TAG_KEY = "agentworks:vm"
 
-# Stamped into every ephemeral SSH allow's rule description, with a created-at
-# timestamp, so a future doctor stale-rule sweep can flag rules leaked by
-# killed processes. Descriptions do NOT participate in EC2 rule identity (that
-# is the (protocol, port, cidr) tuple), so this is observability only.
-SSH_ALLOW_DESCRIPTION_MARKER = "agentworks scoped SSH allow"
-
 # Codes that reject the credential itself. Runup and status share this set.
 _CREDENTIAL_REJECTION_CODES = frozenset(
     {
@@ -218,7 +212,7 @@ def _require_dry_run_permission(
 def _check_ssh_revoke_permissions(ec2: Any, security_group_id: str, prefixes: Sequence[str]) -> None:
     """Dry-run every exact revoke before any matching authorize occurs."""
     for prefix in prefixes:
-        permission = _ssh_permission(prefix, with_description=False)
+        permission = _ssh_permission(prefix)
         _require_dry_run_permission(
             partial(
                 ec2.revoke_security_group_ingress,
@@ -268,18 +262,9 @@ def create_security_group(ec2: Any, backend_name: str, vpc_id: str) -> str:
     return str(result["GroupId"])
 
 
-def _ssh_permission(prefix: str, *, with_description: bool) -> dict[str, Any]:
-    """One TCP/22 ingress permission scoped to ``prefix``. The description is
-    added on authorize (for the future doctor sweep) and omitted on revoke
-    (revoke matches by the (protocol, port, cidr) tuple; the description is not
-    part of identity)."""
-    ip_range: dict[str, str] = {"CidrIp": prefix}
-    if with_description:
-        from datetime import UTC, datetime
-
-        created = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-        ip_range["Description"] = f"{SSH_ALLOW_DESCRIPTION_MARKER} (created {created})"
-    return {"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "IpRanges": [ip_range]}
+def _ssh_permission(prefix: str) -> dict[str, Any]:
+    """One TCP/22 ingress permission scoped to ``prefix``."""
+    return {"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "IpRanges": [{"CidrIp": prefix}]}
 
 
 def poke_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) -> None:
@@ -298,7 +283,7 @@ def poke_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) ->
             try:
                 ec2.authorize_security_group_ingress(
                     GroupId=security_group_id,
-                    IpPermissions=[_ssh_permission(prefix, with_description=True)],
+                    IpPermissions=[_ssh_permission(prefix)],
                 )
             except Exception as exc:
                 if error_code(exc) == _DUPLICATE_PERMISSION_CODE:
@@ -328,7 +313,7 @@ def remove_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) 
         try:
             ec2.revoke_security_group_ingress(
                 GroupId=security_group_id,
-                IpPermissions=[_ssh_permission(prefix, with_description=False)],
+                IpPermissions=[_ssh_permission(prefix)],
             )
         except Exception as exc:
             code = error_code(exc)

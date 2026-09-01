@@ -64,6 +64,13 @@ operator-administered hosts, or a local `lima` / `wsl2` VM on the operator's mac
 perimeter stays authoritative and Agentworks does not touch it. The mechanism behind both cases is
 described below.
 
+Cloud permission diagnostics block only when the provider makes that exact check authoritative. EC2
+can authorize exact requests through `DryRun`, so an inconclusive result stops the guarded mutation.
+Azure's resource-group listing is a negative diagnostic, so an incomplete listing warns and leaves
+authorization to the real operation. GCE cannot test permissions for resources that do not exist
+yet, so its real operations are the only authority. The provider guides document the required
+permissions and each platform's checks.
+
 ## VM Platform Obligations
 
 A vm-platform stands up a machine and hands Agentworks an administrative foothold on it. It:

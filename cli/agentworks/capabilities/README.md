@@ -53,11 +53,9 @@ delete) Agentworks drives through that one admin foothold. See
 [`vm_platform/README.md`](vm_platform/README.md) for what a platform must provide and the specifics
 of each.
 
-Cloud permission diagnostics remain platform-specific because the providers expose different proofs.
-Azure can enumerate resource-group grants before create, EC2 can dry-run exact requests at selected
-composite mutation boundaries, and GCE cannot authorize future child resources through
-`testIamPermissions`. The capability contract requires typed failures and safe lifecycle ordering;
-it does not flatten those different provider guarantees into a misleading common readiness result.
+Cloud permission diagnostics follow the provider-evidence model in the
+[`vm-platform` guide](vm_platform/README.md#security-posture); the capability contract does not
+flatten different provider guarantees into a misleading common readiness result.
 
 ### Harness Integration
 

@@ -42,10 +42,11 @@ Before declaring a site:
 2. Give the selected host identity permission to read the project, zone, machine/image/disk types,
    network and firewall state, and to create, start, stop, and delete instances and classic VPC
    firewall rules. The predefined `Compute Instance Admin (v1)` and `Compute Security Admin` roles
-   are a straightforward starting point. A custom role needs the actions below. Choose the
-   `networks.use*` pair for the default network or the `subnetworks.use*` pair for a configured
-   subnet. Grant `compute.images.getFromFamily` and `compute.images.useReadOnly` on the public
-   `debian-cloud` image project where Google permits that scope.
+   are a straightforward starting point. A custom role needs the common actions below, plus exactly
+   one of the network-mode additions that follows. Both modes read the selected VPC network, while
+   only a configured-subnet site reads a subnetwork. Grant `compute.images.getFromFamily` and
+   `compute.images.useReadOnly` on the public `debian-cloud` image project where Google permits that
+   scope.
 
    ```text
    compute.diskTypes.get
@@ -66,14 +67,24 @@ Before declaring a site:
    compute.instances.stop
    compute.machineTypes.get
    compute.networks.get
+   compute.projects.get
+   compute.zoneOperations.get
+   compute.zones.get
+   ```
+
+   For a site that uses the project's `default` network, add:
+
+   ```text
    compute.networks.use
    compute.networks.useExternalIp
-   compute.projects.get
+   ```
+
+   For a site that names a configured subnet, add:
+
+   ```text
    compute.subnetworks.get
    compute.subnetworks.use
    compute.subnetworks.useExternalIp
-   compute.zoneOperations.get
-   compute.zones.get
    ```
 
    Agentworks creates the boot disk as part of `instances.insert` and marks it for automatic
