@@ -129,7 +129,8 @@ to `vm confirm-release`. It never silently adopts an external distribution chang
 
 `vm list` and `vm describe` expose recorded state only. The compact list has one `DEBIAN` column;
 human detail also exposes relative support and observation time, while JSON exposes the recorded
-release and observation time. These read paths do not perform a live probe.
+release and observation time. These read paths do not perform a live Debian release probe; existing
+status and resource inspection behavior is unchanged.
 
 ## Explicit release adoption
 

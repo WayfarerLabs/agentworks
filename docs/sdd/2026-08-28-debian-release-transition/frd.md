@@ -199,7 +199,7 @@ metadata silently.
 - `vm confirm-release` refuses unrecognized guests, requires consent for change, updates release and
   pending initialization atomically, and does not call reinitialization.
 - A matching confirmation refreshes observation time without changing initialization status.
-- `vm list` and `vm describe` expose recorded Debian release without live probes.
+- `vm list` and `vm describe` expose recorded Debian release without a live Debian release probe.
 - Doctor performs no Debian-related VM network access.
 - Legacy recognized VMs warn and continue best effort; previous VMs are not treated as legacy.
 - Migration 35 removes an empty checkpoint table and refuses a nonempty one.
