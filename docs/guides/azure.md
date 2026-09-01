@@ -72,6 +72,7 @@ Microsoft.Network/virtualNetworks/read
 Microsoft.Network/virtualNetworks/write
 Microsoft.Network/virtualNetworks/delete
 Microsoft.Network/virtualNetworks/subnets/read
+Microsoft.Network/virtualNetworks/subnets/write
 Microsoft.Network/virtualNetworks/subnets/join/action
 Microsoft.Resources/subscriptions/resourceGroups/read
 ```
