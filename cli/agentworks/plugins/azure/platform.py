@@ -51,14 +51,13 @@ from agentworks.plugins.azure.network import (
     verify_vm_deleted,
     wrap_azure_error,
 )
-from agentworks.plugins.azure.permissions import check_resource_group_permissions
+from agentworks.plugins.azure.permissions import missing_resource_group_actions
 from agentworks.topics import TopicProse
 from agentworks.transports import SSHTransport
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
-    from azure.mgmt.authorization import AuthorizationManagementClient
     from azure.mgmt.compute import ComputeManagementClient
     from azure.mgmt.network import NetworkManagementClient
     from azure.mgmt.resource.resources import ResourceManagementClient
@@ -152,7 +151,6 @@ class AzureVMPlatform(VMPlatform):
         self._compute_cached: dict[str, ComputeManagementClient] = {}
         self._network_cached: dict[str, NetworkManagementClient] = {}
         self._resource_cached: dict[str, ResourceManagementClient] = {}
-        self._authorization_cached: dict[str, AuthorizationManagementClient] = {}
 
     # No preflight override, on either credential path. A
     # ``service-principal`` site DOES declare a config secret, and an
@@ -265,15 +263,11 @@ class AzureVMPlatform(VMPlatform):
             self._resource_cached[az.subscription_id] = resource
         return resource
 
-    def _authorization_client(self, az: _HasSubscriptionId, ctx: RunContext) -> AuthorizationManagementClient:
-        """The cached authorization client for ``az``'s subscription."""
+    def _authorization_client(self, az: _HasSubscriptionId, ctx: RunContext) -> Any:
+        """Build an authorization client for the one create-time query."""
         from azure.mgmt.authorization import AuthorizationManagementClient
 
-        authorization = self._authorization_cached.get(az.subscription_id)
-        if authorization is None:
-            authorization = AuthorizationManagementClient(self._get_credential(ctx), az.subscription_id)  # type: ignore[arg-type]
-            self._authorization_cached[az.subscription_id] = authorization
-        return authorization
+        return AuthorizationManagementClient(self._get_credential(ctx), az.subscription_id)  # type: ignore[arg-type]
 
     def runup(self, ctx: RunContext) -> None:
         """Provisioning runup: read-only resource-group existence and Azure
@@ -355,7 +349,7 @@ class AzureVMPlatform(VMPlatform):
         try:
             authorization = self._authorization_client(az, ctx)
             blocks = authorization.permissions.list_for_resource_group(az.resource_group)
-            permission_check = check_resource_group_permissions(blocks)
+            missing_actions = missing_resource_group_actions(blocks)
         except Exception as exc:
             output.warn(
                 f"could not verify Azure create permissions for resource group "
@@ -363,8 +357,8 @@ class AzureVMPlatform(VMPlatform):
             )
             return
 
-        if permission_check.missing_actions:
-            missing = ", ".join(permission_check.missing_actions)
+        if missing_actions:
+            missing = ", ".join(missing_actions)
             raise AuthorizationError(
                 f"the active Azure credential lacks required create or rollback permissions "
                 f"on resource group '{az.resource_group}': {missing}",

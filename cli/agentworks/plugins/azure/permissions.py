@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
 
 # Control-plane actions exercised by create and its fail-closed cleanup at the
 # configured resource-group scope. Runtime power operations and transient-route
@@ -42,14 +41,7 @@ REQUIRED_RESOURCE_GROUP_ACTIONS = frozenset(
 )
 
 
-@dataclass(frozen=True)
-class PermissionCheck:
-    """Required control-plane actions not granted by a complete listing."""
-
-    missing_actions: tuple[str, ...]
-
-
-def check_resource_group_permissions(permission_blocks: Iterable[object]) -> PermissionCheck:
+def missing_resource_group_actions(permission_blocks: Iterable[object]) -> tuple[str, ...]:
     """Evaluate Azure ``Actions - NotActions`` blocks, then add their grants.
 
     The permission listing is provider input. Every block must carry well-formed
@@ -66,7 +58,7 @@ def check_resource_group_permissions(permission_blocks: Iterable[object]) -> Per
             if _matches_any(actions, required) and not _matches_any(not_actions, required):
                 granted.add(required)
 
-    return PermissionCheck(tuple(sorted(REQUIRED_RESOURCE_GROUP_ACTIONS - granted)))
+    return tuple(sorted(REQUIRED_RESOURCE_GROUP_ACTIONS - granted))
 
 
 def _patterns(block: object, field: str) -> tuple[str, ...]:

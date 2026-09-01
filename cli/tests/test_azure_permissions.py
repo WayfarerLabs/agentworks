@@ -13,7 +13,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.errors import AuthorizationError
 from agentworks.plugins.azure.permissions import (
     REQUIRED_RESOURCE_GROUP_ACTIONS,
-    check_resource_group_permissions,
+    missing_resource_group_actions,
 )
 from agentworks.plugins.azure.platform import AzureVMPlatform
 
@@ -39,20 +39,20 @@ def _block(actions: list[str], not_actions: list[str] | None = None, **extra: ob
     ],
 )
 def test_permission_patterns_grant_required_actions(actions: list[str]) -> None:
-    assert check_resource_group_permissions([_block(actions)]).missing_actions == ()
+    assert missing_resource_group_actions([_block(actions)]) == ()
 
 
 def test_not_actions_excludes_only_its_permission_block_and_ignores_data_actions() -> None:
     block = _block(["*"], [_DELETE_PUBLIC_IP], data_actions=[_DELETE_PUBLIC_IP], not_data_actions=[])
 
-    assert check_resource_group_permissions([block]).missing_actions == (_DELETE_PUBLIC_IP,)
+    assert missing_resource_group_actions([block]) == (_DELETE_PUBLIC_IP,)
 
 
 def test_separate_permission_block_can_regrant_a_not_action() -> None:
     broad_role = _block(["*"], [_DELETE_PUBLIC_IP])
     narrow_role = _block([_DELETE_PUBLIC_IP])
 
-    assert check_resource_group_permissions([broad_role, narrow_role]).missing_actions == ()
+    assert missing_resource_group_actions([broad_role, narrow_role]) == ()
 
 
 def _wire_runup(monkeypatch: pytest.MonkeyPatch, listing: object) -> AzureVMPlatform:

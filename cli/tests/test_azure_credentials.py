@@ -332,22 +332,6 @@ class TestCredentialCaching:
         assert counters["cred_build"] == 1
         assert counters["get_token"] == 1
 
-    def test_authorization_client_caches_per_subscription(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        counters = _install_fakes(monkeypatch)
-        platform = _platform()
-        az_a = SimpleNamespace(subscription_id="sub-A")
-        az_b = SimpleNamespace(subscription_id="sub-B")
-
-        first = platform._authorization_client(az_a, RunContext())
-        assert platform._authorization_client(az_a, RunContext()) is first
-        second = platform._authorization_client(az_b, RunContext())
-
-        assert second is not first
-        assert counters["authorization_build"] == 2
-        assert set(platform._authorization_cached) == {"sub-A", "sub-B"}
-        assert counters["cred_build"] == 1
-        assert counters["get_token"] == 1
-
     def test_browser_fallback_preserved_and_cached(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When the DefaultAzureCredential probe raises
         ClientAuthenticationError, the decision lands on the interactive
