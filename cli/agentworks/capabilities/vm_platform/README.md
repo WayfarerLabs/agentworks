@@ -108,9 +108,9 @@ A vm-platform stands up a machine and hands Agentworks an administrative foothol
   and report any residue with recovery guidance.
 - **MUST NOT** report `delete` as successful until the backend VM is confirmed gone. A failure
   **MUST** retain the Agentworks row for retry.
-- **MUST** scope every resource it creates to one VM and **MUST NOT** reconfigure or tear down
-  another VM's resources, another site's state, or shared operator infrastructure such as a resource
-  group, VPC, subnet, or bridge.
+- **MUST** scope every VM-specific backend resource to one VM and **MUST NOT** reconfigure or tear
+  down another VM's resources, another site's state, or shared operator infrastructure such as a
+  resource group, VPC, subnet, or bridge.
 - On a full-control cloud host it **MUST** default to zero standing inbound exposure, opening only a
   narrowly scoped, ephemeral hole for the one operation that needs it and closing it after, failing
   closed rather than open; on an externally administered or local host it **MUST NOT** manage the
@@ -119,8 +119,8 @@ A vm-platform stands up a machine and hands Agentworks an administrative foothol
   **MUST NOT** log or persist resolved secret values (its metadata carries only non-secret state
   required for safe lifecycle operations).
 
-VM platforms do not create Agentworks users, workspaces, groups, or sessions or manage their
-secrets. Core owns those resources through platform-agnostic mechanisms.
+VM platforms do not create agent users, workspaces, groups, or sessions or manage their secrets.
+Core owns those resources through platform-agnostic mechanisms.
 
 ## Technical Overview
 
