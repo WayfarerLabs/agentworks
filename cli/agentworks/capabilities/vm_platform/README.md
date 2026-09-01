@@ -190,10 +190,11 @@ and DB migration.
   state guards; `delete` treats already-gone as success on all six. `delete` is NOT unconditionally
   best-effort though: a delete that cannot remove the backend VM must raise a typed error (the
   manager deletes the DB row only on success, so a swallowed backend failure orphans the VM; #329).
-  Azure enforces this with a post-teardown existence probe (`verify_vm_deleted`), and GCE requires
-  provider-ID-owned instance absence before removing its lifetime deny. Only auxiliary-resource
-  stragglers stay warn-and-continue. Lima, WSL2, Proxmox, and EC2 do not yet verify; their teardown
-  verbs remain fire-and-forget (tracked in #356).
+  Azure enforces this with a post-teardown existence probe (`verify_vm_deleted`), GCE requires
+  provider-ID-owned instance absence before removing its lifetime deny, and EC2 requires its
+  termination waiter and security-group cleanup to complete. Only Azure's auxiliary-resource
+  stragglers stay warn-and-continue. Lima, WSL2, and Proxmox do not yet verify; their teardown verbs
+  remain fire-and-forget (tracked in #356).
 - `status(vm, ctx) -> VMStatus` is a read-only query.
 - `display_backend_name(vm) -> str` is pure display and takes no `ctx`.
 
@@ -476,6 +477,32 @@ exact #303 hole). Second, an `assume_role_arn` builds AUTO-REFRESHING credential
 `AssumeRoleCredentialFetcher` + `DeferredRefreshableCredentials`) rather than a one-shot assume, so
 a long op cannot fail with `ExpiredToken` from a frozen cache. See `test_platform_runup.py` and
 `test_aws_ec2_ops.py` (directly under `cli/tests/`) for the halves.
+
+### Provider-Native Permission Diagnostics
+
+Permission evidence belongs at the narrowest provider boundary that can state it truthfully. The
+vm-platform API does not define one generic permission roster or a boolean capability certificate:
+provider authorization can depend on a future resource identity, exact request fields, tags, linked
+resources, conditions, denies, and policy changes after a check.
+
+The three managed cloud platforms therefore use different evidence:
+
+- Azure's create-time `runup` fully consumes the caller's resource-group permission listing. A
+  complete response that lacks a create, rollback, or bootstrap-route-closure grant is a definitive
+  pre-mutation refusal. An unavailable or incomplete listing warns and defers to the real request;
+  deny assignments, policy, locks, and later RBAC changes remain authoritative at mutation time.
+- EC2 uses exact `DryRun` requests only at composite safety boundaries. It proves revoke permission
+  before opening an SSH tuple and security-group deletion permission before terminating the VM.
+  Other responses are indeterminate, and IAM policy simulation is not used as an authorization gate.
+  Explicit delete raises on termination, confirmation, or security-group cleanup failure so core
+  retains the VM row for retry.
+- GCE makes its definitive project, zone, network, image, and shape reads before mutation, then lets
+  exact mutations authorize themselves under provider-ID-owned rollback. Its IAM test methods apply
+  to existing resources and are advisory; the future VM, boot disk, and firewall rules do not exist
+  during runup, so no honest whole-lifecycle precheck is available.
+
+Operator setup and the exact action inventories live in the Amazon EC2, Azure Virtual Machines, and
+Google Compute Engine guides under `docs/guides/`.
 
 ### Exposure on a Cloud Platform: Baseline Deny, Ephemeral Scoped Allows
 

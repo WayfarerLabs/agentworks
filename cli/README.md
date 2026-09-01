@@ -474,9 +474,10 @@ group listing every installed plugin, its description, and whether it is enabled
 
 See [docs/guides/resources.md](../docs/guides/resources.md#system-plugins) for the full model
 (origins, the disabled-resource semantics, config-error deferral) and the upgrade note for configs
-that relied on Azure, Proxmox, 1Password, or Claude Code before they became opt-in. Google Compute
-Engine setup, firewall prerequisites, whole-document JSON-secret setup, and provider-ID-safe
-recovery are covered in [Using Google Compute Engine](../docs/guides/gcp.md).
+that relied on Azure, Proxmox, 1Password, or Claude Code before they became opt-in. Cloud platform
+permissions, credentials, and safe cleanup are covered in [Using Amazon EC2](../docs/guides/aws.md),
+[Using Azure Virtual Machines](../docs/guides/azure.md), and
+[Using Google Compute Engine](../docs/guides/gcp.md).
 
 ### Mise (Polyglot Tool Manager)
 
