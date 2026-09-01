@@ -38,8 +38,6 @@ from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.debian import DebianRelease
 from agentworks.errors import StateError
 
-pytestmark = pytest.mark.usefixtures("verified_debian_release")
-
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
 

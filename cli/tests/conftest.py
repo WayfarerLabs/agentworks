@@ -30,13 +30,10 @@ pytest_plugins = ["tests.orchestrated_fixtures"]
 
 @pytest.fixture
 def verified_debian_release(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make offline provider creates observe the release they requested."""
-    from agentworks.capabilities.vm_platform import debian_release
-
+    """Make offline manager creates observe the release they requested."""
     monkeypatch.setattr(
-        debian_release,
-        "probe_debian_release",
-        lambda transport, expected=None: expected,
+        "agentworks.vms.manager.lifecycle.probe_debian_release",
+        lambda transport, *, expected=None: expected,
     )
 
 

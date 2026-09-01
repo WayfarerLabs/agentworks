@@ -28,8 +28,6 @@ from agentworks.plugins.gcp.network import FirewallState
 from agentworks.plugins.gcp.platform import GCEPlatform
 from agentworks.ssh import SSHError, SSHResult
 
-pytestmark = pytest.mark.usefixtures("verified_debian_release")
-
 _TAILSCALE_SENTINEL = "tskey-hostile-'\"$()"
 _SERVICE_SENTINEL = '{"private_key":"service-hostile-\'\\"$()"}'
 _PROJECT = "project-a"

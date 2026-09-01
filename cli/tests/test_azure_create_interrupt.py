@@ -46,8 +46,6 @@ from tests._azure_platform_support import _install_fakes
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
 
-pytestmark = pytest.mark.usefixtures("verified_debian_release")
-
 _CONFIG = {"subscription_id": "sub-A", "resource_group": "rg1", "region": "eastus", "auth": {"mode": "ambient"}}
 _SENTINEL = "tskey-azure-readiness-'sentinel"
 

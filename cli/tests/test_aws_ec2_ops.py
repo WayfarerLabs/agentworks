@@ -25,8 +25,6 @@ from agentworks.ssh import SSHError
 from agentworks.transports import SSHTransport
 from tests._aws_fakes import Controls, client_error, install_fakes, stub_egress, unreachable
 
-pytestmark = pytest.mark.usefixtures("verified_debian_release")
-
 if TYPE_CHECKING:
     from tests._aws_fakes import Recorder
     from tests.conftest import CapturedOutput

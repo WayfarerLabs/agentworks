@@ -33,8 +33,6 @@ from agentworks.capabilities.vm_platform.lima import _REBOOT_CLEAR_MARKER, LimaP
 from agentworks.debian import DebianRelease
 from agentworks.ssh import SSHError
 
-pytestmark = pytest.mark.usefixtures("verified_debian_release")
-
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
 

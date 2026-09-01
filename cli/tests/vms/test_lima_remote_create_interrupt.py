@@ -22,8 +22,6 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.ssh import SSHError
 from agentworks.vms import manager as vm_manager
 
-pytestmark = pytest.mark.usefixtures("verified_debian_release")
-
 if TYPE_CHECKING:
     from agentworks.db import Database
     from tests.conftest import CapturedOutput

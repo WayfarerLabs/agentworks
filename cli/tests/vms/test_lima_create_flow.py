@@ -30,8 +30,6 @@ from agentworks.capabilities.vm_platform.lima import (
 from agentworks.debian import DebianRelease
 from agentworks.ssh import SSHError
 
-pytestmark = pytest.mark.usefixtures("verified_debian_release")
-
 
 def _request(*, tailscale_auth_key: str = "tskey-test") -> ProvisionRequest:
     return ProvisionRequest(

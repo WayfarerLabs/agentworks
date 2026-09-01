@@ -26,8 +26,6 @@ from agentworks.plugins.azure.config import (
 from agentworks.plugins.azure.platform import AzureVMPlatform
 from agentworks.schema import RefOwner
 
-pytestmark = pytest.mark.usefixtures("verified_debian_release")
-
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
 

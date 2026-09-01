@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-from typing import cast
-
 import pytest
 
-from agentworks.capabilities.vm_platform import debian_release as release_boundary
 from agentworks.capabilities.vm_platform.debian_release import (
     code_owned_release_value,
     operator_owned_release_value,
-    verify_provisioned_release,
 )
 from agentworks.capabilities.vm_platform.lima import _LIMA_IMAGE_BLOCKS, LimaPlatform
 from agentworks.capabilities.vm_platform.wsl2 import _DEBIAN_OCI_TAGS, WSL2Platform
@@ -22,7 +18,6 @@ from agentworks.plugins.azure.platform import AzureVMPlatform
 from agentworks.plugins.gcp.config import IMAGE_FAMILIES
 from agentworks.plugins.gcp.platform import GCEPlatform
 from agentworks.plugins.proxmox.platform import ProxmoxConfig, ProxmoxPlatform
-from agentworks.transports import Transport
 
 
 def test_all_platforms_declare_contract_version_one() -> None:
@@ -115,19 +110,3 @@ def test_proxmox_create_release_validation_preserves_config_loadability() -> Non
 
     assert caught.value.entity_kind == "vm-site"
     assert caught.value.entity_name == "lab"
-
-
-def test_shared_verifier_passes_the_expected_release_to_the_core_probe(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    seen: list[tuple[object, DebianRelease | None]] = []
-    transport = cast("Transport", object())
-
-    def _probe(candidate: object, expected: DebianRelease | None = None) -> DebianRelease:
-        seen.append((candidate, expected))
-        return DebianRelease.TRIXIE
-
-    monkeypatch.setattr(release_boundary, "probe_debian_release", _probe)
-
-    assert verify_provisioned_release(transport, DebianRelease.TRIXIE) is DebianRelease.TRIXIE
-    assert seen == [(transport, DebianRelease.TRIXIE)]

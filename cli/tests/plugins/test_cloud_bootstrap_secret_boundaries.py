@@ -22,8 +22,6 @@ from agentworks.transports import SSHTransport
 from tests._aws_fakes import install_fakes as install_aws_fakes
 from tests._azure_platform_support import _install_fakes as install_azure_fakes
 
-pytestmark = pytest.mark.usefixtures("verified_debian_release")
-
 _SENTINEL = "tskey-boundary-'swordfish"
 _AZURE_CONFIG = {
     "subscription_id": "sub-A",

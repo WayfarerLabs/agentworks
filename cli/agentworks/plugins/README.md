@@ -206,9 +206,8 @@ class ExampleCloudPlatform(VMPlatform):
 For vm-platform contract version 1, `create()` receives a concrete core-selected Debian release, a
 required Tailscale auth key, and a value-free bootstrap-progress sink in `ProvisionRequest`. The
 platform resolves the release through a local artifact map before mutation, with no default or
-fallback. It must finish the Tailscale join, probe `/etc/os-release` while backend rollback remains
-available, and raise after cleaning up a mismatch. Core independently repeats that probe over the
-returned transport and persists its own observation rather than trusting a platform result field. A
+fallback. It must finish the Tailscale join and return a transport through which core probes
+`/etc/os-release`. Core persists its own observation rather than trusting a platform result field. A
 missing code-owned map entry says that Agentworks is out of date; an operator-owned catalog miss
 names the exact vm-site field. A successful result may omit the Tailscale IP only when join
 succeeded but IP discovery did not; the manager then performs IP-only rediscovery and Tailscale SSH
@@ -218,9 +217,9 @@ An operator-owned release catalog also overrides the pure `validate_create_relea
 Core calls it with the concrete selection before resolving secrets or running authenticated platform
 readiness, while `create()` repeats the lookup before mutation. Do not turn that operation-specific
 requirement into load-time rejection when the same site can still operate existing VMs. When the
-backend can inspect an operator-owned artifact after boot but before Agentworks bootstrap, attest
-`/etc/os-release` at that boundary and roll back a mismatch. Core retains the final live probe over
-the returned transport; neither verification gets an operator bypass.
+artifact is operator owned, core applies the same returned-transport probe after platform creation.
+A mismatch retains an addressable failed VM for explicit deletion. The verification has no operator
+bypass.
 
 A site then writes `platform: {name: example-cloud, region: us-west-2}`, and `api_token` resolves to
 the `example-cloud-token` secret because the field was omitted. An OMITTED reference field and an

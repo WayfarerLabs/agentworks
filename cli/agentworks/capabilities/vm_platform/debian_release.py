@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from agentworks.debian import DebianRelease, probe_debian_release
 from agentworks.errors import ConfigError, StateError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from agentworks.transports import Transport
+    from agentworks.debian import DebianRelease
 
 
 def code_owned_release_value[T](
@@ -54,8 +53,3 @@ def operator_owned_release_value[T](
             entity_name=site_name,
             hint=f"Set {key} in vm-site/{site_name}'s platform configuration.",
         ) from None
-
-
-def verify_provisioned_release(transport: Transport, expected: DebianRelease) -> DebianRelease:
-    """Verify a newly provisioned guest over its returned transport."""
-    return probe_debian_release(transport, expected=expected)

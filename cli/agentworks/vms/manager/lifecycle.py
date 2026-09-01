@@ -25,10 +25,9 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.vm_platform.debian_release import verify_provisioned_release
 from agentworks.config import validate_admin_username
 from agentworks.db import SYSTEM_SLUG_KEY, InitStatus, ProvisioningStatus
-from agentworks.debian import CURRENT_DEBIAN_RELEASE, DebianRelease
+from agentworks.debian import CURRENT_DEBIAN_RELEASE, DebianRelease, probe_debian_release
 from agentworks.errors import (
     AlreadyExistsError,
     ConfigError,
@@ -558,9 +557,9 @@ def create_vm(
             # for an explicit delete.
             try:
                 output.info(f"Confirming Debian release {creation_release.value}...")
-                observed_release = verify_provisioned_release(
+                observed_release = probe_debian_release(
                     result.native_transport,
-                    creation_release,
+                    expected=creation_release,
                 )
             except (KeyboardInterrupt, UserAbort):
                 db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)

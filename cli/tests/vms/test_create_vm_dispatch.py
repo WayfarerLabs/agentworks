@@ -86,13 +86,13 @@ def test_create_vm_request_shape_and_row(
     native_transport = SimpleNamespace()
     monkeypatch.setattr("agentworks.instance_specs.render_overlay_outcome", outcomes.append)
 
-    def _verify_release(transport: object, expected: DebianRelease) -> DebianRelease:
+    def _verify_release(transport: object, *, expected: DebianRelease) -> DebianRelease:
         assert transport is native_transport
         attested_release.append(expected)
         return expected
 
     monkeypatch.setattr(
-        "agentworks.vms.manager.lifecycle.verify_provisioned_release",
+        "agentworks.vms.manager.lifecycle.probe_debian_release",
         _verify_release,
     )
 
@@ -316,13 +316,13 @@ def test_create_vm_core_release_attestation_uses_core_release_and_retains_failed
         _create_with_mutated_request,
     )
 
-    def _fail_attestation(transport: object, expected: DebianRelease) -> DebianRelease:
+    def _fail_attestation(transport: object, *, expected: DebianRelease) -> DebianRelease:
         assert transport is native_transport
         assert expected is DebianRelease.TRIXIE
         raise failure
 
     monkeypatch.setattr(
-        "agentworks.vms.manager.lifecycle.verify_provisioned_release",
+        "agentworks.vms.manager.lifecycle.probe_debian_release",
         _fail_attestation,
     )
     monkeypatch.setattr(

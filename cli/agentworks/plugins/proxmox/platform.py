@@ -139,10 +139,10 @@ class ProxmoxPlatform(VMPlatform):
         equivalent escape hatch.
 
         Creation passes the required Tailscale key through a private guest-agent staging
-        file. Before that bootstrap runs, the live guest must report the requested Debian
-        release through the QEMU guest agent. Creation verifies removal of the staging file
-        before returning a transport for core's final independent release check. An early
-        verification or bootstrap failure rolls the cloned VM back before it propagates.
+        file and verifies removal of that file before returning a Tailscale-backed transport.
+        Core checks the live Debian release through the returned transport. A bootstrap
+        failure rolls the cloned VM back; a later core mismatch retains an addressable failed
+        VM for explicit deletion.
 
         Ships as the opt-in `proxmox` system plugin, so a site stays not-ready until
         `[plugins] system` lists it.
