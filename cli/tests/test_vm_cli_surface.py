@@ -5,7 +5,6 @@ removed `--vm-host` / `vm-host` group, and the doctor VM-sites group.
 
 from __future__ import annotations
 
-import json
 import re
 from typing import TYPE_CHECKING, Any, cast
 
@@ -48,129 +47,17 @@ def test_vm_create_site_flag_forwards(monkeypatch: pytest.MonkeyPatch) -> None:
     assert captured["site"] == "azure-dev"
 
 
-def test_vm_upgrade_uses_managed_checkpoint_without_operator_reference(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_vm_confirm_release_forwards_name_and_confirmation(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
     result = _invoke(
         monkeypatch,
-        ["vm", "upgrade", "box"],
-        "agentworks.vms.manager.upgrade_vm",
+        ["vm", "confirm-release", "box", "--yes"],
+        "agentworks.vms.manager.confirm_vm_release",
         captured,
     )
-    assert result.exit_code == 0, result.output
-    assert captured["name"] == "box"
-    assert "checkpoint" not in captured
-
-
-@pytest.mark.parametrize(
-    ("command", "target"),
-    [
-        ("create-checkpoint", "agentworks.vms.manager.create_checkpoint"),
-        ("restore-checkpoint", "agentworks.vms.manager.restore_checkpoint"),
-        ("delete-checkpoint", "agentworks.vms.manager.delete_checkpoint"),
-    ],
-)
-def test_vm_checkpoint_commands_forward_vm_name(
-    monkeypatch: pytest.MonkeyPatch,
-    command: str,
-    target: str,
-) -> None:
-    captured: dict[str, Any] = {}
-    argv = ["vm", command, "box"]
-    if command != "create-checkpoint":
-        argv.append("--yes")
-    if command == "delete-checkpoint":
-        argv.append("--force")
-    result = _invoke(monkeypatch, argv, target, captured)
     assert result.exit_code == 0, result.output
     assert captured["_args"][2] == "box"
-    if command != "create-checkpoint":
-        assert captured["yes"] is True
-    if command == "delete-checkpoint":
-        assert captured["force"] is True
-
-
-def test_vm_list_checkpoints_names_only_forwards_csv_filter(monkeypatch: pytest.MonkeyPatch) -> None:
-    captured: dict[str, Any] = {}
-    result = _invoke(
-        monkeypatch,
-        ["vm", "list-checkpoints", "--vm", "one,two", "--names-only"],
-        "agentworks.vms.manager.list_checkpoints",
-        captured,
-    )
-    assert result.exit_code == 0, result.output
-    assert captured["vm_names"] == ["one", "two"]
-    assert captured["names_only"] is True
-
-
-def test_vm_list_checkpoints_json_uses_machine_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("agentworks.cli.commands.vm.get_db", lambda: object())
-    monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
-    monkeypatch.setattr("agentworks.vms.manager.list_checkpoints", lambda *_args, **_kwargs: [])
-
-    result = CliRunner().invoke(app, ["vm", "list-checkpoints", "--output", "json"])
-
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.stdout)
-    assert payload["command"] == "vm.list-checkpoints"
-    assert payload["data"] == {"checkpoints": []}
-
-
-def test_vm_list_checkpoints_json_projects_checkpoint_fields(monkeypatch: pytest.MonkeyPatch) -> None:
-    from agentworks.db import VMCheckpointRow, VMCheckpointState
-    from agentworks.debian import DebianRelease
-    from agentworks.vms.manager import CheckpointListing, CheckpointRestoreStatus
-
-    row = VMCheckpointRow(
-        vm_name="box",
-        name="agw-checkpoint",
-        provider_identifier="snapshot-123",
-        operation_id=None,
-        desired_state_fingerprint="a" * 64,
-        state=VMCheckpointState.READY,
-        capture_release=DebianRelease.BOOKWORM,
-        source_release=DebianRelease.BOOKWORM,
-        target_release=DebianRelease.TRIXIE,
-        created_at="2026-08-31T12:00:00Z",
-    )
-    monkeypatch.setattr("agentworks.cli.commands.vm.get_db", lambda: object())
-    monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
-    monkeypatch.setattr(
-        "agentworks.vms.manager.list_checkpoints",
-        lambda *_args, **_kwargs: [CheckpointListing(checkpoint=row, restore_status=CheckpointRestoreStatus.AVAILABLE)],
-    )
-
-    result = CliRunner().invoke(app, ["vm", "list-checkpoints", "--output", "json"])
-
-    assert result.exit_code == 0, result.output
-    data = json.loads(result.stdout)["data"]
-    assert data == {
-        "checkpoints": [
-            {
-                "vm_name": "box",
-                "name": "agw-checkpoint",
-                "provider_identifier": "snapshot-123",
-                "state": "ready",
-                "restore_status": "available",
-                "purpose": "debian-upgrade",
-                "capture_release": "bookworm",
-                "source_release": "bookworm",
-                "target_release": "trixie",
-                "created_at": "2026-08-31T12:00:00Z",
-            }
-        ]
-    }
-    assert list(data["checkpoints"][0]) == [
-        "vm_name",
-        "name",
-        "provider_identifier",
-        "state",
-        "restore_status",
-        "purpose",
-        "capture_release",
-        "source_release",
-        "target_release",
-        "created_at",
-    ]
+    assert captured["yes"] is True
 
 
 def test_vm_create_admin_template_flag_forwards(

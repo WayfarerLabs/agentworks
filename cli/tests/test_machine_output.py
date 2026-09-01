@@ -77,7 +77,6 @@ def test_machine_output_commands_are_the_complete_v1_contract() -> None:
         "graph.show",
         "vm.list",
         "vm.describe",
-        "vm.list-checkpoints",
         "workspace.list",
         "workspace.describe",
         "agent.list",

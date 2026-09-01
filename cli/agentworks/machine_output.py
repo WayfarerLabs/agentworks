@@ -64,7 +64,6 @@ class MachineOutputCommand(StrEnum):
     GRAPH_SHOW = "graph.show"
     VM_LIST = "vm.list"
     VM_DESCRIBE = "vm.describe"
-    VM_LIST_CHECKPOINTS = "vm.list-checkpoints"
     WORKSPACE_LIST = "workspace.list"
     WORKSPACE_DESCRIBE = "workspace.describe"
     AGENT_LIST = "agent.list"

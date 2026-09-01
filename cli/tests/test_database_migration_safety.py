@@ -84,7 +84,7 @@ def test_latest_schema_enforces_atomic_debian_release_observation(tmp_path: Path
     connection.close()
 
 
-def test_version_33_advances_to_forward_checkpoint_migration_34(tmp_path: Path) -> None:
+def test_version_33_advances_through_checkpoint_retirement(tmp_path: Path) -> None:
     path = tmp_path / "state.db"
     _build_schema(path, 33)
     before = sqlite3.connect(path)
@@ -97,49 +97,39 @@ def test_version_33_advances_to_forward_checkpoint_migration_34(tmp_path: Path) 
     Database(path).close()
 
     after = sqlite3.connect(path)
-    assert _version(path) == 34
-    columns = tuple(row[1] for row in after.execute("PRAGMA table_info(vm_checkpoints)"))
-    assert columns == (
-        "vm_name",
-        "name",
-        "provider_identifier",
-        "operation_id",
-        "desired_state_fingerprint",
-        "state",
-        "capture_release",
-        "source_release",
-        "target_release",
-        "created_at",
+    assert _version(path) == 35
+    assert (
+        after.execute("SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'vm_checkpoints'").fetchone()
+        is None
     )
     after.close()
 
 
-def test_checkpoint_schema_requires_upgrade_capture_to_equal_source(tmp_path: Path) -> None:
+def test_checkpoint_retirement_refuses_to_orphan_a_record(tmp_path: Path) -> None:
     path = tmp_path / "state.db"
-    _build_schema(path, LATEST_VERSION)
+    _build_schema(path, 34)
     connection = sqlite3.connect(path)
     connection.execute(
         "INSERT INTO vms (name, site, hostname, template) VALUES (?, ?, ?, ?)",
         ("release-witness", "lima-local", "lima--release-witness", None),
     )
 
-    with pytest.raises(sqlite3.IntegrityError):
-        connection.execute(
-            "INSERT INTO vm_checkpoints "
-            "(vm_name, name, provider_identifier, desired_state_fingerprint, state, "
-            "capture_release, source_release, target_release) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                "release-witness",
-                "agw-invalid",
-                "provider-id",
-                "a" * 64,
-                "ready",
-                "trixie",
-                "bookworm",
-                "trixie",
-            ),
-        )
+    connection.execute(
+        "INSERT INTO vm_checkpoints "
+        "(vm_name, name, provider_identifier, desired_state_fingerprint, state, capture_release) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        ("release-witness", "agw-retained", "provider-id", "a" * 64, "ready", "bookworm"),
+    )
+    connection.commit()
     connection.close()
+
+    with pytest.raises(sqlite3.IntegrityError):
+        Database(path)
+
+    after = sqlite3.connect(path)
+    assert _version(path) == 34
+    assert after.execute("SELECT vm_name FROM vm_checkpoints").fetchone() == ("release-witness",)
+    after.close()
 
 
 def _serialized_open_worker(

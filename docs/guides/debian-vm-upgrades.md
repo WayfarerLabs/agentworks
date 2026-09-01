@@ -1,197 +1,142 @@
 # Upgrading a Debian VM
 
-Agentworks creates VMs on one current Debian release and supports one in-place transition: the
-immediately previous release to the current release. `agw vm upgrade NAME` selects that transition
-from Agentworks' release registry. It does not accept a target release, skip releases, downgrade, or
-run a chained upgrade.
+Agentworks creates VMs on one current Debian release. It keeps the immediately previous release
+operable and supports adopting it after an operator-led upgrade to current, but Agentworks does not
+run the Debian upgrade or create a provider recovery artifact.
 
-A VM two or more releases behind remains usable on a best-effort basis, with support warnings, but
-cannot enter this workflow. Create a current VM and copy its workspaces and data instead.
+For Trixie, the supported operator path starts from Bookworm. A VM two or more recognized releases
+behind remains usable on a best-effort basis with warnings, but create a current VM and copy its
+data instead of attempting a chained upgrade.
+
+## Understand the boundary
+
+Three systems hold different state:
+
+- the provider holds the VM disks and machine definition;
+- Debian holds package, boot, network, and service state inside the guest; and
+- Agentworks holds VM declarations plus related agents, sessions, consoles, and workspaces.
+
+A provider snapshot or disk restore covers only the provider side. It does not roll the Agentworks
+database back. An Agentworks VM backup covers metadata, owned resources, and selected files, but it
+cannot restore a provider VM's boot disk.
+
+Plan recovery for both sides before changing Debian. Agentworks cannot make those systems one atomic
+transaction and does not claim automatic rollback.
 
 ## Before you start
 
-Stop every Agentworks session on the VM and resolve any package-manager work already in progress:
+Use an Agentworks build that recognizes the target release. Confirm the VM's recorded state:
+
+```console
+agw vm describe NAME
+```
+
+Stop every Agentworks session on the VM and verify the list. A distribution upgrade and reboot will
+terminate live shells and processes:
 
 ```console
 agw session stop --all --vm NAME
 agw session list --vm NAME
 ```
 
-The upgrade fails before package planning if a session is still running, broken, or cannot be
-verified, and names the affected sessions. A broken session may require `--force`; Agentworks does
-not stop sessions automatically as part of this read-only gate.
+Named console definitions remain in Agentworks, but their live tmux state and console-only processes
+will not survive a reboot. Stop application workloads according to their own runbooks.
 
-If the VM has named consoles, the command also warns that the required reboot ends their live tmux
-state and any console-only shell processes. The named console definitions and session membership
-survive, and the next `agw console attach` rebuilds the aggregate view.
+Create two distinct backups:
 
-The upgrade uses the VM's canonical SSH identity. If the VM predates SSH identity tracking, run one
-successful `agw vm reinit NAME` while the configured key still works before starting the upgrade. If
-it no longer works, restore the configured public key through a supported platform recovery
-transport or provider-native recovery tooling, then reinitialize.
+1. Run `agw vm backup NAME` for Agentworks metadata, resources, and selected files.
+2. Create a provider-native snapshot, image, export, clone, backup, or equivalent that can restore
+   the VM and its boot disk on that platform.
 
-The command checks the recorded and observed Debian releases, package-database health, package
-holds, kernel meta-package where the guest owns its kernel, OpenSSH version, APT pins and mixed
-suites, modified package configuration files, partition-aware disk estimates, package removals,
-third-party repositories, and transition-specific Debian release-note blockers. WSL2 uses the
-Microsoft-managed WSL kernel, so Agentworks verifies that provider kernel instead of requiring a
-Debian `linux-image` package inside the distribution.
+Verify the provider artifact and the actual restore procedure. Ensure you have provider console or
+other out-of-band recovery access in case SSH or Tailscale does not return. Provider permissions,
+storage charges, consistency rules, and restore mechanics remain platform responsibilities.
 
-The target package plan uses isolated scratch APT state and canonical target sources; it does not
-load the guest's APT configuration fragments, hooks, preferences, or source files. Space estimates
-are aggregated by the actual filesystems backing `/`, `/var`, the package cache, and `/boot`, so
-shared mounts are counted together and separate root/`/var` filesystems each carry a conservative
-installed-growth allowance.
+Read the complete release notes for the exact transition before proceeding. For Bookworm to Trixie,
+use Debian's
+[upgrade instructions](https://www.debian.org/releases/trixie/release-notes/upgrading.en.html) and
+[issues to be aware of](https://www.debian.org/releases/trixie/release-notes/issues.en.html).
+Debian's guidance, not this document, is authoritative for package sources, package preparation,
+space, upgrade ordering, reboot, and release-specific blockers.
 
-Agentworks creates one managed, recoverable checkpoint immediately before the first package
-mutation. It generates the checkpoint name, stops the VM for an offline capture, verifies the
-provider artifact, and starts the VM again. The ordinary `vm backup` and Debian recovery bundle
-remain separate data-recovery artifacts.
+## Perform the Debian upgrade
 
-Each VM has one operational checkpoint slot. A checkpoint left by a completed upgrade is retained
-until you explicitly delete it. Before starting a later upgrade, inspect and either retain or delete
-that checkpoint:
+Follow Debian's procedure directly on the guest. Use a durable terminal and keep the provider
+console available. Do not run `vm reinit` in the middle of the distribution transition;
+release-aware Agentworks resources should converge only after Debian reports one coherent recognized
+release.
 
-```console
-agw vm list-checkpoints --vm build-1
-agw vm delete-checkpoint build-1
-```
+After the reboot, verify at least:
 
-The checkpoint list separates provider lifecycle state from current restore eligibility. `ready`
-means the provider artifact completed. `available` means live provider inventory still proves that
-artifact, the current Agentworks declarations match the captured state, and managed restore is
-allowed. `declarations-changed` means restore is blocked until you restore the matching Agentworks
-database and declarations or replace the checkpoint. An interrupted restore reports
-`resume-required`. If provider evidence cannot be proved, `vm describe` reports `unavailable` with a
-diagnostic and ordinary checkpoint listing refuses the inconsistent inventory.
+- `/etc/os-release` reports the expected Debian codename and version;
+- the package database is healthy;
+- SSH and Tailscale are reachable;
+- required services and workloads start; and
+- the recovery artifact remains available until you are satisfied with the result.
 
-An unrelated checkpoint blocks a fresh upgrade instead of being replaced. A checkpoint for the same
-release transition may be reused after a cancellation before package mutation or after an explicit
-restore, provided the guest, database, upgrade journal, provider artifact, and captured desired
-state still agree. Reuse output includes the original creation time so the operator can judge the
-age of the retained recovery point.
+Agentworks has no upgrade-resume journal. If Debian fails partway through, use Debian's recovery
+guidance and your provider-native artifact. Do not ask Agentworks to adopt a mixed or unrecognized
+guest.
 
-### Provider prerequisites
+## Adopt the live release in Agentworks
 
-Checkpoint creation must work before Agentworks mutates Debian. Existing least-privilege cloud
-credentials may need checkpoint permissions added:
-
-- AWS needs EBS snapshot create, describe, tag, and delete access; root-volume replacement task
-  create and describe access; and volume describe, delete, `ec2:CreateTags`, and `ec2:DeleteTags`
-  access. See
-  [EBS snapshot creation](https://docs.aws.amazon.com/ebs/latest/userguide/ebs-creating-snapshot.html)
-  and
-  [EC2 root-volume replacement](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/replace-root.html).
-- Azure needs snapshot read, write, and delete; managed-disk read, write, and delete; and VM read,
-  write, start, deallocate, and instance-view access. See
-  [Azure OS disk swap](https://learn.microsoft.com/en-us/azure/virtual-machines/linux/os-disk-swap).
-
-GCP and Proxmox permissions are covered in their platform guides. Lima QEMU instances use native
-snapshots. Lima VZ instances use a stopped, protected recovery clone and therefore work on the
-ordinary macOS default driver without a configuration switch. Agentworks never starts the recovery
-clone; do not start it manually because it carries the same guest and Tailscale identity as the VM.
-Restore retains the exact original instance directory under a protected emergency name and uses an
-exact-path exclusive local rename to put the recovered stopped clone at the original Lima name
-without copy fallback. SSH-placed VZ checkpoint creation and restore refuse before mutation; run
-those operations on the Lima host through a local-placement site. Remote QEMU snapshots remain
-supported. VZ checkpoint creation refuses Lima `additionalDisks`, which are separate resources a
-primary instance clone cannot recover. Lima tries copy-on-write cloning on supporting filesystems,
-but the clone and retained emergency instance can consume more storage as their disks diverge. WSL2
-must have enough local storage for exports. Provider snapshots, Lima clones, and the emergency disk,
-instance, or export retained by destructive-restore platforms consume storage, quota, and provider
-charges until `agw vm delete-checkpoint NAME` succeeds.
-
-## What the command does
-
-The workflow has two authorization points:
-
-1. It first checks the database checkpoint slot and live provider checkpoint inventory. After that
-   read-only check passes, it completes the ordinary VM backup and Debian recovery bundle, creates
-   and verifies the managed offline checkpoint, then asks permission to bring the source release
-   fully current without changing suites.
-2. It reopens the VM operation boundary, repeats the complete preflight, highlights material drift,
-   shows the final plan, and asks permission to switch Debian suites.
-
-A fresh upgrade and a resume paused before suite switching require an interactive terminal. A
-non-interactive invocation may continue a later stage whose required authorization is already
-durable.
-
-The command announces every preflight group and post-reboot verification stage. Long durable package
-actions are shown as tracked source-update, source-switch, minimal-upgrade, and full-upgrade work,
-so an expensive remote operation does not look stalled even when package processing takes time.
-
-After the second confirmation, Agentworks preserves and disables the existing APT source files,
-writes the target release's canonical Debian sources, runs the documented minimal and full upgrades,
-and verifies the target kernel is installed on guest-kernel platforms. It uses the installed target
-udev rules to predict post-reboot interface names and refuses to reboot when a rename could strand
-the VM. WSL2 instead records and verifies its provider-managed interface names across the clean
-systemd shutdown and distribution restart.
-
-The reboot is a separate durably recorded action. Agentworks requires a changed boot ID, verifies
-the predicted interface names, and first tries the canonical Tailscale SSH route. If that route does
-not return and the platform provides a native transport, it uses that route to rejoin Tailscale with
-the key resolved before mutation. Proxmox has no post-create native transport, so reconnect repair
-uses the Proxmox console. The managed checkpoint is retained for an explicit restore if forward
-repair is not appropriate.
-
-As soon as `/etc/os-release` proves the target release, Agentworks records it in the database. It
-then verifies the package database, target APT convergence and sources, running guest or WSL
-provider kernel, systemd, sshd, Tailscale, and Agentworks identities before rerunning release-aware
-VM initialization. Automatic APT timers are restored to their prior states only after the healthy
-target and initialization complete. A source-safe early failure also attempts restoration. If that
-restoration cannot be verified, all known timers remain stopped during reconfiguration and the VM
-gets a durable repair-required event. Successful completion names the retained checkpoint, warns
-that provider storage charges may continue, and shows the command that deletes it.
-
-## Resume and recovery
-
-Durable state lives on the guest at:
-
-```text
-/var/lib/agentworks/debian-upgrades/{source}-to-{target}/
-```
-
-The directory is root-owned and contains the plan, atomic state, original source files, upgrade
-script, log, and one non-blocking lock. Unsafe symlinks, ownership, or permissions on journal-owned
-paths stop the workflow for repair. Package actions run in a detached systemd unit. Losing the local
-process or SSH connection does not erase intent or start a second package manager; attempt
-identities also fence an older invocation from overwriting a newer retry.
-
-Run the same command after an interruption:
+Once Debian is healthy, run:
 
 ```console
-agw vm upgrade build-1
+agw vm confirm-release NAME
 ```
 
-Agentworks inspects the active unit, native package locks, journal, and action postcondition. It
-advances work already proved complete, safely retries only a retryable action, or stops with manual
-repair guidance. Once suite switching starts, repair proceeds forward to the target release. There
-is no automatic downgrade or provider rollback.
+The command connects to that named VM, reads `/etc/os-release`, and shows both the recorded and live
+releases. It accepts only a release recognized by the installed Agentworks build. If the values
+differ, it asks before changing the database. `--yes` or `-y` skips that confirmation.
 
-Use the retained `upgrade.log`, Debian package logs, recovery bundle, managed checkpoint, and
-platform console when the command reports `repair-required`. If no canonical or native route works,
-do not start another upgrade process. Repair connectivity through the console or explicitly restore
-the checkpoint:
+On a confirmed change, Agentworks performs one local transaction: it records the live release and
+marks initialization pending. It does not reinitialize automatically. This is intentional because
+the observation remains true even if later convergence fails.
+
+Next run:
 
 ```console
-agw vm restore-checkpoint build-1
+agw vm reinit NAME
 ```
 
-Restore is destructive and requires the VM and all its Agentworks sessions to be stopped. Before
-provider mutation, Agentworks verifies that the current effective VM declarations match the state
-captured with the checkpoint. It then restores the provider artifact, briefly starts the VM to
-attest and record the live Debian release, marks initialization for reconciliation, and returns the
-VM to stopped state. Run `agw vm reinit build-1` before relying on guest convergence. Restore
-retains the checkpoint; only `vm delete-checkpoint` frees the slot.
+Reinitialization selects release-specific APT resources from the verified live release and converges
+Agentworks-managed state. If it fails, repair the reported cause and rerun `vm reinit`. The VM
+remains recorded at its truthful live release with initialization pending until convergence
+succeeds.
 
-Checkpoint deletion normally proves provider cleanup before Agentworks releases the slot. If
-provider inventory or cleanup remains unavailable, `agw vm delete-checkpoint NAME --force`
-explicitly makes Agentworks forget the checkpoint so the VM is not permanently trapped in a failed
-lifecycle. This does not prove or perform provider cleanup. The command warns with the known
-provider identifier when one was recorded; late, incomplete, emergency, or additional provider
-artifacts may remain and continue billing. Inspect and remove them with the provider's native tools.
-Ordinary deletion never takes this escape path. `agw vm delete NAME --force` uses it only after its
-checkpoint cleanup attempt fails, then continues the already-explicit forced VM deletion.
+Running `vm confirm-release` when recorded and live releases already match only refreshes the
+observation time. It does not change initialization state or require confirmation.
 
-A target release already proved by the guest remains recorded even when later health checks or
-initialization still need repair.
+## Restoring the provider artifact
+
+Use the provider's native procedure. Agentworks neither lists nor restores provider snapshots.
+
+After restore, verify the guest before using it. A provider disk image may now contain an older
+Debian release while the Agentworks database still contains agents, sessions, consoles, workspaces,
+or declarations created after the snapshot. Reconcile those objects and application data explicitly;
+`confirm-release` cannot make the database match a historical disk image.
+
+If the restored guest reports a recognized release, adopt the backward change through the same two
+commands:
+
+```console
+agw vm confirm-release NAME
+agw vm reinit NAME
+```
+
+Keep or delete the provider recovery artifact according to the platform's retention, billing, and
+operational policy only after the restored or upgraded VM is verified.
+
+## What Agentworks deliberately does not do
+
+- choose an operator-specified Debian target;
+- run `apt`, rewrite Debian sources, or reboot as an upgrade workflow;
+- create, inventory, restore, or delete provider checkpoints;
+- stop sessions or workloads automatically;
+- roll back the Agentworks database with a VM disk;
+- automatically call `vm reinit` after confirming a release; or
+- support a direct or chained upgrade from current-2.
+
+Those boundaries keep the durable release record useful without presenting provider recovery and a
+remote package transition as a portable atomic operation.

@@ -555,11 +555,10 @@ where the platform offers a usable recovery transport, restore the configured pu
 reinitialize. Some platform transports also depend on the configured key; use provider-native
 recovery or recreate the VM when that path cannot connect.
 
-Debian distribution changes use the separate, resumable `agw vm upgrade <name>` workflow. It moves
-only from Agentworks' previous Debian release to its current release. After local backups, it
-creates and verifies the VM's managed offline checkpoint before the first package mutation. The
-checkpoint is retained for explicit restore or deletion. See
-[Upgrading a Debian VM](../docs/guides/debian-vm-upgrades.md).
+Debian distribution upgrades remain operator-led. After following Debian's release notes and
+verifying provider-native recovery, run `agw vm confirm-release <name>` to inspect and explicitly
+adopt the live release, then run the separate `agw vm reinit <name>` to converge release-aware
+Agentworks state. See [Upgrading a Debian VM](../docs/guides/debian-vm-upgrades.md).
 
 Passphrase-protected OpenSSH private keys remain supported: Agentworks reads the public identity
 embedded in the private-key envelope without decrypting it or consulting a sibling public-key file.

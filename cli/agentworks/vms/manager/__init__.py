@@ -51,22 +51,6 @@ from .boundary import (
     gated_vm_platform_recovery_boundary,
     require_vm_ssh_boundary,
 )
-from .checkpoint_listing import (
-    CheckpointListing,
-    CheckpointRestoreStatus,
-    checkpoint_listing_data,
-    render_checkpoint_listing,
-)
-from .checkpoints import (
-    checkpoint_restore_status,
-    create_checkpoint,
-    create_upgrade_checkpoint,
-    delete_checkpoint,
-    list_checkpoints,
-    preflight_upgrade_checkpoint,
-    require_upgrade_checkpoint,
-    restore_checkpoint,
-)
 from .exec import exec_vm, shell_vm
 from .inspect import (
     describe_vm,
@@ -77,7 +61,7 @@ from .inspect import (
 )
 from .lifecycle import create_vm, reinit_vm
 from .power import delete_vm, rekey_vm, start_vm, stop_vm
-from .release import verified_vm_release
+from .release import confirm_vm_release, verified_vm_release
 from .tailscale import (
     _ensure_tailscale,
     _is_tailscale_reachable,
@@ -86,7 +70,6 @@ from .tailscale import (
     _warned_tailscale_missing,
     port_forward_vm,
 )
-from .upgrade import upgrade_vm
 from .verification import VMConnectionVerification, verify_vm_connection
 
 __all__ = [
@@ -111,32 +94,21 @@ __all__ = [
     "_vm_secret_target",
     "_warned_tailscale_missing",
     "bootstrap_vm",
-    "CheckpointListing",
-    "CheckpointRestoreStatus",
-    "checkpoint_listing_data",
-    "checkpoint_restore_status",
-    "create_checkpoint",
+    "confirm_vm_release",
     "create_vm",
-    "create_upgrade_checkpoint",
-    "delete_checkpoint",
     "delete_vm",
     "describe_vm",
     "exec_vm",
     "gated_vm_boundary",
     "gated_vm_platform_recovery_boundary",
     "list_vms",
-    "list_checkpoints",
     "port_forward_vm",
-    "preflight_upgrade_checkpoint",
     "reinit_vm",
     "rejoin_tailscale",
     "rekey_vm",
     "render_vm_listing",
-    "render_checkpoint_listing",
-    "require_upgrade_checkpoint",
     "require_vm_ssh_boundary",
     "run_initialization",
-    "restore_checkpoint",
     "shell_vm",
     "start_vm",
     "stop_vm",
@@ -145,7 +117,6 @@ __all__ = [
     "verify_tailscale_available",
     "verified_vm_release",
     "VMConnectionVerification",
-    "upgrade_vm",
     "VMInitializationOperation",
     "vm_description",
     "vm_listing",

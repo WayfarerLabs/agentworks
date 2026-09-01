@@ -35,21 +35,6 @@ def start_vm(
     *,
     interaction: TtyInteractionPolicy,
 ) -> None:
-    """Start a VM under shared checkpoint exclusion."""
-
-    from .operation_guard import shared_vm_operation_guard
-
-    with shared_vm_operation_guard(db, name, operation="start VM"):
-        _start_vm(db, config, name, interaction=interaction)
-
-
-def _start_vm(
-    db: Database,
-    config: Config,
-    name: str,
-    *,
-    interaction: TtyInteractionPolicy,
-) -> None:
     """Start a stopped VM. Clears the operator-stopped flag so the
     activation gate resumes auto-starting on demand.
 
@@ -140,21 +125,6 @@ def stop_vm(
     *,
     interaction: TtyInteractionPolicy,
 ) -> None:
-    """Stop a VM under shared checkpoint exclusion."""
-
-    from .operation_guard import shared_vm_operation_guard
-
-    with shared_vm_operation_guard(db, name, operation="stop VM"):
-        _stop_vm(db, config, name, interaction=interaction)
-
-
-def _stop_vm(
-    db: Database,
-    config: Config,
-    name: str,
-    *,
-    interaction: TtyInteractionPolicy,
-) -> None:
     """Stop a running VM and record the operator's intent.
 
     Orchestrated, composition only, mirroring :func:`start_vm`: no
@@ -191,30 +161,6 @@ def _stop_vm(
 
 
 def delete_vm(
-    db: Database,
-    config: Config,
-    name: str,
-    *,
-    force: bool = False,
-    yes: bool = False,
-    interaction: TtyInteractionPolicy,
-) -> None:
-    """Delete a VM while excluding checkpoint and upgrade operations."""
-
-    from .operation_guard import exclusive_vm_operation_guard
-
-    with exclusive_vm_operation_guard(db, name, operation="delete VM"):
-        _delete_vm(
-            db,
-            config,
-            name,
-            force=force,
-            yes=yes,
-            interaction=interaction,
-        )
-
-
-def _delete_vm(
     db: Database,
     config: Config,
     name: str,
@@ -284,11 +230,7 @@ def _delete_vm(
         if not output.confirm(msg):
             raise UserAbort("delete cancelled")
 
-    checkpoint_pending = db.get_vm_checkpoint(name) is not None
-    if checkpoint_pending:
-        output.info(f"Deleting VM '{name}' managed checkpoint first...")
-
-    # Resolve once for checkpoint, platform, and Tailscale cleanup.
+    # Platform-specific cleanup (also handles Tailscale logout)
     vm_node: LiveVMNode | None
     ops_ctx: RunContext | None = None
     try:
@@ -301,15 +243,6 @@ def _delete_vm(
         # inside it.)
         raise
     except Exception as e:
-        if checkpoint_pending and not force:
-            # A managed checkpoint is an independently billed/recoverable
-            # provider artifact. Keep both rows when its exact boundary cannot
-            # be resolved; best-effort VM-row cleanup must not orphan it.
-            raise
-        if checkpoint_pending:
-            from .checkpoints import _abandon_checkpoint
-
-            _abandon_checkpoint(db, name, error=e, yes=True)
         # Preflight or build failure (unreachable API, missing tool,
         # stranded site, unresolvable secret): warn and skip backend
         # cleanup; broken backends are what delete exists to clean up.
@@ -320,17 +253,6 @@ def _delete_vm(
     if vm_node is not None:
         assert ops_ctx is not None  # set beside vm_node above
         platform = vm_node.site.platform
-        if checkpoint_pending:
-            from .checkpoints import _delete_checkpoint_with_boundary
-
-            _delete_checkpoint_with_boundary(
-                db,
-                vm,
-                platform,
-                ops_ctx,
-                yes=True,
-                force=force,
-            )
         # Tailscale logout (best-effort, hold-only): the logout wants
         # the VM alive if it happens to be, but delete must NOT gate:
         # an operator-stopped VM would raise. (The WSL2 hold does boot a
@@ -388,30 +310,6 @@ def _delete_vm(
 
 
 def rekey_vm(
-    db: Database,
-    config: Config,
-    name: str,
-    *,
-    wait_for_share: bool = False,
-    ignore_env: bool = False,
-    interaction: TtyInteractionPolicy,
-) -> None:
-    """Rekey a VM under shared checkpoint exclusion."""
-
-    from .operation_guard import shared_vm_operation_guard
-
-    with shared_vm_operation_guard(db, name, operation="rekey VM"):
-        _rekey_vm(
-            db,
-            config,
-            name,
-            wait_for_share=wait_for_share,
-            ignore_env=ignore_env,
-            interaction=interaction,
-        )
-
-
-def _rekey_vm(
     db: Database,
     config: Config,
     name: str,

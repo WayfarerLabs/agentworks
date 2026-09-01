@@ -16,36 +16,40 @@ like a one-off platform migration. Release-dependent provider images and APT rep
 no shared type or observation record.
 
 Agentworks needs to advance Debian stable without introducing operator-selected operating systems,
-parallel creation releases, or an arbitrary release-upgrade graph.
+parallel creation releases, or a distribution-upgrade product. Debian upgrades and provider recovery
+are release-, workload-, and backend-specific. A provider disk restore also cannot atomically
+restore Agentworks' relational agents, sessions, consoles, workspaces, and declarations.
 
 ## Decision
 
 Agentworks continues to support Debian as its one managed guest operating system. It has one ordered
 registry of recognized Debian release profiles, and the final profile is the sole current release
-for new VM creation. Core passes that concrete release through the vm-platform capability; each
-platform maps it to its own reviewed artifact and verifies the live guest while it can still roll
-back a mismatch. Core independently probes the returned transport and persists only its own
-observation. When the artifact catalog is operator-owned, the platform also verifies the live
-release before Agentworks bootstrap mutates the guest.
+for new VM creation. Core passes that concrete release through the internal version-1 vm-platform
+capability. Each platform maps it to its own reviewed artifact and validates the guest within its
+rollback window where possible. Core independently probes the returned transport and persists only
+its own live observation.
 
-The database stores the last release observed from each live VM. Existing unknown rows are observed
-rather than guessed. A recognized release immediately before current is supported for an explicit
-in-place upgrade to current. Older recognized releases remain available for ordinary operations on a
-best-effort basis with a warning, but Agentworks does not start a direct or chained upgrade from
-them.
+The database stores the last release observed from each VM. Existing unknown rows are observed
+rather than guessed. Current and previous releases remain ordinarily operable. Older recognized
+releases continue best effort with a warning instead of being bricked.
 
 Release-dependent values are explicit maps keyed by Debian release and stay with the component that
 understands them. Supporting a future Debian stable release means adding and certifying its profile,
-platform artifacts, APT values, and adjacent transition policy, then appending that profile as the
-new current release.
+platform artifacts, and APT values, then appending that profile as current. It may still require
+release-specific work, but it does not require a new lifecycle model.
 
-The adjacent upgrade automatically acquires one managed offline checkpoint after local backups and
-before its first package mutation. The vm-platform contract requires create, list, restore, and
-delete operations for that checkpoint on every supported platform. Agentworks owns its generated
-name and durable descriptor, limits each VM to one operational checkpoint slot, retains it after
-upgrade or restore, and restores it only on an explicit operator command. Restore verifies that the
-current effective declarations still match the captured fingerprint, independently attests the live
-Debian release afterward, and returns the VM to stopped state for reinitialization.
+Agentworks does not execute a Debian distribution upgrade and does not manage provider checkpoints.
+Operators follow Debian's release notes and use provider-native backup and recovery. After an
+operator changes or restores a guest, `agw vm confirm-release NAME` probes and displays the recorded
+and live releases. A confirmed change atomically records the live observation and sets the existing
+initialization status to pending. The operator then runs the separate `agw vm reinit NAME` command.
+
+Keeping confirmation and reinitialization separate preserves truthful state when reinitialization
+fails. A new `reinit required` VM state is unnecessary because pending initialization already
+represents incomplete convergence.
+
+Doctor does not discover live Debian state. Live observation is an explicit named-VM operation, not
+a fleet-wide network scan that may activate VMs or wait on unavailable platforms.
 
 Operators cannot select another Debian creation release or bring another operating system into the
 managed lifecycle. A provider-specific artifact identifier may remain operator configuration where
@@ -56,12 +60,15 @@ release verification has no operator bypass.
 
 - New VMs across every platform target the same core-selected Debian stable release.
 - Platforms fail clearly when their implementation or operator-owned release map lacks that release.
-- Agentworks can reinitialize existing current and previous-release VMs using their observed release
-  instead of current creation policy.
-- The supported upgrade graph stays one edge: current-1 to current.
-- Every supported platform provides the same managed recovery boundary before an adjacent upgrade;
-  the one-slot rule avoids introducing a general snapshot-retention product.
-- A future stable promotion reuses the registry, persistence, platform contract, and durable upgrade
-  framework, while still requiring release-specific engineering and certification.
-- Multi-distribution support, operator-selected releases, downgrades, and multi-hop upgrades remain
-  outside the product contract.
+- Agentworks can reinitialize existing VMs using their observed release instead of current creation
+  policy.
+- The supported operator upgrade path stays relative: previous to current. Legacy VMs remain usable,
+  but a new current VM plus data copy is the recommended transition.
+- Upgrade execution, package recovery, and provider snapshots remain outside Agentworks' product
+  contract.
+- A failed reinitialization cannot make the release observation false; pending initialization names
+  the remaining convergence work.
+- A future stable promotion reuses the registry, persistence, platform contract, explicit adoption,
+  and release-aware initialization while still requiring release-specific certification.
+- Multi-distribution support, operator-selected releases, automatic downgrades, and multi-hop
+  upgrades remain outside the product contract.

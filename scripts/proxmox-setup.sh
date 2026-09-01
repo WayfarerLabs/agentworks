@@ -142,7 +142,7 @@ ensure_role() {
 }
 
 ensure_role AgentworksVM \
-    "VM.Allocate VM.Clone VM.Config.CPU VM.Config.Memory VM.Config.Cloudinit VM.Config.Disk VM.Config.HWType VM.Config.Options VM.Config.Network VM.PowerMgmt VM.Audit VM.Monitor VM.Snapshot VM.Snapshot.Rollback"
+    "VM.Allocate VM.Clone VM.Config.CPU VM.Config.Memory VM.Config.Cloudinit VM.Config.Disk VM.Config.HWType VM.Config.Options VM.Config.Network VM.PowerMgmt VM.Audit VM.Monitor"
 ensure_role AgentworksTemplate "VM.Clone VM.Audit"
 ensure_role AgentworksStorage "Datastore.AllocateSpace Datastore.Audit"
 ensure_role AgentworksSDN "SDN.Use"

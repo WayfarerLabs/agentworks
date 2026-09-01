@@ -1,363 +1,229 @@
 # Prior Art: Debian Release Transition
 
 - Date: 2026-08-28
-- Scope: Debian's supported upgrade contract, current provider images, recovery primitives, and
-  existing Agentworks seams
+- Amended: 2026-09-01
+- Scope: Debian release identity and operator upgrade guidance, current provider images, and
+  Agentworks lifecycle seams
 
 ## Executive summary
 
-Debian supports a direct Bookworm-to-Trixie in-place upgrade and documents the preparation,
-two-stage package procedure, reboot, and recovery posture in detail. Agentworks can orchestrate that
-procedure, but it cannot honestly promise automatic rollback: its current VM backup contains
-metadata and workspace data rather than a bootable disk. The six platforms expose different native
-recovery models, but each can implement an owned create/list/restore/delete checkpoint lifecycle
-while preserving the logical VM identity.
+Debian documents a direct Bookworm-to-Trixie upgrade, including preparation, package transitions,
+reboot, and recovery. That establishes a valid operator path, but it does not make a cross-provider
+upgrade orchestrator small or safe. Agentworks would need to own package-manager interruption,
+remote recovery, provider snapshot semantics, and relational state that a disk restore cannot roll
+back coherently.
 
-Official Trixie artifacts exist for every current platform. Proxmox is different because it has no
-provider-wide image selector; the operator must build a Trixie template and map the release to its
-VMID. This does not justify a general image override on the other platforms.
+The corrected design uses the narrower parts that generalize safely:
 
-The smallest safe product shape is therefore:
+- one ordered Debian release registry;
+- Trixie-only creation through platform release maps;
+- core live release attestation and durable observation;
+- release-keyed APT values;
+- explicit `vm confirm-release` after an operator changes or restores a guest; and
+- separate `vm reinit` convergence.
 
-- fixed Trixie creation from platform-owned release maps;
-- live release validation and first-class persistence;
-- a durable, resumable `vm upgrade` that follows Debian's documented procedure;
-- local application/config backups plus one automatically created managed recovery checkpoint; and
-- explicit checkpoint restore/delete with retained provider intermediates where restore is
-  destructive, but no automatic rollback or general snapshot manager.
+Agentworks does not ship `vm upgrade` or a checkpoint product. Provider backup and recovery remain
+operator responsibilities. The substantial checkpoint research performed during this effort is a
+rejected design record, not a reason to retain the abstraction.
 
 ## Debian's supported path
 
-### Direct Bookworm to Trixie is supported
+### Direct upgrades are release-specific
 
-Debian supports upgrades to Trixie only from Debian 12 Bookworm. It requires Bookworm to be on its
-latest point release first. The notes recommend a backup, recovery access for remote systems,
-package database checks, removal or review of complicating sources/packages, codename-pinned Trixie
-sources, a minimal upgrade, a full upgrade, and a reboot.
+Debian supports upgrading to Trixie from Debian 12 Bookworm and requires the source system to be
+fully current first. Its notes cover backups, remote recovery access, package database checks,
+unofficial sources, package removals, disk capacity, a minimal upgrade, a full upgrade, and reboot.
 
-Design consequences:
+Design disposition:
 
-- `vm upgrade` accepts only a verified Bookworm guest or an already-Trixie guest being adopted.
-- Trixie's profile owns an explicit upgrade-from-Bookworm policy, not a generic version increment or
-  arbitrary pair graph.
-- The command brings Bookworm current before changing suites.
-- The preliminary plan and first confirmation authorize only bringing Bookworm current. Agentworks
-  then recomputes the complete source/removal/package plan from that changed state and requires a
-  second confirmation before the suite switch.
-- It uses `apt-get` in scripts because Debian says `apt` is intended for interactive use.
-- It performs the equivalent of `upgrade --without-new-pkgs` before `full-upgrade`.
+- Agentworks documents only the supported previous-to-current operator path.
+- The ordered profile contains release identity, not Debian package commands or a transition graph.
+- A future promotion adds its profile and mappings, while operators follow that release's own notes.
+- Legacy current-2 guests are not bricked, but Agentworks recommends a new current VM plus data copy
+  instead of a chained upgrade.
 
 Source:
 [Debian Trixie upgrade notes](https://www.debian.org/releases/trixie/release-notes/upgrading.en.html)
 
-### Remote recovery is a prerequisite
+### Recovery is platform and workload specific
 
-Debian recommends a full backup, or at minimum irreplaceable data and configuration, before
-upgrading. For a remotely managed system it recommends a serial console or equivalent recovery route
-because a new kernel or network configuration can make SSH unavailable. It also recommends a durable
-terminal such as screen or tmux so a transient SSH disconnect does not terminate apt.
+Debian recommends a full backup, or at least irreplaceable data and configuration, and an
+out-of-band recovery route for remote systems. A new kernel or network configuration can make SSH
+unavailable. Debian also identifies package and workload cases requiring operator judgment.
 
-Design consequences:
+Design disposition:
 
-- Package work runs detached from SSH with durable remote state.
-- The orchestrator checks native dpkg/APT ownership and durably inhibits known automatic APT timers
-  for the mutation window. It restores them only from a Bookworm-safe abort or verified healthy
-  Trixie state, not while the package system is mixed or unhealthy.
-- Agentworks creates local workspace/metadata and Debian configuration/package-state artifacts.
-- The command creates and verifies one offline Agentworks-managed checkpoint before package
-  mutation, while platform console guidance remains the out-of-band repair path.
-- Those artifacts are not described as an automatic or bootable rollback.
-
-Source:
-[Upgrade preparation and recovery](https://www.debian.org/releases/trixie/release-notes/upgrading.en.html#preparing-for-the-upgrade)
-
-### Preflight must be narrower than arbitrary Debian
-
-Debian calls out `dpkg --audit`, package holds, APT pinning, backports, unofficial sources, obsolete
-and non-Debian packages, package removals, disk capacity, kernel metapackages, and conffile
-decisions. The Trixie issues chapter also names workload-specific cases that require manual
-handling. Examples include MariaDB shutdown state and RabbitMQ's difficult direct upgrade path.
-
-Design consequences:
-
-- Agentworks fails closed on unhealthy dpkg, holds that block transition, inadequate space,
-  unsupported source layouts, changed package conffiles, and known package blockers.
-- It shows simulated removals for operator approval.
-- It does not grow a general debconf/conffile answer engine or automatically apply force options
-  after dependency failures.
+- The operator creates and verifies a provider-native recovery artifact before upgrading.
+- Agentworks does not label its metadata/workspace backup as a bootable rollback.
+- Agentworks does not automate package, source, debconf, or conffile decisions.
+- After external success, Agentworks observes the fact and converges its own declarations.
 
 Sources:
-[Debian package and APT preparation](https://www.debian.org/releases/trixie/release-notes/upgrading.en.html#start-from-pure-debian),
-[Trixie issues to be aware of](https://www.debian.org/releases/trixie/release-notes/issues.en.html)
+[upgrade preparation](https://www.debian.org/releases/trixie/release-notes/upgrading.en.html#preparing-for-the-upgrade),
+[issues to be aware of](https://www.debian.org/releases/trixie/release-notes/issues.en.html)
 
-### Trixie changes relevant to Agentworks
+### Trixie changes relevant to ordinary Agentworks operation
 
-The release notes identify several concrete certification risks:
+The release notes identify several creation and initialization risks:
 
-- interrupted SSH upgrades require Bookworm OpenSSH `1:9.2p1-2+deb12u7` or newer;
-- a separate `/boot` should be at least 768 MB with about 300 MB free;
-- `/tmp` becomes tmpfs after reboot and defaults to a 50 percent memory ceiling;
+- `/tmp` becomes tmpfs by default;
 - DSA SSH keys are removed;
 - sshd no longer reads `~/.pam_environment` by default;
-- `/etc/sysctl.conf` is no longer read by `systemd-sysctl`, while `/etc/sysctl.d` remains valid;
+- `/etc/sysctl.conf` is no longer read by `systemd-sysctl`, while drop-ins remain supported;
 - network interface names can change; and
-- APT is moving toward deb822 `.sources` files.
+- Debian is moving toward deb822 APT sources.
 
-Agentworks already writes sysctl drop-ins, so that item needs certification rather than a redesign.
-Its size-unbounded VM backup and workspace copy archives currently stage under `/tmp`, so those
-paths must move before Trixie certification.
+Agentworks already writes sysctl drop-ins. Its size-unbounded backup and workspace-copy archives did
+stage under `/tmp`, so those move to private disk-backed `/var/tmp` paths. The remaining items are
+covered by creation and initialization certification rather than an upgrade state machine.
 
 Source:
 [Trixie issues to be aware of](https://www.debian.org/releases/trixie/release-notes/issues.en.html)
 
-### Support horizons
+### Support remains relative
 
-Bookworm LTS ends on 2028-06-30. Trixie's regular support runs through 2028-08-09 and its LTS period
-ends on 2030-06-30.
+Debian publishes regular-support and LTS dates, but those dates do not define a second Agentworks
+support clock. Agentworks has one current release, supports ordinary operation and the documented
+operator upgrade path for previous, and treats older recognized guests as best effort with warnings.
 
-Design consequences:
-
-- New Bookworm creation ends immediately when the feature ships.
-- Upstream dates remain useful release-planning and diagnostic facts, but do not define a second
-  Agentworks support clock.
-- Agentworks supports the release immediately before current, including its adjacent upgrade, and
-  treats current-2 or older VMs as best effort with warnings and no supported upgrade.
-
-Sources: [Bookworm release lifecycle](https://www.debian.org/releases/bookworm/),
-[Trixie release lifecycle](https://www.debian.org/releases/trixie/)
-
-### WSL2 kernel and restart ownership
-
-WSL2 runs distributions as isolated containers inside a Microsoft-managed lightweight VM with a
-shared Linux kernel. Systemd is supported inside the distribution and participates in its clean
-shutdown, while `wsl --terminate`/activation owns the distribution lifecycle. Therefore a WSL2
-distribution upgrade must not require a Debian kernel metapackage or apply guest udev predictions to
-provider-managed interfaces; it verifies the Microsoft kernel and a changed distribution boot ID.
-
-Sources:
-[Microsoft WSL version comparison](https://learn.microsoft.com/en-us/windows/wsl/compare-versions),
-[Microsoft WSL systemd architecture](https://learn.microsoft.com/en-us/windows/wsl/systemd), and
-[Microsoft WSL lifecycle commands](https://learn.microsoft.com/en-us/windows/wsl/basic-commands)
+Sources: [Bookworm release information](https://www.debian.org/releases/bookworm/),
+[Trixie release information](https://www.debian.org/releases/trixie/)
 
 ## Official Trixie image selectors
 
-| Platform | Official current selector                                                     | Design consequence                                                                               |
-| -------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| AWS      | SSM path below `/aws/service/debian/release/13/latest`, split by architecture | Map release to SSM release segment and retain architecture mapping; do not pin regional AMI IDs. |
-| Azure    | `Debian:debian-13:13-gen2:latest`                                             | Map the complete image record and disk floor together.                                           |
-| GCP      | project `debian-cloud`, families `debian-13` and `debian-13-arm64`            | Add release as the outer key of the existing architecture map.                                   |
-| WSL2     | Docker Official Image `debian:trixie`                                         | Pin the codename tag rather than moving `latest`; derive cache and diagnostic values from it.    |
-| Lima     | official rolling `debian-13-generic-amd64.qcow2` and arm64 image              | Render Lima's image block from release and architecture maps.                                    |
-| Proxmox  | no provider image catalog                                                     | Map release to an operator template VMID and verify the cloned guest.                            |
+Official Trixie artifacts exist for every bundled platform. Proxmox differs because it has no
+provider-wide catalog: the operator builds and maps a template, while core still verifies the cloned
+guest.
+
+| Platform | Trixie selector                                                    | Product mapping                      |
+| -------- | ------------------------------------------------------------------ | ------------------------------------ |
+| AWS EC2  | SSM path below `/aws/service/debian/release/13/latest`             | release then architecture            |
+| Azure VM | `Debian:debian-13:13-gen2:latest`                                  | complete image record and disk floor |
+| GCP GCE  | project `debian-cloud`, families `debian-13` and `debian-13-arm64` | release then architecture            |
+| WSL2     | Docker Official Image `debian:trixie`                              | release tag, cache, and diagnostics  |
+| Lima     | Debian 13 generic cloud images                                     | release then architecture            |
+| Proxmox  | operator-built template                                            | `template_vmids.trixie`              |
 
 Sources:
 
 - [Debian AWS Trixie images](https://wiki.debian.org/Cloud/AmazonEC2Image/Trixie)
-- [Debian Azure images](https://wiki.debian.org/Cloud/MicrosoftAzure) and
-  [Microsoft Debian 13 Marketplace entry](https://marketplace.microsoft.com/en-us/product/virtual-machines/debian.debian-13)
+- [Debian Azure images](https://wiki.debian.org/Cloud/MicrosoftAzure)
 - [Google Compute Engine operating-system details](https://cloud.google.com/compute/docs/images/os-details)
 - [Docker Official Debian image](https://hub.docker.com/_/debian/)
-- [Debian Trixie cloud image checksums](https://cloud.debian.org/images/cloud/trixie/latest/SHA512SUMS)
+- [Debian Trixie cloud images](https://cloud.debian.org/images/cloud/trixie/latest/)
 - [Lima templates](https://lima-vm.io/docs/templates/)
 - [Proxmox VE administration guide](https://pve.proxmox.com/pve-docs/pve-admin-guide.pdf)
 
-## Third-party APT values
-
-A host release and a vendor repository suite are not the same concept. The Trixie mapping must use
-the vendor's supported value rather than replace every literal `bookworm` with `trixie`.
-
-| Source         | Bookworm value | Trixie host value | Evidence                                                                                  |
-| -------------- | -------------- | ----------------- | ----------------------------------------------------------------------------------------- |
-| HashiCorp      | `bookworm`     | `trixie`          | HashiCorp derives and publishes the Debian codename.                                      |
-| tofuutils/tenv | `bookworm`     | `trixie`          | Cloudsmith's generated Trixie setup publishes that suite.                                 |
-| ngrok          | `bookworm`     | `bookworm`        | ngrok's current Debian instructions still prescribe `bookworm`; no Trixie Release exists. |
-| GitHub CLI     | `stable`       | scalar `stable`   | Vendor suite is host-release independent.                                                 |
-| NodeSource     | `nodistro`     | scalar `nodistro` | Vendor suite is host-release independent.                                                 |
-
 Design consequences:
 
-- Release-specific `apt-source` data is an explicit map selected from the verified guest release.
-- A Trixie map value may contain `bookworm` when that is reviewed vendor policy.
-- Distribution upgrade disables third-party sources, then Phase B recreates only selected sources
-  from target-release values.
+- core sends one concrete release and exposes no selector;
+- each platform owns the mapping from that release to its native artifact;
+- a missing mapping fails before mutation and never falls back; and
+- core independently reads `/etc/os-release` from the created guest.
 
-Sources: [HashiCorp Terraform installation](https://developer.hashicorp.com/terraform/install),
+## Third-party APT values
+
+A host release and a vendor repository suite are different facts. Release-aware resources must use
+the vendor's published value rather than replace every occurrence of `bookworm` with `trixie`.
+
+| Source         | Bookworm value | Trixie host value | Disposition                                       |
+| -------------- | -------------- | ----------------- | ------------------------------------------------- |
+| HashiCorp      | `bookworm`     | `trixie`          | release map                                       |
+| tofuutils/tenv | `bookworm`     | `trixie`          | release map                                       |
+| ngrok          | `bookworm`     | `bookworm`        | reviewed vendor exception, dated in resource YAML |
+| GitHub CLI     | `stable`       | `stable`          | release-neutral scalar                            |
+| NodeSource     | `nodistro`     | `nodistro`        | release-neutral scalar                            |
+
+Sources: [HashiCorp installation](https://developer.hashicorp.com/terraform/install),
 [tofuutils Cloudsmith setup](https://cloudsmith.io/~tofuutils/repos/tenv/setup/),
 [ngrok Linux installation](https://ngrok.com/download/linux)
 
-## Recovery primitives can support one owned checkpoint lifecycle
+The initializer selects from the VM's verified observed release. A map is explicit policy and may
+intentionally contain the same suite for two host releases.
 
-Every platform has a different implementation primitive, but all six can implement create, list,
-restore, and delete while preserving the logical VM identity:
+## Provider recovery research and rejection
 
-- AWS can snapshot the stopped instance's root EBS volume. Its root-volume replacement task requires
-  a running instance and reboots it, so the platform must temporarily start the stopped VM, wait for
-  the task, then stop and prove it stopped before returning to the common restore contract.
-- Azure can snapshot the managed OS disk, create a disk from that snapshot, and swap the OS disk on
-  the same deallocated VM.
-- GCP snapshots restore by creating a new disk; a stopped instance can detach its old boot disk and
-  attach the restored disk as boot.
-- WSL can export a stopped distribution and restore under the same name/install path. Because
-  `--unregister` is destructive, safe restore first exports the current distribution as a retained
-  emergency intermediate.
-- Lima exposes native snapshot create, list, apply, and delete commands using caller-assigned tags,
-  but Lima 2.2.0's VZ driver returns unimplemented from all four snapshot methods. VZ is Lima's
-  default and recommended driver for ordinary native-architecture macOS VMs, and an existing
-  instance cannot change its driver. `limactl clone` supports a stopped source; its implementation
-  copies the complete instance directory and attempts copy-on-write for each file. A protected,
-  stopped clone can therefore provide the owned checkpoint primitive for VZ without changing the VM
-  driver. Lima 2.2 implements `limactl rename` by creating the target and moving the source files
-  one at a time, so interruption can split an instance across both names. Agentworks instead
-  validates the canonical absolute sibling directories reported by Lima and uses an exact-path
-  exclusive OS rename when running on the Lima host for each destructive boundary. SSH placement
-  cannot prove an atomic no-clobber directory rename, so VZ create and restore refuse before
-  mutation there; QEMU native snapshots remain available remotely. The stopped clone already applies
-  Lima's rules for omitting protection and runtime files and nullifying the VZ identifier; the
-  original directory moves intact to the protected emergency name and is never started. A clone
-  interrupted before `lima.yaml` exists cannot be removed by `limactl delete`, so its unreadable
-  deterministic target remains fenced with exact repair guidance rather than being adopted or
-  blindly removed. Clone does not make separately managed `additionalDisks` independent, so that
-  case must fail rather than claim whole-VM recovery.
-- Proxmox exposes named QEMU snapshots and rollback on the same VMID when its storage supports
-  snapshots. The Agentworks role must gain the corresponding snapshot permission.
+The six platforms expose materially different recovery primitives:
 
-This research rejects creation-only automation, not a complete abstraction. The common contract is
-an offline Agentworks-managed checkpoint whose provider proves ownership and source binding, with
-explicit restore and delete. Core can generate a safe name, persist one slot per VM, and retain the
-provider identifier without pretending all backends use the same storage primitive. Destructive
-boot-disk or WSL restore keeps an intermediate until core re-attests the restored guest.
+- AWS snapshots an EBS volume and restores a root volume through an instance task;
+- Azure snapshots and swaps managed OS disks;
+- GCP snapshots, creates a new disk, and reattaches a boot disk;
+- WSL exports and destructively re-registers a distribution;
+- Proxmox exposes QEMU snapshot and rollback only when storage supports it; and
+- Lima's behavior depends on its driver. Lima 2.2.0 VZ does not implement native snapshots, while
+  clone-based recovery introduces host-placement, additional-disk, incomplete-clone, and atomic
+  rename concerns.
 
 Sources:
-[AWS EBS snapshot guidance](https://docs.aws.amazon.com/ebs/latest/userguide/ebs-creating-snapshot.html),
+[AWS EBS snapshots](https://docs.aws.amazon.com/ebs/latest/userguide/ebs-creating-snapshot.html),
 [AWS root-volume replacement](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/replace-root.html),
 [Azure OS disk swap](https://learn.microsoft.com/en-us/azure/virtual-machines/linux/os-disk-swap),
-[GCP snapshot restore](https://docs.cloud.google.com/compute/docs/disks/restore-snapshot),
-[GCP boot-disk detach/reattach](https://docs.cloud.google.com/compute/docs/disks/detach-reattach-boot-disk),
-[WSL basic commands](https://learn.microsoft.com/en-us/windows/wsl/basic-commands),
+[GCP snapshot restore](https://cloud.google.com/compute/docs/disks/restore-snapshot),
+[WSL lifecycle commands](https://learn.microsoft.com/en-us/windows/wsl/basic-commands),
 [Lima snapshot create](https://lima-vm.io/docs/reference/limactl_snapshot_create/),
-[Lima snapshot apply](https://lima-vm.io/docs/reference/limactl_snapshot_apply/),
 [Lima VM types](https://lima-vm.io/docs/config/vmtype/),
-[Lima clone](https://lima-vm.io/docs/reference/limactl_clone/),
 [Lima 2.2.0 VZ snapshot implementation](https://github.com/lima-vm/lima/blob/v2.2.0/pkg/driver/vz/vz_driver_darwin.go#L565-L578),
-[Lima 2.2.0 clone implementation](https://github.com/lima-vm/lima/blob/v2.2.0/pkg/instance/clone.go#L23-L96),
-[Lima 2.2.0 delete handling](https://github.com/lima-vm/lima/blob/v2.2.0/cmd/limactl/delete.go#L70-L84),
-[Lima incomplete-instance inventory fix](https://github.com/lima-vm/lima/issues/5236), and
-[Proxmox VE administration guide](https://pve.proxmox.com/pve-docs/pve-admin-guide.pdf)
+[Proxmox administration guide](https://pve.proxmox.com/pve-docs/pve-admin-guide.pdf)
 
-Provider consoles are also not uniform or guaranteed. AWS serial console is disabled by default and
-has IAM/guest prerequisites; Azure requires boot diagnostics and RBAC; GCP interactive serial access
-requires metadata and IAM. The command must show platform guidance rather than label an existing SSH
-transport an out-of-band console.
+A common create/list/restore/delete API can hide method names, but it cannot make these operations
+equivalent. It also cannot roll back Agentworks relational state. Restoring a VM disk after agents,
+sessions, consoles, workspaces, or declarations changed would restore only one side of a distributed
+state boundary.
 
-Sources:
-[AWS EC2 serial console](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configure-access-to-serial-console.html),
-[Azure Linux serial console](https://learn.microsoft.com/en-us/troubleshoot/azure/virtual-machines/linux/serial-console-linux),
-[GCP interactive serial console](https://cloud.google.com/compute/docs/troubleshooting/troubleshooting-using-serial-console)
+That mismatch is decisive. A general checkpoint object is not valuable enough by itself, and using
+it only to justify an assisted upgrade makes the upgrade much larger. The shipping design therefore
+removes all checkpoint capability methods, provider implementations, database models, and CLI
+commands. Provider-native recovery remains an explicit operator prerequisite.
 
 ## Existing Agentworks seams
 
-### Release state and provisioning
+The retained design drafts on existing boundaries:
 
-`VMRow` has no guest release field. `platform_metadata` is deliberately opaque and platform-owned,
-so a cross-platform Debian lifecycle fact does not belong there. `ProvisionRequest` is the one
-common fully resolved create input, and every manager-built request passes through it immediately
-before platform dispatch.
+- `ProvisionRequest` is the one shared input to every vm-platform create;
+- `ProvisionResult.native_transport` gives core an independent attestation route;
+- `VMRow` and the database repository hold durable observed state;
+- the existing initialization status already represents pending convergence;
+- Phase B already applies declarative APT resources;
+- named VM boundaries activate and connect to one selected VM; and
+- doctor is designed as a bounded readiness report, not a fleet-wide remote scanner.
 
-The manager currently wraps every ordinary exception from `platform.create` as a
-`ProvisioningError`, which would discard a typed missing-map error's remediation hint. It also ends
-the create unwind window as soon as the platform returns and only then persists platform metadata. A
-defensive core probe failure detected at that point therefore needs a retained row with its cleanup
-identifiers, not row deletion that could orphan the returned backend. The plugin-author guide still
-advertises vm-platform contract version 2 and teaches the version 2 request.
+The new surface is therefore one narrow command, `vm confirm-release`, rather than an upgrade
+subsystem. It separates observing an external change from converging Agentworks state and avoids
+claiming atomicity across provider recovery, Debian package state, and the Agentworks database.
 
-Design consequence: add a nullable first-class VM column and a required internal request value. Core
-passes its concrete current release; each platform resolves that value through its own map rather
-than inferring current. The vm-platform contract version changes so old plugins fail conformance,
-while a contract-current platform missing the requested key fails clearly before backend mutation.
-The manager preserves those focused errors and independently probes the returned transport instead
-of trusting a platform-authored release result. A failed core probe retains backend metadata in a
-failed row, and the capability plus plugin-author documentation changes with the contract.
+## Rejected alternatives
 
-Evidence: `cli/agentworks/db/models.py`, `cli/agentworks/db/converters.py`,
-`cli/agentworks/db/database.py`, `cli/agentworks/capabilities/vm_platform/base.py`,
-`cli/agentworks/vms/manager/lifecycle.py`, and `cli/agentworks/plugins/README.md`.
+### Continue creating Bookworm
 
-### No release probe exists
+Rejected. It creates new legacy debt after Trixie is stable and makes later promotions harder.
 
-Current code does not read `/etc/os-release`. Proxmox clones an operator template without validating
-its guest OS. Existing rows therefore cannot be backfilled from product history without inventing a
-fact.
+### Let platforms decide current
 
-Design consequence: migration leaves the release unknown, and a shared live probe establishes it.
+Rejected. Different plugin versions could silently create different Debian releases. Core sends the
+concrete value and verifies it.
 
-Evidence: `cli/agentworks/plugins/proxmox/platform.py` and repository-wide search for
-`VERSION_CODENAME`/`os-release`.
+### Expose OS, release, or image selection
 
-### Reinit is not an OS upgrade
+Rejected. It creates multiple product truths and conflicts with the Debian-only, one-current-release
+manifesto.
 
-`reinit_vm` replays Phase B initialization. It never recreates the VM, replaces Debian sources, runs
-a distribution upgrade, or owns a reboot. This separation is useful and should remain.
+### Automatically adopt release drift
 
-Design consequence: `vm upgrade` is its own manager workflow and invokes Phase B only after Trixie
-has been observed.
+Rejected. A changed live release is material operator state. Ordinary operations fail with a clear
+path to explicit confirmation.
 
-Evidence: `cli/agentworks/vms/manager/lifecycle.py` and `cli/agentworks/vms/initializer/driver.py`.
+### Have `confirm-release` call `reinit`
 
-### Native transport is not universal recovery
+Rejected. If reinit fails, the release observation is still true. Atomic observation plus pending
+initialization represents that outcome without pretending the remote operation and local database
+can be one transaction.
 
-Lima and WSL have strong local native paths. AWS, Azure, and GCP native paths still require working
-guest networking and sshd. Proxmox returns no post-create native transport. Ordinary VM operations
-use canonical Tailscale SSH and do not silently fall back.
+### Add a new `reinit required` VM state
 
-Design consequence: native transport can repair Tailscale after reboot where available, but
-checkpoint recovery remains a vm-platform lifecycle operation and core re-attests the restored guest
-independently.
+Rejected. Existing `InitStatus.PENDING` already represents incomplete convergence and has
+established retry behavior.
 
-Evidence: `cli/agentworks/capabilities/vm_platform/base.py`, each platform's `native_transport`, and
-`cli/agentworks/transports/__init__.py`.
+### Scan every VM from doctor
 
-### Current backups and detached work are narrower
-
-`vm backup` exports database metadata and workspace files but has no VM restore counterpart. The
-detached runner stores status under `/tmp` by default and writes completion after the command exits,
-so it cannot represent a command that reboots the guest. VM backup and workspace copy also stage
-large archives under `/tmp`.
-
-Design consequences:
-
-- do not promise rollback from `vm backup`;
-- add a focused release-upgrade recovery bundle;
-- give the upgrade its own persistent systemd-backed stage runner; and
-- move size-unbounded archive staging to disk-backed paths.
-
-Evidence: `cli/agentworks/vms/backup.py`, `cli/agentworks/workspaces/manager/copy.py`, and
-`cli/agentworks/remote_exec.py`.
-
-## Refuted or not adopted
-
-- **Replace every `bookworm` literal with `trixie`:** wrong for existing Bookworm VMs, vendor suite
-  semantics, and persisted history.
-- **Let the platform infer the current release:** duplicates product policy and cannot make reinit
-  choose the existing VM's release.
-- **Backfill all rows to Bookworm:** unprovable for Proxmox and manually changed guests.
-- **Expose a release or image selector:** recreates cross-platform inconsistency and contradicts the
-  Debian-only product contract.
-- **Keep creating Bookworm during the transition:** adds new migration debt after the safe path
-  exists.
-- **Treat `vm backup` as rollback:** no boot disk, system state, or restore command exists.
-- **Create provider snapshots automatically but leave restore/cleanup manual:** Agentworks would own
-  costly residual resources without a complete lifecycle.
-- **Run apt directly over SSH or under `/tmp`:** a disconnect or Trixie reboot can erase the control
-  state.
-- **Automatically re-enable every third-party source:** vendor support cannot be inferred from a
-  codename.
-- **Build a generic multi-release upgrader now:** only one adjacent transition is researched and
-  testable; the target profile's upgrade-from-previous policy preserves extension without creating
-  an arbitrary release graph.
-
-## Source quality
-
-All external technical sources are primary project, vendor, or provider documentation. Debian's
-release notes are authoritative for the distribution transition. Provider catalogs are authoritative
-for current image selectors. Third-party repository instructions are authoritative for their suite
-values. Agentworks findings come from the current repository rather than issue or review prose.
+Rejected. It turns a local diagnostic into a potentially slow, activating network fan-out and can
+wait on unavailable WSL or remote VMs. Live observation belongs to an explicit named command.

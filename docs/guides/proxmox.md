@@ -70,18 +70,17 @@ the config block and token secret for your agentworks config.
 
 The setup script follows least-privilege principles:
 
-- **Custom roles** with only the privileges agentworks needs, including managed VM snapshots but no
-  backups, migrations, or console access
+- **Custom roles** with only the privileges agentworks needs (no snapshots, backups, migrations,
+  console access)
 - **Pool-scoped ACLs** so the token can only manage VMs in the `agentworks` pool
 - **Privilege-separated token** (`--privsep=1`) with its own permissions
 - **Scoped storage/template/SDN access** to only the specific resources needed
 
 **The token can:** Clone the template, configure/start/stop/delete VMs in the `agentworks` pool,
-create/list/restore/delete their managed snapshots, query the guest agent, and allocate disk space
-on the specified storage.
+query the guest agent, and allocate disk space on the specified storage.
 
-**The token cannot:** Manage VMs outside the pool, access other storage, create backups, migrate
-VMs, access the console, or manage users/nodes/cluster config.
+**The token cannot:** Manage VMs outside the pool, access other storage, take snapshots, create
+backups, migrate VMs, access the console, or manage users/nodes/cluster config.
 
 ### Manual setup
 
@@ -231,7 +230,7 @@ never returns it.
 
 Check that all four ACLs are set (re-run the setup script if unsure):
 
-- `AgentworksVM` on `/pool/agentworks` -- VM lifecycle and managed snapshots within the pool
+- `AgentworksVM` on `/pool/agentworks`: VM lifecycle within the pool
 - `AgentworksTemplate` on `/vms/<template_vmid>` -- clone permission on the template
 - `AgentworksStorage` on `/storage/<storage>` -- disk allocation
 - `AgentworksSDN` on `/sdn/zones/localnetwork` -- network bridge access

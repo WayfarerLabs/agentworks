@@ -8,7 +8,7 @@ from typing import Annotated
 import typer
 
 from agentworks.cli._app import app
-from agentworks.cli._helpers import get_db, ordinary_tty_interaction_policy, parse_csv_filter
+from agentworks.cli._helpers import get_db, ordinary_tty_interaction_policy
 from agentworks.machine_output import OutputFormat
 
 vm_app = typer.Typer(
@@ -135,127 +135,17 @@ def vm_backup(
     backup_vm(get_db(), load_config(), name, interaction=interaction)
 
 
-@vm_app.command("upgrade")
-def vm_upgrade(
-    name: Annotated[str, typer.Argument(help="VM name")],
-) -> None:
-    """Upgrade a previous-release Debian VM to the current release."""
-    interaction = ordinary_tty_interaction_policy()
-    from agentworks.config import load_config
-    from agentworks.vms.manager import upgrade_vm
-
-    upgrade_vm(
-        get_db(),
-        load_config(),
-        name=name,
-        interaction=interaction,
-    )
-
-
-@vm_app.command("create-checkpoint")
-def vm_create_checkpoint(
-    name: Annotated[str, typer.Argument(help="VM name")],
-) -> None:
-    """Create the VM's one managed recovery checkpoint."""
-    interaction = ordinary_tty_interaction_policy()
-    from agentworks.config import load_config
-    from agentworks.vms.manager import create_checkpoint
-
-    create_checkpoint(get_db(), load_config(), name, interaction=interaction)
-
-
-@vm_app.command("list-checkpoints")
-def vm_list_checkpoints(
-    vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,
-    names_only: Annotated[
-        bool,
-        typer.Option(
-            "--names-only",
-            help="Emit one checkpoint name per line (no header, no formatting).",
-        ),
-    ] = False,
-    output_format: Annotated[
-        OutputFormat,
-        typer.Option("--output", help="Output format: human or json. Default: human."),
-    ] = OutputFormat.HUMAN,
-) -> None:
-    """List managed VM checkpoints."""
-    if names_only and output_format is OutputFormat.JSON:
-        raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
-
-    interaction = ordinary_tty_interaction_policy()
-    from agentworks.config import load_config
-    from agentworks.vms.manager import list_checkpoints, render_checkpoint_listing
-
-    db = get_db()
-    config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
-    vm_names = parse_csv_filter(vm)
-    if names_only:
-        list_checkpoints(
-            db,
-            config,
-            vm_names=vm_names,
-            names_only=True,
-            interaction=interaction,
-        )
-        return
-    if output_format is OutputFormat.JSON:
-        from click import get_binary_stream
-
-        from agentworks import output
-        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
-        from agentworks.vms.manager import checkpoint_listing_data
-
-        with output.suppress_presentation():
-            rows = list_checkpoints(
-                db,
-                config,
-                vm_names=vm_names,
-                interaction=interaction,
-            )
-        write_json_envelope(
-            MachineOutputCommand.VM_LIST_CHECKPOINTS,
-            checkpoint_listing_data(rows),
-            get_binary_stream("stdout"),
-        )
-        return
-    rows = list_checkpoints(
-        db,
-        config,
-        vm_names=vm_names,
-        interaction=interaction,
-    )
-    render_checkpoint_listing(rows)
-
-
-@vm_app.command("restore-checkpoint")
-def vm_restore_checkpoint(
+@vm_app.command("confirm-release")
+def vm_confirm_release(
     name: Annotated[str, typer.Argument(help="VM name")],
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
 ) -> None:
-    """Restore the VM from its managed recovery checkpoint."""
+    """Observe and explicitly record a VM's live Debian release."""
     interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config
-    from agentworks.vms.manager import restore_checkpoint
+    from agentworks.vms.manager import confirm_vm_release
 
-    restore_checkpoint(get_db(), load_config(), name, yes=yes, interaction=interaction)
-
-
-@vm_app.command("delete-checkpoint")
-def vm_delete_checkpoint(
-    name: Annotated[str, typer.Argument(help="VM name")],
-    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
-    force: Annotated[
-        bool,
-        typer.Option("--force", help="Forget the checkpoint if provider cleanup cannot complete"),
-    ] = False,
-) -> None:
-    """Delete the VM's managed recovery checkpoint."""
-    interaction = ordinary_tty_interaction_policy()
-    from agentworks.config import load_config
-    from agentworks.vms.manager import delete_checkpoint
-
-    delete_checkpoint(get_db(), load_config(), name, yes=yes, force=force, interaction=interaction)
+    confirm_vm_release(get_db(), load_config(), name, yes=yes, interaction=interaction)
 
 
 @vm_app.command("describe")

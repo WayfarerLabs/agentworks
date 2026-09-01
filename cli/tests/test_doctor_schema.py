@@ -9,17 +9,14 @@ import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
 import pytest
 
 from agentworks.config import Config
 from agentworks.db import LATEST_VERSION, AppliedStateKey, Database, SessionMode, VersionedPayload
-from agentworks.debian import DebianRelease
 from agentworks.doctor import HealthGroup, InstanceStateHealthFactType, Status
 from agentworks.doctor_state import (
-    _append_live_release_check,
-    _append_live_upgrade_hazards,
     _live_resource_counts,
     _report_contents,
     append_vm_site_database_checks,
@@ -33,9 +30,6 @@ from agentworks.vms.applied_state import encode_ssh_identity
 
 _FINGERPRINT = f"SHA256:{'A' * 43}"
 _OTHER_FINGERPRINT = f"SHA256:{'E' * 43}"
-
-if TYPE_CHECKING:
-    from agentworks.transports import Transport
 
 
 def _installed_agw() -> Path:
@@ -453,113 +447,11 @@ def test_doctor_database_errors_remain_shared_actionable_facts(monkeypatch: pyte
     system = check_system().checks[0]
     database = check_database().checks[0]
     sites = HealthGroup("VM sites")
-    append_vm_site_database_checks(
-        sites,
-        config=cast("Config", object()),
-        sites={},
-        not_ready={},
-    )
+    append_vm_site_database_checks(sites, sites={}, not_ready={})
 
     assert system.message == f"could not check the database: {marker}"
     assert database.message == marker
     assert sites.checks[0].message == f"could not check the database: {marker}"
-
-
-@pytest.mark.parametrize(
-    ("recorded", "observed", "expected_status"),
-    [
-        (DebianRelease.TRIXIE, DebianRelease.TRIXIE, Status.OK),
-        (DebianRelease.BOOKWORM, DebianRelease.TRIXIE, Status.FAIL),
-    ],
-)
-def test_doctor_compares_live_and_recorded_debian_release_without_writing(
-    db: Database,
-    monkeypatch: pytest.MonkeyPatch,
-    recorded: DebianRelease,
-    observed: DebianRelease,
-    expected_status: Status,
-) -> None:
-    db.insert_vm("box", site="lima-local", hostname="box")
-    db.update_vm_tailscale("box", "100.64.0.9")
-    db.update_vm_debian_release("box", recorded)
-    before = db.get_vm("box")
-    assert before is not None
-
-    sentinel = object()
-    monkeypatch.setattr("agentworks.transports.transport", lambda *_args, **_kwargs: sentinel)
-    monkeypatch.setattr(
-        "agentworks.debian.probe_debian_release",
-        lambda candidate: observed if candidate is sentinel else DebianRelease.BOOKWORM,
-    )
-    monkeypatch.setattr("agentworks.vms.manager.boundary.require_vm_ssh_boundary", lambda *_args: None)
-    group = HealthGroup("VM sites")
-
-    _append_live_release_check(group, db, cast("Config", object()), before)
-
-    assert group.checks[0].status is expected_status
-    assert db.get_vm("box") == before
-
-
-def test_doctor_does_not_construct_transport_when_ssh_identity_is_refused(
-    db: Database,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    db.insert_vm("box", site="lima-local", hostname="box")
-    db.update_vm_tailscale("box", "100.64.0.9")
-    vm = db.get_vm("box")
-    assert vm is not None
-
-    def refuse(*_args: object) -> None:
-        raise StateError(
-            "VM 'box' has no recorded SSH identity",
-            hint="Run 'agw vm reinit box' to establish SSH identity evidence.",
-        )
-
-    monkeypatch.setattr("agentworks.vms.manager.boundary.require_vm_ssh_boundary", refuse)
-    monkeypatch.setattr(
-        "agentworks.transports.transport",
-        lambda *_args, **_kwargs: pytest.fail("transport constructed after SSH identity refusal"),
-    )
-    group = HealthGroup("VM sites")
-
-    _append_live_release_check(group, db, cast("Config", object()), vm)
-
-    assert group.checks[0].status is Status.WARN
-    assert group.checks[0].hint is not None
-
-
-def test_doctor_reports_incomplete_upgrade_and_staging_residue(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class _Target:
-        def __init__(self) -> None:
-            self.commands: list[str] = []
-
-        def run(self, command: str, **kwargs: object) -> object:
-            del kwargs
-            self.commands.append(command)
-            if "*.agentworks-disabled" in command:
-                return SimpleNamespace(stdout="/etc/apt/sources.list.d/vendor.agentworks-disabled\n")
-            if "find /tmp" in command:
-                return SimpleNamespace(stdout="/tmp/agentworks-backup-old\n")
-            raise AssertionError(command)
-
-    class _Journal:
-        def __init__(self, target: object) -> None:
-            assert isinstance(target, _Target)
-
-        def read_states(self, pairs: tuple[object, ...]) -> dict[object, object]:
-            return {pairs[0]: SimpleNamespace(is_complete=False)}
-
-    monkeypatch.setattr("agentworks.vms.upgrade.remote.RemoteJournal", _Journal)
-    group = HealthGroup("VM sites")
-    target = _Target()
-
-    _append_live_upgrade_hazards(group, SimpleNamespace(name="box"), cast("Transport", target))
-
-    assert len(group.checks) == 3
-    assert all(check.status is Status.WARN for check in group.checks)
-    assert len(target.commands) == 2
 
 
 def test_installed_doctor_reports_malformed_schema_in_human_and_json(tmp_path: Path) -> None:

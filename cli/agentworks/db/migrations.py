@@ -49,6 +49,22 @@ def _load_legacy_toml() -> dict[str, Any]:
         return {}
 
 
+def _retire_vm_checkpoints(conn: sqlite3.Connection, _context: MigrationContext) -> None:
+    """Drop the superseded checkpoint schema only after proving it empty."""
+
+    exists = conn.execute("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'vm_checkpoints'").fetchone()
+    if exists is None:
+        return
+    names = [row[0] for row in conn.execute("SELECT vm_name FROM vm_checkpoints ORDER BY vm_name").fetchall()]
+    if names:
+        raise sqlite3.IntegrityError(
+            "cannot retire managed VM checkpoints while records remain for: "
+            + ", ".join(names)
+            + ". Reinstall the previous Agentworks build, delete each managed checkpoint, and retry."
+        )
+    conn.execute("DROP TABLE vm_checkpoints")
+
+
 def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> None:
     """v27 (the vm-site refactor): ``vms`` grows ``platform_metadata`` /
     ``operator_stopped`` / ``hostname``; remote-Lima rows re-point at
@@ -685,6 +701,11 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
             CHECK (source_release IS NULL OR capture_release = source_release)
         );
     """,
+    # -- Assisted upgrades and their managed checkpoint product were -----
+    # -- removed before release. Keep the already-applied v34 history for -
+    # -- development installations, but never discard a provider-artifact -
+    # -- ownership record implicitly. ------------------------------------
+    35: _retire_vm_checkpoints,
 }
 
 LATEST_VERSION = max(MIGRATIONS)
@@ -814,6 +835,7 @@ _SCHEMA_SENTINEL_REMOVED_TABLES: dict[int, tuple[str, ...]] = {
     5: ("vm_git_host_keys",),
     17: ("tasks",),
     27: ("vm_hosts",),
+    35: ("vm_checkpoints",),
 }
 
 _SCHEMA_SENTINEL_REMOVED_COLUMNS: dict[int, dict[str, tuple[str, ...]]] = {

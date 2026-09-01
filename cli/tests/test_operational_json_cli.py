@@ -214,7 +214,6 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
     from agentworks.vms.manager.inspect import (
         VMDescription,
         VMDetailAgent,
-        VMDetailCheckpoint,
         VMDetailEvent,
         VMDetailFacts,
         VMDetailSession,
@@ -279,17 +278,6 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
             "256 GiB",
             "64 GiB",
             "25%",
-        ),
-        checkpoint=VMDetailCheckpoint(
-            name="agw-checkpoint",
-            provider_identifier="snapshot-123",
-            state="ready",
-            restore_status="available",
-            purpose="debian-upgrade",
-            capture_release="bookworm",
-            source_release="bookworm",
-            target_release="trixie",
-            created_at="2026-01-03",
         ),
         agents=(VMDetailAgent("agent-b", "aw-b", True, 2), VMDetailAgent("agent-a", "aw-a", False, 1)),
         workspaces=(
@@ -402,17 +390,6 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
                 "disk_used": "64 GiB",
                 "disk_percent": "25%",
             },
-            "checkpoint": {
-                "name": "agw-checkpoint",
-                "provider_identifier": "snapshot-123",
-                "state": "ready",
-                "restore_status": "available",
-                "purpose": "debian-upgrade",
-                "capture_release": "bookworm",
-                "source_release": "bookworm",
-                "target_release": "trixie",
-                "created_at": "2026-01-03",
-            },
             "agents": cast(
                 "object",
                 [
@@ -441,13 +418,7 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
         },
         "issues": [
             {"source": source, "code": "unavailable"}
-            for source in (
-                "site_lookup",
-                "preflight",
-                "secret_resolution",
-                "checkpoint_inventory",
-                "platform_status",
-            )
+            for source in ("site_lookup", "preflight", "secret_resolution", "platform_status")
         ],
     }
     expected_workspace: dict[str, object] = {

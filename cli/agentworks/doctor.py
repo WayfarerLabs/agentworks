@@ -678,7 +678,7 @@ def _check_vm_sites(
 
     from agentworks.doctor_state import append_vm_site_database_checks
 
-    append_vm_site_database_checks(g, config=config, sites=sites, not_ready=not_ready)
+    append_vm_site_database_checks(g, sites=sites, not_ready=not_ready)
     return g
 
 

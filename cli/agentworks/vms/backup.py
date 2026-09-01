@@ -98,7 +98,6 @@ def backup_vm(
                 output.info("Reading database (consistent snapshot)...")
                 (
                     _vm,
-                    checkpoint,
                     agents,
                     workspaces,
                     sessions,
@@ -113,28 +112,6 @@ def backup_vm(
                 # 1. VM metadata
                 output.info("Exporting VM metadata...")
                 _write_json(backup_dir / "vm.json", asdict(vm))
-
-                checkpoint_data = None
-                if checkpoint is not None:
-                    checkpoint_data = {
-                        "vm_name": checkpoint.vm_name,
-                        "name": checkpoint.name,
-                        "provider_identifier": checkpoint.provider_identifier,
-                        "operation_id": checkpoint.operation_id,
-                        "desired_state_fingerprint": checkpoint.desired_state_fingerprint,
-                        "state": checkpoint.state.value,
-                        "purpose": checkpoint.purpose,
-                        "capture_release": checkpoint.capture_release.value,
-                        "source_release": (
-                            None if checkpoint.source_release is None else checkpoint.source_release.value
-                        ),
-                        "target_release": (
-                            None if checkpoint.target_release is None else checkpoint.target_release.value
-                        ),
-                        "created_at": checkpoint.created_at,
-                    }
-                    output.info("Exporting managed checkpoint metadata...")
-                    _write_json(backup_dir / "checkpoint.json", checkpoint_data)
 
                 # 2. Events
                 output.info(f"Exporting {len(events)} VM events...")
@@ -238,7 +215,7 @@ def backup_vm(
 
                 # 9. Manifest
                 manifest = {
-                    "version": 5,
+                    "version": 4,
                     "vm_name": vm_name,
                     "timestamp": timestamp,
                     "agent_count": len(agents_data),
@@ -247,7 +224,6 @@ def backup_vm(
                     "event_count": len(events),
                     "instance_spec_count": len(overlay_data),
                     "applied_state_count": len(applied_state_data),
-                    "checkpoint_present": checkpoint_data is not None,
                     "archived_paths": archived_paths,
                     "skipped_paths": skipped_paths,
                 }

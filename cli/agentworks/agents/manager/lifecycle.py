@@ -8,7 +8,6 @@ with the session orchestrator lives in ``agents/realize.py``.
 from __future__ import annotations
 
 import contextlib
-from functools import wraps
 from typing import TYPE_CHECKING, cast
 
 import agentworks.agents.manager as _mgr
@@ -27,7 +26,6 @@ from agentworks.vms.manager import gated_vm_boundary
 from ._common import MAX_AGENT_NAME_LENGTH, _require_vm, agent_scope
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from contextlib import AbstractContextManager
 
     from agentworks.agents.template import AgentTemplate
@@ -188,17 +186,9 @@ def create_agent(
     )
 
     from agentworks.vms.manager import require_vm_ssh_boundary
-    from agentworks.vms.manager.operation_guard import shared_vm_operation_guard
 
     require_vm_ssh_boundary(db, config, vm)
-    with (
-        shared_vm_operation_guard(
-            db,
-            vm.name,
-            operation="create agent",
-        ),
-        activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)),
-    ):
+    with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
         # The preflight boundary: an unresolvable token fails before
         # any prompt, then git tokens and any site config secret
         # (proxmox's API token) resolve in one prompt session.
@@ -447,31 +437,6 @@ def delete_agent(
         output.info(f"Agent '{name}' deleted")
 
 
-def _guard_agent_reinit[**P](function: Callable[P, None]) -> Callable[P, None]:
-    """Decorate the stable command entry without hiding its recipe gate."""
-
-    @wraps(function)
-    def guarded(*args: P.args, **kwargs: P.kwargs) -> None:
-        db = cast("Database", args[0])
-        name = cast("str", kwargs["name"])
-        agent = db.get_agent(name)
-        if agent is None:
-            function(*args, **kwargs)
-            return
-
-        from agentworks.vms.manager.operation_guard import shared_vm_operation_guard
-
-        with shared_vm_operation_guard(
-            db,
-            agent.vm_name,
-            operation="reinitialize agent",
-        ):
-            function(*args, **kwargs)
-
-    return guarded
-
-
-@_guard_agent_reinit
 def reinit_agent(
     db: Database,
     config: Config,

@@ -1,26 +1,28 @@
 # Plan: Debian Release Transition
 
-- Status: Integration feedback round 1 implementation in progress
+- Status: Operator-directed simplification in progress
 - Date: 2026-08-28
 - Governing artifacts: `frd.md`, `hla.md`, `prior-art-research.md`, and `migration-strategy.md`
+
+The assisted-upgrade and managed-checkpoint direction was superseded on 2026-09-01. Completed
+checkboxes below remain unchanged as the truthful record of work performed; the target design no
+longer retains those production surfaces.
 
 ## Delivery posture
 
 This is a standalone significant effort. The SDD lands for review before implementation begins.
-Implementation uses a sequence of independently green merge units because the database migration,
-package catalog, six-provider release contract, remote state machine, and live certification should
-not arrive as one review surface. Stacked provider branches can make review parallel, but they are
-review inputs rather than independently mergeable changes when the shared contract would leave any
-provider broken.
+Implementation uses independently green merge units for the database migration, package catalog,
+six-provider release contract, and live certification. Stacked provider branches can make review
+parallel, but they are review inputs rather than independently mergeable changes when the shared
+contract would leave any provider broken.
 
-The effort lead owns the FRD/HLA rulings, shared release and persistence contracts, integration of
-the upgrade state machine, and final closeout. Platform work can proceed in parallel only after the
-common request/result and selector-map contracts are reviewed. Each worker owns disjoint provider
-files and tests and is told that concurrent changes belong to other agents.
+The effort lead owns the FRD/HLA rulings, shared release and persistence contracts, explicit release
+adoption, and final closeout. Platform work can proceed in parallel only after the common
+request/result and selector-map contracts are reviewed. Each worker owns disjoint provider files and
+tests and is told that concurrent changes belong to other agents.
 
-No implementation PR may introduce an operator OS/release/image selector, automatically create an
-unowned provider checkpoint, or grow the ordered adjacent-release mechanism into an arbitrary
-release graph or multi-hop upgrader.
+No implementation PR may introduce an operator OS/release/image selector, Agentworks-managed
+provider checkpoint, distribution upgrade executor, arbitrary release graph, or multi-hop upgrader.
 
 ## Full gate
 
@@ -335,16 +337,15 @@ a provider unable to construct or honor the required request.
 
 ### Live matrix
 
-- [ ] Run the authenticated integration environment for each platform and supported architecture,
-      recording artifact identity, architecture, test resource names, budgets, checkpoint reference,
+- [ ] Run the authenticated integration environment for each available platform and supported
+      architecture, recording artifact identity, architecture, test resource names, budgets,
       operation transcript, and cleanup evidence.
 - [ ] Prove artifact resolution, boot, live release observation, and delete for every exposed
       architecture.
-- [ ] Prove at least one full lifecycle and one real Bookworm-to-Trixie upgrade on every platform
-      where the operator-approved recovery prerequisite can be established.
-- [ ] Seed Bookworm inputs from the last Bookworm-creating Agentworks release or an
-      operator-approved prebuilt image, record provenance, and prove current code has no hidden
-      Bookworm create selector.
+- [ ] Prove an ordinary Trixie lifecycle on every available platform and explicitly exclude Debian
+      package upgrades from product certification.
+- [ ] Exercise matching `vm confirm-release` observation and separate `vm reinit` on a disposable
+      representative VM without changing its distribution.
 
 Across the matrix, also exercise:
 
@@ -356,7 +357,6 @@ Across the matrix, also exercise:
 - [ ] Prove DSA rejection and supported SSH-key success.
 - [ ] Prove `~/.pam_environment` independence and continued `/etc/sysctl.d` application.
 - [ ] Prove network-interface-name and deb822 source assumptions.
-- [ ] Capture interruption/resume evidence for the upgrade journal.
 
 A platform failure blocks its Trixie certification. It does not authorize Bookworm fallback, a
 custom-image escape hatch, or relaxed release validation. The disposition returns to the operator if
@@ -364,8 +364,8 @@ the product cannot ship consistently within the agreed scope.
 
 ### Final cutover
 
-- [ ] Atomically append the certified Trixie profile, making it current by registry position, and
-      delete the Bookworm platform image selectors.
+- [ ] Certify the already-appended Trixie profile as current by registry position and prove no
+      public or platform-local path can create Bookworm.
 - [x] Enable the relative support classifier and named-VM legacy warning; prove Bookworm is previous
       at this cutover and that no wall-clock value changes its tier.
 - [x] Add the superseding Debian-release ADR and mark ADR 0002 superseded without rewriting history.
@@ -508,8 +508,6 @@ incidental implementation work.
 - [x] Reject partial WSL exports before destructive restore, announce AWS's required temporary start
       while preserving a primary restore error across stop cleanup, and use a 3600-second Proxmox
       checkpoint task timeout.
-- [ ] Run focused provider/manager/migration tests, full unit/static/docs/generated gates,
-      exact-head implementation/project/complexity review, and the signed ready handoff cycle.
 
 ### Operator-directed Lima VZ checkpoint correction
 
@@ -531,49 +529,62 @@ additional feedback/fix rounds and provided direct `msm4` access to the integrat
       hidden host entries and unreadable partial clones, validate a completed replay before cleanup,
       permit deletion of an owned unprotected interrupted clone, and exercise the real forward path
       at both atomic interruption boundaries.
-- [ ] Run focused and full gates, exact-head project/correctness/complexity review, hosted CI, and a
-      signed ready handoff for live create/list/restore/delete plus Bookworm-to-Trixie upgrade on
-      the VZ-backed `msm4` environment.
+
+### Operator-directed assisted-upgrade removal
+
+The operator accepted the exact-head complexity finding on 2026-09-01. Assisted upgrades and managed
+checkpoints are superseded before merge. The retained release model, Trixie create path, and
+release-aware initialization now support an operator-led transition without owning Debian or
+provider recovery.
+
+- [x] Remove `vm upgrade`, its remote journal and package state machine, all checkpoint core and
+      provider surfaces, operation guards introduced only for them, and experimental upgrade gates.
+- [x] Keep migration 34 immutable and add migration 35 that drops only an empty checkpoint table,
+      refusing without data loss when ownership rows remain.
+- [x] Add `vm confirm-release NAME [-y|--yes]`; atomically adopt a recognized changed observation
+      and set existing initialization status pending, but leave `vm reinit` separate.
+- [x] Remove every Debian release and upgrade addition from doctor so doctor performs no live VM
+      probe, activation, or network wait.
+- [x] Rewrite the governing SDD, ADR, operator guide, capability docs, command reference, samples,
+      permissions, completions, and release collateral around the operator-led boundary.
+- [ ] Run focused and full gates, exact-head project/correctness/complexity review, hosted CI, and
+      the signed ready handoff for the corrected product surface.
 
 - [ ] After live certification or an authenticated disposition, create `locked.md`, record the final
       evidence, and leave the exact green reviewed head ready to merge.
 
 ### Exit criteria
 
-- [ ] Every successful new create is verified Trixie, existing release state remains truthful and
-      recoverable, the supported upgrade path is documented and live-proven, and all test resources
-      are removed or explicitly handed back to the operator.
+- [ ] Every successful new create is verified Trixie, existing release state remains truthful,
+      operator-led adoption and reinitialization are documented, and all test resources are removed
+      or explicitly handed back to the operator.
 
 ## Coordination and escalation
 
 Escalate to the authenticated operator instead of expanding scope when:
 
 - an official Trixie artifact is unavailable on a supported provider/architecture;
-- a platform cannot establish the required recovery prerequisite in the provided environment;
-- a provider needs a new image override, snapshot ownership model, or materially broader permissions
-  to pass;
-- Debian release-note blockers require application-specific migration behavior beyond fail-closed
-  preflight;
+- a provider needs a new image override or materially broader creation permissions to pass;
 - a review proposes arbitrary OS support, an arbitrary or multi-hop release graph, or automatic
   rollback; or
 - live certification exposes a platform incompatibility whose fix materially increases complexity.
 
-Within the standing scope, the effort lead may correct selector values, preflight coverage, state
-transitions, tests, docs, and error guidance without reopening the FRD.
+Within the standing scope, the effort lead may correct selector values, create-time verification,
+release observation, tests, docs, and error guidance without reopening the FRD.
 
 ## Traceability
 
-| Requirement                   | Primary phases | Proof                                          |
-| ----------------------------- | -------------- | ---------------------------------------------- |
-| R1 ordered Debian model       | 1, 3, 5        | registry-tail and schema/CLI absence tests     |
-| R2 current-release creation   | 3, 5           | v1 request/selector plus live create matrix    |
-| R3 persisted observation      | 1, 3, 4        | migration/parser/reconciliation/create tests   |
-| R4 release maps               | 1, 3, 5        | apt/platform mapping and selector contracts    |
-| R5 safe `vm upgrade`          | 4, 5           | preflight, interruption/resume, real upgrades  |
-| R6 relative release support   | 1, 4, 5        | classifier, warnings, adjacent-only upgrade    |
-| R7 Trixie operations          | 2, 5           | tmpfs, SSH, PAM, sysctl, NIC, deb822 proofs    |
-| R8 operator recovery teaching | 4, 5           | CLI/docs review and failure-stage runbook      |
-| R9 managed VM checkpoints     | 3, 4, 5        | v1 contract, migration 34, lifecycle/live test |
+| Requirement                  | Primary phases | Proof                                          |
+| ---------------------------- | -------------- | ---------------------------------------------- |
+| R1 ordered Debian model      | 1, 3, 5        | registry-tail and schema/CLI absence tests     |
+| R2 current-release creation  | 3, 5           | v1 request/selector plus live create matrix    |
+| R3 persisted observation     | 1, 3, 5        | migration/parser/reconciliation/create tests   |
+| R4 explicit release adoption | 5              | confirm/consent/transaction/reinit split tests |
+| R5 release maps              | 1, 3, 5        | apt/platform mapping and selector contracts    |
+| R6 relative release support  | 1, 5           | classifier and warning behavior                |
+| R7 Trixie operations         | 2, 5           | tmpfs, SSH, PAM, sysctl, NIC, deb822 proofs    |
+| R8 bounded doctor            | 5              | schema and no-live-probe tests                 |
+| R9 schema retirement         | 5              | migration 34-to-35 empty/nonempty tests        |
 
 ## Research disposition
 

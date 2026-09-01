@@ -576,21 +576,6 @@ def delete_console(
     name: str,
     yes: bool = False,
 ) -> None:
-    """Delete a console while preserving checkpoint fingerprint integrity."""
-    console = _require_console(db, name)
-    from agentworks.vms.manager.operation_guard import shared_vm_operation_guard
-
-    with shared_vm_operation_guard(db, console.vm_name, operation="delete console"):
-        _delete_console(db, config, name=name, yes=yes)
-
-
-def _delete_console(
-    db: Database,
-    config: Config,
-    *,
-    name: str,
-    yes: bool = False,
-) -> None:
     """Delete a console: tear down its tmux session (best-effort), then DB row."""
     console = _require_console(db, name)
     if not yes and not output.confirm(f"Delete console '{name}'?"):

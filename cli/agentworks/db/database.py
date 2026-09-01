@@ -16,7 +16,6 @@ from agentworks.db.converters import (
     _to_console_session,
     _to_session,
     _to_vm,
-    _to_vm_checkpoint,
     _to_vm_event,
     _to_workspace,
 )
@@ -41,8 +40,6 @@ if TYPE_CHECKING:
         SessionMode,
         SessionRow,
         ShellEntry,
-        VMCheckpointRow,
-        VMCheckpointState,
         VMEventRow,
         VMRow,
         WorkspaceRow,
@@ -85,7 +82,6 @@ class Database:
         self._read_tx_active = False
         self._tx_depth = 0
         db_path = path or _db.DB_PATH
-        self._path = db_path
         if read_only:
             from agentworks.db.backup import _connect_ro, _is_busy
             from agentworks.errors import BusyStateError, StateError
@@ -143,12 +139,6 @@ class Database:
 
     def close(self) -> None:
         self._conn.close()
-
-    @property
-    def path(self) -> Path:
-        """Filesystem path backing this database and its adjacent operation locks."""
-
-        return self._path
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
@@ -388,19 +378,6 @@ class Database:
         self._conn.execute("UPDATE vms SET tailscale_host = ? WHERE name = ?", (tailscale_host, name))
         self._conn.commit()
 
-    def clear_vm_tailscale(self, name: str) -> None:
-        self._conn.execute("UPDATE vms SET tailscale_host = NULL WHERE name = ?", (name,))
-        self._conn.commit()
-
-    def update_vm_platform_metadata(self, name: str, metadata: dict[str, str]) -> None:
-        """Replace the VM's platform_metadata wholesale (the owning
-        platform returns the complete dict from ``create()``)."""
-        self._conn.execute(
-            "UPDATE vms SET platform_metadata = ? WHERE name = ?",
-            (json.dumps(metadata), name),
-        )
-        self._conn.commit()
-
     def update_vm_debian_release(
         self,
         name: str,
@@ -414,6 +391,19 @@ class Database:
             (release.value, name),
         )
         self._commit_unless_in_tx()
+
+    def clear_vm_tailscale(self, name: str) -> None:
+        self._conn.execute("UPDATE vms SET tailscale_host = NULL WHERE name = ?", (name,))
+        self._conn.commit()
+
+    def update_vm_platform_metadata(self, name: str, metadata: dict[str, str]) -> None:
+        """Replace the VM's platform_metadata wholesale (the owning
+        platform returns the complete dict from ``create()``)."""
+        self._conn.execute(
+            "UPDATE vms SET platform_metadata = ? WHERE name = ?",
+            (json.dumps(metadata), name),
+        )
+        self._conn.commit()
 
     def set_operator_stopped(self, name: str, stopped: bool) -> None:
         """Record operator stop/start intent (gates the activation gate's auto-start)."""
@@ -1148,167 +1138,11 @@ class Database:
         ).fetchall()
         return [_to_vm_event(r) for r in rows]
 
-    # -- VM Checkpoints ---------------------------------------------------
-
-    def insert_vm_checkpoint(
-        self,
-        *,
-        vm_name: str,
-        name: str,
-        operation_id: str,
-        desired_state_fingerprint: str,
-        capture_release: DebianRelease,
-        source_release: DebianRelease | None = None,
-        target_release: DebianRelease | None = None,
-    ) -> VMCheckpointRow:
-        """Claim a VM's one checkpoint slot before provider mutation."""
-
-        self._conn.execute(
-            "INSERT INTO vm_checkpoints "
-            "(vm_name, name, operation_id, desired_state_fingerprint, state, "
-            "capture_release, source_release, target_release) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                vm_name,
-                name,
-                operation_id,
-                desired_state_fingerprint,
-                _db.VMCheckpointState.CREATING.value,
-                capture_release.value,
-                source_release.value if source_release is not None else None,
-                target_release.value if target_release is not None else None,
-            ),
-        )
-        self._commit_unless_in_tx()
-        row = self.get_vm_checkpoint(vm_name)
-        assert row is not None
-        return row
-
-    def get_vm_checkpoint(self, vm_name: str) -> VMCheckpointRow | None:
-        row = self._conn.execute(
-            "SELECT * FROM vm_checkpoints WHERE vm_name = ?",
-            (vm_name,),
-        ).fetchone()
-        return _to_vm_checkpoint(row) if row else None
-
-    def list_vm_checkpoints(self, *, vm_name: str | list[str] | None = None) -> list[VMCheckpointRow]:
-        clause, params = _eq_or_in("vm_name", vm_name)
-        sql = "SELECT * FROM vm_checkpoints"
-        if clause:
-            sql += " WHERE " + clause
-        sql += " ORDER BY vm_name"
-        rows = self._conn.execute(sql, params).fetchall()
-        return [_to_vm_checkpoint(row) for row in rows]
-
-    def claim_vm_checkpoint(
-        self,
-        vm_name: str,
-        *,
-        expected_state: VMCheckpointState,
-        expected_operation_id: str | None,
-        target_state: VMCheckpointState,
-        operation_id: str,
-    ) -> bool:
-        """Fence one lifecycle attempt with a fresh operation identity."""
-
-        if target_state is _db.VMCheckpointState.READY:
-            raise ValueError("checkpoint claims require an active target state")
-        cursor = self._conn.execute(
-            "UPDATE vm_checkpoints SET state = ?, operation_id = ? "
-            "WHERE vm_name = ? AND state = ? AND operation_id IS ?",
-            (
-                target_state.value,
-                operation_id,
-                vm_name,
-                expected_state.value,
-                expected_operation_id,
-            ),
-        )
-        self._commit_unless_in_tx()
-        return cursor.rowcount == 1
-
-    def complete_vm_checkpoint(
-        self,
-        vm_name: str,
-        *,
-        expected_state: VMCheckpointState,
-        operation_id: str,
-        provider_identifier: str | None = None,
-    ) -> bool:
-        """Return one fenced create/restore attempt to the ready state."""
-
-        cursor = self._conn.execute(
-            "UPDATE vm_checkpoints SET state = ?, operation_id = NULL, "
-            "provider_identifier = COALESCE(?, provider_identifier) "
-            "WHERE vm_name = ? AND state = ? AND operation_id = ?",
-            (
-                _db.VMCheckpointState.READY.value,
-                provider_identifier,
-                vm_name,
-                expected_state.value,
-                operation_id,
-            ),
-        )
-        self._commit_unless_in_tx()
-        return cursor.rowcount == 1
-
-    def delete_claimed_vm_checkpoint(self, vm_name: str, *, operation_id: str) -> bool:
-        """Remove the record only for the deleting attempt that proved absence."""
-
-        cursor = self._conn.execute(
-            "DELETE FROM vm_checkpoints WHERE vm_name = ? AND state = ? AND operation_id = ?",
-            (vm_name, _db.VMCheckpointState.DELETING.value, operation_id),
-        )
-        self._commit_unless_in_tx()
-        return cursor.rowcount == 1
-
-    def abandon_vm_checkpoint(
-        self,
-        vm_name: str,
-        *,
-        expected_state: VMCheckpointState,
-        expected_operation_id: str | None,
-    ) -> bool:
-        """Forget one explicitly disowned checkpoint lifecycle attempt."""
-
-        cursor = self._conn.execute(
-            "DELETE FROM vm_checkpoints WHERE vm_name = ? AND state = ? AND operation_id IS ?",
-            (vm_name, expected_state.value, expected_operation_id),
-        )
-        self._commit_unless_in_tx()
-        return cursor.rowcount == 1
-
-    def claim_materialized_vm_checkpoint_deletion(
-        self,
-        vm_name: str,
-        *,
-        expected_operation_id: str,
-        provider_identifier: str,
-        operation_id: str,
-    ) -> bool:
-        """Fence deletion of an artifact found during an interrupted create."""
-
-        cursor = self._conn.execute(
-            "UPDATE vm_checkpoints SET state = ?, operation_id = ?, provider_identifier = ? "
-            "WHERE vm_name = ? AND state = ? AND operation_id = ? "
-            "AND provider_identifier IS NULL",
-            (
-                _db.VMCheckpointState.DELETING.value,
-                operation_id,
-                provider_identifier,
-                vm_name,
-                _db.VMCheckpointState.CREATING.value,
-                expected_operation_id,
-            ),
-        )
-        self._commit_unless_in_tx()
-        return cursor.rowcount == 1
-
     def snapshot_vm_backup_data(
         self,
         vm_name: str,
     ) -> tuple[
         VMRow | None,
-        VMCheckpointRow | None,
         list[AgentRow],
         list[WorkspaceRow],
         list[SessionRow],
@@ -1319,13 +1153,12 @@ class Database:
     ]:
         """Read the currently exported VM backup rows in one transaction.
 
-        Returns (vm, checkpoint, agents, workspaces, sessions, events,
+        Returns (vm, agents, workspaces, sessions, events,
         grants_by_agent, desired_overlays, applied_slices).
         """
         self._conn.execute("BEGIN")
         try:
             vm = self.get_vm(vm_name)
-            checkpoint = self.get_vm_checkpoint(vm_name)
             agents = self.list_agents(vm_name=vm_name)
             workspaces = self.list_workspaces(vm_name=vm_name)
             ws_names = {ws.name for ws in workspaces}
@@ -1341,7 +1174,6 @@ class Database:
             self._conn.execute("COMMIT")
         return (
             vm,
-            checkpoint,
             agents,
             workspaces,
             sessions,

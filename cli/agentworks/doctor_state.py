@@ -19,7 +19,6 @@ if TYPE_CHECKING:
     )
     from agentworks.doctor import HealthGroup, InstanceStateHealthFactType
     from agentworks.ssh_identity import SSHIdentity
-    from agentworks.transports import Transport
     from agentworks.vms.applied_state import SSHAppliedState
     from agentworks.vms.sites import VMSiteDecl
 
@@ -122,7 +121,6 @@ def _report_contents(
 ) -> None:
     """Report stored counts and flag VMs in non-complete states."""
     from agentworks.db import InitStatus
-    from agentworks.debian import DebianSupport, classify_release
     from agentworks.ssh import LOG_DIR
 
     group.ok(
@@ -138,23 +136,6 @@ def _report_contents(
         return f" Log: {format_host_path(logs[0])}" if logs else ""
 
     for vm in vms:
-        if vm.debian_release is None:
-            group.info(
-                f"VM '{vm.name}' Debian",
-                "not observed yet; a release-sensitive operation will verify the live guest",
-            )
-        else:
-            support = classify_release(vm.debian_release)
-            if support is DebianSupport.PREVIOUS:
-                group.warn(
-                    f"VM '{vm.name}' Debian",
-                    f"{vm.debian_release} is the previous release; 'agw vm upgrade {vm.name}' is available",
-                )
-            elif support is DebianSupport.LEGACY:
-                group.warn(
-                    f"VM '{vm.name}' Debian",
-                    f"{vm.debian_release} is legacy; ordinary operations are best effort and upgrade is unsupported",
-                )
         if vm.init_status == InitStatus.FAILED.value:
             group.warn(f"VM '{vm.name}'", f"failed state (only delete supported).{log_hint(vm.name)}")
         elif vm.init_status == InitStatus.PARTIAL.value:
@@ -431,7 +412,6 @@ def _report_instance_state(
 def append_vm_site_database_checks(
     group: HealthGroup,
     *,
-    config: Config,
     sites: dict[str, VMSiteDecl],
     not_ready: dict[str, str],
 ) -> None:
@@ -462,103 +442,5 @@ def append_vm_site_database_checks(
                         f"site '{vm.site}' is not declared",
                         hint=site_manifest_hint(vm.site),
                     )
-                else:
-                    _append_live_release_check(group, database, config, vm)
     except Exception as error:
         group.warn("VM sites", f"could not check the database: {error}", hint=getattr(error, "hint", None))
-
-
-def _append_live_release_check(
-    group: HealthGroup,
-    database: Database,
-    config: Config,
-    vm: VMRow,
-) -> None:
-    """Compare a reachable guest to persisted release state without writing it."""
-
-    if vm.tailscale_host is None:
-        group.info(f"VM '{vm.name}' Debian live", "not checked; no canonical Tailscale route is recorded")
-        return
-    try:
-        from agentworks.debian import probe_debian_release
-        from agentworks.transports import transport
-        from agentworks.vms.manager.boundary import require_vm_ssh_boundary
-
-        require_vm_ssh_boundary(database, config, vm)
-        target = transport(vm, config, default_timeout=10)
-        observed = probe_debian_release(target)
-    except Exception as error:
-        group.warn(
-            f"VM '{vm.name}' Debian live",
-            f"could not observe the guest: {error}",
-            hint=getattr(error, "hint", None),
-        )
-        return
-
-    if vm.debian_release is None:
-        group.info(
-            f"VM '{vm.name}' Debian live",
-            f"guest reports {observed}; the database has no verified observation yet",
-        )
-    elif vm.debian_release is not observed:
-        group.fail(
-            f"VM '{vm.name}' Debian live",
-            f"database records {vm.debian_release}, but the guest reports {observed}",
-            hint=f"Run 'agw vm upgrade {vm.name}' to inspect an adjacent external upgrade.",
-        )
-    else:
-        group.ok(f"VM '{vm.name}' Debian live", observed.value)
-    _append_live_upgrade_hazards(group, vm, target)
-
-
-def _append_live_upgrade_hazards(group: HealthGroup, vm: VMRow, target: Transport) -> None:
-    """Report durable upgrade and pre-Trixie staging residue without mutation."""
-    from agentworks.debian import DEBIAN_RELEASES
-    from agentworks.vms.upgrade.journal import UpgradePair
-    from agentworks.vms.upgrade.remote import RemoteJournal
-
-    pairs = tuple(
-        UpgradePair(source.release.value, destination.release.value)
-        for source, destination in zip(DEBIAN_RELEASES, DEBIAN_RELEASES[1:], strict=False)
-    )
-    try:
-        states = RemoteJournal(target).read_states(pairs)
-        incomplete = [pair.dirname for pair, state in states.items() if not state.is_complete]
-        if incomplete:
-            group.warn(
-                f"VM '{vm.name}' Debian upgrade",
-                "incomplete durable journal: " + ", ".join(incomplete),
-                hint=f"Run 'agw vm upgrade {vm.name}' to inspect or resume it.",
-            )
-
-        disabled = target.run(
-            "find /etc/apt -maxdepth 3 -type f -name '*.agentworks-disabled' -print 2>/dev/null",
-            sudo=True,
-            check=False,
-        )
-        disabled_paths = [line.strip() for line in disabled.stdout.splitlines() if line.strip()]
-        if disabled_paths:
-            group.warn(
-                f"VM '{vm.name}' disabled APT sources",
-                f"{len(disabled_paths)} unmanaged source file(s) remain disabled after upgrade",
-            )
-
-        old_tmp = target.run(
-            "find /tmp -mindepth 1 -maxdepth 1 "
-            "\\( -name 'agentworks-backup-*' -o -name '_aw_paths_*' -o -name '_aw_detached_*' "
-            "-o -name '*-copy.tgz' -o -name 'agentworks-copy-*' -o -name 'agentworks-source-ref' \\) "
-            "-print 2>/dev/null",
-            check=False,
-        )
-        old_paths = [line.strip() for line in old_tmp.stdout.splitlines() if line.strip()]
-        if old_paths:
-            group.warn(
-                f"VM '{vm.name}' legacy staging",
-                f"{len(old_paths)} pre-Trixie size-bearing /tmp path(s) remain",
-            )
-    except Exception as error:
-        group.warn(
-            f"VM '{vm.name}' Debian upgrade diagnostics",
-            f"could not inspect live upgrade state: {error}",
-            hint=getattr(error, "hint", None),
-        )

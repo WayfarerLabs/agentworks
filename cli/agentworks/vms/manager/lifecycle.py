@@ -21,8 +21,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import replace
-from functools import wraps
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.capabilities.base import RunContext
@@ -44,7 +43,6 @@ from ._helpers import _require_vm
 from .boundary import _warn_legacy_release
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from typing import NoReturn
 
     from agentworks.config import Config
@@ -672,22 +670,6 @@ def create_vm(
         output.result(f"VM '{vm_name}' is ready!")
 
 
-def _guard_vm_reinit[**P](function: Callable[P, None]) -> Callable[P, None]:
-    """Decorate the stable command entry without hiding its recipe gate."""
-
-    @wraps(function)
-    def guarded(*args: P.args, **kwargs: P.kwargs) -> None:
-        db = cast("Database", args[0])
-        name = cast("str", args[2] if len(args) > 2 else kwargs["name"])
-        from .operation_guard import shared_vm_operation_guard
-
-        with shared_vm_operation_guard(db, name, operation="reinitialize VM"):
-            function(*args, **kwargs)
-
-    return guarded
-
-
-@_guard_vm_reinit
 def reinit_vm(
     db: Database,
     config: Config,

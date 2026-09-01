@@ -231,7 +231,6 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
                 "debian_release_observed_at",
                 "provisioned_resources",
                 "live_resources",
-                "checkpoint",
                 "agents",
                 "workspaces",
                 "events",

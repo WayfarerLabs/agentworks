@@ -2,331 +2,230 @@
 
 - Status: Draft
 - Date: 2026-08-28
-- Governing artifacts: `frd.md` and `hla.md`
+- Applies to: database state, VM creation, Proxmox configuration, APT resources, and existing VMs
 
 ## 1. Transition shape
 
-This is a forward product cutover with two different populations:
+The release containing this work makes Trixie the sole release for new VM creation. It does not
+rewrite an existing guest and does not infer that an old row is Bookworm. Existing VMs keep their
+platform identity and ordinary lifecycle behavior.
 
-- **New VMs:** Trixie only, immediately when the implementation release ships.
-- **Existing VMs:** last verified release is discovered live; Bookworm is `current-1` after the
-  cutover and can move through `vm upgrade`.
+The cutover has five independent parts:
 
-There is no period in which the operator selects Bookworm or Trixie for creation. There is no
-database rewrite pretending every old VM is Bookworm. There is no automatic whole-VM rollback;
-restore remains an explicit operator action against the one Agentworks-managed checkpoint. Support
-derives only from position in one ordered profile registry whose final entry is current: current is
-fully supported, current-1 is supported and upgradable, and current-2 or older is best effort with
-warnings and no newly started upgrade. Debian lifecycle dates do not change those tiers.
+1. migrate durable release observation fields;
+2. retire the unshipped checkpoint schema through a later migration;
+3. make every create request carry and verify Trixie;
+4. convert release-specific platform and APT values to maps; and
+5. give operators an explicit way to adopt a release changed outside Agentworks.
 
-## 2. Database transition
+No deployment stage offers both Bookworm and Trixie creation. There is no public release selector
+and no compatibility period in which platforms choose their own meaning of current.
 
-### Schema migration
+## 2. Database migration
 
-Migration 33 adds nullable `debian_release` and `debian_release_observed_at` columns with the
-pair-null constraint described in the HLA. It does not enumerate codenames in SQL, so a future
-release promotion changes the code registry rather than the schema. It updates the safer-migrations
-exact version-shape map and all migration fixtures in the same commit.
+### Migration ladder
 
-The migration does not inspect live guests, network, platform configuration, or historical events.
-Every existing row receives `(NULL, NULL)`. A new database creates the columns through the ordinary
-migration ladder.
+Migration 33 adds nullable `debian_release` and `debian_release_observed_at` columns. The pair-null
+check prevents a release without observation provenance or a timestamp without a release. Existing
+rows are left null.
 
-Migration 33 is already applied by installations running this branch and remains byte-for-byte
-unchanged. Checkpoint persistence therefore lands only in new migration 34. It creates the
-`vm_checkpoints` table described in the HLA, including operation identity and the canonical
-effective desired-state fingerprint plus immutable recognized Debian capture release recorded by
-application code. It updates the exact schema sentinel and adds no column or statement to
-migration 33. Tests build a real version-33 database, advance it to version 34, and also run a fresh
-database through the complete ordered ladder.
+Migration 34 created `vm_checkpoints` during development. It is immutable because development
+installations, including the authenticated operator's installation, have already applied it.
 
-Migration 34 performs no provider discovery and creates no checkpoint rows. Its VM primary key
-enforces one managed checkpoint per VM; future support for multiple checkpoints requires a
-deliberate forward migration and CLI selection design. The checkpoint table is included in database
-backup/restore projection. `vm delete` normally removes the provider artifact and row before
-deleting the VM, while the foreign key refuses an orphan-producing database delete. Explicit forced
-checkpoint or VM deletion first tries normal reconciliation, then may disown the row with a distinct
-audit event and provider residue/billing warnings when cleanup cannot be proved. A schema check
-requires every upgrade checkpoint's immutable capture release to equal its source release; converter
-and lifecycle tests cover that invariant and a restore comparison after the VM records the upgrade
-target.
+Migration 35 retires that table safely:
 
-Because migration 34 intentionally creates no ownership rows, fresh checkpoint creation inventories
-the provider before inserting one. An unrecorded managed artifact blocks adoption. List and describe
-keep persisted lifecycle state separate from restore eligibility derived from both live provider
-inventory and the current desired fingerprint; names-only listing performs neither live check.
+- an absent table is already in the desired state;
+- an empty table is dropped; and
+- a nonempty table aborts migration without changing schema version or deleting rows.
 
-### Population rules
+The refusal lists affected VM names and directs the operator to use the previous build to delete the
+managed provider artifacts before retrying. This is a one-time development migration, not a shipping
+checkpoint lifecycle.
 
-- New create writes the release that core independently observes over the platform's returned
-  transport before Phase A starts.
-- A release-sensitive operation probes an unknown existing row and records a recognized observation.
-- `vm list` and database open never probe the network.
-- A recorded/live mismatch blocks ordinary release-sensitive mutation.
-- `vm upgrade` is the explicit adoption path for a healthy guest manually upgraded from current-1 to
-  current.
+### Required operator preparation for schema version 34
 
-The observation timestamp makes the value's meaning explicit: it is the last verified live fact, not
-a continuously synchronized claim.
+Before installing the corrected build, an operator on version 34 should run the old build's
+`vm list-checkpoints` and delete every managed checkpoint it reports. Provider billing or retained
+recovery artifacts may otherwise outlive the database record.
 
-### Older Agentworks binaries
+If the corrected build encounters a remaining row, startup migration stops safely. The operator must
+reinstall or invoke the exact prior build, remove the checkpoint through its managed delete command,
+and then retry the corrected build. Direct SQL deletion is not recommended because it would disown
+the provider artifact.
 
-The safer-migrations future-schema refusal remains the downgrade guard. An older binary whose schema
-support ends before the new migration refuses the newer database rather than ignoring the columns.
-An operator who must downgrade Agentworks restores the pre-migration database backup according to
-the existing database restore runbook before running the older binary.
+Fresh databases still apply the forward ladder through 33, 34, and 35. Their newly created
+checkpoint table is empty and is removed in the same migration transaction sequence.
 
-Restoring the database does not downgrade a VM that has already reached Trixie. After any database
-restore, the operator must use a release that understands Trixie and re-observe affected guests
-before a release-sensitive mutation.
+### Observation population
+
+No migration backfills release data. Rows gain an observation only when:
+
+- a new create is independently verified by core;
+- an ordinary release-sensitive operation proves an unknown or matching live release; or
+- the operator explicitly runs `vm confirm-release`.
+
+The database stores the observed codename rather than current/previous/legacy. Those labels are
+derived at read time from the running release registry.
+
+An older Agentworks binary that rejects the new database version is not a rollback mechanism.
+Operators restore a pre-migration database backup if they must revert the application. That does not
+revert a guest distribution upgrade.
 
 ## 3. Creation cutover
 
-All platform selector maps, the internal vm-platform version 1 release/checkpoint contract, and
-create-time live validation land before Trixie's certified profile is appended to the active
-registry. The commits remain independently green by using explicit candidate-profile test fixtures
-until the final cutover commit performs that one append. Before the append, a live Trixie guest is
-an unrecognized release and release-sensitive mutation refuses with guidance to use a supporting
-Agentworks build; there is no separate ahead-of-current tier.
+Core chooses Trixie from the final ordered release profile and passes the concrete value in
+`ProvisionRequest.debian_release`. All bundled version-1 vm-platform implementations change in the
+same release.
 
-The VM manager supplies the concrete current release in every `ProvisionRequest`; platforms do not
-infer it. Vm-platform remains an internal version-1 API, so its descriptor and all six bundled
-implementations mutate in the same green change. Exact capability conformance catches an
-inconsistent declaration or incomplete implementation. A conforming platform resolves the request
-through its own map before backend mutation. A missing code-owned key reports that Agentworks is out
-of date; a missing operator-owned Proxmox key names the exact vm-site setting. Neither failure
-chooses a different release.
+Each code-owned platform map must have a Trixie artifact for every architecture it exposes. Missing
+code-owned mappings are implementation defects and fail without fallback. Proxmox is operator-owned,
+so a create preflight requires `template_vmids.trixie` before secret resolution or backend access.
 
-The manager's provisioning wrapper preserves those two typed errors and their remediation hints. A
-platform's live mismatch must raise while the platform can still roll back. After any platform
-returns success, core first retains the platform metadata and then independently probes the returned
-transport. A failed core probe leaves one failed, uninitialized row with delete/retry guidance. This
-keeps the backend addressable for cleanup instead of unwinding its only database handle.
+Platforms validate the image inside their rollback window where possible. Core always performs the
+final `/etc/os-release` probe through the returned native transport. A mismatch records neither the
+requested release nor a successful provisioning result. Backend identity remains addressable when
+core discovers a mismatch after platform success.
 
-The release is not publishable until each platform's artifact lookup and create rollback behavior is
-certified. At runtime, a missing image or architecture produces a typed platform or configuration
-error. It never falls back to Bookworm. The cutover deletes Bookworm platform image selectors; real
-upgrade certification uses prebuilt Bookworm fixtures rather than a hidden create route.
+There is no existing-VM rewrite. A Bookworm VM continues pointing at the same backend object and can
+be started, stopped, accessed, backed up, reinitialized where valid, and deleted.
 
-The contract change updates `cli/agentworks/capabilities/README.md`,
-`cli/agentworks/capabilities/vm_platform/README.md`, and `cli/agentworks/plugins/README.md` in the
-same implementation merge unit. The base guide explains the domain-owned request value and hard
-internal contract. The specific guide documents release-map lookup, missing-key errors, platform
-rollback verification, core-owned final attestation, and the tests required of bundled platforms.
-The system-plugin guide keeps its vm-platform example at version 1 while adding the mandatory
-managed checkpoint lifecycle. Topic prose and docstrings move with them.
+## 4. Proxmox configuration
 
-Existing VMs retain the platform metadata recorded at their original creation. Image mappings are
-used only to create a new backend VM; changing a map does not mutate or relabel an existing one.
-
-## 4. Proxmox configuration migration
-
-Proxmox must move the release-specific template input to a release map:
+The old scalar:
 
 ```yaml
-# old
 template_vmid: 9000
-
-# new
-template_vmids:
-  trixie: 9001
 ```
 
-The old scalar remains loadable as a Bookworm-only value under ordinary configuration compatibility.
-It supports resolving the site for existing VM operations but does not satisfy a Trixie create. A
-new create on that site fails with a focused message that names `template_vmids.trixie` and the
-setup guide.
+is read only as a legacy Bookworm mapping. Current creation requires:
 
-For a configured Trixie mapping, creation treats the VMID as an operator assertion until the cloned
-guest proves it. Proxmox starts the clone, reads `/etc/os-release` through the QEMU guest agent, and
-rolls the clone back before Agentworks bootstrap when the observation is missing, non-Debian, or not
-Trixie. The ordinary post-bootstrap probe remains the final success attestation. There is no bypass
-for either check.
+```yaml
+template_vmids:
+  trixie: 9013
+```
 
-The CLI does not automatically rewrite operator YAML. The guide instructs the operator to:
+Operators may retain a Bookworm entry for local clarity or old-tool compatibility, but it does not
+enable Bookworm creation in the new build:
 
-1. update `scripts/proxmox-setup.sh` from the implementation release;
-2. create and verify a Trixie cloud-init template under a new VMID;
-3. add that VMID under `template_vmids.trixie`;
-4. keep the old Bookworm template until existing recovery/checkpoint needs end; and
-5. remove `template_vmid` after every Agentworks installation that reads the config is upgraded.
+```yaml
+template_vmids:
+  bookworm: 9012
+  trixie: 9013
+```
 
-The compatibility parser warns that the scalar is historical and cannot satisfy current creation.
-There is no Debian-date removal promise and no alias that silently reinterprets the old VMID as
-Trixie. Any future removal follows the repository's configuration-compatibility policy rather than
-the guest release support classifier.
+Before upgrade, the operator builds a Debian 13 template using the supported setup procedure and
+adds `template_vmids.trixie` to every Proxmox vm-site that should create VMs. Sites without that key
+remain loadable for best-effort operations on existing VMs; only create fails early.
 
-## 5. APT resource schema transition
+Core's final live attestation prevents an incorrectly labeled template from being accepted. The
+configuration has no bypass for that check.
 
-The existing scalar `source` field remains valid for release-neutral repositories. The new `sources`
-map is additive, mutually exclusive with `source`, and selected from the VM's verified release.
+## 5. APT resource transition
 
-Shipped resources migrate in place:
+Release-neutral sources keep scalar `source`. A source whose correctness changes by Debian release
+moves to an explicit map:
 
-- HashiCorp becomes a Bookworm/Trixie map.
-- tofuutils/tenv becomes a Bookworm/Trixie map.
-- ngrok becomes an explicit map whose currently reviewed values both use the vendor-supported
-  `bookworm` suite.
-- GitHub CLI, NodeSource, mise, and Google Cloud CLI remain scalar while vendor guidance remains
-  release-neutral.
+```yaml
+sources:
+  bookworm: deb [signed-by=...] https://vendor.example/debian bookworm main
+  trixie: deb [signed-by=...] https://vendor.example/debian trixie main
+```
 
-Operator manifests with a genuinely release-neutral scalar keep working. A scalar containing a
-registered Debian codename becomes invalid and reports the equivalent `sources` shape. This is an
-intentional validation cutover: silently treating a Bookworm stanza as Trixie-compatible is the bug
-the new model prevents. The scalar remains an operator assertion of release independence, not a
-claim that Agentworks can prove every vendor URL or suite is portable.
+The migration is declarative, not a database rewrite. Built-in resources ship with reviewed map
+values. Operator-authored resources using a codename-bearing scalar fail validation with guidance to
+provide `sources`.
 
-The permanent resource guide and generated sample are updated in the same commit. Historical SDDs
-and changelog entries keep their old examples.
+Before installing this release, operators should add entries for every recognized VM release on
+which they expect the resource to converge. A missing selected entry fails before key or source
+writes. Vendor suite names are copied from vendor policy and are not generated by substituting the
+host codename.
 
-## 6. Existing VM support as current advances
+## 6. Existing VM support
 
-After the Trixie cutover, an observed Bookworm VM is `current-1` and retains:
+After the cutover:
 
-- start, stop, delete, shell, exec, backup, and inspection;
-- workspace, agent, and session lifecycle behavior supported by the implementation release;
-- Phase B `vm reinit` using Bookworm APT mappings; and
-- `vm upgrade` to Trixie.
+- Trixie is current and used for creation;
+- Bookworm is previous and remains ordinarily operable; and
+- a recognized release older than Bookworm would be legacy, warn on access, and continue best
+  effort.
 
-No Bookworm VM is recreated or upgraded automatically. Doctor and describe show its previous-release
-status and recommend `vm upgrade`.
+Appending a future Forky profile changes Trixie to previous and Bookworm to legacy. It does not
+rewrite rows or require another support-state migration.
 
-When a later promotion makes Bookworm `current-2`, ordinary commands still attempt best-effort
-operation and emit one legacy warning before access. Release age alone does not block start, stop,
-inspect, shell, exec, backup, delete, reinit, or another lifecycle action. Concrete platform,
-package, and missing-map failures remain honest failures; best effort is not a compatibility claim.
+Agentworks supports the operator workflow from previous to current. It does not support chained
+current-2 upgrades. For a legacy guest, create a current VM and copy the needed data.
 
-The current Agentworks `vm upgrade` refuses to start a Bookworm upgrade once it is `current-2`. It
-does not chain Bookworm-to-Trixie and Trixie-to-current. An incomplete Bookworm-to-Trixie journal
-that Agentworks created earlier remains resumable or diagnosable through that one direct policy;
-this recovery exception cannot create a second journal or begin another edge. Guidance for a legacy
-VM with no journal points to a new current VM and data copy. The VM row remains readable and no
-calendar event rewrites or invalidates it.
+## 7. Operator-led distribution upgrade
 
-## 7. In-place upgrade transition
+Agentworks does not execute package or source changes. The safe migration sequence is:
 
-### Before irreversible work
+1. update Agentworks to a build that recognizes the target release;
+2. stop Agentworks sessions and workloads that must not be interrupted;
+3. create and verify a provider-native backup or recovery artifact;
+4. ensure an out-of-band recovery path appropriate to the platform;
+5. follow Debian's release-specific upgrade notes completely;
+6. verify the guest is healthy and reachable;
+7. run `agw vm confirm-release NAME` and consent to the recorded change; and
+8. run `agw vm reinit NAME` to converge release-aware Agentworks state.
 
-After activation provides guest access, `vm upgrade` first scans for an incomplete Agentworks
-upgrade journal. Exactly one journal resumes or diagnoses its validated adjacent pair before current
-eligibility is considered; multiple journals fail with repair guidance. Only without a journal does
-the command prove that the observed release is current-1 and select the final target profile's
-upgrade-from-previous policy. It performs the HLA preflight, updates no Debian suites, and shows a
-preliminary plan. It next validates the checkpoint row, transition identity, fingerprint, and live
-provider inventory without mutation. Only after that viability pass does it create the Agentworks
-backup and Debian recovery bundle, claim or resume the VM's single checkpoint slot, temporarily stop
-the VM, create and verify the managed provider checkpoint, restart the VM, and separately receive
-confirmation to bring the source release current within its existing suite. Reusing a matching
-checkpoint discloses its original creation time.
+Step 7 atomically records the observed target and sets initialization pending. Step 8 is separate.
+If it fails, the database still reports the truthful live release and pending initialization; repair
+the cause and rerun `vm reinit`.
 
-After that update it closes and reopens the VM operation boundary, reruns the complete preflight and
-simulation, shows every material difference, and receives a second mutation confirmation before
-switching sources. A preliminary mutation confirmation never authorizes a changed removal, source,
-conffile, blocker, or space plan.
+An operator-led provider restore uses the same adoption sequence. After the provider restores a
+recognized older guest, run `vm confirm-release` to record the backward observation and then
+`vm reinit`. Agentworks does not restore its live related objects from a provider disk image, so the
+operator must reconcile application data and declarations separately.
 
-If the command exits before package-mutation confirmation, no guest journal or package state needs
-cleanup. A ready managed checkpoint remains intentionally retained until explicit deletion. A failed
-or incomplete local backup is not accepted as a gate.
+## 8. Trixie staging migration
 
-### During package transition
+Size-unbounded backup and workspace-copy archives move from guest `/tmp` to private paths under
+`/var/tmp`. This is an implementation cutover with no persistent data migration. Temporary files are
+removed after success or failure.
 
-The durable guest journal stores last-completed progress separately from the active attempt and its
-outcome under `/var/lib/agentworks/debian-upgrades/{source}-to-{target}`. The validated directory is
-the only stored source/target identity. `plan.json` keeps the computed upgrade plan, and
-`state.json` keeps progress, without another pair field in either. Intent is durable before each
-mutation. The original APT source files and final plan are preserved both remotely and in the local
-recovery bundle. Re-running the command takes the same journal lock used by the package service,
-then inspects the systemd unit, native package locks, active attempt, postcondition, and logs before
-it performs any action or writes journal state. A source-safe abort or verified healthy target
-completion restores the recorded automatic APT timer state. After source-switch intent, a mixed or
-unhealthy state keeps the timers inhibited until forward repair or external restore.
+Operators should ensure `/var/tmp` has enough disk space for the largest expected archive. Existing
+small bounded uses of `/tmp` remain subject to ordinary temporary-file controls.
 
-There is no source-level rollback once target packages may have installed. Restoring source-release
-files onto a partially upgraded package set is specifically forbidden. The supported choices are:
+## 9. Doctor transition
 
-- repair and resume forward using the stage/log guidance; or
-- explicitly run `agw vm restore-checkpoint NAME`.
+Remove every Debian release, live observation, upgrade residue, and per-VM connectivity addition
+made to doctor by the superseded design. No compatibility shim remains.
 
-### After reboot
+Doctor must retain its previous local runtime behavior: it does not activate VMs or wait for an
+unavailable WSL distribution. Operators request live evidence through the named VM commands.
 
-The database updates to the target as soon as a live probe proves it, even if Tailscale repair,
-health verification, or Phase B later fails. Existing init state and a `repair-required` event own
-the remaining outcome; remote progress does not duplicate Trixie observation or Phase B completion.
+## 10. Delivery and rollback
 
-Selected Agentworks APT sources are recreated from target mappings. Unmanaged sources remain
-disabled and are listed for manual review. Old source backups and upgrade logs remain until the
-operator completes the documented cleanup after validating the VM and deciding whether to retain or
-delete its managed checkpoint. Successful output names that retained checkpoint, warns about
-continuing provider storage charges, and supplies the exact deletion command.
+The implementation lands as one atomic product cutover:
 
-## 8. Fresh-VM fallback
+1. release registry and observation schema;
+2. version-1 platform request and all provider maps;
+3. release-aware APT resources;
+4. `vm confirm-release` and recorded projections;
+5. migration 35 checkpoint-schema retirement;
+6. doctor and checkpoint/upgrade surface removal; and
+7. permanent documentation and generated collateral.
 
-An operator who cannot satisfy in-place preflight, or who prefers a clean replacement, uses a new
-Trixie VM and data copy:
+Before marking the PR ready, unit, static, generated, capability-conformance, and documentation
+gates run on the exact head. Live certification covers Trixie create and ordinary lifecycle on
+available platforms. It does not certify an Agentworks upgrade command that no longer exists.
 
-1. run `agw vm backup OLD`, stop it, and run `agw vm create-checkpoint OLD`;
-2. create `NEW`, which is necessarily Trixie;
-3. recreate desired VM/workspace/agent/session declarations from the exported metadata and current
-   Agentworks configuration;
-4. use supported workspace copy or repository remotes to move workspace data;
-5. validate credentials, sessions, and external integrations on `NEW`; and
-6. retain then delete `OLD` under the operator's ordinary recovery policy.
+Application rollback restores an application/database backup from before the schema transition and
+the matching binary. Guest rollback remains a provider-native operator operation. After any guest
+restore, the operator explicitly confirms the observed release and reinitializes.
 
-This is documented as a reconstruction, not transparent VM restore. Current `workspace copy` creates
-a new logical workspace, and current `vm backup` has no restore command. This SDD does not hide
-those facts or add a second migration verb.
+## 11. Removal proof
 
-## 9. Trixie `/tmp` migration
+Repository checks must prove that no shipping surface retains:
 
-Before Trixie creation is enabled, size-unbounded staging moves from guest `/tmp` to secure
-disk-backed paths:
+- `vm upgrade`;
+- checkpoint CLI commands or completion entries;
+- checkpoint database models, repositories, or capability methods;
+- provider checkpoint implementations or snapshot permissions added only for them;
+- the remote upgrade journal or preflight engine;
+- experimental upgrade-enable configuration; or
+- live Debian doctor probes.
 
-- VM backup workspace archive and path staging;
-- workspace copy destination archive; and
-- any upgrade package/state artifacts.
-
-Existing small, bounded `/tmp` uses are inventoried and can remain. No configuration knob is added
-to turn off Trixie's tmpfs default. Tests prove large data transfer with `/tmp` too small to contain
-the payload.
-
-## 10. Delivery and rollback order
-
-The implementation lands in independently reviewable phases:
-
-1. ordered core release type, relative support classifier, database observation, release-keyed Phase
-   B values, output, and no-selector contract as one merge unit;
-2. disk-backed staging corrections;
-3. internal vm-platform version 1 release/checkpoint contract, platform image maps, Proxmox
-   transition, capability READMEs, and Trixie create validation;
-4. the adjacent durable `vm upgrade` workflow and permanent recovery teaching;
-5. live platform certification, relative support teaching, superseding ADR, and release cutover.
-
-Before phase 5, builds still create the prior final registry profile on the integration branch.
-Phase 3's shared provider contract and all six implementations land through one green merge unit;
-provider branches are stacked review inputs, not independently mergeable changes. The final cutover
-atomically appends the certified Trixie profile and deletes Bookworm platform selectors only after
-all gates pass. Current then derives from the new tail; no second setting changes.
-
-Rolling back code before any VM upgrade uses the existing database-restore procedure. A binary that
-predates migration 34 refuses the newer database, so code rollback also restores the matching
-pre-migration database backup. Rolling back an already upgraded guest requires explicit managed
-checkpoint restore; changing the Agentworks constant, database row, or APT sources is not a guest
-rollback.
-
-## 11. Residual and removal policy
-
-Release promotion changes support position, not data readability. When a release becomes
-`current-2`, current documentation stops claiming supported convergence or upgrade for it and starts
-teaching best-effort access plus fresh-VM/data-copy recovery. The implementation keeps:
-
-- release recognition and display for persisted VMs;
-- operational release mappings that still enable honest best-effort work;
-- the legacy Proxmox parser while ordinary configuration compatibility requires it; and
-- backup, access, delete, and reconstruction guidance.
-
-Create-only selectors for a non-current release can be deleted because core never requests them. An
-old target profile's adjacent policy is no longer eligible to start an upgrade once its source is
-not current-1, but its policy and journal reader remain available to recover an incomplete journal
-that predates promotion. Retaining that direct recovery data must not make a new or multi-hop path
-callable. Removal of old recognition or operational data requires a separately authorized
-compatibility decision, not a date embedded in this effort.
+Historical migration 34 and completed SDD plan checkboxes remain as immutable evidence of what was
+developed and then superseded. Migration 35 and the SDD ruling explain why those names still appear
+in history without defining a shipping product surface.
