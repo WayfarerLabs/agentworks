@@ -473,6 +473,14 @@ class EC2Platform(VMPlatform):
                 cleanup_created_resources(ec2, instance_id, security_group_id)
             except (Exception, KeyboardInterrupt) as cleanup_error:
                 detail = cleanup_error.detail if isinstance(cleanup_error, EC2Error) else "cleanup was interrupted"
+                recovery = (
+                    f"After AWS permissions or service availability recover, run 'agw vm delete {request.vm_name}'."
+                )
+                if instance_id is None and security_group_id is not None:
+                    recovery = (
+                        f"AWS did not return an instance ID; first inspect EC2 in {region} for "
+                        f"agentworks:vm={backend_name}, then run 'agw vm delete {request.vm_name}'."
+                    )
                 raise RetainedProvisioningError(
                     f"AWS cleanup for VM '{request.vm_name}' could not be confirmed: {detail}",
                     platform_metadata=_metadata(incomplete=True),
@@ -480,8 +488,7 @@ class EC2Platform(VMPlatform):
                     hint=(
                         f"Instance: {instance_id or 'not returned'}; "
                         f"security group: {security_group_id or 'not created'}; region: {region}; "
-                        f"ownership tag: agentworks:vm={backend_name}. After AWS permissions or service availability "
-                        f"recover, run 'agw vm delete {request.vm_name}'."
+                        f"ownership tag: agentworks:vm={backend_name}. {recovery}"
                     ),
                 ) from cleanup_error
 

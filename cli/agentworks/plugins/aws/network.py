@@ -1,6 +1,6 @@
 """AWS SDK plumbing shared by the EC2 platform's ops: typed error
 classification, per-VM security-group exposure mechanics, and the distinct
-strict-delete and best-effort rollback cleanup paths.
+strict-delete and create-rollback cleanup paths.
 
 Split out of ``platform.py`` mirroring ``plugins/azure/network.py``:
 ``platform.py`` keeps the ``VMPlatform`` capability surface (config, sessions,
