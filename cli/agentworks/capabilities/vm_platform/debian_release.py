@@ -20,8 +20,8 @@ def code_owned_release_value[T](
 ) -> T:
     """Resolve a platform-owned selector supplied by this build.
 
-    ``ProvisionRequest`` is a capability boundary that plugins can call, so
-    the requested release is validated even though core supplies a typed value.
+    A missing bundled selector means this Agentworks build is internally
+    incomplete, so fail with platform-specific context before backend mutation.
     """
     try:
         return values[release]
@@ -31,7 +31,7 @@ def code_owned_release_value[T](
             "its release map has no matching artifact",
             entity_kind="vm-platform",
             entity_name=platform_name,
-            hint=f"Update Agentworks or the plugin that provides vm-platform/{platform_name}.",
+            hint=(f"Update Agentworks to a build where vm-platform/{platform_name} supports Debian {release.value}."),
         ) from None
 
 

@@ -549,9 +549,9 @@ def create_vm(
                 render_overlay_outcome(overlay_outcome)
                 raise
 
-            # A platform's success return is not evidence about the guest. It
-            # may come from third-party code, so core independently observes
-            # the live release over the returned transport. Metadata is
+            # A platform's success return does not prove the guest's identity,
+            # so core independently observes the live release over the returned
+            # transport. Metadata is
             # already durable: if attestation fails after the platform closed
             # its rollback window, the failed row still addresses the backend
             # for an explicit delete.

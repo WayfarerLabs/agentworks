@@ -560,6 +560,8 @@ identities and all bundled implementations continue to mutate atomically.
 - [x] Correct the Proxmox guide to describe the setup script's actual `--privsep=0` token model.
 - [x] Label `vm describe` release fields as recorded observations and teach operators that only the
       explicit `vm confirm-release` command refreshes live evidence.
+- [x] Remove residual separately distributed vm-platform rationale from selector errors and core
+      attestation comments; failures name an updated Agentworks build.
 - [ ] Run focused and full gates, exact-head project/correctness/complexity review, hosted CI, and
       the signed ready handoff for the corrected product surface.
 
