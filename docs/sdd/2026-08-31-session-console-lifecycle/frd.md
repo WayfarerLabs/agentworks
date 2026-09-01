@@ -24,7 +24,7 @@ where the underlying operation is the same: `create`, `start`, `stop`, `restart`
 effort does not invent a VM restart merely for symmetry.
 
 For sessions, `start` and `restart` both request continuation of prior harness state when the
-selected harness integration supports it, unless the operator passes `--no-resume`. Continuation is
+selected harness integration supports it, unless the operator passes `--force-new`. Continuation is
 a harness decision, not the name or guaranteed outcome of the Agentworks lifecycle operation. A
 harness integration supplies start behavior and may request a graceful application stop. Core owns
 runtime teardown, liveness verification, grace timing, and fallback kill behavior. A harness
@@ -73,7 +73,7 @@ release notes and locked SDD records remain historical.
 The operator runs `agw session start NAME`. Agentworks starts the existing logical session and asks
 its harness integration to continue prior harness state when supported. If no prior state is usable,
 the harness starts fresh and Agentworks does not falsely claim that a conversation resumed. The
-operator can pass `--no-resume` to require a fresh harness start instead.
+operator can pass `--force-new` to require a fresh harness start instead.
 
 ### Operator deliberately replacing a running session
 
@@ -96,7 +96,7 @@ effect of attach. Attaching to an already-running console does not rebuild it.
 ### Harness integration author
 
 The author implements one start operation and may implement a graceful-stop hook whose default is a
-no-op. Start receives `no_resume`, which defaults to false. The integration examines its own state
+no-op. Start receives `force_new`, which defaults to false. The integration examines its own state
 and decides whether and how to continue when continuation is allowed. Its stop hook may
 cooperatively ask the application to exit, but core still verifies and owns tmux teardown,
 escalation, and final state. The integration never implements a separate restart operation.
@@ -135,21 +135,26 @@ session row, workspace, agent/admin identity, template selection, instance overl
 construction, and per-session socket model. It MUST preserve every foreign harness integration state
 namespace. The selected integration continues to own its own namespace and MAY update it as part of
 choosing a continuation or fresh identity. Start MUST request harness continuation because the
-logical Agentworks session already exists. `session start NAME --no-resume` MUST instead require a
-fresh harness launch while retaining the same Agentworks session resource and its other durable
-configuration.
+logical Agentworks session already exists. On a stopped session, `session start NAME --force-new`
+MUST instead require a fresh harness launch while retaining the same Agentworks session resource and
+its other durable configuration.
 
 If the session is already running, `session start` MUST report that fact and succeed without
-stopping, replacing, resolving runtime-only secrets, or invoking the harness start operation. If the
-session is broken, the command MUST refuse before destructive action unless the operator passes the
-command's explicit force option. A forced start MUST use the same core-owned bounded kill behavior
-as restart, verify that the broken runtime no longer owns the session, and then start the
-replacement. If teardown cannot be verified, it MUST fail without invoking harness start.
+stopping, replacing, resolving runtime-only secrets, or invoking the harness start operation.
+`session start NAME --force-new` on a running session MUST instead fail without mutation and direct
+the operator to `session restart NAME --force-new`; start MUST NOT acquire restart semantics from
+the policy flag. If the session is broken, the command MUST refuse before destructive action unless
+the operator passes the command's explicit force option. A forced start MUST use the same core-owned
+bounded kill behavior as restart, verify that the broken runtime no longer owns the session, and
+then start the replacement. If teardown cannot be verified, it MUST fail without invoking harness
+start.
 
 `session start --all` MUST operate on every matching stopped session and leave already-running
 sessions unchanged. The existing VM, workspace, agent, and admin filters MUST remain available and
-retain their current composition rules. `--no-resume` MUST apply uniformly to every selected start.
-The canonical start command MUST NOT need a redundant `--all-stopped` spelling.
+retain their current composition rules. `--force-new` MUST apply the fresh policy to every selected
+stopped session, while an already-running selected session MUST produce the same actionable error as
+the named command rather than be replaced. The canonical start command MUST NOT need a redundant
+`--all-stopped` spelling.
 
 ### R3: Session restart
 
@@ -162,7 +167,7 @@ recovery.
 
 A stopped session passed to `session restart` MUST be started without manufacturing a meaningless
 stop operation. Both the running and stopped paths MUST request continuation from the harness
-integration because the durable logical session already exists. `session restart NAME --no-resume`
+integration because the durable logical session already exists. `session restart NAME --force-new`
 MUST perform the same core lifecycle transition but require a fresh harness launch afterward.
 
 The restart verb itself is explicit authorization to replace a running runtime. Canonical
@@ -170,7 +175,7 @@ single-session restart MUST NOT prompt merely because the session is running, an
 `--yes` option whose only purpose is to suppress that prompt.
 
 `session restart --all` MUST apply the same state-aware operation to every matching session. It MUST
-retain the existing VM, workspace, agent, admin, force, and `--no-resume` behavior across the
+retain the existing VM, workspace, agent, admin, force, and `--force-new` behavior across the
 selected set. It MUST NOT preserve the current `resume --all` confirmation ceremony under the new
 explicit verb.
 
@@ -261,23 +266,24 @@ Core owns session status inspection, stop orchestration, liveness verification, 
 policy, fallback kill, tmux replacement, and the decision to invoke start. A harness integration
 MUST NOT kill, replace, attach to, or persist liveness for the Agentworks session runtime.
 
-`start` MUST receive a keyword-only `no_resume` Boolean whose default is false. The CLI and service
-layers MUST retain that negative spelling so `--no-resume`, `no_resume`, and the capability input
-form one vocabulary. Core sets the operator policy. When `no_resume` is false, the integration MUST
+`start` MUST receive a keyword-only `force_new` Boolean whose default is false. The CLI and service
+layers MUST retain that positive spelling so `--force-new`, `force_new`, and the capability input
+form one vocabulary. Core sets the operator policy. When `force_new` is false, the integration MUST
 inspect and interpret its own state to determine whether continuation is supported, available, and
-safe. When `no_resume` is true, it MUST take its fresh path without probing whether prior state can
+safe. When `force_new` is true, it MUST take its fresh path without probing whether prior state can
 be resumed, except for integration-local work strictly required to retire or rotate its own binding
 safely:
 
-- session create MUST pass `no_resume=True` and MUST NOT permit adoption of state belonging to a
+- session create MUST pass `force_new=True` and MUST NOT permit adoption of state belonging to a
   deleted predecessor that reused the name or workspace;
-- session start MUST use the false default and pass true under `--no-resume`;
-- session restart MUST use the false default and pass true under `--no-resume`, after core has
+- session start MUST use the false default and pass true under `--force-new`; for a running session,
+  core MUST refuse rather than invoking start or performing teardown;
+- session restart MUST use the false default and pass true under `--force-new`, after core has
   completed teardown.
 
-When `no_resume` is false, an integration that supports continuation SHOULD resume when its own
+When `force_new` is false, an integration that supports continuation SHOULD resume when its own
 compatible prior state is usable. It MUST be free to start fresh when no such state exists and to
-defer a choice to its own tool when that is the safest available behavior. When `no_resume` is true,
+defer a choice to its own tool when that is the safest available behavior. When `force_new` is true,
 the integration MUST select a fresh start and MUST NOT adopt or resume prior harness state. An
 integration that does not support continuation MUST still be a valid implementation of start.
 
@@ -320,11 +326,10 @@ operation actually does. The cutover includes:
 - tests, fixtures, fakes, and structural drift guards.
 
 The word `resume` MAY remain only where it truthfully describes harness-level continuation, such as
-the `--no-resume` policy switch, an external tool's resume flag, a continuation decision, or
-historical material. It MUST NOT remain as the current name of the Agentworks session lifecycle
-operation, a core manager operation, a logger operation, or a harness lifecycle method. Historical
-changelog entries, locked SDDs, and third-party command names MUST NOT be rewritten to manufacture
-current terminology.
+an external tool's resume flag, a continuation decision, or historical material. It MUST NOT remain
+as the current name of the Agentworks session lifecycle operation, a core manager operation, a
+logger operation, or a harness lifecycle method. Historical changelog entries, locked SDDs, and
+third-party command names MUST NOT be rewritten to manufacture current terminology.
 
 ### R8: Compatibility and migration
 
@@ -377,10 +382,10 @@ attach. Runtime creation MUST not be hidden behind inspection, list, completion,
 1. Session help and completion expose canonical `start`, `stop`, `restart`, and `attach` operations;
    console help and completion expose the same runtime verbs.
 2. Starting a stopped session invokes the harness start operation with continuation requested;
-   starting a running session is a no-op; restarting a running session completes core-owned teardown
-   before invoking that same start operation.
-3. `--no-resume` makes session start/restart request a fresh harness launch without changing their
-   core runtime transition; initial session creation always uses that fresh policy.
+   ordinarily starting a running session is a no-op; starting it with `--force-new` errors; and
+   restarting it completes core-owned teardown before invoking that same start operation.
+3. `--force-new` makes session start/restart request a fresh harness launch when that operation
+   launches a runtime; initial session creation always uses the fresh policy.
 4. Harness integrations expose start plus a default-no-op cooperative stop hook and no
    resume/restart lifecycle methods; core retains sole authority over teardown and stopped state.
 5. Continuation-capable harness integrations preserve their current safe continuation behavior;
@@ -424,8 +429,9 @@ attach. Runtime creation MUST not be hidden behind inspection, list, completion,
   `feat/debian-release-transition-sdd` so the lifecycle work composes with the in-flight Debian
   release transition rather than resolving a large integration conflict afterward.
 - **2026-08-31 — Continuation on both operations:** Session start and session restart both request
-  harness continuation when supported. `--no-resume` forces a fresh harness launch. Session create
-  is always fresh.
+  harness continuation when supported. `--force-new` forces a fresh harness launch. Session create
+  is always fresh. `session start --force-new` on a running session errors rather than taking
+  ordinary start's idempotent no-op path or acquiring restart semantics.
 - **2026-08-31 — Harness lifecycle boundary:** A harness integration offers start and an optional
   default-no-op cooperative stop hook, but no restart operation. Core orchestrates liveness,
   graceful fallback, bounded force kill, persisted state, and subsequent start for restart.
