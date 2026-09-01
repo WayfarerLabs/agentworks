@@ -555,8 +555,8 @@ The authenticated operator retained contract version 1 on 2026-09-01. Vm-platfor
 internal, so historical internal-only version increments do not consume public compatibility
 identities and all bundled implementations continue to mutate atomically.
 
-- [x] Reject falsy non-mapping Proxmox `template_vmids` values at config validation while
-      preserving the absent/null and legacy-scalar adaptation paths.
+- [x] Reject falsy non-mapping Proxmox `template_vmids` values at config validation while preserving
+      the absent/null and legacy-scalar adaptation paths.
 - [x] Correct the Proxmox guide to describe the setup script's actual `--privsep=0` token model.
 - [x] Label `vm describe` release fields as recorded observations and teach operators that only the
       explicit `vm confirm-release` command refreshes live evidence.
