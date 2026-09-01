@@ -378,9 +378,6 @@ def _terminate_created_instance(ec2: Any, instance_id: str) -> None:
         except Exception as exc:
             if error_code(exc) not in _INSTANCE_NOT_FOUND_CODES:
                 raise wrap_ec2_error(exc) from exc
-            # Read the exact ID for diagnostics, but do not accept absence: the
-            # preceding RunInstances response proves this can be propagation.
-            describe_instance_exact(ec2, instance_id)
             if attempt + 1 == attempts:
                 raise EC2Error(
                     f"AWS never accepted termination of newly created instance '{instance_id}'",
@@ -410,10 +407,6 @@ def _delete_created_security_group(ec2: Any, security_group_id: str) -> None:
             retryable = code == "DependencyViolation" or code in _GROUP_NOT_FOUND_CODES
             if not retryable:
                 raise wrap_ec2_error(exc) from exc
-            if code in _GROUP_NOT_FOUND_CODES:
-                # As with the instance, a read informs the retry but cannot
-                # turn create-time propagation into a false cleanup success.
-                describe_security_group_exact(ec2, security_group_id)
             if attempt + 1 == attempts:
                 raise EC2Error(
                     f"AWS never accepted deletion of newly created security group '{security_group_id}'",

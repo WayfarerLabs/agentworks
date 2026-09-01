@@ -382,7 +382,6 @@ class TestCreateRollback:
             _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
 
         assert rec.methods("ec2").count("terminate_instances") == 2
-        assert rec.methods("ec2").count("describe_instances") == 3
 
     def test_unconfirmed_rollback_retains_exact_metadata(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("agentworks.plugins.aws.network.time.sleep", lambda _seconds: None)

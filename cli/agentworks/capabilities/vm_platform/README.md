@@ -472,14 +472,13 @@ is reachable in a way config validation cannot catch.
 Read `AzureAuth`, `_build_service_principal_credential`, and `_get_credential` together: that trio
 is the whole pattern. On EC2 the analogous trio is `AwsAuth`, `_build_access_key_session`, and
 `_get_session`; two things differ deliberately, both because the SDKs differ. First, `_get_session`
-does NOT probe at build (boto3 sessions are inert), so the runup and status classify a definitive
-credential rejection apart from an unreachable endpoint: azure-identity collapses an Entra rejection
-and an unreachable Entra into one `ClientAuthenticationError`, so azure must treat every credential
-failure as fatal, but botocore surfaces a rejection as a `ClientError` with an auth error code and
-an outage as an `EndpointConnectionError`, so `aws-ec2` follows proxmox (runup makes a rejection
-fatal and warns-and-continues on indeterminacy) and its `status` re-raises a rejection typed rather
-than degrading to UNKNOWN, so a misconfigured site never reads as UNKNOWN in `vm describe` (the
-exact #303 hole). Second, an `assume_role_arn` builds AUTO-REFRESHING credentials (botocore's
+does NOT probe at build (boto3 sessions are inert), so runup makes the STS identity call after
+secret resolution. That identity is the mandatory account binding for later destructive operations:
+rejection, permission denial, transport failure, and an invalid response are all fatal before
+create. Only an indeterminate optional subnet read warns. `status` still distinguishes structured
+credential or authorization rejection from an unreachable endpoint, re-raising the former typed
+rather than degrading it to UNKNOWN, so a misconfigured site never reads as UNKNOWN in `vm describe`
+(the exact #303 hole). Second, an `assume_role_arn` builds AUTO-REFRESHING credentials (botocore's
 `AssumeRoleCredentialFetcher` + `DeferredRefreshableCredentials`) rather than a one-shot assume, so
 a long op cannot fail with `ExpiredToken` from a frozen cache. See `test_platform_runup.py` and
 `test_aws_ec2_ops.py` (directly under `cli/tests/`) for the halves.
