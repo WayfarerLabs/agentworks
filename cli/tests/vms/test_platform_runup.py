@@ -23,7 +23,7 @@ from types import SimpleNamespace
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.errors import NotFoundError, TokenRejectedError, ValidationError
+from agentworks.errors import AuthorizationError, NotFoundError, TokenRejectedError, ValidationError
 from agentworks.plugins.azure.network import AzureError
 from agentworks.plugins.azure.platform import AzureVMPlatform
 from agentworks.plugins.proxmox.api import (
@@ -336,6 +336,23 @@ def test_aws_ec2_runup_auth_rejection_is_fatal(monkeypatch: pytest.MonkeyPatch) 
     )
     with pytest.raises(TokenRejectedError, match="AWS rejected"):
         EC2Platform("aws", _EC2_CONFIG).runup(RunContext())
+
+
+@pytest.mark.parametrize("code", ["UnauthorizedOperation", "AccessDenied", "AccessDeniedException"])
+def test_aws_ec2_runup_permission_denial_is_authorization(
+    monkeypatch: pytest.MonkeyPatch,
+    code: str,
+) -> None:
+    from agentworks.plugins.aws.platform import EC2Platform
+    from tests._aws_fakes import Controls, client_error, install_fakes
+
+    install_fakes(monkeypatch, Controls(identity_error=client_error(code, "denied", "GetCallerIdentity")))
+
+    with pytest.raises(AuthorizationError) as exc:
+        EC2Platform("aws", _EC2_CONFIG).runup(RunContext())
+
+    assert exc.value.entity_kind == "vm-site"
+    assert exc.value.entity_name == "aws"
 
 
 def test_aws_ec2_runup_unreachable_warns(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:

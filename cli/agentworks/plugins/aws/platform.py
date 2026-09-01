@@ -10,10 +10,10 @@ group that denies all inbound by default; SSH via ephemeral rules scoped to the
 operator's egress prefixes; ``post_tailscale_ready`` / ``secure_failed_vm`` /
 ``transient_route`` close hooks; create rollback on both failure and operator
 interrupt). Two deliberate divergences from azure are documented where they
-live: ``runup`` / ``status`` classify a definitive credential rejection apart
-from an unreachable endpoint (botocore can; azure-identity cannot), and the
-security-group mechanics in ``network.py`` note the SG-natural-deny asymmetry
-and the shared-tuple concurrency behavior EC2's rule model forces.
+live: ``runup`` / ``status`` classify credential rejection, authorization
+denial, and an unreachable endpoint separately, and the security-group
+mechanics in ``network.py`` note the SG-natural-deny asymmetry and the
+shared-tuple concurrency behavior EC2's rule model forces.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs,
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
-from agentworks.errors import ConfigError, NotFoundError, StateError, TokenRejectedError
+from agentworks.errors import AuthorizationError, ConfigError, NotFoundError, StateError, TokenRejectedError
 from agentworks.plugins.aws.auth import _build_access_key_session, _build_ambient_session
 from agentworks.plugins.aws.config import (
     AwsAmbientAuth,
@@ -55,11 +55,12 @@ from agentworks.plugins.aws.network import (
     error_code,
     first_instance_public_ip,
     first_instance_state,
-    is_auth_rejection,
+    is_authorization_denial,
+    is_credential_rejection,
     poke_ssh_allow,
     remove_ssh_allow,
     rollback_create_on_interrupt,
-    terminate_and_cleanup,
+    terminate_and_cleanup_strict,
     vm_tag,
     wrap_ec2_error,
 )
@@ -236,10 +237,10 @@ class EC2Platform(VMPlatform):
         with a ``ClientError`` carrying an auth error code (``AuthFailure``,
         ``InvalidClientTokenId``, ...) and an unreachable endpoint with an
         ``EndpointConnectionError`` and friends, so EC2 follows proxmox: a
-        definitive rejection is fatal (a ``TokenRejectedError`` before any VM
-        exists), and a transient or unreachable failure warns and continues
-        unverified, so an outage never blocks work a valid credential would have
-        done.
+        definitive credential rejection is fatal (a ``TokenRejectedError``
+        before any VM exists), an authorization denial is a distinct
+        ``AuthorizationError``, and a transient or unreachable failure warns
+        and continues unverified.
         """
         from botocore.exceptions import BotoCoreError, ClientError
 
@@ -261,11 +262,17 @@ class EC2Platform(VMPlatform):
         ec2 = self._client("ec2", region, ctx)
 
         def _reject_or_warn(exc: ClientError) -> None:
-            """A definitive auth rejection is fatal; anything else warns and
-            continues unverified."""
-            if is_auth_rejection(exc):
+            """Raise definitive credential and permission failures."""
+            if is_credential_rejection(exc):
                 raise TokenRejectedError(
                     f"AWS rejected {cred_label} for vm-site '{self.site_name}' ({error_code(exc)})",
+                    entity_kind="vm-site",
+                    entity_name=self.site_name,
+                    hint=cred_hint,
+                ) from exc
+            if is_authorization_denial(exc):
+                raise AuthorizationError(
+                    f"AWS denied {cred_label} permission for vm-site '{self.site_name}' ({error_code(exc)})",
                     entity_kind="vm-site",
                     entity_name=self.site_name,
                     hint=cred_hint,
@@ -492,7 +499,7 @@ class EC2Platform(VMPlatform):
         except Exception as exc:
             output.detail("Cleaning up resources...")
             cleanup_partial(ec2, instance_id, security_group_id)
-            if isinstance(exc, StateError):
+            if isinstance(exc, (AuthorizationError, StateError, TokenRejectedError)):
                 raise
             raise wrap_ec2_error(exc) from exc
 
@@ -548,7 +555,7 @@ class EC2Platform(VMPlatform):
             output.warn("no EC2 instance id, skipping EC2 cleanup")
             return
         ec2 = self._client("ec2", self._region_of(vm), ctx)
-        terminate_and_cleanup(ec2, str(instance_id), vm.platform_metadata.get("security_group_id"))
+        terminate_and_cleanup_strict(ec2, str(instance_id), vm.platform_metadata.get("security_group_id"))
         output.info(f"EC2 instance '{vm.name}' deleted")
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
@@ -563,13 +570,14 @@ class EC2Platform(VMPlatform):
         # was rejected would hide a misconfiguration behind a plausible-looking
         # answer, exactly in `vm describe` where an operator checks a broken
         # site. botocore lets us tell the two apart at the call site, so a
-        # rejection re-raises typed (via the same classifier runup uses) and
-        # only a transient/unreachable failure degrades to UNKNOWN.
+        # credential or authorization rejection re-raises typed (via the same
+        # structured classifiers runup uses) and only a transient/unreachable
+        # failure degrades to UNKNOWN.
         ec2 = self._client("ec2", self._region_of(vm), ctx)
         try:
             result = ec2.describe_instances(InstanceIds=[instance_id])
         except Exception as exc:
-            if is_auth_rejection(exc):
+            if is_credential_rejection(exc) or is_authorization_denial(exc):
                 raise wrap_ec2_error(exc) from exc
             return VMStatus.UNKNOWN
         state = first_instance_state(result)
@@ -679,8 +687,8 @@ class EC2Platform(VMPlatform):
         ec2 = self._client("ec2", self._region_of(vm), ctx)
         security_group_id = self._security_group_id(vm)
         prefixes = operator_ssh_prefixes(config_allow_cidrs(config))
+        poke_ssh_allow(ec2, security_group_id, prefixes)
         try:
-            poke_ssh_allow(ec2, security_group_id, prefixes)
             yield
         finally:
             remove_ssh_allow(ec2, security_group_id, prefixes)
@@ -885,6 +893,9 @@ class EC2Platform(VMPlatform):
         try:
             result = ec2.describe_images(ImageIds=[ami])
         except Exception as exc:
+            mapped = wrap_ec2_error(exc)
+            if isinstance(mapped, (AuthorizationError, TokenRejectedError)):
+                raise mapped from exc
             raise EC2Error(
                 f"could not read AMI '{ami}' to size the disk for vm-site '{self.site_name}'",
                 detail=str(exc),

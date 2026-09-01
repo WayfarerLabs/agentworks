@@ -1,7 +1,7 @@
 """EC2 create flow, exposure model, and power ops against the in-process boto3
 fakes: the deny-baseline security group, the scoped ephemeral SSH allows and
 their close hooks, the transient route, create rollback (failure and operator
-interrupt), status mapping, and the idempotent delete.
+interrupt), status mapping, and strict idempotent delete.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from agentworks.capabilities.vm_platform import ProvisionRequest
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
-from agentworks.errors import ConfigError, StateError
+from agentworks.errors import AuthorizationError, ConfigError, StateError, TokenRejectedError
 from agentworks.plugins.aws.network import EC2Error, poke_ssh_allow, remove_ssh_allow
 from agentworks.plugins.aws.platform import EC2Platform
 from agentworks.ssh import SSHError
@@ -163,6 +163,22 @@ class TestCreate:
 
         assert rec.authorized_cidrs() == [_DETECTED_PREFIX, "198.51.100.0/24"]
 
+    def test_bootstrap_checks_every_revoke_before_any_authorize(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = install_fakes(monkeypatch)
+        _platform().create(_request(), RunContext(config=_config(["198.51.100.0/24"])))
+
+        boundary_calls = [
+            (method, kwargs.get("DryRun", False), kwargs["IpPermissions"][0]["IpRanges"][0]["CidrIp"])
+            for service, method, kwargs in rec.calls
+            if service == "ec2" and method in {"revoke_security_group_ingress", "authorize_security_group_ingress"}
+        ]
+        assert boundary_calls == [
+            ("revoke_security_group_ingress", True, _DETECTED_PREFIX),
+            ("revoke_security_group_ingress", True, "198.51.100.0/24"),
+            ("authorize_security_group_ingress", False, _DETECTED_PREFIX),
+            ("authorize_security_group_ingress", False, "198.51.100.0/24"),
+        ]
+
     def test_launch_pins_a_permanent_auto_public_ip(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The primary network interface pins AssociatePublicIpAddress=True (a
         permanent auto-assigned IP; exposure is the SG's job), with the security
@@ -285,9 +301,9 @@ class TestCreate:
             "tests._aws_fakes._FakeEC2.describe_images",
             lambda self, **kw: (_ for _ in ()).throw(client_error("UnauthorizedOperation", "denied", "DescribeImages")),
         )
-        with pytest.raises(EC2Error, match="size the disk") as exc:
+        with pytest.raises(AuthorizationError) as exc:
             _platform().create(_request(disk=40), RunContext(config=_config()))
-        assert exc.value.hint is not None and "ec2:DescribeImages" in exc.value.hint
+        assert exc.value.__cause__ is not None
 
     def test_tailscale_path_waits_for_bootstrap(self, monkeypatch: pytest.MonkeyPatch) -> None:
         install_fakes(monkeypatch)
@@ -540,12 +556,68 @@ class TestCloseProvisioningHooks:
 
 class TestTransientRoute:
     def test_pokes_on_enter_and_removes_on_exit(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        install_fakes(monkeypatch)
+        rec = install_fakes(monkeypatch)
         platform = _platform()
         with platform.transient_route(_vm(), RunContext(), config=_config(["198.51.100.0/24"])):
             assert _ec2(platform).ingress["sg-123"] == {_DETECTED_PREFIX: "sgr-1", "198.51.100.0/24": "sgr-2"}
         # Exit revoked exactly what it poked.
         assert _ec2(platform).ingress["sg-123"] == {}
+        boundary_calls = [
+            (method, kwargs.get("DryRun", False))
+            for service, method, kwargs in rec.calls
+            if service == "ec2" and method in {"revoke_security_group_ingress", "authorize_security_group_ingress"}
+        ]
+        assert boundary_calls == [
+            ("revoke_security_group_ingress", True),
+            ("revoke_security_group_ingress", True),
+            ("authorize_security_group_ingress", False),
+            ("authorize_security_group_ingress", False),
+            ("revoke_security_group_ingress", False),
+            ("revoke_security_group_ingress", False),
+        ]
+
+    def test_revoke_denial_happens_before_route_mutation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        controls = Controls(
+            dry_run_outcomes=[
+                None,
+                client_error("UnauthorizedOperation", "denied", "RevokeSecurityGroupIngress"),
+            ]
+        )
+        rec = install_fakes(monkeypatch, controls)
+        platform = _platform()
+
+        route = platform.transient_route(_vm(), RunContext(), config=_config(["198.51.100.0/24"]))
+        with pytest.raises(AuthorizationError), route:
+            pass
+
+        assert rec.authorized_cidrs() == []
+        dry_runs = rec.dry_runs("revoke_security_group_ingress")
+        assert len(dry_runs) == 2
+        assert all(kwargs.get("DryRun") for _method, kwargs in dry_runs)
+        assert _ec2(platform).ingress == {}
+
+    @pytest.mark.parametrize(
+        "outcome",
+        [
+            None,
+            client_error("InvalidPermission.NotFound", "gone", "RevokeSecurityGroupIngress"),
+            client_error("AccessDenied", "indeterminate dry run", "RevokeSecurityGroupIngress"),
+            unreachable(),
+        ],
+        ids=["normal-return", "validation-result", "access-denied-indeterminate", "transport-result"],
+    )
+    def test_indeterminate_revoke_dry_run_preserves_authorize(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        outcome: Exception | None,
+    ) -> None:
+        rec = install_fakes(monkeypatch, Controls(dry_run_outcomes=[outcome]))
+        platform = _platform()
+
+        with platform.transient_route(_vm(), RunContext(), config=_config()):
+            assert _ec2(platform).ingress["sg-123"] == {_DETECTED_PREFIX: "sgr-1"}
+
+        assert rec.authorized_cidrs() == [_DETECTED_PREFIX]
 
     def test_removes_on_body_exception(self, monkeypatch: pytest.MonkeyPatch) -> None:
         install_fakes(monkeypatch)
@@ -681,8 +753,19 @@ class TestPowerOps:
             "tests._aws_fakes._FakeEC2.describe_instances",
             lambda self, **kw: (_ for _ in ()).throw(client_error("AuthFailure", "denied", "DescribeInstances")),
         )
-        with pytest.raises(EC2Error):
+        with pytest.raises(TokenRejectedError):
             _platform().status(_vm(), RunContext())  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("code", ["UnauthorizedOperation", "AccessDenied", "AccessDeniedException"])
+    def test_status_raises_authorization_denial(self, monkeypatch: pytest.MonkeyPatch, code: str) -> None:
+        install_fakes(monkeypatch)
+        monkeypatch.setattr(
+            "tests._aws_fakes._FakeEC2.describe_instances",
+            lambda self, **kw: (_ for _ in ()).throw(client_error(code, "denied", "DescribeInstances")),
+        )
+        with pytest.raises(AuthorizationError) as exc:
+            _platform().status(_vm(), RunContext())  # type: ignore[arg-type]
+        assert isinstance(exc.value.__cause__, Exception)
 
     def test_status_unknown_on_unreachable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         install_fakes(monkeypatch)
@@ -709,14 +792,60 @@ class TestPowerOps:
 
 class TestDelete:
     def _sg_deleted(self, rec: Recorder) -> int:
-        return rec.methods("ec2").count("delete_security_group")
+        return sum(
+            1
+            for service, method, kwargs in rec.calls
+            if service == "ec2" and method == "delete_security_group" and not kwargs.get("DryRun")
+        )
 
     def test_terminates_and_deletes_the_security_group(self, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = install_fakes(monkeypatch)
         _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
-        methods = rec.methods("ec2")
-        assert "terminate_instances" in methods
-        assert "delete_security_group" in methods
+        assert [
+            (method, kwargs.get("DryRun", False))
+            for service, method, kwargs in rec.calls
+            if service == "ec2" and method in {"delete_security_group", "terminate_instances", "get_waiter"}
+        ] == [
+            ("delete_security_group", True),
+            ("terminate_instances", False),
+            ("get_waiter", False),
+            ("delete_security_group", False),
+        ]
+
+    def test_security_group_delete_denial_prevents_all_mutation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = install_fakes(
+            monkeypatch,
+            Controls(dry_run_outcomes=[client_error("UnauthorizedOperation", "denied", "DeleteSecurityGroup")]),
+        )
+
+        with pytest.raises(AuthorizationError) as exc:
+            _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
+
+        assert exc.value.entity_kind == "security-group"
+        assert exc.value.entity_name == "sg-123"
+        assert rec.calls == [("ec2", "delete_security_group", {"GroupId": "sg-123", "DryRun": True})]
+
+    @pytest.mark.parametrize(
+        "outcome",
+        [
+            None,
+            client_error("InvalidGroup.NotFound", "gone", "DeleteSecurityGroup"),
+            client_error("AccessDenied", "indeterminate dry run", "DeleteSecurityGroup"),
+            unreachable(),
+        ],
+        ids=["normal-return", "validation-result", "access-denied-indeterminate", "transport-result"],
+    )
+    def test_indeterminate_delete_dry_run_preserves_delete_behavior(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        outcome: Exception | None,
+    ) -> None:
+        rec = install_fakes(monkeypatch, Controls(dry_run_outcomes=[outcome]))
+
+        _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
+
+        assert rec.kwargs_for("terminate_instances") == {"InstanceIds": ["i-123"]}
+        assert self._sg_deleted(rec) == 1
 
     def test_is_idempotent_when_already_gone(self, monkeypatch: pytest.MonkeyPatch) -> None:
         install_fakes(monkeypatch)
@@ -741,16 +870,37 @@ class TestDelete:
         _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
         assert not any("terminate" in w for w in captured_output.warnings)
 
-    def test_unexpected_terminate_failure_warns(self, monkeypatch: pytest.MonkeyPatch, captured_output: Any) -> None:
-        """A real terminate failure (AuthFailure) warns loudly rather than being
-        swallowed and misattributed to the later security-group cleanup."""
+    def test_credential_rejection_during_terminate_is_strict(self, monkeypatch: pytest.MonkeyPatch) -> None:
         install_fakes(monkeypatch)
         monkeypatch.setattr(
             "tests._aws_fakes._FakeEC2.terminate_instances",
             lambda self, **kw: (_ for _ in ()).throw(client_error("AuthFailure", "denied", "Terminate")),
         )
-        _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
-        assert any("could not terminate instance" in w for w in captured_output.warnings)
+        with pytest.raises(TokenRejectedError):
+            _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
+
+    def test_termination_wait_failure_is_strict(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = install_fakes(monkeypatch)
+        monkeypatch.setattr(
+            "tests._aws_fakes._FakeWaiter.wait",
+            lambda self, **kw: (_ for _ in ()).throw(RuntimeError("wait failed")),
+        )
+
+        with pytest.raises(EC2Error):
+            _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
+
+        assert self._sg_deleted(rec) == 0
+
+    def test_security_group_delete_failure_is_strict(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = install_fakes(
+            monkeypatch,
+            Controls(sg_delete_errors=[client_error("AccessDenied", "denied", "DeleteSecurityGroup")]),
+        )
+
+        with pytest.raises(AuthorizationError):
+            _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
+
+        assert self._sg_deleted(rec) == 1
 
     def test_retries_sg_through_dependency_violation(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("agentworks.plugins.aws.network.time.sleep", lambda _s: None)
@@ -760,6 +910,41 @@ class TestDelete:
         )
         _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
         assert self._sg_deleted(rec) == 2  # one DependencyViolation, then success
+
+    def test_dependency_retries_are_bounded_and_strict(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("agentworks.plugins.aws.network.time.sleep", lambda _s: None)
+        rec = install_fakes(
+            monkeypatch,
+            Controls(sg_delete_errors=[client_error("DependencyViolation", "attached", "DeleteSecurityGroup")] * 12),
+        )
+
+        with pytest.raises(EC2Error) as exc:
+            _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
+
+        assert self._sg_deleted(rec) == 12
+        assert exc.value.entity_kind == "security-group"
+        assert exc.value.entity_name == "sg-123"
+
+    def test_retry_after_indeterminate_wait_can_finish(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = install_fakes(monkeypatch)
+        waits = 0
+
+        def _wait_once(self: object, **kwargs: object) -> None:
+            nonlocal waits
+            del self, kwargs
+            waits += 1
+            if waits == 1:
+                raise RuntimeError("wait failed")
+
+        monkeypatch.setattr("tests._aws_fakes._FakeWaiter.wait", _wait_once)
+        platform = _platform()
+
+        with pytest.raises(EC2Error):
+            platform.delete(_vm(), RunContext())  # type: ignore[arg-type]
+        platform.delete(_vm(), RunContext())  # type: ignore[arg-type]
+
+        assert rec.methods("ec2").count("terminate_instances") == 2
+        assert self._sg_deleted(rec) == 1
 
     def test_without_instance_id_is_a_noop(self, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = install_fakes(monkeypatch)

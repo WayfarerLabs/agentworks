@@ -63,6 +63,10 @@ class Controls:
     # delete_security_group: exceptions to raise on successive calls before it
     # finally succeeds (drives the DependencyViolation retry test).
     sg_delete_errors: list[Exception] = field(default_factory=list)
+    # Outcomes for successive DryRun calls across the EC2 client. An Exception
+    # is raised; None models an inert fake normal return. Once exhausted, the
+    # realistic allowed answer is DryRunOperation.
+    dry_run_outcomes: list[Exception | None] = field(default_factory=list)
 
 
 @dataclass
@@ -84,7 +88,7 @@ class Recorder:
     def _cidrs(self, method: str) -> list[str]:
         out: list[str] = []
         for _s, m, kw in self.calls:
-            if m != method:
+            if m != method or kw.get("DryRun"):
                 continue
             for perm in kw.get("IpPermissions", []):
                 out.extend(r["CidrIp"] for r in perm.get("IpRanges", []))
@@ -95,6 +99,14 @@ class Recorder:
 
     def revoked_cidrs(self) -> list[str]:
         return self._cidrs("revoke_security_group_ingress")
+
+    def dry_runs(self, method: str | None = None) -> list[tuple[str, dict[str, Any]]]:
+        """Recorded EC2 DryRun calls, optionally narrowed by method."""
+        return [
+            (called_method, kwargs)
+            for service, called_method, kwargs in self.calls
+            if service == "ec2" and kwargs.get("DryRun") and (method is None or called_method == method)
+        ]
 
 
 class _FakeWaiter:
@@ -108,12 +120,23 @@ class _FakeEC2:
         self._c = controls
         self._region = region
         self._sg_delete_attempts = 0
+        self._dry_run_attempts = 0
         # sg_id -> {cidr: rule_id}; the per-SG ingress the exposure tests read.
         self.ingress: dict[str, dict[str, str]] = {}
         self._next_rule = 0
 
     def _record(self, method: str, **kwargs: Any) -> None:
         self._rec.calls.append(("ec2", method, kwargs))
+
+    def _dry_run(self, operation: str) -> dict[str, Any]:
+        idx = self._dry_run_attempts
+        self._dry_run_attempts += 1
+        if idx < len(self._c.dry_run_outcomes):
+            outcome = self._c.dry_run_outcomes[idx]
+            if outcome is not None:
+                raise outcome
+            return {}
+        raise client_error("DryRunOperation", "allowed", operation)
 
     def describe_instances(self, **kwargs: Any) -> dict[str, Any]:
         self._record("describe_instances", **kwargs)
@@ -179,6 +202,8 @@ class _FakeEC2:
 
     def revoke_security_group_ingress(self, **kwargs: Any) -> dict[str, Any]:
         self._record("revoke_security_group_ingress", **kwargs)
+        if kwargs.get("DryRun"):
+            return self._dry_run("RevokeSecurityGroupIngress")
         ing = self.ingress.setdefault(kwargs["GroupId"], {})
         if "SecurityGroupRuleIds" in kwargs:
             ids = set(kwargs["SecurityGroupRuleIds"])
@@ -220,6 +245,8 @@ class _FakeEC2:
 
     def delete_security_group(self, **kwargs: Any) -> dict[str, Any]:
         self._record("delete_security_group", **kwargs)
+        if kwargs.get("DryRun"):
+            return self._dry_run("DeleteSecurityGroup")
         idx = self._sg_delete_attempts
         self._sg_delete_attempts += 1
         if idx < len(self._c.sg_delete_errors):

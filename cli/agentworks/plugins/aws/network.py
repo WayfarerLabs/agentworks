@@ -1,6 +1,6 @@
-"""AWS SDK plumbing shared by the EC2 platform's ops: the typed error
-wrapper, the auth-rejection classifier, the per-VM security-group exposure
-mechanics, and the resource-cleanup / create-rollback sweeps.
+"""AWS SDK plumbing shared by the EC2 platform's ops: typed error
+classification, per-VM security-group exposure mechanics, and the distinct
+strict-delete and best-effort rollback cleanup paths.
 
 Split out of ``platform.py`` mirroring ``plugins/azure/network.py``:
 ``platform.py`` keeps the ``VMPlatform`` capability surface (config, sessions,
@@ -44,13 +44,14 @@ open, so the worst case is a benign re-poke on the next entry, never exposure.
 from __future__ import annotations
 
 import time
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from agentworks import output
-from agentworks.errors import ProvisioningError
+from agentworks.errors import AgentworksError, AuthorizationError, ProvisioningError, TokenRejectedError
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
 
 # The tag key every agentworks-created EC2 resource carries, its value the
@@ -65,26 +66,22 @@ VM_TAG_KEY = "agentworks:vm"
 # is the (protocol, port, cidr) tuple), so this is observability only.
 SSH_ALLOW_DESCRIPTION_MARKER = "agentworks scoped SSH allow"
 
-# botocore error codes that mean AWS DEFINITIVELY rejected the credential, as
-# opposed to a transient failure or an unreachable endpoint. This is the split
-# azure-identity cannot make (it collapses both into one exception); on EC2 it
-# lets runup fail fatally on a real rejection and status re-raise typed rather
-# than degrade to UNKNOWN. Spans the EC2 request-signing codes and the STS/SSM
-# spellings of the same faults.
-_AUTH_REJECTION_CODES = frozenset(
+# Codes that reject the credential itself. Runup and status share this set.
+_CREDENTIAL_REJECTION_CODES = frozenset(
     {
         "AuthFailure",
-        "UnauthorizedOperation",
         "InvalidClientTokenId",
         "SignatureDoesNotMatch",
-        "AccessDenied",
-        "AccessDeniedException",
         "UnrecognizedClientException",
         "InvalidAccessKeyId",
         "ExpiredToken",
         "ExpiredTokenException",
     }
 )
+
+# Codes that deny an authenticated identity's operation.
+_AUTHORIZATION_DENIAL_CODES = frozenset({"UnauthorizedOperation", "AccessDenied", "AccessDeniedException"})
+_DRY_RUN_ALLOWED_CODE = "DryRunOperation"
 
 # The error codes describe_subnets answers with when a configured subnet does
 # not exist in the region: a definitive misconfiguration.
@@ -141,27 +138,88 @@ def error_code(exc: Exception) -> str | None:
     return None
 
 
-def wrap_ec2_error(exc: Exception) -> EC2Error:
-    """Convert a boto3/botocore exception into an :class:`EC2Error`, unwrapping
-    a ``ClientError`` to its most specific ``code: message``."""
+def wrap_ec2_error(exc: Exception) -> AgentworksError:
+    """Map structured credential and permission codes to their domain types;
+    retain :class:`EC2Error` for other SDK and transport failures."""
     from botocore.exceptions import ClientError
 
+    if isinstance(exc, (AuthorizationError, TokenRejectedError)):
+        return exc
     if isinstance(exc, ClientError):
         error = exc.response.get("Error", {}) if isinstance(exc.response, dict) else {}
         code = error.get("Code")
         message = error.get("Message") or str(exc)
         summary = f"{code}: {message}" if code else str(message)
+        if code in _AUTHORIZATION_DENIAL_CODES:
+            return AuthorizationError(f"AWS denied permission ({summary})")
+        if code in _CREDENTIAL_REJECTION_CODES:
+            return TokenRejectedError(f"AWS rejected the selected credential ({summary})")
         return EC2Error(summary, detail=str(exc))
     return EC2Error(str(exc), detail=str(exc))
 
 
-def is_auth_rejection(exc: Exception) -> bool:
-    """Whether ``exc`` is a DEFINITIVE credential rejection (an auth-coded
-    ``ClientError``), as opposed to a transient or unreachable failure. The
-    single classifier shared by ``runup`` (which makes it fatal) and ``status``
-    (which re-raises it typed rather than degrading to UNKNOWN), so the two
-    stages agree on what "rejected" means from one code set."""
-    return error_code(exc) in _AUTH_REJECTION_CODES
+def is_credential_rejection(exc: Exception) -> bool:
+    """Whether a structured code definitively rejects the credential."""
+    return error_code(exc) in _CREDENTIAL_REJECTION_CODES
+
+
+def is_authorization_denial(exc: Exception) -> bool:
+    """Whether a structured code denies the authenticated AWS identity."""
+    return error_code(exc) in _AUTHORIZATION_DENIAL_CODES
+
+
+def _raise_on_dry_run_unauthorized(
+    call: Callable[[], object],
+    *,
+    operation: str,
+    entity_kind: str,
+    entity_name: str,
+) -> None:
+    """Raise only for structured ``UnauthorizedOperation``.
+
+    ``DryRunOperation`` and an inert normal return pass. Every other result is
+    indeterminate, so the guarded operation proceeds. This is not a generic AWS
+    permission checker: only composite safety boundaries call it.
+    """
+    try:
+        call()
+    except Exception as exc:
+        code = error_code(exc)
+        if code == _DRY_RUN_ALLOWED_CODE:
+            return
+        if code == "UnauthorizedOperation":
+            raise AuthorizationError(
+                f"AWS denied permission to {operation} ({code})",
+                entity_kind=entity_kind,
+                entity_name=entity_name,
+            ) from exc
+
+
+def _check_ssh_revoke_permissions(ec2: Any, security_group_id: str, prefixes: Sequence[str]) -> None:
+    """Dry-run every exact revoke before any matching authorize occurs."""
+    for prefix in prefixes:
+        permission = _ssh_permission(prefix, with_description=False)
+        _raise_on_dry_run_unauthorized(
+            partial(
+                ec2.revoke_security_group_ingress,
+                GroupId=security_group_id,
+                IpPermissions=[permission],
+                DryRun=True,
+            ),
+            operation="revoke the planned SSH ingress rule",
+            entity_kind="security-group",
+            entity_name=security_group_id,
+        )
+
+
+def _check_security_group_delete_permission(ec2: Any, security_group_id: str) -> None:
+    """Dry-run the exact security-group delete used after termination."""
+    _raise_on_dry_run_unauthorized(
+        lambda: ec2.delete_security_group(GroupId=security_group_id, DryRun=True),
+        operation="delete the VM security group",
+        entity_kind="security-group",
+        entity_name=security_group_id,
+    )
 
 
 def vm_tag(backend_name: str) -> dict[str, str]:
@@ -207,22 +265,32 @@ def _ssh_permission(prefix: str, *, with_description: bool) -> dict[str, Any]:
 def poke_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) -> None:
     """Authorize an ephemeral SSH allow on TCP/22 scoped to ``prefixes``.
 
-    Authorizes one prefix at a time (rather than all in one call) so a partial
-    overlap with a concurrent route's rules still adds the non-overlapping
-    prefixes: EC2 rejects a whole authorize call if ANY of its tuples already
-    exists. A tuple that already exists (a concurrent route or a leftover) is
-    tolerated, because the allow we need is present either way."""
+    Dry-runs every exact matching revoke before any authorize. Then authorizes
+    one prefix at a time so overlap with a concurrent route does not prevent
+    non-overlapping prefixes from being added. Duplicate tuples are tolerated.
+    If an actual authorize fails partway through, all planned tuples are
+    revoked best-effort before the typed failure propagates.
+    """
+    _check_ssh_revoke_permissions(ec2, security_group_id, prefixes)
     output.info(f"Opening SSH route (allow scoped to {', '.join(prefixes)})...")
-    for prefix in prefixes:
-        try:
-            ec2.authorize_security_group_ingress(
-                GroupId=security_group_id,
-                IpPermissions=[_ssh_permission(prefix, with_description=True)],
-            )
-        except Exception as exc:
-            if error_code(exc) == _DUPLICATE_PERMISSION_CODE:
-                continue
-            raise wrap_ec2_error(exc) from exc
+    try:
+        for prefix in prefixes:
+            try:
+                ec2.authorize_security_group_ingress(
+                    GroupId=security_group_id,
+                    IpPermissions=[_ssh_permission(prefix, with_description=True)],
+                )
+            except Exception as exc:
+                if error_code(exc) == _DUPLICATE_PERMISSION_CODE:
+                    continue
+                raise
+    except KeyboardInterrupt:
+        remove_ssh_allow(ec2, security_group_id, prefixes)
+        raise
+    except Exception as exc:
+        failure = wrap_ec2_error(exc)
+        remove_ssh_allow(ec2, security_group_id, prefixes)
+        raise failure from exc
 
 
 def remove_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) -> None:
@@ -249,7 +317,7 @@ def remove_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) 
             err = wrap_ec2_error(exc)
             output.warn(
                 f"could not revoke the SSH allow for {prefix} on security group "
-                f"'{security_group_id}': {err.summary}. The VM's SSH port stays open to "
+                f"'{security_group_id}': {err}. The VM's SSH port stays open to "
                 f"{prefix}; revoke it manually to restore zero inbound exposure."
             )
 
@@ -270,7 +338,7 @@ def delete_security_group(ec2: Any, security_group_id: str) -> None:
             if code == "DependencyViolation":
                 time.sleep(5)
                 continue
-            output.warn(f"could not delete security group '{security_group_id}': {wrap_ec2_error(exc).summary}")
+            output.warn(f"could not delete security group '{security_group_id}': {wrap_ec2_error(exc)}")
             return
     output.warn(f"security group '{security_group_id}' still had dependencies after retries; leaving it")
 
@@ -278,8 +346,8 @@ def delete_security_group(ec2: Any, security_group_id: str) -> None:
 def terminate_and_cleanup(ec2: Any, instance_id: str, security_group_id: str | None) -> None:
     """Terminate the instance, wait out its ENI detach, then delete the per-VM
     security group. Best-effort per resource, idempotent (already-gone
-    succeeds). The one place the terminate-then-delete-group ordering lives:
-    shared by the delete op and the create rollback paths.
+    succeeds). Used only while unwinding create or interrupt rollback, where
+    cleanup must keep progressing after an individual resource failure.
 
     Unexpected failures WARN (mirroring :func:`delete_security_group`), rather
     than being swallowed silently: a real ``AuthFailure`` on terminate must not
@@ -291,7 +359,7 @@ def terminate_and_cleanup(ec2: Any, instance_id: str, security_group_id: str | N
             ec2.get_waiter("instance_terminated").wait(InstanceIds=[instance_id])
         except Exception as exc:
             output.warn(
-                f"waiting for instance '{instance_id}' to terminate failed: {wrap_ec2_error(exc).summary}; "
+                f"waiting for instance '{instance_id}' to terminate failed: {wrap_ec2_error(exc)}; "
                 f"the security-group delete will retry through any lingering dependency"
             )
     if security_group_id:
@@ -309,8 +377,61 @@ def _terminate_instance(ec2: Any, instance_id: str) -> bool:
     except Exception as exc:
         if error_code(exc) in _INSTANCE_NOT_FOUND_CODES:
             return True
-        output.warn(f"could not terminate instance '{instance_id}': {wrap_ec2_error(exc).summary}")
+        output.warn(f"could not terminate instance '{instance_id}': {wrap_ec2_error(exc)}")
         return False
+
+
+def terminate_and_cleanup_strict(ec2: Any, instance_id: str, security_group_id: str | None) -> None:
+    """Strict explicit-delete teardown for one EC2 VM.
+
+    Dry-run a recorded group's exact delete before termination, then require
+    termination, confirmation, and bounded group deletion. Already-gone
+    resources make retries idempotent.
+    """
+    if security_group_id:
+        _check_security_group_delete_permission(ec2, security_group_id)
+
+    already_gone = False
+    try:
+        ec2.terminate_instances(InstanceIds=[instance_id])
+    except Exception as exc:
+        if error_code(exc) in _INSTANCE_NOT_FOUND_CODES:
+            already_gone = True
+        else:
+            raise wrap_ec2_error(exc) from exc
+
+    if not already_gone:
+        try:
+            ec2.get_waiter("instance_terminated").wait(InstanceIds=[instance_id])
+        except Exception as exc:
+            raise wrap_ec2_error(exc) from exc
+
+    if security_group_id:
+        _delete_security_group_strict(ec2, security_group_id)
+
+
+def _delete_security_group_strict(ec2: Any, security_group_id: str) -> None:
+    """Delete one security group or raise after bounded dependency retries."""
+    attempts = 12
+    for attempt in range(attempts):
+        try:
+            ec2.delete_security_group(GroupId=security_group_id)
+            return
+        except Exception as exc:
+            code = error_code(exc)
+            if code in _GROUP_NOT_FOUND_CODES:
+                return
+            if code == "DependencyViolation" and attempt + 1 < attempts:
+                time.sleep(5)
+                continue
+            if code == "DependencyViolation":
+                raise EC2Error(
+                    f"security group '{security_group_id}' still had dependencies after {attempts} delete attempts",
+                    detail=str(exc),
+                    entity_kind="security-group",
+                    entity_name=security_group_id,
+                ) from exc
+            raise wrap_ec2_error(exc) from exc
 
 
 def cleanup_partial(ec2: Any, instance_id: str | None, security_group_id: str | None) -> None:
