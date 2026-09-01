@@ -192,9 +192,8 @@ def _iter_documents(path: Path) -> Iterator[tuple[object, SourceLocation]]:
                 continue
             location = SourceLocation(file=path, line=node.start_mark.line + 1)
             constructor = _StrictLoader("")
-            # construct_document is untyped in types-PyYAML; the call is
-            # the documented node-to-value path for composed documents.
-            value = constructor.construct_document(node)  # type: ignore[no-untyped-call]
+            # The documented node-to-value path for composed documents.
+            value = constructor.construct_document(node)
             if value is None:
                 # A document containing only whitespace/comments composes
                 # to a null scalar; treat it like an absent document.
