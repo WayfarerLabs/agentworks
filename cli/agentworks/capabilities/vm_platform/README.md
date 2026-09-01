@@ -187,14 +187,17 @@ and DB migration.
   first and short-circuit, because the backend verb is not reliably a no-op on an already-in-state
   instance; WSL2's `start` needs no guard because running a command boots a stopped distro and is a
   plain exec on a running one; Azure and EC2 rely on idempotent provider verbs, while GCE uses live
-  state guards; `delete` treats already-gone as success on all six. `delete` is NOT unconditionally
-  best-effort though: a delete that cannot remove the backend VM must raise a typed error (the
-  manager deletes the DB row only on success, so a swallowed backend failure orphans the VM; #329).
-  Azure enforces this with a post-teardown existence probe (`verify_vm_deleted`), GCE requires
-  provider-ID-owned instance absence before removing its lifetime deny, and EC2 requires its
-  termination waiter and security-group cleanup to complete. Only Azure's auxiliary-resource
-  stragglers stay warn-and-continue. Lima, WSL2, and Proxmox do not yet verify; their teardown verbs
-  remain fire-and-forget (tracked in #356).
+  state guards; `delete` treats provider-confirmed already-gone as success on all six. EC2 can
+  confirm this only for an account-bound row; a legacy row with no account ID must still be live
+  enough to prove current-account ownership, or its ambiguous `NotFound` retains the row. `delete`
+  is NOT unconditionally best-effort though: a delete that cannot remove the backend VM must raise a
+  typed error (the manager deletes the DB row only on success, so a swallowed backend failure
+  orphans the VM; #329). Azure enforces this with a post-teardown existence probe
+  (`verify_vm_deleted`), GCE requires provider-ID-owned instance absence before removing its
+  lifetime deny, and EC2 requires an STS account match, provider-owned security-group proof, its
+  termination waiter or bounded absence confirmation, and security-group cleanup. Only Azure's
+  auxiliary-resource stragglers stay warn-and-continue. Lima, WSL2, and Proxmox do not yet verify;
+  their teardown verbs remain fire-and-forget (tracked in #356).
 - `status(vm, ctx) -> VMStatus` is a read-only query.
 - `display_backend_name(vm) -> str` is pure display and takes no `ctx`.
 
@@ -494,9 +497,9 @@ The three managed cloud platforms therefore use different evidence:
 - EC2 uses exact `DryRun` requests only at composite safety boundaries. It proves revoke permission
   before opening an SSH tuple and security-group deletion permission before terminating the VM. Only
   `DryRunOperation` is positive evidence; unknown results stop before the guarded mutation. IAM
-  policy simulation is not used as an authorization gate. Explicit delete raises on missing provider
-  IDs, termination, confirmation, or security-group cleanup failure so core retains the VM row for
-  retry.
+  policy simulation is not used as an authorization gate. New rows bind provider IDs to the creating
+  AWS account. Explicit delete raises on missing or mismatched identity, ownership, termination,
+  confirmation, or security-group cleanup failure so core retains the VM row for retry.
 - GCE makes its definitive project, zone, network, image, and shape reads before mutation, then lets
   exact mutations authorize themselves under provider-ID-owned rollback. Its IAM test methods apply
   to existing resources and are advisory; the future VM, boot disk, and firewall rules do not exist

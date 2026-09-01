@@ -893,12 +893,13 @@ class TestDelete:
     def test_already_absent_security_group_needs_no_delete_permission(self, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = install_fakes(
             monkeypatch,
-            Controls(security_group_presence_outcomes=[False]),
+            Controls(security_group_presence_outcomes=[False, False, False]),
         )
 
         _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
 
         assert rec.kwargs_for("terminate_instances") == {"InstanceIds": ["i-123"]}
+        assert rec.methods("ec2").count("describe_security_groups") == 3
         assert rec.dry_runs("delete_security_group") == []
         assert self._sg_deleted(rec) == 0
 
@@ -907,7 +908,7 @@ class TestDelete:
             monkeypatch,
             Controls(
                 terminate_errors=[client_error("InvalidInstanceID.NotFound", "gone", "Terminate")],
-                instance_presence_outcomes=[False],
+                instance_presence_outcomes=[False, False],
             ),
         )
 
@@ -915,6 +916,7 @@ class TestDelete:
 
         methods = rec.methods("ec2")
         assert methods.index("terminate_instances") < methods.index("describe_instances")
+        assert methods.count("describe_instances") == 2
         assert self._sg_deleted(rec) == 1
 
     def test_unconfirmed_terminate_not_found_is_strict(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -934,14 +936,14 @@ class TestDelete:
         rec = install_fakes(
             monkeypatch,
             Controls(
-                security_group_presence_outcomes=[True, False],
+                security_group_presence_outcomes=[True, False, False],
                 sg_delete_errors=[client_error("InvalidGroup.NotFound", "gone", "DeleteSecurityGroup")],
             ),
         )
 
         _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
 
-        assert rec.methods("ec2").count("describe_security_groups") == 2
+        assert rec.methods("ec2").count("describe_security_groups") == 3
         assert self._sg_deleted(rec) == 1
 
     def test_credential_rejection_during_terminate_is_strict(self, monkeypatch: pytest.MonkeyPatch) -> None:

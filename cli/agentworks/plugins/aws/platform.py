@@ -126,6 +126,10 @@ class EC2Platform(VMPlatform):
         ...}` replaces that chain for this site; add `assume_role_arn` to layer an STS
         AssumeRole on top.
 
+        Create records the validated STS account ID. Delete refreshes that identity,
+        refuses a different account, and confirms the recorded security group's
+        ownership before terminating the instance.
+
         EC2 retains credential-free UserData. After cloud-init is ready, creation sends
         the required Tailscale key through one fixed SSH command on stdin and returns
         only after join succeeds. Failure terminates the new instance and security group.

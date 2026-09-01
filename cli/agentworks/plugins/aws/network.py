@@ -94,6 +94,7 @@ _PERMISSION_NOT_FOUND_CODE = "InvalidPermission.NotFound"
 _GROUP_NOT_FOUND_CODES = frozenset({"InvalidGroup.NotFound", "InvalidGroupId.NotFound"})
 _INSTANCE_NOT_FOUND_CODES = frozenset({"InvalidInstanceID.NotFound"})
 _ABSENCE_CONFIRM_ATTEMPTS = 3
+_ABSENCE_CONFIRM_SUCCESSES = 2
 
 
 class EC2Error(ProvisioningError):
@@ -453,14 +454,22 @@ def describe_security_group_exact(ec2: Any, security_group_id: str) -> dict[str,
 
 def _confirm_absent(lookup: Callable[[], object | None], *, entity_kind: str, entity_name: str) -> None:
     """Require bounded read-only absence confirmation after mutation NotFound."""
+    consecutive_absences = 0
     for attempt in range(_ABSENCE_CONFIRM_ATTEMPTS):
         if lookup() is None:
-            return
+            consecutive_absences += 1
+            if consecutive_absences == _ABSENCE_CONFIRM_SUCCESSES:
+                return
+        else:
+            consecutive_absences = 0
         if attempt + 1 < _ABSENCE_CONFIRM_ATTEMPTS:
             time.sleep(1)
     raise EC2Error(
         f"AWS did not confirm {entity_kind} '{entity_name}' was absent",
-        detail=f"the exact resource remained visible after {_ABSENCE_CONFIRM_ATTEMPTS} read-only checks",
+        detail=(
+            f"the exact resource was not absent for {_ABSENCE_CONFIRM_SUCCESSES} consecutive checks "
+            f"within {_ABSENCE_CONFIRM_ATTEMPTS} attempts"
+        ),
         entity_kind=entity_kind,
         entity_name=entity_name,
     )
@@ -474,7 +483,13 @@ def terminate_and_cleanup_strict(
 ) -> None:
     """Strict explicit-delete teardown with positive permission and absence proof."""
     security_group = describe_security_group_exact(ec2, security_group_id)
-    if security_group is not None:
+    if security_group is None:
+        _confirm_absent(
+            partial(describe_security_group_exact, ec2, security_group_id),
+            entity_kind="security-group",
+            entity_name=security_group_id,
+        )
+    else:
         tags = security_group.get("Tags")
         owned = isinstance(tags, list) and any(
             isinstance(tag, dict) and tag.get("Key") == VM_TAG_KEY and tag.get("Value") == backend_name for tag in tags

@@ -47,6 +47,7 @@ ec2:DeleteSecurityGroup
 ec2:DescribeImages
 ec2:DescribeInstances
 ec2:DescribeInstanceTypes
+ec2:DescribeSecurityGroups
 ec2:DescribeSubnets
 ec2:RevokeSecurityGroupIngress
 ec2:RunInstances
@@ -73,7 +74,7 @@ KMS key may also require the KMS actions that key policy and EBS encryption requ
 does not provide a reliable general answer for whether an identity can operate future resources,
 especially when policies use resource ARNs, request tags, resource tags, VPCs, or region conditions.
 Agentworks therefore does not use IAM policy simulation or claim that the runup check certifies the
-whole lifecycle.
+whole lifecycle. New VMs record the validated 12-digit AWS account ID alongside their provider IDs.
 
 EC2 does provide exact-request `DryRun` authorization. Agentworks uses it where a later missing
 permission would make an earlier mutation unsafe:
@@ -96,7 +97,16 @@ Agentworks opens TCP/22 only to the detected operator IPv4 address plus `operato
 first for bootstrap and later for a native platform shell. It revokes only the tuples that operation
 opened.
 
-`agw vm delete <name>` terminates the instance, waits for termination, and then deletes the security
-group after its network interface detaches. If any required step fails, retain the VM row and retry
-after correcting the provider failure. When investigating residue, match both the stored instance ID
-and the `agentworks:vm` tag before deleting anything manually.
+`agw vm delete <name>` refreshes the STS identity and refuses an account mismatch. It reads the
+recorded security group and verifies its `agentworks:vm` ownership tag before the dry run or any
+termination, then waits for termination and deletes the group after its network interface detaches.
+A mutation-time `NotFound` succeeds only after bounded, consecutive read-only absence checks.
+
+Rows created before account binding carry no account ID. Agentworks deletes one only when the live
+instance's ID, ownership tag, and security-group association prove that the current account owns the
+target. An already-absent legacy target is intentionally ambiguous, so Agentworks retains the row
+instead of risking a wrong-account orphan.
+
+If any required step fails, retain the VM row and retry after correcting the provider failure. When
+investigating residue, match the stored account, instance ID, security-group ID, and `agentworks:vm`
+tag before deleting anything manually.
