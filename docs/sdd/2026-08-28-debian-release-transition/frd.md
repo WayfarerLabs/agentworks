@@ -382,6 +382,17 @@ logical VM and its existing platform metadata even when restoration requires rep
 or reimporting a WSL distribution. Before claiming a fresh create row, core checks the live managed
 provider inventory and refuses an unrecorded artifact instead of overwriting or adopting it.
 
+Lima supports both drivers used by existing Agentworks installations without an operator driver
+setting. QEMU uses Lima's native snapshot lifecycle. VZ uses one stopped, protected recovery clone
+because Lima does not implement native VZ snapshots. Restore keeps the original pre-first-restore
+instance as a protected emergency artifact, returns the recovered instance to the original Lima
+name, and must converge after interruption at any clone or rename boundary. The recovery clone is
+never started; operator output warns that starting it would duplicate guest and Tailscale identity.
+Deletion removes the checkpoint clone, emergency instance, and interrupted restore intermediates. VZ
+checkpoint creation refuses Lima instances with `additionalDisks` rather than presenting a
+primary-instance clone as whole-VM recovery. Lima's driver choice for new VMs remains its own host
+default, and existing instances cannot change drivers through this work.
+
 The operator-facing surface follows the existing flat second-object convention:
 
 ```console
@@ -504,6 +515,12 @@ trade recovery safety for a free slot.
   rather than documented only in prose. Operation identity and narrow shared/exclusive per-VM
   exclusion prevent stale or concurrent lifecycle work from crossing provider operations without
   serializing ordinary readers against each other.
+- A default macOS Lima VZ VM can complete managed checkpoint create, list, restore, and delete with
+  the original instance name preserved. Its checkpoint and pre-first-restore emergency clone remain
+  stopped and protected, a same-operation retry does not create another restore copy, a later
+  explicit restore reapplies the checkpoint, and deletion leaves no Agentworks recovery instance.
+  Lima QEMU continues to use its native snapshot lifecycle. A VZ VM with `additionalDisks` fails
+  before clone mutation.
 - Restoring a checkpoint preserves the logical VM identity, re-attests and records the restored
   Debian release, marks initialization for reconciliation, leaves the checkpoint intact, and never
   rewrites desired declarations. It refuses before provider mutation if those declarations no longer

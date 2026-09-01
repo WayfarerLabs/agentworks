@@ -86,10 +86,16 @@ credentials may need checkpoint permissions added:
   write, start, deallocate, and instance-view access. See
   [Azure OS disk swap](https://learn.microsoft.com/en-us/azure/virtual-machines/linux/os-disk-swap).
 
-GCP and Proxmox permissions are covered in their platform guides. Lima must use a driver that
-supports snapshots, and WSL2 must have enough local storage for exports. Provider snapshots and the
-emergency disk or export retained by destructive-restore platforms consume storage, quota, and
-provider charges until `agw vm delete-checkpoint NAME` succeeds.
+GCP and Proxmox permissions are covered in their platform guides. Lima QEMU instances use native
+snapshots. Lima VZ instances use a stopped, protected recovery clone and therefore work on the
+ordinary macOS default driver without a configuration switch. Agentworks never starts the recovery
+clone; do not start it manually because it carries the same guest and Tailscale identity as the VM.
+VZ checkpoint creation refuses Lima `additionalDisks`, which are separate resources a primary
+instance clone cannot recover. Lima tries copy-on-write cloning on supporting filesystems, but the
+clone and retained emergency instance can consume more storage as their disks diverge. WSL2 must
+have enough local storage for exports. Provider snapshots, Lima clones, and the emergency disk,
+instance, or export retained by destructive-restore platforms consume storage, quota, and provider
+charges until `agw vm delete-checkpoint NAME` succeeds.
 
 ## What the command does
 

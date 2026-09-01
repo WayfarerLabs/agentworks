@@ -511,6 +511,24 @@ incidental implementation work.
 - [ ] Run focused provider/manager/migration tests, full unit/static/docs/generated gates,
       exact-head implementation/project/complexity review, and the signed ready handoff cycle.
 
+### Operator-directed Lima VZ checkpoint correction
+
+Live operator testing established that the Lima VMs requiring upgrade use Lima 2.2.0's default VZ
+driver, whose native snapshot methods are unimplemented. The operator authorized up to three
+additional feedback/fix rounds and provided direct `msm4` access to the integration tester.
+
+- [x] Amend the FRD, HLA, prior-art research, capability contract teaching, and permanent upgrade
+      guide for driver-aware Lima checkpoints. Keep Lima's host-appropriate default and add no
+      driver setting or unsafe checkpoint bypass.
+- [x] Preserve native QEMU snapshots. Implement a stopped, protected VZ recovery clone with
+      deterministic owned names, additional-disk refusal, a retained pre-first-restore emergency
+      instance, operation-marked replay-safe name swapping, complete cleanup, and visible progress.
+      Permit a persisted interrupted restore to reconcile through its temporary missing-name window
+      without permitting restore of a running VM.
+- [ ] Run focused and full gates, exact-head project/correctness/complexity review, hosted CI, and a
+      signed ready handoff for live create/list/restore/delete plus Bookworm-to-Trixie upgrade on
+      the VZ-backed `msm4` environment.
+
 - [ ] After live certification or an authenticated disposition, create `locked.md`, record the final
       evidence, and leave the exact green reviewed head ready to merge.
 

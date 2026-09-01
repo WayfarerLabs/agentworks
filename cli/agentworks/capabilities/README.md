@@ -52,8 +52,10 @@ Tailscale, whose whole lifecycle (create, start, a cost-saving stop that resumes
 delete) Agentworks drives through that one admin foothold. Contract version 1 also requires every
 bundled platform to create, list, restore, and delete Agentworks-managed VM checkpoints. Core uses
 that common offline recovery boundary for Debian upgrade, and exact registration conformance keeps
-the bundled implementations synchronized. See [`vm_platform/README.md`](vm_platform/README.md) for
-what a platform must provide and the specifics of each.
+the bundled implementations synchronized. A platform may implement that boundary with a native
+snapshot or with a replay-safe recovery copy when its VM driver has no snapshot primitive. See
+[`vm_platform/README.md`](vm_platform/README.md) for what a platform must provide and the specifics
+of each.
 
 ### Harness Integration
 

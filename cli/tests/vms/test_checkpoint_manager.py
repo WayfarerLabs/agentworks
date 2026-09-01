@@ -523,6 +523,10 @@ def test_interrupted_restore_reuses_its_persisted_operation_identity(
         target_state=VMCheckpointState.RESTORING,
         operation_id=operation_id,
     )
+    # A destructive platform can briefly have no resource at the original
+    # provider identity while it swaps in the recovered one. The provider's
+    # replay-safe restore owns reconciliation from this persisted state.
+    platform.power = VMStatus.UNKNOWN
     monkeypatch.setattr("agentworks.transports.native_transport", lambda *args, **kwargs: object())
     monkeypatch.setattr(
         "agentworks.debian.probe_debian_release",
@@ -539,6 +543,39 @@ def test_interrupted_restore_reuses_its_persisted_operation_identity(
 
     assert platform.restore_operation_ids == [operation_id]
     assert restored.state is VMCheckpointState.READY
+
+
+def test_interrupted_restore_still_refuses_a_running_vm(
+    monkeypatch: pytest.MonkeyPatch,
+    db: Database,
+) -> None:
+    platform = _Platform()
+    _prepare(monkeypatch, db, platform)
+    checkpoints.create_checkpoint(
+        db,
+        object(),
+        "box",
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+    assert db.claim_vm_checkpoint(
+        "box",
+        expected_state=VMCheckpointState.READY,
+        expected_operation_id=None,
+        target_state=VMCheckpointState.RESTORING,
+        operation_id="interrupted-restore",
+    )
+    platform.power = VMStatus.RUNNING
+
+    with pytest.raises(StateError):
+        checkpoints.restore_checkpoint(
+            db,
+            object(),
+            "box",
+            yes=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert platform.restored == []
 
 
 def test_delete_checkpoint_proves_provider_absence_before_releasing_slot(

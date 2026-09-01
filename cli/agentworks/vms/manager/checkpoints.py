@@ -673,7 +673,18 @@ def restore_checkpoint(
             interaction=interaction,
         )
         platform = vm_node.site.platform
-        _require_stopped_vm(platform, vm, ops_ctx)
+        if row.state is VMCheckpointState.READY:
+            _require_stopped_vm(platform, vm, ops_ctx)
+        else:
+            output.info(f"Resuming interrupted checkpoint restore for VM '{name}'...")
+            status = platform.status(vm, ops_ctx)
+            if status not in {VMStatus.STOPPED, VMStatus.DEALLOCATED, VMStatus.UNKNOWN}:
+                raise StateError(
+                    f"VM '{name}' must be stopped before its interrupted restore can resume (status: {status.value})",
+                    entity_kind="vm",
+                    entity_name=name,
+                    hint=f"Run 'agw vm stop {name}', then retry.",
+                )
         descriptor = _reconcile_ready_checkpoint(platform, vm, ops_ctx, row)
         if not yes and not output.confirm(
             f"Restore VM '{name}' to its managed checkpoint? Current guest disk changes will be replaced.",

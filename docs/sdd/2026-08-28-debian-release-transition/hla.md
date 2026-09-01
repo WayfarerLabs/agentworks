@@ -415,6 +415,13 @@ identity until post-restore core attestation returns the row to `ready`. Delete 
 claim rule and removes the row only after provider absence is proved. Every terminal update compares
 both lifecycle state and operation identifier.
 
+A persisted `restoring` row is the one exception to requiring the original provider identity to be
+observable at resume entry. A destructive platform can be interrupted between renaming or replacing
+the old resource and installing the recovered resource. Core permits `unknown` status only for that
+already-claimed restore and delegates reconciliation with the same operation identity. A reported
+running state still fails with stop guidance, and the platform must return and prove the logical VM
+stopped before core begins restored-guest attestation.
+
 `delete-checkpoint --force` never skips that reconciliation. It attempts the ordinary provider
 cleanup first and reaches the fallback only after a typed Agentworks boundary or provider failure.
 The fallback shows the known provider identifier when one exists, warns that late, incomplete,
@@ -458,14 +465,14 @@ agent, session, and console resources remains separate work.
 
 All built-ins preserve the same logical VM and existing `platform_metadata`:
 
-| Platform | Managed checkpoint and restore                                                                                                                                                                                                                                                                                                                                                     |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Lima     | `limactl snapshot create/list/apply/delete` with the generated tag on the placement host. Unsupported Lima drivers fail clearly before upgrade mutation.                                                                                                                                                                                                                           |
-| WSL2     | A stopped-distro export under the Agentworks WSL storage root. Restore refuses a partial export before unregistering anything, strictly proves distro inventory across the destructive boundary, first exports the current distro as an emergency intermediate, unregisters/imports under the same name and install path, and keeps both artifacts if recovery cannot be proved.   |
-| AWS EC2  | A tagged root-volume EBS snapshot. Restore enters stopped, announces and temporarily starts the instance, submits the replacement task with a stable checkpoint-derived client token, survives its provider reboot, then stops and proves the same instance stopped. Stop cleanup never masks the primary restore error; replay discovers the task rather than submitting another. |
-| Azure VM | A tagged managed-OS-disk snapshot. Snapshot, disk, update, and tag requests use typed Azure SDK models. Restore creates a replacement managed disk, swaps it onto the same VM, and retains the displaced disk until the swap and core attestation are recoverable.                                                                                                                 |
-| GCP GCE  | A labeled boot-disk snapshot. Restore creates a replacement zonal disk, swaps it onto the same stopped instance, and retains the displaced disk until recovery is proved.                                                                                                                                                                                                          |
-| Proxmox  | A generated QEMU snapshot name with `vmstate=0`, a 3600-second checkpoint task timeout, exact inventory checks, rollback, and deletion on the same VMID/node. Unsupported storage fails clearly.                                                                                                                                                                                   |
+| Platform | Managed checkpoint and restore                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Lima     | The live instance's driver selects the primitive. QEMU uses `limactl snapshot create/list/apply/delete`. VZ uses a stopped, protected `limactl clone`; restore clones a temporary instance, retains the original pre-first-restore instance under a protected emergency name, and swaps the recovered instance back to the original name. The checkpoint clone records the stable restore operation identity for replay. Delete removes every related recovery instance. VZ refuses `additionalDisks`. |
+| WSL2     | A stopped-distro export under the Agentworks WSL storage root. Restore refuses a partial export before unregistering anything, strictly proves distro inventory across the destructive boundary, first exports the current distro as an emergency intermediate, unregisters/imports under the same name and install path, and keeps both artifacts if recovery cannot be proved.                                                                                                                       |
+| AWS EC2  | A tagged root-volume EBS snapshot. Restore enters stopped, announces and temporarily starts the instance, submits the replacement task with a stable checkpoint-derived client token, survives its provider reboot, then stops and proves the same instance stopped. Stop cleanup never masks the primary restore error; replay discovers the task rather than submitting another.                                                                                                                     |
+| Azure VM | A tagged managed-OS-disk snapshot. Snapshot, disk, update, and tag requests use typed Azure SDK models. Restore creates a replacement managed disk, swaps it onto the same VM, and retains the displaced disk until the swap and core attestation are recoverable.                                                                                                                                                                                                                                     |
+| GCP GCE  | A labeled boot-disk snapshot. Restore creates a replacement zonal disk, swaps it onto the same stopped instance, and retains the displaced disk until recovery is proved.                                                                                                                                                                                                                                                                                                                              |
+| Proxmox  | A generated QEMU snapshot name with `vmstate=0`, a 3600-second checkpoint task timeout, exact inventory checks, rollback, and deletion on the same VMID/node. Unsupported storage fails clearly.                                                                                                                                                                                                                                                                                                       |
 
 Provider-specific intermediate resources use deterministic names/tags tied to the checkpoint and are
 retained as one pre-first-restore emergency artifact until checkpoint deletion. A later restore
@@ -934,7 +941,7 @@ restore point.
 - No release field in VM templates or core site declarations.
 - No arbitrary distribution-upgrade graph or multi-hop engine. One ordered profile tuple, its final
   current entry, and the target profile's upgrade-from-previous policy drive one state machine.
-- No checkpoint resource kind, arbitrary retention engine, user-authored name, clone API, or
+- No checkpoint resource kind, arbitrary retention engine, user-authored name, public clone API, or
   automatic rollback. One VM-owned row and four vm-platform operations cover the required lifecycle.
 - No database table mirroring remote package-stage state. The checkpoint table owns the recovery
   artifact lifecycle plus the single desired-state fingerprint required to reject unsafe restore.
@@ -1036,6 +1043,11 @@ B, shell, workspace, backup, managed checkpoint create/list/restore/delete, rebo
 real Bookworm-to-Trixie upgrade, post-reboot interface verification, and cleanup. Shared APT-map
 behavior and constrained-`/tmp` large transfer run once on representative Trixie guests plus the
 cross-platform contract suite, rather than being repeated where no provider code participates.
+
+Lima certification exercises the macOS default VZ path on the `msm4` environment, including retained
+artifact inventory and complete cleanup. Focused tests retain the QEMU native-snapshot path and both
+drivers' replay boundaries; a separate QEMU live VM is not required merely to repeat Lima's native
+snapshot command surface.
 
 Bookworm upgrade fixtures come from the last released Bookworm-creating Agentworks version or from
 operator-approved prebuilt images. The run records the fixture's release, artifact provenance, and

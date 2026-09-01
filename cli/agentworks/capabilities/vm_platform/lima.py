@@ -34,6 +34,7 @@ from agentworks.capabilities.vm_platform.debian_release import (
     code_owned_release_value,
     verify_provisioned_release,
 )
+from agentworks.capabilities.vm_platform.lima_checkpoints import LimaCheckpointOperations
 from agentworks.capabilities.vm_platform.tailscale_join import TAILSCALE_JOIN_STDIN_COMMAND
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
@@ -61,12 +62,6 @@ _REBOOT_CLEAR_MARKER = "AGW_REBOOT_CLEAR"
 _REMOTE_TEMPLATE_ROOT = "/tmp"
 _REMOTE_TEMPLATE_PREFIX = "agentworks-lima-template."
 _REMOTE_TEMPLATE_RANDOM_LENGTH = 10
-
-# Core generates checkpoint names, but the platform boundary also reads names
-# back from an external CLI and from durable descriptors. Keep the accepted
-# shape deliberately smaller than Lima's tag grammar so every value remains a
-# single shell-safe token on local and SSH placements.
-_MANAGED_CHECKPOINT_NAME = re.compile(r"agw-[a-z0-9](?:[a-z0-9-]*[a-z0-9])?")
 
 # Lima template for Debian cloud VMs (values substituted at create time).
 # The provision block runs the non-secret bootstrap script (user, packages,
@@ -190,6 +185,11 @@ class LimaPlatform(VMPlatform):
         Creation retains a credential-free provision script, then sends the required
         Tailscale key through one fixed guest command on stdin. It returns only after
         the join succeeds, or raises after removing the partial instance.
+
+        Managed checkpoints use native snapshots for QEMU instances and stopped,
+        protected recovery clones for VZ instances. Never start a recovery clone: it
+        contains the same guest and Tailscale identity. VZ checkpoints require the VM
+        to have no Lima additional disks.
 
         Local sites need `limactl` installed here and report not-ready without it.
         Remote sites need nothing locally.
@@ -763,57 +763,11 @@ class LimaPlatform(VMPlatform):
         self._delete_instance(self._instance_name(vm))
         output.info(f"Lima VM '{vm.name}' deleted")
 
-    @staticmethod
-    def _require_checkpoint_name(name: str, *, vm_name: str) -> str:
-        """Validate a checkpoint name crossing a durable/provider boundary."""
-        if _MANAGED_CHECKPOINT_NAME.fullmatch(name) is None:
-            raise StateError(
-                f"Lima checkpoint name {name!r} is not an Agentworks-managed name",
-                entity_kind="vm",
-                entity_name=vm_name,
-            )
-        return name
-
-    def _checkpoint_names(self, vm: VMRow) -> tuple[str, ...]:
-        """Return managed snapshot tags scoped to this exact Lima instance."""
-        instance_name = shlex.quote(self._instance_name(vm))
-        try:
-            listing = self._run_lima(f"limactl snapshot list {instance_name} --quiet")
-        except (OSError, SSHError) as e:
-            raise StateError(
-                f"Lima checkpoint inventory is unavailable for VM '{vm.name}'",
-                entity_kind="vm",
-                entity_name=vm.name,
-                hint=(
-                    "Lima snapshots are experimental and require a snapshot-capable VM driver; "
-                    "update Lima or move the VM to a supported driver before upgrading."
-                ),
-            ) from e
-        return tuple(
-            name
-            for raw_name in listing.splitlines()
-            if (name := raw_name.strip()) and _MANAGED_CHECKPOINT_NAME.fullmatch(name) is not None
-        )
-
-    @staticmethod
-    def _require_one_checkpoint(name: str, names: tuple[str, ...], *, vm_name: str) -> None:
-        count = names.count(name)
-        if count == 1:
-            return
-        problem = "missing" if count == 0 else "duplicated"
-        raise StateError(
-            f"Lima checkpoint '{name}' is {problem} for VM '{vm_name}'",
-            entity_kind="vm",
-            entity_name=vm_name,
-        )
-
-    def _require_checkpoint_vm_stopped(self, vm: VMRow, ctx: RunContext) -> None:
-        if self.status(vm, ctx) is VMStatus.STOPPED:
-            return
-        raise StateError(
-            f"Lima VM '{vm.name}' must be stopped for this checkpoint operation",
-            entity_kind="vm",
-            entity_name=vm.name,
+    def _checkpoint_operations(self, vm: VMRow) -> LimaCheckpointOperations:
+        return LimaCheckpointOperations(
+            vm_name=vm.name,
+            instance_name=self._instance_name(vm),
+            run=self._run_lima,
         )
 
     def create_checkpoint(
@@ -825,34 +779,16 @@ class LimaPlatform(VMPlatform):
         operation_id: str,
         resume: bool,
     ) -> CheckpointDescriptor:
-        del operation_id, resume
-        name = self._require_checkpoint_name(name, vm_name=vm.name)
-        self._require_checkpoint_vm_stopped(vm, ctx)
-        existing = self._checkpoint_names(vm)
-        if name in existing:
-            self._require_one_checkpoint(name, existing, vm_name=vm.name)
-            return CheckpointDescriptor(name=name, identifier=name)
-
-        instance_name = shlex.quote(self._instance_name(vm))
-        try:
-            self._run_lima(f"limactl snapshot create {instance_name} --tag {name}")
-        except (OSError, SSHError) as e:
-            raise StateError(
-                f"Lima could not create checkpoint '{name}' for VM '{vm.name}'",
-                entity_kind="vm",
-                entity_name=vm.name,
-                hint=(
-                    "Confirm that this Lima version and VM driver support snapshots; "
-                    "the VM remains stopped and no Debian package mutation has begun."
-                ),
-            ) from e
-
-        self._require_one_checkpoint(name, self._checkpoint_names(vm), vm_name=vm.name)
-        return CheckpointDescriptor(name=name, identifier=name)
+        del ctx
+        return self._checkpoint_operations(vm).create(
+            name,
+            operation_id=operation_id,
+            resume=resume,
+        )
 
     def list_checkpoints(self, vm: VMRow, ctx: RunContext) -> tuple[CheckpointDescriptor, ...]:
         del ctx
-        return tuple(CheckpointDescriptor(name=name, identifier=name) for name in sorted(self._checkpoint_names(vm)))
+        return self._checkpoint_operations(vm).list()
 
     def restore_checkpoint(
         self,
@@ -862,28 +798,8 @@ class LimaPlatform(VMPlatform):
         *,
         operation_id: str,
     ) -> None:
-        del operation_id
-        name = self._require_checkpoint_name(checkpoint.name, vm_name=vm.name)
-        if checkpoint.identifier != name:
-            raise StateError(
-                f"Lima checkpoint '{name}' has a conflicting provider identifier",
-                entity_kind="vm",
-                entity_name=vm.name,
-            )
-        self._require_one_checkpoint(name, self._checkpoint_names(vm), vm_name=vm.name)
-        self._require_checkpoint_vm_stopped(vm, ctx)
-
-        instance_name = shlex.quote(self._instance_name(vm))
-        try:
-            self._run_lima(f"limactl snapshot apply {instance_name} --tag {name}")
-        except (OSError, SSHError) as e:
-            raise StateError(
-                f"Lima could not restore checkpoint '{name}' for VM '{vm.name}'",
-                entity_kind="vm",
-                entity_name=vm.name,
-            ) from e
-        self._require_one_checkpoint(name, self._checkpoint_names(vm), vm_name=vm.name)
-        self._require_checkpoint_vm_stopped(vm, ctx)
+        del ctx
+        self._checkpoint_operations(vm).restore(checkpoint, operation_id=operation_id)
 
     def delete_checkpoint(
         self,
@@ -892,33 +808,7 @@ class LimaPlatform(VMPlatform):
         ctx: RunContext,
     ) -> None:
         del ctx
-        name = self._require_checkpoint_name(checkpoint.name, vm_name=vm.name)
-        if checkpoint.identifier != name:
-            raise StateError(
-                f"Lima checkpoint '{name}' has a conflicting provider identifier",
-                entity_kind="vm",
-                entity_name=vm.name,
-            )
-        existing = self._checkpoint_names(vm)
-        if name not in existing:
-            return
-        self._require_one_checkpoint(name, existing, vm_name=vm.name)
-
-        instance_name = shlex.quote(self._instance_name(vm))
-        try:
-            self._run_lima(f"limactl snapshot delete {instance_name} --tag {name}")
-        except (OSError, SSHError) as e:
-            raise StateError(
-                f"Lima could not delete checkpoint '{name}' for VM '{vm.name}'",
-                entity_kind="vm",
-                entity_name=vm.name,
-            ) from e
-        if name in self._checkpoint_names(vm):
-            raise StateError(
-                f"Lima checkpoint '{name}' still exists after deletion",
-                entity_kind="vm",
-                entity_name=vm.name,
-            )
+        self._checkpoint_operations(vm).delete(checkpoint)
 
     def display_backend_name(self, vm: VMRow) -> str:
         instance = str(vm.platform_metadata.get("instance_name", vm.name))

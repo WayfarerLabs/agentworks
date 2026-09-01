@@ -227,6 +227,22 @@ and DB migration.
 - `status(vm, ctx) -> VMStatus` is a read-only query.
 - `display_backend_name(vm) -> str` is pure display and takes no `ctx`.
 
+Lima selects the checkpoint primitive from the existing instance's reported `vmType`; site
+configuration does not select or change the driver. QEMU uses Lima's native snapshot commands. VZ,
+the normal Lima default on supported macOS hosts, uses a stopped instance clone because Lima does
+not implement native VZ snapshots. The clone has a deterministic Agentworks name, is protected
+against `limactl delete`, and carries the same Agentworks incarnation marker as its source so a
+reused Lima name cannot adopt an old clone. It must never be started because it contains the guest's
+VM and Tailscale identity. Restore clones that recovery instance into a temporary stopped instance,
+retains the pre-first-restore instance under a protected emergency name, swaps the recovered
+instance back to the original name, and records the completed restore operation on the recovery
+clone. A retry of that operation converges; a later explicit restore reapplies the checkpoint.
+Checkpoint deletion removes the clone, emergency instance, and any interrupted restore
+intermediates. VZ checkpoint creation refuses an instance with Lima `additionalDisks`, because a
+cloned primary instance would not own or recover those separately managed disks. Lima attempts
+copy-on-write cloning when the host filesystem supports it, but operators must still budget storage
+for divergence until checkpoint deletion.
+
 Vm-platform is an internal capability API. Its complete bundled contract remains version 1, and all
 six implementations change atomically with the descriptor. Exact registration conformance rejects an
 inconsistent version or missing abstract implementation as a curation error. Returning unsupported

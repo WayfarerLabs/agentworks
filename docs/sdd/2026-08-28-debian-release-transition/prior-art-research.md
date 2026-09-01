@@ -200,8 +200,14 @@ restore, and delete while preserving the logical VM identity:
 - WSL can export a stopped distribution and restore under the same name/install path. Because
   `--unregister` is destructive, safe restore first exports the current distribution as a retained
   emergency intermediate.
-- Lima exposes native snapshot create, list, apply, and delete commands using caller-assigned tags.
-  Driver support remains a runtime precondition that must fail before upgrade mutation.
+- Lima exposes native snapshot create, list, apply, and delete commands using caller-assigned tags,
+  but Lima 2.2.0's VZ driver returns unimplemented from all four snapshot methods. VZ is Lima's
+  default and recommended driver for ordinary native-architecture macOS VMs, and an existing
+  instance cannot change its driver. `limactl clone` supports a stopped source; its implementation
+  copies the complete instance directory and attempts copy-on-write for each file. A protected,
+  stopped clone can therefore provide the owned checkpoint primitive for VZ without changing the VM
+  driver. Clone does not make separately managed `additionalDisks` independent, so that case must
+  fail rather than claim whole-VM recovery.
 - Proxmox exposes named QEMU snapshots and rollback on the same VMID when its storage supports
   snapshots. The Agentworks role must gain the corresponding snapshot permission.
 
@@ -219,8 +225,12 @@ Sources:
 [GCP boot-disk detach/reattach](https://docs.cloud.google.com/compute/docs/disks/detach-reattach-boot-disk),
 [WSL basic commands](https://learn.microsoft.com/en-us/windows/wsl/basic-commands),
 [Lima snapshot create](https://lima-vm.io/docs/reference/limactl_snapshot_create/),
-[Lima snapshot apply](https://lima-vm.io/docs/reference/limactl_snapshot_apply/), and
-[Proxmox VE administration guide](https://pve.proxmox.com/pve-docs/pve-admin-guide.pdf)
+[Lima snapshot apply](https://lima-vm.io/docs/reference/limactl_snapshot_apply/),
+[Lima VM types](https://lima-vm.io/docs/config/vmtype/),
+[Lima clone](https://lima-vm.io/docs/reference/limactl_clone/),
+[Lima 2.2.0 VZ snapshot implementation](https://github.com/lima-vm/lima/blob/v2.2.0/pkg/driver/vz/vz_driver_darwin.go#L565-L578),
+[Lima 2.2.0 clone implementation](https://github.com/lima-vm/lima/blob/v2.2.0/pkg/instance/clone.go#L23-L96),
+and [Proxmox VE administration guide](https://pve.proxmox.com/pve-docs/pve-admin-guide.pdf)
 
 Provider consoles are also not uniform or guaranteed. AWS serial console is disabled by default and
 has IAM/guest prerequisites; Azure requires boot diagnostics and RBAC; GCP interactive serial access
