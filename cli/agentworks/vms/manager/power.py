@@ -282,16 +282,23 @@ def delete_vm(
         # nothing left to target it (#329). ``--force`` does not soften
         # this: force skips the child-count guard and the confirm
         # prompt, never a failed backend delete.
-        try:
-            platform.delete(vm, ops_ctx)
-        except RetainedDeletionError as retained:
-            # The platform positively discovered a provider identity that was
-            # previously represented only by an indeterminate request token.
-            # Make it durable before ANY later provider call. If the one retry
-            # fails or is interrupted, the row can resume from that exact ID.
-            db.update_vm_platform_metadata(name, retained.platform_metadata)
-            vm = replace(vm, platform_metadata=retained.platform_metadata)
-            platform.delete(vm, ops_ctx)
+        while True:
+            try:
+                platform.delete(vm, ops_ctx)
+                break
+            except RetainedDeletionError as retained:
+                # A provider-side fact became safer to remember than to infer
+                # again. Persist every monotonic transition before ANY later
+                # provider call; a repeated identical transition is a platform
+                # contract bug, not progress to spin on.
+                if retained.platform_metadata == vm.platform_metadata:
+                    raise StateError(
+                        f"VM platform '{platform.name}' repeated retained deletion metadata without progress",
+                        entity_kind="vm",
+                        entity_name=name,
+                    ) from retained
+                db.update_vm_platform_metadata(name, retained.platform_metadata)
+                vm = replace(vm, platform_metadata=retained.platform_metadata)
 
     # Clean up logs
     from agentworks.ssh import LOG_DIR

@@ -432,6 +432,15 @@ def test_reconciled_delete_identity_is_durable_before_retry(
                 platform_metadata=metadata,
                 entity_name=row.name,
             )
+        if len(calls) == 2:
+            metadata = dict(row.platform_metadata)
+            metadata["termination_accepted"] = "true"
+            metadata.pop("client_token")
+            raise RetainedDeletionError(
+                "provider accepted termination",
+                platform_metadata=metadata,
+                entity_name=row.name,
+            )
         persisted = db.get_vm(row.name)
         assert persisted is not None
         assert persisted.platform_metadata == row.platform_metadata
@@ -453,7 +462,9 @@ def test_reconciled_delete_identity_is_durable_before_retry(
     row = db.get_vm("dvm")
     assert row is not None
     assert row.platform_metadata["instance_id"] == "i-reconciled"
-    assert calls[1] == row.platform_metadata
+    assert row.platform_metadata["termination_accepted"] == "true"
+    assert "client_token" not in row.platform_metadata
+    assert calls[2] == row.platform_metadata
 
     vm_manager.delete_vm(
         db,
@@ -462,8 +473,42 @@ def test_reconciled_delete_identity_is_durable_before_retry(
         yes=True,
         interaction=TtyInteractionPolicy.REFUSE,
     )
-    assert calls[2] == row.platform_metadata
+    assert calls[3] == row.platform_metadata
     assert db.get_vm("dvm") is None
+
+
+def test_retained_delete_transition_must_change_metadata(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed(db)
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
+    calls = 0
+
+    def _delete(self: ProxmoxPlatform, row: VMRow, ctx: object) -> None:
+        nonlocal calls
+        del self, ctx
+        calls += 1
+        raise RetainedDeletionError(
+            "provider made no progress",
+            platform_metadata=row.platform_metadata,
+            entity_name=row.name,
+        )
+
+    monkeypatch.setattr(ProxmoxPlatform, "delete", _delete)
+
+    with pytest.raises(StateError):
+        vm_manager.delete_vm(
+            db,
+            make_config(),
+            "dvm",
+            yes=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert calls == 1
+    assert db.get_vm("dvm") is not None
 
 
 def test_force_does_not_suppress_backend_delete_failure(

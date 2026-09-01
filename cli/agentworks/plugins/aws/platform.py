@@ -688,6 +688,7 @@ class EC2Platform(VMPlatform):
         partial_create = vm.platform_metadata.get("create_incomplete") == "true"
         instance_id = self._optional_metadata(vm, "instance_id") if partial_create else self._instance_id(vm)
         client_token = self._optional_metadata(vm, "client_token") if partial_create else None
+        termination_accepted = partial_create and vm.platform_metadata.get("termination_accepted") == "true"
         security_group_id = self._security_group_id(vm)
         backend_name = self._backend_name(vm)
         recorded_account_id = self._recorded_account_id(vm)
@@ -721,15 +722,28 @@ class EC2Platform(VMPlatform):
                     platform_metadata=durable_metadata,
                     entity_name=vm.name,
                 )
-        terminate_and_cleanup_strict(
+        accepted_now = terminate_and_cleanup_strict(
             ec2,
             instance_id,
             security_group_id,
             backend_name,
             account_bound=recorded_account_id is not None,
             partial_create=partial_create,
-            positively_observed_instance=instance_id is not None and client_token is not None,
+            positively_observed_instance=(
+                instance_id is not None and client_token is not None and not termination_accepted
+            ),
+            termination_accepted=termination_accepted,
         )
+        if accepted_now:
+            assert instance_id is not None
+            durable_metadata = dict(vm.platform_metadata)
+            durable_metadata["termination_accepted"] = "true"
+            durable_metadata.pop("client_token", None)
+            raise RetainedDeletionError(
+                f"AWS accepted termination of retained VM '{vm.name}' instance '{instance_id}'",
+                platform_metadata=durable_metadata,
+                entity_name=vm.name,
+            )
         output.info(f"EC2 instance '{vm.name}' deleted")
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:

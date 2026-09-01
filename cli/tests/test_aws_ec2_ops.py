@@ -535,9 +535,15 @@ class TestCreateRollback:
         with pytest.raises(RetainedDeletionError) as retained:
             platform.delete(SimpleNamespace(name="dev", platform_metadata=metadata), RunContext())  # type: ignore[arg-type]
         assert retained.value.platform_metadata["instance_id"] == "i-123"
+        with pytest.raises(RetainedDeletionError) as accepted:
+            platform.delete(  # type: ignore[arg-type]
+                SimpleNamespace(name="dev", platform_metadata=retained.value.platform_metadata),
+                RunContext(),
+            )
+        assert accepted.value.platform_metadata["termination_accepted"] == "true"
+        assert "client_token" not in accepted.value.platform_metadata
         platform.delete(  # type: ignore[arg-type]
-            SimpleNamespace(name="dev", platform_metadata=retained.value.platform_metadata),
-            RunContext(),
+            SimpleNamespace(name="dev", platform_metadata=accepted.value.platform_metadata), RunContext()
         )
         assert rec.kwargs_for("terminate_instances") == {"InstanceIds": ["i-123"]}
 
@@ -1049,9 +1055,13 @@ class TestDelete:
         platform = _platform()
         with pytest.raises(RetainedDeletionError) as retained:
             platform.delete(SimpleNamespace(name="dev", platform_metadata=metadata), RunContext())  # type: ignore[arg-type]
+        with pytest.raises(RetainedDeletionError) as accepted:
+            platform.delete(  # type: ignore[arg-type]
+                SimpleNamespace(name="dev", platform_metadata=retained.value.platform_metadata),
+                RunContext(),
+            )
         platform.delete(  # type: ignore[arg-type]
-            SimpleNamespace(name="dev", platform_metadata=retained.value.platform_metadata),
-            RunContext(),
+            SimpleNamespace(name="dev", platform_metadata=accepted.value.platform_metadata), RunContext()
         )
 
         token_reads = [
@@ -1092,6 +1102,53 @@ class TestDelete:
 
         assert rec.methods("ec2").count("terminate_instances") == 6
         assert rec.methods("ec2").count("describe_instances") == 2
+
+    def test_accepted_termination_survives_wait_interrupt_and_later_absence(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from tests import _aws_fakes
+
+        rec = install_fakes(
+            monkeypatch,
+            Controls(
+                instance_presence_outcomes=[True, True, False],
+                instance_security_group_id="sg-detached",
+            ),
+        )
+        metadata = _vm().platform_metadata | {
+            "create_incomplete": "true",
+            "client_token": "retained-token",
+        }
+        platform = _platform()
+        interrupt_wait = True
+        original_wait = _aws_fakes._FakeWaiter.wait
+
+        def _interrupt_once(self: Any, **kwargs: object) -> None:
+            nonlocal interrupt_wait
+            if interrupt_wait:
+                interrupt_wait = False
+                raise KeyboardInterrupt("interrupt after termination acceptance")
+            original_wait(self, **kwargs)
+
+        monkeypatch.setattr("tests._aws_fakes._FakeWaiter.wait", _interrupt_once)
+
+        with pytest.raises(RetainedDeletionError) as accepted:
+            platform.delete(SimpleNamespace(name="dev", platform_metadata=metadata), RunContext())  # type: ignore[arg-type]
+
+        accepted_metadata = accepted.value.platform_metadata
+        assert accepted_metadata["termination_accepted"] == "true"
+        assert "client_token" not in accepted_metadata
+        with pytest.raises(KeyboardInterrupt):
+            platform.delete(  # type: ignore[arg-type]
+                SimpleNamespace(name="dev", platform_metadata=accepted_metadata), RunContext()
+            )
+        platform.delete(  # type: ignore[arg-type]
+            SimpleNamespace(name="dev", platform_metadata=accepted_metadata), RunContext()
+        )
+
+        assert rec.methods("ec2").count("terminate_instances") == 1
+        assert self._sg_deleted(rec) == 1
 
     def test_account_mismatch_prevents_all_ec2_calls(self, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = install_fakes(monkeypatch, Controls(account_id="999988887777"))

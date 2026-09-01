@@ -371,6 +371,15 @@ def cleanup_created_resources(ec2: Any, instance_id: str | None, security_group_
 
 def _terminate_created_instance(ec2: Any, instance_id: str) -> None:
     """Obtain a positive termination response for a newly returned ID."""
+    _request_created_instance_termination(ec2, instance_id)
+    try:
+        ec2.get_waiter("instance_terminated").wait(InstanceIds=[instance_id])
+    except Exception as exc:
+        raise wrap_ec2_error(exc) from exc
+
+
+def _request_created_instance_termination(ec2: Any, instance_id: str) -> None:
+    """Require EC2 to accept termination of one newly observed instance."""
     attempts = 6
     for attempt in range(attempts):
         try:
@@ -388,10 +397,6 @@ def _terminate_created_instance(ec2: Any, instance_id: str) -> None:
             output.detail(f"Waiting for newly created instance '{instance_id}' to become visible for cleanup...")
             time.sleep(2**attempt)
             continue
-        try:
-            ec2.get_waiter("instance_terminated").wait(InstanceIds=[instance_id])
-        except Exception as exc:
-            raise wrap_ec2_error(exc) from exc
         return
 
 
@@ -569,10 +574,11 @@ def terminate_and_cleanup_strict(
     account_bound: bool,
     partial_create: bool,
     positively_observed_instance: bool = False,
-) -> None:
-    """Strict explicit-delete teardown with positive permission and absence proof."""
+    termination_accepted: bool = False,
+) -> bool:
+    """Strict teardown, returning when termination acceptance needs persistence."""
     instance = describe_instance_exact(ec2, instance_id) if instance_id is not None else None
-    if instance_id is not None and instance is None and not positively_observed_instance:
+    if instance_id is not None and instance is None and not positively_observed_instance and not termination_accepted:
         if not account_bound:
             raise EC2Error(
                 f"cannot confirm absent legacy instance '{instance_id}' belongs to the current AWS account",
@@ -621,12 +627,21 @@ def terminate_and_cleanup_strict(
             )
         _check_security_group_delete_permission(ec2, security_group_id)
 
-    if instance_id is not None and (instance is not None or positively_observed_instance):
-        if positively_observed_instance:
-            # Once durable token reconciliation has proved this uncertain
-            # launch existed, later NotFound reads cannot downgrade it to
-            # "never created." Require a positively accepted termination.
-            _terminate_created_instance(ec2, instance_id)
+    if instance_id is not None and (instance is not None or positively_observed_instance or termination_accepted):
+        if termination_accepted:
+            # Termination acceptance is already durable. A visible instance
+            # may still be shutting down, while an absent one has aged out;
+            # neither case should issue or require another termination.
+            if instance is not None:
+                try:
+                    ec2.get_waiter("instance_terminated").wait(InstanceIds=[instance_id])
+                except Exception as exc:
+                    raise wrap_ec2_error(exc) from exc
+        elif positively_observed_instance:
+            # Return immediately after EC2 accepts termination. The caller
+            # persists that monotonic phase before any waiter or cleanup call.
+            _request_created_instance_termination(ec2, instance_id)
+            return True
         else:
             try:
                 ec2.terminate_instances(InstanceIds=[instance_id])
@@ -647,6 +662,7 @@ def terminate_and_cleanup_strict(
 
     if security_group is not None:
         _delete_security_group_strict(ec2, security_group_id)
+    return False
 
 
 def _delete_security_group_strict(ec2: Any, security_group_id: str) -> None:
