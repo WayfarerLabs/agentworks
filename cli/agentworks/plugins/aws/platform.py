@@ -478,8 +478,10 @@ class EC2Platform(VMPlatform):
                 )
                 if instance_id is None and security_group_id is not None:
                     recovery = (
-                        f"AWS did not return an instance ID; first inspect EC2 in {region} for "
-                        f"agentworks:vm={backend_name}, then run 'agw vm delete {request.vm_name}'."
+                        f"AWS did not return an instance ID. Inspect EC2 account {account_id} in {region}; "
+                        f"only if an instance has agentworks:vm={backend_name} and uses security group "
+                        f"{security_group_id}, terminate that instance manually. Then run "
+                        f"'agw vm delete {request.vm_name}' to remove the retained security group."
                     )
                 raise RetainedProvisioningError(
                     f"AWS cleanup for VM '{request.vm_name}' could not be confirmed: {detail}",

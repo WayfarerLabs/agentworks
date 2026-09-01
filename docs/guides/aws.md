@@ -111,8 +111,10 @@ AWS never positively accepts cleanup, Agentworks retains the VM row in failed st
 account, region, instance, group, and ownership identifiers. Retry `agw vm delete <name>` after
 provider permissions or availability recover; that explicit path also handles a retained row whose
 create stopped after creating only the security group. If any create request may have succeeded but
-did not return its provider ID, inspect EC2 in the recorded account and region for the matching
-`agentworks:vm` tag because Agentworks can only clean up IDs it received.
+did not return its provider ID, inspect instances and security groups in the site-selected account
+and region. Act only on an instance with both the exact `agentworks:vm` tag and the known security
+group association: terminate that verified instance manually, then use `agw vm delete <name>` to
+remove the retained group. Agentworks can only target provider IDs it received.
 
 Rows created before account binding carry no account ID. Agentworks deletes one only when the live
 instance's ID, ownership tag, and security-group association prove that the current account owns the
