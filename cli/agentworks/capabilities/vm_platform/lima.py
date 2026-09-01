@@ -105,38 +105,6 @@ def _rename_directory_exclusive(source: str, target: str) -> None:
         raise OSError(error_number, os.strerror(error_number), target)
 
 
-def _sftp_quote(path: str) -> str:
-    if any(character in path for character in ("\0", "\n", "\r")):
-        raise ValueError("SFTP path contains a control character")
-    return '"' + path.replace("\\", "\\\\").replace('"', '\\"') + '"'
-
-
-def _rename_remote_directory_exclusive(host: str, source: str, target: str) -> None:
-    """Use SFTP's exact-path, no-overwrite rename on a remote Lima host."""
-    # -l forces the standard SFTP rename instead of OpenSSH's overwriting
-    # posix-rename extension. The server either renames the exact path or fails;
-    # it never falls back to a cross-filesystem copy.
-    batch = f"rename -l {_sftp_quote(source)} {_sftp_quote(target)}\n"
-    proc = subprocess.run(
-        [
-            "sftp",
-            "-q",
-            "-b",
-            "-",
-            "-o",
-            "StrictHostKeyChecking=accept-new",
-            "-o",
-            "BatchMode=yes",
-            "--",
-            host,
-        ],
-        input=stdin_bytes(batch),
-        capture_output=True,
-    )
-    if proc.returncode != 0:
-        raise SSHError(f"SFTP rename failed: {decode_stream(proc.stderr).strip()}")
-
-
 # Lima template for Debian cloud VMs (values substituted at create time).
 # The provision block runs the non-secret bootstrap script (user, packages,
 # swap, SSH key, and Tailscale installation) as a system-level provisioner
@@ -214,8 +182,7 @@ class LimaLocalPlacement(AgwModel):
 class LimaSshPlacement(AgwModel):
     """Run limactl on another host over SSH.
 
-    The VMs live on a shared box and the local OpenSSH client suite is
-    required, including SFTP for exact-path VZ recovery moves.
+    The VMs live on a shared box and nothing but SSH is needed here.
     """
 
     mode: Literal["ssh"]
@@ -255,7 +222,7 @@ class LimaPlatform(VMPlatform):
         to `{mode: local}`: `limactl` runs on this machine, which is what the
         built-in `lima-local` site is. `placement: {mode: ssh, host: me@gpu-box}`
         runs `limactl` on that host over SSH, so the VMs live on a shared box and
-        the local OpenSSH client suite is the only host dependency.
+        nothing but SSH is needed here.
 
         Creation retains a credential-free provision script, then sends the required
         Tailscale key through one fixed guest command on stdin. It returns only after
@@ -265,16 +232,18 @@ class LimaPlatform(VMPlatform):
         protected recovery clones for VZ instances. Never start a recovery clone: it
         contains the same guest and Tailscale identity. VZ restore validates Lima's
         reported sibling directories and uses atomic stopped-instance moves because
-        Lima 2.2's public rename is not atomic. VZ checkpoints require the VM to have
-        no Lima additional disks.
+        Lima 2.2's public rename is not atomic. VZ checkpoint creation and restore
+        must run on the Lima host through local placement; SSH placement refuses
+        before mutation. VZ checkpoints require the VM to have no Lima additional
+        disks.
 
         Local sites need `limactl` installed here and report not-ready without it.
-        Remote sites need the OpenSSH client suite, including `sftp`.
+        Remote sites need nothing locally.
         """,
     )
     # No unsupported_reason override: the platform is supported on
     # every host, because remote-Lima sites run limactl on the placement
-    # host and need only the portable OpenSSH client suite locally.
+    # host and need nothing locally.
 
     @classmethod
     def not_ready(cls, config: Mapping[str, object]) -> Readiness:
@@ -289,17 +258,11 @@ class LimaPlatform(VMPlatform):
         if "placement" in config:
             placement = config.get("placement")
             local = isinstance(placement, Mapping) and placement.get("mode") == "local"
-            remote = isinstance(placement, Mapping) and placement.get("mode") == "ssh"
         else:
             local = isinstance(LimaConfig.model_fields["placement"].default, LimaLocalPlacement)
-            remote = False
         import shutil
 
         if not local:
-            if not remote:
-                return Readiness.ready()
-            if not shutil.which("sftp"):
-                return Readiness.blocked("sftp not installed")
             return Readiness.ready()
         if not shutil.which("limactl"):
             return Readiness.blocked("limactl not installed")
@@ -849,14 +812,10 @@ class LimaPlatform(VMPlatform):
             vm_name=vm.name,
             instance_name=self._instance_name(vm),
             run=self._run_lima,
-            rename=self._rename_lima_instance_directory,
+            rename=None if self.is_remote else self._rename_lima_instance_directory,
         )
 
     def _rename_lima_instance_directory(self, source: str, target: str) -> None:
-        if self.is_remote:
-            assert self._remote_host is not None
-            _rename_remote_directory_exclusive(self._remote_host, source, target)
-            return
         _rename_directory_exclusive(source, target)
 
     def create_checkpoint(

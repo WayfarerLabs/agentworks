@@ -19,10 +19,14 @@ LimaDirectoryRename = Callable[[str, str], None]
 class LimaCheckpointHost:
     """Treat Lima's reported host state as an external trust boundary."""
 
-    def __init__(self, *, vm_name: str, run: LimaRunner, rename: LimaDirectoryRename) -> None:
+    def __init__(self, *, vm_name: str, run: LimaRunner, rename: LimaDirectoryRename | None) -> None:
         self.vm_name = vm_name
         self.run = run
         self.rename = rename
+
+    @staticmethod
+    def _is_recovery_instance(instance_name: str) -> bool:
+        return instance_name.startswith(("agwcp-", "agwem-", "agwrs-", "agwrd-"))
 
     @staticmethod
     def _partial_recovery_hint(instance_name: str) -> str:
@@ -53,8 +57,9 @@ class LimaCheckpointHost:
         instance_name: str,
         *,
         required: bool = True,
+        recovery_target: str | None = None,
     ) -> dict[str, Any] | None:
-        if not required and instance_name not in self.names():
+        if not required and instance_name not in self.names(recovery_target=recovery_target):
             return None
         try:
             listing = self.run(f"limactl list --json {shlex.quote(instance_name)}")
@@ -75,12 +80,24 @@ class LimaCheckpointHost:
             except json.JSONDecodeError:
                 continue
             if isinstance(record, dict) and record.get("name") == instance_name:
+                status = record.get("status")
+                if self._is_recovery_instance(instance_name) and isinstance(status, str) and status.lower() == "broken":
+                    raise StateError(
+                        f"Lima recovery instance '{instance_name}' is incomplete",
+                        entity_kind="vm",
+                        entity_name=self.vm_name,
+                        hint=self._partial_recovery_hint(instance_name),
+                    )
                 return record
         raise StateError(
             f"Lima instance '{instance_name}' does not exist or is incomplete",
             entity_kind="vm",
             entity_name=self.vm_name,
-            hint="Inspect the Lima instance inventory before retrying the checkpoint operation.",
+            hint=(
+                self._partial_recovery_hint(instance_name)
+                if self._is_recovery_instance(instance_name)
+                else "Inspect the Lima instance inventory before retrying the checkpoint operation."
+            ),
         )
 
     def backend(self, record: dict[str, Any], instance_name: str) -> str:
@@ -140,15 +157,31 @@ class LimaCheckpointHost:
                 entity_name=self.vm_name,
             )
         normalized = posixpath.normpath(value)
-        parent = posixpath.dirname(normalized)
-        if not posixpath.isabs(normalized) or posixpath.basename(normalized) != instance_name or parent in {"", "/"}:
+        parent = posixpath.dirname(value)
+        if (
+            value != normalized
+            or any(ord(character) < 32 or ord(character) == 127 for character in value)
+            or not posixpath.isabs(value)
+            or posixpath.basename(value) != instance_name
+            or parent in {"", "/"}
+        ):
             raise StateError(
                 f"Lima reported an unsafe instance directory for '{instance_name}'",
                 entity_kind="vm",
                 entity_name=self.vm_name,
                 hint="Inspect the Lima instance directory before retrying the checkpoint operation.",
             )
-        return normalized
+        return value
+
+    def require_atomic_rename(self) -> None:
+        if self.rename is not None:
+            return
+        raise StateError(
+            f"Lima VZ checkpoint operations for VM '{self.vm_name}' must run on the Lima placement host",
+            entity_kind="vm",
+            entity_name=self.vm_name,
+            hint="Run Agentworks on that host with a local-placement Lima site, then retry.",
+        )
 
     def require_same_parent(
         self,
@@ -210,7 +243,9 @@ class LimaCheckpointHost:
                 entity_name=self.vm_name,
             )
 
-    def move_atomically(self, source: str, target: str) -> None:
+    def move_atomically(self, source: str, target: str) -> dict[str, Any]:
+        self.require_atomic_rename()
+        assert self.rename is not None
         source_record = self.record(source)
         assert source_record is not None
         self.require_stopped(source, purpose="checkpoint restore", record=source_record)
@@ -256,6 +291,7 @@ class LimaCheckpointHost:
                 entity_name=self.vm_name,
             )
         self.require_stopped(target, purpose="checkpoint restore", record=target_record)
+        return target_record
 
     def delete_recovery_instance(self, instance_name: str) -> None:
         if instance_name not in self.names():

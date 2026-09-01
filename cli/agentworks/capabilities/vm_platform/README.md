@@ -238,17 +238,19 @@ marks every intermediate with its role and restore identity, and retains the exa
 instance directory under a protected emergency name. Lima 2.2's public rename walks and moves files,
 so Agentworks does not use it: after validating Lima-reported absolute sibling paths, VZ ownership,
 stopped state, and target absence, Agentworks uses an exact-path exclusive OS rename locally or
-standard SFTP rename for SSH placement, with no cross-filesystem copy fallback, and proves the
-recovered instance at the original name. The stopped public clone has already omitted runtime files,
-protection state, and the old VZ identifier as Lima requires; the emergency move preserves the
-original directory exactly and that duplicate must never be started. A retry of the same restore
-converges; a later explicit restore reapplies the checkpoint. An unreadable partial clone fails
-closed with exact repair guidance instead of being adopted by name. Checkpoint deletion validates
-the role and VM incarnation of the clone, emergency instance, and any interrupted restore
-intermediates before removing them. VZ checkpoint creation refuses an instance with Lima
-`additionalDisks`, because a cloned primary instance would not own or recover those separately
-managed disks. Lima attempts copy-on-write cloning when the host filesystem supports it, but
-operators must still budget storage for divergence until checkpoint deletion.
+refuses VZ checkpoint creation and restore before mutation for SSH placement, where Agentworks
+cannot prove a no-clobber directory rename. Run those VZ operations on the placement host through a
+local Lima site. Remote QEMU snapshots remain supported. The local rename has no cross-filesystem
+copy fallback, and Agentworks proves the recovered instance at the original name. The stopped public
+clone has already omitted runtime files, protection state, and the old VZ identifier as Lima
+requires; the emergency move preserves the original directory exactly and that duplicate must never
+be started. A retry of the same restore converges; a later explicit restore reapplies the
+checkpoint. An unreadable partial clone fails closed with exact repair guidance instead of being
+adopted by name. Checkpoint deletion validates the role and VM incarnation of the clone, emergency
+instance, and any interrupted restore intermediates before removing them. VZ checkpoint creation
+refuses an instance with Lima `additionalDisks`, because a cloned primary instance would not own or
+recover those separately managed disks. Lima attempts copy-on-write cloning when the host filesystem
+supports it, but operators must still budget storage for divergence until checkpoint deletion.
 
 Vm-platform is an internal capability API. Its complete bundled contract remains version 1, and all
 six implementations change atomically with the descriptor. Exact registration conformance rejects an
@@ -332,12 +334,12 @@ process having warmed a credential cache.
   answers "could any config of this platform ever work on this host," and is the **platform node's
   own** readiness in the fold. WSL2 is the only platform that overrides it (`"Windows only"` off
   Windows). Lima deliberately does not: an ssh-placed site runs `limactl` on the placement host and
-  needs only the local OpenSSH client suite, including `sftp` for exact-path VZ recovery moves.
+  needs nothing locally.
 - `not_ready(config) -> Readiness` (inherited from `Capability`, default ready) is a
   **non-constructing classmethod**: "is a site with THIS config ready," host-introspection only, no
-  network or secrets, no instance built. A local Lima site with no `limactl` is not-ready; a remote
-  site with no `sftp` is not-ready. WSL2 reports a site with no `wsl` on PATH not-ready even on
-  Windows. The fold calls it off the graph-carried impl to fold into the vm-site's verdict.
+  network or secrets, no instance built. A local Lima site with no `limactl` is not-ready. WSL2
+  reports a site with no `wsl` on PATH not-ready even on Windows. The fold calls it off the
+  graph-carried impl to fold into the vm-site's verdict.
 
 **Class-level contract**. `contract_version`, `config_model`, `name`, and `description` are all
 REQUIRED and none is defaulted, because a default would let an unmigrated implementation inherit a

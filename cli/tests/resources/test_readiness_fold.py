@@ -341,10 +341,7 @@ def test_typo_in_the_placement_host_is_refused_rather_than_changing_readiness(
 
     typo: dict[str, object] = {"placement": {"mode": "ssh", "hst": "me@box"}}
     for limactl in (None, "/usr/bin/limactl"):
-        monkeypatch.setattr(
-            "shutil.which",
-            lambda name, found=limactl: "/usr/bin/sftp" if name == "sftp" else found,
-        )
+        monkeypatch.setattr("shutil.which", lambda name, found=limactl: found)
         # The SHAPE half, asserted on the hook the fold calls: the tag says
         # ssh, so the site is not local, so no limactl verdict is reachable
         # for it however this host is equipped. This is the half the

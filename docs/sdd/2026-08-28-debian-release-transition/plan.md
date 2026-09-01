@@ -526,10 +526,11 @@ additional feedback/fix rounds and provided direct `msm4` access to the integrat
       visible progress. Do not use Lima 2.2's file-by-file public rename implementation. Permit a
       persisted interrupted restore to reconcile through its temporary missing-name window without
       permitting restore of a running VM.
-- [x] Harden the VZ correction after exact-head review: use exact-path exclusive rename primitives
-      locally and over SSH placement, fail closed on hidden host entries and unreadable partial
-      clones, validate a completed replay before cleanup, permit deletion of an owned unprotected
-      interrupted clone, and exercise the real forward path at both atomic interruption boundaries.
+- [x] Harden the VZ correction after exact-head review: use an exact-path exclusive rename primitive
+      on the Lima host, refuse SSH-placed VZ creation and restore before mutation, fail closed on
+      hidden host entries and unreadable partial clones, validate a completed replay before cleanup,
+      permit deletion of an owned unprotected interrupted clone, and exercise the real forward path
+      at both atomic interruption boundaries.
 - [ ] Run focused and full gates, exact-head project/correctness/complexity review, hosted CI, and a
       signed ready handoff for live create/list/restore/delete plus Bookworm-to-Trixie upgrade on
       the VZ-backed `msm4` environment.

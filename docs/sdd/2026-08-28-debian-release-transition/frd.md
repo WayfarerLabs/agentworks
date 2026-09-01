@@ -388,15 +388,18 @@ because Lima does not implement native VZ snapshots. Restore keeps the original 
 instance as a protected emergency artifact, returns the recovered instance to the original Lima
 name, and must converge after interruption at any clone or atomic move boundary. Lima 2.2's public
 rename is not used because it moves instance files one at a time. Instead, Agentworks validates
-Lima-reported absolute sibling directories and stopped VZ ownership metadata, then uses an
-exact-path exclusive OS rename locally or standard SFTP rename for SSH placement and proves the
-resulting inventory. Neither path can fall back to a cross-filesystem copy. The recovery clone is
-never started; operator output warns that starting it would duplicate guest and Tailscale identity.
-Deletion removes the checkpoint clone, emergency instance, and interrupted restore intermediates
-only after validating each artifact's role and VM incarnation. VZ checkpoint creation refuses Lima
-instances with `additionalDisks` rather than presenting a primary-instance clone as whole-VM
-recovery. Lima's driver choice for new VMs remains its own host default, and existing instances
-cannot change drivers through this work.
+Lima-reported canonical absolute sibling directories and stopped VZ ownership metadata, then uses an
+exact-path exclusive OS rename when Agentworks runs on the Lima host and proves the resulting
+inventory. SSH-placed VZ checkpoint creation and restore refuse before mutation because that
+transport does not provide a proven no-clobber directory rename; the operator must run them on the
+placement host through a local Lima site. Remote QEMU snapshots remain supported. The local rename
+cannot fall back to a cross-filesystem copy. The recovery clone is never started; operator output
+warns that starting it would duplicate guest and Tailscale identity. Deletion removes the checkpoint
+clone, emergency instance, and interrupted restore intermediates only after validating each
+artifact's role and VM incarnation. VZ checkpoint creation refuses Lima instances with
+`additionalDisks` rather than presenting a primary-instance clone as whole-VM recovery. Lima's
+driver choice for new VMs remains its own host default, and existing instances cannot change drivers
+through this work.
 
 The operator-facing surface follows the existing flat second-object convention:
 

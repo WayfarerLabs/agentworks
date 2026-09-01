@@ -6,6 +6,7 @@ import copy
 import json
 import posixpath
 import shlex
+import sys
 from types import SimpleNamespace
 from typing import Any
 
@@ -13,11 +14,7 @@ import pytest
 
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform.base import CheckpointDescriptor
-from agentworks.capabilities.vm_platform.lima import (
-    LimaPlatform,
-    _rename_directory_exclusive,
-    _rename_remote_directory_exclusive,
-)
+from agentworks.capabilities.vm_platform.lima import LimaPlatform, _rename_directory_exclusive
 from agentworks.errors import StateError
 
 _CHECKPOINT_NAME = f"agw-{'1' * 32}"
@@ -51,9 +48,11 @@ class _LimaBackend:
         }
         self.snapshots = list(snapshots or [])
         self.incomplete_instances: set[str] = set()
+        self.broken_instances: set[str] = set()
         self.inventory_failure = False
         self.symlink_paths: set[str] = set()
         self.interrupt_after_move: int | None = None
+        self.interrupt_after_role: str | None = None
         self.move_count = 0
         self.commands: list[str] = []
 
@@ -63,8 +62,20 @@ class _LimaBackend:
         if argv[:3] == ["limactl", "list", "--quiet"]:
             if self.inventory_failure:
                 raise OSError("Lima inventory contains an unreadable instance")
-            return "\n".join(sorted(self.instances.keys() | self.incomplete_instances))
+            return "\n".join(sorted(self.instances.keys() | self.incomplete_instances | self.broken_instances))
         if argv[:3] == ["limactl", "list", "--json"]:
+            if argv[3] in self.broken_instances:
+                return json.dumps(
+                    {
+                        "name": argv[3],
+                        "status": "Broken",
+                        "vmType": "vz",
+                        "additionalDisks": [],
+                        "protected": False,
+                        "param": {},
+                        "dir": f"/fake-lima/{argv[3]}",
+                    }
+                )
             record = self.instances.get(argv[3])
             return json.dumps(record) if record is not None else ""
         if argv[0] == "/bin/test":
@@ -128,6 +139,10 @@ class _LimaBackend:
             target = argv[-1]
             expression = argv[argv.index("--set") + 1]
             self._apply_param_expression(self.instances[target]["param"], expression)
+            role = self.instances[target]["param"].get("agentworksRecoveryRole")
+            if self.interrupt_after_role is not None and role == self.interrupt_after_role:
+                self.interrupt_after_role = None
+                raise KeyboardInterrupt
             return ""
         raise AssertionError(f"unexpected Lima command: {command}")
 
@@ -166,6 +181,20 @@ def _platform(monkeypatch: pytest.MonkeyPatch, backend: _LimaBackend) -> LimaPla
     return platform
 
 
+def _remote_platform(monkeypatch: pytest.MonkeyPatch, backend: _LimaBackend) -> LimaPlatform:
+    platform = LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "operator@host"}})
+    monkeypatch.setattr(
+        LimaPlatform,
+        "_run_lima",
+        lambda self, command, **kwargs: backend.run(command, **kwargs),
+    )
+    return platform
+
+
+@pytest.mark.skipif(
+    not (sys.platform == "darwin" or sys.platform.startswith("linux")),
+    reason="exclusive directory rename is implemented on Darwin and Linux",
+)
 def test_exclusive_directory_rename_does_not_follow_a_target_symlink(tmp_path: Any) -> None:
     source = tmp_path / "source"
     outside = tmp_path / "outside"
@@ -182,6 +211,10 @@ def test_exclusive_directory_rename_does_not_follow_a_target_symlink(tmp_path: A
     assert list(outside.iterdir()) == []
 
 
+@pytest.mark.skipif(
+    not (sys.platform == "darwin" or sys.platform.startswith("linux")),
+    reason="exclusive directory rename is implemented on Darwin and Linux",
+)
 def test_exclusive_directory_rename_moves_the_exact_directory(tmp_path: Any) -> None:
     source = tmp_path / "source"
     target = tmp_path / "target"
@@ -191,30 +224,6 @@ def test_exclusive_directory_rename_moves_the_exact_directory(tmp_path: Any) -> 
 
     assert not source.exists()
     assert target.is_dir()
-
-
-def test_remote_directory_rename_forces_standard_sftp_semantics(monkeypatch: pytest.MonkeyPatch) -> None:
-    invocation: dict[str, Any] = {}
-
-    def fake_run(args: list[str], **kwargs: Any) -> SimpleNamespace:
-        invocation.update(args=args, **kwargs)
-        return SimpleNamespace(returncode=0, stderr=b"")
-
-    monkeypatch.setattr("agentworks.capabilities.vm_platform.lima.subprocess.run", fake_run)
-
-    _rename_remote_directory_exclusive("operator@host", "/lima/source", "/lima/target")
-
-    assert invocation["args"][-2:] == ["--", "operator@host"]
-    assert invocation["input"] == b'rename -l "/lima/source" "/lima/target"\n'
-
-
-def test_remote_lima_readiness_requires_sftp(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("shutil.which", lambda command: None if command == "sftp" else f"/bin/{command}")
-
-    readiness = LimaPlatform.not_ready({"placement": {"mode": "ssh", "host": "operator@host"}})
-
-    assert not readiness.is_ready
-    assert readiness.reason is not None
 
 
 def _create_checkpoint(
@@ -278,6 +287,49 @@ def test_checkpoint_create_rejects_an_unsupported_driver(
 
     assert caught.value.entity_kind == "vm"
     assert not any("snapshot create" in command or " clone " in command for command in backend.commands)
+
+
+def test_remote_vz_checkpoint_creation_refuses_before_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _LimaBackend(vm_type="vz")
+    platform = _remote_platform(monkeypatch, backend)
+
+    with pytest.raises(StateError):
+        _create_checkpoint(platform, _vm(), _CHECKPOINT_NAME, RunContext())
+
+    assert not any(
+        command.startswith(("limactl clone ", "limactl edit ", "limactl protect ", "limactl snapshot "))
+        for command in backend.commands
+    )
+
+
+def test_remote_qemu_checkpoint_remains_supported(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = _LimaBackend(vm_type="qemu")
+    platform = _remote_platform(monkeypatch, backend)
+
+    descriptor = _create_checkpoint(platform, _vm(), "agw-checkpoint-1", RunContext())
+
+    assert descriptor == CheckpointDescriptor(name="agw-checkpoint-1", identifier="agw-checkpoint-1")
+    assert "agw-checkpoint-1" in backend.snapshots
+
+
+def test_remote_vz_checkpoint_restore_refuses_before_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _LimaBackend(vm_type="vz")
+    local = _platform(monkeypatch, backend)
+    descriptor = _create_checkpoint(local, _vm(), _CHECKPOINT_NAME, RunContext())
+    remote = _remote_platform(monkeypatch, backend)
+    command_count = len(backend.commands)
+
+    with pytest.raises(StateError):
+        remote.restore_checkpoint(  # type: ignore[arg-type]
+            _vm(), descriptor, RunContext(), operation_id="restore-1"
+        )
+
+    assert backend.move_count == 0
+    assert not any(command.startswith("limactl clone ") for command in backend.commands[command_count:])
 
 
 def test_restore_rejects_a_foreign_provider_identifier(
@@ -371,6 +423,43 @@ def test_vz_create_reports_repair_for_an_unreadable_partial_clone(
 
     with pytest.raises(StateError) as caught:
         _create_checkpoint(platform, _vm(), _CHECKPOINT_NAME, RunContext(), resume=True)
+
+    assert caught.value.hint is not None
+    assert backend.move_count == 0
+
+
+def test_vz_create_reports_repair_for_a_broken_partial_clone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _LimaBackend(vm_type="vz")
+    platform = _platform(monkeypatch, backend)
+    descriptor = _create_checkpoint(platform, _vm(), _CHECKPOINT_NAME, RunContext())
+    backend.instances.pop(descriptor.identifier)
+    backend.broken_instances.add(descriptor.identifier)
+    command_count = len(backend.commands)
+
+    with pytest.raises(StateError) as caught:
+        _create_checkpoint(platform, _vm(), _CHECKPOINT_NAME, RunContext(), resume=True)
+
+    assert caught.value.hint is not None
+    assert not any(
+        command.startswith(("limactl clone ", "limactl edit ", "limactl protect "))
+        for command in backend.commands[command_count:]
+    )
+
+
+def test_vz_restore_reports_repair_when_inventory_is_unreadable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _LimaBackend(vm_type="vz")
+    platform = _platform(monkeypatch, backend)
+    descriptor = _create_checkpoint(platform, _vm(), _CHECKPOINT_NAME, RunContext())
+    backend.inventory_failure = True
+
+    with pytest.raises(StateError) as caught:
+        platform.restore_checkpoint(  # type: ignore[arg-type]
+            _vm(), descriptor, RunContext(), operation_id="restore-1"
+        )
 
     assert caught.value.hint is not None
     assert backend.move_count == 0
@@ -482,6 +571,40 @@ def test_vz_restore_resumes_after_later_source_is_retained(
     assert discard not in backend.instances
 
 
+def test_vz_restore_resumes_when_interrupted_before_source_moves(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _LimaBackend(vm_type="vz")
+    platform = _platform(monkeypatch, backend)
+    vm = _vm()
+    ctx = RunContext()
+    descriptor = _create_checkpoint(platform, vm, _CHECKPOINT_NAME, ctx)
+    stem = descriptor.identifier.removeprefix("agwcp-")
+    emergency = f"agwem-{stem}"
+
+    backend.instances["agw-dev"]["generation"] = "upgraded"
+    backend.interrupt_after_role = "emergency"
+    with pytest.raises(KeyboardInterrupt):
+        platform.restore_checkpoint(vm, descriptor, ctx, operation_id="restore-1")  # type: ignore[arg-type]
+
+    assert "agw-dev" in backend.instances
+    assert emergency not in backend.instances
+    platform.restore_checkpoint(vm, descriptor, ctx, operation_id="restore-1")  # type: ignore[arg-type]
+    assert backend.instances["agw-dev"]["generation"] == "captured"
+    assert backend.instances[emergency]["generation"] == "upgraded"
+
+    backend.instances["agw-dev"]["generation"] = "later"
+    backend.interrupt_after_role = "discard"
+    with pytest.raises(KeyboardInterrupt):
+        platform.restore_checkpoint(vm, descriptor, ctx, operation_id="restore-2")  # type: ignore[arg-type]
+
+    assert backend.instances["agw-dev"]["generation"] == "later"
+    platform.restore_checkpoint(vm, descriptor, ctx, operation_id="restore-2")  # type: ignore[arg-type]
+    assert backend.instances["agw-dev"]["generation"] == "captured"
+    assert backend.instances[emergency]["generation"] == "upgraded"
+    assert not any(name.startswith("agwrd-") for name in backend.instances)
+
+
 def test_vz_restore_refuses_a_running_instance_before_swap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -505,6 +628,21 @@ def test_vz_restore_refuses_an_unsafe_lima_instance_directory(
     vm = _vm()
     descriptor = _create_checkpoint(platform, vm, _CHECKPOINT_NAME, RunContext())
     backend.instances["agw-dev"]["dir"] = "/fake-lima/not-the-instance"
+
+    with pytest.raises(StateError):
+        platform.restore_checkpoint(vm, descriptor, RunContext(), operation_id="restore-1")  # type: ignore[arg-type]
+
+    assert backend.move_count == 0
+
+
+def test_vz_restore_refuses_a_noncanonical_lima_instance_directory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _LimaBackend(vm_type="vz")
+    platform = _platform(monkeypatch, backend)
+    vm = _vm()
+    descriptor = _create_checkpoint(platform, vm, _CHECKPOINT_NAME, RunContext())
+    backend.instances["agw-dev"]["dir"] = "/fake-lima/link/../agw-dev"
 
     with pytest.raises(StateError):
         platform.restore_checkpoint(vm, descriptor, RunContext(), operation_id="restore-1")  # type: ignore[arg-type]

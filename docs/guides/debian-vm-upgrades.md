@@ -91,13 +91,15 @@ snapshots. Lima VZ instances use a stopped, protected recovery clone and therefo
 ordinary macOS default driver without a configuration switch. Agentworks never starts the recovery
 clone; do not start it manually because it carries the same guest and Tailscale identity as the VM.
 Restore retains the exact original instance directory under a protected emergency name and uses an
-exact-path exclusive local or SFTP rename to put the recovered stopped clone at the original Lima
-name without copy fallback. VZ checkpoint creation refuses Lima `additionalDisks`, which are
-separate resources a primary instance clone cannot recover. Lima tries copy-on-write cloning on
-supporting filesystems, but the clone and retained emergency instance can consume more storage as
-their disks diverge. WSL2 must have enough local storage for exports. Provider snapshots, Lima
-clones, and the emergency disk, instance, or export retained by destructive-restore platforms
-consume storage, quota, and provider charges until `agw vm delete-checkpoint NAME` succeeds.
+exact-path exclusive local rename to put the recovered stopped clone at the original Lima name
+without copy fallback. SSH-placed VZ checkpoint creation and restore refuse before mutation; run
+those operations on the Lima host through a local-placement site. Remote QEMU snapshots remain
+supported. VZ checkpoint creation refuses Lima `additionalDisks`, which are separate resources a
+primary instance clone cannot recover. Lima tries copy-on-write cloning on supporting filesystems,
+but the clone and retained emergency instance can consume more storage as their disks diverge. WSL2
+must have enough local storage for exports. Provider snapshots, Lima clones, and the emergency disk,
+instance, or export retained by destructive-restore platforms consume storage, quota, and provider
+charges until `agw vm delete-checkpoint NAME` succeeds.
 
 ## What the command does
 

@@ -208,14 +208,16 @@ restore, and delete while preserving the logical VM identity:
   stopped clone can therefore provide the owned checkpoint primitive for VZ without changing the VM
   driver. Lima 2.2 implements `limactl rename` by creating the target and moving the source files
   one at a time, so interruption can split an instance across both names. Agentworks instead
-  validates the absolute sibling directories reported by Lima and uses an exact-path exclusive OS
-  rename locally or the standard no-copy SFTP rename over SSH placement for each destructive
-  boundary. The stopped clone already applies Lima's rules for omitting protection and runtime files
-  and nullifying the VZ identifier; the original directory moves intact to the protected emergency
-  name and is never started. A clone interrupted before `lima.yaml` exists cannot be removed by
-  `limactl delete`, so its unreadable deterministic target remains fenced with exact repair guidance
-  rather than being adopted or blindly removed. Clone does not make separately managed
-  `additionalDisks` independent, so that case must fail rather than claim whole-VM recovery.
+  validates the canonical absolute sibling directories reported by Lima and uses an exact-path
+  exclusive OS rename when running on the Lima host for each destructive boundary. SSH placement
+  cannot prove an atomic no-clobber directory rename, so VZ create and restore refuse before
+  mutation there; QEMU native snapshots remain available remotely. The stopped clone already applies
+  Lima's rules for omitting protection and runtime files and nullifying the VZ identifier; the
+  original directory moves intact to the protected emergency name and is never started. A clone
+  interrupted before `lima.yaml` exists cannot be removed by `limactl delete`, so its unreadable
+  deterministic target remains fenced with exact repair guidance rather than being adopted or
+  blindly removed. Clone does not make separately managed `additionalDisks` independent, so that
+  case must fail rather than claim whole-VM recovery.
 - Proxmox exposes named QEMU snapshots and rollback on the same VMID when its storage supports
   snapshots. The Agentworks role must gain the corresponding snapshot permission.
 
@@ -239,10 +241,8 @@ Sources:
 [Lima 2.2.0 VZ snapshot implementation](https://github.com/lima-vm/lima/blob/v2.2.0/pkg/driver/vz/vz_driver_darwin.go#L565-L578),
 [Lima 2.2.0 clone implementation](https://github.com/lima-vm/lima/blob/v2.2.0/pkg/instance/clone.go#L23-L96),
 [Lima 2.2.0 delete handling](https://github.com/lima-vm/lima/blob/v2.2.0/cmd/limactl/delete.go#L70-L84),
-[Lima incomplete-instance inventory fix](https://github.com/lima-vm/lima/issues/5236),
-[OpenSSH SFTP rename client](https://github.com/openssh/openssh-portable/blob/master/sftp-client.c#L1202-L1245),
-[OpenSSH standard rename server](https://github.com/openssh/openssh-portable/blob/master/sftp-server.c#L1260-L1318),
-and [Proxmox VE administration guide](https://pve.proxmox.com/pve-docs/pve-admin-guide.pdf)
+[Lima incomplete-instance inventory fix](https://github.com/lima-vm/lima/issues/5236), and
+[Proxmox VE administration guide](https://pve.proxmox.com/pve-docs/pve-admin-guide.pdf)
 
 Provider consoles are also not uniform or guaranteed. AWS serial console is disabled by default and
 has IAM/guest prerequisites; Azure requires boot diagnostics and RBAC; GCP interactive serial access
