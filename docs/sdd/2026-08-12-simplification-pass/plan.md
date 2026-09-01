@@ -54,13 +54,16 @@ so the items run in four groups rather than all at once:
    in the same files P5 factors, and deletions rebase cleanly under a later extraction while an
    extraction does not rebase cleanly under later deletions of what it extracted.
 
-The sweep's decision inventory came in at **539 rows: 294 delete, 38 convert, 207 keep**, covering
-about 700 assertion sites and 3,900 to 4,100 lines. It recommends cutting the sweep into five PRs by
-**shape** rather than by domain, plus a sixth for the source-guard family that `hla.md` now settles:
-the mechanical `match=` narrowing first, then guide and migration topics, then report lines and
-hints (the judgment-heavy batch), then schema, manifests, capabilities and platforms, then
-authored-artifact form policing. Batching by domain instead would put a no-judgment mechanical
-change into the same review as the sweep's riskiest deletions.
+The sweep's decision inventory cuts the work by **shape** rather than by domain: the mechanical
+`match=` narrowing first, then report lines and hints (the judgment-heavy batch), then schema,
+manifests, capabilities and platforms, then authored-artifact form policing, plus one for the
+source-guard family that `hla.md` now settles. A guide-and-migration batch was part of that cut
+until the guide rework deleted its whole estate; the inventory records it as settled-map history
+with every row dead. Batching by domain instead would put the lowest-judgment change into the same
+review as the sweep's riskiest deletions. [sweep-inventory.md](sweep-inventory.md) is the single
+source for the row counts, the per-group split and the PR topology, all of which it re-derives at
+HEAD; they are deliberately not restated here, because two copies of a count is how they drifted
+before.
 
 **Website work is deferred** until #486 merges (operator ruling 8). It lands as two PRs rather than
 one (effort lead, 2026-08-16): the website items themselves (W1, W4, W5, W6), and the sweep's
@@ -181,10 +184,19 @@ shares no files with the website work; it waits on the sweep instead, per group 
       convert rows point at the landed structural replacement, and keep rows name the invariant that
       earns the assertion.
 
-      **Step one is done**: [sweep-inventory.md](sweep-inventory.md), 1,160 rows (642 delete, 191
-      convert, 327 keep), batched into six PRs by shape, with group 3 cut into four sub-batches by
-      subsystem because 377 rows is too big for one review round. That artifact is deleted when the
-      sweep closes; its header says so.
+      **Step one is done**: [sweep-inventory.md](sweep-inventory.md), which is the single source for
+      this item's counts and topology; nothing here restates them. Its Totals section carries the
+      executable set and the full ledger, its group headers carry the per-group split, and group 3
+      is cut into four sub-batches by subsystem because one review round cannot hold it. That
+      artifact is deleted when the sweep closes; its header says so.
+
+      **Re-derived against HEAD on 2026-08-19**, after the post-#573 audit and the operator's
+      re-scope. Three things the restart inherits, all recorded in the inventory rather than here:
+      the guide rework deleted group 2's whole estate, so that group has no live row and no PR to
+      cut; the re-scope subtraction moves the secret-backend, secrets, database, resource
+      show/inspect and doctor-drift estates to the two owning efforts, group by group, in the
+      inventory's re-scope subtraction section; and the callee-side raise screen is now a mandatory
+      step for every group's delete rows.
 
       **Three corrections to this item's own enumeration, verified at HEAD 2026-08-16.** Two of the
       files it names for the sweep no longer exist: `test_schema_adapter.py` and

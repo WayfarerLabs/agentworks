@@ -83,11 +83,16 @@ Tailscale-ordering pin whose property observational tests already covered.
 
 ### `match=` splits three ways
 
-It appears at 663 sites, and the criteria above do not decide it on their own (operator ruling 10).
+It appears at 664 sites, and the criteria above do not decide it on their own (operator ruling 10).
 Deleting it wholesale drops real branch coverage; preserving it by adding a production discriminator
 is exactly what R2.2 forbids. So:
 
-1. The raised type already discriminates: **delete** the `match=`, keep the `raises`.
+1. The raised type already discriminates: **delete** the `match=`, keep the `raises`. That claim is
+   about the callee, not the call site. Before deleting under case 1, confirm the operation under
+   test raises the asserted type from exactly one path; where the type is raisable from more than
+   one, case 1 does not apply and the site takes case 2 or a keep. The group-1 screen (see the sweep
+   inventory's method section) found the single-path premise false for roughly four in five
+   resolvable sites, so treat case 1 as the exception to verify, never the default.
 2. The match is the only thing distinguishing same-type branches of one function: **discriminate
    structurally** where the code already offers a handle, meaning the exception type, an exception
    attribute, or the cause chain, and assert on that instead. Where our own authored wording is
@@ -101,12 +106,18 @@ where the prose arrives from outside the repository, so a `match=` against a pro
 upstream tool's error text is the one surviving form; every message this repository writes is
 authored prose, error messages included.
 
-**Corrected 2026-08-16** (sweep inventory, verified at HEAD). Two numbers here were wrong. The count
-was 696 and is 663, the wave 1 landings having taken the rest; a textual grep answers 664, one of
-which is a docstring mentioning `match=` rather than a site. And this taxonomy is keyed on a pytest
-spelling the website suite does not use: `website/tests` is `unittest` and carries **51
-`assertRaisesRegex` sites**, which are the same three cases and which a `match=`-keyed scan misses
-entirely. Read every rule above as governing both spellings.
+This taxonomy is keyed on a pytest spelling the website suite does not use: `website/tests` is
+`unittest` and carries `assertRaisesRegex` sites, which are the same three cases and which a
+`match=`-keyed scan misses entirely. Read every rule above as governing both spellings.
+
+**Corrected 2026-08-19** (map re-baseline, derived from the AST at HEAD by the inventory's
+`sweep-screen.py`). Both counts moved again. `match=` under `cli/tests` is **664**, not the 663 this
+document recorded: the Grok Build integration added one after the sweep map settled. And
+`assertRaisesRegex` under `website/tests` is **49**, not 51, `test_site_templates.py` having lost
+two to an unrelated narrowing. Nine further regex-family sites in that same suite were never in
+either count and are in the estate: one `assertRegex` in `test_site_build.py` and eight
+`assertNotRegex` across `test_lander_404.py` and `test_lander_phase4j.py`. All nine are already
+covered by group 5 rows, so nothing is unmapped; only the headline here was short.
 
 Case 2's "where the code already offers a handle" turned out to be the common case rather than the
 rare one, which is worth stating because it sized a whole batch. Two handles already exist in
