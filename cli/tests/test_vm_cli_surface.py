@@ -142,7 +142,8 @@ def test_vm_list_checkpoints_json_projects_checkpoint_fields(monkeypatch: pytest
     result = CliRunner().invoke(app, ["vm", "list-checkpoints", "--output", "json"])
 
     assert result.exit_code == 0, result.output
-    assert json.loads(result.stdout)["data"] == {
+    data = json.loads(result.stdout)["data"]
+    assert data == {
         "checkpoints": [
             {
                 "vm_name": "box",
@@ -158,6 +159,18 @@ def test_vm_list_checkpoints_json_projects_checkpoint_fields(monkeypatch: pytest
             }
         ]
     }
+    assert list(data["checkpoints"][0]) == [
+        "vm_name",
+        "name",
+        "provider_identifier",
+        "state",
+        "restore_status",
+        "purpose",
+        "capture_release",
+        "source_release",
+        "target_release",
+        "created_at",
+    ]
 
 
 def test_vm_create_admin_template_flag_forwards(

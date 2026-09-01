@@ -349,7 +349,7 @@ agw vm describe build-vm --output json
 ```
 
 `provider_identifier`, `source_release`, and `target_release` are nullable. Rows retain VM-name
-`restore_status` uses the same derived values as VM describe.
+order after filtering. `restore_status` uses the same derived values as VM describe.
 
 #### Workspace and agent JSON schemas
 

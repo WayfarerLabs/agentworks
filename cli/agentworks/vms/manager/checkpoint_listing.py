@@ -38,11 +38,11 @@ def checkpoint_listing_data(listings: Sequence[CheckpointListing]) -> JsonObject
     return {
         "checkpoints": [
             {
-                "restore_status": listing.restore_status.value,
                 "vm_name": listing.checkpoint.vm_name,
                 "name": listing.checkpoint.name,
                 "provider_identifier": listing.checkpoint.provider_identifier,
                 "state": listing.checkpoint.state.value,
+                "restore_status": listing.restore_status.value,
                 "purpose": listing.checkpoint.purpose,
                 "capture_release": listing.checkpoint.capture_release.value,
                 "source_release": (
