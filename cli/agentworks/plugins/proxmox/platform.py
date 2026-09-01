@@ -102,7 +102,9 @@ class ProxmoxConfig(AgwModel):
         if not isinstance(value, dict):
             return value
         adapted = dict(value)
-        raw_template_vmids = adapted.get("template_vmids") or {}
+        raw_template_vmids = adapted.get("template_vmids")
+        if raw_template_vmids is None:
+            raw_template_vmids = {}
         if isinstance(raw_template_vmids, dict):
             releases_by_value = {release.value: release for release in DebianRelease}
             template_vmids = {

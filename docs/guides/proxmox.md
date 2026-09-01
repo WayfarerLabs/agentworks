@@ -76,7 +76,7 @@ The setup script follows least-privilege principles:
 - **Custom roles** with only the privileges agentworks needs (no snapshots, backups, migrations,
   console access)
 - **Pool-scoped ACLs** so the token can only manage VMs in the `agentworks` pool
-- **Privilege-separated token** (`--privsep=1`) with its own permissions
+- **Dedicated token** that inherits only the scoped user's permissions (`--privsep=0`)
 - **Scoped storage/template/SDN access** to only the specific resources needed
 
 **The token can:** Clone the template, configure/start/stop/delete VMs in the `agentworks` pool,

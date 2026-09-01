@@ -259,6 +259,12 @@ def test_proxmox_validation_errors() -> None:
         _validate("proxmox", {**PROXMOX_CONFIG, "nodee": "x"})
 
 
+@pytest.mark.parametrize("template_vmids", [[], "", 0, False])
+def test_proxmox_rejects_falsy_non_mapping_template_vmids(template_vmids: object) -> None:
+    with pytest.raises(ConfigError):
+        _validate("proxmox", {**PROXMOX_CONFIG, "template_vmids": template_vmids})
+
+
 # -- The deliberate breaks ---------------------------------------------------
 
 

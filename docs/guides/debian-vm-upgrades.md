@@ -90,6 +90,10 @@ The command connects to that named VM, reads `/etc/os-release`, and shows both t
 releases. It accepts only a release recognized by the installed Agentworks build. If the values
 differ, it asks before changing the database. `--yes` or `-y` skips that confirmation.
 
+`vm describe` shows the last recorded release observation and its timestamp. It does not contact the
+guest or prove that the release is still current. Run `vm confirm-release` whenever you need to
+refresh that observation or suspect the guest changed outside Agentworks.
+
 On a confirmed change, Agentworks performs one local transaction: it records the live release and
 marks initialization pending. It does not reinitialize automatically. This is intentional because
 the observation remains true even if later convergence fails.
