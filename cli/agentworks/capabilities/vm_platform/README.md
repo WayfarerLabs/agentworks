@@ -68,16 +68,24 @@ described below.
 
 A vm-platform stands up a machine and hands Agentworks an administrative foothold on it. It:
 
-- **MUST** translate `ProvisionRequest.debian_release` through a platform-owned artifact map. Core
-  selects the concrete Debian release; a platform never infers "current" or falls back to another
-  artifact. An operator-owned catalog such as Proxmox must provide the requested release key.
+- **MUST** provision exactly `ProvisionRequest.debian_release`, resolving it through a
+  platform-owned, release-keyed artifact map without inferring "current", substituting another
+  release or operating system, or falling back. An unresolved release **MUST** fail before backend
+  mutation and identify an outdated code-owned platform or the missing operator-owned mapping. Any
+  other platform-owned value whose correctness varies by Debian release **MUST** also be keyed by
+  release.
+- **MUST NOT** make the current creation release or its artifact availability a requirement for
+  operations on an existing VM. Core owns recorded release observations and support warnings;
+  current, previous, and legacy guests proceed through the same platform lifecycle checks.
 - **MUST** create the admin user with the operator-configured name, holding full passwordless `sudo`
   over the machine, reachable by the operator's installed SSH public key and never by password.
 - **MUST** provide a transport that runs arbitrary commands as the admin user: the single foothold
-  every later provisioning step is driven through.
+  every later provisioning step is driven through. Core independently attests that the live guest is
+  Debian at the requested release before accepting creation and persists only that observation. The
+  check has no operator bypass, and a mismatch leaves enough backend identity for deletion.
 - **MUST** consume the required Tailscale auth key, complete the join before `create()` returns, and
-  roll back partial backend state before propagating a join failure or interruption. IP discovery
-  may be deferred after a successful join; Phase A retries only `tailscale ip -4`.
+  attempt cleanup before propagating a join failure or interruption. IP discovery may be deferred
+  after a successful join.
 - **MUST** provision the VM to the requested cpus, memory, and disk, rounding up to the nearest
   available shape where the backend sells only fixed shapes. A backend that structurally cannot
   honor a per-VM shape (WSL2, whose limits are global) is the exception, and it **MUST** at least
@@ -87,23 +95,22 @@ A vm-platform stands up a machine and hands Agentworks an administrative foothol
   VM's status; `create` **MUST** be collision-checked and either fail loudly on a name that already
   exists or pick and persist a new, collision-free backend name, never impacting an existing VM
   outside its control.
-- **MUST** provide a stop that preserves all system state for a later resume. Snapshotting and
-  restoring running state is preferable, but a platform **MAY** implement stop as a full OS
-  shutdown/restart, since Agentworks is built to be robust against restarts and the loss of running
-  processes.
+- **SHOULD** take reasonable steps to validate that the calling identity has the necessary
+  permissions before starting any operation. It **MUST NOT** present incomplete or advisory evidence
+  as proof of authorization; the provider's real request remains authoritative. See
+  [Provider-Native Permission Diagnostics](#provider-native-permission-diagnostics).
+- **MUST** provide a stop that preserves filesystem and configuration state for a later resume. A
+  platform **MAY** stop through a full OS shutdown and restart; running processes need not survive.
 - **SHOULD** take reasonable steps to reduce the cost and resource usage of a stopped VM, releasing
-  billable or heavy resources (compute, memory) for the duration of the stop where the backend
-  allows it. Some standing costs are over that line and accepted: Azure keeps its permanent public
-  IP attached (and billing) while stopped, because detaching it would incur unnecessary complexity.
-- **MUST** roll back its own partial backend state before letting a failure or an operator interrupt
-  propagate out of `create`, and **MUST NOT** report a `delete` as successful unless the backend VM
-  is actually gone. A delete that cannot remove the VM **MUST** raise so Agentworks retains its row
-  for a retry rather than orphaning a backend resource.
-- **MUST NOT** leave billed or orphaned backend resources behind after a delete or a rolled-back
-  create: every resource it creates is scoped to exactly one VM and shares that VM's lifecycle.
-- **MUST NOT** touch, reconfigure, or tear down anything it did not create for this VM, whether
-  another VM's resources, another site's state, or the operator's shared infrastructure (a resource
-  group, VPC, subnet, or bridge), which it reads and existence-checks but never creates or deletes.
+  billable or heavy resources where the backend allows it.
+- **MUST** attempt cleanup of its own backend state after a failed or interrupted `create`. If it
+  cannot confirm cleanup, it **MUST** fail while preserving enough identifiers for explicit deletion
+  and report any residue with recovery guidance.
+- **MUST NOT** report `delete` as successful until the backend VM is confirmed gone. A failure
+  **MUST** retain the Agentworks row for retry.
+- **MUST** scope every resource it creates to one VM and **MUST NOT** reconfigure or tear down
+  another VM's resources, another site's state, or shared operator infrastructure such as a resource
+  group, VPC, subnet, or bridge.
 - On a full-control cloud host it **MUST** default to zero standing inbound exposure, opening only a
   narrowly scoped, ephemeral hole for the one operation that needs it and closing it after, failing
   closed rather than open; on an externally administered or local host it **MUST NOT** manage the
@@ -112,8 +119,8 @@ A vm-platform stands up a machine and hands Agentworks an administrative foothol
   **MUST NOT** log or persist resolved secret values (its metadata carries only non-secret state
   required for safe lifecycle operations).
 
-Notably, VM platforms do not create agent users, workspaces, groups, sessions, or inject secrets.
-Those are managed by the Agentworks core system through platform-agnostic mechanisms.
+VM platforms do not create Agentworks users, workspaces, groups, or sessions or manage their
+secrets. Core owns those resources through platform-agnostic mechanisms.
 
 ## Technical Overview
 
@@ -179,10 +186,11 @@ and DB migration.
 - `create(request, ctx) -> ProvisionResult` is deliberately **not** `@idempotent_op`: it runs a
   pre-flight collision check, then either raises `StateError` (all six in-tree platforms) or, for a
   soft-name backend, selects a different collision-free backend name and records that identifier in
-  `platform_metadata`. A re-run must never target or replace an existing VM. A create that cannot
-  confirm rollback raises `RetainedProvisioningError` with addressable platform metadata; core
-  persists that metadata and retains the provisional row in failed state so `vm delete` can finish
-  cleanup.
+  `platform_metadata`. A re-run must never target or replace an existing VM; Proxmox's remaining
+  failure-closed collision-query gap is tracked in #719. A create that cannot confirm rollback
+  raises `RetainedProvisioningError` with addressable platform metadata; core persists that metadata
+  and retains the provisional row in failed state so `vm delete` can finish cleanup. EC2 implements
+  that retained handoff; the remaining platform rollback paths are tracked in #718.
 - `start(vm, ctx)`, `stop(vm, ctx)`, `delete(vm, ctx)` are flagged `@idempotent_op` and must land in
   the same place run twice as run once. The marker is inherited through the MRO, so an override does
   not restate the decorator. `reinit` re-applies everything and failed commands are retried, so the
