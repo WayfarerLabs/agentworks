@@ -98,6 +98,10 @@ appropriate live tests. Tests assert behavior and structure, never the wording o
       `review-requested`.
 - [x] Collect the authorized published design feedback window and complete up to three converging
       correction cycles using the 20-minute minimum interval.
+- [x] Reconcile the teardown design with the dedicated-server architecture, operator-added panes,
+      primary signal/tmux evidence, dedicated `kill-server`, exact legacy `kill-session`, hardened
+      proven-absence-only stale cleanup, and the separate systemd/cgroup security follow-up in issue
+      #715; rerun the complete design gates and reviews.
 - [ ] Record final design clearance and merge PR #710 before implementation begins.
 
 ### Phase 0 Definition of Done
@@ -168,11 +172,17 @@ appropriate live tests. Tests assert behavior and structure, never the wording o
 
 - [ ] Inventory and route direct stop, restart, direct delete, batch stop, workspace delete, agent
       delete, and reachable VM-delete session cleanup through one session-domain teardown authority.
-- [ ] Replace pane `C-c` with SIGTERM after exact `=NAME` pane discovery and same-command owner
-      revalidation; signal only positive pane PIDs and refuse unsafe or indeterminate targets
-      without expanding process authority.
-- [ ] Preserve one shared grace phase for batches, verified liveness, socket cleanup, stopped-state
-      persistence, and explicit force/PID recovery for broken sessions.
+- [ ] Delete pane `C-c` and its grace sleep; use `kill-server` for each reachable dedicated runtime,
+      verify all operator-added sessions/panes/windows are gone, and retain exact
+      `kill-session -t =NAME` only for reachable legacy shared-server rows.
+- [ ] Add the explicit residual status for a reachable dedicated server whose canonical session is
+      absent; route stop/delete through teardown, start/restart through teardown then launch, and
+      make attach refuse without requiring `--force`.
+- [ ] Add nullable `tmux_server_start_ticks`, atomic fingerprint persistence/clearing, and safe
+      reachable-row backfill; make missing or mismatched broken-state identity fail closed.
+- [ ] Delete raw numeric-PID force kill; permit exact admin/agent stale-socket cleanup only after
+      the stored boot/PID/start-time fingerprint proves the old server already exited, and fail
+      closed on a matching live process, missing identity, or indeterminate result.
 - [ ] Preserve each parent deletion path's existing best-effort or fail-closed policy when targets
       cannot be reached or reconstructed.
 - [ ] Delete superseded session kill loops and prove all intended teardown consumers use the shared
@@ -180,8 +190,8 @@ appropriate live tests. Tests assert behavior and structure, never the wording o
 
 ### Phase 3 Definition of Done
 
-- Direct, batch, restart, and cascading operations share one core-owned SIGTERM/grace/kill
-  implementation.
+- Direct, batch, restart, and cascading operations share one exact tmux teardown authority and one
+  force-only, proven-absence stale-state recovery implementation with no numeric-PID signaling.
 - Harness integrations have no teardown API or responsibility.
 
 ## Phase 4: Console Lifecycle

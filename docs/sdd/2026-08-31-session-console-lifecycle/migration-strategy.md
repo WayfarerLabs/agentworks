@@ -26,11 +26,13 @@ At the baseline:
   it;
 - console attach resolves pane secrets whenever it decides a build is needed;
 - console list and describe remain database-only;
-- session rows already store namespaced harness integration state, PID, and socket path;
+- session rows already store namespaced harness integration state, PID, boot ID, and socket path,
+  but not the process start time needed to distinguish an exited server from PID reuse;
 - console rows already store every durable definition field required for later realization.
 
-No database schema migration is required. The migration affects CLI grammar, internal vocabulary,
-the in-repository capability API, orchestration ownership, and operator expectations.
+One additive database migration adds nullable `tmux_server_start_ticks`. The broader migration
+affects CLI grammar, internal vocabulary, the in-repository capability API, orchestration ownership,
+and operator expectations.
 
 ## Domain-Complete Implementation Stack
 
@@ -91,6 +93,10 @@ through service and capability layers. It is independent from `--force`:
 
 On a running session, `start --force-new` refuses and directs the operator to `restart --force-new`.
 
+A dedicated server that remains reachable after the canonical session disappears reports the new
+`residual` status. It does not require `--force`: stop/delete remove it, start/restart remove it
+before launch, and attach refuses because no canonical session exists.
+
 ## Configuration Compatibility
 
 No configuration field changes.
@@ -139,6 +145,19 @@ A normal start or restart does not rotate a usable binding merely because the me
 Rows with legacy default-tmux-server state continue their existing on-use migration into the
 per-session socket model through canonical start or restart.
 
+### Tmux server fingerprints
+
+The database migration leaves `tmux_server_start_ticks` null for existing rows. A new runtime stores
+it atomically with PID, boot ID, and socket path. A reachable existing dedicated server may backfill
+it only after tmux reports the stored PID and the current boot matches the stored boot ID. A broken
+same-boot row whose stored PID remains live but has no provable start time cannot prove prior-server
+absence; it fails closed and asks for manual recovery rather than risking cleanup around a live or
+unrelated process. A changed boot or absent PID already proves the old process gone.
+
+Stopping a retained session clears the start time with the PID sentinel. An older binary may leave a
+stale or null value after rollback; a later new binary never trusts that value unless it matches the
+current socket-reported server identity.
+
 ### Console rows
 
 Every existing console row becomes a stopped durable definition if its derived tmux runtime is
@@ -161,22 +180,26 @@ The 0.19 upgrade guide and release notes explain:
 5. replace `console attach --recreate` with `console restart`, followed by attach when desired;
 6. hidden compatibility forms last only through 0.19 and are removed in 0.20;
 7. harness integration implementations move directly to the version-1 start-only API; core uses
-   SIGTERM and its existing grace/force policy for session teardown.
+   whole-server destruction for reachable dedicated runtimes, exact session destruction for legacy
+   shared-server rows, and proven-absence-only stale cleanup for broken dedicated runtimes.
 
 The guide teaches only canonical commands. Command reference material may include one bounded
 compatibility note in the 0.19 upgrade guide, not in every command description.
 
 ## Rollback
 
-The database remains backward-readable because no schema changes. Rollback to the previous binary
-restores the old CLI grammar and capability code, but operators must understand three asymmetries:
+The additive nullable column remains backward-readable. Rollback to the previous binary restores the
+old CLI grammar and capability code, but operators must understand four asymmetries:
 
 - a new forced-fresh operation may have changed a selected integration's binding, so the old binary
   resumes or launches from that new binding rather than recovering the abandoned one;
 - while a Codex pending-fresh marker exists without a newly reported ID, the old binary does not
   understand the marker and may read or rediscover the recorder identity the new binary rejected;
 - a console created under the new binary may already have a runtime, while the old binary simply
-  attaches to it.
+  attaches to it;
+- the old binary does not maintain `tmux_server_start_ticks`; after returning to the new binary, a
+  reachable server can be safely backfilled, while a broken server without a matching fingerprint
+  refuses forced PID recovery.
 
 None of these cases corrupts durable state. Old external conversations remain available through
 their own tools even when Agentworks no longer binds to them.

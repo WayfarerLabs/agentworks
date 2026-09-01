@@ -28,7 +28,7 @@ status   core teardown  launch           live probe  teardown   realization
               |          v
               |  create session tmux runtime
               v
-   SIGTERM, grace, verify, force
+ kill dedicated server, verify, stale-state recovery
 ```
 
 The commonality is command meaning, not a shared runnable abstraction. Sessions retain persisted
@@ -59,8 +59,9 @@ authoritative over the policy option.
 
 The session manager keeps distinct public operations and shares only domain-specific internal steps:
 
-- `start_session` classifies current status and either no-ops, refuses, performs forced broken-state
-  recovery, or invokes the absent-runtime start path;
+- `start_session` classifies current status and either no-ops, refuses, removes a reachable residual
+  dedicated server, performs forced indeterminate-state recovery, or invokes the absent-runtime
+  start path;
 - `restart_session` performs all pre-mutation work, uses the shared teardown authority when a
   runtime exists, then invokes the same absent-runtime start path;
 - `stop_session`, direct deletion, batch operations, and cascading deletion use one teardown
@@ -77,20 +78,44 @@ handling visible and avoids encoding session-specific recovery in flags on a cro
 
 ### Core-owned session teardown
 
-One session teardown authority owns the selected target and current status, SIGTERM to each verified
-tmux pane process, one bounded grace window and liveness check, tmux removal and explicit PID
-fallback for broken state, socket cleanup, and persisted stopped state. Batch and cascading
-operations signal their candidates before one shared grace phase rather than waiting one full
-timeout per session.
+One session teardown authority owns the selected target and current status, exact tmux teardown,
+verification, forced broken-state recovery, socket cleanup, and persisted stopped state. A current
+reachable runtime is removed with `kill-server` through its persisted, validated managed socket.
+Core does not inject `C-c`, enumerate pane processes, or wait through a grace phase. The dedicated
+server is the ownership boundary, so the same operation destroys every tmux session, window, and
+pane the operator added to that Agentworks runtime. Batch and cascading operations issue teardown to
+their reachable candidates and verify each dedicated server exited.
 
-Verification stays inside the session domain: exact tmux session selection yields pane process
-identities, and the same remote command revalidates the prepared session-owner UID before signaling
-that positive PID. Failure to prove that identity skips SIGTERM and retains exact tmux teardown
-after the shared grace phase; it never widens the process target.
+A reachable legacy row may still share the default tmux server. It uses exact
+`kill-session -t =NAME` and verifies only that named session absent. It never destroys or signals
+the shared server. This asymmetry stays inside the session-domain teardown authority rather than
+weakening the dedicated-server guarantee.
+
+If the canonical named session is absent but its dedicated server still answers on the persisted
+managed socket, status is `RESIDUAL`. This can happen when a process created a sibling tmux session
+and the canonical session later exited. Stop and deletion destroy the server; start and restart do
+the same before launch. None requires `--force`, because tmux still provides the ordinary scoped
+control authority. Attach refuses because there is no canonical session to join.
+
+The broken-state path is deliberately different because tmux no longer supplies the ordinary control
+authority. Session creation persists a `TmuxServerFingerprint` alongside the existing socket and
+boot identity: positive server PID and Linux process start time. With explicit `--force`, core
+requires the stored boot identity and positive PID, then compares current state. A changed boot or
+absent PID proves prior-server absence without a start time. A same-boot existing PID requires a
+valid stored start time and mismatch. Only that branch-appropriate proof permits removal of the
+exact validated managed admin or agent socket and a durable stopped-state transition. A matching
+live process, evidence missing from the applicable branch, or indeterminate check fails closed with
+manual-recovery guidance. Core never signals the numeric PID, and a legacy row whose PID may name a
+shared server cannot widen that boundary.
 
 The harness integration has no stop or restart API. If a future integration demonstrates a concrete
-application-specific shutdown requirement that core signaling cannot satisfy, that requirement gets
-a separately designed seam rather than speculative lifecycle machinery now.
+application-specific shutdown requirement that exact tmux teardown cannot satisfy, that requirement
+gets a separately designed seam rather than speculative lifecycle machinery now.
+
+Tmux remains the process boundary for this effort. Terminal-detached descendants are outside its
+guarantee; systemd-managed cgroup containment is a separate security design tracked in
+[issue #715](https://github.com/WayfarerLabs/agentworks/issues/715), not a second supervisor layered
+into this lifecycle change.
 
 ### Harness integration contract version 1
 
@@ -261,8 +286,10 @@ boundaries.
 
 ## Persistence and Failure Model
 
-No database schema migration is required. Existing session fields and the full namespaced
-`harness_integration_state` blob are sufficient. Consoles continue to persist only their definition.
+One additive nullable session column stores the tmux-server process start time needed to distinguish
+an already-exited server from PID reuse during forced broken-state cleanup. Existing harness state
+remains in the full namespaced `harness_integration_state` blob. Consoles continue to persist only
+their definition.
 
 The key commit points are:
 
@@ -296,8 +323,9 @@ The key commit points are:
 - `agentworks.capabilities.harness_integration`: version-1 start-only contract, `HarnessStart`, and
   shell implementation.
 - built-in plugin packages: integration-owned continuation and forced-fresh behavior.
-- database layer: unchanged session and console storage APIs, except service-facing method names may
-  change with the vocabulary cutover.
+- database layer: one atomic session-runtime-state update for socket path, PID, boot ID, and process
+  start time; console storage APIs remain unchanged, while service-facing method names may change
+  with the vocabulary cutover.
 
 No package imports a console or VM implementation into the harness capability. No generic runtime
 base, cross-domain status enum, or shared lifecycle dispatcher is added.
@@ -317,7 +345,7 @@ Rejected because a policy option must not change the lifecycle verb. The command
 ### Put restart on the harness integration
 
 Rejected because the integration supplies workload behavior but does not own tmux, PID, liveness,
-grace periods, or fallback kill.
+exact runtime teardown, or broken-server recovery.
 
 ### Keep attach-time console realization
 

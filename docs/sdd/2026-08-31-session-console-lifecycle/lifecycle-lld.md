@@ -171,18 +171,42 @@ thin enough that their distinct status policy remains obvious.
 
 ### Status matrix
 
-| Operation             | Stopped                          | Running                                         | Broken                                      |
-| --------------------- | -------------------------------- | ----------------------------------------------- | ------------------------------------------- |
-| `start`               | launch with continuation allowed | success, no launch work                         | refuse unless `--force`; then recover/start |
-| `start --force-new`   | launch fresh                     | refuse and name `restart --force-new`           | refuse unless `--force`; then recover/start |
-| `restart`             | launch with continuation allowed | teardown, then launch with continuation allowed | refuse unless `--force`                     |
-| `restart --force-new` | launch fresh                     | teardown, then launch fresh                     | refuse unless `--force`; then launch fresh  |
-| `stop`                | success                          | core SIGTERM/grace/force teardown               | refuse unless `--force`                     |
-| `attach`              | refuse                           | attach                                          | refuse                                      |
+| Operation             | Stopped                          | Running                                         | Residual                         | Broken                                      |
+| --------------------- | -------------------------------- | ----------------------------------------------- | -------------------------------- | ------------------------------------------- |
+| `start`               | launch with continuation allowed | success, no launch work                         | teardown, then launch            | refuse unless `--force`; then recover/start |
+| `start --force-new`   | launch fresh                     | refuse and name `restart --force-new`           | teardown, then launch fresh      | refuse unless `--force`; then recover/start |
+| `restart`             | launch with continuation allowed | teardown, then launch with continuation allowed | teardown, then launch            | refuse unless `--force`                     |
+| `restart --force-new` | launch fresh                     | teardown, then launch fresh                     | teardown, then launch fresh      | refuse unless `--force`; then launch fresh  |
+| `stop`                | success                          | dedicated-server teardown                       | dedicated-server teardown        | refuse unless `--force`                     |
+| `attach`              | refuse                           | attach                                          | refuse and name start or restart | refuse                                      |
 
 Legacy default-tmux-server rows remain a migration case inside status preparation. Start and restart
 migrate them into the existing per-session socket model through the same verified teardown and
 runtime creation path.
+
+`SessionStatus.RESIDUAL` means the canonical `=NAME` session is absent while the persisted managed
+socket still reaches the fingerprinted dedicated server. It is not a force-gated broken state:
+ordinary scoped tmux authority is still available and owns every sibling session on that server.
+Status classification MUST test for this state rather than treating every failed `has-session` as
+broken.
+
+### Tmux server fingerprint
+
+The session table adds nullable `tmux_server_start_ticks`, the decimal Linux clock-tick value from
+field 22 of `/proc/PID/stat`. Together with the existing positive `pid` and `boot_id`, it identifies
+one process incarnation across PID reuse.
+
+Tmux creation obtains the server PID through the new socket, reads the VM boot ID and process start
+time, and persists all three with the socket path as one runtime-state update. Capture reads the
+socket-reported PID, boot ID, and `/proc/PID/stat`, then repeats the socket PID and stat reads
+before persistence; both PID and start-time observations must match. Parsing locates the final `)`
+ending the process command and selects the twentieth whitespace-delimited field after it, which is
+Linux stat field 22; it does not split the command's `(tmux: server)` value on whitespace. A stopped
+sentinel clears the start time. Existing positive-PID rows migrate with a null start time. When
+their tmux socket is reachable, lifecycle preparation may backfill through the same repeated capture
+only when the socket-reported server PID matches the stored PID and the stored boot ID matches the
+VM. A same-boot broken row whose stored PID still exists but has no provable start time cannot
+distinguish that process from the old server and fails closed with manual-recovery guidance.
 
 ### Absent-runtime launch
 
@@ -201,7 +225,7 @@ It performs:
 4. surface `HarnessStart.note` when present;
 5. persist the complete namespaced state blob;
 6. create the tmux session;
-7. persist socket path and PID;
+7. persist socket path and the complete tmux server fingerprint;
 8. complete existing restricted-config and creation bookkeeping.
 
 For create, step 5 is part of inserting the new row. If a later creation step fails, existing
@@ -217,8 +241,11 @@ The public operation first resolves and classifies status:
   resolution;
 - running with `force_new=True` raises a typed state error before mutation and identifies
   `restart --force-new`;
-- broken requires `force`; after verified PID fallback it enters the absent-runtime path with the
-  caller's continuation policy.
+- residual enters shared dedicated-server teardown without `force`, then the absent-runtime launch
+  path;
+- broken requires `force`; after fingerprinted proof that the prior server is already absent and
+  exact stale-socket cleanup, it enters the absent-runtime path with the caller's continuation
+  policy.
 
 `start --all` applies the same matrix per selected session. With `--force-new`, stopped selections
 launch fresh while running selections remain untouched and report the same actionable error as the
@@ -232,7 +259,8 @@ Restart validates and resolves the replacement before destructive action. It the
 
 - skips teardown for stopped sessions;
 - uses shared teardown for healthy running sessions;
-- requires `--force` and uses verified PID fallback for broken sessions;
+- uses shared dedicated-server teardown for residual sessions without requiring `force`;
+- requires `--force` and proves the prior server absent before cleaning broken session state;
 - invokes absent-runtime launch with the requested `force_new` value.
 
 Restart itself is authorization to replace a healthy running runtime and does not prompt solely for
@@ -242,35 +270,51 @@ ceremony.
 ### Shared teardown
 
 A private session-domain teardown operation consumes prepared candidates and explicit policies for
-direct stop, restart, delete, or cascading cleanup. It does not accept an open-ended callbacks or
+direct stop, restart, delete, or cascading cleanup. It does not accept open-ended callbacks or
 generic resource types.
 
 For reachable healthy sessions it:
 
-1. resolves each exact tmux pane's process identity through the already authorized target and
-   refuses dangerous or indeterminate signal targets;
-2. sends SIGTERM to every verified pane process as the ordinary cooperative stop;
-3. starts one shared grace deadline for the candidate set;
-4. checks liveness and removes surviving tmux state;
-5. cleans the managed socket only after process death is established;
-6. persists the stopped PID sentinel when the caller retains the session row.
+1. validates the persisted socket as a canonical absolute path directly inside the expected managed
+   admin or agent owner directory, preserving the stored artifact identity rather than re-deriving
+   it from the current naming convention;
+2. requires that socket's reported server PID and current boot/start-time identity match the stored
+   fingerprint, then invokes `tmux -S SOCKET kill-server` through the already authorized target;
+3. verifies the fingerprinted server process exited, treating a concurrent natural exit as success;
+4. removes the exact persisted socket if tmux left it behind and verifies that path is absent;
+5. only then persists the stopped PID sentinel and null start time when the caller retains the
+   session row.
 
-The SIGTERM helper is session-specific and uses the existing prepared target. It selects the tmux
-session as exact `=NAME`, including for a legacy shared-server row, and enumerates all of that
-session's panes with `list-panes -s` and `#{pane_pid}`. Each value must be a canonical decimal
-greater than one. In the same remote shell command that sends the signal, core re-reads the process
-UID and requires it to equal the prepared session owner's UID. Only then may it invoke
-`kill -TERM -- PANE_PID`. Values are shell-quoted after numeric validation. A nonempty harness pane
-uses the existing `exec` wrapper, so the tmux pane PID is the harness process; core does not
-discover or signal a broader process tree. The stored session PID remains the tmux server PID and is
-never substituted for a pane process identity.
+There is no pane enumeration, injected terminal key, direct pane signal, or grace sleep. Tmux owns
+the dedicated server's pseudo-terminals and destroys every session, window, and pane on it,
+including a sibling tmux session the operator created after launch. A legacy reachable
+shared-default-server row instead invokes `tmux kill-session -t =NAME`, uses exact `=NAME` targets
+rather than prefix matching, verifies only that session absent, and does not require or attempt
+shared-server exit.
 
-Signal-target lookup or SIGTERM failure does not expand authority or cause an unverified process to
-be signaled. The candidate proceeds to the existing exact tmux teardown after the shared grace
-phase. That teardown and every new session tmux query use exact `=NAME` targets rather than tmux
-prefix matching. Broken tmux-server PID fallback stays an explicit `force` path, using its existing
-SIGTERM-to-SIGKILL escalation, and does not masquerade as graceful workload stop. Parent deletion
-paths preserve their current best-effort or fail-closed policy when a target cannot be reached.
+If ordinary teardown fails, the operation rechecks exact session and server state. A naturally
+exited server is success. An indeterminate result is a typed failure. With explicit `force`, a
+broken dedicated runtime may enter stale-state recovery when a canonical stored boot identity and a
+positive PID are present. Recovery applies one conditional absence proof:
+
+1. a changed current VM boot ID proves the old process gone without a start time;
+2. on the same boot, an absent stored PID proves the old process gone without a start time;
+3. on the same boot with that PID present, a valid stored start time is required and the same robust
+   `/proc/PID/stat` parser must return a different start time to prove the old process gone;
+4. apply the same canonical managed-owner/root validation to the persisted socket path, preserving
+   historical DB-source-of-truth path shapes under both admin and agent roots;
+5. only after proven absence, remove that exact stale socket, verify the path absent, and permit
+   stopped-state persistence.
+
+A matching live process, a same-boot live PID with missing start time, malformed process data,
+transport failure, or any other indeterminate result refuses recovery with manual-recovery guidance.
+Core never invokes `kill` for the numeric PID. Legacy rows get the same absence-only treatment and
+never signal or destroy a possibly shared server. Parent deletion paths preserve their current
+best-effort or fail-closed policy when a target cannot be reached.
+
+This contract deliberately stops at tmux-owned terminal state. A process that deliberately detaches
+from its terminal may outlive tmux; systemd/cgroup containment of all descendants is the separate
+security design tracked in [issue #715](https://github.com/WayfarerLabs/agentworks/issues/715).
 
 ## Console Operations
 
@@ -433,9 +477,11 @@ Tests remain structural and behavioral:
 - Codex forced-fresh binding/recorder cleanup, rejected-recorder comparison on pre-exec failure and
   retry, malformed type/non-canonical UUID convergence, and no prior-state adoption;
 - shell selection of `command` versus `resume_command`;
-- exact pane process validation, SIGTERM dispatch, refusal of dangerous or indeterminate targets,
-  one shared grace phase, and surviving tmux teardown;
-- direct and cascading teardown use the shared authority;
+- dedicated `kill-server` teardown of every managed tmux session/pane/window, including a sibling
+  tmux session, plus exact legacy `kill-session`, with no key injection or grace delay;
+- stable server-fingerprint persistence and backfill, proven-absence-only stale cleanup, both
+  managed socket roots, no numeric-PID signaling, and legacy shared-server protection;
+- direct and cascading teardown use the shared authority, including residual dedicated runtimes;
 - console attach performs no builder or pane-secret work;
 - console stale-predecessor create boundary, staging publication/cleanup, required-step failure, and
   post-insert definition retention;

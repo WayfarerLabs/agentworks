@@ -26,9 +26,9 @@ effort does not invent a VM restart merely for symmetry.
 For sessions, `start` and `restart` both request continuation of prior harness state when the
 selected harness integration supports it, unless the operator passes `--force-new`. Continuation is
 a harness decision, not the name or guaranteed outcome of the Agentworks lifecycle operation. A
-harness integration supplies start behavior. Core owns SIGTERM, runtime teardown, liveness
-verification, grace timing, and fallback kill behavior. A harness integration exposes neither stop
-nor restart and never owns the old process.
+harness integration supplies start behavior. Core owns exact tmux runtime teardown, liveness
+verification, and fail-closed cleanup of proven-stale broken runtime state. A harness integration
+exposes neither stop nor restart and never owns the old process.
 
 The change is complete across the current system. Commands, manager operations, capability APIs,
 configuration vocabulary where affected, output, errors, logs, completion, guide content, operator
@@ -75,10 +75,9 @@ operator can pass `--force-new` to require a fresh harness start instead.
 
 ### Operator deliberately replacing a running session
 
-The operator runs `agw session restart NAME`. Agentworks performs complete core-owned teardown and
-required fallback kill behavior, then invokes the same harness start operation used for a stopped
-session. The command itself is sufficient authorization to replace the running runtime; it is not
-mislabeled as a resume.
+The operator runs `agw session restart NAME`. Agentworks performs complete core-owned teardown, then
+invokes the same harness start operation used for a stopped session. The command itself is
+sufficient authorization to replace the running runtime; it is not mislabeled as a resume.
 
 ### Operator attaching to a session
 
@@ -140,11 +139,15 @@ If the session is already running, `session start` MUST report that fact and suc
 stopping, replacing, resolving runtime-only secrets, or invoking the harness start operation.
 `session start NAME --force-new` on a running session MUST instead fail without mutation and direct
 the operator to `session restart NAME --force-new`; start MUST NOT acquire restart semantics from
-the policy flag. If the session is broken, the command MUST refuse before destructive action unless
-the operator passes the command's explicit force option. A forced start MUST use the same core-owned
-bounded kill behavior as restart, verify that the broken runtime no longer owns the session, and
-then start the replacement. If teardown cannot be verified, it MUST fail without invoking harness
-start.
+the policy flag. A dedicated server that remains reachable after the canonical named tmux session
+disappears is a residual runtime, not an indeterminate broken runtime. Start MUST remove that whole
+reachable server without requiring `--force`, then launch according to the requested continuation
+policy. If the session is broken because its ordinary tmux authority cannot be reached, the command
+MUST refuse before destructive action unless the operator passes the command's explicit force
+option. A forced start MUST use the same core-owned fingerprinted stale-state recovery as restart,
+verify that the broken runtime no longer exists, clean only the exact validated managed socket, and
+then start the replacement. It MUST NOT signal a numeric PID. If prior-server absence cannot be
+verified, it MUST fail without cleanup, stopped-state persistence, or harness start.
 
 `session start --all` MUST operate on every matching stopped session and leave already-running
 sessions unchanged. The existing VM, workspace, agent, and admin filters MUST remain available and
@@ -158,15 +161,15 @@ canonical start command MUST NOT need a redundant `--all-stopped` spelling.
 
 `agw session restart NAME` MUST leave the named session running after replacing or re-establishing
 its runtime. For a running session, core MUST complete preflight and required secret resolution
-before destructive action, gracefully stop the existing runtime, apply its bounded fallback kill
-policy when needed, verify that the old runtime no longer owns the session, and only then invoke the
-harness start operation. A broken runtime MUST require the explicit force option before destructive
-recovery.
+before destructive action, authoritatively remove the existing tmux runtime, verify that the old
+runtime no longer owns the session, and only then invoke the harness start operation. A broken
+runtime MUST require the explicit force option before stale-state recovery.
 
 A stopped session passed to `session restart` MUST be started without manufacturing a meaningless
 stop operation. Both the running and stopped paths MUST request continuation from the harness
 integration because the durable logical session already exists. `session restart NAME --force-new`
 MUST perform the same core lifecycle transition but require a fresh harness launch afterward.
+Restart MUST remove a reachable residual dedicated server before launch without requiring `--force`.
 
 The restart verb itself is explicit authorization to replace a running runtime. Canonical
 single-session restart MUST NOT prompt merely because the session is running, and MUST NOT carry a
@@ -179,23 +182,43 @@ explicit verb.
 
 ### R4: Session stop and attach remain distinct
 
-Core MUST own the full stop state machine. Every core operation that intentionally ends a reachable
-live session runtime MUST send SIGTERM to each verified tmux pane process, wait according to one
-bounded grace policy, verify liveness, remove surviving tmux state, apply the existing explicit
-force/PID fallback when required, and only then persist the stopped state. Core MUST NOT signal an
-indeterminate or dangerous process identity. This includes direct stop, the teardown half of
-restart, direct session deletion, and cascading workspace, agent, or VM deletion where the runtime
-can still be addressed. Batch stop, restart, and cascading teardown MUST retain one bounded,
-scalable grace phase rather than waiting serially for every session.
+Core MUST own the full stop state machine. Every current admin or agent session has a dedicated tmux
+server and socket. An operation that intentionally ends a reachable current runtime MUST invoke
+tmux's server-destruction operation through that persisted, validated managed socket. It MUST NOT
+inject terminal keys, enumerate pane processes, or add a grace delay before that operation. The
+dedicated tmux server is the complete managed runtime boundary: teardown MUST include every session,
+window, and pane in it, including tmux state the operator created after launch. Core MUST verify
+that the server exited before persisting the stopped state. This includes direct stop, the teardown
+half of restart, direct session deletion, and cascading workspace, agent, or VM deletion where the
+runtime can still be addressed.
+
+A reachable legacy row that may use a shared default tmux server MUST instead address its exact tmux
+session as `=NAME` and invoke `kill-session`. Core MUST verify only that exact session is absent; it
+MUST NOT destroy, signal, or require exit of the shared server.
 
 Shared teardown logic used by stop, restart, direct delete, and cascading delete MUST have one core
 authority with explicit policy inputs for their real differences. The implementation MUST remove
 duplicated session kill loops. Restart MUST NOT grow a separate command-local kill implementation,
 and the harness integration MUST NOT expose stop or restart operations.
 
+A broken dedicated tmux runtime whose socket cannot perform exact teardown MUST refuse stale-state
+recovery unless the caller supplied the operation's explicit force option. Force recovery MUST use a
+stable tmux-server process fingerprint captured at creation: VM boot ID, positive server PID, and
+Linux process start time. A changed boot or absent stored PID proves the prior server gone without a
+start time. On the same boot with that PID still present, a valid stored start time is required and
+only a mismatch proves prior-server absence. Core may then clean the exact validated managed socket
+and persist stopped state. It MUST NOT signal a numeric PID or attempt to kill a still-live server
+whose tmux control socket is unusable. Evidence missing from the applicable branch or any
+indeterminate identity MUST fail closed with manual-recovery guidance. The same boundary applies to
+legacy rows whose PID may identify a shared tmux server.
+
 `session attach` MUST continue to join only a running session. A stopped or broken session MUST
 produce an actionable error identifying the appropriate lifecycle command. Attach MUST NOT start,
 restart, repair, or otherwise replace the session runtime.
+
+A residual dedicated runtime MUST behave like a reachable runtime for stop and deletion: core
+destroys the dedicated server without requiring `--force`. Attach MUST refuse because the canonical
+named session no longer exists and direct the operator to start or restart it.
 
 ### R5: Console lifecycle
 
@@ -256,7 +279,7 @@ remove another console whose name merely shares a prefix.
 
 The harness integration capability MUST expose one launch operation named `start`. It MUST NOT
 expose `stop`, `restart`, or `resume` lifecycle operations. Core owns session status inspection,
-SIGTERM, stop orchestration, liveness verification, grace and escalation policy, fallback kill, tmux
+exact tmux teardown, liveness verification, forced stale-state cleanup, socket cleanup, tmux
 replacement, and the decision to invoke start. A harness integration MUST NOT kill, replace, attach
 to, or persist liveness for the Agentworks session runtime.
 
@@ -401,8 +424,11 @@ attach. Runtime creation MUST not be hidden behind inspection, list, completion,
 13. Focused deterministic CLI, service, orchestration, secret-boundary, capability-contract, and
     completion tests demonstrate the full state matrix; representative live console/session tests
     cover admin and agent targets plus continuation and forced-fresh behavior.
-14. Direct and cascading session teardown route through one core stop authority and one bounded
-    grace policy.
+14. Direct and cascading session teardown route through one core stop authority; current dedicated
+    runtimes use whole-server destruction, legacy shared-server rows use exact session destruction,
+    and neither path injects pane signals or a grace delay. Forced broken-state recovery cleans
+    exact managed state only after proving the prior server is already absent; it never signals a
+    numeric PID.
 
 ## Non-goals
 
@@ -415,6 +441,8 @@ attach. Runtime creation MUST not be hidden behind inspection, list, completion,
   except where needed to establish the explicit lifecycle boundary.
 - Changing VM provisioning, power, reinitialization, or Debian release-transition behavior.
 - Changing the vm-platform capability contract.
+- Introducing cgroup or process-namespace containment. Systemd-managed per-session cgroups are the
+  security follow-up tracked in [issue #715](https://github.com/WayfarerLabs/agentworks/issues/715).
 - Rewriting historical release notes or locked SDD artifacts.
 
 ## Requirements Rulings
@@ -435,11 +463,23 @@ attach. Runtime creation MUST not be hidden behind inspection, list, completion,
 - **2026-08-31 — Harness lifecycle boundary:** A harness integration offers start and an optional
   default-no-op cooperative stop hook, but no restart operation. Core orchestrates liveness,
   graceful fallback, bounded force kill, persisted state, and subsequent start for restart.
-- **2026-09-01 — Stop seam removed under YAGNI:** The harness contract offers only start. No current
-  integration has a distinct graceful-stop request and no planned feature needs one. Core owns the
-  SIGTERM request to each verified tmux pane process, bounded grace period, liveness verification,
-  and forced teardown. A harness-specific stop seam may be designed when the first concrete consumer
-  demonstrates a requirement that core signaling cannot satisfy.
+- **2026-09-01 — Stop seam removed under YAGNI (initial teardown shape, superseded below):** The
+  harness contract offers only start. No current integration has a distinct graceful-stop request
+  and no planned feature needs one. Core owns teardown rather than adding a speculative harness
+  hook. The following ruling replaces this ruling's initial pane-signal/grace implementation shape.
+  A harness-specific stop seam may be designed when the first concrete consumer demonstrates a
+  requirement that core teardown cannot satisfy.
+- **2026-09-01 — Dedicated tmux server is the teardown authority:** Every current Agentworks session
+  has its own tmux server, but a process inside it can create sibling tmux sessions as well as panes
+  or windows. `kill-server` through the persisted, validated managed socket therefore replaces
+  injected `C-c`, pane-PID SIGTERM, and the grace phase for reachable current-runtime teardown. It
+  truthfully destroys the complete tmux-owned runtime without pretending that an
+  application-specific graceful shutdown occurred. A reachable legacy row that may share a default
+  server uses exact `kill-session -t =NAME` instead. Broken dedicated-server recovery uses a
+  persisted boot/PID/start-time fingerprint only to prove that the old server is already absent
+  before exact admin-or-agent socket cleanup. It never signals a numeric PID and fails closed when a
+  live server cannot be controlled through tmux. Strong containment and reliable whole-session
+  process termination are deferred to the systemd/cgroup design in issue #715.
 - **2026-08-31 — Internal capability versions:** This effort does not bump capability versions. Any
   in-repository-only capability contract it changes uses version 1 without compatibility machinery;
   unchanged capability contracts are not renumbered. All current harness integrations ship in this
