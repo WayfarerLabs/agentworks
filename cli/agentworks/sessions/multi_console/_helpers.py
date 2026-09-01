@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from agentworks.db import ConsoleRow, Database, SessionRow, ShellEntry
 
 TMUX_PREFIX = "aw-console-"
+TMUX_STAGING_PREFIX = "aw-console-build+"
 
 # Literal tmux window name for the optional admin-shell window. Wrapped in
 # double hyphens so it cannot collide with any session name: validate_name
@@ -29,6 +30,11 @@ ADMIN_SHELL_WINDOW = "--admin--"
 def tmux_session_name(console_name: str) -> str:
     """Return the tmux session name for a console."""
     return f"{TMUX_PREFIX}{console_name}"
+
+
+def tmux_staging_name(console_name: str) -> str:
+    """Return the reserved staging tmux name for a console build."""
+    return f"{TMUX_STAGING_PREFIX}{console_name}"
 
 
 # -- Spec parsing ----------------------------------------------------------

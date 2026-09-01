@@ -4,8 +4,7 @@ points.
 Split out of the original ``test_secrets_eager_resolve.py`` (see
 ``_secrets_eager_support.py`` for the full background on FRD R4's
 operator-facing guarantee). This file covers the console slice:
-``add_shell``, ``attach_console`` (both the first-attach build path and
-plain-attach-to-an-existing-session path), ``add_sessions``, and
+``add_shell``, ``start_console``, attach to an existing runtime, ``add_sessions``, and
 ``restore_session`` must eager-resolve secrets BEFORE any pane-opening
 mutation (tmux build, DB write) -- but only on the branches that actually
 open new shells. Branches that merely join or wrap existing tmux state
@@ -145,15 +144,15 @@ def test_console_add_shell_promotes_admin_for_admin_mode_session(
 
 
 # ---------------------------------------------------------------------------
-# console attach / build
+# console start / attach
 # ---------------------------------------------------------------------------
 
 
-def test_attach_console_build_path_eager_resolves_before_tmux(
+def test_start_console_eager_resolves_before_tmux(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """attach_console's first-attach build path opens new shells
+    """start_console opens new shells
     (admin shell + per-session shell panes). resolve_for_command must
     fire BEFORE _build_console_tmux issues any tmux command. A failed
     eager-resolve leaves no tmux state created."""
@@ -174,12 +173,13 @@ def test_attach_console_build_path_eager_resolves_before_tmux(
             SimpleNamespace(run=lambda *a, **k: None),
         )
 
-    monkeypatch.setattr(multi_console, "_prepare_vm_target_for_attach", _fake_prepare)
+    monkeypatch.setattr(multi_console, "_prepare_vm_target", _fake_prepare)
     monkeypatch.setattr(
         multi_console,
         "_console_tmux_exists",
         lambda *a, **k: False,
     )
+    monkeypatch.setattr("agentworks.sessions.multi_console.attach._tmux_session_exists", lambda *a, **k: False)
     monkeypatch.setattr(
         multi_console,
         "_console_build_secret_targets",
@@ -208,7 +208,7 @@ def test_attach_console_build_path_eager_resolves_before_tmux(
 
     monkeypatch.delenv("TMUX", raising=False)
     with pytest.raises(SecretUnavailableError, match="api-key"):
-        multi_console.attach_console(db, config, name="c1", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
+        multi_console.start_console(db, config, name="c1", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
     assert build_called == [], "eager-resolve must fire before _build_console_tmux; build ran anyway"
     db.close()
@@ -305,12 +305,13 @@ def test_attach_console_existing_tmux_session_skips_eager_resolve(
             ),
         )
 
-    monkeypatch.setattr(multi_console, "_prepare_vm_target_for_attach", _fake_prepare)
+    monkeypatch.setattr(multi_console, "_prepare_vm_target", _fake_prepare)
     monkeypatch.setattr(
         multi_console,
         "_console_tmux_exists",
         lambda *a, **k: True,
     )
+    monkeypatch.setattr("agentworks.sessions.multi_console.attach._tmux_session_exists", lambda *a, **k: False)
 
     resolve_called: list[bool] = []
 
@@ -565,7 +566,7 @@ def test_restore_session_window_missing_branch_eager_resolves(
     def _fake_prepare(*a: object, **k: object):  # noqa: ANN202
         yield (fake_vm, fake_target)
 
-    monkeypatch.setattr(multi_console, "_prepare_vm_target_for_attach", _fake_prepare)
+    monkeypatch.setattr(multi_console, "_prepare_vm_target", _fake_prepare)
     monkeypatch.setattr(
         multi_console,
         "_console_tmux_exists",

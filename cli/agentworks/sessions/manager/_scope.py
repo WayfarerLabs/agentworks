@@ -185,7 +185,7 @@ def filter_sessions(
     An unknown name in any filter raises ``NotFoundError`` rather than
     matching nothing (issue #304); every element of a list filter is
     checked. Because every batch session op (``list_sessions``,
-    ``stop_all_sessions``, ``resume_all_sessions``) funnels its filters
+    ``stop_all_sessions``, ``start_all_sessions``) funnels its filters
     through here, this is the single validation point for the session
     surface.
     """
@@ -206,7 +206,7 @@ def filter_sessions(
 def _distinct_vms_for_sessions(db: Database, sessions: list[SessionRow]) -> list[VMRow]:
     """Resolve the distinct set of VMs that host the given sessions.
 
-    Used by the batch session operations (stop_all_sessions, resume_all_sessions,
+    Used by the batch session operations (stop_all_sessions, start_all_sessions,
     list_sessions) to feed `_batch_vm_boundary` with exactly the VMs whose SSH
     transports will be touched. Order is insertion order keyed by VM name so
     gate and keepalive entry messages render in a stable order.
@@ -234,7 +234,7 @@ def _batch_vm_boundary_impl(
     interaction: TtyInteractionPolicy,
 ) -> Iterator[None]:
     """The batch session ops' composition root (stop_all_sessions,
-    resume_all_sessions, list_sessions' status pass): ONE boundary
+    start_all_sessions, list_sessions' status pass): ONE boundary
     over the distinct VMs, then each VM's activation gate and
     held-active span.
 

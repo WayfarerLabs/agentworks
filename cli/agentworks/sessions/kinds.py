@@ -109,7 +109,7 @@ class _NamedConsoleTemplateKind:
         instance yet, so a declaration under any other name would be dead config and is
         refused. The layout is re-read on every build, recreate, add-shell, and
         restore-session, so changing it and running
-        `agw console attach <name> --recreate` is enough to switch.
+        `agw console restart <name>` is enough to switch.
 
         Every layout but `aw-session-vertical` is a tmux built-in, so the same value can
         be applied live from a `tmux select-layout` key binding; the ones named `main-`

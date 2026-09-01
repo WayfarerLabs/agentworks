@@ -9,14 +9,13 @@ prefix key) while keeping a large scrollback buffer.
 from __future__ import annotations
 
 import shlex
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, NoReturn, Protocol
 
 from agentworks.errors import StateError
 from agentworks.naming import LINUX_USERNAME_MAX_LENGTH
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from agentworks.transports import Transport
 
 RESTRICTED_CONFIG_PATH = "/opt/agentworks/tmux-session.conf"
@@ -78,6 +77,15 @@ class RunCommand(Protocol):
         check: bool = True,
         env: dict[str, str] | None = None,
     ) -> object: ...
+
+
+@dataclass(frozen=True)
+class TmuxServerFingerprint:
+    """The persisted identity of one Linux tmux server process."""
+
+    pid: int
+    boot_id: str
+    start_ticks: int
 
 
 def agent_socket_dir(linux_user: str) -> str:
@@ -468,7 +476,7 @@ def _probe_pane_liveness(
     Both facts ride one round trip: ``#{pane_dead}`` and
     ``#{pane_dead_status}`` in a single display-message.
     """
-    q_session = shlex.quote(session_name)
+    q_session = shlex.quote(f"={session_name}")
     cmd = (
         tmux_cmd(f"display-message -p -t {q_session} '#{{pane_dead}} #{{pane_dead_status}}'", socket_path)
         + " 2>/dev/null"
@@ -505,7 +513,7 @@ def _raise_workload_died(
         # message there, invisible to the main-screen capture. One
         # best-effort attempt; tmux errors out when no alternate screen
         # exists, hence check=False.
-        q_session = shlex.quote(session_name)
+        q_session = shlex.quote(f"={session_name}")
         alt = run_command(
             tmux_cmd(f"capture-pane -t {q_session} -p -J -a", socket_path) + " 2>/dev/null",
             check=False,
@@ -705,11 +713,17 @@ def kill_session(
     socket_path: str | None = None,
 ) -> bool:
     """Kill a session's tmux session. Returns True if the session existed."""
-    q_session = shlex.quote(session_name)
+    q_session = shlex.quote(f"={session_name}")
     result = run_command(
         tmux_cmd(f"kill-session -t {q_session}", socket_path),
         check=False,
     )
+    return getattr(result, "ok", True)
+
+
+def kill_server(*, run_command: RunCommand, socket_path: str) -> bool:
+    """Destroy the complete dedicated tmux server behind ``socket_path``."""
+    result = run_command(tmux_cmd("kill-server", socket_path), check=False)
     return getattr(result, "ok", True)
 
 
@@ -720,27 +734,12 @@ def session_exists(
     socket_path: str | None = None,
 ) -> bool:
     """Check if a session's tmux session is alive."""
-    q_session = shlex.quote(session_name)
+    q_session = shlex.quote(f"={session_name}")
     result = run_command(
         tmux_cmd(f"has-session -t {q_session}", socket_path) + " 2>/dev/null",
         check=False,
     )
     return getattr(result, "ok", False)
-
-
-def send_keys(
-    session_name: str,
-    keys: str,
-    *,
-    run_command: RunCommand,
-    socket_path: str | None = None,
-) -> None:
-    """Send keys to a session's tmux session."""
-    q_session = shlex.quote(session_name)
-    run_command(
-        tmux_cmd(f"send-keys -t {q_session} {keys}", socket_path),
-        check=False,
-    )
 
 
 def capture_output(
@@ -757,7 +756,7 @@ def capture_output(
     longer than the pane width survives later per-line trimming as one
     line; off by default to keep other callers' output shape unchanged.
     """
-    q_session = shlex.quote(session_name)
+    q_session = shlex.quote(f"={session_name}")
     flags = "-p -J" if join_wrapped else "-p"
     result = run_command(
         tmux_cmd(f"capture-pane -t {q_session} {flags} -S -{lines}", socket_path),
@@ -806,54 +805,48 @@ def get_tmux_server_pid(
     return pid if pid > 0 else None
 
 
-def force_kill_tmux_server(
-    pid: int,
+def parse_process_start_ticks(stat_line: str) -> int:
+    """Parse Linux ``/proc/PID/stat`` field 22 without splitting ``comm``."""
+    close = stat_line.rfind(")")
+    if close < 0:
+        raise ValueError("process stat has no closing command delimiter")
+    fields = stat_line[close + 1 :].split()
+    if len(fields) < 20:
+        raise ValueError("process stat is missing field 22")
+    try:
+        ticks = int(fields[19])
+    except ValueError:
+        raise ValueError("process stat field 22 is not an integer") from None
+    if ticks <= 0:
+        raise ValueError("process stat field 22 is not positive")
+    return ticks
+
+
+def get_process_start_ticks(pid: int, *, target: Transport) -> int | None:
+    """Read one process start time, returning ``None`` on absent/invalid data."""
+    result = target.run(f"cat /proc/{pid}/stat", check=False)
+    if not result.ok:
+        return None
+    try:
+        return parse_process_start_ticks(result.stdout.strip())
+    except ValueError:
+        return None
+
+
+def capture_tmux_server_fingerprint(
     *,
     target: Transport,
-    socket_path: str | None = None,
-    log: Callable[[str], None] | None = None,
-    use_sudo: bool = True,
-) -> bool:
-    """Kill a tmux server by PID with SIGTERM -> SIGKILL escalation.
-
-    Cleans up socket file if present. Returns True if the process is dead.
-
-    ``use_sudo`` defaults True for the admin path (cross-uid kill of an
-    agent's tmux pid; admin's NOPASSWD sudo). Pass False when ``target`` is
-    the agent's own ``Transport``: the agent can kill its own pid and remove
-    its own socket without sudo. The admin force-kill carve-out
-    applies to batch operations; single-session agent ops go through agent
-    SSH directly (no sudo).
-    """
-    if pid <= 1:
-        raise ValueError(f"refusing to kill PID {pid} (dangerous special value)")
-    import time
-
-    def _log(msg: str) -> None:
-        if log:
-            log(msg)
-
-    # SIGTERM
-    _log(f"Sending SIGTERM to PID {pid}")
-    target.run(f"kill {pid}", sudo=use_sudo, check=False)
-    time.sleep(2)
-
-    # Check if still alive
-    if target.run(f"test -d /proc/{pid}", check=False).ok:
-        _log(f"PID {pid} survived SIGTERM, escalating to SIGKILL")
-        target.run(f"kill -9 {pid}", sudo=use_sudo, check=False)
-        time.sleep(1)
-
-    # Final check
-    if target.run(f"test -d /proc/{pid}", check=False).ok:
-        _log(f"PID {pid} survived SIGKILL")
-        return False  # process survived
-
-    _log(f"PID {pid} is dead")
-
-    # Clean up stale socket (validate path is under expected root)
-    if socket_path and socket_path.startswith(AGENT_SOCKET_ROOT + "/"):
-        _log(f"Removing stale socket {socket_path}")
-        target.run(f"rm -f {shlex.quote(socket_path)}", sudo=use_sudo, check=False)
-
-    return True
+    socket_path: str,
+) -> TmuxServerFingerprint | None:
+    """Capture a stable tmux PID, boot ID, and process start time."""
+    first_pid = get_tmux_server_pid(target=target, socket_path=socket_path)
+    if first_pid is None:
+        return None
+    first_ticks = get_process_start_ticks(first_pid, target=target)
+    boot = target.run("cat /proc/sys/kernel/random/boot_id", check=False)
+    boot_id = boot.stdout.strip() if boot.ok else ""
+    second_pid = get_tmux_server_pid(target=target, socket_path=socket_path)
+    second_ticks = get_process_start_ticks(first_pid, target=target)
+    if first_ticks is None or not boot_id or second_pid != first_pid or second_ticks != first_ticks:
+        return None
+    return TmuxServerFingerprint(first_pid, boot_id, first_ticks)

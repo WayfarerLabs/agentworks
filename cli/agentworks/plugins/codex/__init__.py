@@ -12,7 +12,7 @@ Both rows are present-but-disabled until an operator opts in with
 - The harness integration row publishes with a ``system-plugin`` origin; a
   ``session-template`` whose tagged ``spec.harness_integration.name`` is ``codex``
   STAYS ready (it does not propagate), and ``ensure_harness_integration_enabled``
-  refuses it at session create/resume with the "enable plugin `codex`" hint until
+  refuses it at session create/start/restart with the "enable plugin `codex`" hint until
   enabled.
 - The ``codex`` install-command row publishes weak (add-if-absent) while
   disabled, so a template's ``user_install_commands = ["codex"]``

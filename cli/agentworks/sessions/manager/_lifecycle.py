@@ -1,9 +1,9 @@
-"""Stop and resume operations (single and batch)."""
+"""Session start, stop, and restart operations."""
 
 from __future__ import annotations
 
-import contextlib
 import shlex
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
@@ -16,7 +16,7 @@ from agentworks.errors import (
     StateError,
     UserAbort,
 )
-from agentworks.sessions.tmux import AGENT_SOCKET_ROOT
+from agentworks.sessions.tmux import ADMIN_SOCKET_ROOT, AGENT_SOCKET_ROOT
 
 if TYPE_CHECKING:
     from agentworks.agents.nodes import (
@@ -28,7 +28,182 @@ if TYPE_CHECKING:
     from agentworks.sessions.template import SessionTemplate
     from agentworks.sessions.tmux import RunCommand
     from agentworks.transports import Transport
-from ._constants import _STOP_GRACE_SECONDS
+
+
+def _validated_socket_path(db: Database, session: SessionRow) -> str:
+    """Validate persisted socket identity before destructive use."""
+    socket_path = session.socket_path
+    if socket_path is None:
+        raise StateError(
+            f"session '{session.name}' has no dedicated tmux socket",
+            entity_kind="session",
+            entity_name=session.name,
+        )
+    if session.mode == SessionMode.AGENT.value:
+        agent = db.get_agent(session.agent_name or "")
+        owner_dir = f"{AGENT_SOCKET_ROOT}/{agent.linux_user}" if agent is not None else ""
+    else:
+        workspace = db.get_workspace(session.workspace_name)
+        vm = db.get_vm(workspace.vm_name) if workspace is not None else None
+        owner_dir = f"{ADMIN_SOCKET_ROOT}/{vm.admin_username}" if vm is not None else ""
+    path = PurePosixPath(socket_path)
+    if not path.is_absolute() or str(path.parent) != owner_dir or path.name in {"", ".", ".."}:
+        raise StateError(
+            f"session '{session.name}' has an invalid managed tmux socket path",
+            entity_kind="session",
+            entity_name=session.name,
+            hint="Repair the persisted session row before retrying destructive cleanup.",
+        )
+    return socket_path
+
+
+def _mark_stopped(db: Database, session: SessionRow) -> None:
+    db.update_session_runtime(
+        session.name,
+        socket_path=session.socket_path,
+        pid=PID_STOPPED,
+        boot_id=None,
+        tmux_server_start_ticks=None,
+    )
+
+
+def _recover_broken_session(
+    session: SessionRow,
+    *,
+    target: Transport,
+    target_owns_session: bool,
+    db: Database,
+) -> None:
+    """Clean stale state only after proving the prior server is absent."""
+    from agentworks.sessions.tmux import get_process_start_ticks
+
+    if session.pid is None or session.pid <= 0 or not session.boot_id:
+        raise BrokenStateError(
+            f"session '{session.name}' lacks the stored identity required for safe recovery",
+            entity_kind="session",
+            entity_name=session.name,
+            hint="Recover the tmux runtime manually, then repair or recreate the session.",
+        )
+    current_boot = _mgr._get_boot_id(target)
+    if current_boot is None:
+        raise BrokenStateError(
+            f"session '{session.name}' runtime identity could not be checked",
+            entity_kind="session",
+            entity_name=session.name,
+        )
+    absent = current_boot != session.boot_id
+    if not absent:
+        pid_alive = _mgr._pid_alive(session.pid, target=target)
+        if not pid_alive:
+            absent = True
+        else:
+            current_ticks = get_process_start_ticks(session.pid, target=target)
+            if session.tmux_server_start_ticks is None or current_ticks is None:
+                absent = False
+            else:
+                absent = current_ticks != session.tmux_server_start_ticks
+    if not absent:
+        raise BrokenStateError(
+            f"session '{session.name}' may still own a live tmux server; refusing stale cleanup",
+            entity_kind="session",
+            entity_name=session.name,
+            hint="Recover the tmux runtime manually before retrying.",
+        )
+    if session.socket_path is not None:
+        socket_path = _validated_socket_path(db, session)
+        q_socket = shlex.quote(socket_path)
+        target.run(f"rm -f {q_socket}", sudo=not target_owns_session, check=False)
+        if not target.run(f"test ! -e {q_socket}", sudo=not target_owns_session, check=False).ok:
+            raise ExternalError(
+                f"failed to remove stale tmux socket for session '{session.name}'",
+                entity_kind="session",
+                entity_name=session.name,
+            )
+    _mark_stopped(db, session)
+
+
+def _teardown_session(
+    session: SessionRow,
+    *,
+    target: Transport,
+    target_owns_session: bool,
+    db: Database,
+    force: bool,
+) -> None:
+    """Destroy one managed session runtime and verify its absence."""
+    from agentworks.sessions.tmux import (
+        capture_tmux_server_fingerprint,
+        kill_server,
+    )
+
+    if session.pid == PID_STOPPED:
+        return
+    if session.socket_path is None:
+        from agentworks.sessions.tmux import session_exists
+
+        _mgr._kill_session(session.name, run_command=target.run, socket_path=None)
+        if session_exists(session.name, run_command=target.run, socket_path=None):
+            raise ExternalError(
+                f"failed to stop legacy session '{session.name}'",
+                entity_kind="session",
+                entity_name=session.name,
+            )
+        _mark_stopped(db, session)
+        return
+
+    socket_path = _validated_socket_path(db, session)
+    observed = capture_tmux_server_fingerprint(target=target, socket_path=socket_path)
+    if observed is None:
+        if force:
+            _recover_broken_session(
+                session,
+                target=target,
+                target_owns_session=target_owns_session,
+                db=db,
+            )
+            return
+        raise BrokenStateError(
+            f"session '{session.name}' tmux server is unreachable",
+            entity_kind="session",
+            entity_name=session.name,
+            hint="Use --force only after the prior server has exited.",
+        )
+    if observed.pid != session.pid or observed.boot_id != session.boot_id:
+        raise BrokenStateError(
+            f"session '{session.name}' tmux server identity does not match persisted state",
+            entity_kind="session",
+            entity_name=session.name,
+        )
+    if session.tmux_server_start_ticks is None:
+        db.update_session_runtime(
+            session.name,
+            socket_path=socket_path,
+            pid=observed.pid,
+            boot_id=observed.boot_id,
+            tmux_server_start_ticks=observed.start_ticks,
+        )
+    elif observed.start_ticks != session.tmux_server_start_ticks:
+        raise BrokenStateError(
+            f"session '{session.name}' tmux server process was replaced",
+            entity_kind="session",
+            entity_name=session.name,
+        )
+    kill_server(run_command=target.run, socket_path=socket_path)
+    if _mgr._pid_alive(observed.pid, target=target):
+        raise ExternalError(
+            f"tmux server for session '{session.name}' survived kill-server",
+            entity_kind="session",
+            entity_name=session.name,
+        )
+    q_socket = shlex.quote(socket_path)
+    target.run(f"rm -f {q_socket}", sudo=not target_owns_session, check=False)
+    if not target.run(f"test ! -e {q_socket}", sudo=not target_owns_session, check=False).ok:
+        raise ExternalError(
+            f"tmux socket for session '{session.name}' remains after teardown",
+            entity_kind="session",
+            entity_name=session.name,
+        )
+    _mark_stopped(db, session)
 
 
 def _execute_stop(
@@ -38,7 +213,7 @@ def _execute_stop(
     force: bool = False,
     announce_stopped: bool = True,
 ) -> list[tuple[str, str]]:
-    """Core stop logic: C-c all, single grace period, kill survivors.
+    """Apply the one verified teardown authority to several sessions.
 
     ``targets`` is ``[(session, target, target_owns_session)]``. When
     ``target_owns_session`` is True, the SSH user is the same uid that owns
@@ -54,98 +229,23 @@ def _execute_stop(
     owns a column-0 ``result()`` terminal of its own, and the per-session
     body line would just duplicate it.
     """
-    import time
-
-    from agentworks.sessions.tmux import force_kill_tmux_server, send_keys
-
     if not targets:
         return []
 
-    # Phase 1: send C-c to all sessions (best effort).
-    # This gives processes that handle SIGINT gracefully (save state, flush)
-    # a chance to clean up before we kill the session. In practice, tmux
-    # kill-session sends SIGHUP which cascades through the shell to children,
-    # so the C-c is rarely necessary. Consider removing the C-c + grace
-    # period if the 5-second wait becomes a pain point.
-    output.detail("Sending C-c to stop any running commands...")
-    for session, target, _ in targets:
-        sock = session.socket_path
-        with contextlib.suppress(Exception):
-            send_keys(session.name, "C-c", run_command=target.run, socket_path=sock)
-
-    # Phase 2: single grace period
-    output.detail(f"Waiting {_STOP_GRACE_SECONDS}s for graceful exit...")
-    time.sleep(_STOP_GRACE_SECONDS)
-
-    # Phase 3: check survivors per VM (reuse existing targets). Status checks
-    # only read /proc; sudo not relevant here. Group by target identity for
-    # one batch-check SSH per (VM, transport).
-    by_target: dict[int, tuple[Transport, list[SessionRow]]] = {}
-    for session, target, _ in targets:
-        tid = id(target)
-        if tid not in by_target:
-            by_target[tid] = (target, [])
-        by_target[tid][1].append(session)
-
-    survivor_map: dict[str, SessionStatus] = {}
-    for target, group in by_target.values():
-        survivor_map.update(_mgr.batch_check_status(group, target=target))
-
     failed: list[tuple[str, str]] = []
-
     for session, target, target_owns_session in targets:
-        # Cross-uid kill/cleanup (admin SSH against an agent session) needs
-        # sudo. Same-uid ops do not.
-        kill_sudo = not target_owns_session
-        status = survivor_map.get(session.name)
-        if status is None:
-            # Status check failed (SSH error or parse issue) -- don't assume stopped
-            failed.append((session.name, "could not verify session status after stop"))
-            output.warn(f"Could not verify status of '{session.name}', not marking as stopped")
-            continue
-        if status == SessionStatus.OK or status == SessionStatus.BROKEN:
-            output.detail(f"Killing session '{session.name}'")
-            sock = session.socket_path
-            killed = _mgr._kill_session(session.name, run_command=target.run, socket_path=sock)
-            if not killed:
-                # Race condition: session may have exited between survivor check and kill.
-                # Recheck before treating as failure.
-                recheck = _mgr.check_session_status(session, target=target)
-                if recheck == SessionStatus.STOPPED:
-                    pass  # session exited on its own, that's success
-                elif force and session.socket_path is not None and session.pid and session.pid > 0:
-                    # Escalate to PID kill for agent sessions only (admin shares PID)
-                    output.detail(f"tmux kill failed for '{session.name}', force-killing PID {session.pid}")
-                    if not force_kill_tmux_server(
-                        session.pid,
-                        target=target,
-                        socket_path=session.socket_path,
-                        log=output.detail,
-                        use_sudo=kill_sudo,
-                    ):
-                        failed.append((session.name, f"PID {session.pid} survived force-kill"))
-                        continue
-                else:
-                    failed.append((session.name, f"tmux kill-session failed for '{session.name}'"))
-                    if session.socket_path is not None and session.pid and session.pid > 0:
-                        output.warn(f"Failed to stop '{session.name}' (tmux unreachable, use --force)")
-                    else:
-                        output.warn(f"Failed to stop '{session.name}' (tmux unreachable)")
-                    continue
-
-        # Clean up agent socket only after confirming the server process is dead
-        if (
-            session.socket_path
-            and session.socket_path.startswith(AGENT_SOCKET_ROOT + "/")
-            and session.pid
-            and session.pid > 0
-            and not _mgr._pid_alive(session.pid, target=target)
-        ):
-            target.run(f"rm -f {shlex.quote(session.socket_path)}", sudo=kill_sudo, check=False)
-
-        db.update_session_pid(session.name, PID_STOPPED)
-        if announce_stopped:
-            output.info(f"Session '{session.name}' stopped")
+        try:
+            _teardown_session(
+                session,
+                target=target,
+                target_owns_session=target_owns_session,
+                db=db,
+                force=force,
+            )
+            if announce_stopped:
+                output.info(f"Session '{session.name}' stopped")
+        except Exception as exc:
+            failed.append((session.name, str(exc)))
 
     return failed
 
@@ -158,8 +258,7 @@ def stop_session(
     force: bool = False,
     interaction: TtyInteractionPolicy,
 ) -> None:
-    """Stop a running session. Sends C-c first, then kills after a grace period."""
-    from agentworks.sessions.tmux import force_kill_tmux_server
+    """Stop a session through its exact tmux ownership boundary."""
 
     session = _mgr._require_session(db, name)
     with _mgr._prepare_vm(
@@ -190,34 +289,13 @@ def stop_session(
         # always returns a same-uid target, so no sudo is needed for the
         # destructive ops below.
         target = _mgr._build_session_target(session, vm=vm, config=config, db=db, admin_target=admin_target)
-        kill_sudo = False
-
-        if status == SessionStatus.BROKEN:
-            if not force:
-                raise BrokenStateError(
-                    f"session '{name}' is broken (PID alive but tmux unreachable).",
-                    entity_kind="session",
-                    entity_name=name,
-                    hint="Use --force to kill the process.",
-                )
-            output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
-            assert session.pid is not None
-            killed = force_kill_tmux_server(
-                session.pid,
-                target=target,
-                socket_path=session.socket_path,
-                log=output.detail,
-                use_sudo=kill_sudo,
+        if status == SessionStatus.BROKEN and not force:
+            raise BrokenStateError(
+                f"session '{name}' is broken (tmux unreachable).",
+                entity_kind="session",
+                entity_name=name,
+                hint="Use --force only after the prior server has exited.",
             )
-            if not killed:
-                raise ExternalError(
-                    f"failed to kill PID {session.pid} for session '{name}'",
-                    entity_kind="session",
-                    entity_name=name,
-                )
-            db.update_session_pid(name, PID_STOPPED)
-            output.result(f"Session '{name}' force-stopped")
-            return
 
         # OK: delegate to shared stop logic. target_owns_session=True
         # because _build_session_target returned a same-uid target. The
@@ -237,16 +315,17 @@ def stop_session(
         output.result(f"Session '{name}' stopped")
 
 
-def resume_session(
+def _launch_existing_session(
     db: Database,
     config: Config,
     *,
     name: str,
+    replace_running: bool,
     force: bool = False,
-    yes: bool = False,
+    force_new: bool = False,
     interaction: TtyInteractionPolicy,
 ) -> None:
-    """Resume a session. Prompts if running (--yes to skip). --force for BROKEN.
+    """Start a stopped session, optionally replacing a running runtime.
 
     Orchestrated: the live graph derives from the session's rows, the
     activation gate replaces the imperative ensure_active + hold, and
@@ -342,7 +421,7 @@ def resume_session(
             )
         agent_node = live_agent_node(agent_row, vm_node)
     # Gate a disabled plugin harness_integration at USE (R14, the secret model): a live
-    # session on a disabled harness_integration refuses to resume / reattach with the
+    # session on a disabled harness_integration refuses to start or restart with the
     # enable-plugin error. The gate lives at this call site (not inside
     # ``live_session_node``, which threads no registry); a drift guard pins that
     # every caller of the node factory gates.
@@ -351,7 +430,7 @@ def resume_session(
 
     ensure_harness_integration_enabled(registry, template.harness_integration)
     # Refuse a session-template recipe drawing on a disabled plugin's declarable
-    # resource before the resume / reattach (Phase 7, LLD b). Drift guard:
+    # resource before start or restart (Phase 7, LLD b). Drift guard:
     # tests/agents/test_recipe_gate_drift.py.
     ensure_recipe_enabled(registry, "session-template", template.name)
     session_node = live_session_node(
@@ -365,7 +444,7 @@ def resume_session(
     # The walk supplies the boundary union (the site's config secrets;
     # live nodes declare nothing else). The session's env chain is
     # deliberately NOT part of this boundary: it resolves after the
-    # BROKEN/confirm gates below, the recorded bail-before-prompt
+    # status and operation-policy gates below, the recorded bail-before-prompt
     # exception.
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
@@ -397,12 +476,15 @@ def resume_session(
 
         from agentworks.ssh import SSHLogger
 
-        logger = SSHLogger(vm.name, "session-resume")
+        operation = "restart" if replace_running else "start"
+        logger = SSHLogger(vm.name, f"session-{operation}")
         admin_target = _mgr.transport(vm, config, logger=logger)
         run_command: RunCommand = admin_target.run
 
         with output.section("Preflight"):
-            session = _mgr._ensure_pid(session, target=admin_target, db=db)
+            is_legacy = session.socket_path is None and session.pid is not None and session.pid > 0
+            if not is_legacy:
+                session = _mgr._ensure_pid(session, target=admin_target, db=db)
 
             # Legacy migration: sessions predating the per-session-socket model
             # have ``socket_path=None`` (they lived on the admin's default tmux
@@ -413,7 +495,6 @@ def resume_session(
             # path), and fall through to the create step. The downstream
             # ``create_tmux_session`` produces a per-session socket and the
             # subsequent ``db.update_session_socket_path`` lands the migration.
-            is_legacy = session.socket_path is None and session.pid is not None and session.pid > 0
             if is_legacy:
                 output.info(
                     f"Session '{name}' uses the legacy default-tmux-server model; migrating to per-session socket."
@@ -426,20 +507,37 @@ def resume_session(
             # For agent sessions this builds an agent Transport and probes it
             # so a pre-rollout agent surfaces as an actionable StateError up
             # front rather than leaving us with a stopped session we can't
-            # resume. Same transport is used for kill (above) and create
+            # launch. The same transport is used for teardown and create
             # (below): every destructive step on an agent session goes via
             # direct agent SSH. _build_session_target always returns a
             # same-uid target, so no sudo is needed for kill.
             is_admin = session.mode == SessionMode.ADMIN.value
             session_target = _mgr._build_session_target(session, vm=vm, config=config, db=db, admin_target=admin_target)
             session_run_command: RunCommand = session_target.run
-            kill_sudo = False
+
+            if status == SessionStatus.OK and not replace_running:
+                if force_new:
+                    raise StateError(
+                        f"session '{name}' is already running",
+                        entity_kind="session",
+                        entity_name=name,
+                        hint=f"Run `agw session restart {name} --force-new` to replace it.",
+                    )
+                output.result(f"Session '{name}' is already running")
+                return
+            if status == SessionStatus.BROKEN and not force:
+                raise BrokenStateError(
+                    f"session '{name}' is broken (PID alive but tmux unreachable).",
+                    entity_kind="session",
+                    entity_name=name,
+                    hint=f"Use `agw session {operation} {name} --force` to recover it.",
+                )
 
             # PREFLIGHT-ALL over the walk rooted at the live session node,
             # against the one command-start context: the required-commands
             # check's target (an existing agent, or the admin) is realized,
             # so it probes NOW, pre-resolve and PRE-KILL, and a missing
-            # binary aborts the resume with the old session still running.
+            # binary aborts the launch with the old session still running.
             # Preflight is read-only (no prompt), so it stays ahead of the
             # gates below; both secret-resolving passes run AFTER them.
             preflight_all(
@@ -454,38 +552,17 @@ def resume_session(
                 interaction=interaction,
             )
 
-            # Bail-before-prompt: refuse the operation up front in the cases
-            # where the operator either lacks the right flag (BROKEN + no
-            # --force) or declines the confirm (OK + interactive 'no'). BOTH
-            # secret-resolving passes (the graph-union boundary resolve and
-            # the env-chain resolve below) run AFTER these checks so a
-            # refused or declined resume never prompts for secrets it was
-            # about to discard.
-            # UNKNOWN is impossible here (_ensure_pid raises on unresolvable
-            # sessions). Legacy sessions short-circuit at ``status =
-            # SessionStatus.STOPPED`` above, so neither gate fires for them;
-            # migration is implicit in the operator's resume opt-in.
-            if status == SessionStatus.BROKEN and not force:
-                raise BrokenStateError(
-                    f"session '{name}' is broken (PID alive but tmux unreachable).",
-                    entity_kind="session",
-                    entity_name=name,
-                    hint="Use --force to resume.",
-                )
-            if status == SessionStatus.OK and not yes and not output.confirm(f"Session '{name}' is running. Resume?"):
-                raise UserAbort("resume cancelled")
-
         with output.section("Resolving Secrets"):
             # The graph-union boundary resolve (pass 1). Placed AFTER the
             # gates above, symmetric with the env-chain pass below, so a
-            # refused or declined resume never prompts. Gate-resolved values
+            # refused launch never prompts. Gate-resolved values
             # are already seeded, so nothing resolves twice.
             resolver.resolve()
             # Capture the graph boundary union for the harness_integration's op-start
             # context (matching the create path, which captures
             # ``resolver.values`` at its boundary). Inert for the built-in
-            # shell harness_integration (empty ``config_secret_refs()``), but keeps the resume
-            # op ctx shape-correct for a future secret-declaring harness_integration; the
+            # shell harness_integration (empty ``config_secret_refs()``), but keeps the start
+            # context shape-correct for a future secret-declaring harness integration; the
             # env-chain resolve (``resolve_for_command`` below) is a SEPARATE
             # pass, not this graph union.
             graph_secret_values = resolver.values
@@ -497,8 +574,8 @@ def resume_session(
             # is the recorded bail-before-prompt exception to the
             # one-boundary-resolve contract: the graph's union (the site's
             # config secrets) and this env chain BOTH resolve here, after the
-            # BROKEN/--force refusal and the "Resume?" confirm, so a declined
-            # resume never prompts for secrets it was about to discard.
+            # BROKEN/--force refusal, so a refused launch never prompts for
+            # secrets it was about to discard.
             # Folding the env chain into the boundary would trade that
             # operator protection for one fewer prompt session on proxmox
             # only.
@@ -525,72 +602,41 @@ def resume_session(
             )
 
         with output.section("Starting Session"):
-            output.info(f"Resuming session '{name}'...")
+            output.info(f"{operation.title()}ing session '{name}'...")
 
-            if is_legacy:
-                # Surgical kill of the named session on the default tmux
-                # server (no socket path). ``session.pid`` identifies the
-                # SERVER for legacy admin rows, not this session, so the
-                # BROKEN path's ``force_kill_tmux_server(pid)`` would nuke
-                # every other tmux session sharing the server -- including
-                # ad-hoc tmux work and other legacy Agentworks rows. The
-                # ``kill-session -t <name>`` primitive is surgical. Failure
-                # is best-effort: if the session is already gone (only the
-                # DB row survived), kill returns False and we proceed to
-                # create the new shape.
-                _mgr._kill_session(name, run_command=session_run_command, socket_path=None)
-            elif status == SessionStatus.BROKEN:
-                from agentworks.sessions.tmux import force_kill_tmux_server
-
-                output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
-                assert session.pid is not None
-                killed = force_kill_tmux_server(
-                    session.pid,
+            if is_legacy or status in {SessionStatus.OK, SessionStatus.RESIDUAL, SessionStatus.BROKEN}:
+                _teardown_session(
+                    session,
                     target=session_target,
-                    socket_path=session.socket_path,
-                    log=output.detail,
-                    use_sudo=kill_sudo,
+                    target_owns_session=True,
+                    db=db,
+                    force=force,
                 )
-                if not killed:
-                    raise ExternalError(
-                        f"failed to kill PID {session.pid} for session '{name}'",
-                        entity_kind="session",
-                        entity_name=name,
-                    )
-            elif status == SessionStatus.OK:
-                # Confirm already happened above (before eager-resolve), so we
-                # know the operator opted in.
-                sock = session.socket_path
-                if not _mgr._kill_session(name, run_command=session_run_command, socket_path=sock):
-                    raise ExternalError(
-                        f"failed to stop session '{name}' for resume",
-                        entity_kind="session",
-                        entity_name=name,
-                    )
 
             deploy_restricted_config(run_command, history_limit=config.session.history_limit)
 
-            # Op-start RunContext for the harness_integration's resume op, assembled
-            # AFTER the kill (a state-aware harness_integration decides resume-vs-launch
+            # Op-start RunContext for the harness integration, assembled
+            # AFTER teardown (a state-aware harness integration decides continuation-vs-fresh
             # with the old process already dead). Mirrors the preflight
-            # readiness ctx above (the resume path builds no runup ctx), plus
+            # readiness context above (this path builds no runup context), plus
             # the scoped graph secrets (empty for the built-in shell harness_integration).
-            # Template-var substitution wraps the returned string; resume
+            # Template-var substitution wraps the returned string; launch
             # sources ``workspace_name`` from the session row, as the interim
             # path did.
-            resume_ctx = RunContext(
+            start_ctx = RunContext(
                 config=config,
                 operation_scope=scope,
                 admin_target=admin_target,
                 agent_target=None if is_admin else session_target,
                 secrets=ScopedSecrets(graph_secret_values, session_node.secret_refs()),
             )
+            harness_start = session_node.harness_integration.start(start_ctx, force_new=force_new)
             command = _mgr._substitute_template_vars(
-                session_node.harness_integration.resume(resume_ctx),
+                harness_start.command,
                 {"session_name": name, "workspace_name": session.workspace_name},
             )
-            if (note := session_node.harness_integration.launch_note()) is not None:
-                output.detail(note)
+            if harness_start.note is not None:
+                output.detail(harness_start.note)
             # Persist the node's FULL namespaced harness_integration_state blob after the
             # op (mirrors the create-path insert): the harness_integration mutated its own
             # namespace in place, and persisting the full blob keeps foreign
@@ -598,7 +644,7 @@ def resume_session(
             # harness_integration switch.
             # Usually a no-op (the value was stored on create), but a session
             # predating the harness_integration_state column (backfilled to {}) mints its
-            # id on this first resume. Persisting BEFORE create_tmux_session
+            # id on this first launch. Persisting BEFORE create_tmux_session
             # is intentional: a stable id that survives a tmux-recreate retry
             # beats re-minting a new one each attempt (the id is the
             # session's, whether or not the pane came up).
@@ -639,21 +685,26 @@ def resume_session(
                     ) from exc
                 raise
 
-            # Persist socket path if it differs from what's stored.
-            if new_sock != session.socket_path:
-                db.update_session_socket_path(name, new_sock)
-            if pid is not None:
-                # boot_id is /proc/sys/kernel/random/boot_id (world-readable);
-                # admin's target is fine and convenient.
-                boot_id = _mgr._get_boot_id(admin_target)
-                if boot_id is not None:
-                    db.update_session_pid(name, pid, boot_id=boot_id)
-                else:
-                    output.warn(f"Could not read boot ID for session '{name}', PID not stored")
-            else:
-                output.warn(f"Could not capture PID for session '{name}', will auto-repair on next access")
+            from agentworks.sessions.tmux import capture_tmux_server_fingerprint, kill_server
 
-        output.result(f"Session '{name}' resumed")
+            fingerprint = capture_tmux_server_fingerprint(target=session_target, socket_path=new_sock)
+            if fingerprint is None or (pid is not None and fingerprint.pid != pid):
+                kill_server(run_command=session_run_command, socket_path=new_sock)
+                _mark_stopped(db, session)
+                raise ExternalError(
+                    f"could not capture a stable tmux server fingerprint for session '{name}'",
+                    entity_kind="session",
+                    entity_name=name,
+                )
+            db.update_session_runtime(
+                name,
+                socket_path=new_sock,
+                pid=fingerprint.pid,
+                boot_id=fingerprint.boot_id,
+                tmux_server_start_ticks=fingerprint.start_ticks,
+            )
+
+        output.result(f"Session '{name}' {operation}ed")
 
         _mgr._regenerate_tmuxinator(db, config, vm, ws)
 
@@ -714,7 +765,7 @@ def stop_all_sessions(
             names = ", ".join(s.name for s in broken)
             output.warn(f"Skipping {len(broken)} broken session(s) ({names}). Use --force to kill.")
 
-        ok_statuses = {SessionStatus.OK}
+        ok_statuses = {SessionStatus.OK, SessionStatus.RESIDUAL}
         if force:
             ok_statuses.add(SessionStatus.BROKEN)
         alive_sessions = [s for s in sessions if status_map.get(s.name) in ok_statuses]
@@ -750,7 +801,7 @@ def stop_all_sessions(
             raise ExternalError(f"{len(failed)} session(s) failed to stop.")
 
 
-def resume_all_sessions(
+def _launch_all_sessions(
     db: Database,
     config: Config,
     *,
@@ -758,15 +809,15 @@ def resume_all_sessions(
     workspace_name: str | list[str] | None = None,
     agent_name: str | list[str] | None = None,
     admin_only: bool = False,
-    include_running: bool = False,
+    replace_running: bool,
     force: bool = False,
+    force_new: bool = False,
     interaction: TtyInteractionPolicy,
 ) -> None:
-    """Resume sessions, optionally filtered by VM, workspace, agent, and/or mode.
+    """Start sessions, optionally replacing running runtimes.
 
-    With include_running=False (--all-stopped), only stopped sessions are
-    resumed. With include_running=True (--all), all sessions are targeted;
-    if any are running, the caller should have prompted or passed yes=True.
+    Ordinary start leaves running selections unchanged; restart replaces them.
+    Each operation considers every matching session.
 
     Each name filter accepts a single name or a list of names; lists
     OR within a filter, filters AND across the call. ``agent_name``
@@ -782,7 +833,7 @@ def resume_all_sessions(
     )
 
     # Resolve distinct VMs from the filtered set and anchor them BEFORE the
-    # SSH probes. Each resume_session call also opens its own gate span;
+    # SSH probes. Each singular launch also opens its own gate span;
     # the redundant inner gate is a no-op on already-active VMs and a cheap
     # extra subprocess on WSL2 (accepted, see PR description).
     distinct_vms = _mgr._distinct_vms_for_sessions(db, sessions)
@@ -796,7 +847,7 @@ def resume_all_sessions(
         # Error if any sessions are still unknown after auto-repair.
         # PID_STOPPED sessions are known-stopped (excluded from status_map by design).
         # Legacy sessions (``socket_path is None``) are also excluded from
-        # status_map by ``batch_check_status``; resume_session migrates them
+        # status_map by ``batch_check_status``; the singular launch migrates them
         # to the new model, so don't treat them as "unknown" here.
         unknown = [
             s
@@ -812,42 +863,26 @@ def resume_all_sessions(
                 hint="Resolve the listed sessions manually before retrying.",
             )
 
-        if not include_running:
-            # Only stopped sessions. Legacy sessions are alive-ish (PID set,
-            # socket_path None) -- we can't tell whether they're stopped
-            # from status_map alone (batch_check_status skips them), so we
-            # filter them out under ``--all-stopped`` and tell the operator
-            # how to migrate (``--all``). The batch_check_status warning
-            # already named them; this second message ties that warning to
-            # an actionable next step from the command they just ran.
-            legacy_skipped = [s.name for s in sessions if s.socket_path is None and s.pid is not None and s.pid > 0]
-            if legacy_skipped:
-                names = ", ".join(legacy_skipped)
-                output.warn(
-                    f"Skipping {len(legacy_skipped)} legacy session(s) under "
-                    f"--all-stopped (can't determine state without a per-session "
-                    f"socket). Use `--all` to migrate them: {names}"
-                )
-            sessions = [s for s in sessions if s.pid == PID_STOPPED or status_map.get(s.name) == SessionStatus.STOPPED]
-
         if not sessions:
-            output.info("No matching sessions to resume.")
+            output.info("No matching sessions to start.")
             return
 
-        output.info(f"Resuming {len(sessions)} session(s)...")
+        operation = "restarting" if replace_running else "starting"
+        output.info(f"{operation.title()} {len(sessions)} session(s)...")
 
         for session in sessions:
             try:
-                resume_session(
+                _launch_existing_session(
                     db,
                     config,
                     name=session.name,
+                    replace_running=replace_running,
                     force=force,
-                    yes=include_running,
+                    force_new=force_new,
                     interaction=interaction,
                 )
             except UserAbort:
-                # A confirm-cancellation aborts the whole batch operation, not
+                # An interaction cancellation aborts the whole batch operation, not
                 # just this one session. Propagate so the outer wrapper renders
                 # "Aborted." once and exits.
                 raise
@@ -856,13 +891,69 @@ def resume_all_sessions(
                     output.warn(f"Skipping '{session.name}': {exc}")
                 else:
                     failed.append((session.name, str(exc)))
-                    output.warn(f"Error resuming '{session.name}': {exc}")
+                    output.warn(f"Error {operation} '{session.name}': {exc}")
             except StateError as exc:
                 failed.append((session.name, str(exc)))
-                output.warn(f"Error resuming '{session.name}': {exc}")
+                output.warn(f"Error {operation} '{session.name}': {exc}")
             except Exception as exc:
                 failed.append((session.name, str(exc)))
-                output.warn(f"Error resuming '{session.name}': {exc}")
+                output.warn(f"Error {operation} '{session.name}': {exc}")
 
     if failed:
-        raise ExternalError(f"{len(failed)} session(s) failed to resume.")
+        raise ExternalError(f"{len(failed)} session(s) failed while {operation}.")
+
+
+def start_session(
+    db: Database,
+    config: Config,
+    *,
+    name: str,
+    force: bool = False,
+    force_new: bool = False,
+    interaction: TtyInteractionPolicy,
+) -> None:
+    _launch_existing_session(
+        db,
+        config,
+        name=name,
+        replace_running=False,
+        force=force,
+        force_new=force_new,
+        interaction=interaction,
+    )
+
+
+def restart_session(
+    db: Database,
+    config: Config,
+    *,
+    name: str,
+    force: bool = False,
+    force_new: bool = False,
+    interaction: TtyInteractionPolicy,
+) -> None:
+    _launch_existing_session(
+        db,
+        config,
+        name=name,
+        replace_running=True,
+        force=force,
+        force_new=force_new,
+        interaction=interaction,
+    )
+
+
+def start_all_sessions(
+    db: Database,
+    config: Config,
+    **kwargs: object,
+) -> None:
+    _launch_all_sessions(db, config, replace_running=False, **kwargs)  # type: ignore[arg-type]
+
+
+def restart_all_sessions(
+    db: Database,
+    config: Config,
+    **kwargs: object,
+) -> None:
+    _launch_all_sessions(db, config, replace_running=True, **kwargs)  # type: ignore[arg-type]

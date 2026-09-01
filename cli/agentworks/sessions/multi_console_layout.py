@@ -23,7 +23,7 @@ Two clusters live here:
 
 Everything in this module is best-effort. A failed tmux call is
 silently swallowed unless it's recoverable only by a full ``console
-attach --recreate``, in which case the helper emits ``output.warn``
+restart``, in which case the helper emits ``output.warn``
 with that hint.
 """
 
@@ -48,7 +48,7 @@ SHELL_INDEX_OPTION = "@agentworks-shell-index"
 # -- Layout application ----------------------------------------------------
 
 
-def _apply_layout(target: Transport, q_con: str, q_win: str, layout: str) -> None:
+def _apply_layout(target: Transport, q_con: str, q_win: str, layout: str) -> bool:
     """Apply *layout* to a single console window.
 
     Tmux preset names (`tiled`, `main-vertical`, etc.) go through
@@ -65,15 +65,14 @@ def _apply_layout(target: Transport, q_con: str, q_win: str, layout: str) -> Non
     layout failure today and we preserve that contract.
     """
     if layout == AW_SESSION_VERTICAL_LAYOUT:
-        _apply_aw_session_vertical_layout(target, q_con, q_win)
-    else:
-        target.run(
-            f"tmux select-layout -t {q_con}:{q_win} {shlex.quote(layout)}",
-            check=False,
-        )
+        return _apply_aw_session_vertical_layout(target, q_con, q_win)
+    return target.run(
+        f"tmux select-layout -t {q_con}:{q_win} {shlex.quote(layout)}",
+        check=False,
+    ).ok
 
 
-def _apply_aw_session_vertical_layout(target: Transport, q_con: str, q_win: str) -> None:
+def _apply_aw_session_vertical_layout(target: Transport, q_con: str, q_win: str) -> bool:
     """Build and apply a hand-computed tmux layout string for
     ``aw-session-vertical``. Two transport round trips through the
     ``Transport`` abstraction (one ``target.run`` chains two tmux
@@ -94,11 +93,11 @@ def _apply_aw_session_vertical_layout(target: Transport, q_con: str, q_win: str)
         check=False,
     )
     if not query.ok:
-        return
+        return False
     pane_count = _count_panes_in_query_output(query.stdout)
     if pane_count is not None and pane_count <= 1:
         # Single-pane window: nothing to lay out, not an error.
-        return
+        return True
     layout_string = _build_aw_session_vertical_layout_string(query.stdout)
     if layout_string is None:
         output.warn(
@@ -106,11 +105,11 @@ def _apply_aw_session_vertical_layout(target: Transport, q_con: str, q_win: str)
             f"{q_con}:{q_win} (window too small or unparseable tmux "
             f"output); tmux will keep its current layout"
         )
-        return
-    target.run(
+        return False
+    return target.run(
         f"tmux select-layout -t {q_con}:{q_win} {shlex.quote(layout_string)}",
         check=False,
-    )
+    ).ok
 
 
 def _count_panes_in_query_output(query_output: str) -> int | None:
@@ -228,7 +227,7 @@ def _tmux_layout_checksum(s: str) -> int:
     return csum
 
 
-def _focus_session_pane(target: Transport, q_con: str, q_win: str, base_pidx: int) -> None:
+def _focus_session_pane(target: Transport, q_con: str, q_win: str, base_pidx: int) -> bool:
     """Move tmux's active pane to the session pane of a window.
 
     Called after building or repairing a window so the operator lands on
@@ -243,7 +242,7 @@ def _focus_session_pane(target: Transport, q_con: str, q_win: str, base_pidx: in
     listing, and the build path captures it from the session pane created by
     `tmux new-window`.
     """
-    target.run(f"tmux select-pane -t {q_con}:{q_win}.{base_pidx}", check=False)
+    return target.run(f"tmux select-pane -t {q_con}:{q_win}.{base_pidx}", check=False).ok
 
 
 # -- Pane / window reordering ----------------------------------------------
@@ -370,7 +369,7 @@ def _reorder_session_windows(
     # imports symbols from this module).
     from agentworks.sessions.multi_console import tmux_session_name
 
-    q_con = shlex.quote(tmux_session_name(console_name))
+    q_con = shlex.quote(f"={tmux_session_name(console_name)}")
     res = target.run(
         f"tmux list-windows -t {q_con} -F '#{{window_index}}|#{{window_name}}'",
         check=False,
@@ -407,7 +406,7 @@ def _reorder_session_windows(
             f"console '{console_name}' has duplicate window name(s) "
             f"({', '.join(duplicated)}); cannot reorder live tmux safely. "
             f"DB order was updated; run "
-            f"`agentworks console attach {q_console} --recreate` to rebuild "
+            f"`agentworks console restart {q_console}` to rebuild "
             f"tmux from DB state."
         )
         return
@@ -429,7 +428,7 @@ def _reorder_session_windows(
             # Defensive: session_slots and present_desired should be the
             # same length by construction (both filter on desired_set ∩
             # live-names). If they ever diverge, stop rather than risk a
-            # bad swap. --recreate will reconcile.
+            # bad swap. A console restart will reconcile.
             break
         target_idx = session_slots[k]
         src_idx = widx_by_name[desired_name]

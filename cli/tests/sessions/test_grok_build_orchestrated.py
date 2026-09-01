@@ -78,6 +78,7 @@ def _common_stubs(monkeypatch: pytest.MonkeyPatch, target: _GrokTarget) -> None:
     stub_vm_gates(monkeypatch)
     stub_session_resolvers(monkeypatch)
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)
+    monkeypatch.setattr(tmux_mod, "session_exists", lambda *args, **kwargs: False)
     monkeypatch.setattr(session_manager, "_get_boot_id", lambda *args, **kwargs: "boot-x")
     monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *args, **kwargs: None)
     _template(monkeypatch)
@@ -92,6 +93,11 @@ def _capture_tmux(monkeypatch: pytest.MonkeyPatch, events: list[str], captured: 
         return ("/tmp/s1.sock", 4243)
 
     monkeypatch.setattr(tmux_mod, "create_session", capture)
+    monkeypatch.setattr(
+        tmux_mod,
+        "capture_tmux_server_fingerprint",
+        lambda **kwargs: SimpleNamespace(pid=4243, boot_id="boot-x", start_ticks=1),
+    )
 
 
 def test_create_persists_minted_uuid_and_launches_fresh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -197,11 +203,10 @@ def test_resume_reads_uuid_and_detects_after_killing_old_workload(
         return True
 
     monkeypatch.setattr(session_manager, "_kill_session", kill)
-    session_manager.resume_session(
+    session_manager.restart_session(
         db,
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),  # type: ignore[arg-type]
         name="s1",
-        yes=True,
         interaction=TtyInteractionPolicy.REFUSE,
     )
 

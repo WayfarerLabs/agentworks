@@ -275,10 +275,14 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("session.stop", "vm"): "vms",
     ("session.stop", "workspace"): "workspaces",
     ("session.stop", "agent"): "agents",
-    ("session.resume", "name"): "sessions",
-    ("session.resume", "vm"): "vms",
-    ("session.resume", "workspace"): "workspaces",
-    ("session.resume", "agent"): "agents",
+    ("session.start", "name"): "sessions",
+    ("session.start", "vm"): "vms",
+    ("session.start", "workspace"): "workspaces",
+    ("session.start", "agent"): "agents",
+    ("session.restart", "name"): "sessions",
+    ("session.restart", "vm"): "vms",
+    ("session.restart", "workspace"): "workspaces",
+    ("session.restart", "agent"): "agents",
     ("session.attach", "name"): "sessions",
     ("session.delete", "name"): "sessions",
     ("session.logs", "name"): "sessions",
@@ -294,6 +298,9 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("console.list", "workspace"): "workspaces",
     ("console.list", "agent"): "agents",
     ("console.describe", "name"): "consoles",
+    ("console.start", "name"): "consoles",
+    ("console.stop", "name"): "consoles",
+    ("console.restart", "name"): "consoles",
     ("console.attach", "name"): "consoles",
     ("console.delete", "name"): "consoles",
     ("console.add-sessions", "name"): "consoles",
@@ -372,7 +379,7 @@ def _build_command_spec(cmd: _ClickCommand, path: str) -> CommandSpec:
     if isinstance(commands, dict):
         for sub_name in sorted(commands):
             sub_cmd = commands[sub_name]
-            if sub_cmd is not None:
+            if sub_cmd is not None and not getattr(sub_cmd, "hidden", False):
                 spec.subcommands[sub_name] = _build_command_spec(sub_cmd, path=current_path)
 
     return spec

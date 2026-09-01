@@ -58,11 +58,11 @@ of each.
 The `harness-integration` capability decides what an agent session actually runs and how that
 workload is configured, launched, and managed. This is where a session becomes a plain `shell`, an
 interactive `claude-code` or `codex` session, or another agentic harness entirely, without
-Agentworks needing to know the details of any one of them. An integration launches its harness,
-brings it back on resume (resuming where the harness allows), and checks the harness's binaries are
-present, while Agentworks owns the tmux session, the user, and the workspace around it. See
-[`harness_integration/README.md`](harness_integration/README.md) for the integration contract and
-the shipped options.
+Agentworks needing to know the details of any one of them. An integration produces a launch command,
+continues its harness conversation where possible, and checks that the harness's binaries are
+present, while Agentworks owns start, restart, stop, the tmux server, the user, and the workspace.
+See [`harness_integration/README.md`](harness_integration/README.md) for the integration contract
+and the shipped options.
 
 ### Secret Backend and Source
 
@@ -289,12 +289,12 @@ Config is offered per FACET by contract: a facet is the level a capability is dr
 `user`, `workspace`, `session`), pairing that level's methods with that level's config. CONSUMERS
 choose which facet they drive, so a producer never has to know who is asking, and facets are
 deliberately **not** scopes, with core owning the mapping between them (admin and agent both drive
-the `user` level; session start and resume share `session`). Nothing under `capabilities/` spells a
-scope. The parameter that names a facet is not on the signature yet, because nothing offers more
-than one config; it arrives additively with the first capability whose methods run at several
-levels, which is the same change that brings the consumers able to pass it. Offering a config at a
-facet is **not** a claim to support that level, and offering none is not a claim to lack it: support
-is carried by the implementation.
+the `user` level; session launches share `session`). Nothing under `capabilities/` spells a scope.
+The parameter that names a facet is not on the signature yet, because nothing offers more than one
+config; it arrives additively with the first capability whose methods run at several levels, which
+is the same change that brings the consumers able to pass it. Offering a config at a facet is
+**not** a claim to support that level, and offering none is not a claim to lack it: support is
+carried by the implementation.
 
 The references the core extracts are sourceless. The consuming resource attaches itself as the
 source when it emits them, in its `dependencies()` at finalize ("whoever hosts the config that names
@@ -772,7 +772,7 @@ sibling-base question.
 - **Each capability kind has a detailed companion README** with more depth on that specific kind:
   [`vm_platform/README.md`](vm_platform/README.md) (running VMs: exposure, credentials, rollback,
   and the bring-up pitfalls), [`harness_integration/README.md`](harness_integration/README.md)
-  (harness integrations: the contract, how the session machinery consumes one, session resume), and
+  (harness integrations: the contract, how the session machinery consumes one, continuation), and
   [`git_credential/README.md`](git_credential/README.md) (sourcing and provisioning git credentials:
   the provider contract, the github and azdo providers, the credential-helper path), and
   [`secret_backend/README.md`](secret_backend/README.md) (source configuration, backend mappings,

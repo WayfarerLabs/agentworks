@@ -110,10 +110,10 @@ def _repair_session_pid(
     Raises StateError if the session is alive but PID/boot_id can't be recovered,
     or ConnectivityError if the VM is unreachable.
     """
-    from agentworks.sessions.tmux import get_tmux_server_pid, tmux_cmd
+    from agentworks.sessions.tmux import capture_tmux_server_fingerprint, tmux_cmd
 
     sock = session.socket_path
-    q_session = shlex.quote(session.name)
+    q_session = shlex.quote(f"={session.name}")
 
     # Step 1: try has-session (the primary liveness check)
     has_cmd = tmux_cmd(f"has-session -t {q_session}", sock) + " 2>/dev/null"
@@ -125,12 +125,26 @@ def _repair_session_pid(
             entity_name=session.name,
         )
     if has_result.ok:
-        # Session is alive -- recover PID + boot ID
-        pid = get_tmux_server_pid(target=target, socket_path=sock)
-        boot_id = _mgr._get_boot_id(target) if pid is not None else None
-        if pid is not None and boot_id is not None:
-            db.update_session_pid(session.name, pid, boot_id=boot_id)
-            output.warn(f"Recovered PID {pid} for session '{session.name}'")
+        if sock is None:
+            raise StateError(
+                f"session '{session.name}' is live on a legacy shared tmux server",
+                entity_kind="session",
+                entity_name=session.name,
+                hint=f"Run `agw session restart {session.name}` to migrate it.",
+            )
+        fingerprint = capture_tmux_server_fingerprint(target=target, socket_path=sock)
+        if fingerprint is not None and (
+            (session.pid is None or session.pid == fingerprint.pid)
+            and (session.boot_id is None or session.boot_id == fingerprint.boot_id)
+        ):
+            db.update_session_runtime(
+                session.name,
+                socket_path=sock,
+                pid=fingerprint.pid,
+                boot_id=fingerprint.boot_id,
+                tmux_server_start_ticks=fingerprint.start_ticks,
+            )
+            output.warn(f"Recovered runtime identity for session '{session.name}'")
             return True
         raise StateError(
             f"session '{session.name}' is alive but PID/boot ID recovery failed.",
@@ -151,12 +165,24 @@ def _repair_session_pid(
                 hint="This may indicate a permissions issue. Investigate manually.",
             )
         # Stale socket, server is dead
-        db.update_session_pid(session.name, PID_STOPPED)
+        db.update_session_runtime(
+            session.name,
+            socket_path=sock,
+            pid=PID_STOPPED,
+            boot_id=None,
+            tmux_server_start_ticks=None,
+        )
         output.warn(f"Session '{session.name}' is not running, marked stopped")
         return True
 
     # No socket (or admin session) and has-session failed -- genuinely stopped
-    db.update_session_pid(session.name, PID_STOPPED)
+    db.update_session_runtime(
+        session.name,
+        socket_path=sock,
+        pid=PID_STOPPED,
+        boot_id=None,
+        tmux_server_start_ticks=None,
+    )
     output.warn(f"Session '{session.name}' is not running, marked stopped")
     return True
 
@@ -165,7 +191,7 @@ def _needs_repair(session: SessionRow) -> bool:
     """True if the session is missing PID or boot_id and needs auto-repair."""
     if session.pid == PID_STOPPED:
         return False
-    return session.pid is None or session.boot_id is None
+    return session.pid is None or session.boot_id is None or session.tmux_server_start_ticks is None
 
 
 def _ensure_pid(session: SessionRow, *, target: Transport, db: Database) -> SessionRow:

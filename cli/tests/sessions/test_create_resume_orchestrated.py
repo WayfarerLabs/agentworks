@@ -1,4 +1,4 @@
-"""``session create`` / ``session resume`` through the orchestrated
+"""``session create`` / ``session restart`` through the orchestrated
 model: the parity carries the node layer could not prove on its own.
 
 - resume's required-commands probe fires AT PREFLIGHT, before the
@@ -169,7 +169,7 @@ def _resume_fixture(
         "claude",
         SessionMode.AGENT,
         agent_name="a1",
-        socket_path="/tmp/s1.sock",
+        socket_path="/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock",
     )
     db.update_session_pid("s1", 4242, boot_id="boot-x")
 
@@ -194,7 +194,7 @@ def _resume_fixture(
 
     # Instrument pass 2 (the env-chain resolve) with its own marker so
     # the refusal tests can prove BOTH secret passes stay behind the
-    # gates, not just pass 1 (``Resolver.resolve``). ``resume_session``
+    # gates, not just pass 1 (``Resolver.resolve``). ``restart_session``
     # imports ``resolve_for_command`` function-locally from
     # ``agentworks.secrets``, so patch it there, overriding the no-op the
     # conftest ``stub_session_resolvers`` installed.
@@ -204,16 +204,21 @@ def _resume_fixture(
 
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", _marking_resolve_env)
 
-    def _spy_kill(name: str, **kwargs: object) -> bool:
-        events.append("kill")
-        return True
-
-    monkeypatch.setattr(session_manager, "_kill_session", _spy_kill)
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._lifecycle._teardown_session",
+        lambda *args, **kwargs: events.append("kill"),
+    )
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *a, **k: None)
+    monkeypatch.setattr(tmux_mod, "session_exists", lambda *a, **k: False)
     monkeypatch.setattr(
         tmux_mod,
         "create_session",
-        lambda *a, **k: events.append("tmux_create") or ("/tmp/s1.sock", 4243),
+        lambda *a, **k: events.append("tmux_create") or ("/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock", 4243),
+    )
+    monkeypatch.setattr(
+        tmux_mod,
+        "capture_tmux_server_fingerprint",
+        lambda **kwargs: SimpleNamespace(pid=4243, boot_id="boot-x", start_ticks=1),
     )
     monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: "boot-x")
     monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
@@ -224,15 +229,14 @@ def test_resume_probe_fires_at_preflight_before_the_kill(tmp_path: Path, monkeyp
     """The pre-kill guard, orchestrated: the required-commands probe
     fires at PREFLIGHT, strictly before the kill, not merely once
     somewhere in the command."""
-    from agentworks.sessions.manager import resume_session
+    from agentworks.sessions.manager import restart_session
 
     db, events = _resume_fixture(tmp_path, monkeypatch)
 
-    resume_session(
+    restart_session(
         db,
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),
         name="s1",
-        yes=True,
         interaction=TtyInteractionPolicy.REFUSE,
     )  # type: ignore[arg-type]
 
@@ -251,7 +255,7 @@ def test_resume_refuses_ssh_identity_before_activation_or_probe(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agentworks.sessions.manager import resume_session
+    from agentworks.sessions.manager import restart_session
 
     db, events = _resume_fixture(tmp_path, monkeypatch)
 
@@ -265,11 +269,10 @@ def test_resume_refuses_ssh_identity_before_activation_or_probe(
     )
 
     with pytest.raises(StateError):
-        resume_session(
+        restart_session(
             db,
             SimpleNamespace(session=SimpleNamespace(history_limit=1)),
             name="s1",
-            yes=True,
             interaction=TtyInteractionPolicy.REFUSE,
         )  # type: ignore[arg-type]
 
@@ -277,21 +280,20 @@ def test_resume_refuses_ssh_identity_before_activation_or_probe(
     db.close()
 
 
-def test_resume_missing_binary_aborts_with_the_old_session_running(
+def test_restart_missing_binary_aborts_with_the_old_session_running(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A missing required command aborts the resume at the sweep: no
+    """A missing required command aborts restart at the sweep: no
     kill, no tmux create, the old session untouched."""
-    from agentworks.sessions.manager import resume_session
+    from agentworks.sessions.manager import restart_session
 
     db, events = _resume_fixture(tmp_path, monkeypatch, missing={"claude"})
 
     with pytest.raises(StateError, match="requires 'claude'") as exc:
-        resume_session(
+        restart_session(
             db,
             SimpleNamespace(session=SimpleNamespace(history_limit=1)),
             name="s1",
-            yes=True,
             interaction=TtyInteractionPolicy.REFUSE,
         )  # type: ignore[arg-type]
 
@@ -302,24 +304,24 @@ def test_resume_missing_binary_aborts_with_the_old_session_running(
     db.close()
 
 
-# -- resume: both secret passes run AFTER the refusal/confirm gates ----------
+# -- restart: secret passes run after refusal gates --------------------------
 
 
-def test_resume_broken_without_force_refuses_before_the_resolve(
+def test_restart_broken_without_force_refuses_before_the_resolve(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A BROKEN session without --force is refused up front. The pass-1
     graph-union resolve must NOT run first (issue #202): a refused
-    resume never prompts. Preflight (read-only) still runs."""
+    restart never prompts. Preflight (read-only) still runs."""
     from agentworks.errors import BrokenStateError
     from agentworks.sessions import manager as session_manager
-    from agentworks.sessions.manager import resume_session
+    from agentworks.sessions.manager import restart_session
 
     db, events = _resume_fixture(tmp_path, monkeypatch)
     monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: SessionStatus.BROKEN)
 
     with pytest.raises(BrokenStateError):
-        resume_session(
+        restart_session(
             db,
             SimpleNamespace(session=SimpleNamespace(history_limit=1)),
             name="s1",
@@ -329,34 +331,6 @@ def test_resume_broken_without_force_refuses_before_the_resolve(
     # Preflight probed, but neither secret pass ran and nothing was
     # killed: pass 1 (graph-union boundary) and pass 2 (env chain) both
     # stayed behind the refusal.
-    assert "resolve" not in events
-    assert "resolve_env" not in events
-    assert "kill" not in events
-    db.close()
-
-
-def test_resume_declined_confirm_refuses_before_the_resolve(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """An OK session whose "Resume?" confirm is declined is refused up
-    front. The pass-1 graph-union resolve must NOT run first (issue
-    #202): a declined resume never prompts for secrets it was about to
-    discard."""
-    from agentworks import output
-    from agentworks.errors import UserAbort
-    from agentworks.sessions.manager import resume_session
-
-    db, events = _resume_fixture(tmp_path, monkeypatch)  # status OK
-    monkeypatch.setattr(output, "confirm", lambda *a, **k: False)
-
-    with pytest.raises(UserAbort):
-        resume_session(
-            db,
-            SimpleNamespace(session=SimpleNamespace(history_limit=1)),
-            name="s1",
-            yes=False,
-            interaction=TtyInteractionPolicy.REFUSE,
-        )  # type: ignore[arg-type]
-
-    # Both secret passes stayed behind the declined confirm.
     assert "resolve" not in events
     assert "resolve_env" not in events
     assert "kill" not in events
@@ -383,7 +357,12 @@ def _create_stubs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, events: list[
     monkeypatch.setattr(
         tmux_mod,
         "create_session",
-        lambda *a, **k: events.append("tmux_create") or ("/tmp/s1.sock", 4243),
+        lambda *a, **k: events.append("tmux_create") or ("/run/agentworks/agent-tmux-sockets/agt-s1/s1.sock", 4243),
+    )
+    monkeypatch.setattr(
+        tmux_mod,
+        "capture_tmux_server_fingerprint",
+        lambda **kwargs: SimpleNamespace(pid=4243, boot_id="boot-x", start_ticks=1),
     )
     monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: "boot-x")
     monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
@@ -1015,7 +994,7 @@ def test_resume_pane_command_uses_resume_command_and_session_workspace(
     template's ``resume_command``, preferred over ``command``) with
     ``workspace_name`` sourced from the SESSION ROW, matching the interim
     path's resume substitution."""
-    from agentworks.sessions.manager import resume_session
+    from agentworks.sessions.manager import restart_session
 
     db, _events = _resume_fixture(tmp_path, monkeypatch)
     _template(
@@ -1026,11 +1005,10 @@ def test_resume_pane_command_uses_resume_command_and_session_workspace(
     captured: dict[str, str] = {}
     _capture_pane_command(monkeypatch, captured)
 
-    resume_session(
+    restart_session(
         db,
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),
         name="s1",
-        yes=True,
         interaction=TtyInteractionPolicy.REFUSE,
     )  # type: ignore[arg-type]
 
@@ -1116,13 +1094,19 @@ def _patch_session_ops(monkeypatch: pytest.MonkeyPatch, events: list[str], captu
 
     _patch_transports(monkeypatch, _Target(events), _Target(events))
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *a, **k: None)
+    monkeypatch.setattr(tmux_mod, "session_exists", lambda *a, **k: False)
 
     def _capture_create(*a: object, env: dict[str, str] | None = None, **k: object):  # noqa: ANN202
         events.append("tmux_create")
         captured_env.update(env or {})
-        return ("/tmp/s1.sock", 4243)
+        return ("/run/agentworks/admin-tmux-sockets/admin/s1.sock", 4243)
 
     monkeypatch.setattr(tmux_mod, "create_session", _capture_create)
+    monkeypatch.setattr(
+        tmux_mod,
+        "capture_tmux_server_fingerprint",
+        lambda **kwargs: SimpleNamespace(pid=4243, boot_id="boot-x", start_ticks=1),
+    )
     monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: "boot-x")
     monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
 
@@ -1384,7 +1368,7 @@ def test_resume_stopped_vm_gate_seeds_and_env_pass_is_the_only_other(
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
-    """session resume on a stopped VM: the gate's just-in-time token
+    """session restart on a stopped VM: the gate's just-in-time token
     resolve seeds the boundary, whose own pass then covers NOTHING (the
     graph union is exactly the seeded site secret, so no second backend
     pass runs at the boundary); the recorded post-confirm env-chain
@@ -1392,7 +1376,7 @@ def test_resume_stopped_vm_gate_seeds_and_env_pass_is_the_only_other(
     from agentworks.db import SessionStatus
     from agentworks.instance_specs import parse_instance_spec
     from agentworks.sessions import manager as session_manager
-    from agentworks.sessions.manager import resume_session
+    from agentworks.sessions.manager import restart_session
 
     config = make_config()
     _seed_stopped_proxmox_vm(db)
@@ -1407,7 +1391,7 @@ def test_resume_stopped_vm_gate_seeds_and_env_pass_is_the_only_other(
     monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, **k: session)
     monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: SessionStatus.STOPPED)
 
-    resume_session(db, config, name="s1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+    restart_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
 
     # Two backend passes total: the gate's token resolve, then the
     # env chain's post-confirm pass. The boundary itself contributed no
@@ -1419,19 +1403,19 @@ def test_resume_stopped_vm_gate_seeds_and_env_pass_is_the_only_other(
     assert captured_env["RESUME_SPEC"] == "set"
     assert "tmux_create" in events  # the command completed
 
-    # Resume now reads as a structured plan mirroring create: the
+    # Restart now reads as a structured plan mirroring create: the
     # Preflight / Resolving Secrets / Starting Session headers sit at level
-    # 0, the "Resuming..." announce nests at level 1, and the terminal
+    # 0, the restart announce nests at level 1, and the terminal
     # result line dedents to column 0.
     assert (Role.HEADER, 0, "Preflight") in captured_output.lines
     assert (Role.HEADER, 0, "Resolving Secrets") in captured_output.lines
     assert (Role.HEADER, 0, "Starting Session") in captured_output.lines
     assert any(
-        role is Role.BODY and level == 1 and msg.startswith("Resuming session 's1'")
+        role is Role.BODY and level == 1 and msg.startswith("Restarting session 's1'")
         for role, level, msg in captured_output.lines
     )
     assert any(
-        role is Role.RESULT and level == 0 and msg == "Session 's1' resumed"
+        role is Role.RESULT and level == 0 and msg == "Session 's1' restarted"
         for role, level, msg in captured_output.lines
     )
 
@@ -1444,7 +1428,7 @@ def test_resume_validates_stored_overlay_references_before_lifecycle_work(
     from agentworks.errors import ConfigError
     from agentworks.instance_specs import parse_instance_spec
     from agentworks.sessions import manager as session_manager
-    from agentworks.sessions.manager import resume_session
+    from agentworks.sessions.manager import restart_session
 
     config = make_config()
     _seed_stopped_proxmox_vm(db)
@@ -1460,7 +1444,7 @@ def test_resume_validates_stored_overlay_references_before_lifecycle_work(
     monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: SessionStatus.STOPPED)
 
     with pytest.raises(ConfigError):
-        resume_session(db, config, name="s1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+        restart_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
 
     assert events == []
     assert captured_env == {}
@@ -1472,7 +1456,7 @@ def test_resume_multiline_environment_secret_refuses_before_kill(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agentworks.sessions import manager as session_manager
-    from agentworks.sessions.manager import resume_session
+    from agentworks.sessions.manager import restart_session
     from agentworks.vms import manager as vm_manager
 
     config = make_config()
@@ -1494,11 +1478,10 @@ def test_resume_multiline_environment_secret_refuses_before_kill(
     )
 
     with pytest.raises(ValidationError) as caught:
-        resume_session(
+        restart_session(
             db,
             config,
             name="s1",
-            yes=True,
             interaction=TtyInteractionPolicy.REFUSE,
         )
 
@@ -1511,35 +1494,3 @@ def test_resume_multiline_environment_secret_refuses_before_kill(
     assert "session-resume-sentinel" not in repr((caught.value.args, vars(caught.value)))
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
-
-
-def test_resume_broken_force_kill_warning_nests_under_starting_session(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, captured_output: Any
-) -> None:
-    """A BROKEN session resumed with --force force-kills via PID; that
-    'force-killing' warning is emitted from inside the Starting Session
-    section, so it renders at level 1 under the header, and the terminal
-    result line still dedents to column 0."""
-    from agentworks.sessions import manager as session_manager
-    from agentworks.sessions import tmux as tmux_mod
-    from agentworks.sessions.manager import resume_session
-
-    db, events = _resume_fixture(tmp_path, monkeypatch)
-    monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: SessionStatus.BROKEN)
-    monkeypatch.setattr(tmux_mod, "force_kill_tmux_server", lambda *a, **k: True)
-
-    resume_session(
-        db,
-        SimpleNamespace(session=SimpleNamespace(history_limit=1)),  # type: ignore[arg-type]
-        name="s1",
-        force=True,
-        interaction=TtyInteractionPolicy.REFUSE,
-    )
-
-    assert (Role.HEADER, 0, "Starting Session") in captured_output.lines
-    assert any(
-        role is Role.WARNING and level == 1 and "force-killing via PID" in msg
-        for role, level, msg in captured_output.lines
-    )
-    assert (Role.RESULT, 0, "Session 's1' resumed") in captured_output.lines
-    db.close()

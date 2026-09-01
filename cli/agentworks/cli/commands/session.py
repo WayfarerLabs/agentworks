@@ -215,7 +215,7 @@ def session_stop(
         bool,
         typer.Option("--admin", help="Only admin-mode sessions (with --all)"),
     ] = False,
-    force: Annotated[bool, typer.Option("--force", help="Force-stop broken sessions via PID kill")] = False,
+    force: Annotated[bool, typer.Option("--force", help="Recover broken session state before stopping")] = False,
 ) -> None:
     """Stop a running session, or all running sessions with --all.
 
@@ -260,133 +260,176 @@ def session_stop(
         raise typer.BadParameter("provide a session name or use --all")
 
 
-def _resume_sessions(
+def _launch_sessions(
     name: str | None,
     *,
-    all_stopped: bool,
     all_sessions: bool,
     vm: str | None,
     workspace: str | None,
     agent: str | None,
     admin: bool,
     force: bool,
-    yes: bool,
+    force_new: bool,
+    replace_running: bool,
     interaction: TtyInteractionPolicy,
 ) -> None:
-    """Validate and execute the single or batch session resume operation."""
+    """Validate and execute one canonical session launch operation."""
     from agentworks.config import load_config
-    from agentworks.sessions.manager import resume_all_sessions, resume_session
+    from agentworks.sessions.manager import (
+        restart_all_sessions,
+        restart_session,
+        start_all_sessions,
+        start_session,
+    )
 
     parsed_vm = parse_csv_filter(vm)
     parsed_workspace = parse_csv_filter(workspace)
     parsed_agent = parse_csv_filter(agent)
 
-    if name and (all_stopped or all_sessions):
-        raise typer.BadParameter("provide a session name or a batch flag (--all/--all-stopped), not both")
-    if all_stopped and all_sessions:
-        raise typer.BadParameter("use --all or --all-stopped, not both")
+    if name and all_sessions:
+        raise typer.BadParameter("provide a session name or --all, not both")
     if admin and parsed_agent is not None:
         raise typer.BadParameter("--admin and --agent are mutually exclusive")
-    if (parsed_vm or parsed_workspace or parsed_agent or admin) and not (all_stopped or all_sessions):
-        raise typer.BadParameter("--vm, --workspace, --agent, and --admin require --all or --all-stopped")
-    if all_stopped or all_sessions:
+    if (parsed_vm or parsed_workspace or parsed_agent or admin) and not all_sessions:
+        raise typer.BadParameter("--vm, --workspace, --agent, and --admin require --all")
+    if all_sessions:
         db = get_db()
         config = load_config()
-        include_running = all_sessions
-
-        # --all without --yes: prompt if there are running sessions
-        if include_running and not yes:
-            from agentworks import output
-            from agentworks.sessions.manager import (
-                batch_check_all_sessions,
-                ensure_pids_batch,
-                filter_sessions,
-            )
-
-            sessions = filter_sessions(
-                db,
-                workspace_name=parsed_workspace,
-                vm_name=parsed_vm,
-                agent_name=parsed_agent,
-                admin_only=admin,
-            )
-            sessions = ensure_pids_batch(sessions, db=db, config=config)
-            from agentworks.db import SessionStatus
-
-            status_map = batch_check_all_sessions(sessions, db=db, config=config)
-            running = [s for s in sessions if status_map.get(s.name) == SessionStatus.OK]
-            if running:
-                names = ", ".join(s.name for s in running[:5])
-                suffix = f" (and {len(running) - 5} more)" if len(running) > 5 else ""
-                output.warn(f"{len(running)} session(s) are running and will be resumed ({names}{suffix}).")
-                if not output.confirm("Continue? (--all-stopped resumes only the stopped sessions)"):
-                    from agentworks.errors import UserAbort
-
-                    raise UserAbort("resume cancelled")
-
-        resume_all_sessions(
+        batch_operation = restart_all_sessions if replace_running else start_all_sessions
+        batch_operation(
             db,
             config,
             vm_name=parsed_vm,
             workspace_name=parsed_workspace,
             agent_name=parsed_agent,
             admin_only=admin,
-            include_running=include_running,
             force=force,
+            force_new=force_new,
             interaction=interaction,
         )
     elif name:
-        resume_session(
+        operation = restart_session if replace_running else start_session
+        operation(
             get_db(),
             load_config(),
             name=name,
             force=force,
-            yes=yes,
+            force_new=force_new,
             interaction=interaction,
         )
     else:
-        raise typer.BadParameter("provide a session name, --all-stopped, or --all")
+        raise typer.BadParameter("provide a session name or use --all")
 
 
-@session_app.command("resume")
-def session_resume(
-    name: Annotated[str | None, typer.Argument(help="Session name")] = None,
-    all_stopped: Annotated[bool, typer.Option("--all-stopped", help="Resume all stopped sessions")] = False,
-    all_sessions: Annotated[bool, typer.Option("--all", help="Resume all sessions (prompts for running)")] = False,
-    vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM (with --all/--all-stopped)")] = None,
-    workspace: Annotated[
-        str | None,
-        typer.Option("--workspace", help="Filter by workspace (with --all/--all-stopped)"),
-    ] = None,
-    agent: Annotated[
-        str | None,
-        typer.Option("--agent", help="Filter by agent (with --all/--all-stopped)"),
-    ] = None,
-    admin: Annotated[
-        bool,
-        typer.Option("--admin", help="Only admin-mode sessions (with --all/--all-stopped)"),
-    ] = False,
-    force: Annotated[bool, typer.Option("--force", help="Force-kill broken sessions via PID")] = False,
-    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation prompts")] = False,
+def _canonical_launch_options(
+    name: str | None,
+    *,
+    all_sessions: bool,
+    vm: str | None,
+    workspace: str | None,
+    agent: str | None,
+    admin: bool,
+    force: bool,
+    force_new: bool,
+    replace_running: bool,
 ) -> None:
-    """Resume a session, or batch resume with --all-stopped / --all.
-
-    Filters compose with AND. ``--vm``, ``--workspace``, and ``--agent``
-    accept a single value or a comma-separated list (e.g.
-    ``--vm vm1,vm2``); commas within a filter are OR-ed together.
-    """
-    interaction = ordinary_tty_interaction_policy()
-    _resume_sessions(
+    _launch_sessions(
         name,
-        all_stopped=all_stopped,
         all_sessions=all_sessions,
         vm=vm,
         workspace=workspace,
         agent=agent,
         admin=admin,
         force=force,
-        yes=yes,
-        interaction=interaction,
+        force_new=force_new,
+        replace_running=replace_running,
+        interaction=ordinary_tty_interaction_policy(),
+    )
+
+
+@session_app.command("start")
+def session_start(
+    name: Annotated[str | None, typer.Argument(help="Session name")] = None,
+    all_sessions: Annotated[bool, typer.Option("--all", help="Start all sessions")] = False,
+    vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM (with --all)")] = None,
+    workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace (with --all)")] = None,
+    agent: Annotated[str | None, typer.Option("--agent", help="Filter by agent (with --all)")] = None,
+    admin: Annotated[bool, typer.Option("--admin", help="Only admin-mode sessions (with --all)")] = False,
+    force: Annotated[bool, typer.Option("--force", help="Recover broken session state")] = False,
+    force_new: Annotated[bool, typer.Option("--force-new", help="Launch a fresh harness conversation")] = False,
+) -> None:
+    """Start a session, or all sessions with --all."""
+    _canonical_launch_options(
+        name,
+        all_sessions=all_sessions,
+        vm=vm,
+        workspace=workspace,
+        agent=agent,
+        admin=admin,
+        force=force,
+        force_new=force_new,
+        replace_running=False,
+    )
+
+
+@session_app.command("restart")
+def session_restart(
+    name: Annotated[str | None, typer.Argument(help="Session name")] = None,
+    all_sessions: Annotated[bool, typer.Option("--all", help="Restart all sessions")] = False,
+    vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM (with --all)")] = None,
+    workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace (with --all)")] = None,
+    agent: Annotated[str | None, typer.Option("--agent", help="Filter by agent (with --all)")] = None,
+    admin: Annotated[bool, typer.Option("--admin", help="Only admin-mode sessions (with --all)")] = False,
+    force: Annotated[bool, typer.Option("--force", help="Recover broken session state")] = False,
+    force_new: Annotated[bool, typer.Option("--force-new", help="Launch a fresh harness conversation")] = False,
+) -> None:
+    """Restart a session, or all sessions with --all."""
+    _canonical_launch_options(
+        name,
+        all_sessions=all_sessions,
+        vm=vm,
+        workspace=workspace,
+        agent=agent,
+        admin=admin,
+        force=force,
+        force_new=force_new,
+        replace_running=True,
+    )
+
+
+@session_app.command("resume", hidden=True)
+def session_resume(
+    name: Annotated[str | None, typer.Argument(help="Session name")] = None,
+    all_stopped: Annotated[bool, typer.Option("--all-stopped")] = False,
+    all_sessions: Annotated[bool, typer.Option("--all")] = False,
+    vm: Annotated[str | None, typer.Option("--vm")] = None,
+    workspace: Annotated[str | None, typer.Option("--workspace")] = None,
+    agent: Annotated[str | None, typer.Option("--agent")] = None,
+    admin: Annotated[bool, typer.Option("--admin")] = False,
+    force: Annotated[bool, typer.Option("--force")] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y")] = False,
+) -> None:
+    """Compatibility wrapper for the 0.18 session resume grammar.
+
+    Removed in 0.20.
+    """
+    del yes
+    from agentworks import output
+
+    output.deprecation("`agw session resume` is deprecated; use `session start` or `session restart`.")
+    if all_stopped and all_sessions:
+        raise typer.BadParameter("use --all or --all-stopped, not both")
+    _launch_sessions(
+        name,
+        all_sessions=all_stopped or all_sessions,
+        vm=vm,
+        workspace=workspace,
+        agent=agent,
+        admin=admin,
+        force=force,
+        force_new=False,
+        replace_running=not all_stopped,
+        interaction=ordinary_tty_interaction_policy(),
     )
 
 

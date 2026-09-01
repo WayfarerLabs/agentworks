@@ -42,6 +42,12 @@ contract it relies on (validate / construct / preflight / runup / ops) is docume
 > same-integration `merge_config` mechanism with schema-directed model policy. Selector silence and
 > integration-switch reset remain unchanged. The `merge_config` language below records the accepted
 > version-1 decision; a version-1 third-party integration is now refused at registration.
+>
+> Note (2026-09-01): the session/console lifecycle redesign supersedes the lifecycle API portions of
+> this record and the 2026-08-28 contract-number statement. The in-repository contract is version 1
+> again and exposes only `start(ctx, force_new=False) -> HarnessStart`; core owns session start,
+> restart, and teardown. Schema-directed config merging remains unchanged. Version 1 identifies the
+> current contract exactly and is not an adapter for the earlier version-1 shape.
 
 ## Context
 

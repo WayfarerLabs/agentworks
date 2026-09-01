@@ -1,4 +1,4 @@
-"""CLI coverage for canonical session resume and the removed restart alias."""
+"""CLI routing for canonical session lifecycle and the 0.19 wrapper."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ import pytest
 from typer.testing import CliRunner
 
 from agentworks.cli import app
-from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager as session_manager
 
 
@@ -17,52 +16,61 @@ def command_calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, 
     calls: list[tuple[str, dict[str, Any]]] = []
     monkeypatch.setattr("agentworks.cli._helpers.get_db", lambda: object())
     monkeypatch.setattr("agentworks.config.load_config", lambda: object())
-    monkeypatch.setattr(session_manager, "resume_session", lambda *args, **kwargs: calls.append(("single", kwargs)))
-    monkeypatch.setattr(session_manager, "resume_all_sessions", lambda *args, **kwargs: calls.append(("batch", kwargs)))
+    for name in ("start_session", "restart_session", "start_all_sessions", "restart_all_sessions"):
+        monkeypatch.setattr(
+            session_manager,
+            name,
+            lambda *args, _name=name, **kwargs: calls.append((_name, kwargs)),
+        )
     return calls
 
 
 @pytest.mark.parametrize(
-    "arguments, expected",
+    ("arguments", "operation", "selected"),
     [
+        (["start", "coding", "--force-new"], "start_session", {"name": "coding", "force_new": True}),
+        (["restart", "coding", "--force"], "restart_session", {"name": "coding", "force": True}),
         (
-            ["coding", "--force", "--yes"],
-            (
-                "single",
-                {
-                    "name": "coding",
-                    "force": True,
-                    "yes": True,
-                    "interaction": TtyInteractionPolicy.ALLOW,
-                },
-            ),
+            ["start", "--all", "--vm", "vm1", "--workspace", "ws1"],
+            "start_all_sessions",
+            {"vm_name": "vm1", "workspace_name": "ws1"},
         ),
-        (
-            ["--all-stopped", "--vm", "vm1", "--workspace", "ws1", "--agent", "agent1"],
-            (
-                "batch",
-                {
-                    "vm_name": "vm1",
-                    "workspace_name": "ws1",
-                    "agent_name": "agent1",
-                    "admin_only": False,
-                    "include_running": False,
-                    "force": False,
-                    "interaction": TtyInteractionPolicy.ALLOW,
-                },
-            ),
-        ),
+        (["restart", "--all", "--agent", "agent1"], "restart_all_sessions", {"agent_name": "agent1"}),
     ],
 )
-def test_resume_dispatches_canonical_behavior(
-    arguments: list[str], expected: tuple[str, dict[str, Any]], command_calls: list[tuple[str, dict[str, Any]]]
+def test_canonical_launch_commands_route_to_matching_service(
+    arguments: list[str],
+    operation: str,
+    selected: dict[str, object],
+    command_calls: list[tuple[str, dict[str, Any]]],
+) -> None:
+    result = CliRunner().invoke(app, ["session", *arguments])
+    assert result.exit_code == 0, result.output
+    assert len(command_calls) == 1
+    actual_operation, kwargs = command_calls[0]
+    assert actual_operation == operation
+    assert kwargs.items() >= selected.items()
+
+
+@pytest.mark.parametrize(
+    ("arguments", "operation"),
+    [
+        (["coding", "--yes"], "restart_session"),
+        (["--all-stopped"], "start_all_sessions"),
+        (["--all"], "restart_all_sessions"),
+    ],
+)
+def test_resume_wrapper_routes_to_canonical_services(
+    arguments: list[str],
+    operation: str,
+    command_calls: list[tuple[str, dict[str, Any]]],
 ) -> None:
     result = CliRunner().invoke(app, ["session", "resume", *arguments])
     assert result.exit_code == 0, result.output
-    assert command_calls == [expected]
+    assert [name for name, _kwargs in command_calls] == [operation]
 
 
-def test_restart_is_an_unknown_command() -> None:
-    result = CliRunner().invoke(app, ["session", "restart", "coding"])
-    assert result.exit_code == 2
-    assert "No such command 'restart'" in result.output
+def test_resume_wrapper_is_hidden_from_help() -> None:
+    result = CliRunner().invoke(app, ["session", "--help"])
+    assert result.exit_code == 0
+    assert "resume" not in result.output

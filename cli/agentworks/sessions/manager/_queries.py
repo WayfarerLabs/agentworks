@@ -13,13 +13,11 @@ from agentworks.db.projections import project_session_mode, project_session_stat
 from agentworks.errors import (
     AgentworksError,
     BrokenStateError,
-    ExternalError,
     NotFoundError,
     StateError,
     UserAbort,
 )
 from agentworks.sessions._resource_cleanup import cleanup_now_empty_resource
-from agentworks.sessions.tmux import AGENT_SOCKET_ROOT
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -29,7 +27,6 @@ if TYPE_CHECKING:
     from agentworks.resources.registry import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.sessions.template import SessionTemplate
-    from agentworks.sessions.tmux import RunCommand
 
 
 @dataclass(frozen=True)
@@ -161,52 +158,19 @@ def delete_session(
         # confirmed the delete. The helper returns a same-uid target, so
         # no sudo is needed for the destructive ops below.
         session_target = _mgr._build_session_target(session, vm=vm, config=config, db=db, admin_target=admin_target)
-        session_run_command: RunCommand = session_target.run
-        kill_sudo = False
 
         # Confirm before any destructive action
         if not yes and not output.confirm(f"Delete session '{name}'?"):
             raise UserAbort("delete cancelled")
 
-        # Now kill if needed
-        if status == SessionStatus.OK:
-            sock = session.socket_path
-            if not _mgr._kill_session(name, run_command=session_run_command, socket_path=sock):
-                # Race: session may have exited between check and kill. Recheck.
-                recheck = _mgr.check_session_status(session, target=admin_target)
-                if recheck != SessionStatus.STOPPED:
-                    raise ExternalError(
-                        f"failed to stop session '{name}' for deletion",
-                        entity_kind="session",
-                        entity_name=name,
-                    )
-        elif status == SessionStatus.BROKEN:
-            from agentworks.sessions.tmux import force_kill_tmux_server
-
-            output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
-            assert session.pid is not None
-            killed = force_kill_tmux_server(
-                session.pid,
+        if status != SessionStatus.STOPPED:
+            _mgr._teardown_session(
+                session,
                 target=session_target,
-                socket_path=session.socket_path,
-                log=output.detail,
-                use_sudo=kill_sudo,
+                target_owns_session=True,
+                db=db,
+                force=force,
             )
-            if not killed:
-                raise ExternalError(
-                    f"failed to kill PID {session.pid} for session '{name}'",
-                    entity_kind="session",
-                    entity_name=name,
-                )
-
-        # Clean up socket if the server is dead (don't remove a live socket)
-        sock = session.socket_path
-        if sock and sock.startswith(AGENT_SOCKET_ROOT + "/"):
-            post_status = _mgr.check_session_status(session, target=admin_target)
-            if post_status == SessionStatus.STOPPED:
-                session_target.run(f"rm -f {shlex.quote(sock)}", sudo=kill_sudo, check=False)
-            else:
-                output.warn(f"Session '{name}' status is {post_status.value} after delete, socket preserved at {sock}")
 
         # Capture console memberships before delete; the FK cascade on
         # console_sessions zeroes the join table the moment the session row goes.
@@ -516,6 +480,7 @@ def _session_structural_description(
                 SessionStatus.OK: "running",
                 SessionStatus.STOPPED: "stopped",
                 SessionStatus.BROKEN: "broken",
+                SessionStatus.RESIDUAL: "residual",
                 SessionStatus.UNKNOWN: "unknown",
             }[status],
             pid=session.pid if session.pid is not None and session.pid > 0 else None,
@@ -741,6 +706,7 @@ def session_listing(
                 SessionStatus.OK: "running",
                 SessionStatus.STOPPED: "stopped",
                 SessionStatus.BROKEN: "broken",
+                SessionStatus.RESIDUAL: "residual",
                 SessionStatus.UNKNOWN: "unknown",
             }[status_map[session.name]]
         else:
@@ -798,7 +764,7 @@ def render_session_listing(listing: SessionListing) -> None:
         if broken_names:
             output.warn(
                 f"{len(broken_names)} session(s) are broken (tmux unreachable): "
-                f"{', '.join(broken_names)}. Use resume/stop/delete --force."
+                f"{', '.join(broken_names)}. Use start/restart/stop/delete --force."
             )
         if unknown_names:
             output.warn(
@@ -845,7 +811,7 @@ def attach_session(
                 entity_kind="session",
                 entity_name=name,
             )
-        if status == SessionStatus.BROKEN:
+        if status in {SessionStatus.BROKEN, SessionStatus.RESIDUAL}:
             raise BrokenStateError(
                 f"session '{name}' is broken (PID alive but tmux unreachable).",
                 entity_kind="session",
@@ -854,7 +820,7 @@ def attach_session(
 
         from agentworks.terminal import clear_screen_on_detach
 
-        q_session = shlex.quote(name)
+        q_session = shlex.quote(f"={name}")
         # A session attach is a full-screen tmux; clear the local screen on
         # detach where we don't trust the terminal to restore cleanly.
         return target.interactive(

@@ -15,6 +15,7 @@ time (``_mc.<name>(...)``) rather than a direct or bare reference.
 from __future__ import annotations
 
 import shlex
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import agentworks.sessions.multi_console as _mc
@@ -43,31 +44,44 @@ from .tmux_build import PreserveEnvMemo, _resolve_workspace_path, _split_shell_p
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.db import Database, ShellEntry
+    from agentworks.db import ConsoleSessionRow, Database, ShellEntry
     from agentworks.secrets import SecretTarget
     from agentworks.secrets.policy import TtyInteractionPolicy
 
 
+@dataclass(frozen=True)
+class ConsoleDefinition:
+    """A validated console definition before its database commit point."""
+
+    name: str
+    vm_name: str
+    admin_shell: bool
+    members: tuple[ConsoleSessionRow, ...]
+
+
 def create_console(
     db: Database,
+    config: Config,
     *,
     name: str,
     vm_name: str,
     session_specs: list[str],
     fill_all: bool = False,
     add_admin_shell: bool = False,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Create a new console with the given sessions.
 
     Explicit *session_specs* keep their argument order. *fill_all* appends
     every other session on the VM in alphabetical order with zero shells.
     *add_admin_shell* adds a window 0 login shell as the VM admin, useful when
-    you want a top-level shell alongside the curated session windows. All inserts run in one transaction; the
-    console is not created if any step fails.
+    you want a top-level shell alongside the curated session windows. The
+    definition inserts atomically after validation, secret resolution, and
+    stale-runtime cleanup. A later build failure retains that honest stopped
+    definition so ``console start`` can retry it.
 
-    Note: this function is DB-only. Live filtering (e.g. --all-running) is
-    resolved by the CLI layer into an explicit list of session names before
-    calling create_console.
+    Live filtering (e.g. ``--all-running``) is resolved by the CLI layer into
+    an explicit list of session names before calling this function.
     """
     validate_name(name, max_length=MAX_FREEFORM_NAME_LENGTH)
 
@@ -112,10 +126,62 @@ def create_console(
             entity_name=name,
         )
 
-    with db.transaction():
-        db.insert_console(name, vm_name, admin_shell=add_admin_shell)
-        for spec in specs:
-            db.add_console_session(name, spec.name, default_shells(spec.shells))
+    from agentworks.bootstrap import load_request_registry
+    from agentworks.db import ConsoleSessionRow
+    from agentworks.secrets import resolve_for_command
+
+    definition = ConsoleDefinition(
+        name=name,
+        vm_name=vm_name,
+        admin_shell=add_admin_shell,
+        members=tuple(
+            ConsoleSessionRow(
+                console_name=name,
+                session_name=spec.name,
+                position=position,
+                shells=default_shells(spec.shells),
+            )
+            for position, spec in enumerate(specs)
+        ),
+    )
+    registry = load_request_registry(config, live_database=db)
+    with _mc._prepare_vm_target(
+        db,
+        config,
+        vm_name,
+        registry=registry,
+        interaction=interaction,
+    ) as (vm, target):
+        secret_values = resolve_for_command(
+            _mc._console_build_secret_targets(
+                db,
+                registry,
+                console=definition,
+                vm=vm,
+                members=definition.members,
+            ),
+            config,
+            registry,
+            allow_transient_auto_declare=True,
+            interaction=interaction,
+        )
+        _mc._teardown_console_tmux(target, name)
+        with db.transaction():
+            db.insert_console(name, vm_name, admin_shell=add_admin_shell)
+            for spec in specs:
+                db.add_console_session(name, spec.name, default_shells(spec.shells))
+        console = _require_console(db, name)
+        from .tmux_build import _build_console_tmux
+
+        _build_console_tmux(
+            target,
+            db,
+            registry,
+            console,
+            vm,
+            values=secret_values,
+            layout=named_console_template(registry).tmux_layout,
+        )
 
     extras_note = " + admin shell" if add_admin_shell else ""
     output.result(f"Console '{name}' created with {len(specs)} session(s){extras_note}.")
@@ -559,7 +625,7 @@ def add_shell(
             # One pane, so no probe verdict to share with a sibling split.
             preserve_memo={},
         )
-        q_con = shlex.quote(tmux_session_name(console_name))
+        q_con = shlex.quote(f"={tmux_session_name(console_name)}")
         q_win = shlex.quote(session_name)
         # `_split_shell_pane` splits the window's active pane, which after an
         # attach is the session pane, so the new shell lands directly below it,

@@ -66,9 +66,9 @@ def _seed_live_session(db: Database, *, name: str, ws: str, agent: str) -> None:
     delete's status-aware kill loop probes and kills it."""
     db._conn.execute(
         "INSERT INTO sessions (name, workspace_name, template, mode, "
-        "agent_name, socket_path, pid, boot_id) VALUES (?, ?, 'default', "
-        "'agent', ?, ?, 4242, 'boot-1')",
-        (name, ws, agent, f"/tmp/{name}.sock"),
+        "agent_name, socket_path, pid, boot_id, tmux_server_start_ticks) VALUES (?, ?, 'default', "
+        "'agent', ?, ?, 4242, 'boot-1', 1)",
+        (name, ws, agent, f"/run/agentworks/agent-tmux-sockets/agt-{agent}/{name}.sock"),
     )
     db._conn.commit()
 
@@ -474,11 +474,15 @@ def test_delete_choreography_end_to_end_standalone(
     db.insert_agent_grant("a1", "ws1", "explicit")
     _seed_live_session(db, name="s1", ws="ws1", agent="a1")
     _reachable(monkeypatch, True)
+    monkeypatch.setattr(
+        "agentworks.sessions.tmux.capture_tmux_server_fingerprint",
+        lambda **kwargs: SimpleNamespace(pid=4242, boot_id="boot-1", start_ticks=1),
+    )
+    monkeypatch.setattr("agentworks.sessions.manager._pid_alive", lambda *args, **kwargs: False)
 
     agent_manager.delete_agent(db, config, name="a1", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
-    assert any("has-session -t s1" in c for c in target.commands)
-    assert any("kill-session -t s1" in c for c in target.commands)
+    assert any("tmux -S /run/agentworks/agent-tmux-sockets/agt-a1/s1.sock kill-server" in c for c in target.commands)
     assert any("gpasswd -d agt-a1 ws-ws1" in c for c in target.commands)
     assert any("pkill -u agt-a1" in c for c in target.commands)
     assert any("userdel -r agt-a1" in c for c in target.commands)

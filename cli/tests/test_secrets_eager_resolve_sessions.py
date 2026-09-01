@@ -3,7 +3,7 @@
 Split out of the original ``test_secrets_eager_resolve.py`` (see
 ``_secrets_eager_support.py`` for the full background on FRD R4's
 operator-facing guarantee). This file covers the session-lifecycle slice:
-``create_session`` and ``resume_session`` must eager-resolve secrets
+``create_session`` and ``restart_session`` must eager-resolve secrets
 BEFORE any state mutation (session-create DB insert, session-kill), and
 the read-only session commands (``attach``, ``list``, ``describe``) must
 NOT eager-resolve at all, since they open no new shells and consume no
@@ -156,7 +156,7 @@ def test_session_create_calls_resolve_with_session_target(
 
 
 # ---------------------------------------------------------------------------
-# session resume
+# session restart
 # ---------------------------------------------------------------------------
 
 
@@ -164,7 +164,7 @@ def test_session_resume_broken_no_force_bails_before_eager_resolve(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A BROKEN session resumed without --force must raise BrokenStateError
+    """A BROKEN session restartd without --force must raise BrokenStateError
     BEFORE eager-resolve runs. The operator gets a clean error without
     being asked for credentials they would have discarded."""
     from agentworks.db import SessionMode, SessionStatus
@@ -175,7 +175,7 @@ def test_session_resume_broken_no_force_bails_before_eager_resolve(
     _stub_session_prep(monkeypatch)
 
     # A non-NULL socket_path keeps this session on the new per-session-socket
-    # model; with socket_path=None, resume_session treats the row as a
+    # model; with socket_path=None, restart_session treats the row as a
     # legacy migration target and skips the gates these tests exist to pin.
     db._conn.execute(
         "INSERT INTO sessions (name, workspace_name, template, mode, pid, socket_path) "
@@ -207,12 +207,11 @@ def test_session_resume_broken_no_force_bails_before_eager_resolve(
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
     with pytest.raises(BrokenStateError, match="broken"):
-        session_manager.resume_session(
+        session_manager.restart_session(
             db,
             config,  # type: ignore[arg-type]
             name="s1",
             force=False,
-            yes=True,
             interaction=TtyInteractionPolicy.REFUSE,
         )
 
@@ -227,7 +226,7 @@ def test_session_resume_eager_resolve_fires_before_kill(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """resume_session must call resolve_for_command BEFORE _kill_session.
+    """restart_session must call resolve_for_command BEFORE _kill_session.
     A failed eager-resolve leaves the running session untouched."""
     from agentworks.db import SessionMode, SessionStatus
     from agentworks.sessions import manager as session_manager
@@ -236,7 +235,7 @@ def test_session_resume_eager_resolve_fires_before_kill(
     _stub_session_prep(monkeypatch)
 
     # A non-NULL socket_path keeps this session on the new per-session-socket
-    # model; with socket_path=None, resume_session treats the row as a
+    # model; with socket_path=None, restart_session treats the row as a
     # legacy migration target and skips the gates these tests exist to pin.
     db._conn.execute(
         "INSERT INTO sessions (name, workspace_name, template, mode, pid, socket_path) "
@@ -245,7 +244,7 @@ def test_session_resume_eager_resolve_fires_before_kill(
     )
     db._conn.commit()
 
-    # Status probes -> OK so the resume path would try to kill.
+    # Status probes -> OK so the restart path would try to tear down.
     monkeypatch.setattr(
         session_manager,
         "_ensure_pid",
@@ -286,11 +285,10 @@ def test_session_resume_eager_resolve_fires_before_kill(
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
     with pytest.raises(SecretUnavailableError, match="api-key"):
-        session_manager.resume_session(
+        session_manager.restart_session(
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            yes=True,
             interaction=TtyInteractionPolicy.REFUSE,
         )
 

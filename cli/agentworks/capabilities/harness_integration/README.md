@@ -20,11 +20,11 @@ launching their desired tooling.
 
 However, Agentworks also supports deeper tooling support through a **harness integration**. An
 Agentworks harness integration knows how to run a specific harness as the session's workload,
-including checking dependencies, configuring it, and implementing its exact start/resume semantics.
-This allows tight integration with harnesses such as Claude Code or Codex without confusing the
-Agentworks integration layer with the harness it drives.
+including checking dependencies, configuring it, and choosing whether to continue existing tool
+state. This allows tight integration with harnesses such as Claude Code or Codex without confusing
+the Agentworks integration layer with the harness it drives.
 
-The current integration contract covers session-scoped configuration and start/resume semantics.
+The current integration contract covers session-scoped configuration and one launch operation.
 Broader user- and workspace-scoped tooling behavior remains outside that contract, as described
 below.
 
@@ -58,9 +58,10 @@ definitive config for one.
 
 - **`shell`** (built in) is the default. By default it simply opens the configured shell for the
   session's target user (agent or admin user). It can further be configured to run a specific
-  command with `resume_command` for a different command on `session resume` versus the initial start
-  (via `session create`). From here, an operator can do whatever they want in terms of configuring
-  the environment and launching their desired tooling. They're just largely on their own.
+  command with `resume_command` for ordinary `session start`/`restart` versus a fresh launch
+  (`session create` or `--force-new`). From here, an operator can do whatever they want in terms of
+  configuring the environment and launching their desired tooling. They're just largely on their
+  own.
 - **`claude-code`** (via the `claude` system plugin) drives an interactive Claude Code session. It
   knows how to launch Claude Code and, on resume, how to check for an existing session and reattach
   if found so that the operator experience is seamless and they can pick up right where they left
@@ -85,12 +86,11 @@ definitive config for one.
   conversation can also receive Grok's native goal and initial prompt. The agent and rules configure
   every launched Grok process, including a real resume.
 
-## Session Resume
+## Conversation Continuation
 
-Where possible, integrations should support resuming a session on `session resume` rather than
-starting over. This is going to mean different things for different tools, but the general idea is
-that if a session is interrupted or resumed, the operator should be able to pick up right where they
-left off rather than losing their work.
+By default, `session start` and `session restart` ask the integration to continue existing tool
+state where possible. `--force-new` asks for a fresh tool conversation. The exact mechanism differs
+by tool, but an ordinary relaunch should preserve useful work when the tool supports it.
 
 Of course, this is not always possible. Some tools, like a plain shell, do not have any concept of a
 session to resume, so the integration simply starts a new workload.
@@ -100,12 +100,11 @@ session to resume, so the integration simply starts a new workload.
 A harness integration knows how to run one harness as a session's workload and bring it back, and
 nothing about the machinery around it. It:
 
-- **MUST** produce the command that launches its tool for a given session, to run as the target user
-  (an agent, or admin) in the session's workspace.
-- **MUST** produce the command that allows the workload to be resumed if the workload is interrupted
-  (e.g. process exit, machine restart, manual session stop, etc.); where possible (i.e. for
-  "stateful" tools), the integration **SHOULD** resume the existing session rather than starting
-  over.
+- **MUST** implement `start(ctx, *, force_new=False)` and return a `HarnessStart` containing the
+  command that launches its tool for a given session, to run as the target user (an agent, or admin)
+  in the session's workspace.
+- **SHOULD** continue an existing tool conversation when `force_new` is false, and **MUST** honor
+  `force_new` by launching a fresh conversation when the tool can distinguish the two.
 - **MUST** declare the executables its tool needs on the launch target, so Agentworks can verify
   their presence before starting and surface a missing tool as an actionable error.
 - **MUST**, for a stateful tool, own a durable session identity and refuse to guess it: mint or
@@ -148,14 +147,14 @@ those; the integration only decides what runs in the pane.
 
 The preceding sections describe the operator-facing model. The remaining sections cover where a
 integration sits in the capability model, its implementation contract, how the session machinery
-consumes it, and the practices that make the shipped integrations robust, especially session resume.
+consumes it, and the practices that make the shipped integrations robust, especially continuation.
 
 A **harness integration** is a harness's runtime adapter: it knows how a session workload (a plain
-shell, Claude Code, Codex, ...) is configured, started, and resumed, and what the launch target must
-provide for that to work. The session is the rich consuming resource: a session node HOLDS an
-integration instance, composes its readiness, and the session manager invokes its ops. The
-integration never touches tmux, the database, or the CLI; it declares its config, probes its target,
-and returns pane command strings.
+shell, Claude Code, Codex, ...) is configured and launched, and what the launch target must provide
+for that to work. The session is the rich consuming resource: a session node HOLDS an integration
+instance, composes its readiness, and the session manager invokes its ops. The integration never
+touches tmux, the database, or the CLI; it declares its config, probes its target, and returns pane
+command strings.
 
 Four integrations ship today and serve as references:
 
@@ -215,9 +214,9 @@ missing any of them, naming the plugin:
 - `contract_version`: the capability contract version this implementation is written against.
   Registration requires an exact match with the version its kind's descriptor declares supported, so
   a contract change is a hard cutover rather than a silent re-certification. The current contract is
-  version 2, and every shipped integration declares 2. Third-party version-1 integrations must
-  migrate before registration; see
-  [`docs/guides/upgrading-to-0.17.md`](../../../../docs/guides/upgrading-to-0.17.md).
+  version 1, and every shipped integration declares 1. The version number identifies this current
+  start-only contract; it does not imply compatibility with the earlier version-1 shape that shipped
+  before 0.17.
 - `config_model`: what the config IS (see below). A capability that accepts none declares a model
   with no fields beyond its tag, which is closed-world by construction.
 - `name` / `description`: the registry row's identity.
@@ -241,9 +240,9 @@ runs for either. Two rules with teeth:
   drift between its releases, so a stale integration-side enum would reject values a newer CLI
   accepts. The installed tool owns whether an unsupported value fails, warns and falls back, or
   changes meaning with the selected model. When it fails loudly, that error still reaches the
-  operator even if the workload dies too fast for the pane to be attached: `session create` /
-  `session resume` detect the instantly-dead pane, capture its output, and fold it into their own
-  error message.
+  operator even if the workload dies too fast for the pane to be attached: session
+  create/start/restart detect the instantly-dead pane, capture its output, and fold it into their
+  own error message.
 
 #### Declaring References: A Marker, Not a Method
 
@@ -310,32 +309,26 @@ concern: readiness is read-only and re-runnable by contract, and it runs at comm
 world the op changes (on resume, the resume decision must see the old process already dead, which
 only the op-time probe does).
 
-#### Ops: Returning the Pane Command String
+#### Operation: Returning the Launch Decision
 
-- The return value is a command string, not an execution: the session manager wraps it (template-var
-  substitution, then the tmux pane's `$SHELL -lic 'cd <dir> && exec <command>'`) and runs it. Empty
-  string means "just the login shell".
-- `start` serves `session create`; `resume` serves `session resume`. The orchestrator kills the old
-  workload BEFORE calling `resume`, a deliberate ordering guarantee: a stateful integration decides
-  resume-vs-launch with the old process dead and its on-disk state settled.
-- **`start` runs against a brand-new session row, and that is load-bearing, not trivia.** `create`
-  inserts the row after the op, so a `start` call means no prior workload of this session exists.
-  Where identity is MINTED (`claude-code`, `grok-build`), the two ops can share one decision method
-  and the difference is purely caller-side. Where identity is DISCOVERED, they must not: every
-  discovery channel keys off something the tool wrote earlier under a name or path Agentworks did
-  not reserve (a session name, a workspace directory), so discovering at create time is precisely
-  how a brand-new session inherits a deleted namesake's history or a stranger's conversation.
-  `codex` is the shipped example: its `start` is unconditionally fresh, probes nothing, and clears
-  the stale identity file, and only `resume` ever adopts an id. Asymmetry here is the correct
-  semantics, not a wart. Ask which op could legitimately find work to resume, and let the answer
-  shape the split.
+- The return value is `HarnessStart(command, note)`, not an execution: the session manager wraps the
+  command (template-var substitution, then the tmux pane's
+  `$SHELL -lic 'cd <dir> && exec <command>'`) and runs it. Empty string means "just the login
+  shell".
+- Core calls `start(..., force_new=True)` for `session create` and explicit `--force-new`; ordinary
+  `session start` and `session restart` pass false. On restart, core tears down the old tmux server
+  before asking the integration for the next launch decision.
+- A stateful integration owns the continuation decision. `claude-code` and `grok-build` use durable
+  integration-owned identifiers. `codex` fingerprints its recorder before a forced-fresh launch so a
+  stale notification cannot immediately rebind the new conversation, while ordinary launches may
+  adopt only the candidates its documented decision tree considers safe.
 
 #### The Operator-Facing Decision Line
 
-`launch_note` returns a one-line note about what the op decided (`claude-code` and `grok-build`:
-resumed vs started fresh) and the session manager prints it in the CLI op output. Default `None`
-keeps `shell` silent. Pair it with a pane-visible echo (below) so the decision is visible in both
-places the operator looks.
+`HarnessStart.note` carries an optional one-line note about what the operation decided
+(`claude-code` and `grok-build`: resumed vs started fresh) and the session manager prints it in the
+CLI op output. Default `None` keeps `shell` silent. Pair it with a pane-visible echo (below) so the
+decision is visible in both places the operator looks.
 
 #### Per-Session State: The Persisted Blob
 
@@ -345,8 +338,8 @@ JSON column after each op. The persistence contract the manager provides (and te
 
 - On create, the op runs BEFORE the row insert, so state minted during `start` lands with the new
   row atomically.
-- On resume, the updated blob is persisted BEFORE the new tmux session is created, so a failed
-  launch retried later still sees the same identity.
+- On start or restart, the updated blob is persisted BEFORE the new tmux session is created, so a
+  failed launch retried later still sees the same identity.
 - A malformed stored blob degrades to `{}` with a warning, never a crash; likewise a stored
   namespace value that is not a dict degrades to empty with a warning at the seam.
 
@@ -368,13 +361,13 @@ is compatibility code slated for DELETION on the next major release.
 
 The surrounding wiring supplies the following behavior and debugging boundaries:
 
-- **Enablement gate:** `ensure_harness_integration_enabled` (`__init__.py`) runs at session create
-  and resume (`sessions/manager/_create_build.py`, `_lifecycle.py`; resume also covers recovering a
-  broken session). A template naming a disabled plugin integration stays ready (listing works);
-  USING it raises with an "enable plugin `<name>`" hint. Plain `session attach` never constructs an
-  integration, so it does not gate. The node factories do not gate either (they thread no registry);
-  an AST drift guard (`cli/tests/sessions/test_harness_integration_gate_drift.py`) enforces that
-  every factory caller gates first.
+- **Enablement gate:** `ensure_harness_integration_enabled` (`__init__.py`) runs at session create,
+  start, and restart (`sessions/manager/_create_roll.py`, `_lifecycle.py`; launch also covers
+  recovering a broken session). A template naming a disabled plugin integration stays ready (listing
+  works); USING it raises with an "enable plugin `<name>`" hint. Plain `session attach` never
+  constructs an integration, so it does not gate. The node factories do not gate either (they thread
+  no registry); an AST drift guard (`cli/tests/sessions/test_harness_integration_gate_drift.py`)
+  enforces that every factory caller gates first.
 - **Construction point:** `_harness_integration_for_template` (`sessions/nodes.py`) is the single
   place instances are built, and the namespacing seam: it holds the FULL blob (`{}` on a fresh
   create, the stored `row.harness_integration_state` for a live session) and constructs the
@@ -382,9 +375,9 @@ The surrounding wiring supplies the following behavior and debugging boundaries:
   (`harness_integration_state`) for the manager to persist.
 - **Op context:** the manager assembles an op-start `RunContext` (targets, operation scope, scoped
   secrets) per op (`sessions/manager/_create_roll.py`, `_lifecycle.py`). Readiness runs through the
-  node's composed `preflight` / `runup` on create; the resume path deliberately builds no runup
+  node's composed `preflight` / `runup` on create; the existing-session launch path builds no runup
   context (its only readiness pass is the pre-kill preflight sweep), and on both paths only the op
-  context carries secrets. An integration cannot depend on runup firing before `resume`.
+  context carries secrets. An integration cannot depend on runup firing before `start`.
 - **Substitution stays outside:** the returned string is passed through `{{session_name}}` /
   `{{workspace_name}}` substitution at the call site. The resulting constraints appear under
   "Building the pane command" below.
@@ -437,8 +430,8 @@ sessions. Five rules, each earned:
    not start) RAISES a typed `StateError` rather than guessing. Guessing "fresh" launches with a
    reserved id the tool may reject as in-use, and the pane dies opaquely.
 5. **Make the decision visible twice, per leaf.** An `echo` as the pane's first line (the operator
-   attaching sees which way it went) and `launch_note` (the operator running the CLI op sees it
-   too). Every distinct outcome gets its own wording in both places: codex ships five (resumed,
+   attaching sees which way it went) and `HarnessStart.note` (the operator running the CLI op sees
+   it too). Every distinct outcome gets its own wording in both places: codex ships five (resumed,
    adopted by discovery, picker, fresh, archived-or-gone), because a decision line that cannot
    distinguish adoption from a fresh start cannot tell the operator a heuristic went wrong.
 
@@ -469,7 +462,7 @@ sessions. Five rules, each earned:
   fields open strings rather than duplicating a fast-moving upstream vocabulary.
 - **Separate conversation content from process controls.** A missing Claude transcript, missing Grok
   summary, or Codex decision with no resumable candidate is a fresh conversation even when it occurs
-  during `session resume`, so it receives goal and initial-prompt content plus Codex's
+  during an ordinary start or restart, so it receives goal and initial-prompt content plus Codex's
   prompt-mediated primary-thread agent. A real upstream resume receives none of that conversation
   content. Native process controls apply whenever their harness process launches: Claude's agent and
   appended system prompt, Grok's agent and rules, and Codex's developer instructions. A
@@ -509,8 +502,9 @@ Three rules make a per-user file legitimate under the session-scoped effects rul
   the contract of a script a running tool is about to invoke.
 - **Per-SESSION files are keyed by session name, so treat their contents as suspect.** A session
   name is reusable: a deleted session's file outlives it and the next namesake finds it. Decide
-  explicitly which ops may READ such a file (`codex`: only `resume`, never `create`, which deletes
-  it), because "the file exists" never means "it belongs to this session".
+  explicitly when such a file may be trusted. Codex fingerprints the old recorder value on a
+  forced-fresh launch and refuses to bind that same value afterward, because "the file exists" never
+  means "it belongs to this session".
 
 #### Probing the Launch Target
 
@@ -531,9 +525,7 @@ No real tool binary anywhere. The layers, with the shipped tests as templates:
   probe (keyed on the stored id) in a single test. Cover: config vocabulary (accepts, unknown-field
   raises, wrong-type raises), both detection directions (probe hit resumes, miss launches fresh,
   other exit raises), flag mapping and `extra_args` quoting, the visible-decision line, state
-  minting, and whatever the integration promises about `start` versus `resume` (`claude-code` pins
-  that they are symmetric; `codex` pins the opposite, that `start` probes nothing and adopts
-  nothing, since that promise is a safety property rather than a convenience).
+  minting, and the integration's ordinary versus `force_new` behavior.
 - **Generated shell text, executed:** `cli/tests/test_codex_integration.py`. An exit-code stub
   proves how a probe's ANSWER is classified; it cannot prove the probe asks the right question, and
   the interesting logic in a stateful integration often lives in the shell text itself (codex's
@@ -541,7 +533,7 @@ No real tool binary anywhere. The layers, with the shipped tests as templates:
   the three-layer quoting of a `-c` override). Run that text through a real `sh` against scratch
   fixtures with `$HOME` pointed at a tmp dir: still no tool binary, but a mis-quoted token or an
   inverted filter fails in the test rather than in a pane.
-- **Orchestrated:** `cli/tests/sessions/test_claude_code_orchestrated.py`. Real create/resume
+- **Orchestrated:** `cli/tests/sessions/test_claude_code_orchestrated.py`. Real create/restart
   through the orchestrator with stubbed transports: state persisted to the row, pre-existing blob
   read back, substitution does not mangle the returned snippet.
 - **Plugin end-to-end:** `cli/tests/plugins/test_claude.py`. Through `build_registry`:
@@ -609,6 +601,6 @@ Known holes the current contract leaves open on purpose, so the boundaries read 
   including secret-backed entries, is the supported way to put an env var (an API key, a tool
   config-dir override) into the pane today; what does not exist is a way for an integration to
   contribute env from its OWN config. No design record yet; a first-class surface is future work.
-- **Liveness and headless ops.** The integration knows start/resume, not "is the workload healthy"
-  and not a non-TTY exec mode. Both are plausible extensions of the op surface; no design record
-  yet.
+- **Liveness and headless ops.** The integration chooses a launch command, not "is the workload
+  healthy" and not a non-TTY exec mode. Both are plausible extensions of the op surface; no design
+  record yet.

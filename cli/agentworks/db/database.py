@@ -851,6 +851,28 @@ class Database:
         )
         self._conn.commit()
 
+    def update_session_runtime(
+        self,
+        name: str,
+        *,
+        socket_path: str | None,
+        pid: int,
+        boot_id: str | None,
+        tmux_server_start_ticks: int | None,
+    ) -> None:
+        """Persist or clear the session runtime identity as one fact."""
+        if pid != _db.PID_STOPPED and pid <= 0:
+            raise ValueError(f"invalid runtime PID: {pid}")
+        if pid > 0 and (boot_id is None or tmux_server_start_ticks is None or tmux_server_start_ticks <= 0):
+            raise ValueError("a live runtime requires boot ID and positive process start time")
+        self._conn.execute(
+            "UPDATE sessions SET socket_path = ?, pid = ?, boot_id = COALESCE(?, boot_id), "
+            "tmux_server_start_ticks = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
+            "WHERE name = ?",
+            (socket_path, pid, boot_id, tmux_server_start_ticks, name),
+        )
+        self._conn.commit()
+
     def update_session_harness_integration_state(self, name: str, harness_integration_state: dict[str, object]) -> None:
         """Persist the harness integration's per-session state blob.
 

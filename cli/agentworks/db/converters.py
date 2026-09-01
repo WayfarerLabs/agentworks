@@ -178,6 +178,7 @@ def _to_session(row: sqlite3.Row) -> SessionRow:
         socket_path=row["socket_path"],
         pid=row["pid"],
         boot_id=row["boot_id"],
+        tmux_server_start_ticks=row["tmux_server_start_ticks"],
         harness_integration_state=_parse_harness_integration_state(row["harness_integration_state"], row["name"]),
     )
 

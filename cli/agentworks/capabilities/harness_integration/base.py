@@ -5,7 +5,7 @@ the shape of its own config block as a model
 (``config_model``, which the core validates against), owns the
 session's launch-target readiness (the required-commands probe and the
 skip/defer/probe/error fork), and produces the tmux pane command string
-that runs the workload as its ops (``start`` / ``resume``). Unlike the
+that runs the workload as its single op (``start(force_new=...)``). Unlike the
 thin-wrapper git-credential capability, a harness integration is HELD by a rich
 consuming node (the session node), which composes its readiness rather
 than walking it (``capabilities/README.md``: "Rich (session over
@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import shlex
 from abc import abstractmethod
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Literal, Protocol
 
 from agentworks.capabilities.base import Capability, ScopeLevel
@@ -48,6 +49,14 @@ if TYPE_CHECKING:
         def name(self) -> str: ...
         @property
         def realized(self) -> bool: ...
+
+
+@dataclass(frozen=True)
+class HarnessStart:
+    """A harness integration's pre-launch decision."""
+
+    command: str
+    note: str | None = None
 
 
 def require_commands(
@@ -88,7 +97,7 @@ def require_commands(
     per-session tmux server exits, and the next ``server-access``
     call fails against a now-dead socket. Checking up front turns
     that into an actionable error with no partial state to roll
-    back (and, at resume, with the old session still running).
+    back (and, for restart, with the old session still running).
 
     ``target_label`` is passed in (not recomputed): a shared helper
     takes no ``self``, so the caller derives the label the same way the
@@ -139,12 +148,11 @@ class HarnessIntegration(Capability):
     """Capability: configures, runs, and manages one session's workload.
 
     A harness integration owns the launch-target readiness fork and the
-    required-commands probe, and it ADDS the op surface (:meth:`start` /
-    :meth:`resume`, the pane command string) the session's service layer
-    consumes to build the tmux pane.
+    required-commands probe, and it ADDS the :meth:`start` operation the
+    session's service layer consumes to build the tmux pane.
 
     Subclasses (``ShellIntegration``, ``ClaudeCodeIntegration``) implement the
-    two ops and :meth:`_probe_target` (their own required-command set);
+    start and :meth:`_probe_target` (their own required-command set);
     the fork (:meth:`_run_readiness`), the SESSION-level identity guard
     (:meth:`_check_identity`), and the single-fire guard live here so
     every member shares one copy.
@@ -241,27 +249,13 @@ class HarnessIntegration(Capability):
         seam stays integration-agnostic.
         """
 
-    def launch_note(self) -> str | None:
-        """A human-facing one-line note about what the last ``start`` /
-        ``resume`` decided, surfaced by the session manager in its op
-        output. ``None`` (the default) means the harness integration has nothing to
-        add, so ``shell`` stays silent; ``claude-code`` reports whether it
-        resumed an existing session or started a new one.
+    @abstractmethod
+    def start(self, ctx: RunContext, *, force_new: bool = False) -> HarnessStart:
+        """Choose the raw pane command for a session launch.
+
+        Empty ``command`` means a login shell. Core owns lifecycle and asks for
+        a fresh harness conversation only when ``force_new`` is true.
         """
-        return None
-
-    @abstractmethod
-    def start(self, ctx: RunContext) -> str:
-        """The raw pane command string for ``session create`` (empty
-        string = login shell only). Template-var substitution and
-        ``exec`` wrapping stay OUTSIDE this (the call site applies
-        them)."""
-
-    @abstractmethod
-    def resume(self, ctx: RunContext) -> str:
-        """The raw pane command string for ``session resume``. Assembled
-        AFTER the old process is killed, so a state-aware harness integration decides
-        resume-vs-launch with it already dead."""
 
     @abstractmethod
     def _probe_target(self, transport: Transport) -> None:

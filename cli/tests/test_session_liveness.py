@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 
 from agentworks.db import SessionRow, SessionStatus
@@ -10,10 +9,7 @@ from agentworks.sessions.manager import (
     batch_check_status,
     check_session_status,
 )
-from agentworks.sessions.tmux import (
-    force_kill_tmux_server,
-    get_tmux_server_pid,
-)
+from agentworks.sessions.tmux import get_tmux_server_pid
 
 
 @dataclass
@@ -134,6 +130,7 @@ def test_agent_stopped_pid_dead() -> None:
     target = _FakeTarget(
         {
             "has-session": _FakeResult(ok=False),
+            "list-sessions": _FakeResult(ok=False),
             "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
             "test -d /proc/42": _FakeResult(ok=False),
         }
@@ -147,6 +144,7 @@ def test_agent_stopped_stale_boot() -> None:
     target = _FakeTarget(
         {
             "has-session": _FakeResult(ok=False),
+            "list-sessions": _FakeResult(ok=False),
             "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
         }
     )
@@ -161,11 +159,24 @@ def test_agent_broken() -> None:
     target = _FakeTarget(
         {
             "has-session": _FakeResult(ok=False),
+            "list-sessions": _FakeResult(ok=False),
             "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
             "test -d /proc/42": _FakeResult(ok=True),
         }
     )
     assert check_session_status(session, target=target) == SessionStatus.BROKEN
+
+
+def test_reachable_server_without_canonical_session_is_residual() -> None:
+    session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
+    target = _FakeTarget(
+        {
+            "has-session": _FakeResult(ok=False),
+            "list-sessions": _FakeResult(ok=True),
+        }
+    )
+    assert check_session_status(session, target=target) == SessionStatus.RESIDUAL
+    assert not any("/proc/42" in command for command in target.commands)
 
 
 def test_admin_ok() -> None:
@@ -185,6 +196,7 @@ def test_admin_stopped_dead_pid() -> None:
     target = _FakeTarget(
         {
             "has-session": _FakeResult(ok=False),
+            "list-sessions": _FakeResult(ok=False),
             "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
             "test -d /proc/42": _FakeResult(ok=False),
         }
@@ -202,6 +214,7 @@ def test_admin_broken_after_setenv_pivot() -> None:
     target = _FakeTarget(
         {
             "has-session": _FakeResult(ok=False),
+            "list-sessions": _FakeResult(ok=False),
             "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
             "test -d /proc/42": _FakeResult(ok=True),
         }
@@ -212,7 +225,7 @@ def test_admin_broken_after_setenv_pivot() -> None:
 def test_legacy_admin_session_without_socket_raises_state_error() -> None:
     """A SessionRow predating the env-and-secrets SDD that has socket_path=None
     surfaces as a typed StateError so the CLI's top-level error wrapper
-    renders it cleanly. The hint points the operator at ``session resume``
+    renders it cleanly. The hint points the operator at ``session restart``
     (which migrates the row to the new shape), not ``session delete``."""
     import pytest
 
@@ -225,7 +238,7 @@ def test_legacy_admin_session_without_socket_raises_state_error() -> None:
     assert exc.value.entity_kind == "session"
     assert exc.value.entity_name == "s1"
     assert exc.value.hint is not None
-    assert "session resume" in exc.value.hint
+    assert "session restart" in exc.value.hint
     assert "session delete" not in exc.value.hint
 
 
@@ -267,48 +280,6 @@ def test_get_pid_with_socket() -> None:
     assert "-S /run/test.sock" in target.commands[0]
 
 
-# -- force_kill_tmux_server -------------------------------------------------
-
-
-def test_force_kill_sigterm_succeeds(monkeypatch) -> None:
-    monkeypatch.setattr(time, "sleep", lambda _: None)
-    target = _FakeTarget({"test -d /proc/42": _FakeResult(ok=False)})
-    assert force_kill_tmux_server(42, target=target) is True
-    assert not any("kill -9" in cmd for cmd in target.commands)
-
-
-def test_force_kill_escalates_to_sigkill(monkeypatch) -> None:
-    monkeypatch.setattr(time, "sleep", lambda _: None)
-    call_count = 0
-
-    class _EscalationTarget:
-        def __init__(self) -> None:
-            self.commands: list[str] = []
-
-        def run(self, command, *, check=True, sudo=False, tty=None, timeout=None):
-            nonlocal call_count
-            self.commands.append(command)
-            if "test -d /proc/42" in command:
-                call_count += 1
-                # First check: alive (needs SIGKILL). Second: dead.
-                return _FakeResult(ok=(call_count == 1))
-            return _FakeResult(ok=True)
-
-    target = _EscalationTarget()
-    assert force_kill_tmux_server(42, target=target) is True
-    assert any("kill -9 42" in cmd for cmd in target.commands)
-
-
-def test_force_kill_cleans_socket(monkeypatch) -> None:
-    monkeypatch.setattr(time, "sleep", lambda _: None)
-    target = _FakeTarget({"test -d /proc/42": _FakeResult(ok=False)})
-    from agentworks.sessions.tmux import AGENT_SOCKET_ROOT
-
-    sock = f"{AGENT_SOCKET_ROOT}/agt--test/test.sock"
-    force_kill_tmux_server(42, target=target, socket_path=sock)
-    assert any("rm -f" in cmd and "test.sock" in cmd for cmd in target.commands)
-
-
 # -- batch unknown detection ------------------------------------------------
 
 
@@ -345,6 +316,7 @@ def test_agent_unknown_when_boot_id_unreadable() -> None:
     target = _FakeTarget(
         {
             "has-session": _FakeResult(ok=False),
+            "list-sessions": _FakeResult(ok=False),
             "boot_id": _FakeResult(ok=False, stdout=""),
         }
     )
