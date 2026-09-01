@@ -73,6 +73,9 @@ class Controls:
     # documented positive answer is DryRunOperation.
     dry_run_outcomes: list[Exception | None] = field(default_factory=list)
     security_group_presence_outcomes: list[bool | Exception] = field(default_factory=list)
+    # Whether a DescribeInstances client-token reconciliation finds the
+    # instance whose RunInstances response was lost.
+    client_token_instance: bool = False
 
 
 @dataclass
@@ -149,6 +152,23 @@ class _FakeEC2:
 
     def describe_instances(self, **kwargs: Any) -> dict[str, Any]:
         self._record("describe_instances", **kwargs)
+        filters = kwargs.get("Filters")
+        if filters and any(item.get("Name") == "client-token" for item in filters):
+            if self._c.client_token_instance:
+                return {
+                    "Reservations": [
+                        {
+                            "Instances": [
+                                {
+                                    "InstanceId": "i-123",
+                                    "Tags": [{"Key": "agentworks:vm", "Value": self._c.instance_backend_name}],
+                                    "SecurityGroups": [{"GroupId": self._c.instance_security_group_id}],
+                                }
+                            ]
+                        }
+                    ]
+                }
+            return {"Reservations": []}
         if "Filters" in kwargs:  # collision preflight
             if self._c.collision:
                 return {"Reservations": [{"Instances": [{"InstanceId": "i-existing"}]}]}

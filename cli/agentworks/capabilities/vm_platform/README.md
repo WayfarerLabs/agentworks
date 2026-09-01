@@ -502,9 +502,11 @@ The three managed cloud platforms therefore use different evidence:
   policy simulation is not used as an authorization gate. New rows bind provider IDs to the creating
   AWS account. Explicit delete raises on missing or mismatched identity, ownership, termination,
   confirmation, or security-group cleanup failure so core retains the VM row for retry. Create
-  rollback retries propagation-time `NotFound` instead of treating it as absence; if positive
-  cleanup never arrives, `RetainedProvisioningError` makes the provisional row and exact provider
-  identifiers durable for explicit deletion.
+  sends an idempotency token with `RunInstances`; a lost launch response is reconciled only to one
+  instance bearing the exact backend tag and recorded security group. Rollback retries
+  propagation-time `NotFound` instead of treating it as absence. If reconciliation or positive
+  cleanup never arrives, `RetainedProvisioningError` makes the provisional row, known provider
+  identifiers, launch token, and cleanup cause durable for explicit deletion.
 - GCE makes its definitive project, zone, network, image, and shape reads before mutation, then lets
   exact mutations authorize themselves under provider-ID-owned rollback. Its IAM test methods apply
   to existing resources and are advisory; the future VM, boot disk, and firewall rules do not exist

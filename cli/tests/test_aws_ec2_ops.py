@@ -10,6 +10,7 @@ import gzip
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
+from uuid import UUID
 
 import pytest
 
@@ -202,6 +203,7 @@ class TestCreate:
         _platform(subnet_id="subnet-abc").create(_request(), RunContext(config=_config()))
 
         kw = rec.kwargs_for("run_instances")
+        assert UUID(kw["ClientToken"]).version == 4
         assert "SecurityGroupIds" not in kw
         assert "SubnetId" not in kw
         (nic,) = kw["NetworkInterfaces"]
@@ -396,6 +398,8 @@ class TestCreateRollback:
         with pytest.raises(RetainedProvisioningError) as caught:
             _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
 
+        assert isinstance(caught.value.__cause__, EC2Error)
+        assert caught.value.__cause__.detail
         assert caught.value.platform_metadata["instance_id"] == "i-123"
         assert caught.value.platform_metadata["security_group_id"] == "sg-123"
         assert caught.value.platform_metadata["account_id"] == "111122223333"
@@ -419,6 +423,86 @@ class TestCreateRollback:
         assert "instance_id" not in metadata
         platform.delete(SimpleNamespace(name="dev", platform_metadata=metadata), RunContext())  # type: ignore[arg-type]
         assert rec.methods("ec2").count("delete_security_group") == 3
+
+    def test_lost_run_response_reconciles_and_cleans_the_owned_instance(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        controls = Controls(client_token_instance=True)
+        rec = install_fakes(monkeypatch, controls)
+
+        def _lose_response(self: Any, **kwargs: object) -> object:
+            self._record("run_instances", **kwargs)
+            raise unreachable()
+
+        monkeypatch.setattr("tests._aws_fakes._FakeEC2.run_instances", _lose_response)
+
+        with pytest.raises(EC2Error):
+            _platform().create(_request(), RunContext(config=_config()))
+
+        token = rec.kwargs_for("run_instances")["ClientToken"]
+        token_reads = [
+            kwargs
+            for service, method, kwargs in rec.calls
+            if service == "ec2" and method == "describe_instances" and kwargs.get("Filters")
+        ]
+        assert {
+            item["Values"][0] for read in token_reads for item in read["Filters"] if item["Name"] == "client-token"
+        } == {token}
+        assert rec.kwargs_for("terminate_instances") == {"InstanceIds": ["i-123"]}
+
+    @pytest.mark.parametrize(
+        ("backend_name", "security_group_id"),
+        [("other", "sg-123"), ("dev", "sg-other")],
+    )
+    def test_lost_run_response_retains_an_unowned_reconciliation(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        backend_name: str,
+        security_group_id: str,
+    ) -> None:
+        install_fakes(
+            monkeypatch,
+            Controls(
+                client_token_instance=True,
+                instance_backend_name=backend_name,
+                instance_security_group_id=security_group_id,
+            ),
+        )
+
+        def _lose_response(self: Any, **kwargs: object) -> object:
+            self._record("run_instances", **kwargs)
+            raise unreachable()
+
+        monkeypatch.setattr("tests._aws_fakes._FakeEC2.run_instances", _lose_response)
+
+        with pytest.raises(RetainedProvisioningError) as caught:
+            _platform().create(_request(), RunContext(config=_config()))
+
+        assert "instance_id" not in caught.value.platform_metadata
+        assert "client_token" in caught.value.platform_metadata
+
+    def test_retained_lost_response_resolves_by_token_on_delete(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        controls = Controls(sg_delete_errors=[client_error("AccessDenied", "denied", "DeleteSecurityGroup")])
+        rec = install_fakes(monkeypatch, controls)
+
+        def _lose_response(self: Any, **kwargs: object) -> object:
+            self._record("run_instances", **kwargs)
+            raise unreachable()
+
+        monkeypatch.setattr("tests._aws_fakes._FakeEC2.run_instances", _lose_response)
+        platform = _platform()
+
+        with pytest.raises(RetainedProvisioningError) as caught:
+            platform.create(_request(), RunContext(config=_config()))
+
+        metadata = caught.value.platform_metadata
+        assert "instance_id" not in metadata
+        assert metadata["client_token"] == rec.kwargs_for("run_instances")["ClientToken"]
+
+        controls.client_token_instance = True
+        platform.delete(SimpleNamespace(name="dev", platform_metadata=metadata), RunContext())  # type: ignore[arg-type]
+        assert rec.kwargs_for("terminate_instances") == {"InstanceIds": ["i-123"]}
 
     def test_retained_partial_create_allows_detached_group_cleanup(self, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = install_fakes(monkeypatch, Controls(instance_security_group_id="sg-detached"))
@@ -574,8 +658,10 @@ class TestCreateRollback:
         monkeypatch.setattr("tests._aws_fakes._FakeEC2.terminate_instances", _interrupt_cleanup)
         with pytest.raises(RetainedProvisioningError) as caught:
             _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
-        assert caught.value.__cause__ is interrupt
-        assert caught.value.platform_metadata == {
+        assert isinstance(caught.value.__cause__, KeyboardInterrupt)
+        metadata = dict(caught.value.platform_metadata)
+        assert UUID(metadata.pop("client_token")).version == 4
+        assert metadata == {
             "region": "us-east-1",
             "backend_name": "dev",
             "account_id": "111122223333",
