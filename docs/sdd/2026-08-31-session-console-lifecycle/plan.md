@@ -9,8 +9,8 @@
 - Detailed design: [lifecycle-lld.md](./lifecycle-lld.md)
 - Migration: [migration-strategy.md](./migration-strategy.md)
 - Research: [prior-art-research.md](./prior-art-research.md)
-- Source baseline: `b0924f594d5fe6eeece74b2474a67bdad78c8bad`
-- Design PR: #710, stacked on `feat/debian-release-transition-sdd`
+- Source baseline: `8695afcd833790ee433b50bb9f5d5c696177233d`
+- Design PR: #710, based on `main`
 
 ## Delivery Rules
 
@@ -24,8 +24,7 @@
 - A divergent contract, requirement ambiguity, or non-converging finding stops for operator
   direction rather than spending the remaining budget by assumption.
 - The design PR does not authorize implementation. After design clearance and merge, implementation
-  uses a short two-PR stack based on the then-current `main`, including the Debian
-  release-transition work this SDD is stacked on.
+  uses a short two-PR stack based on the then-current `main`.
 - The first implementation PR is domain-complete for session and harness lifecycle. The second is
   domain-complete for console lifecycle and may be stacked on the first. Neither separates a command
   surface from its manager semantics, compatibility wrapper, collateral, or tests. The SDD remains
@@ -67,7 +66,7 @@ appropriate live tests. Tests assert behavior and structure, never the wording o
 | ----------- | ---------------------------------------- | ------------------------------------------------- |
 | R1          | HLA component split; lifecycle LLD       | CLI grammar and no-generic-framework review       |
 | R2, R3      | HLA session manager; LLD status matrix   | singular/batch start and restart tests            |
-| R4          | HLA teardown; LLD shared teardown        | direct/batch/cascade stop and hook tests          |
+| R4          | HLA teardown; LLD shared teardown        | direct/batch/cascade stop tests                   |
 | R5          | HLA console manager; LLD console matrix  | create/start/stop/restart/attach state tests      |
 | R6          | HLA capability; LLD built-in behavior    | contract, binding, retry, and capability tests    |
 | R7          | migration cutover; plan residual sweep   | current-surface inventory and static gates        |
@@ -79,6 +78,10 @@ appropriate live tests. Tests assert behavior and structure, never the wording o
 
 - [x] Base the effort on `feat/debian-release-transition-sdd` and record exact source baseline
       `b0924f594d5fe6eeece74b2474a67bdad78c8bad`.
+- [x] Rebase PR #710 after PRs #702 and #709 onto `main` at
+      `8695afcd833790ee433b50bb9f5d5c696177233d`, audit their complete delta against this design,
+      and shift compatibility to 0.19 with 0.20 removal because 0.18.0 already has a ready release
+      PR.
 - [x] Inventory session create/resume/stop/delete, direct and cascading teardown, console
       create/attach/recreate/delete, completion, database state, the capability descriptor, and all
       four built-in integrations at the baseline.
@@ -106,7 +109,7 @@ appropriate live tests. Tests assert behavior and structure, never the wording o
 - Start, restart, attach, force, and force-new interactions have no ambiguous state.
 - Session teardown has one core authority and console realization has one builder without a generic
   runnable framework.
-- Compatibility is bounded to hidden 0.17 CLI forms with a named 0.18 removal.
+- Compatibility is bounded to hidden 0.19 CLI forms with a named 0.20 removal.
 - No material design or complexity finding remains.
 
 ## Phase 1: CLI Grammar and Harness Contract
@@ -115,8 +118,8 @@ appropriate live tests. Tests assert behavior and structure, never the wording o
       shapes, and typed manager errors.
 - [ ] Add `--force-new` and thread the exact `force_new` spelling through CLI, services, and harness
       start; keep it independent from broken-runtime `--force`.
-- [ ] Replace harness-integration contract v2 with the version-1 `HarnessStart`,
-      `start(ctx, *, force_new=False)`, and concrete default-no-op `stop(ctx)` contract.
+- [ ] Replace harness-integration contract v2 with the version-1 `HarnessStart` and
+      `start(ctx, *, force_new=False)` contract.
 - [ ] Delete capability `resume`, mutable `launch_note`, v2 descriptor requirements, adapters, and
       old lifecycle vocabulary from every built-in implementation and fake.
 - [ ] Add one suppressible output deprecation helper and make completion introspection omit hidden
@@ -165,22 +168,21 @@ appropriate live tests. Tests assert behavior and structure, never the wording o
 
 - [ ] Inventory and route direct stop, restart, direct delete, batch stop, workspace delete, agent
       delete, and reachable VM-delete session cleanup through one session-domain teardown authority.
-- [ ] Add at-most-once optional harness stop requests with fresh scoped contexts, no new secret
-      prompts, one batch-wide concurrent dispatch budget, discarded arbitrary output, and generic
-      interrupt fallback.
+- [ ] Replace pane `C-c` with SIGTERM after exact `=NAME` pane discovery and same-command owner
+      revalidation; signal only positive pane PIDs and refuse unsafe or indeterminate targets
+      without expanding process authority.
 - [ ] Preserve one shared grace phase for batches, verified liveness, socket cleanup, stopped-state
       persistence, and explicit force/PID recovery for broken sessions.
 - [ ] Preserve each parent deletion path's existing best-effort or fail-closed policy when targets
-      or integrations cannot be reconstructed; the optional hook never becomes a deletion
-      dependency.
+      cannot be reached or reconstructed.
 - [ ] Delete superseded session kill loops and prove all intended teardown consumers use the shared
       authority.
 
 ### Phase 3 Definition of Done
 
-- The harness can request cooperative application shutdown but cannot own or claim runtime death.
-- Direct, batch, restart, and cascading operations share one grace/kill implementation.
-- Unavailable optional integration behavior cannot strand mandatory cleanup.
+- Direct, batch, restart, and cascading operations share one core-owned SIGTERM/grace/kill
+  implementation.
+- Harness integrations have no teardown API or responsibility.
 
 ## Phase 4: Console Lifecycle
 
@@ -221,32 +223,33 @@ These tasks land inside the corresponding domain PR, not in a third cleanup PR.
 
 ### Session and harness PR
 
-- [ ] Add the hidden 0.17 session resume wrapper and normalize named, all-stopped, and all forms
+- [ ] Add the hidden 0.19 session resume wrapper and normalize named, all-stopped, and all forms
       into canonical manager operations; accept only the bounded legacy parser surface.
 - [ ] Prove the wrapper respects `--no-deprecations`, remains absent from help/completion, and
       carries no service implementation.
 - [ ] Update session-facing CLI README/command reference/resources/guide/release/upgrade material,
       harness capability/root/plugin READMEs, sample configuration, and ADR 0020 with a supersession
       note.
-- [ ] Record explicit 0.18 session-wrapper removal work, update machine identities/logs/comments
+- [ ] Record explicit 0.20 session-wrapper removal work, update machine identities/logs/comments
       that misuse resume for runtime replacement, and run the one-time scoped vocabulary review;
       keep persistent guards structural rather than lexical.
 
 ### Console PR
 
-- [ ] Add the hidden 0.17 console attach `--recreate` wrapper as restart followed by attach and
+- [ ] Add the hidden 0.19 console attach `--recreate` wrapper as restart followed by attach and
       prove it respects `--no-deprecations`, stays absent from help/completion, and carries no
       service implementation.
 - [ ] Update console-facing CLI README/command reference/resources/guide/release/upgrade material
       and sample configuration, without duplicating compatibility teaching across permanent
       surfaces.
-- [ ] Record explicit 0.18 console-wrapper removal work and update machine identities, operation
+- [ ] Record explicit 0.20 console-wrapper removal work and update machine identities, operation
       labels, tests, fixtures, comments, and docstrings that misuse attach for runtime mutation.
 
 ### Phase 5 Definition of Done
 
 - A new operator sees one canonical vocabulary everywhere.
-- Existing 0.17 automation has a bounded warning-producing route in each domain-complete PR.
+- Existing 0.18 automation has a bounded warning-producing route through 0.19 in each
+  domain-complete PR.
 - Permanent docs describe current behavior without depending on this SDD.
 
 ## Phase 6: Verification, Delivery, and Closeout
@@ -267,7 +270,7 @@ domain-complete PR. Combined verification and SDD closeout occur only after both
       start/restart/force-new/attach, one Agentworks-minted UUID integration, and Codex's
       tool-assigned identity path where the environment supports them.
 - [ ] Confirm the release notes identify the CLI and in-repository capability breaks, the upgrade
-      guide is actionable, and 0.18 removal work has an owner.
+      guide is actionable, and 0.20 removal work has an owner.
 - [ ] Create `locked.md` only after implementation, live evidence, reviews, and final acceptance are
       complete; run locked-SDD checks and merge through the operator-owned flow.
 
@@ -278,5 +281,5 @@ domain-complete PR. Combined verification and SDD closeout occur only after both
   complexity finding.
 - The implementation is complete enough that deleting this SDD would not remove any permanent
   operating or contributor knowledge.
-- The lock records the exact shipped lifecycle, compatibility window, evidence, and residual 0.18
+- The lock records the exact shipped lifecycle, compatibility window, evidence, and residual 0.20
   removal task.

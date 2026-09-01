@@ -26,9 +26,9 @@ effort does not invent a VM restart merely for symmetry.
 For sessions, `start` and `restart` both request continuation of prior harness state when the
 selected harness integration supports it, unless the operator passes `--force-new`. Continuation is
 a harness decision, not the name or guaranteed outcome of the Agentworks lifecycle operation. A
-harness integration supplies start behavior and may request a graceful application stop. Core owns
-runtime teardown, liveness verification, grace timing, and fallback kill behavior. A harness
-integration never exposes `restart` or owns the old process.
+harness integration supplies start behavior. Core owns SIGTERM, runtime teardown, liveness
+verification, grace timing, and fallback kill behavior. A harness integration exposes neither stop
+nor restart and never owns the old process.
 
 The change is complete across the current system. Commands, manager operations, capability APIs,
 configuration vocabulary where affected, output, errors, logs, completion, guide content, operator
@@ -42,8 +42,8 @@ release notes and locked SDD records remain historical.
 3. Give sessions and consoles explicit, predictable start, stop, and restart operations.
 4. Treat harness conversation continuation as a best-effort start decision rather than a promised
    resource lifecycle result.
-5. Keep process ownership in core while allowing the harness integration to supply launch behavior
-   and a cooperative graceful-stop request.
+5. Keep process ownership and teardown policy in core while allowing the harness integration to
+   supply launch behavior.
 6. Preserve a bounded command compatibility path while removing obsolete internal vocabulary in one
    cutover.
 7. Share a CLI grammar across VMs, sessions, and consoles without introducing a speculative common
@@ -62,8 +62,6 @@ release notes and locked SDD records remain historical.
 - **Continuation**: a harness integration attempting to continue its own prior conversation or
   workload state while constructing a new session runtime. A continuation attempt may still launch
   fresh, defer a choice to the harness, or fail.
-- **Graceful-stop hook**: a harness-owned cooperative request for its application to shut down. The
-  hook neither owns nor proves termination of the Agentworks session runtime.
 - **Attach**: joining a running interactive runtime without creating or replacing that runtime.
 
 ## Users and Stories
@@ -77,10 +75,10 @@ operator can pass `--force-new` to require a fresh harness start instead.
 
 ### Operator deliberately replacing a running session
 
-The operator runs `agw session restart NAME`. Agentworks lets the harness request a graceful
-application shutdown, performs the complete safe teardown and required fallback kill behavior, and
-then invokes the same harness start operation used for a stopped session. The command itself is
-sufficient authorization to replace the running runtime; it is not mislabeled as a resume.
+The operator runs `agw session restart NAME`. Agentworks performs complete core-owned teardown and
+required fallback kill behavior, then invokes the same harness start operation used for a stopped
+session. The command itself is sufficient authorization to replace the running runtime; it is not
+mislabeled as a resume.
 
 ### Operator attaching to a session
 
@@ -95,17 +93,16 @@ effect of attach. Attaching to an already-running console does not rebuild it.
 
 ### Harness integration author
 
-The author implements one start operation and may implement a graceful-stop hook whose default is a
-no-op. Start receives `force_new`, which defaults to false. The integration examines its own state
-and decides whether and how to continue when continuation is allowed. Its stop hook may
-cooperatively ask the application to exit, but core still verifies and owns tmux teardown,
-escalation, and final state. The integration never implements a separate restart operation.
+The author implements one start operation. Start receives `force_new`, which defaults to false. The
+integration examines its own state and decides whether and how to continue when continuation is
+allowed. Core owns signaling, tmux teardown, escalation, and final state. The integration implements
+neither stop nor restart.
 
 ### Existing automation owner
 
-Existing `session resume` and `console attach --recreate` invocations remain usable in 0.17, warn
+Existing `session resume` and `console attach --recreate` invocations remain usable in 0.19, warn
 through the ordinary deprecation channel, and identify the canonical replacement. They are removed
-in 0.18. New help, completion, examples, and documentation expose only the new grammar.
+in 0.20. New help, completion, examples, and documentation expose only the new grammar.
 
 ## Requirements
 
@@ -182,35 +179,19 @@ explicit verb.
 
 ### R4: Session stop and attach remain distinct
 
-Every core operation that intentionally ends a reachable live session runtime MUST offer the
-selected harness integration one cooperative graceful-stop hook before core escalates. This includes
-direct stop, the teardown half of restart, direct session deletion, and cascading workspace, agent,
-or VM deletion where the runtime and integration can still be addressed. The default hook MUST be a
-no-op so an integration needs no stop-specific behavior to remain valid. A hook MAY ask its
-application to flush state or exit through the operation's already-authorized target, but it MUST
-NOT kill tmux, mark the session stopped, choose the grace period, or claim that the process exited.
-An optional hook MUST NOT cause stop, restart, or deletion to resolve or prompt for
-integration-declared secrets solely to make the hook available. It MAY use inputs already available
-to the enclosing operation; when its inputs are unavailable, core MUST continue through the generic
-teardown path.
-
-Core MUST own the full stop state machine. It MUST invoke the hook at most once per stop attempt,
-substitute its generic graceful interrupt when the hook performs no request, wait according to one
+Core MUST own the full stop state machine. Every core operation that intentionally ends a reachable
+live session runtime MUST send SIGTERM to each verified tmux pane process, wait according to one
 bounded grace policy, verify liveness, remove surviving tmux state, apply the existing explicit
-force/PID fallback when required, and only then persist the stopped state. A failed or unavailable
-hook MUST remain recoverable through the generic core path and MUST NOT strand an otherwise
-stoppable session. A destructive parent-resource teardown MUST remain able to apply its existing
-best-effort or fail-closed cleanup policy when an integration cannot be reconstructed or its hook
-cannot run; the optional cooperative hook does not become a new deletion dependency. Batch stop,
-restart, and cascading teardown MUST retain one bounded, scalable grace phase rather than waiting
-serially for every session. Cooperative hook commands in a batch MUST be dispatched within one
-batch-wide request budget; they MUST NOT add one serial timeout per session before the grace phase.
+force/PID fallback when required, and only then persist the stopped state. Core MUST NOT signal an
+indeterminate or dangerous process identity. This includes direct stop, the teardown half of
+restart, direct session deletion, and cascading workspace, agent, or VM deletion where the runtime
+can still be addressed. Batch stop, restart, and cascading teardown MUST retain one bounded,
+scalable grace phase rather than waiting serially for every session.
 
 Shared teardown logic used by stop, restart, direct delete, and cascading delete MUST have one core
 authority with explicit policy inputs for their real differences. The implementation MUST remove
-duplicated session kill loops rather than attach the hook independently to each existing copy.
-Restart MUST NOT grow a separate command-local kill implementation, and the harness integration MUST
-NOT expose a restart operation.
+duplicated session kill loops. Restart MUST NOT grow a separate command-local kill implementation,
+and the harness integration MUST NOT expose stop or restart operations.
 
 `session attach` MUST continue to join only a running session. A stopped or broken session MUST
 produce an actionable error identifying the appropriate lifecycle command. Attach MUST NOT start,
@@ -271,13 +252,13 @@ Every tmux target used by console lifecycle MUST select the full generated sessi
 Prefix matching MUST NOT permit one console or staging artifact to inspect, attach to, rename, or
 remove another console whose name merely shares a prefix.
 
-### R6: Harness start and graceful-stop boundary
+### R6: Harness start boundary
 
-The harness integration capability MUST expose one launch operation named `start` and one optional
-graceful-stop operation named `stop`. It MUST NOT expose `restart` or `resume` lifecycle operations.
-Core owns session status inspection, stop orchestration, liveness verification, grace and escalation
-policy, fallback kill, tmux replacement, and the decision to invoke start. A harness integration
-MUST NOT kill, replace, attach to, or persist liveness for the Agentworks session runtime.
+The harness integration capability MUST expose one launch operation named `start`. It MUST NOT
+expose `stop`, `restart`, or `resume` lifecycle operations. Core owns session status inspection,
+SIGTERM, stop orchestration, liveness verification, grace and escalation policy, fallback kill, tmux
+replacement, and the decision to invoke start. A harness integration MUST NOT kill, replace, attach
+to, or persist liveness for the Agentworks session runtime.
 
 `start` MUST receive a keyword-only `force_new` Boolean whose default is false. The CLI and service
 layers MUST retain that positive spelling so `--force-new`, `force_new`, and the capability input
@@ -346,7 +327,7 @@ third-party command names MUST NOT be rewritten to manufacture current terminolo
 
 ### R8: Compatibility and migration
 
-In 0.17, `agw session resume` MUST remain as a hidden, warning-producing command wrapper around the
+In 0.19, `agw session resume` MUST remain as a hidden, warning-producing command wrapper around the
 new canonical lifecycle operations:
 
 - a named session MUST preserve the prior state-aware behavior by dispatching to restart;
@@ -356,12 +337,12 @@ new canonical lifecycle operations:
 The wrapper MUST use the ordinary suppressible deprecation channel, MUST identify the canonical
 replacement, and MUST NOT duplicate lifecycle implementation. Canonical help, completion, docs, and
 examples MUST expose only start/restart. The compatibility wrapper and its legacy-only options MUST
-be removed in 0.18.
+be removed in 0.20.
 
-For 0.17, `console attach --recreate` MUST remain as a deprecated compatibility form that performs
+For 0.19, `console attach --recreate` MUST remain as a deprecated compatibility form that performs
 restart followed by attach through the canonical service operations. Ordinary `console attach` MUST
 adopt the new attach-only behavior immediately; preserving implicit first-attach realization would
-preserve the design defect. The compatibility form MUST be removed in 0.18.
+preserve the design defect. The compatibility form MUST be removed in 0.20.
 
 Any affected configuration spelling MUST receive an explicit migration decision during architecture.
 A retained alias MUST be bounded and must normalize into the one canonical model; the implementation
@@ -399,8 +380,8 @@ attach. Runtime creation MUST not be hidden behind inspection, list, completion,
    restarting it completes core-owned teardown before invoking that same start operation.
 3. `--force-new` makes session start/restart request a fresh harness launch when that operation
    launches a runtime; initial session creation always uses the fresh policy.
-4. Harness integrations expose start plus a default-no-op cooperative stop hook and no
-   resume/restart lifecycle methods; core retains sole authority over teardown and stopped state.
+4. Harness integrations expose start and no stop/resume/restart lifecycle methods; core retains sole
+   authority over teardown and stopped state.
 5. Continuation-capable harness integrations preserve their current safe continuation behavior;
    integrations that cannot continue remain valid and start fresh without false success claims.
 6. Console create/start/restart share one realization path; console stop removes only runtime;
@@ -420,9 +401,8 @@ attach. Runtime creation MUST not be hidden behind inspection, list, completion,
 13. Focused deterministic CLI, service, orchestration, secret-boundary, capability-contract, and
     completion tests demonstrate the full state matrix; representative live console/session tests
     cover admin and agent targets plus continuation and forced-fresh behavior.
-14. Direct and cascading session teardown route through one core stop authority; the harness hook is
-    offered where possible, and an unavailable optional hook does not prevent required deletion
-    cleanup.
+14. Direct and cascading session teardown route through one core stop authority and one bounded
+    grace policy.
 
 ## Non-goals
 
@@ -442,6 +422,12 @@ attach. Runtime creation MUST not be hidden behind inspection, list, completion,
 - **2026-08-31 — Base branch:** Design and implementation are based on the tip of
   `feat/debian-release-transition-sdd` so the lifecycle work composes with the in-flight Debian
   release transition rather than resolving a large integration conflict afterward.
+- **2026-09-01 — Main rebase and release window:** After the Debian transition merged in PR #702,
+  the design branch rebased onto `main` at `8695afcd833790ee433b50bb9f5d5c696177233d`, and PR #710
+  changed its base to `main`. Release 0.17.0 landed in the same range, and the fully green 0.18.0
+  release PR #714 is already ready before this design and its two implementation PRs. Compatibility
+  wrappers therefore ship in 0.19 and are removed in 0.20. PR #709 changes typing metadata only;
+  neither merge changes the session, console, or harness implementation contract described here.
 - **2026-08-31 — Continuation on both operations:** Session start and session restart both request
   harness continuation when supported. `--force-new` forces a fresh harness launch. Session create
   is always fresh. `session start --force-new` on a running session errors rather than taking
@@ -449,6 +435,11 @@ attach. Runtime creation MUST not be hidden behind inspection, list, completion,
 - **2026-08-31 — Harness lifecycle boundary:** A harness integration offers start and an optional
   default-no-op cooperative stop hook, but no restart operation. Core orchestrates liveness,
   graceful fallback, bounded force kill, persisted state, and subsequent start for restart.
+- **2026-09-01 — Stop seam removed under YAGNI:** The harness contract offers only start. No current
+  integration has a distinct graceful-stop request and no planned feature needs one. Core owns the
+  SIGTERM request to each verified tmux pane process, bounded grace period, liveness verification,
+  and forced teardown. A harness-specific stop seam may be designed when the first concrete consumer
+  demonstrates a requirement that core signaling cannot satisfy.
 - **2026-08-31 — Internal capability versions:** This effort does not bump capability versions. Any
   in-repository-only capability contract it changes uses version 1 without compatibility machinery;
   unchanged capability contracts are not renumbered. All current harness integrations ship in this

@@ -2,7 +2,7 @@
 
 - Status: Draft for design review
 - Date: 2026-08-31
-- Baseline: `b0924f594d5fe6eeece74b2474a67bdad78c8bad`
+- Baseline: `8695afcd833790ee433b50bb9f5d5c696177233d`
 - Requirements: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
 - Detailed design: [lifecycle-lld.md](./lifecycle-lld.md)
@@ -51,7 +51,7 @@ introduced.
 
 ### Session resume
 
-For 0.17, the old command remains accepted but hidden:
+For 0.19, the old command remains accepted but hidden:
 
 ```text
 agw session resume NAME              -> agw session restart NAME
@@ -65,11 +65,11 @@ prompt that canonical restart intentionally removes. The wrapper emits the ordin
 deprecation warning and identifies the replacement.
 
 The wrapper is excluded from help, completion, examples, and permanent teaching. It is deleted in
-0.18.
+0.20.
 
 ### Console recreate
 
-For 0.17, `agw console attach NAME --recreate` remains accepted as a hidden deprecated form. It
+For 0.19, `agw console attach NAME --recreate` remains accepted as a hidden deprecated form. It
 normalizes to:
 
 ```text
@@ -79,7 +79,7 @@ agw console attach NAME
 
 Ordinary attach changes immediately to attach-only behavior. Preserving first-attach creation as a
 compatibility default would preserve the defect this effort fixes. The hidden option is removed in
-0.18.
+0.20.
 
 ### New force-new policy
 
@@ -113,7 +113,6 @@ v2: start(ctx) -> str
     launch_note() -> str | None
 
 v1: start(ctx, *, force_new=False) -> HarnessStart
-    stop(ctx) -> str | None       # concrete default returns None
 ```
 
 All implementations are internal to this repository. Every built-in, manifest descriptor, fake,
@@ -153,18 +152,19 @@ restart or definition-changing behavior that already requires live synchronizati
 
 ## Upgrade Experience
 
-The 0.17 upgrade guide and release notes explain:
+The 0.19 upgrade guide and release notes explain:
 
 1. use `session start` for a stopped session and `session restart` to replace one;
 2. both operations attempt harness continuation by default;
 3. use `--force-new` to require a new harness conversation;
 4. use `console start` before attach when no console runtime exists;
 5. replace `console attach --recreate` with `console restart`, followed by attach when desired;
-6. hidden compatibility forms last only through 0.17 and are removed in 0.18;
-7. harness integration implementations move directly to the version-1 API.
+6. hidden compatibility forms last only through 0.19 and are removed in 0.20;
+7. harness integration implementations move directly to the version-1 start-only API; core uses
+   SIGTERM and its existing grace/force policy for session teardown.
 
 The guide teaches only canonical commands. Command reference material may include one bounded
-compatibility note in the 0.17 upgrade guide, not in every command description.
+compatibility note in the 0.19 upgrade guide, not in every command description.
 
 ## Rollback
 
@@ -178,18 +178,18 @@ restores the old CLI grammar and capability code, but operators must understand 
 - a console created under the new binary may already have a runtime, while the old binary simply
   attaches to it.
 
-Neither case corrupts durable state. Old external conversations remain available through their own
-tools even when Agentworks no longer binds to them.
+None of these cases corrupts durable state. Old external conversations remain available through
+their own tools even when Agentworks no longer binds to them.
 
-## Removal in 0.18
+## Removal in 0.20
 
-The release following 0.17 deletes:
+The release following 0.19 deletes:
 
 - the hidden `session resume` command and its legacy-only option parser;
 - the hidden `console attach --recreate` option;
 - their deprecation warnings and compatibility tests.
 
-The 0.18 work is recorded as a bounded release task, not a dormant compatibility framework. No old
+The 0.20 work is recorded as a bounded release task, not a dormant compatibility framework. No old
 internal manager or capability method survives until then.
 
 ## Migration Verification
@@ -198,7 +198,7 @@ internal manager or capability method survives until then.
 - Existing Claude, Grok, and Codex bindings continue under default start/restart.
 - Forced fresh changes only the selected namespace and does not delete external history.
 - Existing console rows attach when runtime is present and require explicit start when absent.
-- Hidden 0.17 forms reach canonical manager operations and emit deprecation through the shared
+- Hidden 0.19 forms reach canonical manager operations and emit deprecation through the shared
   channel.
 - Canonical help and generated completions expose no legacy forms.
 - Installed-wheel tests cover both old accepted invocations and new canonical invocations.

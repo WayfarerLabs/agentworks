@@ -10,10 +10,9 @@
 1. Lifecycle verbs define runtime transitions; flags refine policy without changing the verb.
 2. Session and console implementations remain separate and share no speculative runnable layer.
 3. Core owns runtime status, teardown, persistence, and retry boundaries.
-4. Harness integrations own only launch choice, optional cooperative stop requests, and their
-   namespaced state.
+4. Harness integrations own only launch choice and their namespaced state.
 5. Attach never realizes runtime state.
-6. Required inputs are resolved before destructive mutation, and optional hooks never add prompts.
+6. Required inputs are resolved before destructive mutation.
 7. Compatibility terminates at hidden CLI wrappers.
 
 ## Harness Integration Contract
@@ -45,30 +44,17 @@ class HarnessIntegration(Capability):
         *,
         force_new: bool = False,
     ) -> HarnessStart: ...
-
-    def stop(self, ctx: RunContext) -> str | None:
-        return None
 ```
 
 The existing `resume()` abstract method and mutable `launch_note()` method are deleted. No adapter,
 v2 compatibility class, or dual-dispatch branch remains. Every built-in implementation and fake
 migrates in the same change.
 
-`stop` returns either `None` or a nonempty shell command. Core dispatches a returned command through
-the session target with discarded output under the teardown batch's one request deadline. An
-exception, deadline expiry, or nonzero result produces a fixed safe warning and triggers the generic
-interrupt path. A successful request does not prove shutdown; core still waits and checks liveness.
-
 ### Context and secret delivery
 
 Each start receives a fresh session-scoped `RunContext` with exactly the launch target for its mode
 and the integration's scoped secret view. Start runs only after readiness and required secret
 resolution have succeeded.
-
-The stop context is also fresh and session-scoped. It contains the already-authorized target and
-only secret values already available to the enclosing operation. Core does not resolve or prompt for
-an integration's missing secret solely to call an optional stop hook. An implementation must
-tolerate the absence of optional stop inputs; failure is advisory to core teardown.
 
 ### State ownership
 
@@ -77,8 +63,7 @@ The capability receives its own mutable namespace within the session row's compl
 after a successful start decision and before tmux construction.
 
 Foreign namespaces remain byte-for-byte represented by the same parsed objects unless their owning
-integration is selected and changes them. Stop does not persist integration state in this effort;
-the optional hook is a request, not a state transition.
+integration is selected and changes them.
 
 ### Launch-result notes
 
@@ -106,7 +91,7 @@ required_commands
 | false       | `resume_command` when nonempty, else `command` |
 | true        | `command`                                      |
 
-No remote state probe is added. Stop inherits the default `None` hook.
+No remote state probe is added.
 
 ### Claude Code
 
@@ -186,14 +171,14 @@ thin enough that their distinct status policy remains obvious.
 
 ### Status matrix
 
-| Operation             | Stopped                          | Running                                          | Broken                                      |
-| --------------------- | -------------------------------- | ------------------------------------------------ | ------------------------------------------- |
-| `start`               | launch with continuation allowed | success, no launch work                          | refuse unless `--force`; then recover/start |
-| `start --force-new`   | launch fresh                     | refuse and name `restart --force-new`            | refuse unless `--force`; then recover/start |
-| `restart`             | launch with continuation allowed | teardown, then launch with continuation allowed  | refuse unless `--force`                     |
-| `restart --force-new` | launch fresh                     | teardown, then launch fresh                      | refuse unless `--force`; then launch fresh  |
-| `stop`                | success                          | cooperative request/generic interrupt, then stop | refuse unless `--force`                     |
-| `attach`              | refuse                           | attach                                           | refuse                                      |
+| Operation             | Stopped                          | Running                                         | Broken                                      |
+| --------------------- | -------------------------------- | ----------------------------------------------- | ------------------------------------------- |
+| `start`               | launch with continuation allowed | success, no launch work                         | refuse unless `--force`; then recover/start |
+| `start --force-new`   | launch fresh                     | refuse and name `restart --force-new`           | refuse unless `--force`; then recover/start |
+| `restart`             | launch with continuation allowed | teardown, then launch with continuation allowed | refuse unless `--force`                     |
+| `restart --force-new` | launch fresh                     | teardown, then launch fresh                     | refuse unless `--force`; then launch fresh  |
+| `stop`                | success                          | core SIGTERM/grace/force teardown               | refuse unless `--force`                     |
+| `attach`              | refuse                           | attach                                          | refuse                                      |
 
 Legacy default-tmux-server rows remain a migration case inside status preparation. Start and restart
 migrate them into the existing per-session socket model through the same verified teardown and
@@ -262,20 +247,30 @@ generic resource types.
 
 For reachable healthy sessions it:
 
-1. builds a stop context from values already available to the enclosing operation;
-2. calls the selected integration's stop method at most once;
-3. dispatches returned commands concurrently with discarded output under one batch-wide request
-   deadline, without introducing a reusable asynchronous lifecycle framework;
-4. sends the current generic interrupt for sessions with no usable or successfully dispatched
-   request, then starts one shared grace deadline for the candidate set;
-5. checks liveness and removes surviving tmux state;
-6. cleans the managed socket only after process death is established;
-7. persists the stopped PID sentinel when the caller retains the session row.
+1. resolves each exact tmux pane's process identity through the already authorized target and
+   refuses dangerous or indeterminate signal targets;
+2. sends SIGTERM to every verified pane process as the ordinary cooperative stop;
+3. starts one shared grace deadline for the candidate set;
+4. checks liveness and removes surviving tmux state;
+5. cleans the managed socket only after process death is established;
+6. persists the stopped PID sentinel when the caller retains the session row.
 
-Delete paths that cannot reconstruct the integration or reach the target skip the hook and preserve
-their current best-effort or fail-closed policy. The hook is never a new requirement for deleting a
-parent resource. Broken PID fallback stays an explicit `force` path and does not masquerade as
-graceful stop.
+The SIGTERM helper is session-specific and uses the existing prepared target. It selects the tmux
+session as exact `=NAME`, including for a legacy shared-server row, and enumerates all of that
+session's panes with `list-panes -s` and `#{pane_pid}`. Each value must be a canonical decimal
+greater than one. In the same remote shell command that sends the signal, core re-reads the process
+UID and requires it to equal the prepared session owner's UID. Only then may it invoke
+`kill -TERM -- PANE_PID`. Values are shell-quoted after numeric validation. A nonempty harness pane
+uses the existing `exec` wrapper, so the tmux pane PID is the harness process; core does not
+discover or signal a broader process tree. The stored session PID remains the tmux server PID and is
+never substituted for a pane process identity.
+
+Signal-target lookup or SIGTERM failure does not expand authority or cause an unverified process to
+be signaled. The candidate proceeds to the existing exact tmux teardown after the shared grace
+phase. That teardown and every new session tmux query use exact `=NAME` targets rather than tmux
+prefix matching. Broken tmux-server PID fallback stays an explicit `force` path, using its existing
+SIGTERM-to-SIGKILL escalation, and does not masquerade as graceful workload stop. Parent deletion
+paths preserve their current best-effort or fail-closed policy when a target cannot be reached.
 
 ## Console Operations
 
@@ -374,7 +369,7 @@ use `console restart` when a full rebuild is required.
 
 ### Session resume wrapper
 
-The 0.17 hidden command accepts the legacy argument shapes and normalizes immediately:
+The 0.19 hidden command accepts the legacy argument shapes and normalizes immediately:
 
 | Legacy invocation                  | Canonical call              |
 | ---------------------------------- | --------------------------- |
@@ -384,7 +379,7 @@ The 0.17 hidden command accepts the legacy argument shapes and normalizes immedi
 
 Legacy `--yes` remains parser-compatible but does not recreate the old running-session prompt. Every
 invocation emits one suppressible deprecation warning. The wrapper is absent from help and
-completion and is deleted in 0.18.
+completion and is deleted in 0.20.
 
 The output package exposes one `deprecation(message)` helper. It emits through the ordinary warning
 presentation only when `deprecations_suppressed()` is false. Command wrappers call this helper once;
@@ -396,9 +391,9 @@ the wrapper even though Click can still dispatch it.
 
 ### Console recreate wrapper
 
-For 0.17 only, hidden `console attach NAME --recreate` emits one deprecation warning, calls
+For 0.19 only, hidden `console attach NAME --recreate` emits one deprecation warning, calls
 `restart_console`, and on success calls ordinary `attach_console`. It does not call the builder
-directly. The option is removed in 0.18.
+directly. The option is removed in 0.20.
 
 ## Error and Output Contract
 
@@ -438,8 +433,8 @@ Tests remain structural and behavioral:
 - Codex forced-fresh binding/recorder cleanup, rejected-recorder comparison on pre-exec failure and
   retry, malformed type/non-canonical UUID convergence, and no prior-state adoption;
 - shell selection of `command` versus `resume_command`;
-- stop-hook absent/success/failure/deadline behavior, one batch-wide request budget, and one shared
-  grace phase;
+- exact pane process validation, SIGTERM dispatch, refusal of dangerous or indeterminate targets,
+  one shared grace phase, and surviving tmux teardown;
 - direct and cascading teardown use the shared authority;
 - console attach performs no builder or pane-secret work;
 - console stale-predecessor create boundary, staging publication/cleanup, required-step failure, and

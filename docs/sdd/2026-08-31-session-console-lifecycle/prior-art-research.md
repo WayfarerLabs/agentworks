@@ -118,7 +118,8 @@ The current implementation has several useful boundaries to retain:
 - session resume already calls the integration after old-runtime teardown and persists the complete
   namespaced state before new tmux creation;
 - session status distinguishes stopped, healthy, broken, and legacy socket cases;
-- batch stop already separates graceful signaling from later liveness checks;
+- batch stop already separates signaling from later liveness checks, while the existing broken
+  tmux-server fallback already uses bounded SIGTERM-to-SIGKILL escalation;
 - console list and describe are database-only;
 - console attach already skips pane-secret resolution when tmux exists;
 - console building already has one substantial pane/layout implementation.
@@ -133,7 +134,8 @@ The parts to retire are ownership mistakes rather than missing primitives:
 - teardown logic is duplicated across direct and cascading paths.
 
 **Decision:** reshape these existing seams rather than add new persisted state or a common runtime
-framework.
+framework. Replace pane `C-c` with SIGTERM to each verified tmux pane process, keep one shared grace
+phase, then use exact tmux teardown for survivors.
 
 ## Alternatives Considered
 
@@ -152,11 +154,12 @@ Rejected. It makes an option silently override the lifecycle verb. Refusal plus 
 Rejected. Claude and Grok accept Agentworks-owned UUIDs, but Codex assigns its own ID after launch
 and shell has no conversation identity. A common identifier contract would be false abstraction.
 
-### Make every integration implement graceful stop now
+### Add a harness stop seam before a consumer exists
 
-Rejected. No current built-in has demonstrated a better application-level request than core's
-generic tmux interrupt. A default-no-op method establishes the boundary without speculative per-tool
-commands.
+Rejected. No current built-in or planned feature has demonstrated an application-level shutdown
+request that core-owned SIGTERM, bounded grace, and forced tmux teardown cannot satisfy. Adding a
+default-no-op method would establish contexts, failure semantics, and tests without a consumer. The
+contract should gain a stop seam only when a concrete integration demonstrates the requirement.
 
 ### Persist console runtime status
 
@@ -166,7 +169,7 @@ and require reconciliation machinery without fixing an operator problem.
 ### Preserve attach-time creation as a compatibility default
 
 Rejected. It would keep secret resolution and runtime mutation hidden behind attach. The bounded
-0.17 `--recreate` wrapper is enough for migration while ordinary attach changes immediately.
+0.19 `--recreate` wrapper is enough for migration while ordinary attach changes immediately.
 
 ## Refuted or Do-Not-Rely-On Claims
 

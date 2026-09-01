@@ -19,15 +19,16 @@ session lifecycle manager                    console lifecycle manager
   |          |          |                    |          |          |
 status   core teardown  launch           live probe  teardown   realization
               |          |                    |                     |
-              v          v                    v                     v
-    optional harness   harness start          console tmux session and panes
-        stop request    result
-                           |
-                           v
-              persist integration state
-                           |
-                           v
-                 create session tmux runtime
+              |          v                    |                     v
+              |    harness start result       |          console tmux session and panes
+              |          |
+              |          v
+              |    persist integration state
+              |          |
+              |          v
+              |  create session tmux runtime
+              v
+   SIGTERM, grace, verify, force
 ```
 
 The commonality is command meaning, not a shared runnable abstraction. Sessions retain persisted
@@ -76,19 +77,20 @@ handling visible and avoids encoding session-specific recovery in flags on a cro
 
 ### Core-owned session teardown
 
-One session teardown authority owns:
+One session teardown authority owns the selected target and current status, SIGTERM to each verified
+tmux pane process, one bounded grace window and liveness check, tmux removal and explicit PID
+fallback for broken state, socket cleanup, and persisted stopped state. Batch and cascading
+operations signal their candidates before one shared grace phase rather than waiting one full
+timeout per session.
 
-1. the selected target and current status;
-2. at most one optional harness stop request;
-3. the generic graceful interrupt when no stop request is available;
-4. one bounded grace window and liveness check;
-5. tmux removal and the existing explicit PID fallback for broken state;
-6. socket cleanup and persisted stopped state.
+Verification stays inside the session domain: exact tmux session selection yields pane process
+identities, and the same remote command revalidates the prepared session-owner UID before signaling
+that positive PID. Failure to prove that identity skips SIGTERM and retains exact tmux teardown
+after the shared grace phase; it never widens the process target.
 
-The harness integration does not kill tmux, choose the grace duration, report liveness, or persist
-runtime state. A missing, unavailable, or unsuccessful hook falls back to the generic core path.
-Batch and cascading operations dispatch cooperative requests concurrently under one request budget,
-then share one bounded grace phase rather than waiting one full timeout per session.
+The harness integration has no stop or restart API. If a future integration demonstrates a concrete
+application-specific shutdown requirement that core signaling cannot satisfy, that requirement gets
+a separately designed seam rather than speculative lifecycle machinery now.
 
 ### Harness integration contract version 1
 
@@ -106,20 +108,11 @@ class HarnessStart:
 
 class HarnessIntegration(Capability):
     def start(self, ctx: RunContext, *, force_new: bool = False) -> HarnessStart: ...
-
-    def stop(self, ctx: RunContext) -> str | None:
-        return None
 ```
 
 `HarnessStart` replaces the mutable `launch_note()` side channel. It carries only the pane command
 and an optional truthful pre-launch note. It does not claim that the external tool successfully
 continued after the pane starts, and it does not introduce a typed decision taxonomy.
-
-`stop` optionally returns a nonempty cooperative command for core to run through the already
-authorized target. The default is `None`. All current integrations may use the default; the hook is
-the contract seam for an integration that later has a real application-level shutdown request. Core
-suppresses arbitrary command output, treats failure as advisory, and continues through its generic
-teardown.
 
 The integration still owns only its namespaced portion of `harness_integration_state`. The session
 manager persists the complete blob so a template switch never discards another integration's
@@ -192,7 +185,7 @@ such as `foo` and `foobar` cannot cross lifecycle boundaries.
 
 ### Compatibility wrappers
 
-Compatibility is isolated at the CLI boundary for 0.17:
+Compatibility is isolated at the CLI boundary for 0.19:
 
 - hidden `session resume NAME` delegates to canonical restart;
 - hidden `session resume --all-stopped` delegates to canonical batch start;
@@ -202,7 +195,7 @@ Compatibility is isolated at the CLI boundary for 0.17:
 Wrappers accept the bounded legacy option spellings needed by existing automation, emit the ordinary
 suppressible deprecation warning, and contain no lifecycle implementation. Internal manager and
 capability names switch completely to the new vocabulary. Canonical help, completion, docs, and
-examples contain only the new commands. The wrappers are removed in 0.18.
+examples contain only the new commands. The wrappers are removed in 0.20.
 
 The CLI output layer gains one small deprecation emitter that respects the existing global
 `--no-deprecations` state. Completion introspection excludes hidden subcommands as well as hidden
@@ -290,8 +283,6 @@ The key commit points are:
   launch-only secrets.
 - Console attach does not resolve pane secrets. It may resolve only the VM/site inputs required to
   establish its authorized transport.
-- A graceful-stop hook receives only values already resolved for its enclosing operation. Stop and
-  delete do not prompt for additional integration secrets solely for an optional hook.
 - Harness notes and errors describe pre-launch decisions, not third-party success.
 - State values, generated commands containing sensitive values, and third-party process output are
   not emitted in diagnostics.
@@ -302,8 +293,8 @@ The key commit points are:
 - `agentworks.sessions.manager`: session status, launch, shared teardown, attach, and batch policy.
 - `agentworks.sessions.multi_console`: console definition, realization, teardown, attach, and live
   best-effort synchronization.
-- `agentworks.capabilities.harness_integration`: version-1 contract, `HarnessStart`, default stop,
-  and shell implementation.
+- `agentworks.capabilities.harness_integration`: version-1 start-only contract, `HarnessStart`, and
+  shell implementation.
 - built-in plugin packages: integration-owned continuation and forced-fresh behavior.
 - database layer: unchanged session and console storage APIs, except service-facing method names may
   change with the vocabulary cutover.
