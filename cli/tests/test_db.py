@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from agentworks.db import Database, InitStatus, ProvisioningStatus
+from agentworks.debian import DebianRelease
 
 
 def test_roundtrip_vm(db: Database) -> None:
@@ -30,6 +31,8 @@ def test_roundtrip_vm(db: Database) -> None:
     assert vm.disk_gib == 50
     assert vm.platform_metadata == {}
     assert vm.operator_stopped is False
+    assert vm.debian_release is None
+    assert vm.debian_release_observed_at is None
 
     db.update_vm_init_status("dev-vm", InitStatus.COMPLETE)
     vm = db.get_vm("dev-vm")
@@ -45,6 +48,12 @@ def test_roundtrip_vm(db: Database) -> None:
     vm = db.get_vm("dev-vm")
     assert vm is not None
     assert vm.platform_metadata == {"instance_name": "dev-vm"}
+
+    db.update_vm_debian_release("dev-vm", DebianRelease.TRIXIE)
+    vm = db.get_vm("dev-vm")
+    assert vm is not None
+    assert vm.debian_release is DebianRelease.TRIXIE
+    assert vm.debian_release_observed_at is not None
 
     db.set_operator_stopped("dev-vm", True)
     vm = db.get_vm("dev-vm")

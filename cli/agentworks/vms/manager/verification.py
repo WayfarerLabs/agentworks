@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import NotFoundError
 
+from .boundary import _warn_legacy_release
+
 _VERIFY_CONNECTION_TIMEOUT_SECONDS = 10
 
 if TYPE_CHECKING:
@@ -37,6 +39,7 @@ def verify_vm_connection(
             entity_kind="vm",
             entity_name=name,
         )
+    _warn_legacy_release(vm)
 
     # Resolve the VM's declared site through the usual readiness boundary, but
     # do not call any platform operation or activation machinery.

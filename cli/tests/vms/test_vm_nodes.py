@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from agentworks.db import VMStatus
+from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError, StateError, ValidationError
 from agentworks.orchestration.activation import activation_gate, ensure_active
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -660,7 +661,7 @@ def _pending(db: Database):
 
     template = vm_template_node(ResolvedVMTemplate(name="default"))
     site = VMSiteNode("stub", cast("VMPlatform", _GatePlatform()), (), cast("Registry", object()))
-    return pending_vm_node(db, "nvm", template, site, ()), template, site
+    return pending_vm_node(db, "nvm", DebianRelease.TRIXIE, template, site, ()), template, site
 
 
 def test_pending_vm_node_shape_and_edges(db: Database) -> None:

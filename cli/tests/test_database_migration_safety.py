@@ -33,7 +33,8 @@ from agentworks.db import (
     prepare_database_open,
     render_restore_command,
 )
-from agentworks.errors import BusyStateError, StateError
+from agentworks.db.migrations import _retire_vm_checkpoints
+from agentworks.errors import BusyStateError, MigrationBlockedError, StateError
 from tests.conftest import CapturedOutput, held_exclusive_lock, write_cfg
 
 
@@ -65,6 +66,112 @@ def _version(path: Path) -> int:
     version = int(connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0])
     connection.close()
     return version
+
+
+def test_latest_schema_enforces_atomic_debian_release_observation(tmp_path: Path) -> None:
+    path = tmp_path / "state.db"
+    _build_schema(path, LATEST_VERSION)
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "INSERT INTO vms (name, site, hostname, template) VALUES (?, ?, ?, ?)",
+        ("release-witness", "lima-local", "lima--release-witness", None),
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        connection.execute(
+            "UPDATE vms SET debian_release = ? WHERE name = ?",
+            ("trixie", "release-witness"),
+        )
+    connection.close()
+
+
+def test_version_33_advances_through_checkpoint_retirement(tmp_path: Path) -> None:
+    path = tmp_path / "state.db"
+    _build_schema(path, 33)
+    before = sqlite3.connect(path)
+    assert (
+        before.execute("SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'vm_checkpoints'").fetchone()
+        is None
+    )
+    before.close()
+
+    Database(path).close()
+
+    after = sqlite3.connect(path)
+    assert _version(path) == 35
+    assert (
+        after.execute("SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'vm_checkpoints'").fetchone()
+        is None
+    )
+    after.close()
+
+
+def test_checkpoint_retirement_refuses_to_orphan_a_record(tmp_path: Path) -> None:
+    path = tmp_path / "state.db"
+    _build_schema(path, 34)
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "INSERT INTO vms (name, site, hostname, template) VALUES (?, ?, ?, ?)",
+        ("release-witness", "lima-local", "lima--release-witness", None),
+    )
+
+    connection.execute(
+        "INSERT INTO vm_checkpoints "
+        "(vm_name, name, provider_identifier, desired_state_fingerprint, state, capture_release) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        ("release-witness", "agw-retained", "provider-id", "a" * 64, "ready", "bookworm"),
+    )
+    connection.commit()
+    connection.close()
+
+    with pytest.raises(MigrationBlockedError):
+        open_database_safely(path, prepare_database_open(path), create_backup=False)
+
+    after = sqlite3.connect(path)
+    assert _version(path) == 34
+    assert after.execute("SELECT vm_name FROM vm_checkpoints").fetchone() == ("release-witness",)
+    after.close()
+
+
+def test_checkpoint_retirement_holds_write_lock_through_version_checkpoint(tmp_path: Path) -> None:
+    path = tmp_path / "state.db"
+    _build_schema(path, 34)
+    seed = sqlite3.connect(path)
+    seed.execute(
+        "INSERT INTO vms (name, site, hostname, template) VALUES (?, ?, ?, ?)",
+        ("late-vm", "lima-local", "lima--late-vm", None),
+    )
+    seed.commit()
+    seed.close()
+
+    migrator = sqlite3.connect(path, timeout=0)
+    migrator.row_factory = sqlite3.Row
+    _retire_vm_checkpoints(migrator, MigrationContext())
+    assert migrator.in_transaction
+
+    old_process = sqlite3.connect(path, timeout=0)
+    try:
+        with pytest.raises(sqlite3.OperationalError) as caught:
+            old_process.execute(
+                "INSERT INTO vm_checkpoints "
+                "(vm_name, name, provider_identifier, desired_state_fingerprint, state, capture_release) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                ("late-vm", "late", "provider-id", "a" * 64, "ready", "bookworm"),
+            )
+        assert caught.value.sqlite_errorcode == sqlite3.SQLITE_BUSY
+    finally:
+        old_process.close()
+
+    migrator.execute("INSERT INTO schema_version (version) VALUES (35)")
+    migrator.commit()
+    migrator.close()
+
+    after = sqlite3.connect(path)
+    assert _version(path) == 35
+    assert (
+        after.execute("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'vm_checkpoints'").fetchone() is None
+    )
+    after.close()
 
 
 def _serialized_open_worker(

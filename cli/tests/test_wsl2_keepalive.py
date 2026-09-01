@@ -315,7 +315,7 @@ def test_base_platform_vm_active_is_nullcontext() -> None:
     class _Stub(VMPlatform):
         name = "stub"
         description = "stub"
-        contract_version = 2
+        contract_version = 1
         config_model = _StubConfig
 
         def create(self, request: Any, ctx: Any) -> Any:

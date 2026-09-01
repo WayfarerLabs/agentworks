@@ -32,6 +32,7 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest, ssh_exposure
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
+from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError, ConnectivityError
 from agentworks.plugins.azure import network as azure_network
 from agentworks.plugins.azure.network import (
@@ -175,6 +176,7 @@ class TestCreate:
     def _request(self) -> ProvisionRequest:
         return ProvisionRequest(
             vm_name="vm1",
+            debian_release=DebianRelease.TRIXIE,
             hostname="vm1",
             system_slug=None,
             admin_username="agentworks",

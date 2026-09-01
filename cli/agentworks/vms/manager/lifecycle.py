@@ -20,14 +20,17 @@ either phase to the same operator-facing outcome.
 from __future__ import annotations
 
 import sys
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.capabilities.base import RunContext
 from agentworks.config import validate_admin_username
 from agentworks.db import SYSTEM_SLUG_KEY, InitStatus, ProvisioningStatus
+from agentworks.debian import CURRENT_DEBIAN_RELEASE, DebianRelease, probe_debian_release
 from agentworks.errors import (
     AlreadyExistsError,
+    ConfigError,
     ExternalError,
     ProvisioningError,
     StateError,
@@ -36,12 +39,13 @@ from agentworks.errors import (
 from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
 
 from ._helpers import _require_vm
+from .boundary import _warn_legacy_release
 
 if TYPE_CHECKING:
     from typing import NoReturn
 
     from agentworks.config import Config
-    from agentworks.db import Database
+    from agentworks.db import Database, VMRow
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.transports import Transport
 
@@ -275,7 +279,15 @@ def create_vm(
 
     template_node = vm_template_node(vm_tmpl)
     site_node = vm_site_node(registry, site)
-    pending_vm = pending_vm_node(db, vm_name, template_node, site_node, cred_nodes)
+    creation_release = CURRENT_DEBIAN_RELEASE
+    pending_vm = pending_vm_node(
+        db,
+        vm_name,
+        creation_release,
+        template_node,
+        site_node,
+        cred_nodes,
+    )
     nodes = walk(pending_vm)
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
@@ -463,6 +475,7 @@ def create_vm(
             try:
                 request = ProvisionRequest(
                     vm_name=vm_name,
+                    debian_release=creation_release,
                     hostname=hostname,
                     system_slug=slug,
                     admin_username=resolved_admin_username,
@@ -483,7 +496,7 @@ def create_vm(
                 # The primary provisioning step: promoted to info so it sits at
                 # the section body level (the platform's own sub-steps render as
                 # detail one notch deeper).
-                output.info(f"Creating VM '{vm_name}' on vm-site '{site}'...")
+                output.info(f"Creating VM '{vm_name}' on vm-site '{site}' ({creation_release.value})...")
             except BaseException:
                 log.unwind()
                 raise
@@ -509,6 +522,13 @@ def create_vm(
                 log.unwind()
                 output.warn(f"Log: {logger.display_path}")
                 raise
+            except (ConfigError, StateError):
+                # Release-map misses and live-release verification failures
+                # are already typed with their owning platform's remediation.
+                # A compliant platform has not mutated, or has rolled back,
+                # so only the provisional row remains to unwind.
+                log.unwind()
+                raise
             except Exception as e:
                 log.unwind()
                 raise ProvisioningError(
@@ -516,9 +536,9 @@ def create_vm(
                     entity_kind="vm",
                     entity_name=vm_name,
                 ) from e
-            # The unwind window closes here: provisioning succeeded, the VM
-            # exists, and initialization failures keep it (with recovery
-            # guidance), exactly as before.
+            # The platform's rollback window closes here: its create returned
+            # and the VM exists. Core acceptance is still pending below; a
+            # failure there keeps an addressable row with recovery guidance.
             from agentworks.instance_specs import render_overlay_outcome
 
             # Persist the platform's opaque identifiers verbatim; the owning
@@ -529,13 +549,44 @@ def create_vm(
                 render_overlay_outcome(overlay_outcome)
                 raise
 
+            # A platform's success return does not prove the guest's identity,
+            # so core independently observes the live release over the returned
+            # transport. Metadata is
+            # already durable: if attestation fails after the platform closed
+            # its rollback window, the failed row still addresses the backend
+            # for an explicit delete.
+            try:
+                output.info(f"Confirming Debian release {creation_release.value}...")
+                observed_release = probe_debian_release(
+                    result.native_transport,
+                    expected=creation_release,
+                )
+            except (KeyboardInterrupt, UserAbort):
+                db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
+                output.warn(
+                    f"VM '{vm_name}' exists but its Debian release was not verified; "
+                    f"run 'agw vm delete {vm_name}' to remove it."
+                )
+                raise
+            except Exception as e:
+                db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
+                raise StateError(
+                    f"Agentworks could not verify VM '{vm_name}' as Debian {creation_release.value} "
+                    f"after vm-platform/{platform_obj.name} returned success",
+                    entity_kind="vm",
+                    entity_name=vm_name,
+                    hint=f"Run 'agw vm delete {vm_name}' to remove the unverified VM, then update the platform.",
+                ) from e
+
+            db.update_vm_debian_release(vm_name, observed_release)
+
             # -- Phase A: record + verify connectivity (the tail of Provisioning) --
             # Past the unwind window: if anything below fails, the VM exists on
             # the remote host and is kept (debuggable, reinit-able). The hold is
             # entered here so it spans Phase A and Phase B; the row exists (the
             # insert above), so no power-state convergence is threaded, only the
-            # hold-span. Phase A closes the Provisioning section with the
-            # announced "SSH config synced" line.
+            # hold-span. The manager closes the Provisioning section explicitly
+            # after Phase A returns.
             init_row = db.get_vm(vm_name)
             assert init_row is not None, "create_vm inserted the row before init"
             try:
@@ -555,6 +606,7 @@ def create_vm(
                     tailscale_ip=result.tailscale_ip,
                     on_tailscale_ready=_on_tailscale_ready,
                 )
+                output.info("Provisioning complete.")
             except (KeyboardInterrupt, UserAbort):
                 # An operator abort must never downgrade to a
                 # Provisioning/External error; re-raise as itself after the
@@ -582,6 +634,7 @@ def create_vm(
                 home,
                 resolved_admin_username,
                 logger,
+                debian_release=observed_release,
                 operation=_mgr.VMInitializationOperation.VM_CREATE,
             )
         except (KeyboardInterrupt, UserAbort):
@@ -593,8 +646,8 @@ def create_vm(
             _raise_init_failure(db, vm_name, e)
 
     # -- Post-init: SSH config re-sync --
-    # Phase A already synced and announced "SSH config synced" as the last
-    # line of Provisioning; this re-sync captures any state Phase B changed
+    # Phase A already synced and announced the first SSH-config update before
+    # Provisioning completed; this re-sync captures any state Phase B changed
     # (nothing today) and stays silent (announce=False) to avoid a duplicate
     # line.
     try:
@@ -644,6 +697,8 @@ def reinit_vm(
     registry = load_request_registry(config, live_database=db)
 
     vm = _require_vm(db, name)
+    if vm.debian_release is not None:
+        _warn_legacy_release(vm)
 
     from agentworks.capabilities.base import OperationScope, ScopeLevel
     from agentworks.git_credentials.nodes import git_credential_node
@@ -835,6 +890,8 @@ def reinit_vm(
         # create / reinit and workspace create / rehome.
         try:
             try:
+                verified_release = _mgr.verified_vm_release(db, vm, ts_target)
+                _warn_newly_observed_legacy(vm, verified_release)
                 _mgr.run_initialization(
                     db,
                     config,
@@ -847,6 +904,7 @@ def reinit_vm(
                     home,
                     vm.admin_username,
                     logger,
+                    debian_release=verified_release,
                     operation=_mgr.VMInitializationOperation.VM_REINIT,
                 )
             except KeyboardInterrupt:
@@ -869,3 +927,9 @@ def reinit_vm(
         output.info(f"Log: {logger.display_path}")
     else:
         output.result(f"VM '{name}' reinitialized successfully!")
+
+
+def _warn_newly_observed_legacy(vm: VMRow, observed: DebianRelease) -> None:
+    """Warn after observation only when the command entered with an unknown row."""
+    if vm.debian_release is None:
+        _warn_legacy_release(replace(vm, debian_release=observed))

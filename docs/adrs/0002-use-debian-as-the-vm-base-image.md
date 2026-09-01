@@ -4,7 +4,7 @@ Date: 2026-03-05
 
 ## Status
 
-Accepted
+Superseded by [ADR 0025](0025-manage-one-current-debian-release.md)
 
 ## Context
 

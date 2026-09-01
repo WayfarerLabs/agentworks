@@ -251,7 +251,7 @@ def _archive_workspaces(
     and reports archive size periodically.
 
     The archive is created in a root-owned temp directory to avoid symlink
-    attacks and collisions in /tmp.
+    attacks and collisions in the disk-backed staging area.
 
     ``admin_username`` is the account the archive is chowned to so scp can
     read it. It comes from the VM row, which is where the value is
@@ -265,10 +265,12 @@ def _archive_workspaces(
     """
 
     # Create a secure temp directory (root-owned, mode 0700)
-    tmp_dir = target.run("mktemp -d /tmp/agentworks-backup-XXXXXX", sudo=True).stdout.strip()
+    tmp_dir = target.run("mktemp -d /var/tmp/agentworks-backup-XXXXXX", sudo=True).stdout.strip()
     q_tmp = shlex.quote(tmp_dir)
     archive = f"{tmp_dir}/workspaces.tar.zst"
     q_archive = shlex.quote(archive)
+    detached_dir: str | None = None
+    staging_paths: str | None = None
 
     try:
         # Verify workspace paths exist on the VM
@@ -314,7 +316,7 @@ def _archive_workspaces(
 
         # Admin can't write to root-owned temp dir, so stage via a securely
         # created temp file (mktemp creates with mode 0600), then move as root.
-        staging_paths = target.run("mktemp /tmp/_aw_paths_XXXXXX.txt").stdout.strip()
+        staging_paths = target.run("mktemp /var/tmp/_aw_paths_XXXXXX.txt").stdout.strip()
         q_staging = shlex.quote(staging_paths)
         target.write_file(staging_paths, path_content)
         target.run(f"mv {q_staging} {q_paths_file}", sudo=True)
@@ -327,7 +329,7 @@ def _archive_workspaces(
         # for run_detached's files. Can't use the root-owned tmp_dir because
         # run_detached writes its wrapper script via scp (as admin). Using
         # mktemp -d (not -u) avoids the race/symlink risks of mktemp -u.
-        detached_dir = target.run("mktemp -d /tmp/_aw_detached_XXXXXX").stdout.strip()
+        detached_dir = target.run("mktemp -d /var/tmp/_aw_detached_XXXXXX").stdout.strip()
         detached_base = f"{detached_dir}/run"
 
         import threading
@@ -410,12 +412,21 @@ def _archive_workspaces(
         output.detail("Transferring remote archive to local...")
         _transfer_with_progress(target, archive, local_archive, remote_size)
 
-    except Exception:
-        output.warn(f"Remote temp dir preserved for debugging: {tmp_dir}")
-        raise
-    else:
-        target.run(f"rm -rf {q_tmp}", sudo=True, check=False)
-        target.run(f"rm -rf {shlex.quote(detached_dir)}", check=False)
+    finally:
+        try:
+            target.run(f"rm -rf {q_tmp}", sudo=True, check=False)
+        except Exception as error:
+            output.warn(f"Could not remove remote backup staging directory: {error}")
+        if staging_paths is not None:
+            try:
+                target.run(f"rm -f {shlex.quote(staging_paths)}", check=False)
+            except Exception as error:
+                output.warn(f"Could not remove remote backup path list: {error}")
+        if detached_dir is not None:
+            try:
+                target.run(f"rm -rf {shlex.quote(detached_dir)}", check=False)
+            except Exception as error:
+                output.warn(f"Could not remove remote backup command directory: {error}")
 
     return [ws.workspace_path for ws in valid], skipped
 

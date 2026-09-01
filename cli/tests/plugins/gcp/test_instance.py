@@ -90,7 +90,7 @@ def _resource() -> compute_v1.Instance:
         build_instance_resource(
             instance_name="vm-a",
             machine_type_url="projects/project-a/zones/us-central1-a/machineTypes/e2-standard-2",
-            image_url="projects/debian-cloud/global/images/debian-12-v1",
+            image_url="projects/debian-cloud/global/images/debian-13-v1",
             disk_type_url="projects/project-a/zones/us-central1-a/diskTypes/pd-balanced",
             disk_gib=40,
             network=NetworkSelection("us-central1", _NETWORK, None),
@@ -232,7 +232,6 @@ def test_residual_definitive_insert_rejection_has_fixed_machine_disk_guidance() 
     assert "caller-authored-type" in str(caught.value)
     assert "while using selected machine type" in str(caught.value)
     assert "IAM, quota, and request prerequisites first" in (caught.value.hint or "")
-    assert "CPU-only Debian 12" in (caught.value.hint or "")
     assert "pd-balanced" in (caught.value.hint or "")
     assert (caught.value.hint or "").index("request prerequisites") < (caught.value.hint or "").index("CPU-only")
     assert [name for name, _kwargs in client.calls] == ["insert"]

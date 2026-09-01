@@ -513,6 +513,11 @@ Reference entries by name from VM, admin, and agent templates. User-defined entr
 same-named plugin row. A custom apt package that keeps a shipped apt-source dependency still needs
 `apt` enabled, or must replace or remove that source dependency too.
 
+An `apt-source` uses either a release-independent `spec.source` scalar or a release-keyed
+`spec.sources` map. Use the map whenever a Debian codename appears in the stanza. Initialization
+selects the entry for the VM's verified Debian release and fails before source mutation when that
+mapping is absent.
+
 Prefer template `apt`, `apt_packages`, `snap`, or `mise_packages` fields over a custom install
 command. When an install command is necessary, its `command` is one logical shell invocation written
 as a single-line YAML scalar, either plain or quoted, normally one maintained package-manager or
@@ -549,6 +554,11 @@ commands will use it. If the configured key no longer works, use `agw vm shell N
 where the platform offers a usable recovery transport, restore the configured public key, and
 reinitialize. Some platform transports also depend on the configured key; use provider-native
 recovery or recreate the VM when that path cannot connect.
+
+Debian distribution upgrades remain operator-led. After following Debian's release notes and
+verifying provider-native recovery, run `agw vm confirm-release <name>` to inspect and explicitly
+adopt the live release, then run the separate `agw vm reinit <name>` to converge release-aware
+Agentworks state. See [Upgrading a Debian VM](../docs/guides/debian-vm-upgrades.md).
 
 Passphrase-protected OpenSSH private keys remain supported: Agentworks reads the public identity
 embedded in the private-key envelope without decrypting it or consulting a sibling public-key file.

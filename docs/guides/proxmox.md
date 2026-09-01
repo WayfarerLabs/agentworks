@@ -1,7 +1,7 @@
 # Using Proxmox with agentworks
 
 Proxmox VE is a server virtualization platform based on KVM/QEMU. Agentworks provisions VMs by
-cloning a Debian 12 cloud-init template that you prepare once on your Proxmox node.
+cloning a Debian 13 Trixie cloud-init template that you prepare once on your Proxmox node.
 
 > **Enable the proxmox plugin first.** The Proxmox VM platform ships as an opt-in system plugin, so
 > before any proxmox site will work you must enable it in your `config.toml`:
@@ -30,7 +30,7 @@ Proxmox host is outside the scope of this guide; see the
 
 Agentworks includes a setup script that handles all Proxmox-side configuration in one step:
 
-- Creates a Debian 12 cloud-init VM template with `qemu-guest-agent`
+- Creates a Debian 13 Trixie cloud-init VM template with `qemu-guest-agent`
 - Creates an `agentworks` resource pool for VM isolation
 - Creates least-privilege custom roles and ACLs
 - Creates a dedicated API user and token
@@ -46,7 +46,7 @@ For example:
 
 ```bash
 scp scripts/proxmox-setup.sh root@pve.monkey-cat.ts.net:/tmp/
-ssh -t root@pve.monkey-cat.ts.net bash /tmp/proxmox-setup.sh 9000 local vmbr0
+ssh -t root@pve.monkey-cat.ts.net bash /tmp/proxmox-setup.sh 9001 local vmbr0
 ```
 
 To tear down all agentworks resources (template, pool, roles, user):
@@ -58,12 +58,16 @@ ssh -t root@<proxmox-host> bash /tmp/proxmox-teardown.sh <vmid>
 
 | Argument  | Description              | Default     |
 | --------- | ------------------------ | ----------- |
-| `vmid`    | VMID for the template    | `9000`      |
+| `vmid`    | VMID for the template    | `9001`      |
 | `storage` | Storage volume for disks | `local-lvm` |
 | `bridge`  | Network bridge           | `vmbr0`     |
 
-The script is idempotent -- it skips resources that already exist. At the end it prints the config
-block and token secret for your agentworks config.
+The script builds Agentworks' current Debian release; it does not expose an operating-system or
+release selector. Bookworm-era setup used VMID 9000, so the Trixie script defaults to 9001. Do not
+reuse a Bookworm template VMID: choose another unused value if 9001 is occupied. On a rerun the
+script skips an existing template only when its name and Agentworks release tags match; otherwise it
+stops before printing a misleading Trixie mapping. At the end it prints the config block and token
+secret for your agentworks config.
 
 ### Security model
 
@@ -72,11 +76,11 @@ The setup script follows least-privilege principles:
 - **Custom roles** with only the privileges agentworks needs (no snapshots, backups, migrations,
   console access)
 - **Pool-scoped ACLs** so the token can only manage VMs in the `agentworks` pool
-- **Privilege-separated token** (`--privsep=1`) with its own permissions
+- **Dedicated token** that inherits only the scoped user's permissions (`--privsep=0`)
 - **Scoped storage/template/SDN access** to only the specific resources needed
 
 **The token can:** Clone the template, configure/start/stop/delete VMs in the `agentworks` pool,
-query the guest agent, allocate disk space on the specified storage.
+query the guest agent, and allocate disk space on the specified storage.
 
 **The token cannot:** Manage VMs outside the pool, access other storage, take snapshots, create
 backups, migrate VMs, access the console, or manage users/nodes/cluster config.
@@ -86,7 +90,7 @@ backups, migrate VMs, access the console, or manage users/nodes/cluster config.
 If you prefer to set things up manually, see the script source for the exact commands. The key
 components are:
 
-- A Debian 12 cloud-init template with `qemu-guest-agent` pre-installed
+- A Debian 13 Trixie cloud-init template with `qemu-guest-agent` pre-installed
 - A resource pool (`agentworks`) to scope API permissions
 - Custom roles: `AgentworksVM`, `AgentworksTemplate`, `AgentworksStorage`, `AgentworksSDN`
 - ACLs on `/pool/agentworks`, `/vms/<template>`, `/storage/<storage>`, `/sdn/zones/localnetwork`
@@ -115,7 +119,8 @@ spec:
     api_url: "https://pve.example.com:8006"
     node: pve
     token_id: "agentworks@pam!agentworks"
-    template_vmid: 9000
+    template_vmids:
+      trixie: 9001
     storage: data
     bridge: vmbr0
     pool: agentworks
@@ -125,8 +130,18 @@ spec:
 `agw resource explain vm-platform/proxmox` documents every field above with its type, whether it is
 required, and its default; `agw resource sample vm-site` prints a commented starter to edit. Two
 values map to things this guide produced rather than to anything Proxmox calls by that name:
-`token_id` is the `full-tokenid` the setup script printed, and `template_vmid` is the VMID you gave
-the template. `node` is the node name in the Proxmox UI sidebar, usually `pve`.
+`token_id` is the `full-tokenid` the setup script printed, and `template_vmids.trixie` is the VMID
+you gave the current template. `node` is the node name in the Proxmox UI sidebar, usually `pve`. The
+old `template_vmid` scalar remains readable only as a legacy Bookworm mapping and cannot satisfy
+current Trixie creation.
+
+A site without `template_vmids.trixie` remains loadable for best-effort operations on existing VMs.
+New VM creation validates the concrete core-selected release during preflight and fails before the
+command's secret-resolution phase or Proxmox API authentication when that mapping is missing. After
+cloning and bootstrapping the mapped template, core verifies the live guest's `/etc/os-release`
+through the returned Tailscale SSH transport. A missing, non-Debian, or wrong-release observation
+retains an addressable failed VM row for explicit deletion. There is no configuration switch to skip
+the check.
 
 For 0.13 configuration migration, see [Upgrading to 0.14](upgrading-to-0.14.md).
 
@@ -217,7 +232,7 @@ never returns it.
 
 Check that all four ACLs are set (re-run the setup script if unsure):
 
-- `AgentworksVM` on `/pool/agentworks` -- VM lifecycle within the pool
+- `AgentworksVM` on `/pool/agentworks`: VM lifecycle within the pool
 - `AgentworksTemplate` on `/vms/<template_vmid>` -- clone permission on the template
 - `AgentworksStorage` on `/storage/<storage>` -- disk allocation
 - `AgentworksSDN` on `/sdn/zones/localnetwork` -- network bridge access

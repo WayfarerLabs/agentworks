@@ -1,7 +1,7 @@
 # Using Google Compute Engine with Agentworks
 
-Agentworks provisions Debian 12 VMs on Google Compute Engine through the opt-in `gcp` system plugin.
-Each site targets one project and zone and may select one subnet in that zone's region.
+Agentworks provisions Debian 13 Trixie VMs on Google Compute Engine through the opt-in `gcp` system
+plugin. Each site targets one project and zone and may select one subnet in that zone's region.
 
 ## Enable the plugin
 
@@ -164,13 +164,13 @@ and positive, then verifies that they match the declaration. Missing fields, non
 and positive declaration mismatches are distinct configuration errors. It also verifies optional
 architecture, Persistent Disk capacity, and required accelerators. A machine with no Persistent Disk
 capacity explicitly reported by the provider, or a required guest accelerator, is outside the
-current CPU-only Debian 12 and `pd-balanced` boot-disk boundary and fails as a configuration error.
+current CPU-only Debian 13 and `pd-balanced` boot-disk boundary and fails as a configuration error.
 An omitted disk-capacity field remains unknown and proceeds to `instances.insert`. This check uses
 provider fields, not the machine-type name.
 
 Compute Engine has no read-only validator for every machine-type and boot-disk pair. A remaining
 definitive `instances.insert` rejection therefore names the selected machine type and asks you to
-verify IAM, quota, and request prerequisites first, then its CPU-only Debian 12 and `pd-balanced`
+verify IAM, quota, and request prerequisites first, then its CPU-only Debian 13 and `pd-balanced`
 compatibility, while Agentworks performs bounded rollback. It never renders the provider's message,
 code, or object.
 

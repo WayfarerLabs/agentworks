@@ -7,15 +7,16 @@ from copy import deepcopy
 import pytest
 from pydantic import ValidationError
 
+from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError
 from agentworks.plugins.gcp.config import (
     DEFAULT_MACHINE_TYPES,
+    IMAGE_FAMILIES,
     IMAGE_PROJECT,
     GcpAmbientAuth,
     GcpGCEConfig,
     GcpServiceAccountAuth,
     MachineTypeSelection,
-    image_family_for_arch,
     machine_catalog,
     select_machine_type,
 )
@@ -189,8 +190,10 @@ def test_selection_failure_is_typed_and_names_the_largest_entry() -> None:
 
 def test_image_family_mapping_is_exact() -> None:
     assert IMAGE_PROJECT == "debian-cloud"
-    assert image_family_for_arch("x86_64") == "debian-12"
-    assert image_family_for_arch("arm64") == "debian-12-arm64"
+    assert IMAGE_FAMILIES[DebianRelease.TRIXIE] == {
+        "x86_64": "debian-13",
+        "arm64": "debian-13-arm64",
+    }
 
 
 def test_secret_marker_schema_is_nullable_optional_and_input_is_not_mutated() -> None:

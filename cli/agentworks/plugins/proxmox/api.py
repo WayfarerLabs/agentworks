@@ -87,11 +87,18 @@ class ProxmoxAPI:
             err = ProxmoxAPIError(f"Proxmox API {method} {path} failed ({e.code}): {err_body}")
             err.code = e.code
             raise err from e
+        except (OSError, UnicodeError) as e:
+            raise ProxmoxAPIError(f"Proxmox API {method} {path} failed: {e}") from e
 
         if not resp_body:
             return None
-        parsed = json.loads(resp_body)
-        return parsed.get("data")
+        try:
+            parsed = json.loads(resp_body)
+        except json.JSONDecodeError as e:
+            raise ProxmoxAPIError(f"Proxmox API {method} {path} returned invalid JSON") from e
+        if not isinstance(parsed, dict) or "data" not in parsed:
+            raise ProxmoxAPIError(f"Proxmox API {method} {path} returned a malformed response")
+        return parsed["data"]
 
     # -- Cluster ---------------------------------------------------------------
 

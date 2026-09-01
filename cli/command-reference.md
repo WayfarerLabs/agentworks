@@ -233,14 +233,16 @@ omit static non-candidates. The default preview permits no backend-classified op
 
 ```text
 {vms: [{name, site, template, provisioning_status, initialization_status,
-        workspace_count, agent_count, session_count, tailscale_host, created_at}]}
+        workspace_count, agent_count, session_count, tailscale_host, created_at,
+        debian_release, debian_release_observed_at}]}
 ```
 
-`template` and `tailscale_host` are nullable. VMs retain name order. Provisioning is `pending`,
-`in_progress`, `complete`, `failed`, or `unknown`; initialization additionally permits `partial`.
-These frozen JSON v1 vocabularies do not expand when domain enums gain members. In this VM list JSON
-projection, `unknown` is the stable sentinel for an invalid persisted value and never echoes that
-stored value.
+`template`, `tailscale_host`, `debian_release`, and `debian_release_observed_at` are nullable. A
+non-null release is a codename recognized by this Agentworks build, and its timestamp records the
+last matching live observation. VMs retain name order. Provisioning is `pending`, `in_progress`,
+`complete`, `failed`, or `unknown`; initialization additionally permits `partial`. These frozen JSON
+v1 vocabularies do not expand when domain enums gain members. In this VM list JSON projection,
+`unknown` is the stable sentinel for an invalid persisted value and never echoes that stored value.
 
 The VM, workspace, agent, and session description records append the JSON v1 `instance_state`
 object. Current producers always include it; older JSON v1 producers may omit this additive field:
@@ -280,17 +282,19 @@ this ordered shape:
 {name, created_at, site, platform, backend, observed_status, status_disposition,
  operator_stopped, hostname, system_slug, system_slug_state, template, admin_template,
  admin_username, provisioning_status, initialization_status, tailscale_host, last_seen_at,
- provisioned_resources, live_resources, agents, workspaces, events, instance_state}
+ debian_release, debian_release_observed_at, provisioned_resources, live_resources, agents,
+ workspaces, events, instance_state}
 ```
 
 `platform`, `backend`, `observed_status`, `status_disposition`, `system_slug`, `template`,
-`admin_template`, `tailscale_host`, `last_seen_at`, and `live_resources` are nullable.
-`observed_status` is `running`, `stopped`, `deallocated`, or `unknown`; `status_disposition` is
-`manual` or `idle` only for stopped or deallocated VMs; and `system_slug_state` is `set`,
-`declined`, or `unset`. `provisioned_resources` is `{cpus, memory_gib, disk_gib, swap_gib}` with
-nullable integers. It is the provisioning request recorded by Agentworks, not provider-observed
-realized hardware. Human VM describe labels these persisted values `Requested`. `live_resources` is
-null or this record:
+`admin_template`, `tailscale_host`, `last_seen_at`, `debian_release`, `debian_release_observed_at`,
+and `live_resources` are nullable. Non-null release observations have the same recognized-codename
+and timestamp semantics as VM list. `observed_status` is `running`, `stopped`, `deallocated`, or
+`unknown`; `status_disposition` is `manual` or `idle` only for stopped or deallocated VMs; and
+`system_slug_state` is `set`, `declined`, or `unset`. `provisioned_resources` is
+`{cpus, memory_gib, disk_gib, swap_gib}` with nullable integers. It is the provisioning request
+recorded by Agentworks, not provider-observed realized hardware. Human VM describe labels these
+persisted values `Requested`. `live_resources` is null or this record:
 
 ```text
 {cpus, load_average, memory_total, memory_used, memory_percent, swap_total,
@@ -558,6 +562,7 @@ just a vm-site.
 | `agw vm start <name>`                               | Start a stopped VM and clear its manual-stop intent           |
 | `agw vm stop <name>`                                | Stop a VM and keep it stopped (no auto-start)                 |
 | `agw vm reinit <name>`                              | Re-run initialization on a provisioned VM                     |
+| `agw vm confirm-release <name>`                     | Observe and explicitly record the live Debian release         |
 | `agw vm delete <name>`                              | Delete a VM (with confirmation)                               |
 | `agw vm backup <name>`                              | Back up a VM: metadata, agents, workspaces, and files         |
 | `agw vm rekey <name>`                               | Assign a new Tailscale auth key to a VM (logout + rejoin)     |
@@ -602,16 +607,27 @@ consumes both stored VM and admin instance specs but cannot change or clear eith
 
 VMs created before SSH lifecycle-evidence tracking have no synthesized identity evidence. Ordinary
 canonical SSH commands refuse that unknown state until one successful `agw vm reinit <name>` proves
-and records the configured identity. Run that reinit after upgrading while the installed key still
-works. If it no longer works, try `agw vm shell <name> --platform` where supported, restore the
-configured public key, and rerun reinit. A platform-native transport can itself depend on the
-configured key, so use provider-native recovery tooling or recreate the VM if it cannot connect.
+and records the configured identity. After upgrading Agentworks, run that reinit while the installed
+key still works. If it no longer works, try `agw vm shell <name> --platform` where supported,
+restore the configured public key, and rerun reinit. A platform-native transport can itself depend
+on the configured key, so use provider-native recovery tooling or recreate the VM if it cannot
+connect.
+
+`vm confirm-release` reads `/etc/os-release` through the named VM's canonical live transport and
+shows the recorded and live Debian releases. A changed or previously unknown value requires a
+default-negative confirmation unless `--yes`/`-y` is supplied. On consent, Agentworks atomically
+records the recognized live release and marks initialization pending. The command does not run
+`vm reinit`; run that separately to converge release-aware resources. A matching observation only
+refreshes its timestamp and leaves initialization state unchanged. See
+[Upgrading a Debian VM](../docs/guides/debian-vm-upgrades.md) for the operator-led upgrade and
+provider-recovery boundary.
 
 `vm delete` requires `--force` if the VM has workspaces, agents, or sessions. The confirmation
 message shows what will be deleted. Pass `--yes` to skip the prompt.
 
 `vm backup` exports the VM row and exact owner tree of agents, workspaces, sessions, events, grants,
-desired instance specs, and workspace files. On POSIX, its local timestamp directory is created with
+desired instance specs, and workspace files. It does not create or copy a provider VM snapshot,
+disk, export, or other recovery artifact. On POSIX, its local timestamp directory is created with
 mode 0700 and its JSON files with mode 0600. Native Windows refuses backups containing instance
 specs until private access-control export is supported. Instance specs can contain plaintext
 environment values, so keep the configured backup path on a trusted local filesystem and protect any

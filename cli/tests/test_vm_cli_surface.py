@@ -25,12 +25,13 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 def _invoke(monkeypatch: pytest.MonkeyPatch, argv: list[str], target: str, capture: dict[str, Any]):
     def _spy(*args: object, **kwargs: object) -> None:
+        capture["_args"] = args
         capture.update(kwargs)
 
     monkeypatch.setattr(target, _spy)
     monkeypatch.setattr("agentworks.cli._helpers.get_db", lambda: object())
     monkeypatch.setattr("agentworks.cli.commands.vm.get_db", lambda: object())
-    monkeypatch.setattr("agentworks.config.load_config", lambda: object())
+    monkeypatch.setattr("agentworks.config.load_config", lambda *_args, **_kwargs: object())
     return CliRunner().invoke(app, argv)
 
 
@@ -44,6 +45,19 @@ def test_vm_create_site_flag_forwards(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert result.exit_code == 0, result.output
     assert captured["site"] == "azure-dev"
+
+
+def test_vm_confirm_release_forwards_name_and_confirmation(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+    result = _invoke(
+        monkeypatch,
+        ["vm", "confirm-release", "box", "--yes"],
+        "agentworks.vms.manager.confirm_vm_release",
+        captured,
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["_args"][2] == "box"
+    assert captured["yes"] is True
 
 
 def test_vm_create_admin_template_flag_forwards(

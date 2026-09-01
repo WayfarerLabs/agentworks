@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow, VMStatus
+    from agentworks.debian import DebianRelease
     from agentworks.transports import Transport
 
 
@@ -67,6 +68,9 @@ class ProvisionRequest:
     """
 
     vm_name: str
+    # Core owns release policy. Platforms translate this concrete value
+    # through their own artifact map and never infer "current" themselves.
+    debian_release: DebianRelease
     # The R11 hostname ({slug}-{vm_name} or {vm_name}), computed by the
     # manager and recorded in vms.hostname; platforms bake it via their
     # bootstrap paths and tailscaled picks it up as the node name.
@@ -193,6 +197,20 @@ class VMPlatform(Capability):
         """
         return {}
 
+    def validate_create_release(self, release: DebianRelease) -> None:
+        """Validate create-time release inputs before secret resolution.
+
+        This operation-specific preflight is pure and offline. Platforms whose
+        operator-owned configuration maps releases to artifacts override it so
+        a missing entry fails before ``runup`` authenticates to the backend.
+        The default is a no-op because code-owned catalogs ship with the
+        implementation and remain covered by conformance tests and ``create``.
+
+        ``create`` still resolves the same value before mutation. This early
+        boundary improves failure ordering without making a current-release
+        artifact a load-time requirement for sites used only by existing VMs.
+        """
+
     @abstractmethod
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
         """Create the backend-side VM.
@@ -229,7 +247,8 @@ class VMPlatform(Capability):
         - Return ``ProvisionResult`` with ``platform_metadata``
           capturing whatever identifiers subsequent ops need, without
           relying on live configuration (e.g. proxmox records the node
-          alongside the vmid).
+          alongside the vmid), and a transport through which core can attest
+          the live Debian release.
         """
 
     @idempotent_op

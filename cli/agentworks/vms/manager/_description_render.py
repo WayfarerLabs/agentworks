@@ -40,6 +40,9 @@ def render_vm_description(description: VMDescription) -> None:
     output.info(f"Provisioning:   {vm.provisioning_status}")
     output.info(f"Initialization: {vm.initialization_status}")
     output.info(f"Tailscale IP:   {vm.tailscale_host or '-'}")
+    output.info(f"Recorded Debian: {vm.debian_release or '-'}")
+    output.info(f"Recorded Tier:   {vm.debian_support or '-'}")
+    output.info(f"Observed At:     {vm.debian_release_observed_at or '-'}")
 
     from agentworks.instance_description import render_instance_state
 

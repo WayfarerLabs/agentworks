@@ -13,6 +13,7 @@ import pytest
 
 from agentworks.db import AppliedStateKey, InitStatus
 from agentworks.db.instance_state import InstanceStateRepository
+from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError
 from agentworks.ssh_identity import VerifiedSSHIdentity, read_private_ssh_identity
 from agentworks.vms.applied_state import (
@@ -94,6 +95,7 @@ def _run(
         "/home/agentworks",
         "agentworks",
         active_logger,
+        debian_release=DebianRelease.TRIXIE,
         operation=operation,
     )
     return active_logger

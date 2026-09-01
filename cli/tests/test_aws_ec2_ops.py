@@ -17,6 +17,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
+from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError, StateError
 from agentworks.plugins.aws.network import EC2Error, poke_ssh_allow, remove_ssh_allow
 from agentworks.plugins.aws.platform import EC2Platform
@@ -81,6 +82,7 @@ def _request(
     defaults, and ``disk`` / ``swap`` here carry its values)."""
     return ProvisionRequest(
         vm_name="dev",
+        debian_release=DebianRelease.TRIXIE,
         hostname="dev",
         system_slug=None,
         admin_username="agw",
@@ -230,11 +232,11 @@ class TestCreate:
         assert "10-byte" in str(exc.value)
 
     def test_always_resolves_debian_ami_from_ssm_for_arch(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """SSM is the ONLY image source (no operator pin): the Debian bookworm
+        """SSM is the only image source: the requested Debian 13 release
         release parameter for the selected arch is always resolved at create."""
         rec = install_fakes(monkeypatch, Controls(ssm_ami="ami-from-ssm"))
         _platform().create(_request(), RunContext(config=_config()))
-        assert rec.kwargs_for("get_parameter")["Name"] == "/aws/service/debian/release/bookworm/latest/arm64"
+        assert rec.kwargs_for("get_parameter")["Name"] == "/aws/service/debian/release/13/latest/arm64"
         assert rec.kwargs_for("run_instances")["ImageId"] == "ami-from-ssm"
 
     def test_rejects_a_name_collision(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -610,17 +612,57 @@ class TestPowerOps:
         rec = install_fakes(monkeypatch)
         _platform().start(_vm(), RunContext())  # type: ignore[arg-type]
         assert rec.kwargs_for("start_instances")["InstanceIds"] == ["i-123"]
+        assert rec.kwargs_for("get_waiter")["name"] == "instance_running"
 
     def test_stop_calls_stop_instances(self, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = install_fakes(monkeypatch)
         _platform().stop(_vm(), RunContext())  # type: ignore[arg-type]
         assert rec.kwargs_for("stop_instances")["InstanceIds"] == ["i-123"]
+        assert rec.kwargs_for("get_waiter")["name"] == "instance_stopped"
+
+    def test_power_operations_wait_through_transitional_states(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        class _Waiter:
+            def __init__(self, client: _AsyncEC2, final_state: str) -> None:
+                self.client = client
+                self.final_state = final_state
+
+            def wait(self, **kwargs: object) -> None:
+                del kwargs
+                self.client.state = self.final_state
+
+        class _AsyncEC2:
+            def __init__(self) -> None:
+                self.state = "stopped"
+
+            def start_instances(self, **kwargs: object) -> None:
+                del kwargs
+                self.state = "pending"
+
+            def stop_instances(self, **kwargs: object) -> None:
+                del kwargs
+                self.state = "stopping"
+
+            def get_waiter(self, name: str) -> _Waiter:
+                return _Waiter(self, "running" if name == "instance_running" else "stopped")
+
+            def describe_instances(self, **kwargs: object) -> dict[str, object]:
+                del kwargs
+                return {"Reservations": [{"Instances": [{"State": {"Name": self.state}}]}]}
+
+        client = _AsyncEC2()
+        platform = _platform()
+        monkeypatch.setattr(platform, "_client", lambda *args, **kwargs: client)
+
+        platform.start(_vm(), RunContext())  # type: ignore[arg-type]
+        assert platform.status(_vm(), RunContext()) is VMStatus.RUNNING  # type: ignore[arg-type]
+        platform.stop(_vm(), RunContext())  # type: ignore[arg-type]
+        assert platform.status(_vm(), RunContext()) is VMStatus.STOPPED  # type: ignore[arg-type]
 
     @pytest.mark.parametrize(
         ("state", "expected"),
         [
             ("running", VMStatus.RUNNING),
-            ("stopping", VMStatus.STOPPED),
+            ("stopping", VMStatus.UNKNOWN),
             ("stopped", VMStatus.STOPPED),
             ("pending", VMStatus.UNKNOWN),
             ("shutting-down", VMStatus.UNKNOWN),

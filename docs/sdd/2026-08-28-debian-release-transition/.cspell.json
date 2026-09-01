@@ -1,0 +1,23 @@
+{
+  "version": "0.2",
+  "import": ["../../../.cspell.json"],
+  "words": [
+    "Cloudsmith",
+    "Trixie",
+    "bootable",
+    "codenames",
+    "conffile",
+    "conffiles",
+    "debconf",
+    "dpkg",
+    "metapackage",
+    "metapackages",
+    "noninteractive",
+    "reconnectable",
+    "resumability",
+    "tenv",
+    "tofuutils",
+    "upgrader",
+    "vmids"
+  ]
+}

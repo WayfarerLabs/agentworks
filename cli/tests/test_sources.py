@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
 from agentworks.sources import SourceRef, SourceRefError, fetch_file, parse_source_ref
+from agentworks.ssh import SSHError
 
 
 def test_parse_git_source_with_subpath_and_ref() -> None:
@@ -74,12 +76,38 @@ def test_fetch_file_copies_local_source(tmp_path) -> None:
 
 def test_fetch_file_clones_copies_and_cleans_git_source() -> None:
     target = MagicMock()
+    target.run.return_value.stdout = "/var/tmp/agentworks-source-ref-abcd12\n"
     ref = parse_source_ref("git::https://example.com/repo.git//locks/mise.lock?ref=v1")
 
     fetch_file(ref, target, "/remote/mise.lock")
 
     commands = [call.args[0] for call in target.run.call_args_list]
     assert any("git clone --depth 1 --branch v1" in command for command in commands)
-    assert any("test -f /tmp/agentworks-source-ref/locks/mise.lock" in command for command in commands)
-    assert any("cp /tmp/agentworks-source-ref/locks/mise.lock /remote/mise.lock" in command for command in commands)
-    assert commands[-1] == "rm -rf /tmp/agentworks-source-ref"
+    assert any("test -f /var/tmp/agentworks-source-ref-abcd12/locks/mise.lock" in command for command in commands)
+    assert any(
+        "cp /var/tmp/agentworks-source-ref-abcd12/locks/mise.lock /remote/mise.lock" in command for command in commands
+    )
+    assert commands[-1] == "rm -rf /var/tmp/agentworks-source-ref-abcd12"
+
+
+def test_fetch_file_cleanup_failure_preserves_fetch_error(captured_output) -> None:  # noqa: ANN001
+    target = MagicMock()
+    primary = SSHError("clone failed")
+
+    def _run(command: str, **_kwargs: object) -> SimpleNamespace:
+        if command.startswith("mktemp "):
+            return SimpleNamespace(stdout="/var/tmp/agentworks-source-ref-abcd12\n")
+        if command.startswith("git clone "):
+            raise primary
+        if command.startswith("rm -rf "):
+            raise SSHError("cleanup failed")
+        return SimpleNamespace(stdout="")
+
+    target.run.side_effect = _run
+    ref = parse_source_ref("git::https://example.com/repo.git//locks/mise.lock")
+
+    with pytest.raises(SourceRefError) as caught:
+        fetch_file(ref, target, "/remote/mise.lock")
+
+    assert caught.value.__cause__ is primary
+    assert captured_output.warnings

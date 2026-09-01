@@ -295,7 +295,6 @@ def test_known_live_machine_incompatibility_is_actionable_detached_config_error(
     assert "caller-authored-type" in str(caught.value)
     assert "Persistent Disk" in (caught.value.hint or "")
     assert "requires no guest accelerator" in (caught.value.hint or "")
-    assert "CPU-only Debian 12" in (caught.value.hint or "")
     assert "pd-balanced" in (caught.value.hint or "")
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
@@ -303,9 +302,9 @@ def test_known_live_machine_incompatibility_is_actionable_detached_config_error(
 
 def test_image_family_uses_public_project_and_matching_architecture() -> None:
     image = compute_v1.Image(
-        name="debian-12-arm64-v1",
+        name="debian-13-arm64-v1",
         architecture="ARM64",
-        self_link="https://www.googleapis.com/compute/v1/projects/debian-cloud/global/images/debian-12-arm64-v1",
+        self_link="https://www.googleapis.com/compute/v1/projects/debian-cloud/global/images/debian-13-arm64-v1",
     )
 
     class Images:
@@ -318,8 +317,8 @@ def test_image_family_uses_public_project_and_matching_architecture() -> None:
 
     images = Images()
     cache = _Cache(images=images)
-    assert resolve_debian_image(cache, RunContext(), "arm64") is image  # type: ignore[arg-type]
-    assert images.calls == [{"project": "debian-cloud", "family": "debian-12-arm64"}]
+    assert resolve_debian_image(cache, RunContext(), "arm64", "debian-13-arm64") is image  # type: ignore[arg-type]
+    assert images.calls == [{"project": "debian-cloud", "family": "debian-13-arm64"}]
 
 
 def test_image_architecture_mismatch_is_rejected() -> None:
@@ -330,7 +329,12 @@ def test_image_architecture_mismatch_is_rejected() -> None:
             return image
 
     with pytest.raises(ConfigError, match="reports architecture"):
-        resolve_debian_image(_Cache(images=Images()), RunContext(), "arm64")  # type: ignore[arg-type]
+        resolve_debian_image(  # type: ignore[arg-type]
+            _Cache(images=Images()),
+            RunContext(),
+            "arm64",
+            "debian-13-arm64",
+        )
 
 
 def test_exact_instance_collision_and_not_found_paths() -> None:

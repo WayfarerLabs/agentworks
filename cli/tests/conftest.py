@@ -28,6 +28,15 @@ from tests.ssh_fixtures import write_test_ssh_keypair
 pytest_plugins = ["tests.orchestrated_fixtures"]
 
 
+@pytest.fixture
+def verified_debian_release(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make offline manager creates observe the release they requested."""
+    monkeypatch.setattr(
+        "agentworks.vms.manager.lifecycle.probe_debian_release",
+        lambda transport, *, expected=None: expected,
+    )
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _isolate_ssh_logs(tmp_path_factory: pytest.TempPathFactory) -> Generator[None, None, None]:
     """Keep default SSH logs in this worker's temporary directory."""

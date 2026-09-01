@@ -44,6 +44,7 @@ if TYPE_CHECKING:
         VMRow,
         WorkspaceRow,
     )
+    from agentworks.debian import DebianRelease
 
 
 DatabaseDriverError = sqlite3.DatabaseError
@@ -376,6 +377,20 @@ class Database:
     def update_vm_tailscale(self, name: str, tailscale_host: str) -> None:
         self._conn.execute("UPDATE vms SET tailscale_host = ? WHERE name = ?", (tailscale_host, name))
         self._conn.commit()
+
+    def update_vm_debian_release(
+        self,
+        name: str,
+        release: DebianRelease,
+    ) -> None:
+        """Atomically replace one VM's proved Debian release observation."""
+        self._conn.execute(
+            "UPDATE vms SET debian_release = ?, "
+            "debian_release_observed_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
+            "WHERE name = ?",
+            (release.value, name),
+        )
+        self._commit_unless_in_tx()
 
     def clear_vm_tailscale(self, name: str) -> None:
         self._conn.execute("UPDATE vms SET tailscale_host = NULL WHERE name = ?", (name,))

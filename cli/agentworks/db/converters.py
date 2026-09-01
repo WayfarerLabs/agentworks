@@ -20,6 +20,7 @@ from agentworks.db.models import (
     VMRow,
     WorkspaceRow,
 )
+from agentworks.debian import DebianRelease, profile_for_release
 from agentworks.errors import StateError
 
 if TYPE_CHECKING:
@@ -54,6 +55,27 @@ def _to_vm(row: sqlite3.Row) -> VMRow:
     metadata = row["platform_metadata"]
     extra_packages = cast("list[str]", _parse_vm_json(extra, row["name"], "extra_packages", list))
     platform_metadata = cast("dict[str, str]", _parse_vm_json(metadata, row["name"], "platform_metadata", dict))
+    raw_release = row["debian_release"]
+    observed_at = row["debian_release_observed_at"]
+    if (raw_release is None) != (observed_at is None):
+        raise StateError(
+            "stored VM Debian release observation is incomplete",
+            entity_kind="vm",
+            entity_name=row["name"],
+            hint="Restore a valid Agentworks database backup.",
+        )
+    debian_release: DebianRelease | None = None
+    if raw_release is not None:
+        try:
+            debian_release = DebianRelease(raw_release)
+            profile_for_release(debian_release)
+        except (ValueError, StateError):
+            raise StateError(
+                "stored VM Debian release is not supported by this Agentworks build",
+                entity_kind="vm",
+                entity_name=row["name"],
+                hint="Upgrade Agentworks to a build that supports the recorded Debian release.",
+            ) from None
     return VMRow(
         name=row["name"],
         site=row["site"],
@@ -71,6 +93,8 @@ def _to_vm(row: sqlite3.Row) -> VMRow:
         hostname=row["hostname"],
         created_at=row["created_at"],
         last_seen_at=row["last_seen_at"],
+        debian_release=debian_release,
+        debian_release_observed_at=observed_at,
         platform_metadata=platform_metadata,
         operator_stopped=bool(row["operator_stopped"]),
     )

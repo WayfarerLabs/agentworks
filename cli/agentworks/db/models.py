@@ -6,7 +6,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
+
+if TYPE_CHECKING:
+    from agentworks.debian import DebianRelease
 
 
 class ProvisioningStatus(Enum):
@@ -83,6 +86,10 @@ class VMRow:
     hostname: str
     created_at: str
     last_seen_at: str | None
+    # The last release proved from the live guest. Legacy rows remain null
+    # until a release-sensitive operation observes them.
+    debian_release: DebianRelease | None = None
+    debian_release_observed_at: str | None = None
     # Opaque per-platform identifiers (JSON in the column); the owning
     # platform is the only reader (azure resource_id, wsl2 distro_name,
     # proxmox vmid/node, lima instance_name).

@@ -126,8 +126,7 @@ def test_interactive_with_command_includes_bash_lc() -> None:
 
 
 def test_copy_to_scps_to_host_then_limactl_copy() -> None:
-    """Three steps: scp local -> host tmp, limactl copy host tmp -> VM,
-    rm host tmp."""
+    """The host intermediate is private, disk-backed, and removed."""
     t = RemoteLimaTransport(vm_name="my-vm", vm_host_ssh="host.example")
     calls: list[list[str]] = []
 
@@ -140,8 +139,28 @@ def test_copy_to_scps_to_host_then_limactl_copy() -> None:
 
     # Expect: scp ..., ssh ... limactl copy ..., ssh ... rm -f ...
     assert any(a[0] == "scp" for a in calls)
+    assert any(a[0] == "ssh" and "umask 077 && mkdir -- /var/tmp/" in a[-1] for a in calls)
     assert any(a[0] == "ssh" and "limactl copy" in a[-1] for a in calls)
-    assert any(a[0] == "ssh" and "rm -f" in a[-1] for a in calls)
+    assert any(a[0] == "ssh" and "rm -rf -- /var/tmp/" in a[-1] for a in calls)
+
+
+def test_copy_to_removes_host_intermediate_when_lima_copy_fails() -> None:
+    t = RemoteLimaTransport(vm_name="my-vm", vm_host_ssh="host.example")
+    calls: list[list[str]] = []
+
+    def fake_subprocess_run(args: list[str], **_kwargs: object) -> MagicMock:
+        calls.append(args)
+        if args[0] == "ssh" and "limactl copy" in args[-1]:
+            return _fail_completed(returncode=1)
+        return _ok_completed()
+
+    with (
+        patch("agentworks.transports.ssh.subprocess.run", side_effect=fake_subprocess_run),
+        pytest.raises(SSHError),
+    ):
+        t.copy_to("/local/foo", "/remote/bar")
+
+    assert any(a[0] == "ssh" and "rm -rf -- /var/tmp/" in a[-1] for a in calls)
 
 
 def test_copy_from_pulls_via_host_tmp() -> None:
@@ -158,6 +177,26 @@ def test_copy_from_pulls_via_host_tmp() -> None:
 
     assert any(a[0] == "ssh" and "limactl copy" in a[-1] for a in calls)
     assert any(a[0] == "scp" for a in calls)
+    assert any(a[0] == "ssh" and "rm -rf -- /var/tmp/" in a[-1] for a in calls)
+
+
+def test_copy_from_removes_host_intermediate_when_lima_copy_fails() -> None:
+    t = RemoteLimaTransport(vm_name="my-vm", vm_host_ssh="host.example")
+    calls: list[list[str]] = []
+
+    def fake_subprocess_run(args: list[str], **_kwargs: object) -> MagicMock:
+        calls.append(args)
+        if args[0] == "ssh" and "limactl copy" in args[-1]:
+            return _fail_completed(returncode=1)
+        return _ok_completed()
+
+    with (
+        patch("agentworks.transports.ssh.subprocess.run", side_effect=fake_subprocess_run),
+        pytest.raises(SSHError),
+    ):
+        t.copy_from("/remote/bar", "/local/foo")
+
+    assert any(a[0] == "ssh" and "rm -rf -- /var/tmp/" in a[-1] for a in calls)
 
 
 # ---------------------------------------------------------------------------

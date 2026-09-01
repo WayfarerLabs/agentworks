@@ -22,9 +22,10 @@ when done. One `agw` CLI drives all of it declaratively via an **SSH-over-Tailsc
 The operator runs the `agw` CLI on their workstation. VMs are created at declared **vm-sites**
 (configured places to create VMs), each backed by a **vm-platform** that knows how to work with a
 given provider (Lima, WSL2, Proxmox, Azure VMs, AWS EC2, and Google Compute Engine today).
-Regardless of the platform, every VM runs the same base operating system (Debian Bookworm), is
-joined to the same Tailscale tailnet, and is accessible over SSH at its Tailscale IP address using
-the operator's keys.
+Regardless of the platform, every managed VM runs Debian, joins the same Tailscale tailnet, and is
+accessible over SSH at its Tailscale IP address using the operator's keys. New VMs use the current
+Debian stable release, Trixie; existing Bookworm VMs remain operable, and operators can upgrade them
+in place using Debian's procedure.
 
 ![Agentworks topology: the operator's workstation runs the agw CLI, which creates VMs at declared sites across local platforms (Lima or WSL2), a remote SSH VM site (e.g. Lima), Azure, AWS EC2, and Proxmox, with a placeholder for future VM platforms. Every VM and the workstation itself join a shared Tailnet overlay, which is how the CLI reaches them all.](docs/images/agw-topology.png)
 
@@ -145,10 +146,12 @@ isolation boundary; Linux users, groups, and permissioned filesystem subtrees pr
 separation between workloads inside it. See [ADR 0001](docs/adrs/0001-vm-based-infrastructure.md)
 for the decision record.
 
-Every managed VM uses Debian Bookworm, the same admin-user setup, and the same Tailscale network
-model. See [ADR 0002](docs/adrs/0002-use-debian-as-the-vm-base-image.md) for the base-image
-decision. VMs are long-lived, backed by declarative templates, and can be idempotently reinitialized
-to pick up changes without being replaced.
+Every newly created managed VM uses Debian Trixie, the same admin-user setup, and the same Tailscale
+network model. See [ADR 0025](docs/adrs/0025-manage-one-current-debian-release.md) for the release
+lifecycle decision. VMs are long-lived, backed by declarative templates, and can be idempotently
+reinitialized to pick up changes without being replaced. Existing VMs record their last verified
+Debian release. Distribution upgrades and provider recovery remain operator-led; after either one,
+`vm confirm-release` explicitly adopts the live release before a separate `vm reinit`.
 
 ### Workspaces - The Project
 

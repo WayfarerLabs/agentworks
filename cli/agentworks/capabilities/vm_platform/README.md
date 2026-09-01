@@ -45,8 +45,8 @@ load one), and `agw resource explain vm-platform/<name>` is the definitive confi
 - **`gcp-gce`** (via the `gcp` system plugin) runs VMs on Google Compute Engine in an
   operator-selected project, zone, and optional subnet.
 
-Per the Agentworks model, the choice of platform largely disappears once a VM is up and running. All
-VMs run the same base OS (Debian Bookworm) and are accessible via SSH over Tailscale.
+Per the Agentworks model, the choice of platform largely disappears once a VM is up and running. New
+VMs run core's concrete current release (Debian Trixie) and are accessible via SSH over Tailscale.
 
 ## Security Posture
 
@@ -68,10 +68,9 @@ described below.
 
 A vm-platform stands up a machine and hands Agentworks an administrative foothold on it. It:
 
-- **MUST** provision a VM running the standard base operating system, Debian Bookworm, at the
-  operator-configured site. (An externally administered backend that clones an operator-supplied
-  template inherits this from the template today; that deviation is being closed under
-  [#368](https://github.com/WayfarerLabs/agentworks/issues/368).)
+- **MUST** translate `ProvisionRequest.debian_release` through a platform-owned artifact map. Core
+  selects the concrete Debian release; a platform never infers "current" or falls back to another
+  artifact. An operator-owned catalog such as Proxmox must provide the requested release key.
 - **MUST** create the admin user with the operator-configured name, holding full passwordless `sudo`
   over the machine, reachable by the operator's installed SSH public key and never by password.
 - **MUST** provide a transport that runs arbitrary commands as the admin user: the single foothold
@@ -198,6 +197,13 @@ and DB migration.
 - `status(vm, ctx) -> VMStatus` is a read-only query.
 - `display_backend_name(vm) -> str` is pure display and takes no `ctx`.
 
+Vm-platform is an internal capability API. Its complete bundled contract remains version 1, and all
+six implementations change atomically with the descriptor. Exact registration conformance rejects an
+inconsistent version or missing abstract implementation as a curation error. Returning unsupported
+or implementing a no-op still violates the contract and must be caught by review and provider tests;
+registration does not attempt to infer method semantics or ask a platform to interpret Debian's
+current release.
+
 **Transport and lifecycle hooks** (sensible defaults on `VMPlatform`; implementations override only
 what their backends need). All are entered by callers that gate first, so on entry the VM is running
 or was just started. The three transport hooks take `ctx: RunContext` for the same reason the ops
@@ -271,19 +277,19 @@ process having warmed a credential cache.
 - `unsupported_reason()` is a class-level, zero-arg classmethod run at every registry build. It
   answers "could any config of this platform ever work on this host," and is the **platform node's
   own** readiness in the fold. WSL2 is the only platform that overrides it (`"Windows only"` off
-  Windows). Lima deliberately does not: an ssh-placed site runs `limactl` on the placement host over
-  SSH and needs nothing locally.
+  Windows). Lima deliberately does not: an ssh-placed site runs `limactl` on the placement host and
+  needs only the local `ssh` client.
 - `not_ready(config) -> Readiness` (inherited from `Capability`, default ready) is a
   **non-constructing classmethod**: "is a site with THIS config ready," host-introspection only, no
-  network or secrets, no instance built. A local Lima site with no `limactl` is not-ready; a remote
-  one is not. WSL2 reports a site with no `wsl` on PATH not-ready even on Windows. The fold calls it
-  off the graph-carried impl to fold into the vm-site's verdict.
+  network or secrets, no instance built. A local Lima site with no `limactl` and an ssh-placed site
+  with no `ssh` are not-ready. WSL2 reports a site with no `wsl` on PATH not-ready even on Windows.
+  The fold calls it off the graph-carried impl to fold into the vm-site's verdict.
 
 **Class-level contract**. `contract_version`, `config_model`, `name`, and `description` are all
 REQUIRED and none is defaulted, because a default would let an unmigrated implementation inherit a
-claim it never made; registration refuses an implementation missing any of them, naming the plugin.
+claim it never made; registration refuses an implementation missing any of them as a curation bug.
 `contract_version` must match exactly the version the vm-platform descriptor declares supported, so
-a contract change is a hard cutover rather than a silent re-certification.
+the descriptor and every bundled implementation must change atomically.
 
 - `config_model` declares what the platform's config IS (the keys a site writes beside `name` inside
   `spec.platform`), as an `AgwModel` carrying the platform's own name as a `Literal` tag plus one
@@ -294,16 +300,33 @@ a contract change is a hard cutover rather than a silent re-certification.
 - `legacy_platform_metadata(cls, row, legacy) -> dict[str, str]` maps pre-migration DB rows into the
   `platform_metadata` shape, consumed only by the one-shot DB migration.
 
-**Inputs and outputs** are uniform under vm-platform contract version 2. Every `create` receives the
-same `ProvisionRequest`, including a required resolved Tailscale auth key and a required value-free
-bootstrap-progress sink. A successful return means the platform completed Tailscale bootstrap;
-failure or interruption raises after platform-owned rollback. `ProvisionResult` carries the native
-transport, an optional Tailscale IP, and `platform_metadata`. The metadata is written verbatim to
-`vms.platform_metadata` and read back only by the owning platform (Lima stores `instance_name`, WSL2
-`distro_name`, Azure `resource_id`, Proxmox `vmid` + `node`, EC2 `instance_id` +
-`security_group_id` + `region` + `backend_name`, and never the public IP, which it reads live). An
-omitted IP means discovery failed after a successful join, not that bootstrap is incomplete. Phase A
-retries only `tailscale ip -4` before it records the address and verifies Tailscale SSH.
+**Inputs and outputs** are uniform under vm-platform contract version 1. Every `create` receives the
+same `ProvisionRequest`, including the concrete core-selected `debian_release`, a required resolved
+Tailscale auth key, and a required value-free bootstrap-progress sink. The platform resolves the
+release through its local artifact map before backend mutation. A missing code-owned mapping names
+the out-of-date Agentworks build; a missing operator-owned mapping names the exact vm-site field.
+Neither has a fallback. A successful `ProvisionResult` carries the native transport, an optional
+Tailscale IP, and `platform_metadata`. Core treats the result as a runtime conformance boundary:
+after persisting the metadata, it probes the returned transport and persists only that live
+observation. This is not a security sandbox for in-process plugin code. The metadata is written
+verbatim to `vms.platform_metadata` and read back only by the owning platform (Lima stores
+`instance_name`, WSL2 `distro_name`, Azure `resource_id`, Proxmox `vmid` + `node`, EC2
+`instance_id` + `security_group_id` + `region` + `backend_name`, and never the public IP, which it
+reads live). An omitted IP means discovery failed after a successful join, not that bootstrap is
+incomplete. Phase A retries only `tailscale ip -4` before it records the address and verifies
+Tailscale SSH.
+
+Before the create boundary resolves secrets, the pending VM node calls
+`validate_create_release(release)` with that same concrete core selection. The hook is pure and
+offline. Its default is a no-op for code-owned catalogs; a platform with an operator-owned catalog
+overrides it so a missing create entry fails before authenticated `runup`. `create()` resolves the
+mapping again before mutation. This timing does not make the current artifact a load-time config
+requirement, so a legacy site can still load for operations on existing VMs.
+
+An operator-owned artifact is also untrusted until the live guest proves what it contains. Core
+applies the same returned-transport probe regardless of who owns the artifact map. A mismatch leaves
+the backend identity addressable for explicit deletion. Do not add a configuration bypass for this
+check.
 
 Add a platform-specific **input** by adding a field to `ProvisionRequest`, not by changing the
 protocol. But note the opposite pattern is also right: purely internal translation stays inside the
@@ -700,11 +723,13 @@ YAML block scalar, remote shell). Two traps that have already occurred:
    the non-constructing `not_ready(config)` handles per-site tool checks (Lima with no `limactl`).
    `legacy_platform_metadata` is needed only when pre-migration rows must be mapped.
 5. Only the transport and lifecycle hooks required by the backend override their defaults.
-6. `create()` completes Tailscale bootstrap or raises after rollback. Use `bootstrap_script.py` /
-   `cloud_init.py` for the create-time payload instead of a platform-specific reinvention. Keep any
-   provider-retained payload credential-free and deliver the resolved key through the platform's
-   ephemeral mechanism. Return an optional IP only after a successful join; Phase A owns IP-only
-   rediscovery and Tailscale SSH verification.
+6. An operator-owned release catalog overrides `validate_create_release(release)` with a pure
+   lookup, while `create()` resolves `request.debian_release` again before mutation, completes
+   Tailscale bootstrap, and returns a transport through which core verifies and records the live
+   release. Use `bootstrap_script.py` / `cloud_init.py` for the create-time payload instead of a
+   platform-specific reinvention. Keep any provider-retained payload credential-free and deliver the
+   resolved key through the platform's ephemeral mechanism. Return an optional IP only after a
+   successful join; Phase A owns IP-only rediscovery and Tailscale SSH verification.
 7. Dispatch, idempotency, and, where applicable, template-render tests belong under
    `cli/tests/vms/`; the next section lists the existing references.
 8. The implementation is checked against the preceding platform-development considerations before it
@@ -727,8 +752,8 @@ The existing tests under `cli/tests/vms/` are the templates to copy from:
   (fatal) from a transient error (warn and continue unverified). The template for any platform with
   a credential to verify.
 - `test_create_vm_dispatch.py` and `test_create_reinit_orchestrated.py`: the `ProvisionRequest`
-  shape handed to the platform, the persisted row, and the orchestrated create/reinit graph
-  including the `RealizationLog` unwind and the activation gate.
+  shape handed to the platform, core's independent release attestation, the persisted row, and the
+  orchestrated create/reinit graph including the `RealizationLog` unwind and the activation gate.
 - `test_lima_create_flow.py`: create-time provisioning wiring with mocked `limactl` and transport,
   the pattern for pinning platform create steps without a real VM.
 - `test_lima_template.py`: `yaml.safe_load` over a rendered template with tripwires for the baked-in

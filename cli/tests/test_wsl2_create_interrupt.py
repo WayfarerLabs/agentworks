@@ -35,6 +35,7 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest, wsl2
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
+from agentworks.debian import DebianRelease
 from agentworks.errors import StateError
 
 if TYPE_CHECKING:
@@ -51,6 +52,7 @@ def _local_app_data(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 def _request() -> ProvisionRequest:
     return ProvisionRequest(
         vm_name="vm1",
+        debian_release=DebianRelease.TRIXIE,
         hostname="vm1",
         system_slug=None,
         admin_username="agw",
@@ -113,7 +115,7 @@ def _wire(
 
     monkeypatch.setattr(wsl2, "_wsl", _fake_wsl)
     monkeypatch.setattr(wsl2, "_powershell", _fake_powershell)
-    monkeypatch.setattr(wsl2, "_download_debian_rootfs", lambda tarball: None)
+    monkeypatch.setattr(wsl2, "_download_debian_rootfs", lambda tarball, *, tag: None)
     monkeypatch.setattr(WSL2Platform, "_distro_exists", staticmethod(lambda name: False))
     monkeypatch.setattr(wsl2, "run_wsl2_bootstrap", lambda *args, **kwargs: "100.64.0.7")
     return calls
@@ -133,7 +135,7 @@ def test_success_runs_primary_bootstrap_before_create_returns(monkeypatch: pytes
 
     result = WSL2Platform("wsl2", {}).create(request, RunContext())
 
-    assert WSL2Platform.contract_version == 2
+    assert WSL2Platform.contract_version == 1
     assert result.tailscale_ip == "100.64.0.7"
     bootstrap.assert_called_once()
     assert bootstrap.call_args.kwargs == {
@@ -322,10 +324,10 @@ def test_failed_download_leaves_no_file_at_the_cache_path(
     """A download that dies mid-stream (network failure or Ctrl-C) must
     leave the cache path empty: no truncated tarball, no temp leftover."""
     _stub_registry(monkeypatch, _BlobResp([b"x" * 1024], error=error))
-    tarball = tmp_path / "debian-bookworm-amd64-rootfs.tar.gz"
+    tarball = tmp_path / "debian-trixie-amd64-rootfs.tar.gz"
 
     with pytest.raises(type(error)):
-        wsl2._download_debian_rootfs(tarball)
+        wsl2._download_debian_rootfs(tarball, tag="trixie")
 
     assert not tarball.exists()
     assert list(tmp_path.iterdir()) == []
@@ -349,10 +351,10 @@ def test_failed_rename_leaves_no_residue_either(
     # wsl2 calls os.replace through its module-level `import os`, so
     # patching the os module itself intercepts it (reverted by pytest).
     monkeypatch.setattr("os.replace", _explode)
-    tarball = tmp_path / "debian-bookworm-amd64-rootfs.tar.gz"
+    tarball = tmp_path / "debian-trixie-amd64-rootfs.tar.gz"
 
     with pytest.raises(type(error)):
-        wsl2._download_debian_rootfs(tarball)
+        wsl2._download_debian_rootfs(tarball, tag="trixie")
 
     assert not tarball.exists()
     assert list(tmp_path.iterdir()) == []
@@ -364,9 +366,9 @@ def test_completed_download_lands_at_the_cache_path(
     """The rename lands the complete tarball at the final name, with no
     temp file left beside it."""
     _stub_registry(monkeypatch, _BlobResp([b"rootfs-", b"bytes"]))
-    tarball = tmp_path / "debian-bookworm-amd64-rootfs.tar.gz"
+    tarball = tmp_path / "debian-trixie-amd64-rootfs.tar.gz"
 
-    wsl2._download_debian_rootfs(tarball)
+    wsl2._download_debian_rootfs(tarball, tag="trixie")
 
     assert tarball.read_bytes() == b"rootfs-bytes"
     assert list(tmp_path.iterdir()) == [tarball]

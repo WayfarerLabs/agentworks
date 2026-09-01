@@ -1,4 +1,4 @@
-"""Google Compute Engine contract-v2 VM platform."""
+"""Google Compute Engine vm-platform implementation."""
 
 from __future__ import annotations
 
@@ -13,6 +13,9 @@ from agentworks import output
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
+from agentworks.capabilities.vm_platform.debian_release import (
+    code_owned_release_value,
+)
 from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs, operator_ssh_prefixes
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
@@ -44,7 +47,7 @@ from agentworks.plugins.gcp.compute import (
     verify_live_machine_type,
     verify_zonal_operation,
 )
-from agentworks.plugins.gcp.config import GcpGCEConfig, machine_catalog, select_machine_type
+from agentworks.plugins.gcp.config import IMAGE_FAMILIES, GcpGCEConfig, machine_catalog, select_machine_type
 from agentworks.plugins.gcp.errors import GCEError, GCEOperationError, call_google
 from agentworks.plugins.gcp.instance import (
     InstanceInsertAttempt,
@@ -176,14 +179,14 @@ class _VMIdentity:
 class GCEPlatform(VMPlatform):
     """Runs VMs on Google Compute Engine with provider-ID-owned cleanup."""
 
-    contract_version: ClassVar[int] = 2
+    contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "gcp-gce"
     description: ClassVar[str] = "Google Compute Engine (project + zone)"
     config_model: ClassVar[type[GcpGCEConfig]] = GcpGCEConfig
     prose: ClassVar[TopicProse | None] = TopicProse(
         title="Google Compute Engine VMs",
         overview="""
-        Creates a Debian 12 Compute Engine instance in one project and zone.
+        Creates the Debian release requested by Agentworks in one project and zone.
         The site uses Application Default Credentials unless its tagged `auth`
         selects one complete service-account JSON secret. A scoped priority-0
         SSH allow exists only while bootstrap or a native route needs it; an
@@ -251,6 +254,12 @@ class GCEPlatform(VMPlatform):
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
         names = derive_names(request.hostname)
         selected = select_machine_type(machine_catalog(self.config), cpus=request.cpus, memory_gib=request.memory_gib)
+        image_families = code_owned_release_value(
+            IMAGE_FAMILIES,
+            request.debian_release,
+            platform_name=self.name,
+        )
+        image_family = image_families[selected.arch]
         prefixes = operator_ssh_prefixes(config_allow_cidrs(ctx.config))
         request.progress.step("Validate Google Compute target")
 
@@ -286,7 +295,7 @@ class GCEPlatform(VMPlatform):
         require_firewall_name_available(firewalls, project_id=self.config.project_id, rule_name=names.allow_rule)
 
         machine = verify_live_machine_type(self._clients, ctx, self.config, selected)
-        image = resolve_debian_image(self._clients, ctx, selected.arch)
+        image = resolve_debian_image(self._clients, ctx, selected.arch, image_family)
         disk_type = resolve_balanced_disk_type(self._clients, ctx, self.config)
         machine_url = str(machine.self_link)
         if not machine_url:
@@ -458,7 +467,11 @@ class GCEPlatform(VMPlatform):
         }
         if network.subnet_url is not None:
             metadata["subnet_url"] = network.subnet_url
-        return ProvisionResult(native_transport=transport, platform_metadata=metadata, tailscale_ip=tailscale_ip)
+        return ProvisionResult(
+            native_transport=transport,
+            platform_metadata=metadata,
+            tailscale_ip=tailscale_ip,
+        )
 
     def start(self, vm: VMRow, ctx: RunContext) -> None:
         identity = _VMIdentity.from_row(vm)

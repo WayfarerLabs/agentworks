@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import re
+from copy import deepcopy
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import pytest
@@ -972,6 +973,23 @@ def test_a_string_that_is_not_a_boolean_spelling_is_still_a_schema_error() -> No
 
     assert _errors(schema, nonsense)
     assert _errors(schema, number)
+
+
+def test_apt_source_schema_accepts_exactly_one_release_source_shape() -> None:
+    schema = document_schema("apt-source")
+    (scalar,) = _documents(_an_apt_source("false"))
+    mapped = deepcopy(scalar)
+    mapped["spec"].pop("source")
+    mapped["spec"]["sources"] = {"trixie": "deb https://example.com trixie main"}
+    neither = deepcopy(mapped)
+    neither["spec"].pop("sources")
+    both = deepcopy(scalar)
+    both["spec"]["sources"] = {"trixie": "deb https://example.com trixie main"}
+
+    assert _errors(schema, scalar) == []
+    assert _errors(schema, mapped) == []
+    assert _errors(schema, neither)
+    assert _errors(schema, both)
 
 
 # -- Integers: the same disagreement, one type over -------------------------

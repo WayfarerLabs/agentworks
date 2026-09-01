@@ -27,12 +27,14 @@ from agentworks.capabilities.vm_platform.lima import (
     _REBOOT_PENDING_MARKER,
     LimaPlatform,
 )
+from agentworks.debian import DebianRelease
 from agentworks.ssh import SSHError
 
 
 def _request(*, tailscale_auth_key: str = "tskey-test") -> ProvisionRequest:
     return ProvisionRequest(
         vm_name="myvm",
+        debian_release=DebianRelease.TRIXIE,
         hostname="lima--myvm",
         system_slug=None,
         admin_username="agw",

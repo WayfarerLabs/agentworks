@@ -15,6 +15,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import BootstrapProgress, ProvisionRequest, ssh_exposure
 from agentworks.capabilities.vm_platform.tailscale_join import TAILSCALE_JOIN_STDIN_COMMAND
 from agentworks.db import VMRow, VMStatus
+from agentworks.debian import DebianRelease
 from agentworks.errors import AlreadyExistsError, ConfigError, ConnectivityError, ProvisioningError, StateError
 from agentworks.plugins.gcp.bootstrap import GCE_READINESS_COMMAND
 from agentworks.plugins.gcp.cleanup import InstanceState, RollbackReport
@@ -228,8 +229,8 @@ class _Cache:
             ),
             "images": SimpleNamespace(
                 get_from_family=lambda **_kwargs: compute_v1.Image(
-                    name="debian-12-v1",
-                    self_link="projects/debian-cloud/global/images/debian-12-v1",
+                    name="debian-13-v1",
+                    self_link="projects/debian-cloud/global/images/debian-13-v1",
                     architecture="x86_64",
                 )
             ),
@@ -310,6 +311,7 @@ def _ctx(*ssh_allow_cidrs: str) -> RunContext:
 def _request(progress: BootstrapProgress | None = None) -> ProvisionRequest:
     return ProvisionRequest(
         vm_name="a",
+        debian_release=DebianRelease.TRIXIE,
         hostname="vm-a",
         system_slug=None,
         admin_username="agentworks",
@@ -790,7 +792,6 @@ def test_residual_definitive_insert_rejection_rolls_back_and_stays_detached(
     assert type(caught.value) is GCEOperationError
     assert "e2-standard-2" in str(caught.value)
     assert "IAM, quota, and request prerequisites first" in (caught.value.hint or "")
-    assert "CPU-only Debian 12" in (caught.value.hint or "")
     assert "pd-balanced" in (caught.value.hint or "")
     assert cache.instances.resource is None
     assert len(cache.instances.delete_requests) == 1

@@ -43,6 +43,7 @@ from .packages import (
     _configure_apt_sources,
     _install_apt_packages,
     _install_system_packages,
+    _resolve_apt_sources,
     _run_install_commands,
 )
 from .shell_env import (
@@ -71,6 +72,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database
+    from agentworks.debian import DebianRelease
     from agentworks.git_credentials import CredentialRequest
     from agentworks.resources.registry import Registry
     from agentworks.vms.admin import AdminConfig
@@ -102,7 +104,7 @@ def bootstrap_vm(
     Runs over the provisioning transport after platform-owned bootstrap:
     optional Tailscale IP rediscovery, Tailscale-SSH verification, the
     post-Tailscale-ready hook plus reconnect wait, and finally the SSH-config
-    sync (the last line of the caller's ``Provisioning`` section). Only the
+    sync before the caller's explicit provisioning-complete line. Only the
     IP discovery or verification is fatal to provisioning: a failure there means the VM is
     unreachable, so it marks provisioning ``failed``, records the
     ``provisioning_failed`` event, secures the kept VM via the platform's
@@ -220,8 +222,8 @@ def bootstrap_vm(
         wait_for_reconnect(ts_target)
 
     # Sync the operator's SSH config now that connectivity is verified. This is
-    # the last step of Phase A (and the last line of the caller's Provisioning
-    # section): the VM's Tailscale IP is recorded and the connection is
+    # the last step of Phase A before the caller announces completion: the VM's
+    # Tailscale IP is recorded and the connection is
     # confirmed, so operator-facing ``ssh awvm--<name>`` aliases are in place
     # before Phase B's many SSH calls. Non-fatal: a local ``~/.ssh/config``
     # write failure (permissions, read-only home) has nothing to do with VM
@@ -251,6 +253,7 @@ def run_initialization(
     admin_username: str,
     logger: SSHLogger,
     *,
+    debian_release: DebianRelease,
     operation: VMInitializationOperation,
 ) -> None:
     """Run Phase B (initialization) with status tracking and event logging.
@@ -275,6 +278,7 @@ def run_initialization(
             home,
             admin_username,
             logger,
+            debian_release=debian_release,
             operation=operation,
         )
     except Exception as e:
@@ -405,6 +409,7 @@ def _phase_b_setup(
     admin_username: str,
     logger: SSHLogger,
     *,
+    debian_release: DebianRelease,
     operation: VMInitializationOperation,
 ) -> AuthorizedKeysOutcome:
     """Phase B: Setup (over Tailscale SSH). Non-fatal steps warn and continue."""
@@ -421,6 +426,16 @@ def _phase_b_setup(
         apt_packages = kind_dict(registry, "apt-package")
         system_install_commands = kind_dict(registry, "system-install-command")
         user_install_commands = kind_dict(registry, "user-install-command")
+
+        # Resolve every selected release map before Phase B touches the
+        # guest. A missing mapping is a configuration boundary, not a
+        # partial initialization after unrelated convergence already ran.
+        resolved_apt_sources = _resolve_apt_sources(
+            vm_template,
+            apt_packages,
+            apt_sources,
+            debian_release=debian_release,
+        )
 
         # Non-fatal: ensure cloud-init won't regenerate SSH host keys on reboot.
         # Runs first so VMs predating the create-time bootstrap step are
@@ -505,7 +520,15 @@ def _phase_b_setup(
         _install_system_packages(ts_target, logger)
 
         # Non-fatal: apt sources required by selected apt_packages
-        _configure_apt_sources(ts_target, vm_template, apt_packages, apt_sources, logger)
+        _configure_apt_sources(
+            ts_target,
+            vm_template,
+            apt_packages,
+            apt_sources,
+            logger,
+            debian_release=debian_release,
+            resolved_sources=resolved_apt_sources,
+        )
 
         # Non-fatal: apt packages (direct list + apt-package entries)
         _install_apt_packages(ts_target, vm_template, apt_packages, logger)

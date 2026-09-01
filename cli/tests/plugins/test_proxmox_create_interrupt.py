@@ -34,6 +34,7 @@ import pytest
 
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest
+from agentworks.debian import DebianRelease
 from agentworks.errors import ProvisioningError
 from agentworks.plugins.proxmox.api import ProxmoxAPIError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
@@ -47,11 +48,11 @@ _CONFIG = {
     "api_url": "https://pve.example.com:8006",
     "node": "pve1",
     "token_id": "agw@pam!agw",
-    "template_vmid": 9000,
+    "template_vmids": {"trixie": 9001},
 }
 
 _NEWID = 100
-_TEMPLATE_VMID = 9000
+_TEMPLATE_VMID = 9001
 _CLONE_UPID = "UPID:pve1:clone"
 _START_UPID = "UPID:pve1:start"
 _SENTINEL = "tskey-proxmox-create-'sentinel"
@@ -223,6 +224,7 @@ def _request(*, tailscale: bool) -> ProvisionRequest:
     readiness waits."""
     return ProvisionRequest(
         vm_name="vm1",
+        debian_release=DebianRelease.TRIXIE,
         hostname="vm1",
         system_slug=None,
         admin_username="agentworks",
@@ -539,10 +541,9 @@ class TestOrphanBackstopWarning:
 
 
 class TestTransportFailureDuringRollback:
-    """ProxmoxAPI types only HTTP failures as ProxmoxAPIError; a
-    transport-level failure (URLError/OSError) during the rollback must
-    be contained by the wrappers, never replacing the original
-    interrupt or masking the original error."""
+    """Even an unexpected raw transport failure from a fake API must be
+    contained by rollback, never replacing the original interrupt or
+    masking the original error. The real API normalizes these failures."""
 
     def test_interrupt_path_absorbs_it_with_the_abandon_warning(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput

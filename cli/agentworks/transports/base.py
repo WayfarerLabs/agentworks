@@ -17,11 +17,13 @@ mechanism per platform (SSH carries scp; ``limactl shell`` pairs with
 from __future__ import annotations
 
 import abc
+import shlex
 import tarfile
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agentworks import output
 from agentworks.ssh import SSHError, SSHResult
 from agentworks.terminal import emit_clear, guarded_terminal
 
@@ -266,19 +268,30 @@ class Transport(abc.ABC):
         local_path = Path(local_path)
         with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as f:
             tmp_path = Path(f.name)
+        remote_tmp: str | None = None
         try:
             with tarfile.open(tmp_path, "w:gz") as tar:
                 tar.add(local_path, arcname=".")
-            remote_tmp = f"/tmp/agentworks-copy-{tmp_path.name}"
-            self.copy_to(tmp_path, remote_tmp, timeout=timeout)
+            remote_tmp = self.run("mktemp /var/tmp/agentworks-copy-XXXXXX.tar.gz", timeout=timeout).stdout.strip()
+            try:
+                self.copy_to(tmp_path, remote_tmp, timeout=timeout)
+                remote_tmp_arg = shlex.quote(remote_tmp)
+                remote_path_arg = shlex.quote(remote_path)
+                if delete:
+                    self.run(
+                        f"rm -rf -- {remote_path_arg} && mkdir -p -- {remote_path_arg}",
+                        timeout=timeout,
+                    )
+                else:
+                    self.run(f"mkdir -p -- {remote_path_arg}", timeout=timeout)
+                self.run(f"tar -xzf {remote_tmp_arg} -C {remote_path_arg}", timeout=timeout)
+            finally:
+                try:
+                    self.run(f"rm -f -- {shlex.quote(remote_tmp)}", check=False, timeout=timeout)
+                except Exception as error:
+                    output.warn(f"Could not remove remote staging file: {error}")
         finally:
             tmp_path.unlink(missing_ok=True)
-
-        if delete:
-            self.run(f"rm -rf {remote_path} && mkdir -p {remote_path}", timeout=timeout)
-        else:
-            self.run(f"mkdir -p {remote_path}", timeout=timeout)
-        self.run(f"tar -xzf {remote_tmp} -C {remote_path} && rm -f {remote_tmp}", timeout=timeout)
 
     def write_file(
         self,
@@ -310,4 +323,4 @@ class Transport(abc.ABC):
         finally:
             Path(tmp_path).unlink(missing_ok=True)
         if mode:
-            self.run(f"chmod {mode} {remote_path}")
+            self.run(f"chmod -- {shlex.quote(mode)} {shlex.quote(remote_path)}")

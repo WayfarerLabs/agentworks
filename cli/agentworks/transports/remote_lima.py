@@ -12,15 +12,16 @@ from __future__ import annotations
 import shlex
 import subprocess
 import uuid
-from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agentworks import output
 from agentworks.transports._shared import env_assignment_prefix
 from agentworks.transports.base import Transport
 from agentworks.transports.ssh import SSHTransport, keepalive_args, note_ssh_interactive_exit
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
     from agentworks.ssh import SSHLogger, SSHResult
 
@@ -144,14 +145,31 @@ class RemoteLimaTransport(Transport):
     ) -> None:
         """Copy via scp-to-host then ``limactl copy`` host -> VM.
 
-        ``host_tmp`` carries a UUID so concurrent copies of files that
-        share a basename, or a stale tmp from a crashed prior run, don't
-        collide.
+        The intermediate lives in a private, UUID-named directory on the
+        host's disk-backed temporary filesystem. Cleanup is attempted for
+        every exit from the two-hop copy, including transfer failures.
         """
-        host_tmp = f"/tmp/agentworks-{uuid.uuid4()}-{Path(local_path).name}"
-        self._host_raw.copy_to(local_path, host_tmp, timeout=timeout)
-        self._host_login.run(f"limactl copy {host_tmp} {self.vm_name}:{remote_path}", timeout=timeout)
-        self._host_login.run(f"rm -f {host_tmp}", check=False, timeout=timeout)
+        host_tmp_dir = f"/var/tmp/agentworks-transfer-{uuid.uuid4()}"
+        host_tmp = f"{host_tmp_dir}/payload"
+        try:
+            self._host_login.run(
+                f"umask 077 && mkdir -- {shlex.quote(host_tmp_dir)}",
+                timeout=timeout,
+            )
+            self._host_raw.copy_to(local_path, host_tmp, timeout=timeout)
+            self._host_login.run(
+                f"limactl copy {shlex.quote(host_tmp)} {self.vm_name}:{shlex.quote(remote_path)}",
+                timeout=timeout,
+            )
+        finally:
+            try:
+                self._host_login.run(
+                    f"rm -rf -- {shlex.quote(host_tmp_dir)}",
+                    check=False,
+                    timeout=timeout,
+                )
+            except Exception as error:
+                output.warn(f"Could not remove remote Lima staging directory: {error}")
 
     def copy_from(
         self,
@@ -162,14 +180,29 @@ class RemoteLimaTransport(Transport):
     ) -> None:
         """Copy via ``limactl copy`` VM -> host, then scp host -> local.
 
-        ``host_tmp`` carries a UUID; see ``copy_to`` for rationale.
+        The private host directory follows the same lifetime as ``copy_to``.
         """
-        host_tmp = f"/tmp/agentworks-{uuid.uuid4()}-{Path(remote_path).name}"
-        self._host_login.run(f"limactl copy {self.vm_name}:{remote_path} {host_tmp}", timeout=timeout)
+        host_tmp_dir = f"/var/tmp/agentworks-transfer-{uuid.uuid4()}"
+        host_tmp = f"{host_tmp_dir}/payload"
         try:
+            self._host_login.run(
+                f"umask 077 && mkdir -- {shlex.quote(host_tmp_dir)}",
+                timeout=timeout,
+            )
+            self._host_login.run(
+                f"limactl copy {self.vm_name}:{shlex.quote(remote_path)} {shlex.quote(host_tmp)}",
+                timeout=timeout,
+            )
             self._host_raw.copy_from(host_tmp, local_path, timeout=timeout)
         finally:
-            self._host_login.run(f"rm -f {host_tmp}", check=False, timeout=timeout)
+            try:
+                self._host_login.run(
+                    f"rm -rf -- {shlex.quote(host_tmp_dir)}",
+                    check=False,
+                    timeout=timeout,
+                )
+            except Exception as error:
+                output.warn(f"Could not remove remote Lima staging directory: {error}")
 
     def call_streaming(
         self,

@@ -30,6 +30,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest
 from agentworks.capabilities.vm_platform.bootstrap_script import REBOOT_SENTINEL_PATH
 from agentworks.capabilities.vm_platform.lima import _REBOOT_CLEAR_MARKER, LimaPlatform
+from agentworks.debian import DebianRelease
 from agentworks.ssh import SSHError
 
 if TYPE_CHECKING:
@@ -69,6 +70,7 @@ def _remote_ssh_success(command: str) -> SimpleNamespace:
 def _request(*, tailscale_auth_key: str = "tskey-test") -> ProvisionRequest:
     return ProvisionRequest(
         vm_name="myvm",
+        debian_release=DebianRelease.TRIXIE,
         hostname="lima--myvm",
         system_slug=None,
         admin_username="agw",

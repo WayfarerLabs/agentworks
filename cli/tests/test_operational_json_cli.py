@@ -12,6 +12,7 @@ from typer.testing import CliRunner
 
 from agentworks.cli import app
 from agentworks.db import PID_STOPPED, SessionMode, SessionStatus, VMRow, WorkspaceRow
+from agentworks.debian import DebianRelease
 from agentworks.instance_description import instance_state_data
 from agentworks.secrets.policy import TtyInteractionPolicy
 from tests.conftest import stub_vm_ssh_identity
@@ -144,6 +145,8 @@ def test_nonempty_operational_lists_have_exact_ordered_json(monkeypatch: pytest.
                 "session_count": row.session_count,
                 "tailscale_host": row.tailscale_host,
                 "created_at": row.created_at,
+                "debian_release": row.debian_release,
+                "debian_release_observed_at": row.debian_release_observed_at,
             }
             for row in vm_rows
         ]
@@ -245,6 +248,8 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
         hostname="lab-box",
         created_at="2026-01-01",
         last_seen_at="2026-01-02",
+        debian_release=DebianRelease.TRIXIE,
+        debian_release_observed_at="2026-01-02T12:00:00Z",
         platform_metadata={"unsafe": unsafe},
         operator_stopped=False,
     )
@@ -369,6 +374,8 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
             "initialization_status": "partial",
             "tailscale_host": "100.64.0.9",
             "last_seen_at": "2026-01-02",
+            "debian_release": "trixie",
+            "debian_release_observed_at": "2026-01-02T12:00:00Z",
             "provisioned_resources": {"cpus": 6, "memory_gib": 16, "disk_gib": 256, "swap_gib": None},
             "live_resources": {
                 "cpus": "8",
@@ -746,22 +753,22 @@ def test_vm_describe_closed_status_and_slug_enums_reach_typer_json(
     from agentworks.vms.manager.inspect import VMDescription, VMDetailFacts
 
     row = VMRow(
-        "box",
-        "site",
-        None,
-        None,
-        [],
-        "complete",
-        "complete",
-        None,
-        None,
-        None,
-        None,
-        None,
-        "admin",
-        "box",
-        "2026-01-01",
-        None,
+        name="box",
+        site="site",
+        template=None,
+        admin_template=None,
+        extra_packages=[],
+        provisioning_status="complete",
+        init_status="complete",
+        tailscale_host=None,
+        cpus=None,
+        memory_gib=None,
+        disk_gib=None,
+        swap_gib=None,
+        admin_username="admin",
+        hostname="box",
+        created_at="2026-01-01",
+        last_seen_at=None,
     )
     description = VMDescription(
         VMDetailFacts.from_row(row),
@@ -810,23 +817,23 @@ def test_vm_and_workspace_descriptions_snapshot_only_frozen_safe_scalars() -> No
 
     marker = "OPAQUE_PLATFORM_SECRET"
     vm_row = VMRow(
-        "box",
-        "site",
-        None,
-        None,
-        [],
-        "complete",
-        "partial",
-        None,
-        4,
-        8,
-        64,
-        1,
-        "admin",
-        "box",
-        "2026-01-01",
-        None,
-        {"unsafe": marker},
+        name="box",
+        site="site",
+        template=None,
+        admin_template=None,
+        extra_packages=[],
+        provisioning_status="complete",
+        init_status="partial",
+        tailscale_host=None,
+        cpus=4,
+        memory_gib=8,
+        disk_gib=64,
+        swap_gib=1,
+        admin_username="admin",
+        hostname="box",
+        created_at="2026-01-01",
+        last_seen_at=None,
+        platform_metadata={"unsafe": marker},
     )
     live_mapping = {
         "cpus": "4",

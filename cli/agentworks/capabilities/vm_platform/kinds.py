@@ -54,11 +54,14 @@ class _VMPlatformKind:
         A vm-platform knows how to create, start, stop, and delete VMs on one backend,
         and how to reach them over SSH once they exist.
 
-        Contract version 2 makes creation complete-or-raise: a platform completes its
-        Tailscale join before returning, reports bootstrap through the manager-owned
-        progress sink, and rolls back partial backend state before propagating failure.
-        A successful result may omit only the Tailscale IP; the VM domain then retries
-        IP discovery and verifies Tailscale SSH without replaying bootstrap.
+        Contract version 1 receives core's concrete current Debian release, resolves it
+        to a platform-owned artifact, and fails before backend mutation when the mapping is
+        missing. A platform completes its Tailscale join before returning transport and backend identity,
+        reports bootstrap through the manager-owned progress sink, and rolls back partial
+        backend state before propagating failure. Core verifies the returned
+        transport before persisting the observed release. A successful result may omit only
+        the Tailscale IP; the VM domain then retries IP discovery and verifies Tailscale SSH
+        without replaying bootstrap.
 
         Platforms are code, not config: a vm-site selects one by writing its name inside
         `spec.platform`, and the keys allowed beside that name are the platform's own,
@@ -124,12 +127,10 @@ def _readiness(name: str, impl: Any) -> Readiness:
 
 VM_PLATFORM_DESCRIPTOR = CapabilityKindDescriptor(
     kind="vm-platform",
-    contract_version=2,
+    contract_version=1,
     implementation_contract=VMPlatform,
     registry=_registry,
-    required_operations=frozenset(
-        {"create", "start", "stop", "delete", "status", "display_backend_name"},
-    ),
+    required_operations=frozenset({"create", "start", "stop", "delete", "status", "display_backend_name"}),
     # Empty: VMPlatform supplies every non-operation member a subclass needs.
     required_attributes=frozenset(),
     entry_factory=_entry,

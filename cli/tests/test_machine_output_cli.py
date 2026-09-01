@@ -227,6 +227,8 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
                 "initialization_status",
                 "tailscale_host",
                 "last_seen_at",
+                "debian_release",
+                "debian_release_observed_at",
                 "provisioned_resources",
                 "live_resources",
                 "agents",

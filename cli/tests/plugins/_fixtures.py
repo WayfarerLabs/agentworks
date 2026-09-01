@@ -90,10 +90,12 @@ def _declare_fixture_config(cls: type, kind: str) -> None:
 
 
 class ConformingVMPlatform(VMPlatform):
-    """A concrete ``VMPlatform``: the six abstract power ops implemented so
-    the class is seatable. Subclasses add ``name`` / ``description``."""
+    """A concrete ``VMPlatform`` with every abstract operation implemented.
 
-    contract_version = 2
+    Subclasses add ``name`` / ``description``.
+    """
+
+    contract_version = 1
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)

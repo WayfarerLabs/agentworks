@@ -7,6 +7,7 @@ import contextlib
 import json
 import re
 import shlex
+import subprocess
 import sys
 import textwrap
 
@@ -25,8 +26,12 @@ from agentworks.capabilities.vm_platform.bootstrap_script import (
     parse_bootstrap_output,
 )
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
+from agentworks.capabilities.vm_platform.debian_release import (
+    code_owned_release_value,
+)
 from agentworks.capabilities.vm_platform.tailscale_join import TAILSCALE_JOIN_STDIN_COMMAND
 from agentworks.db import VMStatus
+from agentworks.debian import DebianRelease
 from agentworks.errors import ProvisioningError, StateError
 from agentworks.schema import AgwModel, NonEmptyStr
 from agentworks.ssh import SSHError, SSHTarget
@@ -57,14 +62,19 @@ _REMOTE_TEMPLATE_RANDOM_LENGTH = 10
 # swap, SSH key, and Tailscale installation) as a system-level provisioner
 # during limactl start. Lima retains this block in its instance YAML, so the
 # resolved Tailscale auth key crosses a separate post-start stdin boundary.
+_LIMA_IMAGE_BLOCKS: dict[DebianRelease, str] = {
+    DebianRelease.TRIXIE: """\
+  - location: https://cloud.debian.org/images/cloud/trixie/latest/debian-13-generic-amd64.qcow2
+    arch: x86_64
+  - location: https://cloud.debian.org/images/cloud/trixie/latest/debian-13-generic-arm64.qcow2
+    arch: aarch64""",
+}
+
 LIMA_TEMPLATE = """\
 # Agentworks Debian VM template for Lima
 arch: default
 images:
-  - location: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
-    arch: x86_64
-  - location: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-arm64.qcow2
-    arch: aarch64
+{images}
 cpus: {cpus}
 memory: {memory}GiB
 disk: {disk}GiB
@@ -124,7 +134,7 @@ class LimaLocalPlacement(AgwModel):
 class LimaSshPlacement(AgwModel):
     """Run limactl on another host over SSH.
 
-    The VMs live on a shared box and nothing but SSH is needed here.
+    The VMs live on a shared box and the local OpenSSH client is required.
     """
 
     mode: Literal["ssh"]
@@ -153,7 +163,7 @@ class LimaConfig(AgwModel):
 class LimaPlatform(VMPlatform):
     """Runs VMs via limactl, locally or on a remote host over SSH."""
 
-    contract_version: ClassVar[int] = 2
+    contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "lima"
     description: ClassVar[str] = "Lima VMs (local, or on a remote host via SSH)"
     config_model: ClassVar[type[LimaConfig]] = LimaConfig
@@ -164,19 +174,19 @@ class LimaPlatform(VMPlatform):
         to `{mode: local}`: `limactl` runs on this machine, which is what the
         built-in `lima-local` site is. `placement: {mode: ssh, host: me@gpu-box}`
         runs `limactl` on that host over SSH, so the VMs live on a shared box and
-        nothing but SSH is needed here.
+        only the local OpenSSH client is needed here.
 
         Creation retains a credential-free provision script, then sends the required
         Tailscale key through one fixed guest command on stdin. It returns only after
         the join succeeds, or raises after removing the partial instance.
 
         Local sites need `limactl` installed here and report not-ready without it.
-        Remote sites need nothing locally.
+        Remote sites need `ssh` installed locally.
         """,
     )
     # No unsupported_reason override: the platform is supported on
     # every host, because remote-Lima sites run limactl on the placement
-    # host over SSH and need nothing locally.
+    # host and need only the portable OpenSSH client locally.
 
     @classmethod
     def not_ready(cls, config: Mapping[str, object]) -> Readiness:
@@ -191,12 +201,16 @@ class LimaPlatform(VMPlatform):
         if "placement" in config:
             placement = config.get("placement")
             local = isinstance(placement, Mapping) and placement.get("mode") == "local"
+            remote = isinstance(placement, Mapping) and placement.get("mode") == "ssh"
         else:
             local = isinstance(LimaConfig.model_fields["placement"].default, LimaLocalPlacement)
-        if not local:
-            return Readiness.ready()
+            remote = False
         import shutil
 
+        if not local:
+            if remote and not shutil.which("ssh"):
+                return Readiness.blocked("ssh not installed")
+            return Readiness.ready()
         if not shutil.which("limactl"):
             return Readiness.blocked("limactl not installed")
         return Readiness.ready()
@@ -244,8 +258,6 @@ class LimaPlatform(VMPlatform):
             target = SSHTarget(host=self._remote_host, user=None, login_shell=True)
             return ssh_run(target, command, check=check, input_text=input_text).stdout
         else:
-            import subprocess
-
             proc = subprocess.run(
                 shlex.split(command),
                 # Byte-mode stdin: text mode rewrites LF to CRLF on Windows (see agentworks.subprocess_io).
@@ -296,6 +308,11 @@ class LimaPlatform(VMPlatform):
             )
 
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
+        images = code_owned_release_value(
+            _LIMA_IMAGE_BLOCKS,
+            request.debian_release,
+            platform_name=self.name,
+        )
         if not self.is_remote:
             # Preflight re-runs the same check at the composition root;
             # keeping it here too costs one PATH scan and keeps the op's
@@ -344,6 +361,7 @@ class LimaPlatform(VMPlatform):
         # Indent the provision script for YAML embedding (6 spaces)
         indented_script = textwrap.indent(provision_script, "      ")
         rendered = LIMA_TEMPLATE.format(
+            images=images,
             cpus=cpus,
             memory=memory,
             disk=disk,
@@ -398,6 +416,8 @@ class LimaPlatform(VMPlatform):
             except SSHError as e:
                 output.warn(f"could not retrieve Tailscale IP: {e}")
                 output.warn("Tailscale is joined; Phase A will retry IP discovery without the auth key.")
+
+            transport = self._transport_for(instance_name)
         except KeyboardInterrupt:
             self._rollback_create_on_interrupt(instance_name)
             raise
@@ -407,7 +427,7 @@ class LimaPlatform(VMPlatform):
             raise
 
         return ProvisionResult(
-            native_transport=self._transport_for(instance_name),
+            native_transport=transport,
             platform_metadata={"instance_name": instance_name},
             tailscale_ip=tailscale_ip,
         )
@@ -515,7 +535,7 @@ class LimaPlatform(VMPlatform):
         """run_detached's file identity for this instance's create; the
         interrupt rollback derives the same path to kill the detached
         limactl before deleting the instance."""
-        return f"/tmp/agentworks-lima-{instance_name}"
+        return f"/var/tmp/agentworks-lima-{instance_name}"
 
     def _create_remote(
         self,

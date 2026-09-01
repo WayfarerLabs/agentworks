@@ -11,6 +11,9 @@ from agentworks import output
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES, generate_cloud_init
+from agentworks.capabilities.vm_platform.debian_release import (
+    code_owned_release_value,
+)
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
 from agentworks.errors import NotFoundError, StateError
@@ -20,11 +23,7 @@ from agentworks.plugins.azure.auth import (
     _quiet_azure_identity_logging,
 )
 from agentworks.plugins.azure.config import (
-    IMAGE_OFFER,
-    IMAGE_OS_DISK_FLOOR_GIB,
-    IMAGE_PUBLISHER,
-    IMAGE_SKU,
-    IMAGE_VERSION,
+    AZURE_IMAGES,
     AzureAmbientAuth,
     AzureVMConfig,
     _select_vm_size,
@@ -81,7 +80,7 @@ class AzureVMPlatform(VMPlatform):
     one specific Azure service, and other Azure services could plausibly
     back platforms of their own someday."""
 
-    contract_version: ClassVar[int] = 2
+    contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "azure-vm"
     description: ClassVar[str] = "Azure Virtual Machines (subscription + resource group)"
     config_model: ClassVar[type[AzureVMConfig]] = AzureVMConfig
@@ -337,6 +336,12 @@ class AzureVMPlatform(VMPlatform):
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
         from types import SimpleNamespace
 
+        image = code_owned_release_value(
+            AZURE_IMAGES,
+            request.debian_release,
+            platform_name=self.name,
+        )
+
         # The site's config, shaped like the old AzureConfig so the
         # SDK-call body below stays byte-identical.
         az = SimpleNamespace(
@@ -368,7 +373,7 @@ class AzureVMPlatform(VMPlatform):
         # Clamp the OS disk up to the image's minimum, mirroring the cpu/memory
         # round-up above: Azure rejects a VM whose OS disk is smaller than the
         # disk baked into the image, so a below-floor template disk grows to it.
-        disk = max(requested_disk, IMAGE_OS_DISK_FLOOR_GIB)
+        disk = max(requested_disk, image.os_disk_floor_gib)
         if disk != requested_disk:
             output.warn(f"Rounded up to {disk} GiB OS disk (image minimum) for requested {requested_disk} GiB.")
         swap = request.swap_gib
@@ -567,10 +572,10 @@ class AzureVMPlatform(VMPlatform):
                             hardware_profile=HardwareProfile(vm_size=azure_vm_size),
                             storage_profile=StorageProfile(
                                 image_reference=ImageReference(
-                                    publisher=IMAGE_PUBLISHER,
-                                    offer=IMAGE_OFFER,
-                                    sku=IMAGE_SKU,
-                                    version=IMAGE_VERSION,
+                                    publisher=image.publisher,
+                                    offer=image.offer,
+                                    sku=image.sku,
+                                    version=image.version,
                                 ),
                                 os_disk=OSDisk(
                                     create_option="FromImage",
@@ -659,6 +664,8 @@ class AzureVMPlatform(VMPlatform):
                         f"'{az.resource_group}' ({wrap_azure_error(rollback_vm_exc).summary}); "
                         f"delete it there manually."
                     )
+                if isinstance(exc, StateError):
+                    raise
                 raise wrap_azure_error(exc) from exc
         except KeyboardInterrupt:
             rollback_create_on_interrupt(compute, network, az.resource_group, vm_name)

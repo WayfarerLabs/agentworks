@@ -11,12 +11,18 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
+from agentworks.apt import AptSourceEntry
+from agentworks.debian import DebianRelease
+from agentworks.errors import ConfigError
 from agentworks.install_commands import UserInstallCommandEntry
 from agentworks.vms.initializer import (
     _configure_apt_sources,
     _install_apt_packages,
     _run_install_commands,
 )
+from agentworks.vms.initializer.driver import VMInitializationOperation, _phase_b_setup
 
 from ._initializer_support import _make_entries, _make_target, _make_vm_template
 
@@ -30,7 +36,14 @@ def test_configure_apt_sources_installs_key(tmp_path) -> None:
     logger = MagicMock()
     logger.has_warnings = False
 
-    _configure_apt_sources(target, vm_template, entries.apt_packages, entries.apt_sources, logger)
+    _configure_apt_sources(
+        target,
+        vm_template,
+        entries.apt_packages,
+        entries.apt_sources,
+        logger,
+        debian_release=DebianRelease.TRIXIE,
+    )
 
     # Should have called curl to download the key (now via run with sudo=True)
     curl_calls = [c for c in target.run.call_args_list if "curl" in str(c)]
@@ -47,7 +60,14 @@ def test_configure_apt_sources_skips_existing(tmp_path) -> None:
     logger = MagicMock()
     logger.has_warnings = False
 
-    _configure_apt_sources(target, vm_template, entries.apt_packages, entries.apt_sources, logger)
+    _configure_apt_sources(
+        target,
+        vm_template,
+        entries.apt_packages,
+        entries.apt_sources,
+        logger,
+        debian_release=DebianRelease.TRIXIE,
+    )
 
     # Should not have run apt-get update (nothing new configured)
     update_calls = [c for c in target.run.call_args_list if "apt-get update" in str(c)]
@@ -60,7 +80,14 @@ def test_configure_apt_sources_no_packages() -> None:
     entries = _make_entries()
     logger = MagicMock()
 
-    _configure_apt_sources(target, vm_template, entries.apt_packages, entries.apt_sources, logger)
+    _configure_apt_sources(
+        target,
+        vm_template,
+        entries.apt_packages,
+        entries.apt_sources,
+        logger,
+        debian_release=DebianRelease.TRIXIE,
+    )
 
     # No calls at all
     target.run.assert_not_called()
@@ -73,12 +100,91 @@ def test_configure_apt_sources_resolves_arch() -> None:
     logger = MagicMock()
     logger.has_warnings = False
 
-    _configure_apt_sources(target, vm_template, entries.apt_packages, entries.apt_sources, logger)
+    _configure_apt_sources(
+        target,
+        vm_template,
+        entries.apt_packages,
+        entries.apt_sources,
+        logger,
+        debian_release=DebianRelease.TRIXIE,
+    )
 
     # The source line written should have arm64, not {arch}
     write_calls = [str(c) for c in target.run.call_args_list if "sources.list.d" in str(c)]
     assert any("arm64" in c for c in write_calls)
     assert not any("{arch}" in c for c in write_calls)
+
+
+def test_configure_apt_sources_resolves_all_mappings_before_guest_mutation() -> None:
+    target = MagicMock()
+    vm_template = _make_vm_template(apt_packages=["test-pkg"])
+    entries = _make_entries()
+    entries.apt_sources["test-source"] = AptSourceEntry(
+        name="test-source",
+        key_url="https://example.com/key.gpg",
+        key_path="/etc/apt/keyrings/test.gpg",
+        source=None,
+        sources={DebianRelease.TRIXIE: "deb https://example.com trixie main"},
+        source_file="test.list",
+    )
+
+    with pytest.raises(ConfigError) as caught:
+        _configure_apt_sources(
+            target,
+            vm_template,
+            entries.apt_packages,
+            entries.apt_sources,
+            MagicMock(),
+            debian_release=DebianRelease.BOOKWORM,
+        )
+
+    assert caught.value.entity_kind == "apt-source"
+    target.run.assert_not_called()
+
+
+def test_phase_b_resolves_all_release_maps_before_any_guest_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    target = MagicMock()
+    vm_template = _make_vm_template(apt_packages=["test-pkg"])
+    entries = _make_entries()
+    entries.apt_sources["test-source"] = AptSourceEntry(
+        name="test-source",
+        key_url="https://example.com/key.gpg",
+        key_path="/etc/apt/keyrings/test.gpg",
+        source=None,
+        sources={DebianRelease.TRIXIE: "deb https://example.com trixie main"},
+        source_file="test.list",
+    )
+    resources = {
+        "apt-source": entries.apt_sources,
+        "apt-package": entries.apt_packages,
+        "system-install-command": entries.system_install_commands,
+        "user-install-command": entries.user_install_commands,
+    }
+    monkeypatch.setattr(
+        "agentworks.resources.access.kind_dict",
+        lambda registry, kind: resources[kind],
+    )
+
+    with pytest.raises(ConfigError) as caught:
+        _phase_b_setup(
+            MagicMock(),
+            MagicMock(),
+            MagicMock(),
+            vm_template,
+            MagicMock(),
+            "mapped-vm",
+            target,
+            (),
+            "/home/operator",
+            "operator",
+            MagicMock(),
+            debian_release=DebianRelease.BOOKWORM,
+            operation=VMInitializationOperation.VM_REINIT,
+        )
+
+    assert caught.value.entity_kind == "apt-source"
+    target.run.assert_not_called()
+    target.write_file.assert_not_called()
 
 
 # -- Apt package tests --

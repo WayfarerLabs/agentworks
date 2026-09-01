@@ -44,6 +44,7 @@ EXPECTED_APT_SOURCES: dict[str, dict[str, Any]] = {
             "deb [arch={arch} signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] "
             "https://cli.github.com/packages stable main"
         ),
+        "sources": None,
         "source_file": "github-cli.list",
         "key_dearmor": False,
     },
@@ -52,10 +53,17 @@ EXPECTED_APT_SOURCES: dict[str, dict[str, Any]] = {
         "description": "HashiCorp official apt repository",
         "key_url": "https://apt.releases.hashicorp.com/gpg",
         "key_path": "/etc/apt/keyrings/hashicorp-archive-keyring.gpg",
-        "source": (
-            "deb [arch={arch} signed-by=/etc/apt/keyrings/hashicorp-archive-keyring.gpg] "
-            "https://apt.releases.hashicorp.com bookworm main"
-        ),
+        "source": None,
+        "sources": {
+            "bookworm": (
+                "deb [arch={arch} signed-by=/etc/apt/keyrings/hashicorp-archive-keyring.gpg] "
+                "https://apt.releases.hashicorp.com bookworm main"
+            ),
+            "trixie": (
+                "deb [arch={arch} signed-by=/etc/apt/keyrings/hashicorp-archive-keyring.gpg] "
+                "https://apt.releases.hashicorp.com trixie main"
+            ),
+        },
         "source_file": "hashicorp.list",
         "key_dearmor": True,
     },
@@ -68,6 +76,7 @@ EXPECTED_APT_SOURCES: dict[str, dict[str, Any]] = {
             "deb [arch={arch} signed-by=/etc/apt/keyrings/nodesource.gpg] "
             "https://deb.nodesource.com/node_22.x nodistro main"
         ),
+        "sources": None,
         "source_file": "nodesource.list",
         "key_dearmor": True,
     },
@@ -76,9 +85,17 @@ EXPECTED_APT_SOURCES: dict[str, dict[str, Any]] = {
         "description": "ngrok agent apt repository",
         "key_url": "https://ngrok-agent.s3.amazonaws.com/ngrok.asc",
         "key_path": "/etc/apt/keyrings/ngrok.gpg",
-        "source": (
-            "deb [arch={arch} signed-by=/etc/apt/keyrings/ngrok.gpg] https://ngrok-agent.s3.amazonaws.com bookworm main"
-        ),
+        "source": None,
+        "sources": {
+            "bookworm": (
+                "deb [arch={arch} signed-by=/etc/apt/keyrings/ngrok.gpg] "
+                "https://ngrok-agent.s3.amazonaws.com bookworm main"
+            ),
+            "trixie": (
+                "deb [arch={arch} signed-by=/etc/apt/keyrings/ngrok.gpg] "
+                "https://ngrok-agent.s3.amazonaws.com bookworm main"
+            ),
+        },
         "source_file": "ngrok.list",
         "key_dearmor": True,
     },
@@ -87,10 +104,17 @@ EXPECTED_APT_SOURCES: dict[str, dict[str, Any]] = {
         "description": "tofuutils tenv apt repository (Cloudsmith)",
         "key_url": "https://dl.cloudsmith.io/public/tofuutils/tenv/gpg.8ACD4386ADD982F6.key",
         "key_path": "/etc/apt/keyrings/tofuutils-tenv-archive-keyring.gpg",
-        "source": (
-            "deb [signed-by=/etc/apt/keyrings/tofuutils-tenv-archive-keyring.gpg] "
-            "https://dl.cloudsmith.io/public/tofuutils/tenv/deb/debian bookworm main"
-        ),
+        "source": None,
+        "sources": {
+            "bookworm": (
+                "deb [signed-by=/etc/apt/keyrings/tofuutils-tenv-archive-keyring.gpg] "
+                "https://dl.cloudsmith.io/public/tofuutils/tenv/deb/debian bookworm main"
+            ),
+            "trixie": (
+                "deb [signed-by=/etc/apt/keyrings/tofuutils-tenv-archive-keyring.gpg] "
+                "https://dl.cloudsmith.io/public/tofuutils/tenv/deb/debian trixie main"
+            ),
+        },
         "source_file": "tofuutils-tenv.list",
         "key_dearmor": True,
     },
@@ -201,6 +225,7 @@ def apt_source_payload(entry: AptSourceEntry) -> dict[str, Any]:
         "key_url": entry.key_url,
         "key_path": entry.key_path,
         "source": entry.source,
+        "sources": ({release.value: value for release, value in entry.sources.items()} if entry.sources else None),
         "source_file": entry.source_file,
         "key_dearmor": entry.key_dearmor,
     }

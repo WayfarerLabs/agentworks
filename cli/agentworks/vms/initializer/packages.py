@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.apt import AptPackageEntry, AptSourceEntry
+    from agentworks.debian import DebianRelease
     from agentworks.install_commands import SystemInstallCommandEntry, UserInstallCommandEntry
     from agentworks.transports import Transport
     from agentworks.vms.templates import ResolvedVMTemplate
@@ -28,21 +29,19 @@ def _configure_apt_sources(
     apt_packages: Mapping[str, AptPackageEntry],
     apt_sources: Mapping[str, AptSourceEntry],
     logger: SSHLogger,
+    *,
+    debian_release: DebianRelease,
+    resolved_sources: Mapping[str, tuple[AptSourceEntry, str]] | None = None,
 ) -> None:
     """Configure apt sources required by selected apt_packages. Idempotent."""
-    # Collect all apt sources needed by selected apt_packages
-    required_sources: dict[str, AptSourceEntry] = {}
-    for pkg_name in vm_template.apt_packages:
-        pkg = apt_packages.get(pkg_name)
-        if pkg is None:
-            continue
-        for src_name in pkg.apt_sources:
-            if src_name not in required_sources:
-                src = apt_sources.get(src_name)
-                if src is not None:
-                    required_sources[src_name] = src
-
-    if not required_sources:
+    if resolved_sources is None:
+        resolved_sources = _resolve_apt_sources(
+            vm_template,
+            apt_packages,
+            apt_sources,
+            debian_release=debian_release,
+        )
+    if not resolved_sources:
         return
 
     logger.step("Apt sources")
@@ -52,7 +51,7 @@ def _configure_apt_sources(
     arch = arch_result.stdout.strip() if arch_result.returncode == 0 else "amd64"
 
     newly_configured = False
-    for name, src in required_sources.items():
+    for name, (src, source_line) in resolved_sources.items():
         # Check if GPG key already exists
         key_exists = target.run(f"test -f {shlex.quote(src.key_path)}", check=False).returncode == 0
 
@@ -90,7 +89,7 @@ def _configure_apt_sources(
 
         # Always ensure the source list file has the correct content,
         # even when the key already existed (the source URL may have changed).
-        resolved_source = src.source.replace("{arch}", arch)
+        resolved_source = source_line.replace("{arch}", arch)
         source_path = f"/etc/apt/sources.list.d/{src.source_file}"
         expected = resolved_source + "\n"
         current = target.run(f"cat {shlex.quote(source_path)}", check=False)
@@ -123,6 +122,28 @@ def _configure_apt_sources(
             msg = f"apt-get update failed after adding sources: {e}"
             logger.warning(msg)
             output.warn(msg)
+
+
+def _resolve_apt_sources(
+    vm_template: ResolvedVMTemplate,
+    apt_packages: Mapping[str, AptPackageEntry],
+    apt_sources: Mapping[str, AptSourceEntry],
+    *,
+    debian_release: DebianRelease,
+) -> dict[str, tuple[AptSourceEntry, str]]:
+    """Resolve every selected release map before any APT mutation."""
+    required_sources: dict[str, AptSourceEntry] = {}
+    for pkg_name in vm_template.apt_packages:
+        pkg = apt_packages.get(pkg_name)
+        if pkg is None:
+            continue
+        for src_name in pkg.apt_sources:
+            if src_name not in required_sources:
+                src = apt_sources.get(src_name)
+                if src is not None:
+                    required_sources[src_name] = src
+
+    return {name: (source, source.source_for(debian_release)) for name, source in required_sources.items()}
 
 
 def _install_system_packages(

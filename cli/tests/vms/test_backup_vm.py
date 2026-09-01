@@ -13,7 +13,8 @@ from contextlib import nullcontext
 from json import loads
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -24,7 +25,7 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import backup as vm_backup
 
 if TYPE_CHECKING:
-    from agentworks.db import Database
+    from agentworks.db import Database, WorkspaceRow
 
 
 def test_missing_tailscale_fails_before_the_boundary(
@@ -57,6 +58,34 @@ def test_backup_directory_refuses_a_collision(tmp_path: Path) -> None:
 
     with pytest.raises(BackupError):
         vm_backup._create_backup_directory(destination, "bvm")  # noqa: SLF001
+
+
+def test_workspace_path_staging_is_cleaned_when_upload_fails(tmp_path: Path) -> None:
+    target = MagicMock()
+
+    def _run(command: str, **kwargs: object) -> SimpleNamespace:
+        del kwargs
+        if command == "mktemp -d /var/tmp/agentworks-backup-XXXXXX":
+            return SimpleNamespace(stdout="/var/tmp/agentworks-backup-safe\n", ok=True, returncode=0)
+        if command == "mktemp /var/tmp/_aw_paths_XXXXXX.txt":
+            return SimpleNamespace(stdout="/var/tmp/_aw_paths_safe.txt\n", ok=True, returncode=0)
+        if command.startswith("du -sb"):
+            return SimpleNamespace(stdout="1024\n", ok=True, returncode=0)
+        return SimpleNamespace(stdout="", ok=True, returncode=0)
+
+    target.run.side_effect = _run
+    target.write_file.side_effect = OSError("upload failed")
+
+    with pytest.raises(OSError):
+        vm_backup._archive_workspaces(  # noqa: SLF001
+            target,
+            [cast("WorkspaceRow", SimpleNamespace(workspace_path="/srv/workspace"))],
+            tmp_path / "workspaces.tar.zst",
+            "operator",
+        )
+
+    commands = [call.args[0] for call in target.run.call_args_list]
+    assert "rm -f /var/tmp/_aw_paths_safe.txt" in commands
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX symlink protection")

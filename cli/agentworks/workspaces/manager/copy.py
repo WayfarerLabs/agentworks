@@ -154,6 +154,7 @@ def copy_workspace(
                 )
 
             lg = SSHLogger(dest_vm.name, "workspace-copy")
+            remote_tmp: str | None = None
             try:
                 dest_target = transport(dest_vm, config, logger=lg)
 
@@ -173,10 +174,13 @@ def copy_workspace(
                 dest_target.run(f"chmod 2770 {workspace_path}", sudo=True)
 
                 # Unpack archive and fix ownership
-                remote_tmp = f"/tmp/{dest_name}-copy.tgz"
+                remote_tmp = dest_target.run("mktemp /var/tmp/agentworks-workspace-copy-XXXXXX.tgz").stdout.strip()
                 dest_target.copy_to(tmp_path, remote_tmp, timeout=300)
-                dest_target.run(f"tar xzf {remote_tmp} -C {workspace_path}", sudo=True, timeout=120)
-                dest_target.run(f"rm -f {remote_tmp}", check=False, timeout=10)
+                dest_target.run(
+                    f"tar xzf {shlex.quote(remote_tmp)} -C {shlex.quote(workspace_path)}",
+                    sudo=True,
+                    timeout=120,
+                )
                 dest_target.run(
                     f"chown -R {dest_vm.admin_username}:{ws_group} {workspace_path}",
                     sudo=True,
@@ -228,6 +232,11 @@ def copy_workspace(
                 vscode_path = generate_vscode_workspace(dest_vm, config, dest_name, workspace_path)
                 output.detail(f"VS Code workspace: {format_host_path(vscode_path)}")
             finally:
+                if remote_tmp is not None:
+                    try:
+                        dest_target.run(f"rm -f {shlex.quote(remote_tmp)}", check=False, timeout=10)
+                    except Exception as error:
+                        output.warn(f"Could not remove remote workspace-copy archive: {error}")
                 # Exactly-once close, in a finally so a cancellation (the
                 # sanctioned KeyboardInterrupt re-raise out of
                 # materialize_grant_all_agents) or an error from any

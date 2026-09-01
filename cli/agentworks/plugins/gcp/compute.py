@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from agentworks.errors import AlreadyExistsError, ConfigError
-from agentworks.plugins.gcp.config import IMAGE_PROJECT, MachineTypeSelection, image_family_for_arch
+from agentworks.plugins.gcp.config import IMAGE_PROJECT, MachineTypeSelection
 from agentworks.plugins.gcp.errors import GCEError, GCEOperationError, call_google_optional
 
 if TYPE_CHECKING:
@@ -146,7 +146,7 @@ def verify_live_machine_type(
             f"GCE machine type '{selected.type}' is incompatible with this platform's storage or accelerator contract",
             hint=(
                 f"select a machine_types entry where '{selected.type}' supports Persistent Disk and requires no "
-                "guest accelerator; gcp-gce currently provisions a CPU-only Debian 12 VM with a "
+                "guest accelerator; gcp-gce provisions a CPU-only Debian VM with a "
                 "'pd-balanced' boot disk"
             ),
         )
@@ -210,11 +210,11 @@ def resolve_debian_image(
     clients: GcpClientCache,
     ctx: RunContext,
     arch: str,
+    family: str,
 ) -> Any:
-    """Resolve and architecture-check the public Debian 12 image family."""
+    """Resolve and architecture-check one selected public Debian image family."""
     if arch not in {"x86_64", "arm64"}:
         raise ConfigError(f"unsupported GCE image architecture '{arch}'")
-    family = image_family_for_arch(arch)  # type: ignore[arg-type]
     client = clients.client("images", ctx)
     image = call_google_optional(
         lambda: client.get_from_family(project=IMAGE_PROJECT, family=family),

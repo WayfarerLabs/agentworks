@@ -354,10 +354,10 @@ def test_write_file_chmods_when_mode_supplied(tmp_path: Path) -> None:
     t = SSHTransport(host="vm1", user="agentworks")
     with patch.object(t, "copy_to"), patch.object(t, "run") as mock_run:
         mock_run.return_value = SSHResult(returncode=0, stdout="", stderr="")
-        t.write_file("/remote/conf", "x", mode="0644")
+        t.write_file("/remote path/$(false)", "x", mode="0644")
         # Last call (after the copy) should chmod the remote path.
         mock_run.assert_called_once()
-        assert mock_run.call_args[0][0] == "chmod 0644 /remote/conf"
+        assert mock_run.call_args[0][0] == "chmod -- 0644 '/remote path/$(false)'"
 
 
 # ---------------------------------------------------------------------------

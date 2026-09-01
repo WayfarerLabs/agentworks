@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from agentworks.errors import MigrationBlockedError
 from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
@@ -47,6 +48,31 @@ def _load_legacy_toml() -> dict[str, Any]:
             return tomllib.load(f)
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
         return {}
+
+
+def _retire_vm_checkpoints(conn: sqlite3.Connection, _context: MigrationContext) -> None:
+    """Drop the superseded checkpoint schema only after proving it empty."""
+
+    # Own the write slot before observing emptiness. An already-running v34
+    # process does not know about the sidecar migration lock and could otherwise
+    # insert an ownership row between SELECT and DROP. The migration runner's
+    # schema-version insert and commit close this same transaction.
+    conn.execute("BEGIN IMMEDIATE")
+    exists = conn.execute("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'vm_checkpoints'").fetchone()
+    if exists is None:
+        return
+    names = [row[0] for row in conn.execute("SELECT vm_name FROM vm_checkpoints ORDER BY vm_name").fetchall()]
+    if names:
+        raise MigrationBlockedError(
+            "state database migration is blocked by managed VM checkpoint records",
+            entity_kind="database",
+            hint=(
+                "Reinstall the previous Agentworks build, delete each managed checkpoint for VMs: "
+                + ", ".join(names)
+                + ", then retry."
+            ),
+        )
+    conn.execute("DROP TABLE vm_checkpoints")
 
 
 def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> None:
@@ -650,6 +676,46 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
         CREATE INDEX idx_instance_records_kind_type
             ON instance_records (instance_kind, record_type, instance_name, record_key);
     """,
+    # -- Last live Debian release observation. Both columns are nullable --
+    # -- for pre-observation VMs, but they must change as one fact. The ---
+    # -- release itself is intentionally not enumerated in SQL so future -
+    # -- registry profiles do not require another schema-shape migration. -
+    33: """
+        ALTER TABLE vms ADD COLUMN debian_release TEXT;
+        ALTER TABLE vms ADD COLUMN debian_release_observed_at TEXT
+            CHECK ((debian_release IS NULL) = (debian_release_observed_at IS NULL));
+    """,
+    # -- One Agentworks-managed recovery checkpoint per VM. Operation -----
+    # -- identity fences interrupted lifecycle retries; the desired-state -
+    # -- fingerprint lets core refuse an unsafe whole-VM restore after ----
+    # -- the VM-owned desired database subtree has changed. ---------------
+    34: """
+        CREATE TABLE vm_checkpoints (
+            vm_name                   TEXT PRIMARY KEY
+                                      REFERENCES vms(name) ON DELETE RESTRICT,
+            name                      TEXT NOT NULL UNIQUE,
+            provider_identifier       TEXT,
+            operation_id              TEXT UNIQUE,
+            desired_state_fingerprint TEXT NOT NULL
+                                      CHECK (length(desired_state_fingerprint) = 64),
+            state                     TEXT NOT NULL
+                                      CHECK (state IN ('creating', 'ready', 'restoring', 'deleting')),
+            capture_release           TEXT NOT NULL,
+            source_release            TEXT,
+            target_release            TEXT,
+            created_at                TEXT NOT NULL
+                                      DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            CHECK (provider_identifier IS NOT NULL OR state = 'creating'),
+            CHECK ((state = 'ready') = (operation_id IS NULL)),
+            CHECK ((source_release IS NULL) = (target_release IS NULL)),
+            CHECK (source_release IS NULL OR capture_release = source_release)
+        );
+    """,
+    # -- Assisted upgrades and their managed checkpoint product were -----
+    # -- removed before release. Keep the already-applied v34 history for -
+    # -- development installations, but never discard a provider-artifact -
+    # -- ownership record implicitly. ------------------------------------
+    35: _retire_vm_checkpoints,
 }
 
 LATEST_VERSION = max(MIGRATIONS)
@@ -758,12 +824,28 @@ _SCHEMA_SENTINEL_ADDITIONS: dict[int, dict[str, tuple[str, ...]]] = {
             "operation",
         )
     },
+    33: {"vms": ("debian_release", "debian_release_observed_at")},
+    34: {
+        "vm_checkpoints": (
+            "vm_name",
+            "name",
+            "provider_identifier",
+            "operation_id",
+            "desired_state_fingerprint",
+            "state",
+            "capture_release",
+            "source_release",
+            "target_release",
+            "created_at",
+        )
+    },
 }
 
 _SCHEMA_SENTINEL_REMOVED_TABLES: dict[int, tuple[str, ...]] = {
     5: ("vm_git_host_keys",),
     17: ("tasks",),
     27: ("vm_hosts",),
+    35: ("vm_checkpoints",),
 }
 
 _SCHEMA_SENTINEL_REMOVED_COLUMNS: dict[int, dict[str, tuple[str, ...]]] = {

@@ -135,6 +135,19 @@ def vm_backup(
     backup_vm(get_db(), load_config(), name, interaction=interaction)
 
 
+@vm_app.command("confirm-release")
+def vm_confirm_release(
+    name: Annotated[str, typer.Argument(help="VM name")],
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
+) -> None:
+    """Observe and explicitly record a VM's live Debian release."""
+    interaction = ordinary_tty_interaction_policy()
+    from agentworks.config import load_config
+    from agentworks.vms.manager import confirm_vm_release
+
+    confirm_vm_release(get_db(), load_config(), name, yes=yes, interaction=interaction)
+
+
 @vm_app.command("describe")
 def vm_describe(
     name: Annotated[str, typer.Argument(help="VM name")],

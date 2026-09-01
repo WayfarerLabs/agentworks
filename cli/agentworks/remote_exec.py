@@ -49,7 +49,7 @@ def run_detached(
     command: str,
     *,
     label: str = "Remote command",
-    base_path: str = "/tmp/agentworks-detached",
+    base_path: str = "/var/tmp/agentworks-detached",
     poll_interval: int = 3,
     quiet_timeout: int = 300,
     timeout: int | None = None,

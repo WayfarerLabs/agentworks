@@ -57,7 +57,7 @@ def proxmox_site() -> ManifestDoc:
                 "api_url": "https://pve:8006",
                 "node": "pve1",
                 "token_id": "agw@pam!agw",
-                "template_vmid": 9000,
+                "template_vmids": {"trixie": 9001},
             }
         },
     )

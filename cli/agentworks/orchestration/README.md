@@ -142,7 +142,7 @@ Two config-shaped inputs feed it. A capability's config-**independent** host sup
 capability node's own readiness: `VMPlatform.unsupported_reason()` answers "could any configuration
 ever work here" (wsl2 off Windows), and the fold reads it off the graph-carried impl. A capability's
 config-**dependent** check is keyed on the consuming resource's config (a local-Lima site without
-`limactl`; an ssh-placed site needs nothing locally). A consuming resource then decides its own
+`limactl`; an ssh-placed site without local `ssh`). A consuming resource then decides its own
 verdict from its dependencies' states: the fold hands each node a `DependencyState` per dependency
 (that dep's enablement, its readiness when enabled, its carried disabled reason, and its impl), and
 the resource-level `not_ready(deps)` hook folds them however it likes. The fold imposes no
