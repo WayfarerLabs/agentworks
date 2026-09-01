@@ -79,7 +79,11 @@ def _common_stubs(monkeypatch: pytest.MonkeyPatch, target: _GrokTarget) -> None:
     stub_vm_gates(monkeypatch)
     stub_session_resolvers(monkeypatch)
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)
-    monkeypatch.setattr(session_manager, "_get_boot_id", lambda *args, **kwargs: "boot-x")
+    monkeypatch.setattr(
+        session_manager,
+        "_get_boot_id",
+        lambda *args, **kwargs: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    )
     monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *args, **kwargs: None)
     _template(monkeypatch)
 
@@ -98,7 +102,7 @@ def _capture_tmux(monkeypatch: pytest.MonkeyPatch, events: list[str], captured: 
         "capture_tmux_server_fingerprint",
         lambda **kwargs: FingerprintProbe(
             ProbeStatus.PRESENT,
-            TmuxServerFingerprint(pid=4243, boot_id="boot-x", start_ticks=1),
+            TmuxServerFingerprint(pid=4243, boot_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", start_ticks=1),
         ),
     )
 
@@ -192,7 +196,13 @@ def test_restart_reads_uuid_and_detects_after_killing_old_workload(
         SessionMode.ADMIN,
         harness_integration_state={"grok-build": {"session_id": sid}},
     )
-    db.update_session_runtime("s1", socket_path="/tmp/s1.sock", pid=4242, boot_id="boot-x", tmux_server_start_ticks=77)
+    db.update_session_runtime(
+        "s1",
+        socket_path="/tmp/s1.sock",
+        pid=4242,
+        boot_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        tmux_server_start_ticks=77,
+    )
 
     events: list[str] = []
     captured: dict[str, str] = {}

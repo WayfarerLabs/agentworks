@@ -68,7 +68,9 @@ def test_restore_session_errors_when_tmux_not_running(db: Database, fake_target:
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
 
     # has-session returns nonzero (default _FakeResult is ok, so override).
-    fake_target.responses["has-session -t =aw-console-con"] = _FakeResult(returncode=1)
+    fake_target.responses["has-session -t =aw-console-con"] = _FakeResult(
+        returncode=1, stderr="can't find session: aw-console-con"
+    )
     with pytest.raises(StateError, match="has no live tmux session"):
         restore_session(
             db, _StubConfig(), console_name="con", session_name="a", interaction=TtyInteractionPolicy.REFUSE
@@ -365,7 +367,7 @@ def test_restore_session_refuses_when_session_pane_killed(db: Database, fake_tar
     # Read-only probes only: the window and its live panes are left exactly as
     # they were, so the operator decides whether to recreate.
     assert fake_target.commands == [
-        "tmux has-session -t =aw-console-con 2>/dev/null",
+        "tmux has-session -t =aw-console-con",
         "tmux list-windows -t =aw-console-con -F '#{window_name}'",
         "tmux list-panes -t =aw-console-con:a -F '#{pane_id}|#{pane_index}|#{@agentworks-shell-index}'",
     ]

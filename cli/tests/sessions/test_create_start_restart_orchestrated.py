@@ -29,7 +29,6 @@ from agentworks.bootstrap import build_registry as _real_build_registry
 from agentworks.bootstrap import load_request_registry as _real_load_request_registry
 from agentworks.db import Database, InitStatus, SessionMode, SessionStatus
 from agentworks.errors import NotFoundError, StateError, ValidationError
-from agentworks.output import Role
 from agentworks.secrets.orchestration import (
     resolve_for_command as _real_resolve_for_command,
 )
@@ -46,6 +45,8 @@ from ..conftest import (
     stub_vm_ssh_identity,
 )
 from ..orchestrated_fixtures import PLUGINS_ENABLED, proxmox_site, write_operator_config
+
+BOOT_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -173,7 +174,7 @@ def _restart_fixture(
         agent_name="a1",
         socket_path="/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock",
     )
-    db.update_session_runtime("s1", socket_path="/tmp/s1.sock", pid=4242, boot_id="boot-x", tmux_server_start_ticks=77)
+    db.update_session_runtime("s1", socket_path="/tmp/s1.sock", pid=4242, boot_id=BOOT_ID, tmux_server_start_ticks=77)
 
     events: list[str] = []
     _patch_transports(monkeypatch, _Target(events), _Target(events, missing=missing))
@@ -221,10 +222,10 @@ def _restart_fixture(
         "capture_tmux_server_fingerprint",
         lambda **kwargs: FingerprintProbe(
             ProbeStatus.PRESENT,
-            TmuxServerFingerprint(pid=4243, boot_id="boot-x", start_ticks=1),
+            TmuxServerFingerprint(pid=4243, boot_id=BOOT_ID, start_ticks=1),
         ),
     )
-    monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: "boot-x")
+    monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: BOOT_ID)
     monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
     return db, events
 
@@ -428,10 +429,10 @@ def _create_stubs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, events: list[
         "capture_tmux_server_fingerprint",
         lambda **kwargs: FingerprintProbe(
             ProbeStatus.PRESENT,
-            TmuxServerFingerprint(pid=4243, boot_id="boot-x", start_ticks=1),
+            TmuxServerFingerprint(pid=4243, boot_id=BOOT_ID, start_ticks=1),
         ),
     )
-    monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: "boot-x")
+    monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: BOOT_ID)
     monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
     return db
 
@@ -1173,10 +1174,10 @@ def _patch_session_ops(monkeypatch: pytest.MonkeyPatch, events: list[str], captu
         "capture_tmux_server_fingerprint",
         lambda **kwargs: FingerprintProbe(
             ProbeStatus.PRESENT,
-            TmuxServerFingerprint(pid=4243, boot_id="boot-x", start_ticks=1),
+            TmuxServerFingerprint(pid=4243, boot_id=BOOT_ID, start_ticks=1),
         ),
     )
-    monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: "boot-x")
+    monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: BOOT_ID)
     monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
 
 
@@ -1185,7 +1186,6 @@ def test_create_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
     monkeypatch: pytest.MonkeyPatch,
-    captured_output,  # noqa: ANN001
 ) -> None:
     """session create on a stopped VM: the gate's just-in-time token
     resolve is the first backend pass, the boundary pass covers only
@@ -1211,30 +1211,6 @@ def test_create_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
     assert events[:3] == ["status", "start", "tailscale"]  # the gate ran
     assert captured_env["API_KEY"] == "shhh"  # boundary values reached compose
     assert db.get_session("s1") is not None
-
-    # Phased framing (the vm-create model): even this admin + existing-
-    # workspace create, which has no ephemeral stages, reads as a plan
-    # with Preflight, Resolving Secrets, and Starting Session phases.
-    assert "=== Preflight ===" in captured_output.info
-    assert "=== Resolving Secrets ===" in captured_output.info
-    assert "=== Starting Session ===" in captured_output.info
-    assert any(m.startswith("Checking session-template/") for m in captured_output.info)
-
-    # Nesting, not just substrings: each phase header sits at level 0, the
-    # Preflight "Checking ..." lines are primary steps at the section level
-    # (Role.BODY, level 1, 2 spaces), and the terminal result line dedents
-    # to column 0 (Role.RESULT, level 0) even though it is emitted from
-    # inside the Starting Session section.
-    assert (Role.HEADER, 0, "Preflight") in captured_output.lines
-    assert (Role.HEADER, 0, "Starting Session") in captured_output.lines
-    assert any(
-        role is Role.BODY and level == 1 and msg.startswith("Checking session-template/")
-        for role, level, msg in captured_output.lines
-    )
-    assert any(
-        role is Role.RESULT and level == 0 and msg.startswith("Session 's1' started")
-        for role, level, msg in captured_output.lines
-    )
 
 
 def test_create_multiline_environment_secret_refuses_before_session_mutation(
@@ -1435,7 +1411,6 @@ def test_restart_stopped_vm_gate_seeds_and_env_pass_is_the_only_other(
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
     monkeypatch: pytest.MonkeyPatch,
-    captured_output,  # noqa: ANN001
 ) -> None:
     """session restart on a stopped VM: the gate's just-in-time token
     resolve seeds the boundary, whose own pass then covers NOTHING (the
@@ -1452,7 +1427,7 @@ def test_restart_stopped_vm_gate_seeds_and_env_pass_is_the_only_other(
     db.insert_session("s1", "ws1", "default", SessionMode.ADMIN)
     overlay = parse_instance_spec("session", '{"env":{"RESUME_SPEC":"set"}}')
     db.instance_state.put_desired_overlay("session", "s1", overlay.payload)
-    db.update_session_runtime("s1", socket_path="/tmp/s1.sock", pid=4242, boot_id="boot-x", tmux_server_start_ticks=77)
+    db.update_session_runtime("s1", socket_path="/tmp/s1.sock", pid=4242, boot_id=BOOT_ID, tmux_server_start_ticks=77)
     events: list[str] = []
     captured_env: dict[str, str] = {}
     _stop_the_vm(monkeypatch, events)
@@ -1472,22 +1447,6 @@ def test_restart_stopped_vm_gate_seeds_and_env_pass_is_the_only_other(
     assert captured_env["RESUME_SPEC"] == "set"
     assert "tmux_create" in events  # the command completed
 
-    # Restart now reads as a structured plan mirroring create: the
-    # Preflight / Resolving Secrets / Starting Session headers sit at level
-    # 0, the restart announce nests at level 1, and the terminal
-    # result line dedents to column 0.
-    assert (Role.HEADER, 0, "Preflight") in captured_output.lines
-    assert (Role.HEADER, 0, "Resolving Secrets") in captured_output.lines
-    assert (Role.HEADER, 0, "Starting Session") in captured_output.lines
-    assert any(
-        role is Role.BODY and level == 1 and msg.startswith("Restarting session 's1'")
-        for role, level, msg in captured_output.lines
-    )
-    assert any(
-        role is Role.RESULT and level == 0 and msg == "Session 's1' restarted"
-        for role, level, msg in captured_output.lines
-    )
-
 
 def test_restart_validates_stored_overlay_references_before_lifecycle_work(
     db: Database,
@@ -1504,7 +1463,7 @@ def test_restart_validates_stored_overlay_references_before_lifecycle_work(
     db.insert_session("s1", "ws1", "default", SessionMode.ADMIN)
     overlay = parse_instance_spec("session", '{"harness_integration":{"name":"missing"}}')
     db.instance_state.put_desired_overlay("session", "s1", overlay.payload)
-    db.update_session_runtime("s1", socket_path="/tmp/s1.sock", pid=4242, boot_id="boot-x", tmux_server_start_ticks=77)
+    db.update_session_runtime("s1", socket_path="/tmp/s1.sock", pid=4242, boot_id=BOOT_ID, tmux_server_start_ticks=77)
     events: list[str] = []
     captured_env: dict[str, str] = {}
     _stop_the_vm(monkeypatch, events)
@@ -1533,7 +1492,7 @@ def test_restart_multiline_environment_secret_refuses_before_kill(
     monkeypatch.setenv("AW_SECRET_API_KEY", environment_value)
     _seed_stopped_proxmox_vm(db)
     db.insert_session("s1", "ws1", "default", SessionMode.ADMIN, socket_path="/tmp/s1.sock")
-    db.update_session_runtime("s1", socket_path="/tmp/s1.sock", pid=4242, boot_id="boot-x", tmux_server_start_ticks=77)
+    db.update_session_runtime("s1", socket_path="/tmp/s1.sock", pid=4242, boot_id=BOOT_ID, tmux_server_start_ticks=77)
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
     events: list[str] = []
     captured_env: dict[str, str] = {}

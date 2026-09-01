@@ -101,9 +101,10 @@ def test_running_session_names_uses_live_status_check(db: Database, fake_target:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["alpha", "beta", "gamma"])
     # Give each session a PID so it's eligible for the batch check.
-    db._conn.execute("UPDATE sessions SET pid = 100, boot_id = 'b' WHERE name = 'alpha'")
-    db._conn.execute("UPDATE sessions SET pid = 200, boot_id = 'b' WHERE name = 'beta'")
-    db._conn.execute("UPDATE sessions SET pid = 300, boot_id = 'b' WHERE name = 'gamma'")
+    boot_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    db._conn.execute("UPDATE sessions SET pid = 100, boot_id = ? WHERE name = 'alpha'", (boot_id,))
+    db._conn.execute("UPDATE sessions SET pid = 200, boot_id = ? WHERE name = 'beta'", (boot_id,))
+    db._conn.execute("UPDATE sessions SET pid = 300, boot_id = ? WHERE name = 'gamma'", (boot_id,))
     db._conn.commit()
 
     # batch_check_all_sessions emits one compound shell command per VM. We
@@ -114,7 +115,7 @@ def test_running_session_names_uses_live_status_check(db: Database, fake_target:
         if "has-session -t =alpha" in command and "has-session -t =beta" in command:
             return _FakeResult(
                 returncode=0,
-                stdout="S:alpha:0\nS:beta:0\nS:gamma:1:b:1\n",
+                stdout=f"S:alpha:0\nS:beta:0\nS:gamma:1:{boot_id.encode().hex()}:1\n",
             )
         return _FakeResult()
 

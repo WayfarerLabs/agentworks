@@ -79,7 +79,8 @@ def create_console(
     you want a top-level shell alongside the curated session windows. The
     definition inserts atomically after validation, secret resolution, and
     stale-runtime cleanup. A later build failure retains that honest stopped
-    definition so ``console start`` can retry it.
+    definition only when cleanup proves both runtime names absent so
+    ``console start`` can retry it.
 
     Live filtering (e.g. ``--all-running``) is resolved by the CLI layer into
     an explicit list of session names before calling this function.
@@ -195,11 +196,12 @@ def create_console(
                     entity_name=name,
                     hint=f"The stopped definition was retained; retry with `agw console start {name}`.",
                 ) from exc
+            db.delete_console(name)
             raise StateError(
-                f"console '{name}' was saved, but runtime cleanup could not be verified",
+                f"console '{name}' runtime cleanup could not be verified",
                 entity_kind="console",
                 entity_name=name,
-                hint="Inspect the canonical and staging tmux sessions before retrying.",
+                hint="Inspect the canonical and staging tmux sessions before creating the definition again.",
             ) from exc
 
     extras_note = " + admin shell" if add_admin_shell else ""

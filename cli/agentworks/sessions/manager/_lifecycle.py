@@ -86,19 +86,21 @@ def _remove_stale_socket_and_mark_stopped(
     db: Database,
 ) -> None:
     """Remove an exact stale socket only after the caller proved server absence."""
-    from agentworks.sessions.tmux import ProbeStatus, _presence_from_result
+    from agentworks.sessions.tmux import ProbeStatus, _test_presence_from_result
 
     if session.socket_path is not None:
         socket_path = _validated_socket_path(db, session)
         q_socket = shlex.quote(socket_path)
         removed = target.run(f"rm -f {q_socket}", sudo=not target_owns_session, check=False)
-        if _presence_from_result(removed) is not ProbeStatus.PRESENT:
+        if _test_presence_from_result(removed) is not ProbeStatus.PRESENT:
             raise ExternalError(
                 f"failed to remove stale tmux socket for session '{session.name}'",
                 entity_kind="session",
                 entity_name=session.name,
             )
-        remains = _presence_from_result(target.run(f"test -e {q_socket}", sudo=not target_owns_session, check=False))
+        remains = _test_presence_from_result(
+            target.run(f"test -e {q_socket}", sudo=not target_owns_session, check=False)
+        )
         if remains is not ProbeStatus.ABSENT:
             raise ExternalError(
                 f"could not verify stale tmux socket removal for session '{session.name}'",
@@ -215,7 +217,9 @@ def _teardown_session(
             raise
     observed = probe.fingerprint
     assert observed is not None
-    if observed.pid != session.pid or observed.boot_id != session.boot_id:
+    observed_boot_id = _mgr._validated_observed_boot_id(observed.boot_id, session=session)
+    stored_boot_id = _mgr._validated_stored_boot_id(session)
+    if observed.pid != session.pid or observed_boot_id != stored_boot_id:
         raise BrokenStateError(
             f"session '{session.name}' tmux server identity does not match persisted state",
             entity_kind="session",
@@ -227,7 +231,7 @@ def _teardown_session(
             session.name,
             socket_path=socket_path,
             pid=observed.pid,
-            boot_id=observed.boot_id,
+            boot_id=observed_boot_id,
             tmux_server_start_ticks=observed.start_ticks,
         )
     elif observed.start_ticks != stored_ticks:

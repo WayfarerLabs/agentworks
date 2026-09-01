@@ -124,17 +124,19 @@ def _repair_session_pid(
         if probe.status is ProbeStatus.PRESENT:
             fingerprint = probe.fingerprint
             assert fingerprint is not None
+            observed_boot_id = _validated_observed_boot_id(fingerprint.boot_id, session=session)
+            stored_boot_id = _validated_stored_boot_id(session) if session.boot_id is not None else None
             stored_ticks = _validated_stored_start_ticks(session)
             if (
                 (session.pid is None or session.pid == fingerprint.pid)
-                and (session.boot_id is None or session.boot_id == fingerprint.boot_id)
+                and (stored_boot_id is None or stored_boot_id == observed_boot_id)
                 and (stored_ticks is None or stored_ticks == fingerprint.start_ticks)
             ):
                 db.update_session_runtime(
                     session.name,
                     socket_path=sock,
                     pid=fingerprint.pid,
-                    boot_id=fingerprint.boot_id,
+                    boot_id=observed_boot_id,
                     tmux_server_start_ticks=fingerprint.start_ticks,
                 )
                 output.info(f"Recovered runtime identity for session '{session.name}'")
@@ -179,16 +181,46 @@ def _validated_stored_start_ticks(session: SessionRow) -> int | None:
     return value
 
 
+def _validated_stored_boot_id(session: SessionRow) -> str:
+    """Return a canonical persisted boot UUID or fail closed."""
+    from agentworks.sessions.tmux import canonical_boot_id
+
+    value = canonical_boot_id(session.boot_id)
+    if value is None:
+        raise StateError(
+            f"session '{session.name}' has an invalid stored VM boot identity",
+            entity_kind="session",
+            entity_name=session.name,
+            hint="Repair the persisted runtime identity before retrying.",
+        )
+    return value
+
+
+def _validated_observed_boot_id(value: object, *, session: SessionRow) -> str:
+    """Return a canonical observed boot UUID or fail closed."""
+    from agentworks.sessions.tmux import canonical_boot_id
+
+    boot_id = canonical_boot_id(value)
+    if boot_id is None:
+        raise StateError(
+            f"session '{session.name}' has an invalid observed VM boot identity",
+            entity_kind="session",
+            entity_name=session.name,
+        )
+    return boot_id
+
+
 def _prove_stored_runtime_absent(session: SessionRow, *, target: Transport) -> bool:
     """Prove the stored process incarnation absent without signaling its PID."""
     from agentworks.sessions.tmux import ProbeStatus, probe_process_start_ticks
 
-    if session.pid is None or session.pid <= 0 or not session.boot_id:
+    if session.pid is None or session.pid <= 0 or session.boot_id is None:
         raise StateError(
             f"session '{session.name}' lacks the stored identity required to prove runtime absence",
             entity_kind="session",
             entity_name=session.name,
         )
+    stored_boot_id = _validated_stored_boot_id(session)
     stored_ticks = _validated_stored_start_ticks(session)
     current_boot = _mgr._get_boot_id(target)
     if current_boot is None:
@@ -197,7 +229,7 @@ def _prove_stored_runtime_absent(session: SessionRow, *, target: Transport) -> b
             entity_kind="session",
             entity_name=session.name,
         )
-    if current_boot != session.boot_id:
+    if current_boot != stored_boot_id:
         return True
 
     pid_presence = _mgr._pid_presence(session.pid, target=target)

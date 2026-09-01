@@ -18,6 +18,7 @@ from agentworks.sessions.multi_console import (
     start_console,
     stop_console,
 )
+from agentworks.sessions.tmux import ProbeStatus
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
 from tests._tmux_model import TmuxModel
 from tests.conftest import _FakeResult
@@ -80,6 +81,42 @@ def test_create_failure_retains_stopped_definition_and_cleans_staging(
         )
 
     assert db.get_console("con") is not None
+    assert not model.has_session("aw-console-con")
+    assert not model.has_session("aw-console-build+con")
+
+
+def test_create_failure_removes_definition_when_runtime_absence_is_indeterminate(
+    db: Database,
+    console_target_factory: Callable[[TmuxModel, dict[str, _FakeResult]], _FakeTarget],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentworks.sessions.multi_console as multi_console
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["alpha"])
+    model = TmuxModel()
+    console_target_factory(
+        model,
+        {"new-window -t =aw-console-build+con": _FakeResult(returncode=1, stderr="boom")},
+    )
+    monkeypatch.setattr(
+        multi_console,
+        "_console_runtime_presence",
+        lambda *args, **kwargs: (ProbeStatus.UNKNOWN, ProbeStatus.ABSENT),
+    )
+
+    with pytest.raises(StateError):
+        create_console(
+            db,
+            _StubConfig(),
+            name="con",
+            vm_name="vm1",
+            session_specs=["alpha"],
+            interaction=_refuse(),
+        )
+
+    assert db.get_console("con") is None
+    assert db.list_console_sessions("con") == []
     assert not model.has_session("aw-console-con")
     assert not model.has_session("aw-console-build+con")
 

@@ -15,6 +15,9 @@ Two contracts live here:
 from __future__ import annotations
 
 import shlex
+import shutil
+import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -101,9 +104,18 @@ def test_process_start_ticks_parser_uses_the_final_comm_delimiter() -> None:
 
 
 class _FingerprintTarget:
-    def __init__(self, *, second_pid: int = 42, second_ticks: int = 98765) -> None:
+    def __init__(
+        self,
+        *,
+        second_pid: int = 42,
+        second_ticks: int = 98765,
+        boot_id: str = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        boot_returncode: int = 0,
+    ) -> None:
         self.second_pid = second_pid
         self.second_ticks = second_ticks
+        self.boot_id = boot_id
+        self.boot_returncode = boot_returncode
         self.pid_reads = 0
         self.stat_reads = 0
 
@@ -119,7 +131,7 @@ class _FingerprintTarget:
             fields_after_comm[-1] = str(ticks)
             return _SpyResult(stdout=f"42 (tmux: server) {' '.join(fields_after_comm)}\n")
         if "boot_id" in command:
-            return _SpyResult(stdout="boot-x\n")
+            return _SpyResult(stdout=f"{self.boot_id}\n", returncode=self.boot_returncode)
         raise AssertionError(command)
 
 
@@ -131,7 +143,7 @@ def test_fingerprint_capture_requires_two_matching_pid_and_stat_reads() -> None:
     assert stable.fingerprint is not None
     assert (stable.fingerprint.pid, stable.fingerprint.boot_id, stable.fingerprint.start_ticks) == (
         42,
-        "boot-x",
+        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
         98765,
     )
     changed_pid = capture_tmux_server_fingerprint(
@@ -144,6 +156,98 @@ def test_fingerprint_capture_requires_two_matching_pid_and_stat_reads() -> None:
     )
     assert changed_pid.status is ProbeStatus.UNKNOWN
     assert changed_ticks.status is ProbeStatus.UNKNOWN
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        _FingerprintTarget(boot_id="not-a-uuid"),
+        _FingerprintTarget(boot_returncode=1),
+    ],
+)
+def test_fingerprint_capture_fails_closed_for_untrusted_boot_identity(target: _FingerprintTarget) -> None:
+    from agentworks.sessions.tmux import ProbeStatus
+
+    result = capture_tmux_server_fingerprint(target=target, socket_path="/run/s1.sock")  # type: ignore[arg-type]
+    assert result.status is ProbeStatus.UNKNOWN
+    assert result.fingerprint is None
+
+
+@pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux is not installed")
+def test_tmux_presence_classifier_distinguishes_absence_from_permission_failure(tmp_path: Path) -> None:
+    from agentworks.sessions.tmux import ProbeStatus, _test_presence_from_result, _tmux_presence_from_result
+
+    socket_dir = tmp_path / "tmux"
+    socket_dir.mkdir()
+    socket_path = socket_dir / "server.sock"
+    subprocess.run(
+        ["tmux", "-S", str(socket_path), "new-session", "-d", "-s", "probe", "sleep 30"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    try:
+        missing_target = subprocess.run(
+            ["tmux", "-S", str(socket_path), "has-session", "-t", "=missing"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert _tmux_presence_from_result(missing_target, missing_target_is_absent=True) is ProbeStatus.ABSENT
+        assert _tmux_presence_from_result(missing_target, missing_target_is_absent=False) is ProbeStatus.UNKNOWN
+
+        socket_dir.chmod(0)
+        permission_denied = subprocess.run(
+            ["tmux", "-S", str(socket_path), "list-sessions"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert _tmux_presence_from_result(permission_denied, missing_target_is_absent=False) is ProbeStatus.UNKNOWN
+        assert _test_presence_from_result(permission_denied) is ProbeStatus.ABSENT
+    finally:
+        socket_dir.chmod(0o700)
+        subprocess.run(
+            ["tmux", "-S", str(socket_path), "kill-server"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+    missing_server = subprocess.run(
+        ["tmux", "-S", str(socket_path), "list-sessions"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert _tmux_presence_from_result(missing_server, missing_target_is_absent=False) is ProbeStatus.ABSENT
+
+
+def test_stale_socket_cleanup_removes_only_a_canonically_absent_server() -> None:
+    from agentworks.sessions.tmux import _cleanup_stale_sockets_under
+
+    class _CleanupTarget:
+        def __init__(self, diagnostic: str) -> None:
+            self.diagnostic = diagnostic
+            self.commands: list[str] = []
+
+        def run(self, command: str, **kwargs: object) -> _SpyResult:
+            self.commands.append(command)
+            if command.startswith("find "):
+                return _SpyResult(stdout="/run/agentworks/s.sock\n")
+            if "list-sessions" in command:
+                result = _SpyResult(returncode=1)
+                result.stderr = self.diagnostic
+                return result
+            return _SpyResult()
+
+    unknown = _CleanupTarget("error connecting to /run/agentworks/s.sock (Permission denied)")
+    assert _cleanup_stale_sockets_under(unknown, "/run/agentworks") == 0  # type: ignore[arg-type]
+    assert not any(command.startswith("rm -f ") for command in unknown.commands)
+
+    absent = _CleanupTarget("no server running on /run/agentworks/s.sock")
+    assert _cleanup_stale_sockets_under(absent, "/run/agentworks") == 1  # type: ignore[arg-type]
+    assert sum(command.startswith("rm -f ") for command in absent.commands) == 1
 
 
 # ---------------------------------------------------------------------------

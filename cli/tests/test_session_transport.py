@@ -30,6 +30,8 @@ from .conftest import (
     stub_vm_gates,
 )
 
+BOOT_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
 
 @pytest.fixture(autouse=True)
 def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -96,7 +98,7 @@ def _patch_common(
         "agentworks.sessions.tmux.capture_tmux_server_fingerprint",
         lambda **kwargs: FingerprintProbe(
             ProbeStatus.PRESENT,
-            TmuxServerFingerprint(pid=12345, boot_id="boot-x", start_ticks=1),
+            TmuxServerFingerprint(pid=12345, boot_id=BOOT_ID, start_ticks=1),
         ),
     )
     stub_vm_gates(monkeypatch)
@@ -112,7 +114,7 @@ def _seed_dedicated_admin_session(db: Database, name: str = "s1") -> object:
         name,
         socket_path=socket,
         pid=4242,
-        boot_id="boot-x",
+        boot_id=BOOT_ID,
         tmux_server_start_ticks=77,
     )
     session = db.get_session(name)
@@ -147,7 +149,7 @@ def test_dedicated_teardown_kills_the_fingerprinted_server_and_not_a_numeric_pid
         "capture_tmux_server_fingerprint",
         lambda **kwargs: FingerprintProbe(
             ProbeStatus.PRESENT,
-            TmuxServerFingerprint(pid=4242, boot_id="boot-x", start_ticks=77),
+            TmuxServerFingerprint(pid=4242, boot_id=BOOT_ID, start_ticks=77),
         ),
     )
     killed: list[str] = []
@@ -185,7 +187,7 @@ def test_dedicated_teardown_refuses_a_fingerprint_mismatch(tmp_path: Path, monke
         "capture_tmux_server_fingerprint",
         lambda **kwargs: FingerprintProbe(
             ProbeStatus.PRESENT,
-            TmuxServerFingerprint(pid=9999, boot_id="boot-x", start_ticks=77),
+            TmuxServerFingerprint(pid=9999, boot_id=BOOT_ID, start_ticks=77),
         ),
     )
     monkeypatch.setattr(
@@ -204,6 +206,21 @@ def test_dedicated_teardown_refuses_a_fingerprint_mismatch(tmp_path: Path, monke
         )
 
 
+def test_runtime_absence_proof_rejects_a_malformed_stored_boot_identity(tmp_path: Path) -> None:
+    from agentworks.errors import StateError
+    from agentworks.sessions import manager as session_manager
+
+    db = _seed_db(tmp_path)
+    session = _seed_dedicated_admin_session(db)
+    db._conn.execute("UPDATE sessions SET boot_id = 'not-a-uuid' WHERE name = 's1'")
+    db._conn.commit()
+    session = db.get_session("s1")
+    assert session is not None
+
+    with pytest.raises(StateError):
+        session_manager._prove_stored_runtime_absent(session, target=_Target("admin", []))
+
+
 def test_legacy_teardown_uses_root_transport_when_the_target_is_not_the_owner(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -217,7 +234,7 @@ def test_legacy_teardown_uses_root_transport_when_the_target_is_not_the_owner(
         "legacy",
         socket_path=None,
         pid=4242,
-        boot_id="boot-x",
+        boot_id=BOOT_ID,
         tmux_server_start_ticks=77,
     )
     session = db.get_session("legacy")
@@ -626,7 +643,7 @@ def test_restart_migrates_legacy_session_to_per_session_socket(tmp_path: Path, m
     stub_session_resolvers(monkeypatch)
 
     # Boot ID for the post-create atomic runtime update.
-    monkeypatch.setattr(session_manager, "_get_boot_id", lambda *_a, **_kw: "boot-x")
+    monkeypatch.setattr(session_manager, "_get_boot_id", lambda *_a, **_kw: BOOT_ID)
     # Tmuxinator regeneration is downstream of the migration; not in scope.
     monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *_a, **_kw: None)
     # _resolve_session_linux_user reads the VM/agent rows; stub to a literal.
@@ -669,7 +686,7 @@ def test_restart_migrates_legacy_session_to_per_session_socket(tmp_path: Path, m
         "capture_tmux_server_fingerprint",
         lambda **kwargs: FingerprintProbe(
             ProbeStatus.PRESENT,
-            TmuxServerFingerprint(pid=67890, boot_id="boot-x", start_ticks=2),
+            TmuxServerFingerprint(pid=67890, boot_id=BOOT_ID, start_ticks=2),
         ),
     )
 

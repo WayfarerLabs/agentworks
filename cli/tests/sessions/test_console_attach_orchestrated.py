@@ -75,7 +75,12 @@ class _FakeTarget:
 
     def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
         if "aw-console-build+c1" in cmd:
-            return SimpleNamespace(ok=False, returncode=1, stdout="", stderr="")
+            return SimpleNamespace(
+                ok=False,
+                returncode=1,
+                stdout="",
+                stderr="can't find session: aw-console-build+c1",
+            )
         return SimpleNamespace(ok=True, returncode=0, stdout="", stderr="")
 
     def interactive(self, cmd: str, **kwargs: object) -> int:
