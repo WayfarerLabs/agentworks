@@ -52,6 +52,8 @@ spec:
   key_dearmor: true
   sources:
     bookworm: "deb [arch={arch} signed-by=/etc/apt/keyrings/ngrok.gpg] https://ngrok-agent.s3.amazonaws.com bookworm main"
+    # 2026-08-31: ngrok's current Linux APT instructions still select Bookworm;
+    # dists/trixie/Release returns 404, so Trixie intentionally uses that suite.
     trixie: "deb [arch={arch} signed-by=/etc/apt/keyrings/ngrok.gpg] https://ngrok-agent.s3.amazonaws.com bookworm main"
   source_file: ngrok.list
 ---
