@@ -2,7 +2,7 @@
 
 <!-- cspell:ignore sdds -->
 
-- Status: Design review
+- Status: Implementation
 - Date: 2026-08-31
 - Requirements: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
@@ -10,25 +10,23 @@
 - Migration: [migration-strategy.md](./migration-strategy.md)
 - Research: [prior-art-research.md](./prior-art-research.md)
 - Source baseline: `8695afcd833790ee433b50bb9f5d5c696177233d`
-- Design PR: #710, based on `main`
+- Delivery PR: #710, based on `main`
 
 ## Delivery Rules
 
-- PR #710 is a design-only draft. It contains this SDD directory, carries
-  `sdd:session-console-lifecycle`, and uses the author-owned `review-requested` label for coherent
-  checkpoints. It has no implementation or merge intent while design review is active.
+- PR #710 is the single integrated design-and-implementation PR. It carries
+  `sdd:session-console-lifecycle`, remains draft while implementation is in motion, and becomes
+  ready only with a complete green implementation handoff.
 - The operator authorized up to three published feedback/fix cycles for this design. Each cycle
   waits at least 20 minutes from the preceding handoff, collects one complete batch, critically
   dispositions every material item, removes `review-requested` before mutation, reruns the private
   project and Muntz reviews after changes, then reapplies the signal at the coherent new head.
 - A divergent contract, requirement ambiguity, or non-converging finding stops for operator
   direction rather than spending the remaining budget by assumption.
-- The design PR does not authorize implementation. After design clearance and merge, implementation
-  uses a short two-PR stack based on the then-current `main`.
-- The first implementation PR is domain-complete for session and harness lifecycle. The second is
-  domain-complete for console lifecycle and may be stacked on the first. Neither separates a command
-  surface from its manager semantics, compatibility wrapper, collateral, or tests. The SDD remains
-  open until both land and combined verification completes.
+- Authenticated operator direction on 2026-09-01 superseded the design-first merge and two-PR stack:
+  implementation proceeds on PR #710 without merging the SDD separately. Session, harness, console,
+  compatibility, collateral, and tests therefore land as one coherent increment; no command surface
+  is separated from its manager semantics.
 - The implementation lead does not merge its own PR. Before merge it follows the integration-testing
   process and obtains operator-gated live evidence for representative session and console flows.
 - Completed plan checkboxes are immutable after merge. A later correction appends a superseding item
@@ -102,7 +100,8 @@ appropriate live tests. Tests assert behavior and structure, never the wording o
       primary signal/tmux evidence, dedicated `kill-server`, exact legacy `kill-session`, hardened
       proven-absence-only stale cleanup, and the separate systemd/cgroup security follow-up in issue
       #715; rerun the complete design gates and reviews.
-- [ ] Record final design clearance and merge PR #710 before implementation begins.
+- [x] Record final design clearance, then accept the operator's 2026-09-01 ruling to implement on PR
+      #710 without an intermediate SDD merge.
 
 ### Phase 0 Definition of Done
 
@@ -229,7 +228,8 @@ appropriate live tests. Tests assert behavior and structure, never the wording o
 
 ## Phase 5: Per-Domain Compatibility and Permanent Collateral
 
-These tasks land inside the corresponding domain PR, not in a third cleanup PR.
+These tasks land with their corresponding domain implementation inside PR #710, not in a later
+cleanup PR.
 
 ### Session and harness PR
 
@@ -264,8 +264,7 @@ These tasks land inside the corresponding domain PR, not in a third cleanup PR.
 
 ## Phase 6: Verification, Delivery, and Closeout
 
-The implementation, review, CI, and live-evidence steps below apply separately to each
-domain-complete PR. Combined verification and SDD closeout occur only after both have landed.
+The implementation, review, CI, and live-evidence steps below apply to the complete integrated PR.
 
 - [ ] Add structural and behavioral coverage from the LLD verification matrix without assertions on
       authored prose.
@@ -273,9 +272,8 @@ domain-complete PR. Combined verification and SDD closeout occur only after both
       then the full non-integration, static, docs, generation, website, and installed-wheel gates.
 - [ ] Run private project, Muntz, and cold correctness/security reviews on one clean exact head and
       resolve every material finding.
-- [ ] Open each domain-complete implementation PR ready only after its complete green handoff;
-      monitor CI and published feedback under the standard delivery process, then run combined
-      verification after both land.
+- [ ] Mark PR #710 ready only after its complete green handoff, then monitor CI and published
+      feedback under the standard delivery process.
 - [ ] Run authorized live validation for console create/start/stop/restart/attach, session
       start/restart/force-new/attach, one Agentworks-minted UUID integration, and Codex's
       tool-assigned identity path where the environment supports them.
