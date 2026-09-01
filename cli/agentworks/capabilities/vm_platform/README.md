@@ -234,14 +234,20 @@ not implement native VZ snapshots. The clone has a deterministic Agentworks name
 against `limactl delete`, and carries the same Agentworks incarnation marker as its source so a
 reused Lima name cannot adopt an old clone. It must never be started because it contains the guest's
 VM and Tailscale identity. Restore clones that recovery instance into a temporary stopped instance,
-retains the pre-first-restore instance under a protected emergency name, swaps the recovered
-instance back to the original name, and records the completed restore operation on the recovery
-clone. A retry of that operation converges; a later explicit restore reapplies the checkpoint.
-Checkpoint deletion removes the clone, emergency instance, and any interrupted restore
-intermediates. VZ checkpoint creation refuses an instance with Lima `additionalDisks`, because a
-cloned primary instance would not own or recover those separately managed disks. Lima attempts
-copy-on-write cloning when the host filesystem supports it, but operators must still budget storage
-for divergence until checkpoint deletion.
+marks every intermediate with its role and restore identity, and retains the exact pre-first-restore
+instance directory under a protected emergency name. Lima 2.2's public rename walks and moves files,
+so Agentworks does not use it: after validating Lima-reported absolute sibling paths, VZ ownership,
+stopped state, and target absence, Agentworks uses a same-parent atomic directory move and proves
+the recovered instance at the original name. The stopped public clone has already omitted runtime
+files, protection state, and the old VZ identifier as Lima requires; the emergency move preserves
+the original directory exactly and that duplicate must never be started. A retry of the same restore
+converges; a later explicit restore reapplies the checkpoint. An unreadable partial clone fails
+closed with exact repair guidance instead of being adopted by name. Checkpoint deletion validates
+the role and VM incarnation of the clone, emergency instance, and any interrupted restore
+intermediates before removing them. VZ checkpoint creation refuses an instance with Lima
+`additionalDisks`, because a cloned primary instance would not own or recover those separately
+managed disks. Lima attempts copy-on-write cloning when the host filesystem supports it, but
+operators must still budget storage for divergence until checkpoint deletion.
 
 Vm-platform is an internal capability API. Its complete bundled contract remains version 1, and all
 six implementations change atomically with the descriptor. Exact registration conformance rejects an

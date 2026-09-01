@@ -188,8 +188,10 @@ class LimaPlatform(VMPlatform):
 
         Managed checkpoints use native snapshots for QEMU instances and stopped,
         protected recovery clones for VZ instances. Never start a recovery clone: it
-        contains the same guest and Tailscale identity. VZ checkpoints require the VM
-        to have no Lima additional disks.
+        contains the same guest and Tailscale identity. VZ restore validates Lima's
+        reported sibling directories and uses atomic stopped-instance moves because
+        Lima 2.2's public rename is not atomic. VZ checkpoints require the VM to have
+        no Lima additional disks.
 
         Local sites need `limactl` installed here and report not-ready without it.
         Remote sites need nothing locally.

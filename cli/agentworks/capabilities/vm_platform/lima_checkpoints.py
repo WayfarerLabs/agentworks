@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import json
 import re
@@ -13,6 +12,7 @@ from typing import Any
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import CheckpointDescriptor
+from agentworks.capabilities.vm_platform.lima_checkpoint_host import LimaCheckpointHost
 from agentworks.errors import StateError
 from agentworks.ssh import SSHError
 
@@ -26,6 +26,11 @@ _CHECKPOINT_NAME_PARAM = "agentworksCheckpointName"
 _CHECKPOINT_SOURCE_PARAM = "agentworksCheckpointSource"
 _SOURCE_INCARNATION_PARAM = "agentworksVmIncarnation"
 _LAST_RESTORE_PARAM = "agentworksCheckpointLastRestore"
+_INSTALLED_RESTORE_PARAM = "agentworksCheckpointInstalledRestore"
+_RECOVERY_ROLE_PARAM = "agentworksRecoveryRole"
+_RECOVERY_CHECKPOINT_PARAM = "agentworksRecoveryCheckpoint"
+_RECOVERY_SOURCE_PARAM = "agentworksRecoverySource"
+_RECOVERY_OPERATION_PARAM = "agentworksRecoveryOperation"
 
 LimaRunner = Callable[..., str]
 
@@ -39,17 +44,13 @@ class _RecoveryNames:
 
 
 class LimaCheckpointOperations:
-    """Manage one Lima instance's checkpoints through ``limactl``.
-
-    QEMU has Lima snapshot support. VZ does not, so a stopped clone is the
-    durable recovery point and restore swaps stopped instance names. Every
-    recovery artifact has a deterministic name scoped to the source instance.
-    """
+    """Use QEMU snapshots or VZ clones for one Lima instance's checkpoints."""
 
     def __init__(self, *, vm_name: str, instance_name: str, run: LimaRunner) -> None:
         self.vm_name = vm_name
         self.instance_name = instance_name
         self.run = run
+        self.host = LimaCheckpointHost(vm_name=vm_name, run=run)
         self.source_identity = hashlib.sha256(instance_name.encode()).hexdigest()[:8]
 
     def create(
@@ -59,24 +60,33 @@ class LimaCheckpointOperations:
         operation_id: str,
         resume: bool,
     ) -> CheckpointDescriptor:
+        del resume
         name = self._require_checkpoint_name(name)
-        clone_inventory = self._clone_descriptors()
+        recovery_artifacts = self._recovery_artifact_names()
+        clone_inventory = self._clone_descriptors(recovery_artifacts)
         matches = [item for item in clone_inventory if item.name == name]
         if matches:
             self._require_one_descriptor(name, clone_inventory)
             descriptor = matches[0]
-            self._finish_clone_checkpoint(descriptor, resume=resume)
+            self._finish_clone_checkpoint(descriptor)
             return descriptor
+        if recovery_artifacts:
+            raise StateError(
+                f"Lima VM '{self.vm_name}' has unreconciled Agentworks recovery artifacts",
+                entity_kind="vm",
+                entity_name=self.vm_name,
+                hint="Do not start or rename those instances. Inspect them with 'limactl list' before retrying.",
+            )
 
         backend = self._source_backend()
-        self._require_instance_stopped(self.instance_name, purpose="checkpoint creation")
+        self.host.require_stopped(self.instance_name, purpose="checkpoint creation")
         if backend == "qemu":
             return self._create_snapshot(name)
         if backend != "vz":
             self._raise_unsupported_backend(backend)
 
         clone_descriptor = self._clone_descriptor(name)
-        self._require_no_additional_disks(self.instance_name)
+        self.host.require_no_additional_disks(self.instance_name)
         self._ensure_source_incarnation(operation_id)
         output.info(f"Creating stopped Lima VZ recovery clone '{clone_descriptor.identifier}'...")
         output.detail(
@@ -85,8 +95,7 @@ class LimaCheckpointOperations:
         )
         expression = (
             f".param.{_CHECKPOINT_NAME_PARAM} = {json.dumps(name)} | "
-            f".param.{_CHECKPOINT_SOURCE_PARAM} = {json.dumps(self.instance_name)} | "
-            f'.param.{_LAST_RESTORE_PARAM} = ""'
+            f".param.{_CHECKPOINT_SOURCE_PARAM} = {json.dumps(self.instance_name)}"
         )
         try:
             self.run(
@@ -95,10 +104,12 @@ class LimaCheckpointOperations:
                 f"{clone_descriptor.identifier}"
             )
         except KeyboardInterrupt:
-            self._cleanup_interrupted_clone(clone_descriptor.identifier)
+            output.warn(
+                f"Lima checkpoint clone '{clone_descriptor.identifier}' may still exist. "
+                "Rerun the checkpoint command to reconcile it."
+            )
             raise
         except (OSError, SSHError) as error:
-            self._cleanup_interrupted_clone(clone_descriptor.identifier)
             raise StateError(
                 f"Lima could not create checkpoint '{name}' for VM '{self.vm_name}'",
                 entity_kind="vm",
@@ -108,7 +119,7 @@ class LimaCheckpointOperations:
                     "Correct the Lima clone failure, then retry."
                 ),
             ) from error
-        self._finish_clone_checkpoint(clone_descriptor, resume=False)
+        self._finish_clone_checkpoint(clone_descriptor)
         output.warn(
             f"Lima recovery clone '{clone_descriptor.identifier}' is stopped and protected. "
             "Do not start it: it contains the same guest and Tailscale identity as the VM."
@@ -120,14 +131,14 @@ class LimaCheckpointOperations:
         descriptors = self._clone_descriptors(recovery_artifacts)
         if recovery_artifacts:
             for descriptor in descriptors:
-                record = self._instance_record(descriptor.identifier, required=False)
-                if record is not None:
-                    self._validate_clone_checkpoint_record(descriptor, record)
+                record = self._instance_record(descriptor.identifier)
+                assert record is not None
+                self._validate_clone_checkpoint_record(descriptor, record)
             return descriptors
         record = self._instance_record(self.instance_name, required=False)
         if record is None:
             return ()
-        backend = self._record_backend(record, self.instance_name)
+        backend = self.host.backend(record, self.instance_name)
         if backend == "vz":
             return ()
         if backend != "qemu":
@@ -168,8 +179,13 @@ class LimaCheckpointOperations:
         if checkpoint_artifact in related:
             ordered.append(checkpoint_artifact)
         for artifact in ordered:
+            if artifact == checkpoint_artifact:
+                self._require_clone_checkpoint(clone_descriptor)
+            else:
+                self._validate_owned_recovery_artifact(clone_descriptor, artifact)
+        for artifact in ordered:
             output.info(f"Deleting Lima recovery artifact '{artifact}'...")
-            self._delete_recovery_instance(artifact)
+            self.host.delete_recovery_instance(artifact)
         if self._related_recovery_artifacts(clone_descriptor, self._instance_names()):
             raise StateError(
                 f"Lima checkpoint '{name}' still has recovery artifacts after deletion",
@@ -204,7 +220,7 @@ class LimaCheckpointOperations:
                 entity_kind="vm",
                 entity_name=self.vm_name,
             )
-        self._require_instance_stopped(self.instance_name, purpose="checkpoint restore")
+        self.host.require_stopped(self.instance_name, purpose="checkpoint restore")
         self._require_one_snapshot(checkpoint.name, self._snapshot_names())
         try:
             self.run(f"limactl snapshot apply {shlex.quote(self.instance_name)} --tag {checkpoint.name}")
@@ -215,7 +231,7 @@ class LimaCheckpointOperations:
                 entity_name=self.vm_name,
             ) from error
         self._require_one_snapshot(checkpoint.name, self._snapshot_names())
-        self._require_instance_stopped(self.instance_name, purpose="checkpoint restore")
+        self.host.require_stopped(self.instance_name, purpose="checkpoint restore")
 
     def _delete_snapshot(self, checkpoint: CheckpointDescriptor) -> None:
         if checkpoint.identifier != checkpoint.name:
@@ -252,7 +268,12 @@ class LimaCheckpointOperations:
         names = self._restore_names(checkpoint, operation_id)
         checkpoint_record = self._require_clone_checkpoint(checkpoint)
         if self._last_restore(checkpoint_record) == operation_id:
-            self._finish_completed_restore(names)
+            self._finish_completed_restore(
+                checkpoint,
+                checkpoint_record,
+                names,
+                operation_id=operation_id,
+            )
             return
 
         artifacts = set(self._instance_names())
@@ -260,44 +281,108 @@ class LimaCheckpointOperations:
         stage_exists = names.stage in artifacts
         discard_exists = names.discard in artifacts
         emergency_exists = names.emergency in artifacts
-        self._require_matching_recovery_incarnations(
+        self._validate_recovery_instances(
+            checkpoint,
             checkpoint_record,
             tuple(artifact for artifact in (names.stage, names.discard, names.emergency) if artifact in artifacts),
+            operation_id=operation_id,
         )
 
-        if source_exists and discard_exists:
-            # The swap completed before its durable marker was written.
+        source_record = self._instance_record(self.instance_name) if source_exists else None
+        if source_record is not None:
+            if self.host.backend(source_record, self.instance_name) != "vz":
+                raise StateError(
+                    f"Lima VM '{self.vm_name}' no longer uses the VZ checkpoint driver",
+                    entity_kind="vm",
+                    entity_name=self.vm_name,
+                )
+            self.host.require_stopped(self.instance_name, purpose="checkpoint restore")
+            self.host.require_no_additional_disks(self.instance_name, record=source_record)
+            self._require_matching_recovery_incarnations(checkpoint_record, (self.instance_name,))
+
+        if source_record is not None and self._installed_restore(source_record) == operation_id:
+            self._validate_installed_instance(
+                source_record,
+                checkpoint=checkpoint.identifier,
+                operation_id=operation_id,
+            )
+            if not emergency_exists:
+                raise StateError(
+                    f"Lima restored instance for VM '{self.vm_name}' has no emergency recovery instance",
+                    entity_kind="vm",
+                    entity_name=self.vm_name,
+                    hint="Do not start or rename the recovery instances. Inspect them with 'limactl list'.",
+                )
             if stage_exists:
-                self._delete_recovery_instance(names.stage)
+                self.host.delete_recovery_instance(names.stage)
             self._mark_restore_complete(checkpoint.identifier, operation_id)
-            self._delete_recovery_instance(names.discard)
-            self._prove_completed_restore(names)
+            if discard_exists:
+                self.host.delete_recovery_instance(names.discard)
+            self._prove_completed_restore(names, operation_id=operation_id)
             return
 
+        if source_exists and discard_exists:
+            raise StateError(
+                f"Lima restore artifacts for VM '{self.vm_name}' conflict with the current instance",
+                entity_kind="vm",
+                entity_name=self.vm_name,
+                hint="Do not start or rename the recovery instances. Inspect them with 'limactl list'.",
+            )
+
         if not stage_exists:
+            if not source_exists:
+                raise StateError(
+                    f"Lima restore for VM '{self.vm_name}' is missing both its instance and restore stage",
+                    entity_kind="vm",
+                    entity_name=self.vm_name,
+                    hint="Do not start or rename the recovery instances. Inspect them with 'limactl list'.",
+                )
             output.info(f"Preparing stopped Lima restore instance '{names.stage}' from the recovery clone...")
             expression = (
                 f"del(.param.{_CHECKPOINT_NAME_PARAM}) | "
                 f"del(.param.{_CHECKPOINT_SOURCE_PARAM}) | "
-                f"del(.param.{_LAST_RESTORE_PARAM})"
+                f"del(.param.{_LAST_RESTORE_PARAM}) | "
+                f".param.{_INSTALLED_RESTORE_PARAM} = {json.dumps(operation_id)} | "
+                f'.param.{_RECOVERY_ROLE_PARAM} = "stage" | '
+                f".param.{_RECOVERY_CHECKPOINT_PARAM} = {json.dumps(checkpoint.identifier)} | "
+                f".param.{_RECOVERY_SOURCE_PARAM} = {json.dumps(self.instance_name)} | "
+                f".param.{_RECOVERY_OPERATION_PARAM} = {json.dumps(operation_id)}"
             )
             self._clone_for_restore(checkpoint.identifier, names.stage, expression)
             stage_exists = True
+        self._validate_recovery_instances(
+            checkpoint,
+            checkpoint_record,
+            (names.stage,),
+            operation_id=operation_id,
+        )
 
         if source_exists:
             if emergency_exists:
                 output.info(f"Retaining current Lima instance as '{names.discard}' during restore...")
-                self._rename_instance(self.instance_name, names.discard)
+                self._mark_recovery_role(
+                    self.instance_name,
+                    role="discard",
+                    checkpoint=checkpoint.identifier,
+                    operation_id=operation_id,
+                )
+                self.host.move_atomically(self.instance_name, names.discard)
                 discard_exists = True
             else:
                 output.info(f"Retaining pre-restore Lima instance as emergency recovery '{names.emergency}'...")
-                self._rename_instance(self.instance_name, names.emergency)
-                self._protect_instance(names.emergency)
+                self._mark_recovery_role(
+                    self.instance_name,
+                    role="emergency",
+                    checkpoint=checkpoint.identifier,
+                    operation_id=operation_id,
+                )
+                self.host.ensure_protected(self.instance_name)
+                self.host.move_atomically(self.instance_name, names.emergency)
                 emergency_exists = True
             source_exists = False
 
         if emergency_exists:
-            self._ensure_instance_protected(names.emergency)
+            self.host.ensure_protected(names.emergency)
         if source_exists or not stage_exists or not emergency_exists:
             raise StateError(
                 f"Lima restore artifacts for VM '{self.vm_name}' are inconsistent",
@@ -307,33 +392,68 @@ class LimaCheckpointOperations:
             )
 
         output.info(f"Installing the recovered Lima instance as '{self.instance_name}'...")
-        self._rename_instance(names.stage, self.instance_name)
-        self._require_instance_stopped(self.instance_name, purpose="checkpoint restore")
+        self.host.move_atomically(names.stage, self.instance_name)
+        self.host.require_stopped(self.instance_name, purpose="checkpoint restore")
+        restored_record = self._instance_record(self.instance_name)
+        assert restored_record is not None
+        if self._installed_restore(restored_record) != operation_id:
+            raise StateError(
+                f"Lima did not retain the installed restore marker for VM '{self.vm_name}'",
+                entity_kind="vm",
+                entity_name=self.vm_name,
+            )
+        self._validate_installed_instance(
+            restored_record,
+            checkpoint=checkpoint.identifier,
+            operation_id=operation_id,
+        )
         self._mark_restore_complete(checkpoint.identifier, operation_id)
         if discard_exists:
-            self._delete_recovery_instance(names.discard)
-        self._prove_completed_restore(names)
+            self.host.delete_recovery_instance(names.discard)
+        self._prove_completed_restore(names, operation_id=operation_id)
 
-    def _finish_completed_restore(self, names: _RecoveryNames) -> None:
+    def _finish_completed_restore(
+        self,
+        checkpoint: CheckpointDescriptor,
+        checkpoint_record: dict[str, Any],
+        names: _RecoveryNames,
+        *,
+        operation_id: str,
+    ) -> None:
         artifacts = set(self._instance_names())
-        if self.instance_name not in artifacts:
-            if names.stage in artifacts:
-                output.info(f"Finishing interrupted Lima restore for VM '{self.vm_name}'...")
-                self._rename_instance(names.stage, self.instance_name)
-            else:
-                raise StateError(
-                    f"Lima restore for VM '{self.vm_name}' is marked complete but its instance is missing",
-                    entity_kind="vm",
-                    entity_name=self.vm_name,
-                )
+        if self.instance_name not in artifacts or names.emergency not in artifacts:
+            raise StateError(
+                f"Lima restore for VM '{self.vm_name}' is marked complete but a required instance is missing",
+                entity_kind="vm",
+                entity_name=self.vm_name,
+            )
+        self._validate_recovery_instances(
+            checkpoint,
+            checkpoint_record,
+            tuple(artifact for artifact in (names.stage, names.discard, names.emergency) if artifact in artifacts),
+            operation_id=operation_id,
+        )
+        source_record = self._instance_record(self.instance_name)
+        assert source_record is not None
+        if self._installed_restore(source_record) != operation_id:
+            raise StateError(
+                f"Lima restore marker for VM '{self.vm_name}' disagrees with its installed instance",
+                entity_kind="vm",
+                entity_name=self.vm_name,
+            )
+        self._validate_installed_instance(
+            source_record,
+            checkpoint=names.checkpoint,
+            operation_id=operation_id,
+        )
         if names.stage in self._instance_names():
-            self._delete_recovery_instance(names.stage)
+            self.host.delete_recovery_instance(names.stage)
         if names.discard in self._instance_names():
-            self._delete_recovery_instance(names.discard)
-        self._ensure_instance_protected(names.emergency)
-        self._prove_completed_restore(names)
+            self.host.delete_recovery_instance(names.discard)
+        self.host.ensure_protected(names.emergency)
+        self._prove_completed_restore(names, operation_id=operation_id)
 
-    def _prove_completed_restore(self, names: _RecoveryNames) -> None:
+    def _prove_completed_restore(self, names: _RecoveryNames, *, operation_id: str) -> None:
         artifacts = set(self._instance_names())
         required = {self.instance_name, names.checkpoint, names.emergency}
         missing = sorted(required - artifacts)
@@ -348,13 +468,26 @@ class LimaCheckpointOperations:
                     f"Unexpected temporary artifacts: {', '.join(leftovers) or 'none'}."
                 ),
             )
-        self._require_instance_stopped(self.instance_name, purpose="checkpoint restore")
-        self._require_instance_stopped(names.emergency, purpose="emergency recovery retention")
+        self.host.require_stopped(self.instance_name, purpose="checkpoint restore")
+        self.host.require_stopped(names.emergency, purpose="emergency recovery retention")
         checkpoint_record = self._instance_record(names.checkpoint)
         assert checkpoint_record is not None
         self._require_matching_recovery_incarnations(
             checkpoint_record,
             (self.instance_name, names.emergency),
+        )
+        source_record = self._instance_record(self.instance_name)
+        assert source_record is not None
+        if self._installed_restore(source_record) != operation_id:
+            raise StateError(
+                f"Lima restored instance for VM '{self.vm_name}' has the wrong restore marker",
+                entity_kind="vm",
+                entity_name=self.vm_name,
+            )
+        self._validate_installed_instance(
+            source_record,
+            checkpoint=names.checkpoint,
+            operation_id=operation_id,
         )
         emergency_record = self._instance_record(names.emergency)
         assert emergency_record is not None
@@ -365,17 +498,11 @@ class LimaCheckpointOperations:
                 entity_name=self.vm_name,
             )
 
-    def _finish_clone_checkpoint(
-        self,
-        descriptor: CheckpointDescriptor,
-        *,
-        resume: bool,
-    ) -> None:
+    def _finish_clone_checkpoint(self, descriptor: CheckpointDescriptor) -> None:
         record = self._instance_record(descriptor.identifier, required=False)
         if record is None:
-            qualifier = "interrupted " if resume else ""
             raise StateError(
-                f"Lima {qualifier}checkpoint clone '{descriptor.identifier}' is incomplete",
+                f"Lima checkpoint clone '{descriptor.identifier}' is incomplete",
                 entity_kind="vm",
                 entity_name=self.vm_name,
                 hint=(
@@ -386,7 +513,7 @@ class LimaCheckpointOperations:
         self._validate_clone_checkpoint_record(descriptor, record)
         if record.get("protected") is not True:
             output.info(f"Protecting Lima recovery clone '{descriptor.identifier}' from deletion...")
-            self._protect_instance(descriptor.identifier)
+            self.host.protect(descriptor.identifier)
             record = self._instance_record(descriptor.identifier)
             assert record is not None
         if record.get("protected") is not True:
@@ -416,15 +543,15 @@ class LimaCheckpointOperations:
         descriptor: CheckpointDescriptor,
         record: dict[str, Any],
     ) -> None:
-        self._require_instance_stopped(descriptor.identifier, purpose="checkpoint recovery")
-        backend = self._record_backend(record, descriptor.identifier)
+        self.host.require_stopped(descriptor.identifier, purpose="checkpoint recovery")
+        backend = self.host.backend(record, descriptor.identifier)
         if backend != "vz":
             raise StateError(
                 f"Lima recovery clone '{descriptor.identifier}' uses unexpected driver '{backend}'",
                 entity_kind="vm",
                 entity_name=self.vm_name,
             )
-        self._require_no_additional_disks(descriptor.identifier, record=record)
+        self.host.require_no_additional_disks(descriptor.identifier, record=record)
         params = record.get("param")
         if not isinstance(params, dict) or (
             params.get(_CHECKPOINT_NAME_PARAM) != descriptor.name
@@ -440,6 +567,12 @@ class LimaCheckpointOperations:
             )
         source_record = self._instance_record(self.instance_name, required=False)
         if source_record is not None:
+            self.host.require_same_parent(
+                record,
+                descriptor.identifier,
+                source_record,
+                self.instance_name,
+            )
             source_params = source_record.get("param")
             if not isinstance(source_params, dict) or (
                 source_params.get(_SOURCE_INCARNATION_PARAM) != params[_SOURCE_INCARNATION_PARAM]
@@ -478,21 +611,91 @@ class LimaCheckpointOperations:
                     hint="Do not start, restore, rename, or delete the recovery instances.",
                 )
 
+    def _validate_recovery_instances(
+        self,
+        checkpoint: CheckpointDescriptor,
+        checkpoint_record: dict[str, Any],
+        instance_names: tuple[str, ...],
+        *,
+        operation_id: str,
+    ) -> None:
+        self._require_matching_recovery_incarnations(checkpoint_record, instance_names)
+        for instance_name in instance_names:
+            record = self._instance_record(instance_name)
+            assert record is not None
+            checkpoint_name = str(checkpoint_record.get("name", ""))
+            self.host.require_same_parent(
+                checkpoint_record,
+                checkpoint_name,
+                record,
+                instance_name,
+            )
+            if self.host.backend(record, instance_name) != "vz":
+                raise StateError(
+                    f"Lima recovery instance '{instance_name}' does not use the VZ driver",
+                    entity_kind="vm",
+                    entity_name=self.vm_name,
+                )
+            self.host.require_stopped(instance_name, purpose="checkpoint restore")
+            self.host.require_no_additional_disks(instance_name, record=record)
+            match = _RECOVERY_ARTIFACT_NAME.fullmatch(instance_name)
+            assert match is not None
+            expected_role = {
+                "em": "emergency",
+                "rs": "stage",
+                "rd": "discard",
+            }.get(match.group("role"))
+            params = record.get("param")
+            recorded_operation = params.get(_RECOVERY_OPERATION_PARAM) if isinstance(params, dict) else None
+            if not isinstance(params, dict) or (
+                params.get(_RECOVERY_ROLE_PARAM) != expected_role
+                or params.get(_RECOVERY_CHECKPOINT_PARAM) != checkpoint.identifier
+                or params.get(_RECOVERY_SOURCE_PARAM) != self.instance_name
+                or not isinstance(recorded_operation, str)
+                or not recorded_operation
+                or (expected_role != "emergency" and recorded_operation != operation_id)
+            ):
+                raise StateError(
+                    f"Lima recovery instance '{instance_name}' has conflicting ownership metadata",
+                    entity_kind="vm",
+                    entity_name=self.vm_name,
+                    hint="Do not start, restore, rename, or delete the recovery instances.",
+                )
+
+    def _validate_installed_instance(
+        self,
+        record: dict[str, Any],
+        *,
+        checkpoint: str,
+        operation_id: str,
+    ) -> None:
+        params = record.get("param")
+        if not isinstance(params, dict) or (
+            params.get(_RECOVERY_ROLE_PARAM) != "stage"
+            or params.get(_RECOVERY_CHECKPOINT_PARAM) != checkpoint
+            or params.get(_RECOVERY_SOURCE_PARAM) != self.instance_name
+            or params.get(_RECOVERY_OPERATION_PARAM) != operation_id
+        ):
+            raise StateError(
+                f"Lima restored instance for VM '{self.vm_name}' has conflicting ownership metadata",
+                entity_kind="vm",
+                entity_name=self.vm_name,
+            )
+
     def _clone_for_restore(self, source: str, target: str, expression: str) -> None:
         try:
             self.run(f"limactl clone --tty=false --set {shlex.quote(expression)} {source} {target}")
         except KeyboardInterrupt:
-            self._cleanup_interrupted_clone(target)
+            output.warn(f"Lima restore clone '{target}' may still exist. Rerun the restore command to reconcile it.")
             raise
         except (OSError, SSHError) as error:
-            self._cleanup_interrupted_clone(target)
             raise StateError(
                 f"Lima could not prepare restore instance '{target}' for VM '{self.vm_name}'",
                 entity_kind="vm",
                 entity_name=self.vm_name,
             ) from error
-        self._require_instance_stopped(target, purpose="checkpoint restore")
-        self._require_no_additional_disks(target)
+        self.host.require_stopped(target, purpose="checkpoint restore")
+        self.host.require_no_additional_disks(target)
 
     def _mark_restore_complete(self, checkpoint_artifact: str, operation_id: str) -> None:
         output.detail("Recording completed Lima restore operation on the recovery clone...")
@@ -528,7 +731,10 @@ class LimaCheckpointOperations:
         return operation_id
 
     def _set_instance_param(self, instance_name: str, key: str, value: str) -> None:
-        expression = f".param.{key} = {json.dumps(value)}"
+        self._set_instance_params(instance_name, {key: value})
+
+    def _set_instance_params(self, instance_name: str, values: dict[str, str]) -> None:
+        expression = " | ".join(f".param.{key} = {json.dumps(value)}" for key, value in values.items())
         try:
             self.run(f"limactl edit --tty=false --set {shlex.quote(expression)} {instance_name}")
         except (OSError, SSHError) as error:
@@ -539,6 +745,38 @@ class LimaCheckpointOperations:
                 hint="Correct the Lima instance metadata failure, then retry.",
             ) from error
 
+    def _mark_recovery_role(
+        self,
+        instance_name: str,
+        *,
+        role: str,
+        checkpoint: str,
+        operation_id: str,
+    ) -> None:
+        self._set_instance_params(
+            instance_name,
+            {
+                _RECOVERY_ROLE_PARAM: role,
+                _RECOVERY_CHECKPOINT_PARAM: checkpoint,
+                _RECOVERY_SOURCE_PARAM: self.instance_name,
+                _RECOVERY_OPERATION_PARAM: operation_id,
+            },
+        )
+        record = self._instance_record(instance_name)
+        assert record is not None
+        params = record.get("param")
+        if not isinstance(params, dict) or (
+            params.get(_RECOVERY_ROLE_PARAM) != role
+            or params.get(_RECOVERY_CHECKPOINT_PARAM) != checkpoint
+            or params.get(_RECOVERY_SOURCE_PARAM) != self.instance_name
+            or params.get(_RECOVERY_OPERATION_PARAM) != operation_id
+        ):
+            raise StateError(
+                f"Lima did not retain recovery ownership metadata for '{instance_name}'",
+                entity_kind="vm",
+                entity_name=self.vm_name,
+            )
+
     @staticmethod
     def _last_restore(record: dict[str, Any]) -> str | None:
         params = record.get("param")
@@ -547,20 +785,18 @@ class LimaCheckpointOperations:
         value = params.get(_LAST_RESTORE_PARAM)
         return value if isinstance(value, str) and value else None
 
+    @staticmethod
+    def _installed_restore(record: dict[str, Any]) -> str | None:
+        params = record.get("param")
+        if not isinstance(params, dict):
+            return None
+        value = params.get(_INSTALLED_RESTORE_PARAM)
+        return value if isinstance(value, str) and value else None
+
     def _source_backend(self) -> str:
         record = self._instance_record(self.instance_name)
         assert record is not None
-        return self._record_backend(record, self.instance_name)
-
-    def _record_backend(self, record: dict[str, Any], instance_name: str) -> str:
-        backend = record.get("vmType")
-        if not isinstance(backend, str) or not backend:
-            raise StateError(
-                f"Lima did not report a VM driver for instance '{instance_name}'",
-                entity_kind="vm",
-                entity_name=self.vm_name,
-            )
-        return backend.lower()
+        return self.host.backend(record, self.instance_name)
 
     def _raise_unsupported_backend(self, backend: str) -> None:
         raise StateError(
@@ -568,37 +804,6 @@ class LimaCheckpointOperations:
             entity_kind="vm",
             entity_name=self.vm_name,
             hint="Agentworks supports Lima QEMU snapshots and stopped VZ recovery clones.",
-        )
-
-    def _require_instance_stopped(self, instance_name: str, *, purpose: str) -> None:
-        record = self._instance_record(instance_name)
-        assert record is not None
-        status = record.get("status")
-        if isinstance(status, str) and status.lower() == "stopped":
-            return
-        raise StateError(
-            f"Lima instance '{instance_name}' must be stopped for {purpose}",
-            entity_kind="vm",
-            entity_name=self.vm_name,
-        )
-
-    def _require_no_additional_disks(
-        self,
-        instance_name: str,
-        *,
-        record: dict[str, Any] | None = None,
-    ) -> None:
-        if record is None:
-            record = self._instance_record(instance_name)
-            assert record is not None
-        additional_disks = record.get("additionalDisks", [])
-        if isinstance(additional_disks, list) and not additional_disks:
-            return
-        raise StateError(
-            f"Lima instance '{instance_name}' has additional disks that a recovery clone would not own",
-            entity_kind="vm",
-            entity_name=self.vm_name,
-            hint="Move the VM data onto its primary disk before creating a managed checkpoint.",
         )
 
     def _snapshot_names(self) -> tuple[str, ...]:
@@ -621,16 +826,7 @@ class LimaCheckpointOperations:
         )
 
     def _instance_names(self) -> tuple[str, ...]:
-        try:
-            listing = self.run("limactl list --quiet")
-        except (OSError, SSHError) as error:
-            raise StateError(
-                f"Lima instance inventory is unavailable for VM '{self.vm_name}'",
-                entity_kind="vm",
-                entity_name=self.vm_name,
-                hint="Correct the Lima inventory error, then retry the checkpoint operation.",
-            ) from error
-        return tuple(name for line in listing.splitlines() if (name := line.strip()))
+        return self.host.names()
 
     def _instance_record(
         self,
@@ -638,34 +834,7 @@ class LimaCheckpointOperations:
         *,
         required: bool = True,
     ) -> dict[str, Any] | None:
-        try:
-            listing = self.run(
-                f"limactl list --json {shlex.quote(instance_name)}",
-                check=False,
-            )
-        except (OSError, SSHError) as error:
-            if not required:
-                return None
-            raise StateError(
-                f"Lima instance '{instance_name}' could not be inspected",
-                entity_kind="vm",
-                entity_name=self.vm_name,
-            ) from error
-        for line in listing.splitlines():
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(record, dict) and record.get("name") == instance_name:
-                return record
-        if not required:
-            return None
-        raise StateError(
-            f"Lima instance '{instance_name}' does not exist or is incomplete",
-            entity_kind="vm",
-            entity_name=self.vm_name,
-            hint="Inspect the Lima instance inventory before retrying the checkpoint operation.",
-        )
+        return self.host.record(instance_name, required=required)
 
     def _recovery_artifact_names(self) -> tuple[str, ...]:
         return tuple(
@@ -707,13 +876,13 @@ class LimaCheckpointOperations:
         checkpoint: CheckpointDescriptor,
         operation_id: str,
     ) -> _RecoveryNames:
-        operation_identity = hashlib.sha256(operation_id.encode()).hexdigest()[:8]
+        del operation_id
         stem = checkpoint.identifier.removeprefix("agwcp-")
         return _RecoveryNames(
             checkpoint=checkpoint.identifier,
             emergency=f"agwem-{stem}",
-            stage=f"agwrs-{stem}-{operation_identity}",
-            discard=f"agwrd-{stem}-{operation_identity}",
+            stage=f"agwrs-{stem}",
+            discard=f"agwrd-{stem}",
         )
 
     def _related_recovery_artifacts(
@@ -732,68 +901,66 @@ class LimaCheckpointOperations:
             and candidate.group("checkpoint") == checkpoint_identity
         )
 
-    def _protect_instance(self, instance_name: str) -> None:
-        try:
-            self.run(f"limactl protect {instance_name}")
-        except (OSError, SSHError) as error:
+    def _validate_owned_recovery_artifact(
+        self,
+        checkpoint: CheckpointDescriptor,
+        artifact: str,
+    ) -> None:
+        match = _RECOVERY_ARTIFACT_NAME.fullmatch(artifact)
+        assert match is not None
+        expected_role = {
+            "em": "emergency",
+            "rs": "stage",
+            "rd": "discard",
+        }.get(match.group("role"))
+        if expected_role is None:
             raise StateError(
-                f"Lima could not protect recovery instance '{instance_name}'",
-                entity_kind="vm",
-                entity_name=self.vm_name,
-            ) from error
-
-    def _ensure_instance_protected(self, instance_name: str) -> None:
-        record = self._instance_record(instance_name)
-        assert record is not None
-        if record.get("protected") is True:
-            return
-        output.info(f"Protecting Lima recovery instance '{instance_name}' from deletion...")
-        self._protect_instance(instance_name)
-        record = self._instance_record(instance_name)
-        assert record is not None
-        if record.get("protected") is not True:
-            raise StateError(
-                f"Lima recovery instance '{instance_name}' is not protected",
+                f"Lima recovery artifact '{artifact}' has an unexpected role",
                 entity_kind="vm",
                 entity_name=self.vm_name,
             )
-
-    def _rename_instance(self, source: str, target: str) -> None:
-        try:
-            self.run(f"limactl rename --tty=false {source} {target}")
-        except (OSError, SSHError) as error:
+        record = self._instance_record(artifact)
+        assert record is not None
+        params = record.get("param")
+        incarnation = params.get(_SOURCE_INCARNATION_PARAM) if isinstance(params, dict) else None
+        operation = params.get(_RECOVERY_OPERATION_PARAM) if isinstance(params, dict) else None
+        if not isinstance(params, dict) or (
+            params.get(_RECOVERY_ROLE_PARAM) != expected_role
+            or params.get(_RECOVERY_CHECKPOINT_PARAM) != checkpoint.identifier
+            or params.get(_RECOVERY_SOURCE_PARAM) != self.instance_name
+            or not isinstance(incarnation, str)
+            or not incarnation
+            or not isinstance(operation, str)
+            or not operation
+        ):
             raise StateError(
-                f"Lima could not rename recovery instance '{source}' to '{target}'",
+                f"Lima recovery artifact '{artifact}' has conflicting ownership metadata",
                 entity_kind="vm",
                 entity_name=self.vm_name,
-                hint="Do not start or rename the recovery instances. Rerun the restore.",
-            ) from error
-
-    def _delete_recovery_instance(self, instance_name: str) -> None:
-        if instance_name not in self._instance_names():
-            return
-        self.run(f"limactl unprotect {instance_name}", check=False)
-        try:
-            self.run(f"limactl delete --force {instance_name}")
-        except (OSError, SSHError) as error:
+                hint="Do not delete the artifact until its ownership is repaired.",
+            )
+        if self.host.backend(record, artifact) != "vz":
             raise StateError(
-                f"Lima could not delete recovery instance '{instance_name}'",
-                entity_kind="vm",
-                entity_name=self.vm_name,
-            ) from error
-        if instance_name in self._instance_names():
-            raise StateError(
-                f"Lima recovery instance '{instance_name}' still exists after deletion",
+                f"Lima recovery artifact '{artifact}' does not use the VZ driver",
                 entity_kind="vm",
                 entity_name=self.vm_name,
             )
+        self.host.require_stopped(artifact, purpose="checkpoint deletion")
+        self.host.require_no_additional_disks(artifact, record=record)
 
-    def _cleanup_interrupted_clone(self, instance_name: str) -> None:
-        output.detail(f"Cleaning up interrupted Lima recovery clone '{instance_name}'...")
-        with contextlib.suppress(OSError, SSHError):
-            self.run(f"limactl unprotect {instance_name}", check=False)
-        with contextlib.suppress(OSError, SSHError):
-            self.run(f"limactl delete --force {instance_name}", check=False)
+        source_record = self._instance_record(self.instance_name, required=False)
+        checkpoint_record = self._instance_record(checkpoint.identifier, required=False)
+        anchor = source_record or checkpoint_record
+        if anchor is not None:
+            anchor_name = self.instance_name if source_record is not None else checkpoint.identifier
+            self.host.require_same_parent(anchor, anchor_name, record, artifact)
+            anchor_params = anchor.get("param")
+            if not isinstance(anchor_params, dict) or anchor_params.get(_SOURCE_INCARNATION_PARAM) != incarnation:
+                raise StateError(
+                    f"Lima recovery artifact '{artifact}' belongs to another VM incarnation",
+                    entity_kind="vm",
+                    entity_name=self.vm_name,
+                )
 
     def _require_checkpoint_name(self, name: str) -> str:
         if _MANAGED_CHECKPOINT_NAME.fullmatch(name) is None:

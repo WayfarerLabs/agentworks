@@ -522,9 +522,10 @@ additional feedback/fix rounds and provided direct `msm4` access to the integrat
       driver setting or unsafe checkpoint bypass.
 - [x] Preserve native QEMU snapshots. Implement a stopped, protected VZ recovery clone with
       deterministic owned names, additional-disk refusal, a retained pre-first-restore emergency
-      instance, operation-marked replay-safe name swapping, complete cleanup, and visible progress.
-      Permit a persisted interrupted restore to reconcile through its temporary missing-name window
-      without permitting restore of a running VM.
+      instance, operation-marked replay-safe atomic sibling-directory swaps, complete cleanup, and
+      visible progress. Do not use Lima 2.2's file-by-file public rename implementation. Permit a
+      persisted interrupted restore to reconcile through its temporary missing-name window without
+      permitting restore of a running VM.
 - [ ] Run focused and full gates, exact-head project/correctness/complexity review, hosted CI, and a
       signed ready handoff for live create/list/restore/delete plus Bookworm-to-Trixie upgrade on
       the VZ-backed `msm4` environment.

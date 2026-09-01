@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
+import posixpath
 import shlex
 from types import SimpleNamespace
 from typing import Any
@@ -41,19 +41,29 @@ class _LimaBackend:
                 "protected": False,
                 "param": {},
                 "generation": "captured",
+                "dir": "/fake-lima/agw-dev",
+                "vzIdentifier": "original-vz-id",
             }
         }
         self.snapshots = list(snapshots or [])
+        self.incomplete_instances: set[str] = set()
         self.commands: list[str] = []
 
     def run(self, command: str, **_kwargs: object) -> str:
         self.commands.append(command)
         argv = shlex.split(command)
         if argv[:3] == ["limactl", "list", "--quiet"]:
-            return "\n".join(sorted(self.instances))
+            return "\n".join(sorted(self.instances.keys() | self.incomplete_instances))
         if argv[:3] == ["limactl", "list", "--json"]:
             record = self.instances.get(argv[3])
             return json.dumps(record) if record is not None else ""
+        if argv[0] == "/bin/mv":
+            source = posixpath.basename(argv[1])
+            target = posixpath.basename(argv[2])
+            record = self.instances.pop(source)
+            record.update(name=target, dir=argv[2])
+            self.instances[target] = record
+            return ""
         if argv[1:3] == ["snapshot", "list"]:
             return "\n".join(self.snapshots)
         if argv[1:3] == ["snapshot", "create"]:
@@ -67,21 +77,16 @@ class _LimaBackend:
         if argv[1] == "clone":
             source, target = argv[-2:]
             record = copy.deepcopy(self.instances[source])
-            record.update(name=target, status="Stopped", protected=False)
+            record.update(
+                name=target,
+                status="Stopped",
+                protected=False,
+                dir=f"/fake-lima/{target}",
+                vzIdentifier="",
+            )
             expression = argv[argv.index("--set") + 1]
             params = record.setdefault("param", {})
-            if "agentworksCheckpointName" in expression:
-                checkpoint_identity = target.rsplit("-", 1)[-1]
-                params["agentworksCheckpointName"] = f"agw-{checkpoint_identity}"
-                params["agentworksCheckpointSource"] = source
-                params["agentworksCheckpointLastRestore"] = ""
-            else:
-                for key in (
-                    "agentworksCheckpointName",
-                    "agentworksCheckpointSource",
-                    "agentworksCheckpointLastRestore",
-                ):
-                    params.pop(key, None)
+            self._apply_param_expression(params, expression)
             self.instances[target] = record
             return ""
         if argv[1] == "protect":
@@ -94,7 +99,7 @@ class _LimaBackend:
         if argv[1] == "rename":
             source, target = argv[-2:]
             record = self.instances.pop(source)
-            record["name"] = target
+            record.update(name=target, dir=f"/fake-lima/{target}")
             self.instances[target] = record
             return ""
         if argv[1] == "delete":
@@ -103,11 +108,20 @@ class _LimaBackend:
         if argv[1] == "edit":
             target = argv[-1]
             expression = argv[argv.index("--set") + 1]
-            left, raw_value = expression.split("=", 1)
-            key = left.strip().removeprefix(".param.")
-            self.instances[target]["param"][key] = json.loads(raw_value.strip())
+            self._apply_param_expression(self.instances[target]["param"], expression)
             return ""
         raise AssertionError(f"unexpected Lima command: {command}")
+
+    @staticmethod
+    def _apply_param_expression(params: dict[str, Any], expression: str) -> None:
+        for raw_segment in expression.split("|"):
+            segment = raw_segment.strip()
+            if segment.startswith("del(.param.") and segment.endswith(")"):
+                params.pop(segment.removeprefix("del(.param.").removesuffix(")"), None)
+                continue
+            left, raw_value = segment.split("=", 1)
+            key = left.strip().removeprefix(".param.")
+            params[key] = json.loads(raw_value.strip())
 
 
 def _platform(monkeypatch: pytest.MonkeyPatch, backend: _LimaBackend) -> LimaPlatform:
@@ -134,6 +148,33 @@ def _create_checkpoint(
         ctx,
         operation_id="create-1",
         resume=resume,
+    )
+
+
+def _restore_expression(descriptor: CheckpointDescriptor, operation_id: str) -> str:
+    return (
+        "del(.param.agentworksCheckpointName) | "
+        "del(.param.agentworksCheckpointSource) | "
+        "del(.param.agentworksCheckpointLastRestore) | "
+        f".param.agentworksCheckpointInstalledRestore = {json.dumps(operation_id)} | "
+        '.param.agentworksRecoveryRole = "stage" | '
+        f".param.agentworksRecoveryCheckpoint = {json.dumps(descriptor.identifier)} | "
+        '.param.agentworksRecoverySource = "agw-dev" | '
+        f".param.agentworksRecoveryOperation = {json.dumps(operation_id)}"
+    )
+
+
+def _recovery_role_expression(
+    descriptor: CheckpointDescriptor,
+    *,
+    role: str,
+    operation_id: str,
+) -> str:
+    return (
+        f".param.agentworksRecoveryRole = {json.dumps(role)} | "
+        f".param.agentworksRecoveryCheckpoint = {json.dumps(descriptor.identifier)} | "
+        '.param.agentworksRecoverySource = "agw-dev" | '
+        f".param.agentworksRecoveryOperation = {json.dumps(operation_id)}"
     )
 
 
@@ -251,6 +292,20 @@ def test_vz_inventory_rejects_a_different_source_incarnation(
         platform.list_checkpoints(vm, RunContext())  # type: ignore[arg-type]
 
 
+def test_vz_inventory_fails_closed_for_an_incomplete_clone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _LimaBackend(vm_type="vz")
+    platform = _platform(monkeypatch, backend)
+    vm = _vm()
+    descriptor = _create_checkpoint(platform, vm, _CHECKPOINT_NAME, RunContext())
+    backend.instances.pop(descriptor.identifier)
+    backend.incomplete_instances.add(descriptor.identifier)
+
+    with pytest.raises(StateError):
+        platform.list_checkpoints(vm, RunContext())  # type: ignore[arg-type]
+
+
 def test_vz_restore_retains_first_emergency_and_replays_by_operation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -268,6 +323,8 @@ def test_vz_restore_retains_first_emergency_and_replays_by_operation(
     assert backend.instances["agw-dev"]["generation"] == "captured"
     assert backend.instances[emergency]["generation"] == "upgraded"
     assert backend.instances[emergency]["protected"] is True
+    assert backend.instances[emergency]["vzIdentifier"] == "original-vz-id"
+    assert backend.instances["agw-dev"]["vzIdentifier"] == ""
     first_restore_clone_count = sum(" clone " in command for command in backend.commands)
 
     platform.restore_checkpoint(vm, descriptor, ctx, operation_id="restore-1")  # type: ignore[arg-type]
@@ -281,7 +338,7 @@ def test_vz_restore_retains_first_emergency_and_replays_by_operation(
     assert not any(name.startswith("agwrs-") for name in backend.instances)
 
 
-def test_vz_restore_resumes_between_source_and_replacement_rename(
+def test_vz_restore_resumes_between_atomic_instance_moves(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     backend = _LimaBackend(vm_type="vz")
@@ -290,13 +347,20 @@ def test_vz_restore_resumes_between_source_and_replacement_rename(
     ctx = RunContext()
     descriptor = _create_checkpoint(platform, vm, _CHECKPOINT_NAME, ctx)
     operation_id = "restore-1"
-    identity = hashlib.sha256(operation_id.encode()).hexdigest()[:8]
     stem = descriptor.identifier.removeprefix("agwcp-")
-    stage = f"agwrs-{stem}-{identity}"
+    stage = f"agwrs-{stem}"
     emergency = f"agwem-{stem}"
 
-    backend.run(f"limactl clone --tty=false --set 'del(.param)' {descriptor.identifier} {stage}")
-    backend.run(f"limactl rename --tty=false agw-dev {emergency}")
+    expression = _restore_expression(descriptor, operation_id)
+    backend.run(f"limactl clone --tty=false --set {shlex.quote(expression)} {descriptor.identifier} {stage}")
+    role_expression = _recovery_role_expression(
+        descriptor,
+        role="emergency",
+        operation_id=operation_id,
+    )
+    backend.run(f"limactl edit --tty=false --set {shlex.quote(role_expression)} agw-dev")
+    backend.run("limactl protect agw-dev")
+    backend.run(f"/bin/mv /fake-lima/agw-dev /fake-lima/{emergency}")
 
     platform.restore_checkpoint(vm, descriptor, ctx, operation_id=operation_id)  # type: ignore[arg-type]
 
@@ -304,6 +368,118 @@ def test_vz_restore_resumes_between_source_and_replacement_rename(
     assert emergency in backend.instances
     assert backend.instances[emergency]["protected"] is True
     assert stage not in backend.instances
+
+
+def test_vz_restore_resumes_after_recovered_instance_is_installed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _LimaBackend(vm_type="vz")
+    platform = _platform(monkeypatch, backend)
+    vm = _vm()
+    ctx = RunContext()
+    descriptor = _create_checkpoint(platform, vm, _CHECKPOINT_NAME, ctx)
+    operation_id = "restore-1"
+    stem = descriptor.identifier.removeprefix("agwcp-")
+    stage = f"agwrs-{stem}"
+    emergency = f"agwem-{stem}"
+    expression = _restore_expression(descriptor, operation_id)
+    backend.run(f"limactl clone --tty=false --set {shlex.quote(expression)} {descriptor.identifier} {stage}")
+    role_expression = _recovery_role_expression(
+        descriptor,
+        role="emergency",
+        operation_id=operation_id,
+    )
+    backend.run(f"limactl edit --tty=false --set {shlex.quote(role_expression)} agw-dev")
+    backend.run("limactl protect agw-dev")
+    backend.run(f"/bin/mv /fake-lima/agw-dev /fake-lima/{emergency}")
+    backend.run(f"/bin/mv /fake-lima/{stage} /fake-lima/agw-dev")
+    move_count = sum(command.startswith("/bin/mv ") for command in backend.commands)
+
+    platform.restore_checkpoint(vm, descriptor, ctx, operation_id=operation_id)  # type: ignore[arg-type]
+
+    assert backend.instances[descriptor.identifier]["param"]["agentworksCheckpointLastRestore"] == operation_id
+    assert sum(command.startswith("/bin/mv ") for command in backend.commands) == move_count
+    assert backend.instances["agw-dev"]["param"]["agentworksCheckpointInstalledRestore"] == operation_id
+
+
+def test_vz_restore_resumes_after_later_source_is_retained(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _LimaBackend(vm_type="vz")
+    platform = _platform(monkeypatch, backend)
+    vm = _vm()
+    ctx = RunContext()
+    descriptor = _create_checkpoint(platform, vm, _CHECKPOINT_NAME, ctx)
+    platform.restore_checkpoint(vm, descriptor, ctx, operation_id="restore-1")  # type: ignore[arg-type]
+    backend.instances["agw-dev"]["generation"] = "later"
+
+    stem = descriptor.identifier.removeprefix("agwcp-")
+    stage = f"agwrs-{stem}"
+    discard = f"agwrd-{stem}"
+    operation_id = "restore-2"
+    expression = _restore_expression(descriptor, operation_id)
+    backend.run(f"limactl clone --tty=false --set {shlex.quote(expression)} {descriptor.identifier} {stage}")
+    role_expression = _recovery_role_expression(
+        descriptor,
+        role="discard",
+        operation_id=operation_id,
+    )
+    backend.run(f"limactl edit --tty=false --set {shlex.quote(role_expression)} agw-dev")
+    backend.run(f"/bin/mv /fake-lima/agw-dev /fake-lima/{discard}")
+
+    platform.restore_checkpoint(vm, descriptor, ctx, operation_id=operation_id)  # type: ignore[arg-type]
+
+    assert backend.instances["agw-dev"]["generation"] == "captured"
+    assert discard not in backend.instances
+
+
+def test_vz_restore_refuses_a_running_instance_before_swap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _LimaBackend(vm_type="vz")
+    platform = _platform(monkeypatch, backend)
+    vm = _vm()
+    descriptor = _create_checkpoint(platform, vm, _CHECKPOINT_NAME, RunContext())
+    backend.instances["agw-dev"]["status"] = "Running"
+
+    with pytest.raises(StateError):
+        platform.restore_checkpoint(vm, descriptor, RunContext(), operation_id="restore-1")  # type: ignore[arg-type]
+
+    assert not any(command.startswith("/bin/mv ") for command in backend.commands)
+
+
+def test_vz_restore_refuses_an_unsafe_lima_instance_directory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _LimaBackend(vm_type="vz")
+    platform = _platform(monkeypatch, backend)
+    vm = _vm()
+    descriptor = _create_checkpoint(platform, vm, _CHECKPOINT_NAME, RunContext())
+    backend.instances["agw-dev"]["dir"] = "/fake-lima/not-the-instance"
+
+    with pytest.raises(StateError):
+        platform.restore_checkpoint(vm, descriptor, RunContext(), operation_id="restore-1")  # type: ignore[arg-type]
+
+    assert not any(command.startswith("/bin/mv ") for command in backend.commands)
+
+
+def test_vz_restore_refuses_a_running_emergency_before_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _LimaBackend(vm_type="vz")
+    platform = _platform(monkeypatch, backend)
+    vm = _vm()
+    ctx = RunContext()
+    descriptor = _create_checkpoint(platform, vm, _CHECKPOINT_NAME, ctx)
+    platform.restore_checkpoint(vm, descriptor, ctx, operation_id="restore-1")  # type: ignore[arg-type]
+    emergency = f"agwem-{descriptor.identifier.removeprefix('agwcp-')}"
+    backend.instances[emergency]["status"] = "Running"
+    command_count = len(backend.commands)
+
+    with pytest.raises(StateError):
+        platform.restore_checkpoint(vm, descriptor, ctx, operation_id="restore-2")  # type: ignore[arg-type]
+
+    assert not any(command.startswith(("limactl clone ", "/bin/mv ")) for command in backend.commands[command_count:])
 
 
 def test_vz_delete_removes_checkpoint_and_restore_artifacts(
@@ -321,3 +497,22 @@ def test_vz_delete_removes_checkpoint_and_restore_artifacts(
 
     assert platform.list_checkpoints(vm, ctx) == ()  # type: ignore[arg-type]
     assert not any(name.startswith(("agwcp-", "agwem-", "agwrs-", "agwrd-")) for name in backend.instances)
+
+
+def test_vz_delete_refuses_foreign_recovery_metadata_before_deleting_anything(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _LimaBackend(vm_type="vz")
+    platform = _platform(monkeypatch, backend)
+    vm = _vm()
+    ctx = RunContext()
+    descriptor = _create_checkpoint(platform, vm, _CHECKPOINT_NAME, ctx)
+    platform.restore_checkpoint(vm, descriptor, ctx, operation_id="restore-1")  # type: ignore[arg-type]
+    emergency = f"agwem-{descriptor.identifier.removeprefix('agwcp-')}"
+    backend.instances[emergency]["param"]["agentworksRecoveryCheckpoint"] = "foreign"
+
+    with pytest.raises(StateError):
+        platform.delete_checkpoint(vm, descriptor, ctx)  # type: ignore[arg-type]
+
+    assert descriptor.identifier in backend.instances
+    assert emergency in backend.instances
