@@ -170,7 +170,7 @@ For VMs and agents, `reinit` reruns the full Agentworks initialization contract 
 accumulated state outside that contract. For workspaces, `repair` is deliberately narrower. It
 restores the invariants Agentworks can safely promise without treating the repository clone and the
 work inside it as disposable implementation details. Sessions likewise accumulate harness history
-and are managed through an imperative lifecycle via the `resume` command.
+and expose explicit `start`, `stop`, `restart`, and `attach` operations.
 
 Safe convergence is subtractive as well as additive. Revoking an agent's final grant to a workspace
 removes its Linux group membership, and removing an extra SSH public key from configuration removes

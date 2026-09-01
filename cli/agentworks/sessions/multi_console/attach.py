@@ -208,7 +208,11 @@ def _console_runtime_presence(target: Transport, console_name: str) -> tuple[Pro
 
 def _teardown_console_tmux(target: Transport, console_name: str) -> None:
     """Remove and verify the canonical and staging console runtimes."""
-    from agentworks.sessions.tmux import ProbeStatus, _test_presence_from_result
+    from agentworks.sessions.tmux import (
+        ProbeStatus,
+        _test_presence_from_result,
+        probe_tmux_session_after_teardown,
+    )
 
     names = (tmux_session_name(console_name), tmux_staging_name(console_name))
     initial = {name: _tmux_session_presence(target, name) for name in names}
@@ -229,7 +233,7 @@ def _teardown_console_tmux(target: Transport, console_name: str) -> None:
                 entity_kind="console",
                 entity_name=console_name,
             )
-    final = {name: _tmux_session_presence(target, name) for name in names}
+    final = {name: probe_tmux_session_after_teardown(name, run_command=target.run, socket_path=None) for name in names}
     if any(presence is not ProbeStatus.ABSENT for presence in final.values()):
         raise StateError(
             f"failed to verify removal of console '{console_name}' tmux state",
@@ -240,7 +244,11 @@ def _teardown_console_tmux(target: Transport, console_name: str) -> None:
 
 
 def _teardown_console_staging(target: Transport, console_name: str) -> None:
-    from agentworks.sessions.tmux import ProbeStatus, _test_presence_from_result
+    from agentworks.sessions.tmux import (
+        ProbeStatus,
+        _test_presence_from_result,
+        probe_tmux_session_after_teardown,
+    )
 
     staging_name = tmux_staging_name(console_name)
     presence = _tmux_session_presence(target, staging_name)
@@ -260,7 +268,10 @@ def _teardown_console_staging(target: Transport, console_name: str) -> None:
             entity_kind="console",
             entity_name=console_name,
         )
-    if _tmux_session_presence(target, staging_name) is not ProbeStatus.ABSENT:
+    if (
+        probe_tmux_session_after_teardown(staging_name, run_command=target.run, socket_path=None)
+        is not ProbeStatus.ABSENT
+    ):
         raise StateError(
             f"failed to remove staging tmux state for console '{console_name}'",
             entity_kind="console",

@@ -85,7 +85,7 @@ def test_create_failure_retains_stopped_definition_and_cleans_staging(
     assert not model.has_session("aw-console-build+con")
 
 
-def test_create_failure_removes_definition_when_runtime_absence_is_indeterminate(
+def test_create_failure_retains_definition_when_runtime_absence_is_indeterminate(
     db: Database,
     console_target_factory: Callable[[TmuxModel, dict[str, _FakeResult]], _FakeTarget],
     monkeypatch: pytest.MonkeyPatch,
@@ -115,8 +115,8 @@ def test_create_failure_removes_definition_when_runtime_absence_is_indeterminate
             interaction=_refuse(),
         )
 
-    assert db.get_console("con") is None
-    assert db.list_console_sessions("con") == []
+    assert db.get_console("con") is not None
+    assert [member.session_name for member in db.list_console_sessions("con")] == ["alpha"]
     assert not model.has_session("aw-console-con")
     assert not model.has_session("aw-console-build+con")
 

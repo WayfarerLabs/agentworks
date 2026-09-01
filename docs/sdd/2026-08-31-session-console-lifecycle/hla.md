@@ -301,8 +301,9 @@ The key commit points are:
   socket while its PID, boot ID, and start ticks remain unknown rather than claiming stopped state;
 - a console create does not expose a row while an unverified predecessor runtime may still exist;
 - after predecessor absence is verified, console construction publishes the canonical tmux name only
-  after a complete staging build; a failed build retains an honestly stopped row only when both
-  runtime names are proven absent, otherwise it removes the just-inserted definition;
+  after a complete staging build; a failed build retains the durable definition, reporting it as
+  stopped only when both managed names are proven absent and otherwise reporting runtime state as
+  indeterminate;
 - console stopped state means both the canonical and reserved staging tmux names are absent;
 - failed pre-mutation validation or secret resolution does not destroy a healthy runtime.
 

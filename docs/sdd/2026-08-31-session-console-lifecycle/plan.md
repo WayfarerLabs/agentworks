@@ -207,8 +207,7 @@ appropriate live tests. Tests assert behavior and structure, never the wording o
 - [x] Convert every console tmux target to exact `=NAME` selection and prove canonical and staging
       isolation with related valid names such as `foo` and `foobar`.
 - [x] Make create validate and prepare, remove/verify a stale predecessor, insert atomically, then
-      build; roll back before insertion, retain the row after a later build failure only when both
-      runtime names are proven absent, and otherwise remove the just-inserted definition.
+      build; roll back before insertion and retain the row after a later build failure.
 - [x] Implement idempotent start, state-aware restart, idempotent stop, and attach-only attach using
       the canonical/staging LLD state matrix.
 - [x] Ensure attach does not load build plans or resolve pane secrets, while retaining ordinary VM

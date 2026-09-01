@@ -113,9 +113,16 @@ def test_running_session_names_uses_live_status_check(db: Database, fake_target:
     def stub_run(command: str, **kwargs: object) -> _FakeResult:
         fake_target.commands.append(command)
         if "has-session -t =alpha" in command and "has-session -t =beta" in command:
+            missing_session = b"can't find session: gamma".hex()
+            missing_server = b"no server running on /gamma".hex()
+            boot_hex = boot_id.encode().hex()
             return _FakeResult(
                 returncode=0,
-                stdout=f"S:alpha:0\nS:beta:0\nS:gamma:1:{boot_id.encode().hex()}:1\n",
+                stdout=(
+                    f"S:alpha:0::0::0:{boot_hex}:0\n"
+                    f"S:beta:0::0::0:{boot_hex}:0\n"
+                    f"S:gamma:1:{missing_session}:1:{missing_server}:0:{boot_hex}:1\n"
+                ),
             )
         return _FakeResult()
 
