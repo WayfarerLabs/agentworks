@@ -197,8 +197,9 @@ def console_attach(
     """Attach to a running named console."""
     interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config
-    from agentworks.sessions.multi_console import attach_console, restart_console
+    from agentworks.sessions.multi_console import attach_console, refuse_console_nesting, restart_console
 
+    refuse_console_nesting(allow_nesting=allow_nesting)
     db = get_db()
     config = load_config()
     if recreate:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shlex
 from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
@@ -13,12 +12,10 @@ from agentworks.errors import (
     NotFoundError,
     StateError,
 )
-from agentworks.ssh import SSH_TRANSPORT_ERROR
 
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow, VMRow
-    from agentworks.sessions.tmux import RunCommand
     from agentworks.transports import Transport
 
 
@@ -39,18 +36,6 @@ def _resolve_session_linux_user(db: Database, session: SessionRow, vm: VMRow) ->
     return vm.admin_username
 
 
-def _kill_session(
-    session_name: str,
-    *,
-    run_command: RunCommand,
-    socket_path: str | None,
-) -> bool:
-    """Kill a session on its expected tmux server. Returns True if successful."""
-    from agentworks.sessions.tmux import kill_session
-
-    return kill_session(session_name, run_command=run_command, socket_path=socket_path)
-
-
 def _build_session_target(
     session: SessionRow,
     *,
@@ -67,7 +52,7 @@ def _build_session_target(
     if the agent's authorized_keys aren't provisioned.
     For admin sessions, returns the admin target unchanged.
 
-    Single-session paths use this to make kill / resume operations
+    Single-session paths use this to make stop / restart operations
     consistent with create: every destructive step on an agent session
     goes via direct agent SSH. Because the returned target always owns
     the session it will operate on, callers can issue destructive commands
@@ -110,72 +95,64 @@ def _repair_session_pid(
     Raises StateError if the session is alive but PID/boot_id can't be recovered,
     or ConnectivityError if the VM is unreachable.
     """
-    from agentworks.sessions.tmux import capture_tmux_server_fingerprint, tmux_cmd
+    from agentworks.sessions.tmux import ProbeStatus, capture_tmux_server_fingerprint, probe_tmux_session
 
     sock = session.socket_path
-    q_session = shlex.quote(f"={session.name}")
-
-    # Step 1: try has-session (the primary liveness check)
-    has_cmd = tmux_cmd(f"has-session -t {q_session}", sock) + " 2>/dev/null"
-    has_result = target.run(has_cmd, check=False)
-    if has_result.returncode == SSH_TRANSPORT_ERROR:
-        raise ConnectivityError(
-            f"cannot reach VM for session '{session.name}' (SSH connection failed)",
-            entity_kind="session",
-            entity_name=session.name,
-        )
-    if has_result.ok:
-        if sock is None:
+    if sock is None:
+        presence = probe_tmux_session(session.name, run_command=target.run, socket_path=None)
+        if presence is ProbeStatus.PRESENT:
             raise StateError(
                 f"session '{session.name}' is live on a legacy shared tmux server",
                 entity_kind="session",
                 entity_name=session.name,
                 hint=f"Run `agw session restart {session.name}` to migrate it.",
             )
-        fingerprint = capture_tmux_server_fingerprint(target=target, socket_path=sock)
-        if fingerprint is not None and (
-            (session.pid is None or session.pid == fingerprint.pid)
-            and (session.boot_id is None or session.boot_id == fingerprint.boot_id)
-        ):
-            db.update_session_runtime(
-                session.name,
-                socket_path=sock,
-                pid=fingerprint.pid,
-                boot_id=fingerprint.boot_id,
-                tmux_server_start_ticks=fingerprint.start_ticks,
-            )
-            output.warn(f"Recovered runtime identity for session '{session.name}'")
-            return True
-        raise StateError(
-            f"session '{session.name}' is alive but PID/boot ID recovery failed.",
-            entity_kind="session",
-            entity_name=session.name,
-            hint="Investigate the tmux server manually.",
-        )
-
-    # Step 2: has-session failed -- determine if genuinely stopped or ambiguous
-    if sock and target.run(f"test -e {shlex.quote(sock)}", sudo=True, check=False).ok:
-        # Socket exists. Probe with sudo to distinguish stale from unreachable.
-        probe_cmd = tmux_cmd("list-sessions", sock, sudo=True) + " 2>/dev/null"
-        if target.run(probe_cmd, check=False).ok:
-            raise StateError(
-                f"session '{session.name}' has a live tmux server but it is unreachable.",
+        if presence is ProbeStatus.UNKNOWN:
+            raise ConnectivityError(
+                f"could not determine legacy runtime state for session '{session.name}'",
                 entity_kind="session",
                 entity_name=session.name,
-                hint="This may indicate a permissions issue. Investigate manually.",
             )
-        # Stale socket, server is dead
-        db.update_session_runtime(
-            session.name,
-            socket_path=sock,
-            pid=PID_STOPPED,
-            boot_id=None,
-            tmux_server_start_ticks=None,
-        )
-        output.warn(f"Session '{session.name}' is not running, marked stopped")
-        return True
+        if not _prove_stored_runtime_absent(session, target=target):
+            raise StateError(
+                f"session '{session.name}' may still own a legacy runtime",
+                entity_kind="session",
+                entity_name=session.name,
+            )
+    else:
+        probe = capture_tmux_server_fingerprint(target=target, socket_path=sock)
+        if probe.status is ProbeStatus.PRESENT:
+            fingerprint = probe.fingerprint
+            assert fingerprint is not None
+            stored_ticks = _validated_stored_start_ticks(session)
+            if (
+                (session.pid is None or session.pid == fingerprint.pid)
+                and (session.boot_id is None or session.boot_id == fingerprint.boot_id)
+                and (stored_ticks is None or stored_ticks == fingerprint.start_ticks)
+            ):
+                db.update_session_runtime(
+                    session.name,
+                    socket_path=sock,
+                    pid=fingerprint.pid,
+                    boot_id=fingerprint.boot_id,
+                    tmux_server_start_ticks=fingerprint.start_ticks,
+                )
+                output.info(f"Recovered runtime identity for session '{session.name}'")
+                return True
+            raise StateError(
+                f"session '{session.name}' has a live tmux server whose identity does not match its row",
+                entity_kind="session",
+                entity_name=session.name,
+                hint="Investigate the tmux server manually.",
+            )
+        if not _prove_stored_runtime_absent(session, target=target):
+            raise StateError(
+                f"session '{session.name}' runtime absence could not be proved",
+                entity_kind="session",
+                entity_name=session.name,
+                hint="Investigate the tmux server manually.",
+            )
 
-    # No socket (or admin session) and has-session failed -- genuinely stopped
     db.update_session_runtime(
         session.name,
         socket_path=sock,
@@ -183,8 +160,68 @@ def _repair_session_pid(
         boot_id=None,
         tmux_server_start_ticks=None,
     )
-    output.warn(f"Session '{session.name}' is not running, marked stopped")
+    output.info(f"Session '{session.name}' is not running; marked stopped")
     return True
+
+
+def _validated_stored_start_ticks(session: SessionRow) -> int | None:
+    """Return a valid stored process start time or fail closed."""
+    value = session.tmux_server_start_ticks
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise StateError(
+            f"session '{session.name}' has an invalid stored tmux process start time",
+            entity_kind="session",
+            entity_name=session.name,
+            hint="Repair the persisted runtime identity before retrying.",
+        )
+    return value
+
+
+def _prove_stored_runtime_absent(session: SessionRow, *, target: Transport) -> bool:
+    """Prove the stored process incarnation absent without signaling its PID."""
+    from agentworks.sessions.tmux import ProbeStatus, probe_process_start_ticks
+
+    if session.pid is None or session.pid <= 0 or not session.boot_id:
+        raise StateError(
+            f"session '{session.name}' lacks the stored identity required to prove runtime absence",
+            entity_kind="session",
+            entity_name=session.name,
+        )
+    stored_ticks = _validated_stored_start_ticks(session)
+    current_boot = _mgr._get_boot_id(target)
+    if current_boot is None:
+        raise ConnectivityError(
+            f"could not read the VM boot identity for session '{session.name}'",
+            entity_kind="session",
+            entity_name=session.name,
+        )
+    if current_boot != session.boot_id:
+        return True
+
+    pid_presence = _mgr._pid_presence(session.pid, target=target)
+    if pid_presence is ProbeStatus.ABSENT:
+        return True
+    if pid_presence is ProbeStatus.UNKNOWN:
+        raise ConnectivityError(
+            f"could not determine whether the stored process for session '{session.name}' exists",
+            entity_kind="session",
+            entity_name=session.name,
+        )
+    if stored_ticks is None:
+        return False
+
+    ticks = probe_process_start_ticks(session.pid, target=target)
+    if ticks.status is ProbeStatus.ABSENT:
+        return _mgr._pid_presence(session.pid, target=target) is ProbeStatus.ABSENT
+    if ticks.status is ProbeStatus.UNKNOWN or ticks.value is None:
+        raise StateError(
+            f"could not verify the stored process start time for session '{session.name}'",
+            entity_kind="session",
+            entity_name=session.name,
+        )
+    return ticks.value != stored_ticks
 
 
 def _needs_repair(session: SessionRow) -> bool:

@@ -510,7 +510,9 @@ def _seed_session_rows(db: Database) -> None:
     db.insert_workspace("ws", "/srv/ws", "box", "ws-ws")
     db.insert_session("live", "ws", "missing-template", SessionMode.ADMIN)
     db.insert_session("stopped", "ws", "missing-template", SessionMode.ADMIN)
-    db.update_session_pid("stopped", PID_STOPPED, boot_id="secret-boot-stopped")
+    db.update_session_runtime(
+        "stopped", socket_path="/tmp/stopped.sock", pid=PID_STOPPED, boot_id=None, tmux_server_start_ticks=None
+    )
 
 
 def test_session_json_status_repairs_and_no_status_are_preserved(
@@ -549,7 +551,13 @@ def test_session_json_status_repairs_and_no_status_are_preserved(
         nonlocal repairs
         del config
         repairs += 1
-        db.update_session_pid("live", 4321, boot_id="secret-boot-live")
+        db.update_session_runtime(
+            "live",
+            socket_path="/tmp/live.sock",
+            pid=4321,
+            boot_id="secret-boot-live",
+            tmux_server_start_ticks=77,
+        )
         return db.list_sessions()
 
     monkeypatch.setattr(manager, "_best_effort_batch_vm_boundary", boundary)
@@ -572,10 +580,11 @@ def test_session_json_status_repairs_and_no_status_are_preserved(
     assert repaired is not None and (repaired.pid, repaired.boot_id) == (4321, "secret-boot-live")
     assert repairs == 1
     assert boundary_calls == 1
-    for excluded in (b"secret-boot-live", b"secret-boot-stopped"):
-        assert excluded not in status_result.stdout_bytes
+    assert b"secret-boot-live" not in status_result.stdout_bytes
 
-    db.update_session_pid("live", None)
+    db.update_session_runtime(
+        "live", socket_path="/tmp/live.sock", pid=None, boot_id=None, tmux_server_start_ticks=None
+    )
 
     def forbidden(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("--no-status must not repair or probe")
@@ -632,7 +641,13 @@ def test_session_describe_json_positive_and_stopped_pid_with_degraded_template(
 
     def repair(row: SessionRow, *, target: object, db: Database) -> SessionRow:
         del target
-        db.update_session_pid(row.name, 7777, boot_id="secret-boot-describe")
+        db.update_session_runtime(
+            row.name,
+            socket_path="/tmp/live.sock",
+            pid=7777,
+            boot_id="secret-boot-describe",
+            tmux_server_start_ticks=77,
+        )
         repaired = db.get_session(row.name)
         assert repaired is not None
         return repaired

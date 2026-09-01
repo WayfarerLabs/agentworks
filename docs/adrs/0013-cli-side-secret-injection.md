@@ -97,13 +97,14 @@ site.
 
 1. **The CLI handles secrets on every invocation that opens a shell.** In the file model, the
    create-time command was the only place secrets had to be known; later commands that open new
-   shells (`session resume`, `console add-shell`, `agent exec`, `vm exec`, etc.) didn't need them.
-   With CLI injection, every such command needs the secret available through the active source
-   chain. (`session attach` is unaffected: it joins the existing tmux server's captured env, no
-   re-resolution.) Operators configure a suitable `secret-source`, including a vault-backed source
-   when appropriate, so credentials are available whenever `agw` runs. This is a real cost: the CLI
-   process handles secret material more often, on the presumed-trusted operator workstation rather
-   than the less-trusted VM. Net acceptable for agentworks's use case, but worth naming.
+   shells (`session start` / `session restart`, `console add-shell`, `agent exec`, `vm exec`, etc.)
+   didn't need them. With CLI injection, every such command needs the secret available through the
+   active source chain. (`session attach` is unaffected: it joins the existing tmux server's
+   captured env, no re-resolution.) Operators configure a suitable `secret-source`, including a
+   vault-backed source when appropriate, so credentials are available whenever `agw` runs. This is a
+   real cost: the CLI process handles secret material more often, on the presumed-trusted operator
+   workstation rather than the less-trusted VM. Net acceptable for agentworks's use case, but worth
+   naming.
 
 2. **SSH command line exposure window.** The `export KEY=val && cmd` prelude appears on the SSH
    command line, which is briefly visible via `ps` to any process that can read it during the start

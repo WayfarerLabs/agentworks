@@ -492,17 +492,28 @@ def _build_console_tmux(
     layout: str,
 ) -> None:
     """Build under a reserved name and publish only a complete console."""
-    from .attach import _teardown_console_tmux, _tmux_session_exists
+    from agentworks.sessions.tmux import ProbeStatus
+
+    from .attach import _teardown_console_tmux, _tmux_session_presence
 
     members = db.list_console_sessions(console.name)
     if not members and not console.admin_shell:
-        # create_console rejects this; belt-and-suspenders for future caller paths.
-        output.warn(f"console '{console.name}' has no members; skipping tmux build")
-        return
+        raise ExternalError(
+            f"console '{console.name}' has no configured windows",
+            entity_kind="console",
+            entity_name=console.name,
+        )
 
     canonical_name = tmux_session_name(console.name)
     staging_name = tmux_staging_name(console.name)
-    if _tmux_session_exists(target, canonical_name):
+    canonical_presence = _tmux_session_presence(target, canonical_name)
+    if canonical_presence is ProbeStatus.UNKNOWN:
+        raise ExternalError(
+            f"could not determine canonical tmux state for console '{console.name}'",
+            entity_kind="console",
+            entity_name=console.name,
+        )
+    if canonical_presence is ProbeStatus.PRESENT:
         raise ExternalError(
             f"console '{console.name}' already has a canonical tmux runtime",
             entity_kind="console",
@@ -573,7 +584,9 @@ def _build_console_tmux(
                 entity_kind="console",
                 entity_name=console.name,
             )
-        if not _tmux_session_exists(target, canonical_name) or _tmux_session_exists(target, staging_name):
+        canonical_presence = _tmux_session_presence(target, canonical_name)
+        staging_presence = _tmux_session_presence(target, staging_name)
+        if canonical_presence is not ProbeStatus.PRESENT or staging_presence is not ProbeStatus.ABSENT:
             raise ExternalError(
                 f"console '{console.name}' staging publication could not be verified",
                 entity_kind="console",

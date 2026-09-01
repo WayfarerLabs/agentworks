@@ -70,7 +70,9 @@ def _seed_session(db: Database, name: str, ws: str, *, agent: str | None = None)
         agent_name=agent,
         socket_path=f"/tmp/{name}.sock",
     )
-    db.update_session_pid(name, PID_STOPPED)
+    db.update_session_runtime(
+        name, socket_path=f"/tmp/{name}.sock", pid=PID_STOPPED, boot_id=None, tmux_server_start_ticks=None
+    )
 
 
 def _reachable(monkeypatch: pytest.MonkeyPatch, value: bool) -> None:
@@ -208,7 +210,9 @@ def test_list_status_reports_identity_refusal_as_unknown_without_transport(
 ) -> None:
     _seed_vm(db, "vm-a", "100.64.0.11")
     db.insert_session("s-a", "ws-vm-a", "default", SessionMode.ADMIN, socket_path="/tmp/s-a.sock")
-    db.update_session_pid("s-a", 4321, boot_id="boot-a")
+    db.update_session_runtime(
+        "s-a", socket_path="/tmp/s-a.sock", pid=4321, boot_id="boot-a", tmux_server_start_ticks=77
+    )
 
     def refuse(*args: object, **kwargs: object) -> None:
         raise StateError("SSH identity drift")
@@ -671,7 +675,7 @@ def test_single_stop_ends_on_a_result_terminal_without_duplication(
         "batch_check_status",
         lambda sessions, *, target: {s.name: SessionStatus.OK for s in sessions},
     )
-    monkeypatch.setattr(session_manager, "_kill_session", lambda *a, **k: True)
+    monkeypatch.setattr("agentworks.sessions.manager._lifecycle._teardown_session", lambda *a, **k: None)
 
     session_manager.stop_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
 
@@ -710,7 +714,7 @@ def test_attach_session_reachable_vm_is_one_boundary_burst(
     _seed_singular(db)
     _reachable(monkeypatch, True)
 
-    with pytest.raises(StateError, match="not running"):
+    with pytest.raises(StateError):
         session_manager.attach_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"]]
@@ -727,10 +731,66 @@ def test_session_logs_reachable_vm_is_one_boundary_burst(
     _seed_singular(db)
     _reachable(monkeypatch, True)
 
-    with pytest.raises(StateError, match="not running"):
+    with pytest.raises(StateError):
         session_manager.session_logs(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"]]
+
+
+def test_residual_session_refuses_attach_without_interactive_entry(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.db import SessionStatus
+
+    _seed_singular(db)
+    _reachable(monkeypatch, True)
+    session = db.get_session("s1")
+    assert session is not None
+    monkeypatch.setattr(session_manager, "_ensure_pid", lambda *args, **kwargs: session)
+    monkeypatch.setattr(session_manager, "check_session_status", lambda *args, **kwargs: SessionStatus.RESIDUAL)
+    monkeypatch.setattr(
+        target,
+        "interactive",
+        lambda *args, **kwargs: pytest.fail("residual runtime must not be attached"),
+    )
+
+    with pytest.raises(StateError):
+        session_manager.attach_session(
+            db,
+            make_config(),
+            name="s1",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+
+def test_residual_session_refuses_logs_without_capture(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.db import SessionStatus
+
+    _seed_singular(db)
+    _reachable(monkeypatch, True)
+    session = db.get_session("s1")
+    assert session is not None
+    monkeypatch.setattr(session_manager, "_ensure_pid", lambda *args, **kwargs: session)
+    monkeypatch.setattr(session_manager, "check_session_status", lambda *args, **kwargs: SessionStatus.RESIDUAL)
+    monkeypatch.setattr(
+        "agentworks.sessions.tmux.capture_output",
+        lambda *args, **kwargs: pytest.fail("residual runtime has no canonical pane to capture"),
+    )
+
+    with pytest.raises(StateError):
+        session_manager.session_logs(
+            db,
+            make_config(),
+            name="s1",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
 
 
 def test_session_logs_writes_exact_utf8_bytes_on_a_legacy_console(

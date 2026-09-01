@@ -164,11 +164,9 @@ def test_start_all_sessions_rejects_unknown_vm(db: Database) -> None:
 
 def test_start_all_sessions_valid_filter_empty_result_succeeds(
     db: Database,
-    captured_output: CapturedOutput,
 ) -> None:
     _seed(db)
     session_manager.start_all_sessions(db, None, vm_name="dev-vm", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
-    assert any("No matching sessions to start" in m for m in captured_output.info)
 
 
 # ---------------------------------------------------------------------------

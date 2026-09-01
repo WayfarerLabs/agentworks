@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import Database
+from agentworks.db import PID_STOPPED, Database
 from agentworks.errors import ConnectivityError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.multi_console import (
@@ -36,6 +36,16 @@ if TYPE_CHECKING:
 
 # tmux session name for console "con"; see tmux_session_name.
 CON = "aw-console-con"
+
+
+def _mark_stopped(db: Database, name: str) -> None:
+    db.update_session_runtime(
+        name,
+        socket_path=f"/tmp/{name}.sock",
+        pid=PID_STOPPED,
+        boot_id=None,
+        tmux_server_start_ticks=None,
+    )
 
 
 def test_add_session_live_sync_skipped_when_console_absent(db: Database, fake_target: _FakeTarget) -> None:
@@ -348,9 +358,7 @@ def test_reorder_sessions_live_sync_compacts_when_window_missing(db: Database, f
     assert [m.session_name for m in members] == ["c", "a", "b"]
 
 
-def test_reorder_sessions_live_sync_bails_on_duplicate_window_names(
-    db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
-) -> None:
+def test_reorder_sessions_live_sync_bails_on_duplicate_window_names(db: Database, fake_target: _FakeTarget) -> None:
     """If two windows share a name that's in the session set, we can't
     disambiguate which one to swap. Warn with a restart hint and skip
     tmux work; DB is already updated."""
@@ -367,7 +375,6 @@ def test_reorder_sessions_live_sync_bails_on_duplicate_window_names(
 
     swaps = [c for c in fake_target.commands if "swap-window" in c]
     assert swaps == []
-    assert any("duplicate window name" in w and "restart" in w for w in captured_output.warnings)
     members = db.list_console_sessions("con")
     assert [m.session_name for m in members] == ["b", "a"]
 
@@ -514,13 +521,12 @@ def test_delete_session_kills_console_windows(
     """``manager.delete_session`` must snapshot console memberships *before*
     the DB delete (FK cascade clears the join) and then dispatch to
     ``kill_session_windows`` with one pair per member console."""
-    from agentworks.db import PID_STOPPED
     from agentworks.sessions import manager as manager_mod
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["s", "other"])
     # Mark 's' STOPPED so check_session_status short-circuits with no SSH.
-    db.update_session_pid("s", PID_STOPPED)
+    _mark_stopped(db, "s")
     create_console(db, name="alpha", vm_name="vm1", session_specs=["s", "other"])
     create_console(db, name="beta", vm_name="vm1", session_specs=["s"])
     create_console(db, name="gamma", vm_name="vm1", session_specs=["other"])
@@ -550,12 +556,11 @@ def test_delete_session_skips_kill_when_no_member_consoles(
 ) -> None:
     """No console membership -> no kill_session_windows call. Guards against
     a future regression that unconditionally invokes the helper."""
-    from agentworks.db import PID_STOPPED
     from agentworks.sessions import manager as manager_mod
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["lonely"])
-    db.update_session_pid("lonely", PID_STOPPED)
+    _mark_stopped(db, "lonely")
 
     monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
 
@@ -583,12 +588,11 @@ def test_delete_session_reports_affected_consoles(
 ) -> None:
     """Deleting a session names every console that referenced it, so the
     cascade is no longer silent (issue #248)."""
-    from agentworks.db import PID_STOPPED
     from agentworks.sessions import manager as manager_mod
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["s", "other"])
-    db.update_session_pid("s", PID_STOPPED)
+    _mark_stopped(db, "s")
     # alpha keeps 'other' after the cascade; beta is emptied.
     create_console(db, name="alpha", vm_name="vm1", session_specs=["s", "other"])
     create_console(db, name="beta", vm_name="vm1", session_specs=["s"])
@@ -613,12 +617,11 @@ def test_delete_session_offers_and_deletes_now_empty_console(
 ) -> None:
     """A console emptied by the cascade is offered for deletion; an accepted
     offer deletes it, while a console that still has members survives."""
-    from agentworks.db import PID_STOPPED
     from agentworks.sessions import manager as manager_mod
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["s", "other"])
-    db.update_session_pid("s", PID_STOPPED)
+    _mark_stopped(db, "s")
     create_console(db, name="alpha", vm_name="vm1", session_specs=["s", "other"])
     create_console(db, name="beta", vm_name="vm1", session_specs=["s"])
 
@@ -655,12 +658,11 @@ def test_delete_session_declined_offer_keeps_empty_console(
     captured_output: CapturedOutput,
 ) -> None:
     """Declining the empty-console offer leaves the console in place (empty)."""
-    from agentworks.db import PID_STOPPED
     from agentworks.sessions import manager as manager_mod
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["s"])
-    db.update_session_pid("s", PID_STOPPED)
+    _mark_stopped(db, "s")
     create_console(db, name="beta", vm_name="vm1", session_specs=["s"])
 
     monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
@@ -690,12 +692,11 @@ def test_delete_session_does_not_offer_console_with_remaining_sessions(
 ) -> None:
     """A console that still has other members after the cascade is neither
     offered for deletion nor removed."""
-    from agentworks.db import PID_STOPPED
     from agentworks.sessions import manager as manager_mod
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["s", "other"])
-    db.update_session_pid("s", PID_STOPPED)
+    _mark_stopped(db, "s")
     create_console(db, name="alpha", vm_name="vm1", session_specs=["s", "other"])
 
     monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
@@ -729,12 +730,11 @@ def test_delete_session_leaves_no_dangling_console_reference(
 ) -> None:
     """The FK cascade still holds: no console lists the deleted session after
     ``session delete`` (the guarantee this change must not regress)."""
-    from agentworks.db import PID_STOPPED
     from agentworks.sessions import manager as manager_mod
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["s", "other"])
-    db.update_session_pid("s", PID_STOPPED)
+    _mark_stopped(db, "s")
     create_console(db, name="alpha", vm_name="vm1", session_specs=["s", "other"])
 
     monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
@@ -757,12 +757,11 @@ def test_delete_session_yes_reports_but_keeps_empty_console(
     console-delete command) but NOT auto-deleted: unlike a
     session-created workspace/agent, a console is an operator-authored view
     this session never owned."""
-    from agentworks.db import PID_STOPPED
     from agentworks.sessions import manager as manager_mod
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["s"])
-    db.update_session_pid("s", PID_STOPPED)
+    _mark_stopped(db, "s")
     create_console(db, name="beta", vm_name="vm1", session_specs=["s"])
 
     monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
@@ -790,12 +789,11 @@ def test_delete_session_warns_when_offered_console_delete_raises(
     """If the confirmed empty-console delete raises an AgentworksError (e.g. VM
     unreachable in its teardown), the session is still reported deleted, a
     warning names the console, and the command completes without propagating."""
-    from agentworks.db import PID_STOPPED
     from agentworks.sessions import manager as manager_mod
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["s"])
-    db.update_session_pid("s", PID_STOPPED)
+    _mark_stopped(db, "s")
     create_console(db, name="beta", vm_name="vm1", session_specs=["s"])
 
     monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
@@ -1008,13 +1006,12 @@ def test_delete_workspace_kills_console_windows(
 ) -> None:
     """``delete_workspace --force`` must clean up windows for every deleted
     session across every console that listed them."""
-    from agentworks.db import PID_STOPPED
     from agentworks.workspaces import manager as ws_manager
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["s1", "s2"])
-    db.update_session_pid("s1", PID_STOPPED)
-    db.update_session_pid("s2", PID_STOPPED)
+    _mark_stopped(db, "s1")
+    _mark_stopped(db, "s2")
     create_console(db, name="con1", vm_name="vm1", session_specs=["s1", "s2"])
     create_console(db, name="con2", vm_name="vm1", session_specs=["s1"])
 

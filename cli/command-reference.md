@@ -17,8 +17,8 @@ An instance spec is an inline JSON object applied as the final layer after a sel
 `--spec JSON` on `vm create`, `workspace create`, `agent create`, and `session create`. A VM has two
 declarations: `--template` and `--spec` shape the VM, while `--admin-template` and `--admin-spec`
 shape its admin user. `agent reinit` also accepts `--spec JSON` because it is the existing-instance
-command that can change the bound template. No other reinit, repair, resume, or copy command accepts
-an instance spec.
+command that can change the bound template. No other reinit, repair, start, restart, or copy command
+accepts an instance spec.
 
 The JSON must be one object written directly on the command line. It cannot be a file path, `null`,
 an array, or multiple JSON values. Duplicate keys, non-finite numbers, nested nulls, unknown fields,
@@ -917,10 +917,10 @@ while a console is attached updates the live tmux state immediately (best-effort
 isn't running on the VM, only the DB is updated and changes appear on its next start.
 
 When `console remove-sessions` (or the session-delete cascade) leaves a console with no configured
-sessions, the console is a dead end (`console attach` would just warn "has no members"). It offers
-to delete the now-empty console; pass `-y`/`--yes` to run non-interactively, which reports the
-emptied console and leaves it in place (delete it yourself with `agw console delete <name>`). The
-removed sessions themselves are untouched; only their membership in the console is removed.
+sessions, the console cannot be started. The command that empties it offers to delete the now-empty
+console; pass `-y`/`--yes` to run non-interactively, which reports the emptied console and leaves it
+in place (delete it yourself with `agw console delete <name>`). The removed sessions themselves are
+untouched; only their membership in the console is removed.
 
 <!-- Linked from the top-level README; rename only if you also update README.md. -->
 
@@ -950,7 +950,8 @@ pane PTY, and each socket path is persisted in the database.
 
 #### Named Console
 
-`console attach <name>` creates or attaches to the `aw-console-<name>` tmux session. Each member
+`console create <name>` stores the definition and builds the `aw-console-<name>` tmux session;
+`console start` builds it again when stopped, and `console attach` only joins it. Each member
 session becomes a window running an attachment wrapper, plus a configurable number of extra shell
 panes (default user = session's agent user, default cwd = workspace root; override per pane with
 `--cwd` / `--admin` on `console add-shell`).
@@ -1080,20 +1081,20 @@ itself: every launch installs a small recorder script that Codex runs after each
 (through Codex's `notify` hook, so nothing is added to the conversation), and the next ordinary
 start/restart resumes what it recorded (a session archived with `codex archive` is deliberately
 treated as not resumable: the binding is dropped and the fallback below decides what happens
-instead, which is not always a fresh session). With nothing recorded yet, resume falls back to a
-single interactive Codex conversation recorded in this workspace directory, and on several it opens
-Codex's own session picker in the pane instead of guessing: picking one binds this session to it
-from its next turn, and esc starts a fresh conversation. `session create` and `--force-new` always
-launch a brand-new conversation and adopt nothing, so reusing a deleted session's name cannot
+instead, which is not always a fresh session). With nothing recorded yet, an ordinary start falls
+back to a single interactive Codex conversation recorded in this workspace directory, and on several
+it opens Codex's own session picker in the pane instead of guessing: picking one binds this session
+to it from its next turn, and esc starts a fresh conversation. `session create` and `--force-new`
+always launch a brand-new conversation and adopt nothing, so reusing a deleted session's name cannot
 silently pick its conversation back up; the fallback remains a heuristic, though, so if that
-conversation is the only one recorded in the workspace the new session's first resume can still
-adopt it, announced with the id it chose. It ships as the opt-in `codex` system plugin, disabled by
-default with the same gating as `claude-code` above. Once enabled, it needs only that `codex` is
-installed on the launch target, and announces which of those it did, both in the command output and
-in the pane. Its config is all optional and documented by
-`agw resource explain harness-integration/codex`; the [resources guide](../docs/guides/resources.md)
-covers the Codex behavior behind the fields (network off by default under `workspace-write`, who
-adjudicates an approval escalation, and why the integration always passes `--strict-config`):
+conversation is the only one recorded in the workspace a later ordinary start can still adopt it,
+announced with the id it chose. It ships as the opt-in `codex` system plugin, disabled by default
+with the same gating as `claude-code` above. Once enabled, it needs only that `codex` is installed
+on the launch target, and announces which of those it did, both in the command output and in the
+pane. Its config is all optional and documented by `agw resource explain harness-integration/codex`;
+the [resources guide](../docs/guides/resources.md) covers the Codex behavior behind the fields
+(network off by default under `workspace-write`, who adjudicates an approval escalation, and why the
+integration always passes `--strict-config`):
 
 ```yaml
 apiVersion: agentworks/v1

@@ -5,9 +5,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from typer.testing import CliRunner
 
+from agentworks.cli import app
 from agentworks.db import Database
-from agentworks.errors import ExternalError, SecretUnavailableError, StateError
+from agentworks.errors import ExternalError, SecretUnavailableError, StateError, ValidationError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.multi_console import (
     attach_console,
@@ -157,3 +159,78 @@ def test_exact_targets_do_not_touch_a_prefix_neighbor(
 
     assert model.has_session("aw-console-con")
     assert model.has_session("aw-console-conlong")
+
+
+def test_console_transport_failure_never_triggers_teardown_or_build(
+    db: Database,
+    console_target_factory: Callable[[TmuxModel, dict[str, _FakeResult]], _FakeTarget],
+) -> None:
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["alpha"])
+    model = TmuxModel()
+    target = console_target_factory(
+        model,
+        {"has-session -t =aw-console-con": _FakeResult(returncode=255)},
+    )
+
+    with pytest.raises(StateError):
+        create_console(
+            db,
+            _StubConfig(),
+            name="con",
+            vm_name="vm1",
+            session_specs=["alpha"],
+            interaction=_refuse(),
+        )
+
+    assert db.get_console("con") is None
+    assert not any("kill-session" in command or "new-session" in command for command in target.commands)
+
+
+def test_empty_console_is_rejected_before_registry_or_remote_work(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_vm(db, with_tailscale=True)
+    registry_loads: list[bool] = []
+
+    def load_registry(*args: object, **kwargs: object) -> None:
+        registry_loads.append(True)
+        raise AssertionError("registry loading must follow definition validation")
+
+    monkeypatch.setattr("agentworks.bootstrap.load_request_registry", load_registry)
+
+    with pytest.raises(ValidationError):
+        create_console(
+            db,
+            _StubConfig(),
+            name="con",
+            vm_name="vm1",
+            session_specs=[],
+            interaction=_refuse(),
+        )
+
+    assert registry_loads == []
+    assert db.get_console("con") is None
+
+
+def test_deprecated_recreate_checks_nesting_before_restart(monkeypatch: pytest.MonkeyPatch) -> None:
+    import agentworks.sessions.multi_console as multi_console
+
+    calls: list[str] = []
+
+    def refuse(*, allow_nesting: bool) -> None:
+        calls.append("nesting")
+        raise StateError("nested tmux")
+
+    monkeypatch.setattr(multi_console, "refuse_console_nesting", refuse)
+    monkeypatch.setattr(
+        multi_console,
+        "restart_console",
+        lambda *args, **kwargs: calls.append("restart"),
+    )
+
+    result = CliRunner().invoke(app, ["console", "attach", "con", "--recreate"])
+
+    assert result.exit_code != 0
+    assert calls == ["nesting"]

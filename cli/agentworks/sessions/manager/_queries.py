@@ -139,10 +139,20 @@ def delete_session(
         _run_as_root,
         admin_target,
     ):
-        session = _mgr._ensure_pid(session, target=admin_target, db=db)
-        status = _mgr.check_session_status(session, target=admin_target)
+        legacy = session.socket_path is None and session.pid is not None and session.pid > 0
+        if legacy:
+            status = SessionStatus.OK
+        else:
+            session = _mgr._ensure_pid(session, target=admin_target, db=db)
+            status = _mgr.check_session_status(session, target=admin_target)
 
-        # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable sessions
+        if status == SessionStatus.UNKNOWN:
+            raise StateError(
+                f"session '{name}' runtime state is unknown",
+                entity_kind="session",
+                entity_name=name,
+                hint="Retry after transport access is reliable; no runtime was changed.",
+            )
         if status == SessionStatus.BROKEN and not force:
             raise BrokenStateError(
                 f"session '{name}' is broken (PID alive but tmux unreachable).",
@@ -811,7 +821,21 @@ def attach_session(
                 entity_kind="session",
                 entity_name=name,
             )
-        if status in {SessionStatus.BROKEN, SessionStatus.RESIDUAL}:
+        if status == SessionStatus.UNKNOWN:
+            raise StateError(
+                f"session '{name}' runtime state is unknown",
+                entity_kind="session",
+                entity_name=name,
+                hint="Retry after transport access is reliable.",
+            )
+        if status == SessionStatus.RESIDUAL:
+            raise StateError(
+                f"session '{name}' has a residual tmux server but no canonical session",
+                entity_kind="session",
+                entity_name=name,
+                hint=f"Run `agw session start {name}` or `agw session restart {name}` to recover it.",
+            )
+        if status == SessionStatus.BROKEN:
             raise BrokenStateError(
                 f"session '{name}' is broken (PID alive but tmux unreachable).",
                 entity_kind="session",

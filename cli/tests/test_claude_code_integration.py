@@ -173,20 +173,6 @@ def test_absent_transcript_launches_fresh() -> None:
     assert "starting new session s1" in command
 
 
-def test_launch_note_reports_resume() -> None:
-    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})  # found
-    harness_integration = _harness_integration()
-    result = harness_integration.start(_op_ctx(target))
-    assert result.note == "Existing Claude Code session found. Resuming..."
-
-
-def test_launch_note_reports_fresh_start() -> None:
-    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})  # not found
-    harness_integration = _harness_integration()
-    result = harness_integration.start(_op_ctx(target))
-    assert result.note == "No existing Claude Code session. Starting a new one..."
-
-
 def test_start_and_restart_are_symmetric() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})
     harness_integration = _harness_integration()

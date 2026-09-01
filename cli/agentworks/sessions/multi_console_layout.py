@@ -394,7 +394,7 @@ def _reorder_session_windows(
     # logic (the dict below would silently retain only the last index for
     # each name and we'd target the wrong window). tmux allows duplicates
     # but we can't disambiguate, so bail with a recovery hint rather than
-    # scramble the layout. The DB is already updated; recreate materializes
+    # scramble the layout. The DB is already updated; restart materializes
     # the new order from a clean slate.
     name_counts: dict[str, int] = {}
     for _idx, name in pairs:

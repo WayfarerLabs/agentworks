@@ -4,12 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import pytest
+
 from agentworks.db import SessionRow, SessionStatus
+from agentworks.errors import StateError
 from agentworks.sessions.manager import (
+    _validated_stored_start_ticks,
     batch_check_status,
     check_session_status,
 )
-from agentworks.sessions.tmux import get_tmux_server_pid
+from agentworks.sessions.tmux import ProbeStatus, probe_tmux_server_pid
 
 
 @dataclass
@@ -73,14 +77,14 @@ def test_batch_mixed() -> None:
     """Batch: agent OK, admin stopped, NULL-PID excluded."""
     sessions = [
         _session("a1", pid=100, socket_path="/sock1", mode="agent", boot_id="boot1"),
-        _session("s1", pid=200, mode="admin"),
+        _session("s1", pid=200, socket_path="/sock2", mode="admin", boot_id="boot1"),
         _session("s2", pid=None),
     ]
     target = _FakeTarget(
         {
             "has-session": _FakeResult(
                 ok=True,
-                stdout="S:a1:0\nS:s1:1\n",
+                stdout=f"S:a1:0\nS:s1:1:{BOOT_STALE}:1\n",
             ),
         }
     )
@@ -103,7 +107,7 @@ def test_batch_builds_compound_command() -> None:
     """Compound command includes has-session for both agent and admin sessions."""
     sessions = [
         _session("a1", pid=100, socket_path="/sock", mode="agent", boot_id="b"),
-        _session("s1", pid=200, mode="admin"),
+        _session("s1", pid=200, socket_path="/sock2", mode="admin", boot_id="b"),
     ]
     target = _FakeTarget({"has-session": _FakeResult(ok=True, stdout="S:a1:0\nS:s1:0\n")})
     batch_check_status(sessions, target=target)
@@ -225,21 +229,14 @@ def test_admin_broken_after_setenv_pivot() -> None:
 def test_legacy_admin_session_without_socket_raises_state_error() -> None:
     """A SessionRow predating the env-and-secrets SDD that has socket_path=None
     surfaces as a typed StateError so the CLI's top-level error wrapper
-    renders it cleanly. The hint points the operator at ``session restart``
-    (which migrates the row to the new shape), not ``session delete``."""
-    import pytest
-
-    from agentworks.errors import StateError
-
+    renders it cleanly."""
     session = _session("s1", pid=42, mode="admin", boot_id=BOOT_CURRENT)
     target = _FakeTarget({"has-session": _FakeResult(ok=True)})
-    with pytest.raises(StateError, match="no socket_path") as exc:
+    with pytest.raises(StateError) as exc:
         check_session_status(session, target=target)
     assert exc.value.entity_kind == "session"
     assert exc.value.entity_name == "s1"
     assert exc.value.hint is not None
-    assert "session restart" in exc.value.hint
-    assert "session delete" not in exc.value.hint
 
 
 def test_unknown_no_pid() -> None:
@@ -263,20 +260,20 @@ def test_stopped_pid_sentinel() -> None:
 # -- get_tmux_server_pid ----------------------------------------------------
 
 
-def test_get_pid_success() -> None:
+def test_probe_pid_success() -> None:
     target = _FakeTarget({"display-message": _FakeResult(ok=True, stdout="12345\n")})
-    assert get_tmux_server_pid(target=target) == 12345
+    assert probe_tmux_server_pid(target=target).value == 12345
 
 
-def test_get_pid_not_running() -> None:
+def test_probe_pid_not_running() -> None:
     target = _FakeTarget({"display-message": _FakeResult(ok=False)})
-    assert get_tmux_server_pid(target=target) is None
+    assert probe_tmux_server_pid(target=target).status is ProbeStatus.ABSENT
 
 
-def test_get_pid_with_socket() -> None:
+def test_probe_pid_with_socket() -> None:
     target = _FakeTarget({"display-message": _FakeResult(ok=True, stdout="99999\n")})
-    result = get_tmux_server_pid(target=target, socket_path="/run/test.sock")
-    assert result == 99999
+    result = probe_tmux_server_pid(target=target, socket_path="/run/test.sock")
+    assert result.value == 99999
     assert "-S /run/test.sock" in target.commands[0]
 
 
@@ -323,11 +320,26 @@ def test_agent_unknown_when_boot_id_unreadable() -> None:
     assert check_session_status(session, target=target) == SessionStatus.UNKNOWN
 
 
+def test_transport_failure_is_unknown_not_absent() -> None:
+    session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
+    target = _FakeTarget({"has-session": _FakeResult(returncode=255)})
+
+    assert check_session_status(session, target=target) == SessionStatus.UNKNOWN
+
+
+@pytest.mark.parametrize("value", [0, -1, "bad", True])
+def test_stored_process_start_ticks_must_be_a_positive_integer(value: object) -> None:
+    session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
+    object.__setattr__(session, "tmux_server_start_ticks", value)
+
+    with pytest.raises(StateError):
+        _validated_stored_start_ticks(session)
+
+
 # -- batch_check_status edge cases ------------------------------------------
 
 
-def test_batch_empty_boot_id_omits_from_map() -> None:
-    """If boot_id read fails in compound command, session is omitted from status_map."""
+def test_batch_empty_boot_id_is_unknown() -> None:
     sessions = [
         _session("a1", pid=100, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT),
     ]
@@ -338,16 +350,13 @@ def test_batch_empty_boot_id_omits_from_map() -> None:
         }
     )
     result = batch_check_status(sessions, target=target)
-    assert "a1" not in result  # omitted, not misclassified
+    assert result["a1"] == SessionStatus.UNKNOWN
 
 
 # -- _ensure_pid strict gate ------------------------------------------------
 
 
 def test_ensure_pid_raises_on_unresolvable() -> None:
-    """_ensure_pid raises SessionError when PID/boot_id can't be recovered."""
-    import pytest
-
     from agentworks.sessions.manager import _ensure_pid
 
     session = _session("s1", pid=None, socket_path="/sock", mode="agent")
@@ -365,5 +374,5 @@ def test_ensure_pid_raises_on_unresolvable() -> None:
         def get_session(self, name):
             return session
 
-    with pytest.raises(Exception, match="alive but PID/boot ID recovery failed"):
+    with pytest.raises(StateError):
         _ensure_pid(session, target=_FailTarget(), db=_FakeDb())

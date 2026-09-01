@@ -270,17 +270,7 @@ def test_create_is_always_fresh_even_with_a_recording_and_a_candidate() -> None:
     result = harness_integration.start(_op_ctx(target), force_new=True)
     assert len(target.commands) == 1  # the recorder is fingerprinted, but no rollout discovery runs
     assert state == {"fresh_pending": _SID}
-    assert result.note == "No existing Codex session. Starting a new one..."
-    assert "starting new session s1" in _echo(result)
     assert "resume" not in _sh_argv(result, home="/home/me")
-
-
-def test_create_needs_no_launch_target() -> None:
-    """Create decides nothing, so an op context without a launch target is
-    not a problem it has to refuse: there is no resume-vs-launch guess to
-    make (contrast the resume path, which raises)."""
-    command = _harness_integration(state={}).start(RunContext(), force_new=True)
-    assert "starting new session s1" in _echo(command)
 
 
 def test_create_clears_a_stale_recording_and_retires_legacy_keys() -> None:
@@ -508,30 +498,15 @@ def test_several_candidates_open_the_picker_instead_of_raising() -> None:
     assert "press esc to start a fresh conversation" in _echo(command)
 
 
-def test_picker_warns_only_when_esc_would_drop_fresh_workload_input() -> None:
+def test_picker_does_not_apply_fresh_only_input() -> None:
     discovered = f"{_ROLLOUT}\n{_OTHER_ROLLOUT}\n"
 
-    plain = _harness_integration(state={})
-    plain_result = plain.start(_op_ctx(_target(discovered=discovered)))
-    plain_command = plain_result.command
-    plain_note = plain_result.note
-    assert plain_note is not None
-
     configured = _harness_integration({"initial_prompt": "Fresh prompt"}, state={})
-    configured_result = configured.start(_op_ctx(_target(discovered=discovered)))
-    configured_command = configured_result.command
-    configured_note = configured_result.note
-    assert configured_note is not None
-
-    assert configured_note != plain_note
-    assert _echo(configured_command) != _echo(plain_command)
+    configured_command = configured.start(_op_ctx(_target(discovered=discovered))).command
     assert "Fresh prompt" not in _raw_codex_argv(configured_command)
 
     native = _harness_integration({"developer_instructions": "Native instructions"}, state={})
-    native_result = native.start(_op_ctx(_target(discovered=discovered)))
-    native_command = native_result.command
-    assert native_result.note == plain_note
-    assert _echo(native_command) == _echo(plain_command)
+    native_command = native.start(_op_ctx(_target(discovered=discovered))).command
     assert any("Native instructions" in token for token in _raw_codex_argv(native_command))
 
 
@@ -602,50 +577,6 @@ def test_gone_rollout_drops_the_id_and_falls_through_to_a_fresh_launch() -> None
     assert state == {}  # stale id dropped
 
 
-def test_a_dropped_stale_binding_is_reported_alongside_whatever_replaced_it() -> None:
-    """Dropping a stale binding is news in its own right, so it composes
-    INTO the leaf that follows instead of being overwritten by it.
-
-    An operator who ran ``codex archive`` deliberately and then finds the
-    pane in a different conversation needs both halves: that their previous
-    binding is gone, and what took its place. Neither surface may report
-    only one of them (the bug this pins: the decision leaf used to be
-    overwritten by the adoption, so the drop went unmentioned on both).
-
-    The first block is where the fall-through itself is pinned too: the
-    stale drop continues INTO discovery rather than stopping at fresh, so
-    an archived conversation cannot block adopting the one actually in
-    this workspace."""
-    # Stale then adopted: the drop plus the adopted uuid, on both surfaces.
-    adopted = _harness_integration(state={"session_id": _SID})
-    adopted_result = adopted.start(_op_ctx(_target(rollout=1, discovered=f"{_OTHER_ROLLOUT}\n")))
-    command = adopted_result.command
-    assert adopted_result.note == (
-        f"Previous Codex conversation is archived or gone. Identified a different Codex "
-        f"conversation in this workspace from Codex's own on-disk state: {_OTHER_SID}. Resuming..."
-    )
-    echo = _echo(command)
-    assert "previous codex conversation archived or gone" in echo
-    assert (
-        f"identified a different codex conversation in this workspace from codex's on-disk state ({_OTHER_SID})" in echo
-    )
-
-    # Stale then picker: the drop plus why the picker is opening.
-    picker = _harness_integration(state={"session_id": _SID})
-    picker_result = picker.start(_op_ctx(_target(rollout=1, discovered=f"{_ROLLOUT}\n{_OTHER_ROLLOUT}\n")))
-    picker_command = picker_result.command
-    note = picker_result.note
-    assert note is not None
-    assert note.startswith("Previous Codex conversation is archived or gone. Could not identify")
-    assert "previous codex conversation archived or gone" in _echo(picker_command)
-
-    # And with nothing to replace it, the bare archived-or-gone leaf stands,
-    # which is the whole of what the stale drop says on its own.
-    alone = _harness_integration(state={"session_id": _SID})
-    alone_result = alone.start(_op_ctx(_target(rollout=1)))
-    assert alone_result.note == "Previous Codex session is archived or gone. Starting a new one..."
-
-
 def test_rollout_probe_that_could_not_execute_raises_rather_than_guessing() -> None:
     """A non-{0,1} exit (an SSH failure's 255, a shell that could not
     start) means the probe never ran. Guessing "gone" would drop the
@@ -683,11 +614,11 @@ def test_rollout_probe_is_rooted_at_codex_home_and_finds_by_the_bound_id() -> No
 # -- state hygiene -----------------------------------------------------------
 
 
-def test_resume_without_a_launch_target_raises_rather_than_guessing() -> None:
+def test_start_without_a_launch_target_raises_rather_than_guessing() -> None:
     """No launch target means no probe can run; unlike claude-code (whose
     fresh launch keeps its minted id), a codex fresh launch drops the
-    bound id, so the resume op refuses to guess."""
-    with pytest.raises(StateError, match="no launch target"):
+    bound id, so an ordinary start refuses to guess."""
+    with pytest.raises(StateError):
         _harness_integration().start(RunContext())
 
 
@@ -726,47 +657,6 @@ def test_bound_id_is_resumed_verbatim_on_the_next_op() -> None:
     command = _harness_integration(state=state).start(_op_ctx(_target(rollout=0))).command
     assert f"resume {_SID}" in command
     assert "resuming session s1" in _echo(command)
-
-
-# -- launch_note: the five decision leaves ------------------------------------
-
-
-def test_launch_note_reports_resume() -> None:
-    harness_integration = _harness_integration()
-    result = harness_integration.start(_op_ctx(_target(rollout=0)))
-    assert result.note == "Existing Codex session found. Resuming..."
-
-
-def test_launch_note_reports_fresh_start() -> None:
-    harness_integration = _harness_integration(state={})
-    result = harness_integration.start(_op_ctx(_target()))
-    assert result.note == "No existing Codex session. Starting a new one..."
-
-
-def test_launch_note_reports_adoption_and_names_the_adopted_id() -> None:
-    """Adoption is the one leaf that is explicitly a heuristic, so both
-    operator surfaces name the uuid: the whole reason for announcing the
-    decision is that a wrong one can be caught, which needs something
-    checkable against the conversation the pane comes up in."""
-    harness_integration = _harness_integration(state={})
-    result = harness_integration.start(_op_ctx(_target(discovered=f"{_ROLLOUT}\n", rollout=0)))
-    assert result.note == (
-        f"Identified this session's Codex conversation from Codex's own on-disk state: {_SID}. Resuming..."
-    )
-    assert f"on-disk state ({_SID})" in _echo(result)
-
-
-def test_launch_note_reports_the_picker_including_what_esc_does() -> None:
-    """The picker note carries the whole operator story: why the pane is
-    showing a picker, what picking binds, and what esc does."""
-    harness_integration = _harness_integration(state={})
-    result = harness_integration.start(_op_ctx(_target(discovered=f"{_ROLLOUT}\n{_OTHER_ROLLOUT}\n")))
-    note = result.note
-    assert note is not None
-    assert note.startswith("Could not identify this session's Codex conversation with confidence.")
-    assert "session picker is opening in the pane" in note
-    assert "binds this session to that conversation from its next turn" in note
-    assert "esc starts a fresh conversation instead" in note
 
 
 # -- the notify override on every launch form ---------------------------------
@@ -1578,10 +1468,7 @@ def test_recreated_namesake_never_inherits_the_dead_binding(tmp_path: Path) -> N
     # clearing. The leaf it reaches instead announces itself as a
     # heuristic adoption, which is the visibility the design promises.
     harness_integration = _sh_harness_integration(tmp_path, {})
-    result = harness_integration.start(_op_ctx(_ShellTarget(home)))  # type: ignore[arg-type]
-    assert result.note == (
-        f"Identified this session's Codex conversation from Codex's own on-disk state: {_SID}. Resuming..."
-    )
+    harness_integration.start(_op_ctx(_ShellTarget(home)))  # type: ignore[arg-type]
 
 
 # -- readiness probes codex ---------------------------------------------------

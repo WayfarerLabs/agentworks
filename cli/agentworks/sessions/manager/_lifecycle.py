@@ -67,6 +67,47 @@ def _mark_stopped(db: Database, session: SessionRow) -> None:
     )
 
 
+def _mark_runtime_unknown(db: Database, session: SessionRow, *, socket_path: str) -> None:
+    """Persist an addressable runtime whose process identity is not yet known."""
+    db.update_session_runtime(
+        session.name,
+        socket_path=socket_path,
+        pid=None,
+        boot_id=None,
+        tmux_server_start_ticks=None,
+    )
+
+
+def _remove_stale_socket_and_mark_stopped(
+    session: SessionRow,
+    *,
+    target: Transport,
+    target_owns_session: bool,
+    db: Database,
+) -> None:
+    """Remove an exact stale socket only after the caller proved server absence."""
+    from agentworks.sessions.tmux import ProbeStatus, _presence_from_result
+
+    if session.socket_path is not None:
+        socket_path = _validated_socket_path(db, session)
+        q_socket = shlex.quote(socket_path)
+        removed = target.run(f"rm -f {q_socket}", sudo=not target_owns_session, check=False)
+        if _presence_from_result(removed) is not ProbeStatus.PRESENT:
+            raise ExternalError(
+                f"failed to remove stale tmux socket for session '{session.name}'",
+                entity_kind="session",
+                entity_name=session.name,
+            )
+        remains = _presence_from_result(target.run(f"test -e {q_socket}", sudo=not target_owns_session, check=False))
+        if remains is not ProbeStatus.ABSENT:
+            raise ExternalError(
+                f"could not verify stale tmux socket removal for session '{session.name}'",
+                entity_kind="session",
+                entity_name=session.name,
+            )
+    _mark_stopped(db, session)
+
+
 def _recover_broken_session(
     session: SessionRow,
     *,
@@ -75,50 +116,50 @@ def _recover_broken_session(
     db: Database,
 ) -> None:
     """Clean stale state only after proving the prior server is absent."""
-    from agentworks.sessions.tmux import get_process_start_ticks
-
-    if session.pid is None or session.pid <= 0 or not session.boot_id:
-        raise BrokenStateError(
-            f"session '{session.name}' lacks the stored identity required for safe recovery",
-            entity_kind="session",
-            entity_name=session.name,
-            hint="Recover the tmux runtime manually, then repair or recreate the session.",
-        )
-    current_boot = _mgr._get_boot_id(target)
-    if current_boot is None:
-        raise BrokenStateError(
-            f"session '{session.name}' runtime identity could not be checked",
-            entity_kind="session",
-            entity_name=session.name,
-        )
-    absent = current_boot != session.boot_id
-    if not absent:
-        pid_alive = _mgr._pid_alive(session.pid, target=target)
-        if not pid_alive:
-            absent = True
-        else:
-            current_ticks = get_process_start_ticks(session.pid, target=target)
-            if session.tmux_server_start_ticks is None or current_ticks is None:
-                absent = False
-            else:
-                absent = current_ticks != session.tmux_server_start_ticks
-    if not absent:
+    if not _mgr._prove_stored_runtime_absent(session, target=target):
         raise BrokenStateError(
             f"session '{session.name}' may still own a live tmux server; refusing stale cleanup",
             entity_kind="session",
             entity_name=session.name,
             hint="Recover the tmux runtime manually before retrying.",
         )
-    if session.socket_path is not None:
-        socket_path = _validated_socket_path(db, session)
-        q_socket = shlex.quote(socket_path)
-        target.run(f"rm -f {q_socket}", sudo=not target_owns_session, check=False)
-        if not target.run(f"test ! -e {q_socket}", sudo=not target_owns_session, check=False).ok:
-            raise ExternalError(
-                f"failed to remove stale tmux socket for session '{session.name}'",
-                entity_kind="session",
-                entity_name=session.name,
-            )
+    _remove_stale_socket_and_mark_stopped(
+        session,
+        target=target,
+        target_owns_session=target_owns_session,
+        db=db,
+    )
+
+
+def _teardown_legacy_session(
+    session: SessionRow,
+    *,
+    target: Transport,
+    target_owns_session: bool,
+    db: Database,
+) -> None:
+    """Destroy one exact session on a reachable legacy shared tmux server."""
+    from agentworks.sessions.tmux import ProbeStatus, kill_session, probe_tmux_session
+
+    def run_runtime(command: str, *, check: bool = True, env: dict[str, str] | None = None) -> object:
+        return target.run(command, sudo=not target_owns_session, check=check, env=env)
+
+    presence = probe_tmux_session(session.name, run_command=run_runtime, socket_path=None)
+    if presence is ProbeStatus.UNKNOWN:
+        raise ExternalError(
+            f"could not determine legacy runtime state for session '{session.name}'",
+            entity_kind="session",
+            entity_name=session.name,
+        )
+    if presence is ProbeStatus.PRESENT:
+        kill_session(session.name, run_command=run_runtime, socket_path=None)
+        presence = probe_tmux_session(session.name, run_command=run_runtime, socket_path=None)
+    if presence is not ProbeStatus.ABSENT:
+        raise ExternalError(
+            f"failed to verify legacy session '{session.name}' stopped",
+            entity_kind="session",
+            entity_name=session.name,
+        )
     _mark_stopped(db, session)
 
 
@@ -132,6 +173,7 @@ def _teardown_session(
 ) -> None:
     """Destroy one managed session runtime and verify its absence."""
     from agentworks.sessions.tmux import (
+        ProbeStatus,
         capture_tmux_server_fingerprint,
         kill_server,
     )
@@ -139,22 +181,22 @@ def _teardown_session(
     if session.pid == PID_STOPPED:
         return
     if session.socket_path is None:
-        from agentworks.sessions.tmux import session_exists
-
-        _mgr._kill_session(session.name, run_command=target.run, socket_path=None)
-        if session_exists(session.name, run_command=target.run, socket_path=None):
-            raise ExternalError(
-                f"failed to stop legacy session '{session.name}'",
-                entity_kind="session",
-                entity_name=session.name,
-            )
-        _mark_stopped(db, session)
+        _teardown_legacy_session(
+            session,
+            target=target,
+            target_owns_session=target_owns_session,
+            db=db,
+        )
         return
 
     socket_path = _validated_socket_path(db, session)
-    observed = capture_tmux_server_fingerprint(target=target, socket_path=socket_path)
-    if observed is None:
-        if force:
+    probe = capture_tmux_server_fingerprint(
+        target=target,
+        socket_path=socket_path,
+        sudo=not target_owns_session,
+    )
+    if probe.status is not ProbeStatus.PRESENT:
+        try:
             _recover_broken_session(
                 session,
                 target=target,
@@ -162,19 +204,25 @@ def _teardown_session(
                 db=db,
             )
             return
-        raise BrokenStateError(
-            f"session '{session.name}' tmux server is unreachable",
-            entity_kind="session",
-            entity_name=session.name,
-            hint="Use --force only after the prior server has exited.",
-        )
+        except (BrokenStateError, StateError):
+            if not force:
+                raise BrokenStateError(
+                    f"session '{session.name}' tmux server is unreachable or indeterminate",
+                    entity_kind="session",
+                    entity_name=session.name,
+                    hint="Use --force only after the prior server has exited.",
+                ) from None
+            raise
+    observed = probe.fingerprint
+    assert observed is not None
     if observed.pid != session.pid or observed.boot_id != session.boot_id:
         raise BrokenStateError(
             f"session '{session.name}' tmux server identity does not match persisted state",
             entity_kind="session",
             entity_name=session.name,
         )
-    if session.tmux_server_start_ticks is None:
+    stored_ticks = _mgr._validated_stored_start_ticks(session)
+    if stored_ticks is None:
         db.update_session_runtime(
             session.name,
             socket_path=socket_path,
@@ -182,28 +230,31 @@ def _teardown_session(
             boot_id=observed.boot_id,
             tmux_server_start_ticks=observed.start_ticks,
         )
-    elif observed.start_ticks != session.tmux_server_start_ticks:
+    elif observed.start_ticks != stored_ticks:
         raise BrokenStateError(
             f"session '{session.name}' tmux server process was replaced",
             entity_kind="session",
             entity_name=session.name,
         )
-    kill_server(run_command=target.run, socket_path=socket_path)
-    if _mgr._pid_alive(observed.pid, target=target):
+
+    def run_runtime(command: str, *, check: bool = True, env: dict[str, str] | None = None) -> object:
+        return target.run(command, sudo=not target_owns_session, check=check, env=env)
+
+    kill_server(run_command=run_runtime, socket_path=socket_path)
+    refreshed = db.get_session(session.name)
+    assert refreshed is not None
+    if not _mgr._prove_stored_runtime_absent(refreshed, target=target):
         raise ExternalError(
             f"tmux server for session '{session.name}' survived kill-server",
             entity_kind="session",
             entity_name=session.name,
         )
-    q_socket = shlex.quote(socket_path)
-    target.run(f"rm -f {q_socket}", sudo=not target_owns_session, check=False)
-    if not target.run(f"test ! -e {q_socket}", sudo=not target_owns_session, check=False).ok:
-        raise ExternalError(
-            f"tmux socket for session '{session.name}' remains after teardown",
-            entity_kind="session",
-            entity_name=session.name,
-        )
-    _mark_stopped(db, session)
+    _remove_stale_socket_and_mark_stopped(
+        refreshed,
+        target=target,
+        target_owns_session=target_owns_session,
+        db=db,
+    )
 
 
 def _execute_stop(
@@ -274,13 +325,23 @@ def stop_session(
         _run_as_root,
         admin_target,
     ):
-        session = _mgr._ensure_pid(session, target=admin_target, db=db)
-        status = _mgr.check_session_status(session, target=admin_target)
+        legacy = session.socket_path is None and session.pid is not None and session.pid > 0
+        if legacy:
+            status = SessionStatus.OK
+        else:
+            session = _mgr._ensure_pid(session, target=admin_target, db=db)
+            status = _mgr.check_session_status(session, target=admin_target)
 
         if status == SessionStatus.STOPPED:
             output.info(f"Session '{name}' is already stopped")
             return
-        # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable sessions
+        if status == SessionStatus.UNKNOWN:
+            raise StateError(
+                f"session '{name}' runtime state is unknown",
+                entity_kind="session",
+                entity_name=name,
+                hint="Retry after transport access is reliable; no runtime was changed.",
+            )
 
         # Pick the destructive-op transport BEFORE doing anything destructive.
         # For agent sessions this also probes the agent's direct SSH so a
@@ -494,7 +555,7 @@ def _launch_existing_session(
             # ``tmux kill-session -t <name>`` on the default server (no socket
             # path), and fall through to the create step. The downstream
             # ``create_tmux_session`` produces a per-session socket and the
-            # subsequent ``db.update_session_socket_path`` lands the migration.
+            # subsequent atomic runtime update lands the migration.
             if is_legacy:
                 output.info(
                     f"Session '{name}' uses the legacy default-tmux-server model; migrating to per-session socket."
@@ -503,18 +564,14 @@ def _launch_existing_session(
             else:
                 status = _mgr.check_session_status(session, target=admin_target)
 
-            # Pick the destructive-op transport BEFORE any destructive action.
-            # For agent sessions this builds an agent Transport and probes it
-            # so a pre-rollout agent surfaces as an actionable StateError up
-            # front rather than leaving us with a stopped session we can't
-            # launch. The same transport is used for teardown and create
-            # (below): every destructive step on an agent session goes via
-            # direct agent SSH. _build_session_target always returns a
-            # same-uid target, so no sudo is needed for kill.
             is_admin = session.mode == SessionMode.ADMIN.value
-            session_target = _mgr._build_session_target(session, vm=vm, config=config, db=db, admin_target=admin_target)
-            session_run_command: RunCommand = session_target.run
-
+            if status == SessionStatus.UNKNOWN:
+                raise StateError(
+                    f"session '{name}' runtime state is unknown",
+                    entity_kind="session",
+                    entity_name=name,
+                    hint="Retry after transport access is reliable; no runtime was changed.",
+                )
             if status == SessionStatus.OK and not replace_running:
                 if force_new:
                     raise StateError(
@@ -525,6 +582,19 @@ def _launch_existing_session(
                     )
                 output.result(f"Session '{name}' is already running")
                 return
+
+            # Only a launch path needs the owning transport. In particular, an
+            # ordinary start no-op and running --force-new refusal return above
+            # without probing direct agent SSH.
+            session_target = _mgr._build_session_target(
+                session,
+                vm=vm,
+                config=config,
+                db=db,
+                admin_target=admin_target,
+            )
+            session_run_command: RunCommand = session_target.run
+
             if status == SessionStatus.BROKEN and not force:
                 raise BrokenStateError(
                     f"session '{name}' is broken (PID alive but tmux unreachable).",
@@ -685,16 +755,37 @@ def _launch_existing_session(
                     ) from exc
                 raise
 
-            from agentworks.sessions.tmux import capture_tmux_server_fingerprint, kill_server
+            from agentworks.sessions.tmux import (
+                ProbeStatus,
+                capture_tmux_server_fingerprint,
+                kill_server_and_probe,
+            )
 
-            fingerprint = capture_tmux_server_fingerprint(target=session_target, socket_path=new_sock)
-            if fingerprint is None or (pid is not None and fingerprint.pid != pid):
-                kill_server(run_command=session_run_command, socket_path=new_sock)
-                _mark_stopped(db, session)
+            fingerprint_probe = capture_tmux_server_fingerprint(
+                target=session_target,
+                socket_path=new_sock,
+            )
+            fingerprint = fingerprint_probe.fingerprint
+            if (
+                fingerprint_probe.status is not ProbeStatus.PRESENT
+                or fingerprint is None
+                or (pid is not None and fingerprint.pid != pid)
+            ):
+                cleanup = kill_server_and_probe(run_command=session_run_command, socket_path=new_sock)
+                if cleanup is ProbeStatus.ABSENT:
+                    _mark_stopped(db, session)
+                else:
+                    _mark_runtime_unknown(db, session, socket_path=new_sock)
                 raise ExternalError(
                     f"could not capture a stable tmux server fingerprint for session '{name}'",
                     entity_kind="session",
                     entity_name=name,
+                    hint=(
+                        f"The session row and socket {new_sock} were retained because "
+                        "runtime absence could not be proved."
+                        if cleanup is not ProbeStatus.ABSENT
+                        else None
+                    ),
                 )
             db.update_session_runtime(
                 name,
@@ -748,10 +839,21 @@ def stop_all_sessions(
 
         # Error if any sessions are still unknown after auto-repair.
         # PID_STOPPED sessions are known-stopped (excluded from status_map by design).
+        legacy_names = {
+            session.name
+            for session in sessions
+            if session.socket_path is None and session.pid is not None and session.pid > 0
+        }
         unknown = [
             s
             for s in sessions
-            if s.pid != PID_STOPPED and (s.pid is None or s.boot_id is None or s.name not in status_map)
+            if s.pid != PID_STOPPED
+            and s.name not in legacy_names
+            and (
+                s.pid is None
+                or s.boot_id is None
+                or status_map.get(s.name, SessionStatus.UNKNOWN) is SessionStatus.UNKNOWN
+            )
         ]
         if unknown:
             names = ", ".join(s.name for s in unknown)
@@ -768,7 +870,7 @@ def stop_all_sessions(
         ok_statuses = {SessionStatus.OK, SessionStatus.RESIDUAL}
         if force:
             ok_statuses.add(SessionStatus.BROKEN)
-        alive_sessions = [s for s in sessions if status_map.get(s.name) in ok_statuses]
+        alive_sessions = [s for s in sessions if s.name in legacy_names or status_map.get(s.name) in ok_statuses]
 
         if not alive_sessions:
             output.info("No running sessions to stop.")
@@ -854,7 +956,11 @@ def _launch_all_sessions(
             for s in sessions
             if s.pid != PID_STOPPED
             and s.socket_path is not None
-            and (s.pid is None or s.boot_id is None or s.name not in status_map)
+            and (
+                s.pid is None
+                or s.boot_id is None
+                or status_map.get(s.name, SessionStatus.UNKNOWN) is SessionStatus.UNKNOWN
+            )
         ]
         if unknown:
             names = ", ".join(s.name for s in unknown)

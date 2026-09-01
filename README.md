@@ -186,11 +186,12 @@ application memory, and interactive logins persist in the agent's home.
 
 A **session** runs an agentic workload in a persistent tmux session as a target user (agent or
 admin) in a workspace on a VM. Every session invokes a **harness integration**: Agentworks code that
-knows how to launch and resume a particular **agentic harness** (e.g. Claude Code or Codex) or a
-plain shell, and that checks whether the target environment can support the workload. A unique name,
-persistent tmux session, and integration-specific resume semantics let the operator run any number
-of concurrent workloads and attach, detach, stop, resume, create, and delete them at will. Tmux
-always owns the pane and its tty; the harness integration only decides what runs inside it.
+knows how to launch a particular **agentic harness** (e.g. Claude Code or Codex) or a plain shell,
+continue its prior conversation when possible, and check whether the target environment can support
+the workload. A unique name, persistent tmux session, and integration-specific continuation
+semantics let the operator create, start, restart, stop, attach to, and delete any number of
+concurrent workloads. Tmux always owns the pane and its tty; the harness integration only decides
+what runs inside it.
 
 Session templates make workload configuration reusable. Harness integrations keep workload-specific
 logic outside the core session lifecycle.
@@ -211,7 +212,7 @@ surface.
 
 Agentworks is not an agentic harness. It provides infrastructure for running harnesses such as
 Claude Code, Codex, OpenCode, Aider, and plain shells. A harness integration supplies the
-workload-specific launch, validation, and resume behavior; Agentworks owns the environment and
+workload-specific launch, validation, and continuation behavior; Agentworks owns the environment and
 session around it.
 
 ## Manifesto

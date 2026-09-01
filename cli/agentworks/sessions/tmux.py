@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import shlex
 from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING, Literal, NoReturn, Protocol
 
 from agentworks.errors import StateError
@@ -86,6 +87,42 @@ class TmuxServerFingerprint:
     pid: int
     boot_id: str
     start_ticks: int
+
+
+class ProbeStatus(Enum):
+    """Tri-state result for a remote runtime-presence probe."""
+
+    PRESENT = "present"
+    ABSENT = "absent"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class IntegerProbe:
+    """A tri-state remote probe carrying a positive integer when present."""
+
+    status: ProbeStatus
+    value: int | None = None
+
+
+@dataclass(frozen=True)
+class FingerprintProbe:
+    """A tri-state stable tmux-server fingerprint probe."""
+
+    status: ProbeStatus
+    fingerprint: TmuxServerFingerprint | None = None
+
+
+def _presence_from_result(result: object) -> ProbeStatus:
+    """Classify the command convention used by tmux and ``test`` probes."""
+    returncode = getattr(result, "returncode", None)
+    if returncode is None:
+        return ProbeStatus.PRESENT if getattr(result, "ok", False) else ProbeStatus.ABSENT
+    if returncode == 0:
+        return ProbeStatus.PRESENT
+    if returncode == 1:
+        return ProbeStatus.ABSENT
+    return ProbeStatus.UNKNOWN
 
 
 def agent_socket_dir(linux_user: str) -> str:
@@ -646,11 +683,25 @@ def create_session(
     # behind it, remove it before creating the new session. An active server
     # is a conflict (something else owns this name).
     sock_exists = run_command(f"test -e {q_sock}", check=False)
-    if getattr(sock_exists, "ok", False):
-        server_alive = run_command(f"tmux -S {q_sock} list-sessions 2>/dev/null", check=False)
-        if getattr(server_alive, "ok", False):
+    socket_presence = _presence_from_result(sock_exists)
+    if socket_presence is ProbeStatus.UNKNOWN:
+        raise StateError(
+            f"could not determine whether managed tmux socket {sock} exists",
+            entity_kind="session",
+            entity_name=session_name,
+        )
+    if socket_presence is ProbeStatus.PRESENT:
+        server_presence = probe_tmux_server(run_command=run_command, socket_path=sock)
+        if server_presence is ProbeStatus.PRESENT:
             raise RuntimeError(
                 f"Socket {sock} already has an active tmux server. Kill it first or choose a different session name."
+            )
+        if server_presence is ProbeStatus.UNKNOWN:
+            raise StateError(
+                f"could not determine whether managed tmux socket {sock} has an active server",
+                entity_kind="session",
+                entity_name=session_name,
+                hint="Retry after transport access is reliable; the socket was left unchanged.",
             )
         from agentworks import output as _output
 
@@ -727,19 +778,31 @@ def kill_server(*, run_command: RunCommand, socket_path: str) -> bool:
     return getattr(result, "ok", True)
 
 
-def session_exists(
+def kill_server_and_probe(*, run_command: RunCommand, socket_path: str) -> ProbeStatus:
+    """Request dedicated-server teardown and return its verified presence."""
+    kill_server(run_command=run_command, socket_path=socket_path)
+    return probe_tmux_server(run_command=run_command, socket_path=socket_path)
+
+
+def probe_tmux_session(
     session_name: str,
     *,
     run_command: RunCommand,
     socket_path: str | None = None,
-) -> bool:
-    """Check if a session's tmux session is alive."""
+) -> ProbeStatus:
+    """Probe an exact tmux session without conflating failure with absence."""
     q_session = shlex.quote(f"={session_name}")
     result = run_command(
         tmux_cmd(f"has-session -t {q_session}", socket_path) + " 2>/dev/null",
         check=False,
     )
-    return getattr(result, "ok", False)
+    return _presence_from_result(result)
+
+
+def probe_tmux_server(*, run_command: RunCommand, socket_path: str) -> ProbeStatus:
+    """Probe a dedicated tmux server without conflating failure with absence."""
+    result = run_command(tmux_cmd("list-sessions", socket_path) + " 2>/dev/null", check=False)
+    return _presence_from_result(result)
 
 
 def capture_output(
@@ -782,27 +845,28 @@ def _parse_pid(raw: str, context: str) -> int:
 # -- PID-based liveness helpers --------------------------------------------
 
 
-def get_tmux_server_pid(
+def probe_tmux_server_pid(
     *,
     target: Transport,
     socket_path: str | None = None,
-) -> int | None:
-    """Retrieve the PID of a running tmux server.
-
-    Returns None if the server is not running or unreachable.
-    """
+    sudo: bool = False,
+) -> IntegerProbe:
+    """Probe the positive PID of a running tmux server."""
     cmd = tmux_cmd("display-message -p '#{pid}'", socket_path) + " 2>/dev/null"
-    result = target.run(cmd, check=False)
-    if not result.ok:
-        return None
+    result = target.run(cmd, sudo=True, check=False) if sudo else target.run(cmd, check=False)
+    presence = _presence_from_result(result)
+    if presence is not ProbeStatus.PRESENT:
+        return IntegerProbe(presence)
     pid_str = result.stdout.strip()
     if not pid_str:
-        return None
+        return IntegerProbe(ProbeStatus.UNKNOWN)
     try:
         pid = int(pid_str)
     except ValueError:
-        return None
-    return pid if pid > 0 else None
+        return IntegerProbe(ProbeStatus.UNKNOWN)
+    if pid <= 0:
+        return IntegerProbe(ProbeStatus.UNKNOWN)
+    return IntegerProbe(ProbeStatus.PRESENT, pid)
 
 
 def parse_process_start_ticks(stat_line: str) -> int:
@@ -822,31 +886,47 @@ def parse_process_start_ticks(stat_line: str) -> int:
     return ticks
 
 
-def get_process_start_ticks(pid: int, *, target: Transport) -> int | None:
-    """Read one process start time, returning ``None`` on absent/invalid data."""
+def probe_process_start_ticks(pid: int, *, target: Transport) -> IntegerProbe:
+    """Probe one process start time without conflating failure with absence."""
     result = target.run(f"cat /proc/{pid}/stat", check=False)
-    if not result.ok:
-        return None
+    presence = _presence_from_result(result)
+    if presence is not ProbeStatus.PRESENT:
+        return IntegerProbe(presence)
     try:
-        return parse_process_start_ticks(result.stdout.strip())
+        return IntegerProbe(ProbeStatus.PRESENT, parse_process_start_ticks(result.stdout.strip()))
     except ValueError:
-        return None
+        return IntegerProbe(ProbeStatus.UNKNOWN)
 
 
 def capture_tmux_server_fingerprint(
     *,
     target: Transport,
     socket_path: str,
-) -> TmuxServerFingerprint | None:
+    sudo: bool = False,
+) -> FingerprintProbe:
     """Capture a stable tmux PID, boot ID, and process start time."""
-    first_pid = get_tmux_server_pid(target=target, socket_path=socket_path)
-    if first_pid is None:
-        return None
-    first_ticks = get_process_start_ticks(first_pid, target=target)
+    first_pid = probe_tmux_server_pid(target=target, socket_path=socket_path, sudo=sudo)
+    if first_pid.status is not ProbeStatus.PRESENT:
+        return FingerprintProbe(first_pid.status)
+    assert first_pid.value is not None
+    first_ticks = probe_process_start_ticks(first_pid.value, target=target)
     boot = target.run("cat /proc/sys/kernel/random/boot_id", check=False)
-    boot_id = boot.stdout.strip() if boot.ok else ""
-    second_pid = get_tmux_server_pid(target=target, socket_path=socket_path)
-    second_ticks = get_process_start_ticks(first_pid, target=target)
-    if first_ticks is None or not boot_id or second_pid != first_pid or second_ticks != first_ticks:
-        return None
-    return TmuxServerFingerprint(first_pid, boot_id, first_ticks)
+    boot_id = boot.stdout.strip() if _presence_from_result(boot) is ProbeStatus.PRESENT else ""
+    second_pid = probe_tmux_server_pid(target=target, socket_path=socket_path, sudo=sudo)
+    second_ticks = probe_process_start_ticks(first_pid.value, target=target)
+    if second_pid.status is ProbeStatus.ABSENT:
+        return FingerprintProbe(ProbeStatus.ABSENT)
+    if (
+        first_ticks.status is not ProbeStatus.PRESENT
+        or not boot_id
+        or second_pid.status is not ProbeStatus.PRESENT
+        or second_ticks.status is not ProbeStatus.PRESENT
+        or second_pid.value != first_pid.value
+        or second_ticks.value != first_ticks.value
+    ):
+        return FingerprintProbe(ProbeStatus.UNKNOWN)
+    assert first_ticks.value is not None
+    return FingerprintProbe(
+        ProbeStatus.PRESENT,
+        TmuxServerFingerprint(first_pid.value, boot_id, first_ticks.value),
+    )
