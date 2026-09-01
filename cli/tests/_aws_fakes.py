@@ -40,9 +40,13 @@ class Controls:
 
     # STS get_caller_identity: None passes; an Exception is raised.
     identity_error: Exception | None = None
+    account_id: str = "111122223333"
     # describe_instances(InstanceIds=...) state name (status / native_transport).
     instance_state: str = "running"
     instance_public_ip: str = "203.0.113.10"
+    instance_backend_name: str = "dev"
+    instance_security_group_id: str = "sg-123"
+    instance_presence_outcomes: list[bool | Exception] = field(default_factory=list)
     # Whether a describe_instances(Filters=...) collision preflight finds one.
     collision: bool = False
     # describe_instance_types SupportedArchitectures for the arch cross-check.
@@ -63,10 +67,12 @@ class Controls:
     # delete_security_group: exceptions to raise on successive calls before it
     # finally succeeds (drives the DependencyViolation retry test).
     sg_delete_errors: list[Exception] = field(default_factory=list)
+    terminate_errors: list[Exception] = field(default_factory=list)
     # Outcomes for successive DryRun calls across the EC2 client. An Exception
     # is raised; None models an invalid normal return. Once exhausted, the
     # documented positive answer is DryRunOperation.
     dry_run_outcomes: list[Exception | None] = field(default_factory=list)
+    security_group_presence_outcomes: list[bool | Exception] = field(default_factory=list)
 
 
 @dataclass
@@ -120,7 +126,10 @@ class _FakeEC2:
         self._c = controls
         self._region = region
         self._sg_delete_attempts = 0
+        self._terminate_attempts = 0
         self._dry_run_attempts = 0
+        self._instance_describe_attempts = 0
+        self._security_group_describe_attempts = 0
         # sg_id -> {cidr: rule_id}; the per-SG ingress the exposure tests read.
         self.ingress: dict[str, dict[str, str]] = {}
         self._next_rule = 0
@@ -144,6 +153,14 @@ class _FakeEC2:
             if self._c.collision:
                 return {"Reservations": [{"Instances": [{"InstanceId": "i-existing"}]}]}
             return {"Reservations": []}
+        idx = self._instance_describe_attempts
+        self._instance_describe_attempts += 1
+        if idx < len(self._c.instance_presence_outcomes):
+            outcome = self._c.instance_presence_outcomes[idx]
+            if isinstance(outcome, Exception):
+                raise outcome
+            if not outcome:
+                return {"Reservations": []}
         return {
             "Reservations": [
                 {
@@ -152,8 +169,30 @@ class _FakeEC2:
                             "InstanceId": "i-123",
                             "State": {"Name": self._c.instance_state},
                             "PublicIpAddress": self._c.instance_public_ip,
+                            "Tags": [{"Key": "agentworks:vm", "Value": self._c.instance_backend_name}],
+                            "SecurityGroups": [{"GroupId": self._c.instance_security_group_id}],
                         }
                     ]
+                }
+            ]
+        }
+
+    def describe_security_groups(self, **kwargs: Any) -> dict[str, Any]:
+        self._record("describe_security_groups", **kwargs)
+        idx = self._security_group_describe_attempts
+        self._security_group_describe_attempts += 1
+        if idx < len(self._c.security_group_presence_outcomes):
+            outcome = self._c.security_group_presence_outcomes[idx]
+            if isinstance(outcome, Exception):
+                raise outcome
+            if not outcome:
+                return {"SecurityGroups": []}
+        group_id = kwargs.get("GroupIds", [self._c.instance_security_group_id])[0]
+        return {
+            "SecurityGroups": [
+                {
+                    "GroupId": group_id,
+                    "Tags": [{"Key": "agentworks:vm", "Value": self._c.instance_backend_name}],
                 }
             ]
         }
@@ -233,6 +272,10 @@ class _FakeEC2:
 
     def terminate_instances(self, **kwargs: Any) -> dict[str, Any]:
         self._record("terminate_instances", **kwargs)
+        idx = self._terminate_attempts
+        self._terminate_attempts += 1
+        if idx < len(self._c.terminate_errors):
+            raise self._c.terminate_errors[idx]
         return {}
 
     def start_instances(self, **kwargs: Any) -> dict[str, Any]:
@@ -263,7 +306,7 @@ class _FakeSTS:
         self._rec.calls.append(("sts", "get_caller_identity", kwargs))
         if self._c.identity_error is not None:
             raise self._c.identity_error
-        return {"Account": "111122223333", "Arn": "arn:aws:iam::111122223333:user/agw"}
+        return {"Account": self._c.account_id, "Arn": f"arn:aws:iam::{self._c.account_id}:user/agw"}
 
 
 class _FakeSSM:

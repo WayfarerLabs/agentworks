@@ -92,9 +92,8 @@ SUBNET_NOT_FOUND_CODES = frozenset({"InvalidSubnetID.NotFound", "InvalidSubnet.N
 _DUPLICATE_PERMISSION_CODE = "InvalidPermission.Duplicate"
 _PERMISSION_NOT_FOUND_CODE = "InvalidPermission.NotFound"
 _GROUP_NOT_FOUND_CODES = frozenset({"InvalidGroup.NotFound", "InvalidGroupId.NotFound"})
-# A terminate of an instance that is already terminated or never existed: silent
-# success (the delete op and rollback are idempotent).
 _INSTANCE_NOT_FOUND_CODES = frozenset({"InvalidInstanceID.NotFound"})
+_ABSENCE_CONFIRM_ATTEMPTS = 3
 
 
 class EC2Error(ProvisioningError):
@@ -174,12 +173,10 @@ def _require_dry_run_permission(
     operation: str,
     entity_kind: str,
     entity_name: str,
-    absent_codes: frozenset[str] = frozenset(),
 ) -> None:
     """Require positive authorization evidence for one exact dry run.
 
-    ``DryRunOperation`` is EC2's documented positive result. A caller may name
-    already-absent results that make its cleanup unnecessary. Permission,
+    ``DryRunOperation`` is EC2's documented positive result. Permission,
     credential, transport, validation, and protocol failures all stop before
     the guarded mutation because none proves that its cleanup can run.
     """
@@ -187,7 +184,7 @@ def _require_dry_run_permission(
         call()
     except Exception as exc:
         code = error_code(exc)
-        if code == _DRY_RUN_ALLOWED_CODE or code in absent_codes:
+        if code == _DRY_RUN_ALLOWED_CODE:
             return
         if code in _AUTHORIZATION_DENIAL_CODES:
             raise AuthorizationError(
@@ -241,7 +238,6 @@ def _check_security_group_delete_permission(ec2: Any, security_group_id: str) ->
         operation="delete the VM security group",
         entity_kind="security-group",
         entity_name=security_group_id,
-        absent_codes=_GROUP_NOT_FOUND_CODES,
     )
 
 
@@ -404,31 +400,113 @@ def _terminate_instance(ec2: Any, instance_id: str) -> bool:
         return False
 
 
-def terminate_and_cleanup_strict(ec2: Any, instance_id: str, security_group_id: str) -> None:
-    """Strict explicit-delete teardown for one EC2 VM.
+def describe_instance_exact(ec2: Any, instance_id: str) -> dict[str, Any] | None:
+    """Read one exact instance, returning ``None`` only for confirmed absence."""
+    try:
+        result = ec2.describe_instances(InstanceIds=[instance_id])
+    except Exception as exc:
+        if error_code(exc) in _INSTANCE_NOT_FOUND_CODES:
+            return None
+        raise wrap_ec2_error(exc) from exc
+    try:
+        instances = [
+            instance for reservation in result.get("Reservations", []) for instance in reservation.get("Instances", [])
+        ]
+        matches = [instance for instance in instances if instance.get("InstanceId") == instance_id]
+    except Exception as exc:
+        raise EC2Error(f"EC2 returned malformed instance data for '{instance_id}'", detail=str(exc)) from exc
+    if not instances:
+        return None
+    if len(instances) == 1 and len(matches) == 1:
+        return dict(matches[0])
+    raise EC2Error(
+        f"EC2 did not return an exact instance match for '{instance_id}'",
+        detail="DescribeInstances returned unexpected instance identities",
+    )
 
-    Dry-run a recorded group's exact delete before termination, then require
-    termination, confirmation, and bounded group deletion. Already-gone
-    resources make retries idempotent.
-    """
-    _check_security_group_delete_permission(ec2, security_group_id)
 
-    already_gone = False
+def describe_security_group_exact(ec2: Any, security_group_id: str) -> dict[str, Any] | None:
+    """Read one exact security group, returning ``None`` only for confirmed absence."""
+    try:
+        result = ec2.describe_security_groups(GroupIds=[security_group_id])
+    except Exception as exc:
+        if error_code(exc) in _GROUP_NOT_FOUND_CODES:
+            return None
+        raise wrap_ec2_error(exc) from exc
+    try:
+        groups = result.get("SecurityGroups", [])
+        matches = [group for group in groups if group.get("GroupId") == security_group_id]
+    except Exception as exc:
+        raise EC2Error(
+            f"EC2 returned malformed security-group data for '{security_group_id}'",
+            detail=str(exc),
+        ) from exc
+    if not groups:
+        return None
+    if len(groups) == 1 and len(matches) == 1:
+        return dict(matches[0])
+    raise EC2Error(
+        f"EC2 did not return an exact security-group match for '{security_group_id}'",
+        detail="DescribeSecurityGroups returned unexpected group identities",
+    )
+
+
+def _confirm_absent(lookup: Callable[[], object | None], *, entity_kind: str, entity_name: str) -> None:
+    """Require bounded read-only absence confirmation after mutation NotFound."""
+    for attempt in range(_ABSENCE_CONFIRM_ATTEMPTS):
+        if lookup() is None:
+            return
+        if attempt + 1 < _ABSENCE_CONFIRM_ATTEMPTS:
+            time.sleep(1)
+    raise EC2Error(
+        f"AWS did not confirm {entity_kind} '{entity_name}' was absent",
+        detail=f"the exact resource remained visible after {_ABSENCE_CONFIRM_ATTEMPTS} read-only checks",
+        entity_kind=entity_kind,
+        entity_name=entity_name,
+    )
+
+
+def terminate_and_cleanup_strict(
+    ec2: Any,
+    instance_id: str,
+    security_group_id: str,
+    backend_name: str,
+) -> None:
+    """Strict explicit-delete teardown with positive permission and absence proof."""
+    security_group = describe_security_group_exact(ec2, security_group_id)
+    if security_group is not None:
+        tags = security_group.get("Tags")
+        owned = isinstance(tags, list) and any(
+            isinstance(tag, dict) and tag.get("Key") == VM_TAG_KEY and tag.get("Value") == backend_name for tag in tags
+        )
+        if not owned:
+            raise EC2Error(
+                f"security group '{security_group_id}' is not owned by backend '{backend_name}'",
+                detail=f"the exact {VM_TAG_KEY} tag did not match",
+                entity_kind="security-group",
+                entity_name=security_group_id,
+            )
+        _check_security_group_delete_permission(ec2, security_group_id)
+
     try:
         ec2.terminate_instances(InstanceIds=[instance_id])
     except Exception as exc:
         if error_code(exc) in _INSTANCE_NOT_FOUND_CODES:
-            already_gone = True
+            _confirm_absent(
+                partial(describe_instance_exact, ec2, instance_id),
+                entity_kind="instance",
+                entity_name=instance_id,
+            )
         else:
             raise wrap_ec2_error(exc) from exc
-
-    if not already_gone:
+    else:
         try:
             ec2.get_waiter("instance_terminated").wait(InstanceIds=[instance_id])
         except Exception as exc:
             raise wrap_ec2_error(exc) from exc
 
-    _delete_security_group_strict(ec2, security_group_id)
+    if security_group is not None:
+        _delete_security_group_strict(ec2, security_group_id)
 
 
 def _delete_security_group_strict(ec2: Any, security_group_id: str) -> None:
@@ -441,6 +519,11 @@ def _delete_security_group_strict(ec2: Any, security_group_id: str) -> None:
         except Exception as exc:
             code = error_code(exc)
             if code in _GROUP_NOT_FOUND_CODES:
+                _confirm_absent(
+                    partial(describe_security_group_exact, ec2, security_group_id),
+                    entity_kind="security-group",
+                    entity_name=security_group_id,
+                )
                 return
             if code == "DependencyViolation" and attempt + 1 < attempts:
                 time.sleep(5)

@@ -49,9 +49,11 @@ from agentworks.plugins.aws.config import (
 # sibling network module; this module keeps the VMPlatform capability surface.
 from agentworks.plugins.aws.network import (
     SUBNET_NOT_FOUND_CODES,
+    VM_TAG_KEY,
     EC2Error,
     cleanup_partial,
     create_security_group,
+    describe_instance_exact,
     error_code,
     first_instance_public_ip,
     first_instance_state,
@@ -156,6 +158,7 @@ class EC2Platform(VMPlatform):
         # keep operating regardless of what the config says today.
         self._session_cached: Any | None = None
         self._clients: dict[tuple[str, str], Any] = {}
+        self._account_id_cached: str | None = None
 
     # No preflight override, on either credential path, for the same reasons
     # spelled out on azure's platform: whether a declared secret resolves is
@@ -216,6 +219,32 @@ class EC2Platform(VMPlatform):
             client = self._get_session(ctx).client(service, region_name=region)
             self._clients[key] = client
         return client
+
+    def _account_id_from_identity(self, identity: Any) -> str:
+        """Validate one STS GetCallerIdentity response at the provider boundary."""
+        account_id = identity.get("Account") if isinstance(identity, dict) else None
+        if not self._valid_account_id(account_id):
+            raise EC2Error(
+                f"AWS returned an invalid account identity for vm-site '{self.site_name}'",
+                detail="GetCallerIdentity returned no 12-digit Account value",
+                entity_kind="vm-site",
+                entity_name=self.site_name,
+            )
+        return str(account_id)
+
+    def _current_account_id(self, ctx: RunContext, *, refresh: bool = False) -> str:
+        if refresh or self._account_id_cached is None:
+            sts = self._client("sts", self.config.region, ctx)
+            try:
+                identity = sts.get_caller_identity()
+            except Exception as exc:
+                raise wrap_ec2_error(exc) from exc
+            self._account_id_cached = self._account_id_from_identity(identity)
+        return self._account_id_cached
+
+    @staticmethod
+    def _valid_account_id(value: object) -> bool:
+        return isinstance(value, str) and len(value) == 12 and value.isascii() and value.isdigit()
 
     def runup(self, ctx: RunContext) -> None:
         """Provisioning-phase runup: an authenticated, read-only check before
@@ -281,13 +310,14 @@ class EC2Platform(VMPlatform):
 
         # 1. Identity probe (validates the credential on both paths).
         try:
-            sts.get_caller_identity()
+            identity = sts.get_caller_identity()
         except ClientError as exc:
             _reject_or_warn(exc)
             return  # warned: nothing more to verify unverified
         except BotoCoreError as exc:
             output.warn(f"could not reach AWS for '{self.site_name}' ({exc}); continuing unverified")
             return
+        self._account_id_cached = self._account_id_from_identity(identity)
 
         # 2. A configured subnet that does not exist in the region is a
         # definitive misconfiguration (fatal), like azure's missing group.
@@ -311,6 +341,7 @@ class EC2Platform(VMPlatform):
 
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
         region = self.config.region
+        account_id = self._current_account_id(ctx)
         subnet_id = self.config.subnet_id
         ssm_release = code_owned_release_value(
             _DEBIAN_SSM_RELEASES,
@@ -511,6 +542,7 @@ class EC2Platform(VMPlatform):
             "security_group_id": security_group_id,
             "region": region,
             "backend_name": backend_name,
+            "account_id": account_id,
             # Exactly the prefixes the bootstrap allow was poked with, so the
             # close hooks revoke those tuples and nothing else (a concurrent
             # native route's distinct allow survives).
@@ -552,8 +584,19 @@ class EC2Platform(VMPlatform):
         output.info(f"Deleting EC2 instance '{vm.name}'...")
         instance_id = self._instance_id(vm)
         security_group_id = self._security_group_id(vm)
+        backend_name = self._backend_name(vm)
+        recorded_account_id = self._recorded_account_id(vm)
+        current_account_id = self._current_account_id(ctx, refresh=True)
+        if recorded_account_id is not None and recorded_account_id != current_account_id:
+            raise StateError(
+                f"VM '{vm.name}' belongs to AWS account '{recorded_account_id}', not the current account",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
         ec2 = self._client("ec2", self._region_of(vm), ctx)
-        terminate_and_cleanup_strict(ec2, instance_id, security_group_id)
+        if recorded_account_id is None:
+            self._require_legacy_delete_ownership(ec2, vm, instance_id, security_group_id, backend_name)
+        terminate_and_cleanup_strict(ec2, instance_id, security_group_id, backend_name)
         output.info(f"EC2 instance '{vm.name}' deleted")
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
@@ -697,27 +740,66 @@ class EC2Platform(VMPlatform):
     # -- Helpers ---------------------------------------------------------------
 
     def _instance_id(self, vm: VMRow) -> str:
-        """The VM's EC2 instance id from platform metadata, or a typed error."""
-        instance_id = vm.platform_metadata.get("instance_id")
-        if not instance_id:
-            raise StateError(
-                f"VM '{vm.name}' has no EC2 instance_id in its platform metadata; the DB row is incomplete",
-                entity_kind="vm",
-                entity_name=vm.name,
-            )
-        return str(instance_id)
+        return self._required_metadata(vm, "instance_id")
 
     def _security_group_id(self, vm: VMRow) -> str:
-        """The VM's security-group id from platform metadata, or a typed error
-        (the transient route cannot open without it)."""
-        security_group_id = vm.platform_metadata.get("security_group_id")
-        if not security_group_id:
+        return self._required_metadata(vm, "security_group_id")
+
+    def _backend_name(self, vm: VMRow) -> str:
+        return self._required_metadata(vm, "backend_name")
+
+    def _required_metadata(self, vm: VMRow, key: str) -> str:
+        value = vm.platform_metadata.get(key)
+        if not isinstance(value, str) or not value:
             raise StateError(
-                f"VM '{vm.name}' has no EC2 security_group_id in its platform metadata; the DB row is incomplete",
+                f"VM '{vm.name}' has invalid EC2 {key} platform metadata",
                 entity_kind="vm",
                 entity_name=vm.name,
             )
-        return str(security_group_id)
+        return value
+
+    def _recorded_account_id(self, vm: VMRow) -> str | None:
+        if "account_id" not in vm.platform_metadata:
+            return None
+        account_id = vm.platform_metadata.get("account_id")
+        if not self._valid_account_id(account_id):
+            raise StateError(
+                f"VM '{vm.name}' has an invalid AWS account_id in its platform metadata",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+        return str(account_id)
+
+    def _require_legacy_delete_ownership(
+        self,
+        ec2: Any,
+        vm: VMRow,
+        instance_id: str,
+        security_group_id: str,
+        backend_name: str,
+    ) -> None:
+        """Bind an account-less row through exact live ownership evidence."""
+        instance = describe_instance_exact(ec2, instance_id)
+        if instance is None:
+            raise StateError(
+                f"cannot confirm legacy VM '{vm.name}' in the current AWS account",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+        tags = instance.get("Tags")
+        groups = instance.get("SecurityGroups")
+        owns_instance = isinstance(tags, list) and any(
+            isinstance(tag, dict) and tag.get("Key") == VM_TAG_KEY and tag.get("Value") == backend_name for tag in tags
+        )
+        has_security_group = isinstance(groups, list) and any(
+            isinstance(group, dict) and group.get("GroupId") == security_group_id for group in groups
+        )
+        if not owns_instance or not has_security_group:
+            raise StateError(
+                f"cannot confirm ownership of legacy VM '{vm.name}' in the current AWS account",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
 
     def _region_of(self, vm: VMRow) -> str:
         """The VM's region: the recorded one (decouples existing VMs from config
