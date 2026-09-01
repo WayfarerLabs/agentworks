@@ -477,22 +477,23 @@ def test_reconciled_delete_identity_is_durable_before_retry(
     assert db.get_vm("dvm") is None
 
 
-def test_retained_delete_transition_must_change_metadata(
+def test_retained_delete_transitions_are_bounded(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed(db)
     monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
-    calls = 0
+    calls: list[dict[str, str]] = []
 
     def _delete(self: ProxmoxPlatform, row: VMRow, ctx: object) -> None:
-        nonlocal calls
         del self, ctx
-        calls += 1
+        calls.append(dict(row.platform_metadata))
+        metadata = dict(row.platform_metadata)
+        metadata["phase"] = "odd" if len(calls) % 2 else "even"
         raise RetainedDeletionError(
-            "provider made no progress",
-            platform_metadata=row.platform_metadata,
+            "provider requested another transition",
+            platform_metadata=metadata,
             entity_name=row.name,
         )
 
@@ -507,8 +508,10 @@ def test_retained_delete_transition_must_change_metadata(
             interaction=TtyInteractionPolicy.REFUSE,
         )
 
-    assert calls == 1
-    assert db.get_vm("dvm") is not None
+    assert len(calls) == 3
+    row = db.get_vm("dvm")
+    assert row is not None
+    assert row.platform_metadata["phase"] == "even"
 
 
 def test_force_does_not_suppress_backend_delete_failure(

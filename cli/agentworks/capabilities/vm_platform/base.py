@@ -134,9 +134,10 @@ class RetainedDeletionError(ProvisioningError):
     """Delete discovered provider identity that must be durable before teardown.
 
     The VM manager atomically replaces ``platform_metadata`` and continues the
-    delete. Every retained transition must change the complete metadata; a
-    failure or interrupt afterward leaves the row able to target every provider
-    resource and lifecycle phase already observed.
+    delete. It accepts at most two retained transitions per invocation, and each
+    must change the complete metadata. A failure or interrupt afterward leaves
+    the row able to target every provider resource and lifecycle phase already
+    observed.
     """
 
     def __init__(
@@ -331,9 +332,9 @@ class VMPlatform(Capability):
         with nothing left to target it; a raise keeps the row for a
         retry. A platform that discovers a more exact provider identity
         needed for retry raises ``RetainedDeletionError`` before its next
-        provider call; core persists each monotonic metadata replacement and
-        continues ``delete`` against the refreshed row. An unchanged retained
-        transition is a contract error. Best-effort warn-and-continue is
+        provider call; core persists up to two changed metadata replacements and
+        continues ``delete`` against the refreshed row. An unchanged or third
+        retained transition is a contract error. Best-effort warn-and-continue is
         acceptable only for auxiliary resources an operator can still find
         and remove (azure's NIC/IP/NSG/disk sweep); the VM itself is the gate,
         which azure enforces with a post-teardown existence probe."""
