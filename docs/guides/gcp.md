@@ -67,6 +67,7 @@ Before declaring a site:
    compute.instances.stop
    compute.machineTypes.get
    compute.networks.get
+   compute.networks.updatePolicy
    compute.projects.get
    compute.zoneOperations.get
    compute.zones.get

@@ -54,8 +54,8 @@ delete) Agentworks drives through that one admin foothold. See
 of each.
 
 Cloud permission diagnostics follow the provider-evidence model in the
-[`vm-platform` guide](vm_platform/README.md#security-posture); the capability contract does not
-flatten different provider guarantees into a misleading common readiness result.
+[`vm-platform` guide](vm_platform/README.md#provider-native-permission-diagnostics); the capability
+contract does not flatten different provider guarantees into a misleading common readiness result.
 
 ### Harness Integration
 
