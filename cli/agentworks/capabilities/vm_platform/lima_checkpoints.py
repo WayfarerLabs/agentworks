@@ -197,14 +197,25 @@ class LimaCheckpointOperations:
         ordered = sorted(item for item in related if item != checkpoint_artifact)
         if checkpoint_artifact in related:
             ordered.append(checkpoint_artifact)
+        source_record = self.host.record(self.instance_name) if self.instance_name in all_names else None
+        records: dict[str, dict[str, Any]] = {}
+        for artifact in ordered:
+            record = self.host.record(artifact)
+            assert record is not None
+            records[artifact] = record
+        checkpoint_record = records.get(checkpoint_artifact)
         for artifact in ordered:
             if artifact == checkpoint_artifact:
-                record = self.host.record(checkpoint_artifact)
-                assert record is not None
-                source_record = self.host.record(self.instance_name, required=False)
-                self._validate_clone_checkpoint_record(clone_descriptor, record, source_record)
+                assert checkpoint_record is not None
+                self._validate_clone_checkpoint_record(clone_descriptor, checkpoint_record, source_record)
             else:
-                self._validate_owned_recovery_artifact(clone_descriptor, artifact)
+                self._validate_owned_recovery_artifact(
+                    clone_descriptor,
+                    artifact,
+                    records[artifact],
+                    source_record,
+                    checkpoint_record,
+                )
         for artifact in ordered:
             output.info(f"Deleting Lima recovery artifact '{artifact}'...")
             self.host.delete_recovery_instance(artifact)
@@ -885,6 +896,9 @@ class LimaCheckpointOperations:
         self,
         checkpoint: CheckpointDescriptor,
         artifact: str,
+        record: dict[str, Any],
+        source_record: dict[str, Any] | None,
+        checkpoint_record: dict[str, Any] | None,
     ) -> None:
         match = _RECOVERY_ARTIFACT_NAME.fullmatch(artifact)
         assert match is not None
@@ -899,8 +913,6 @@ class LimaCheckpointOperations:
                 entity_kind="vm",
                 entity_name=self.vm_name,
             )
-        record = self.host.record(artifact)
-        assert record is not None
         params = record.get("param")
         incarnation = params.get(_SOURCE_INCARNATION_PARAM) if isinstance(params, dict) else None
         operation = params.get(_RECOVERY_OPERATION_PARAM) if isinstance(params, dict) else None
@@ -928,8 +940,6 @@ class LimaCheckpointOperations:
         self.host.require_stopped(artifact, purpose="checkpoint deletion", record=record)
         self.host.require_no_additional_disks(artifact, record=record)
 
-        source_record = self.host.record(self.instance_name, required=False)
-        checkpoint_record = self.host.record(checkpoint.identifier, required=False)
         anchor = source_record or checkpoint_record
         if anchor is not None:
             anchor_name = self.instance_name if source_record is not None else checkpoint.identifier
