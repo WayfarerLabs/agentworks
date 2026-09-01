@@ -92,10 +92,12 @@ class AzureVMPlatform(VMPlatform):
         Creates Azure Virtual Machines in one subscription and resource group. Declare
         one vm-site per subscription and group you target.
 
-        The resource group must already exist: `vm create` checks it at runup, with an
+        The resource group must already exist: `vm create` checks it at runup with an
         authenticated read-only probe, then checks any complete permission listing for
         required create and rollback grants. Definitive omissions fail; inconclusive queries
-        warn. `vm create` picks the smallest matching entry from the site's B-series catalog.
+        warn. Sizes come from a built-in B-series catalog unless the site overrides it, and
+        `vm create` picks the smallest entry that satisfies the vm-template's request (an
+        off-ratio request rounds up and warns).
 
         `auth` says how the site authenticates and defaults to `{mode: ambient}`, the
         ambient Azure credential chain (`az login`, `AZURE_*` variables, managed

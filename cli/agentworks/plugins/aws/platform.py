@@ -673,16 +673,19 @@ class EC2Platform(VMPlatform):
         Enter pokes this operation's SSH allow scoped to the operator's egress
         prefixes (widened by ``config.operator.ssh_allow_cidrs``); the finally
         revokes exactly those prefixes on every unwind path, so a concurrent
-        native op's non-overlapping allows are untouched. The poke sits INSIDE
-        the try, so a poke that partially failed is still swept by the finally;
-        a shared prefix across concurrent ops is idempotent to poke and tolerant
-        to revoke (see network.py's poke_ssh_allow / remove_ssh_allow, which
-        carry the full contract). Unlike azure there is no public-IP heal on
-        enter: the EC2 auto-assigned IP is permanent for the VM's lifetime.
+        native op's non-overlapping allows are untouched. A shared prefix across
+        concurrent ops is idempotent to poke and tolerant to revoke (see
+        network.py's poke_ssh_allow / remove_ssh_allow, which carry the full
+        contract). Unlike azure there is no public-IP heal on enter: the EC2
+        auto-assigned IP is permanent for the VM's lifetime.
 
         ``ctx`` is the op-start context threaded from the factory; ``config``
         carries OPERATOR settings (``operator.ssh_allow_cidrs``), mirroring
         azure and :meth:`native_transport`.
+
+        ``poke_ssh_allow`` checks the matching revoke permissions before it
+        mutates ingress and cleans up any partial poke itself. Once the poke
+        succeeds, this context's ``finally`` owns the matching close.
         """
         ec2 = self._client("ec2", self._region_of(vm), ctx)
         security_group_id = self._security_group_id(vm)
