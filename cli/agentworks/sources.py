@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agentworks import output
 from agentworks.errors import ExternalError
 from agentworks.path_rendering import format_host_path
 
@@ -206,7 +207,10 @@ def _fetch_git(
     except SSHError as e:
         raise SourceRefError(f"failed to fetch from git source: {e}") from e
     finally:
-        target.run(f"rm -rf {shlex.quote(tmp_dir)}", check=False)
+        try:
+            target.run(f"rm -rf {shlex.quote(tmp_dir)}", check=False)
+        except Exception as error:
+            output.warn(f"Could not remove remote source staging directory: {error}")
 
 
 def fetch_dir(

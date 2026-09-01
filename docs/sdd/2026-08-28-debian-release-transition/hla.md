@@ -89,12 +89,11 @@ backend authentication are resolved, and again by `create` before mutation. A mi
 the exact `template_vmids.<release>` key. No platform falls back to Bookworm, latest, a scalar
 template, or an arbitrary image.
 
-Platforms validate the guest inside their rollback window where the backend permits it. The platform
-returns a `ProvisionResult` containing the native transport and opaque platform identity, but no
-platform-authored release assertion. Core then probes that transport against the exact pre-dispatch
-request. Only a successful core probe records `debian_release` and `debian_release_observed_at` and
-proceeds to release-aware initialization. A post-create mismatch leaves an addressable failed VM row
-for explicit cleanup.
+The platform returns a `ProvisionResult` containing the native transport and opaque platform
+identity, but no platform-authored release assertion. Core probes that transport against the exact
+pre-dispatch request. Only a successful core probe records `debian_release` and
+`debian_release_observed_at` and proceeds to release-aware initialization. A post-create mismatch
+leaves an addressable failed VM row for explicit cleanup.
 
 Provisioning output names the release in the create line, emits
 `Confirming Debian release <release>...` immediately before the core probe, and prints
@@ -134,8 +133,8 @@ release and observation time. These read paths do not perform a live probe.
 
 ## Explicit release adoption
 
-`agw vm confirm-release NAME [-y|--yes]` uses the ordinary named-VM boundary and canonical native
-transport. It activates the VM when that boundary normally requires activation, reads
+`agw vm confirm-release NAME [-y|--yes]` uses the ordinary named-VM boundary and canonical Tailscale
+SSH transport. It activates the VM when that boundary normally requires activation, reads
 `/etc/os-release`, and accepts only a release recognized by the running Agentworks build.
 
 The command displays the recorded value, including `not recorded`, and the live value. When they

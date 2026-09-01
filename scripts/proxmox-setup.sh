@@ -12,11 +12,12 @@ set -euo pipefail
 #   bash proxmox-setup.sh [VMID] [STORAGE] [BRIDGE]
 #
 # Arguments (all optional with defaults):
-#   VMID    - Template VM ID (default: 9000)
+#   VMID    - Template VM ID (default: 9001; Bookworm setup used 9000)
 #   STORAGE - Storage volume for VM disks (default: local-lvm)
 #   BRIDGE  - Network bridge (default: vmbr0)
 #
-# Idempotent: safe to re-run. Skips resources that already exist.
+# Idempotent: safe to re-run. An existing template is skipped only when its
+# name and release tags match; another object at the VMID is refused.
 # To recreate the API token, answer 'y' when prompted.
 
 if [ "$#" -gt 3 ]; then
@@ -24,7 +25,7 @@ if [ "$#" -gt 3 ]; then
     exit 2
 fi
 
-VMID="${1:-9000}"
+VMID="${1:-9001}"
 STORAGE="${2:-local-lvm}"
 BRIDGE="${3:-vmbr0}"
 RELEASE="trixie"
@@ -35,6 +36,7 @@ TOKEN_NAME="agentworks"
 
 IMAGE_URL="https://cloud.debian.org/images/cloud/${RELEASE}/latest/debian-${DEBIAN_VERSION}-generic-amd64.qcow2"
 TEMPLATE_NAME="debian-${DEBIAN_VERSION}-template"
+TEMPLATE_TAGS="agentworks;debian-${RELEASE}"
 
 echo "=== Agentworks Proxmox Setup ==="
 echo ""
@@ -53,7 +55,17 @@ echo ""
 echo "--- Step 1: VM Template ---"
 
 if qm status "$VMID" >/dev/null 2>&1; then
-    echo "  Template VMID $VMID already exists, skipping."
+    TEMPLATE_CONFIG=$(qm config "$VMID")
+    TEMPLATE_TAG_LINE=$(printf '%s\n' "$TEMPLATE_CONFIG" | sed -n 's/^tags: //p')
+    if ! printf '%s\n' "$TEMPLATE_CONFIG" | grep -Fxq "name: $TEMPLATE_NAME" \
+        || ! printf '%s\n' "$TEMPLATE_CONFIG" | grep -Fxq "template: 1" \
+        || ! printf '%s\n' "$TEMPLATE_TAG_LINE" | tr ';' '\n' | grep -Fxq "agentworks" \
+        || ! printf '%s\n' "$TEMPLATE_TAG_LINE" | tr ';' '\n' | grep -Fxq "debian-${RELEASE}"; then
+        echo "  Error: VMID $VMID is occupied but is not the Agentworks Debian ${RELEASE} template." >&2
+        echo "  Choose an unused VMID and rerun (Bookworm installations commonly use VMID 9000)." >&2
+        exit 1
+    fi
+    echo "  Agentworks Debian ${RELEASE} template VMID $VMID already exists, skipping."
 else
     # Keep the large cloud image in private, disk-backed staging and remove it
     # on every exit, including failures and interrupts.
@@ -98,6 +110,7 @@ else
     # Convert to template
     echo "  Converting to template..."
     qm template "$VMID"
+    qm set "$VMID" --tags "$TEMPLATE_TAGS"
     echo "  Template created."
 
     cleanup_image

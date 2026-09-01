@@ -6,7 +6,8 @@
 
 The assisted-upgrade and managed-checkpoint direction was superseded on 2026-09-01. Completed
 checkboxes below remain unchanged as the truthful record of work performed; the target design no
-longer retains those production surfaces.
+longer retains those production surfaces. The checked platform-local attestation item is likewise
+superseded; the surviving design attests once in core.
 
 ## Delivery posture
 

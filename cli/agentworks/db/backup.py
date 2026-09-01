@@ -16,7 +16,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 from agentworks.db.migrations import LATEST_VERSION, SCHEMA_SENTINELS
-from agentworks.errors import BackupError, BusyStateError, NotFoundError, StateError, ValidationError
+from agentworks.errors import (
+    BackupError,
+    BusyStateError,
+    MigrationBlockedError,
+    NotFoundError,
+    StateError,
+    ValidationError,
+)
 from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
@@ -253,6 +260,11 @@ def open_database_safely(
             backup = create_pre_migration_backup(database_path, current.current_version)
         try:
             database = _construct_writable_database(database_path)
+        except MigrationBlockedError:
+            # This typed refusal is guaranteed to happen before schema or data
+            # changes, and its operator remediation is more useful
+            # than the generic partial-migration recovery message below.
+            raise
         except BaseException as error:
             hint = _migration_failure_hint(backup)
             if isinstance(error, Exception):

@@ -19,7 +19,7 @@ from agentworks.capabilities.vm_platform.debian_release import (
     operator_owned_release_value,
 )
 from agentworks.db import VMStatus
-from agentworks.debian import DebianRelease, verify_os_release
+from agentworks.debian import DebianRelease
 from agentworks.errors import ProvisioningError, StateError
 from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError
 from agentworks.plugins.proxmox.teardown import (
@@ -390,16 +390,11 @@ class ProxmoxPlatform(VMPlatform):
                 ip = self._wait_for_guest_ip(node, newid, ctx)
                 output.detail(f"VM IP: {ip}")
 
-                # 7. Attest the operator-owned template before Agentworks
-                # mutates the guest through its bootstrap.
-                output.detail("Verifying Debian release...")
-                self._verify_guest_release(node, newid, request.debian_release, ctx)
-
-                # 8. Wait for cloud-init to finish (releases apt lock)
+                # 7. Wait for cloud-init to finish (releases apt lock)
                 output.detail("Waiting for cloud-init...")
                 self._wait_for_cloud_init(node, newid, ctx)
 
-                # 9. Run bootstrap script via guest agent
+                # 8. Run bootstrap script via guest agent
                 output.detail("Running bootstrap via guest agent...")
                 bootstrap = generate_bootstrap_script(
                     admin_username=request.admin_username,
@@ -493,29 +488,6 @@ class ProxmoxPlatform(VMPlatform):
     # the typed StateError with the web-console hint.
 
     # -- Helpers ---------------------------------------------------------------
-
-    def _verify_guest_release(
-        self,
-        node: str,
-        vmid: int,
-        expected: DebianRelease,
-        ctx: RunContext,
-    ) -> None:
-        """Attest an operator-owned template through the live guest agent."""
-        result = self._api(ctx).guest_agent_exec_wait(
-            node,
-            vmid,
-            "/usr/bin/cat",
-            ["/etc/os-release"],
-        )
-        if result is None:
-            raise ProvisioningError("Proxmox guest-agent Debian release check timed out")
-        if result.get("exitcode", -1) != 0:
-            raise ProvisioningError("Proxmox guest-agent Debian release check failed")
-        stdout = result.get("out-data")
-        if not isinstance(stdout, str):
-            raise ProvisioningError("Proxmox guest-agent Debian release check returned invalid output")
-        verify_os_release(stdout, expected=expected)
 
     def _wait_for_cloud_init(self, node: str, vmid: int, ctx: RunContext, *, timeout: int = 300) -> None:
         """Wait for cloud-init to finish inside the VM."""

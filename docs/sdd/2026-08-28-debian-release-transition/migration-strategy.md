@@ -81,10 +81,9 @@ Each code-owned platform map must have a Trixie artifact for every architecture 
 code-owned mappings are implementation defects and fail without fallback. Proxmox is operator-owned,
 so a create preflight requires `template_vmids.trixie` before secret resolution or backend access.
 
-Platforms validate the image inside their rollback window where possible. Core always performs the
-final `/etc/os-release` probe through the returned native transport. A mismatch records neither the
-requested release nor a successful provisioning result. Backend identity remains addressable when
-core discovers a mismatch after platform success.
+Core performs the `/etc/os-release` probe through the returned native transport. A mismatch records
+neither the requested release nor a successful provisioning result. Backend identity remains
+addressable when core discovers a mismatch after platform success.
 
 There is no existing-VM rewrite. A Bookworm VM continues pointing at the same backend object and can
 be started, stopped, accessed, backed up, reinitialized where valid, and deleted.

@@ -413,11 +413,20 @@ def _archive_workspaces(
         _transfer_with_progress(target, archive, local_archive, remote_size)
 
     finally:
-        target.run(f"rm -rf {q_tmp}", sudo=True, check=False)
+        try:
+            target.run(f"rm -rf {q_tmp}", sudo=True, check=False)
+        except Exception as error:
+            output.warn(f"Could not remove remote backup staging directory: {error}")
         if staging_paths is not None:
-            target.run(f"rm -f {shlex.quote(staging_paths)}", check=False)
+            try:
+                target.run(f"rm -f {shlex.quote(staging_paths)}", check=False)
+            except Exception as error:
+                output.warn(f"Could not remove remote backup path list: {error}")
         if detached_dir is not None:
-            target.run(f"rm -rf {shlex.quote(detached_dir)}", check=False)
+            try:
+                target.run(f"rm -rf {shlex.quote(detached_dir)}", check=False)
+            except Exception as error:
+                output.warn(f"Could not remove remote backup command directory: {error}")
 
     return [ws.workspace_path for ws in valid], skipped
 

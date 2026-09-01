@@ -146,11 +146,6 @@ def parse_os_release(
     raise _observation_error(fields, "is not recognized by this Agentworks build")
 
 
-# Kept as a discoverable spelling for platform implementations while the
-# os-release parser remains the canonical public name.
-parse_debian_release = parse_os_release
-
-
 def probe_debian_release(
     transport: Transport,
     *,

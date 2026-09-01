@@ -76,6 +76,15 @@ class StateError(AgentworksError):
     """
 
 
+class MigrationBlockedError(StateError):
+    """A migration refused an unmet precondition before changing schema.
+
+    The safe database opener preserves this error's specific remediation
+    instead of replacing it with the generic partial-migration recovery
+    message. Migration steps must only raise this before changing schema or data.
+    """
+
+
 class AuthorizationError(AgentworksError):
     """Operation refused because the actor lacks permission for the target.
 

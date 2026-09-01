@@ -305,13 +305,12 @@ same `ProvisionRequest`, including the concrete core-selected `debian_release`, 
 Tailscale auth key, and a required value-free bootstrap-progress sink. The platform resolves the
 release through its local artifact map before backend mutation. A missing code-owned mapping names
 the out-of-date Agentworks build; a missing operator-owned mapping names the exact vm-site field.
-Neither has a fallback. Before its rollback window closes, the platform probes the live guest and
-raises after cleaning up a mismatch. A successful `ProvisionResult` carries the native transport, an
-optional Tailscale IP, and `platform_metadata`. Core treats the result as a runtime conformance
-boundary: after persisting the metadata, it independently probes the returned transport and persists
-only that live observation. This is not a security sandbox for in-process plugin code. The metadata
-is written verbatim to `vms.platform_metadata` and read back only by the owning platform (Lima
-stores `instance_name`, WSL2 `distro_name`, Azure `resource_id`, Proxmox `vmid` + `node`, EC2
+Neither has a fallback. A successful `ProvisionResult` carries the native transport, an optional
+Tailscale IP, and `platform_metadata`. Core treats the result as a runtime conformance boundary:
+after persisting the metadata, it probes the returned transport and persists only that live
+observation. This is not a security sandbox for in-process plugin code. The metadata is written
+verbatim to `vms.platform_metadata` and read back only by the owning platform (Lima stores
+`instance_name`, WSL2 `distro_name`, Azure `resource_id`, Proxmox `vmid` + `node`, EC2
 `instance_id` + `security_group_id` + `region` + `backend_name`, and never the public IP, which it
 reads live). An omitted IP means discovery failed after a successful join, not that bootstrap is
 incomplete. Phase A retries only `tailscale ip -4` before it records the address and verifies
@@ -324,11 +323,10 @@ overrides it so a missing create entry fails before authenticated `runup`. `crea
 mapping again before mutation. This timing does not make the current artifact a load-time config
 requirement, so a legacy site can still load for operations on existing VMs.
 
-An operator-owned artifact is also untrusted until the live guest proves what it contains. When the
-backend exposes guest execution before Agentworks bootstrap, verify `/etc/os-release` there and roll
-back a mismatch before running the Debian-specific bootstrap. Core still performs the final live
-probe over the returned transport; the early check guards mutation, while core's check owns the
-persisted observation. Do not add a configuration bypass for either check.
+An operator-owned artifact is also untrusted until the live guest proves what it contains. Core
+applies the same returned-transport probe regardless of who owns the artifact map. A mismatch leaves
+the backend identity addressable for explicit deletion. Do not add a configuration bypass for this
+check.
 
 Add a platform-specific **input** by adding a field to `ProvisionRequest`, not by changing the
 protocol. But note the opposite pattern is also right: purely internal translation stays inside the
@@ -727,9 +725,8 @@ YAML block scalar, remote shell). Two traps that have already occurred:
 5. Only the transport and lifecycle hooks required by the backend override their defaults.
 6. An operator-owned release catalog overrides `validate_create_release(release)` with a pure
    lookup, while `create()` resolves `request.debian_release` again before mutation, completes
-   Tailscale bootstrap, and verifies the live guest through the shared release probe or raises after
-   rollback. Core repeats the probe over the returned transport and owns the observation. Use
-   `bootstrap_script.py` / `cloud_init.py` for the create-time payload instead of a
+   Tailscale bootstrap, and returns a transport through which core verifies and records the live
+   release. Use `bootstrap_script.py` / `cloud_init.py` for the create-time payload instead of a
    platform-specific reinvention. Keep any provider-retained payload credential-free and deliver the
    resolved key through the platform's ephemeral mechanism. Return an optional IP only after a
    successful join; Phase A owns IP-only rediscovery and Tailscale SSH verification.

@@ -41,7 +41,13 @@ def test_every_code_owned_platform_map_has_the_trixie_selector() -> None:
     assert "debian-13-generic-arm64.qcow2" in _LIMA_IMAGE_BLOCKS[DebianRelease.TRIXIE]
     assert _DEBIAN_OCI_TAGS[DebianRelease.TRIXIE] == "trixie"
     assert _DEBIAN_SSM_RELEASES[DebianRelease.TRIXIE] == "13"
-    assert AZURE_IMAGES[DebianRelease.TRIXIE].urn == "Debian:debian-13:13-gen2:latest"
+    azure = AZURE_IMAGES[DebianRelease.TRIXIE]
+    assert (azure.publisher, azure.offer, azure.sku, azure.version) == (
+        "Debian",
+        "debian-13",
+        "13-gen2",
+        "latest",
+    )
     assert IMAGE_FAMILIES[DebianRelease.TRIXIE] == {
         "x86_64": "debian-13",
         "arm64": "debian-13-arm64",

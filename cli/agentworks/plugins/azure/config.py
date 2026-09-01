@@ -144,11 +144,6 @@ class AzureImage(NamedTuple):
     version: str
     os_disk_floor_gib: int
 
-    @property
-    def urn(self) -> str:
-        """The provider's compact image identity."""
-        return f"{self.publisher}:{self.offer}:{self.sku}:{self.version}"
-
 
 AZURE_IMAGES: dict[DebianRelease, AzureImage] = {
     DebianRelease.TRIXIE: AzureImage(

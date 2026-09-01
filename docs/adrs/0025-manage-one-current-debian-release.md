@@ -25,9 +25,8 @@ restore Agentworks' relational agents, sessions, consoles, workspaces, and decla
 Agentworks continues to support Debian as its one managed guest operating system. It has one ordered
 registry of recognized Debian release profiles, and the final profile is the sole current release
 for new VM creation. Core passes that concrete release through the internal version-1 vm-platform
-capability. Each platform maps it to its own reviewed artifact and validates the guest within its
-rollback window where possible. Core independently probes the returned transport and persists only
-its own live observation.
+capability. Each platform maps it to its own reviewed artifact. Core probes the returned transport
+and persists only its own live observation.
 
 The database stores the last release observed from each VM. Existing unknown rows are observed
 rather than guessed. Current and previous releases remain ordinarily operable. Older recognized

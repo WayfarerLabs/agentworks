@@ -13,9 +13,9 @@ set -euo pipefail
 #   bash proxmox-teardown.sh [VMID]
 #
 # Arguments:
-#   VMID - Template VM ID to remove (default: 9000)
+#   VMID - Template VM ID to remove (default: 9001; Bookworm setup used 9000)
 
-VMID="${1:-9000}"
+VMID="${1:-9001}"
 POOL="agentworks"
 USER="agentworks@pam"
 TOKEN_NAME="agentworks"

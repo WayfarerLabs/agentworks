@@ -15,7 +15,6 @@ from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootst
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.debian_release import (
     code_owned_release_value,
-    verify_provisioned_release,
 )
 from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs, operator_ssh_prefixes
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
@@ -423,7 +422,6 @@ class GCEPlatform(VMPlatform):
                 readiness_label=GCE_READINESS_LABEL,
             ).complete(request.tailscale_auth_key)
             request.progress.output("GCE credential-free bootstrap and Tailscale join completed")
-            verify_provisioned_release(transport, request.debian_release)
         except KeyboardInterrupt as primary:
             operator_interrupt = primary
         except Exception as primary:

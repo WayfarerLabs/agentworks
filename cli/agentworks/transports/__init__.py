@@ -43,13 +43,8 @@ if TYPE_CHECKING:
     from agentworks.ssh import SSHLogger
 
 
-class NativeTransportUnavailable(StateError):
-    """The selected VM platform has no interactive native transport."""
-
-
 __all__ = [
     "LimaTransport",
-    "NativeTransportUnavailable",
     "RemoteLimaTransport",
     "SSHTransport",
     "TailscaleWait",
@@ -203,7 +198,7 @@ def native_transport(
     stack.enter_context(platform.transient_route(vm, ctx, config=config))
     target = platform.native_transport(vm, ctx, config=config)
     if target is None:
-        raise NativeTransportUnavailable(
+        raise StateError(
             f"No native transport for VM '{vm.name}' (platform '{platform.name}').",
             entity_kind="vm",
             entity_name=vm.name,

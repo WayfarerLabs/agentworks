@@ -13,7 +13,6 @@ from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootst
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES, generate_cloud_init
 from agentworks.capabilities.vm_platform.debian_release import (
     code_owned_release_value,
-    verify_provisioned_release,
 )
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
@@ -652,7 +651,6 @@ class AzureVMPlatform(VMPlatform):
                 # The provider-retained bootstrap installed Tailscale without
                 # a credential. Wait for it, then join once over stdin.
                 tailscale_ip = EphemeralTailscaleBootstrap(prov_transport).complete(tailscale_auth_key)
-                verify_provisioned_release(prov_transport, request.debian_release)
             except Exception as exc:
                 output.detail("Cleaning up resources...")
                 # The teardown captures a VM-delete failure rather than

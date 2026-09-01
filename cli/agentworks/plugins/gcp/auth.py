@@ -25,7 +25,6 @@ type GcpClientKind = Literal[
     "images",
     "instances",
     "firewalls",
-    "disks",
 ]
 
 _CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
@@ -153,7 +152,6 @@ class GcpClientCache:
             "images": compute_v1.ImagesClient,
             "instances": compute_v1.InstancesClient,
             "firewalls": compute_v1.FirewallsClient,
-            "disks": compute_v1.DisksClient,
         }
         credential = self.credential(ctx)
         construction_failed = False

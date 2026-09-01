@@ -28,7 +28,6 @@ from agentworks.capabilities.vm_platform.bootstrap_script import (
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.debian_release import (
     code_owned_release_value,
-    verify_provisioned_release,
 )
 from agentworks.capabilities.vm_platform.tailscale_join import TAILSCALE_JOIN_STDIN_COMMAND
 from agentworks.db import VMStatus
@@ -419,7 +418,6 @@ class LimaPlatform(VMPlatform):
                 output.warn("Tailscale is joined; Phase A will retry IP discovery without the auth key.")
 
             transport = self._transport_for(instance_name)
-            verify_provisioned_release(transport, request.debian_release)
         except KeyboardInterrupt:
             self._rollback_create_on_interrupt(instance_name)
             raise

@@ -162,18 +162,6 @@ def test_primary_bootstrap_failure_cleans_up_and_reraises(monkeypatch: pytest.Mo
     _assert_teardown_ran(calls)
 
 
-def test_release_verification_failure_stays_inside_create_rollback(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = _wire(monkeypatch)
-    failure = StateError("guest release mismatch")
-    monkeypatch.setattr(wsl2, "verify_provisioned_release", MagicMock(side_effect=failure))
-
-    with pytest.raises(StateError) as caught:
-        WSL2Platform("wsl2", {}).create(_request(), RunContext())
-
-    assert caught.value is failure
-    _assert_teardown_ran(calls)
-
-
 def test_failure_mid_provision_cleans_up_and_reraises(
     monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
 ) -> None:

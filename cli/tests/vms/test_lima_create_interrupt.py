@@ -31,7 +31,6 @@ from agentworks.capabilities.vm_platform import ProvisionRequest
 from agentworks.capabilities.vm_platform.bootstrap_script import REBOOT_SENTINEL_PATH
 from agentworks.capabilities.vm_platform.lima import _REBOOT_CLEAR_MARKER, LimaPlatform
 from agentworks.debian import DebianRelease
-from agentworks.errors import StateError
 from agentworks.ssh import SSHError
 
 pytestmark = pytest.mark.usefixtures("verified_debian_release")
@@ -329,23 +328,6 @@ def test_ephemeral_tailscale_join_failure_cleans_up_without_key_in_error(
     assert _deletes(ran) == ["limactl delete --force myvm"]
     assert secret not in repr(caught.value)
     assert secret not in repr(ran)
-
-
-def test_release_verification_failure_stays_inside_create_rollback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    ran = _wire(monkeypatch)
-    failure = StateError("guest release mismatch")
-    monkeypatch.setattr(
-        "agentworks.capabilities.vm_platform.lima.verify_provisioned_release",
-        MagicMock(side_effect=failure),
-    )
-
-    with pytest.raises(StateError) as caught:
-        LimaPlatform("lima", {"placement": {"mode": "local"}}).create(_request(), RunContext())
-
-    assert caught.value is failure
-    assert _deletes(ran) == ["limactl delete --force myvm"]
 
 
 def test_second_interrupt_abandons_cleanup_loudly(

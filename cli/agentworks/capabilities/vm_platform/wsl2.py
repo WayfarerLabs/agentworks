@@ -14,10 +14,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
-from agentworks.capabilities.vm_platform.debian_release import (
-    code_owned_release_value,
-    verify_provisioned_release,
-)
+from agentworks.capabilities.vm_platform.debian_release import code_owned_release_value
 from agentworks.capabilities.vm_platform.wsl2_bootstrap import run_wsl2_bootstrap
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
@@ -774,7 +771,6 @@ class WSL2Platform(VMPlatform):
                     progress=request.progress,
                 )
                 output.detail(f"Tailscale IP: {tailscale_ip}")
-                verify_provisioned_release(native_transport, request.debian_release)
             except Exception:
                 # WSL2's error convention holds: the RuntimeErrors from
                 # _wsl / _powershell propagate unwrapped; the only new

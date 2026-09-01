@@ -233,7 +233,10 @@ def copy_workspace(
                 output.detail(f"VS Code workspace: {format_host_path(vscode_path)}")
             finally:
                 if remote_tmp is not None:
-                    dest_target.run(f"rm -f {shlex.quote(remote_tmp)}", check=False, timeout=10)
+                    try:
+                        dest_target.run(f"rm -f {shlex.quote(remote_tmp)}", check=False, timeout=10)
+                    except Exception as error:
+                        output.warn(f"Could not remove remote workspace-copy archive: {error}")
                 # Exactly-once close, in a finally so a cancellation (the
                 # sanctioned KeyboardInterrupt re-raise out of
                 # materialize_grant_all_agents) or an error from any

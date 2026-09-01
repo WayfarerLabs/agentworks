@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.ssh import SSHResult
+from agentworks.ssh import SSHError, SSHResult
 from agentworks.transports import (
     LimaTransport,
     RemoteLimaTransport,
@@ -123,6 +123,61 @@ def test_copy_dir_to_quotes_remote_archive_and_destination(
         "tar -xzf '/var/tmp/agentworks copy;$(false).tar.gz' -C '/srv/path with spaces/$(false)'",
         "rm -f -- '/var/tmp/agentworks copy;$(false).tar.gz'",
     ]
+
+
+def test_copy_dir_to_cleanup_failure_preserves_primary(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    captured_output,
+) -> None:  # noqa: ANN001
+    source = tmp_path / "source"
+    source.mkdir()
+    primary = SSHError("archive extraction failed")
+    target = _RecordingTransport()
+
+    def _run(command: str, **kwargs: object) -> SSHResult:
+        del kwargs
+        if command.startswith("mktemp "):
+            return SSHResult(returncode=0, stdout="/var/tmp/archive.tgz\n", stderr="")
+        if command.startswith("tar "):
+            raise primary
+        if command.startswith("rm -f "):
+            raise SSHError("cleanup failed")
+        return SSHResult(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(target, "run", _run)
+    monkeypatch.setattr(target, "copy_to", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(SSHError) as caught:
+        target.copy_dir_to(source, "/srv/destination")
+
+    assert caught.value is primary
+    assert captured_output.warnings
+
+
+def test_copy_dir_to_cleanup_failure_does_not_fail_completed_copy(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    captured_output,
+) -> None:  # noqa: ANN001
+    source = tmp_path / "source"
+    source.mkdir()
+    target = _RecordingTransport()
+
+    def _run(command: str, **kwargs: object) -> SSHResult:
+        del kwargs
+        if command.startswith("mktemp "):
+            return SSHResult(returncode=0, stdout="/var/tmp/archive.tgz\n", stderr="")
+        if command.startswith("rm -f "):
+            raise SSHError("cleanup failed")
+        return SSHResult(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(target, "run", _run)
+    monkeypatch.setattr(target, "copy_to", lambda *_args, **_kwargs: None)
+
+    target.copy_dir_to(source, "/srv/destination")
+
+    assert captured_output.warnings
 
 
 # ---------------------------------------------------------------------------

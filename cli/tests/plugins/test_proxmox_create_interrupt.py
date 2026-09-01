@@ -35,7 +35,7 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest
 from agentworks.debian import DebianRelease
-from agentworks.errors import ProvisioningError, StateError
+from agentworks.errors import ProvisioningError
 from agentworks.plugins.proxmox.api import ProxmoxAPIError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.transports import SSHTransport
@@ -111,10 +111,6 @@ class FakeProxmoxAPI:
         self.bootstrap_result: dict[str, Any] | None = {
             "exitcode": 0,
             "out-data": "##STEP## Tailscale\n##SUCCESS## tailscale-ip=100.64.0.7\n",
-        }
-        self.guest_release_result: dict[str, Any] | None = {
-            "exitcode": 0,
-            "out-data": "ID=debian\nVERSION_ID=13\nVERSION_CODENAME=trixie\n",
         }
         self.files: dict[str, str] = {}
         self.file_payloads: list[str] = []
@@ -200,8 +196,6 @@ class FakeProxmoxAPI:
     ) -> dict[str, Any] | None:
         argv = tuple(args or ())
         self.calls.append(("guest_agent_exec_wait", node, vmid, command, argv, timeout))
-        if command == "/usr/bin/cat":
-            return self.guest_release_result
         if command == "/usr/bin/install":
             self.files[str(argv[-1])] = ""
             return {"exitcode": 0, "out-data": ""}
@@ -307,59 +301,6 @@ class TestInterruptDuringBootstrapWait:
 
 
 class TestFailClosedBootstrap:
-    def test_release_attestation_precedes_cloud_init_and_bootstrap(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        platform, fake = _platform_with_fake(monkeypatch)
-
-        platform.create(_request(tailscale=True), RunContext())
-
-        guest_commands = [call[3] for call in fake.calls if call[0] == "guest_agent_exec_wait"]
-        assert guest_commands.index("/usr/bin/cat") < guest_commands.index("/usr/bin/cloud-init")
-        assert guest_commands.index("/usr/bin/cat") < guest_commands.index("/usr/bin/install")
-        assert guest_commands.index("/usr/bin/install") < guest_commands.index("/bin/bash")
-
-    def test_wrong_template_release_rolls_back_before_bootstrap(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        platform, fake = _platform_with_fake(monkeypatch)
-        fake.guest_release_result = {
-            "exitcode": 0,
-            "out-data": "ID=debian\nVERSION_ID=12\nVERSION_CODENAME=bookworm\n",
-        }
-
-        with pytest.raises(StateError) as caught:
-            platform.create(_request(tailscale=True), RunContext())
-
-        assert caught.value.entity_kind == "debian-release"
-        assert ("delete_vm", "pve1", _NEWID) in fake.calls
-        assert fake.file_payloads == []
-        guest_commands = [call[3] for call in fake.calls if call[0] == "guest_agent_exec_wait"]
-        assert "/usr/bin/cloud-init" not in guest_commands
-        assert "/usr/bin/install" not in guest_commands
-        assert "/bin/bash" not in guest_commands
-        _assert_template_untouched(fake)
-
-    @pytest.mark.parametrize(
-        "result",
-        [
-            None,
-            {"exitcode": 1, "out-data": ""},
-            {"exitcode": 0, "out-data": None},
-        ],
-        ids=("timeout", "nonzero", "invalid-output"),
-    )
-    def test_unreadable_release_rolls_back_before_bootstrap(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        result: dict[str, Any] | None,
-    ) -> None:
-        platform, fake = _platform_with_fake(monkeypatch)
-        fake.guest_release_result = result
-
-        with pytest.raises(ProvisioningError):
-            platform.create(_request(tailscale=True), RunContext())
-
-        assert ("delete_vm", "pve1", _NEWID) in fake.calls
-        assert fake.file_payloads == []
-        _assert_template_untouched(fake)
-
     def test_cloud_init_timeout_rolls_back(self, monkeypatch: pytest.MonkeyPatch) -> None:
         platform, fake = _platform_with_fake(monkeypatch)
         wait_for_cloud_init = ProxmoxPlatform._wait_for_cloud_init

@@ -238,10 +238,6 @@ class VMPlatform(Capability):
         - Complete create-time bootstrap, including the Tailscale join, before
           returning. A successful join may return without an IP when discovery
           failed; the manager retries only ``tailscale ip -4`` in that case.
-        - Verify the live guest matches ``request.debian_release`` before the
-          rollback window closes so a mismatch can be cleaned up locally.
-          Core independently repeats this verification over the returned
-          transport and owns the persisted observation.
         - Roll back partial backend state before letting a failure OR
           an operator interrupt (``KeyboardInterrupt``) propagate: the
           caller's unwind deletes only the DB row, so any backend
@@ -251,7 +247,8 @@ class VMPlatform(Capability):
         - Return ``ProvisionResult`` with ``platform_metadata``
           capturing whatever identifiers subsequent ops need, without
           relying on live configuration (e.g. proxmox records the node
-          alongside the vmid).
+          alongside the vmid), and a transport through which core can attest
+          the live Debian release.
         """
 
     @idempotent_op

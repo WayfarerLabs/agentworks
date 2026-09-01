@@ -28,7 +28,6 @@ from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootst
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.debian_release import (
     code_owned_release_value,
-    verify_provisioned_release,
 )
 from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs, operator_ssh_prefixes
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
@@ -487,7 +486,6 @@ class EC2Platform(VMPlatform):
             # The provider-retained bootstrap installed Tailscale without a
             # credential. Wait for it, then join once over stdin.
             tailscale_ip = EphemeralTailscaleBootstrap(prov_transport).complete(request.tailscale_auth_key)
-            verify_provisioned_release(prov_transport, request.debian_release)
         except KeyboardInterrupt:
             rollback_create_on_interrupt(ec2, region, backend_name, instance_id, security_group_id)
             raise

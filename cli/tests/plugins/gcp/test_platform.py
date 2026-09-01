@@ -492,24 +492,6 @@ def test_create_failures_clean_every_partial_resource_set(
         assert len(cache.instances.delete_requests) == 1
 
 
-def test_release_verification_failure_stays_inside_provider_rollback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    platform, cache = _platform(monkeypatch, _Transport())
-    failure = StateError("guest release mismatch")
-    monkeypatch.setattr(
-        "agentworks.plugins.gcp.platform.verify_provisioned_release",
-        MagicMock(side_effect=failure),
-    )
-
-    with pytest.raises(StateError) as caught:
-        platform.create(_request(), _ctx())
-
-    assert caught.value is failure
-    assert cache.instances.resource is None
-    assert cache.firewalls.resources == {}
-
-
 @pytest.mark.parametrize("interrupt_stage", ("deny-wait", "allow-wait", "instance-wait"))
 def test_first_interrupt_carries_operation_ownership_through_platform_rollback(
     monkeypatch: pytest.MonkeyPatch,

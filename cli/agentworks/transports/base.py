@@ -23,6 +23,7 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agentworks import output
 from agentworks.ssh import SSHError, SSHResult
 from agentworks.terminal import emit_clear, guarded_terminal
 
@@ -285,7 +286,10 @@ class Transport(abc.ABC):
                     self.run(f"mkdir -p -- {remote_path_arg}", timeout=timeout)
                 self.run(f"tar -xzf {remote_tmp_arg} -C {remote_path_arg}", timeout=timeout)
             finally:
-                self.run(f"rm -f -- {shlex.quote(remote_tmp)}", check=False, timeout=timeout)
+                try:
+                    self.run(f"rm -f -- {shlex.quote(remote_tmp)}", check=False, timeout=timeout)
+                except Exception as error:
+                    output.warn(f"Could not remove remote staging file: {error}")
         finally:
             tmp_path.unlink(missing_ok=True)
 

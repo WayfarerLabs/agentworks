@@ -14,6 +14,7 @@ import subprocess
 import uuid
 from typing import TYPE_CHECKING
 
+from agentworks import output
 from agentworks.transports._shared import env_assignment_prefix
 from agentworks.transports.base import Transport
 from agentworks.transports.ssh import SSHTransport, keepalive_args, note_ssh_interactive_exit
@@ -161,11 +162,14 @@ class RemoteLimaTransport(Transport):
                 timeout=timeout,
             )
         finally:
-            self._host_login.run(
-                f"rm -rf -- {shlex.quote(host_tmp_dir)}",
-                check=False,
-                timeout=timeout,
-            )
+            try:
+                self._host_login.run(
+                    f"rm -rf -- {shlex.quote(host_tmp_dir)}",
+                    check=False,
+                    timeout=timeout,
+                )
+            except Exception as error:
+                output.warn(f"Could not remove remote Lima staging directory: {error}")
 
     def copy_from(
         self,
@@ -191,11 +195,14 @@ class RemoteLimaTransport(Transport):
             )
             self._host_raw.copy_from(host_tmp, local_path, timeout=timeout)
         finally:
-            self._host_login.run(
-                f"rm -rf -- {shlex.quote(host_tmp_dir)}",
-                check=False,
-                timeout=timeout,
-            )
+            try:
+                self._host_login.run(
+                    f"rm -rf -- {shlex.quote(host_tmp_dir)}",
+                    check=False,
+                    timeout=timeout,
+                )
+            except Exception as error:
+                output.warn(f"Could not remove remote Lima staging directory: {error}")
 
     def call_streaming(
         self,

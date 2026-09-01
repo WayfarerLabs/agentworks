@@ -46,7 +46,7 @@ For example:
 
 ```bash
 scp scripts/proxmox-setup.sh root@pve.monkey-cat.ts.net:/tmp/
-ssh -t root@pve.monkey-cat.ts.net bash /tmp/proxmox-setup.sh 9000 local vmbr0
+ssh -t root@pve.monkey-cat.ts.net bash /tmp/proxmox-setup.sh 9001 local vmbr0
 ```
 
 To tear down all agentworks resources (template, pool, roles, user):
@@ -58,13 +58,16 @@ ssh -t root@<proxmox-host> bash /tmp/proxmox-teardown.sh <vmid>
 
 | Argument  | Description              | Default     |
 | --------- | ------------------------ | ----------- |
-| `vmid`    | VMID for the template    | `9000`      |
+| `vmid`    | VMID for the template    | `9001`      |
 | `storage` | Storage volume for disks | `local-lvm` |
 | `bridge`  | Network bridge           | `vmbr0`     |
 
 The script builds Agentworks' current Debian release; it does not expose an operating-system or
-release selector. It is idempotent -- it skips resources that already exist. At the end it prints
-the config block and token secret for your agentworks config.
+release selector. Bookworm-era setup used VMID 9000, so the Trixie script defaults to 9001. Do not
+reuse a Bookworm template VMID: choose another unused value if 9001 is occupied. On a rerun the
+script skips an existing template only when its name and Agentworks release tags match; otherwise it
+stops before printing a misleading Trixie mapping. At the end it prints the config block and token
+secret for your agentworks config.
 
 ### Security model
 
@@ -117,7 +120,7 @@ spec:
     node: pve
     token_id: "agentworks@pam!agentworks"
     template_vmids:
-      trixie: 9000
+      trixie: 9001
     storage: data
     bridge: vmbr0
     pool: agentworks
@@ -135,11 +138,10 @@ current Trixie creation.
 A site without `template_vmids.trixie` remains loadable for best-effort operations on existing VMs.
 New VM creation validates the concrete core-selected release during preflight and fails before the
 command's secret-resolution phase or Proxmox API authentication when that mapping is missing. After
-cloning and starting the mapped template, Agentworks verifies the live guest's `/etc/os-release`
-through the QEMU guest agent before running its Debian-specific bootstrap. It checks again before
-creation succeeds through core's returned-transport boundary. An early missing, non-Debian, or
-wrong-release observation rolls the clone back; a failed final check retains a failed VM row for
-explicit deletion. There is no configuration switch to skip either check.
+cloning and bootstrapping the mapped template, core verifies the live guest's `/etc/os-release`
+through the returned Tailscale SSH transport. A missing, non-Debian, or wrong-release observation
+retains an addressable failed VM row for explicit deletion. There is no configuration switch to skip
+the check.
 
 For 0.13 configuration migration, see [Upgrading to 0.14](upgrading-to-0.14.md).
 

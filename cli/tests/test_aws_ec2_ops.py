@@ -303,24 +303,6 @@ class TestCreate:
 
 
 class TestCreateRollback:
-    def test_release_verification_failure_rolls_back_and_stays_typed(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        rec = install_fakes(monkeypatch)
-        failure = StateError("guest release mismatch")
-        monkeypatch.setattr(
-            "agentworks.plugins.aws.platform.verify_provisioned_release",
-            MagicMock(side_effect=failure),
-        )
-
-        with pytest.raises(StateError) as caught:
-            _platform().create(_request(), RunContext(config=_config()))
-
-        assert caught.value is failure
-        assert "terminate_instances" in rec.methods("ec2")
-        assert "delete_security_group" in rec.methods("ec2")
-
     def test_rolls_back_on_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A failure after the instance launches (here the bootstrap poke)
         sweeps the partial work: terminate the instance, delete the security

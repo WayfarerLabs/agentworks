@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from agentworks.errors import MigrationBlockedError
 from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
@@ -52,15 +53,24 @@ def _load_legacy_toml() -> dict[str, Any]:
 def _retire_vm_checkpoints(conn: sqlite3.Connection, _context: MigrationContext) -> None:
     """Drop the superseded checkpoint schema only after proving it empty."""
 
+    # Own the write slot before observing emptiness. An already-running v34
+    # process does not know about the sidecar migration lock and could otherwise
+    # insert an ownership row between SELECT and DROP. The migration runner's
+    # schema-version insert and commit close this same transaction.
+    conn.execute("BEGIN IMMEDIATE")
     exists = conn.execute("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'vm_checkpoints'").fetchone()
     if exists is None:
         return
     names = [row[0] for row in conn.execute("SELECT vm_name FROM vm_checkpoints ORDER BY vm_name").fetchall()]
     if names:
-        raise sqlite3.IntegrityError(
-            "cannot retire managed VM checkpoints while records remain for: "
-            + ", ".join(names)
-            + ". Reinstall the previous Agentworks build, delete each managed checkpoint, and retry."
+        raise MigrationBlockedError(
+            "state database migration is blocked by managed VM checkpoint records",
+            entity_kind="database",
+            hint=(
+                "Reinstall the previous Agentworks build, delete each managed checkpoint for VMs: "
+                + ", ".join(names)
+                + ", then retry."
+            ),
         )
     conn.execute("DROP TABLE vm_checkpoints")
 
