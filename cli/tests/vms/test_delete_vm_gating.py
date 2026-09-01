@@ -126,6 +126,51 @@ def test_delete_never_gates(
     assert db.get_vm("dvm") is None
 
 
+def test_reachable_vm_delete_routes_sessions_through_shared_teardown(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from agentworks.db import SessionMode
+    from agentworks.sessions import manager as session_manager
+
+    _seed(db)
+    db.insert_workspace("ws1", "/srv/ws1", "dvm", "ws-ws1")
+    db.insert_session(
+        "s1",
+        "ws1",
+        "default",
+        SessionMode.ADMIN,
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/s1.sock",
+    )
+    _fake_backend(monkeypatch)
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *args, **kwargs: None)
+    monkeypatch.setattr(session_manager, "ensure_pids_batch", lambda sessions, **kwargs: sessions)
+    monkeypatch.setattr(
+        "agentworks.transports.transport",
+        lambda *args, **kwargs: SimpleNamespace(run=lambda *args, **kwargs: None),
+    )
+    torn_down: list[str] = []
+    monkeypatch.setattr(
+        session_manager,
+        "_teardown_session",
+        lambda session, **kwargs: torn_down.append(session.name),
+    )
+
+    vm_manager.delete_vm(
+        db,
+        make_config(),
+        "dvm",
+        force=True,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+
+    assert torn_down == ["s1"]
+    assert db.get_vm("dvm") is None
+
+
 def test_delete_removes_only_its_workspace_artifacts(
     db: Database,
     tmp_path: Path,

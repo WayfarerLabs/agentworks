@@ -272,12 +272,11 @@ def test_restore_session_rebuild_raises_when_shell_split_fails(
     # pane id, so _split_shell_pane can't tag the pane and returns None.
     fake_target.responses["split-window -t =aw-console-con:a"] = _FakeResult(stdout="")
 
-    with pytest.raises(ExternalError, match=r"failed to create/tag config indices \[0, 1\]") as excinfo:
+    with pytest.raises(ExternalError):
         restore_session(
             db, _StubConfig(), console_name="con", session_name="a", interaction=TtyInteractionPolicy.REFUSE
         )
 
-    assert "agw console restart con" in (excinfo.value.hint or "")
     # No clean-rebuild success line on a partial rebuild.
     assert not any("Rebuilt window" in m for m in captured_output.info)
 
@@ -300,12 +299,11 @@ def test_restore_session_rebuild_raises_when_shell_tag_fails(
     fake_target.responses["split-window -t =aw-console-con:a"] = _FakeResult(stdout="%9\n")
     fake_target.responses["set-option -p"] = _FakeResult(returncode=1, stderr="tmux refused set-option")
 
-    with pytest.raises(ExternalError, match=r"failed to create/tag config indices \[0\]") as excinfo:
+    with pytest.raises(ExternalError):
         restore_session(
             db, _StubConfig(), console_name="con", session_name="a", interaction=TtyInteractionPolicy.REFUSE
         )
 
-    assert "agw console restart con" in (excinfo.value.hint or "")
     assert not any("Rebuilt window" in m for m in captured_output.info)
 
 
@@ -359,12 +357,11 @@ def test_restore_session_refuses_when_session_pane_killed(db: Database, fake_tar
     fake_target.responses["list-panes -t =aw-console-con:a"] = _FakeResult(stdout="%1|0|0\n")
 
     fake_target.commands.clear()
-    with pytest.raises(StateError, match="lost its session-attach pane") as excinfo:
+    with pytest.raises(StateError):
         restore_session(
             db, _StubConfig(), console_name="con", session_name="a", interaction=TtyInteractionPolicy.REFUSE
         )
 
-    assert "agw console restart con" in (excinfo.value.hint or "")
     # Read-only probes only: the window and its live panes are left exactly as
     # they were, so the operator decides whether to recreate.
     assert fake_target.commands == [

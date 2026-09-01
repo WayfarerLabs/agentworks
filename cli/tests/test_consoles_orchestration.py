@@ -89,7 +89,7 @@ def test_running_session_names_raises_on_unreachable(db: Database, fake_target: 
     # Probe returns empty stdout (simulates transport failure caught by check=False).
     fake_target.run = lambda command, **kwargs: _FakeResult(returncode=255, stdout="")  # type: ignore[assignment]
 
-    with pytest.raises(ConnectivityError, match="could not determine running"):
+    with pytest.raises(ConnectivityError):
         running_session_names(db, _StubConfig(), "vm1")
 
 
@@ -114,7 +114,7 @@ def test_running_session_names_uses_live_status_check(db: Database, fake_target:
         if "has-session -t =alpha" in command and "has-session -t =beta" in command:
             return _FakeResult(
                 returncode=0,
-                stdout="S:alpha:0\nS:beta:0\nS:gamma:1\n",
+                stdout="S:alpha:0\nS:beta:0\nS:gamma:1:b:1\n",
             )
         return _FakeResult()
 

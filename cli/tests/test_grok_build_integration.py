@@ -174,16 +174,6 @@ def test_start_and_resume_use_the_same_state_based_decision() -> None:
     assert integration.start(_op_ctx(target)) == integration.start(_op_ctx(target))
 
 
-def test_launch_note_reports_the_selected_branch() -> None:
-    integration = _integration()
-    resumed = integration.start(_op_ctx(_FakeTarget({"summary.json": _FakeResult(0)})))
-    assert resumed.note is not None
-
-    integration = _integration()
-    fresh = integration.start(_op_ctx(_FakeTarget({"summary.json": _FakeResult(1)})))
-    assert fresh.note is not None
-
-
 def test_probe_uses_grok_home_and_the_persisted_summary_boundary() -> None:
     target = _FakeTarget({"summary.json": _FakeResult(0)})
     _integration().start(_op_ctx(target))

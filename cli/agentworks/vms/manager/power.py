@@ -266,6 +266,30 @@ def delete_vm(
         if vm.tailscale_host:
             try:
                 with vm_node.hold_active():
+                    from agentworks.sessions.manager import _teardown_session, ensure_pids_batch
+                    from agentworks.transports import transport
+
+                    target = transport(vm, config)
+                    sessions = ensure_pids_batch(
+                        [
+                            session
+                            for workspace in db.list_workspaces(vm_name=name)
+                            for session in db.list_sessions(workspace_name=workspace.name)
+                        ],
+                        db=db,
+                        config=config,
+                    )
+                    for session in sessions:
+                        try:
+                            _teardown_session(
+                                session,
+                                target=target,
+                                target_owns_session=session.agent_name is None,
+                                db=db,
+                                force=True,
+                            )
+                        except Exception as exc:
+                            output.warn(f"session '{session.name}' teardown skipped during VM deletion: {exc}")
                     _mgr._tailscale_logout(vm, config, platform, ops_ctx)
             except UserAbort:
                 raise

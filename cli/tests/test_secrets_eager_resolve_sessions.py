@@ -222,11 +222,11 @@ def test_session_resume_broken_no_force_bails_before_eager_resolve(
     db.close()
 
 
-def test_session_resume_eager_resolve_fires_before_kill(
+def test_session_restart_eager_resolve_fires_before_teardown(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """restart_session must call resolve_for_command BEFORE _kill_session.
+    """restart_session must call resolve_for_command before runtime teardown.
     A failed eager-resolve leaves the running session untouched."""
     from agentworks.db import SessionMode, SessionStatus
     from agentworks.sessions import manager as session_manager
@@ -268,11 +268,10 @@ def test_session_resume_eager_resolve_fires_before_kill(
 
     kill_calls: list[str] = []
 
-    def _track_kill(name: str, **kwargs: object) -> bool:
-        kill_calls.append(name)
-        return True
+    def _track_teardown(*args: object, **kwargs: object) -> None:
+        kill_calls.append("s1")
 
-    monkeypatch.setattr(session_manager, "_kill_session", _track_kill)
+    monkeypatch.setattr("agentworks.sessions.manager._lifecycle._teardown_session", _track_teardown)
 
     def _explode(*args: object, **kwargs: object) -> None:
         raise SecretUnavailableError(

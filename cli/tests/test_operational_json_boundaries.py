@@ -64,7 +64,13 @@ def _seed_session(db: Database) -> None:
         socket_path="/tmp/SECRET_SOCKET",
         harness_integration_state={"SECRET_HARNESS_STATE": True},
     )
-    db.update_session_pid("session-a", PID_STOPPED, boot_id="SECRET_BOOT_ID")
+    db.update_session_runtime(
+        "session-a",
+        socket_path="/tmp/SECRET_SOCKET",
+        pid=PID_STOPPED,
+        boot_id=None,
+        tmux_server_start_ticks=None,
+    )
 
 
 def _wire_cli(monkeypatch: pytest.MonkeyPatch, db: Database, config: Config) -> None:
@@ -248,7 +254,9 @@ def test_session_list_status_and_late_repair_use_the_same_resolution_path(
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "late-repair-value")
     config = make_config()
     _seed_session(db)
-    db.update_session_pid("session-a", None)
+    db.update_session_runtime(
+        "session-a", socket_path="/tmp/SECRET_SOCKET", pid=None, boot_id=None, tmux_server_start_ticks=None
+    )
     _wire_cli(monkeypatch, db, config)
     _install_skipped_backend(monkeypatch)
     calls = _resolution_spy(monkeypatch)
@@ -264,7 +272,13 @@ def test_session_list_status_and_late_repair_use_the_same_resolution_path(
 
     def repair(rows: list[SessionRow], *, db: Database, config: Config) -> list[SessionRow]:
         del rows, config
-        db.update_session_pid("session-a", 9090, boot_id="LATE_REPAIR_BOOT_SECRET")
+        db.update_session_runtime(
+            "session-a",
+            socket_path="/tmp/SECRET_SOCKET",
+            pid=9090,
+            boot_id="LATE_REPAIR_BOOT_SECRET",
+            tmux_server_start_ticks=77,
+        )
         return db.list_sessions()
 
     monkeypatch.setattr(vms, "_ensure_tailscale", reconnect)
@@ -301,7 +315,9 @@ def test_session_list_status_and_late_repair_use_the_same_resolution_path(
 
     calls.clear()
     keys.clear()
-    db.update_session_pid("session-a", None)
+    db.update_session_runtime(
+        "session-a", socket_path="/tmp/SECRET_SOCKET", pid=None, boot_id=None, tmux_server_start_ticks=None
+    )
     human = CliRunner().invoke(app, ["session", "list", "--output", "human"])
     assert human.exit_code == 0, human.output
     assert human.stdout_bytes.splitlines()[0] == b"VM 'box' is stopped. Starting..."

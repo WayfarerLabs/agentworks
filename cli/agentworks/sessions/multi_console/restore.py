@@ -1,7 +1,7 @@
 """Reconcile a console session window's live tmux state against its
 configured shell list.
 
-``_prepare_vm_target``, ``_console_tmux_exists``,
+``_prepare_vm_target``, ``_console_tmux_presence``,
 ``_restore_session_secret_targets``, and ``_add_session_window`` are
 monkeypatched by tests directly on the ``agentworks.sessions.multi_console``
 package object (so a test can drive ``restore_session`` against a fake
@@ -27,6 +27,7 @@ from agentworks.sessions.multi_console_layout import (
     _list_panes_with_tags,
     _reorder_shell_panes,
 )
+from agentworks.sessions.tmux import ProbeStatus
 
 from ._helpers import _require_console, tmux_session_name
 from .attach import _session_linux_user
@@ -88,7 +89,14 @@ def restore_session(
         registry=registry,
         interaction=interaction,
     ) as (vm, target):
-        if not _mc._console_tmux_exists(target, console_name):
+        presence = _mc._console_tmux_presence(target, console_name)
+        if presence is ProbeStatus.UNKNOWN:
+            raise StateError(
+                f"could not determine console '{console_name}' tmux state",
+                entity_kind="console",
+                entity_name=console_name,
+            )
+        if presence is ProbeStatus.ABSENT:
             raise StateError(
                 f"console '{console_name}' has no live tmux session on VM '{console.vm_name}'.",
                 entity_kind="console",

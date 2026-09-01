@@ -25,6 +25,7 @@ from agentworks.errors import StateError, ValidationError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import multi_console
+from agentworks.sessions.tmux import ProbeStatus
 from agentworks.vms import manager as vm_manager
 from tests.conftest import ManifestDoc, stub_vm_ssh_identity
 
@@ -176,7 +177,7 @@ def test_console_recreate_multiline_environment_secret_refuses_before_rebuild(
     _seed_vm(db)
     db.insert_console("c1", "box", admin_shell=True)
     _reachable(monkeypatch, True)
-    monkeypatch.setattr(multi_console, "_console_tmux_exists", lambda *args: True)
+    monkeypatch.setattr(multi_console, "_console_tmux_presence", lambda *args: ProbeStatus.PRESENT)
     rebuilds: list[str] = []
     monkeypatch.setattr(
         "agentworks.sessions.multi_console.attach._build_console_tmux",

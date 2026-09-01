@@ -124,23 +124,26 @@ class _FingerprintTarget:
 
 
 def test_fingerprint_capture_requires_two_matching_pid_and_stat_reads() -> None:
+    from agentworks.sessions.tmux import ProbeStatus
+
     stable = capture_tmux_server_fingerprint(target=_FingerprintTarget(), socket_path="/run/s1.sock")  # type: ignore[arg-type]
-    assert stable is not None
-    assert (stable.pid, stable.boot_id, stable.start_ticks) == (42, "boot-x", 98765)
-    assert (
-        capture_tmux_server_fingerprint(
-            target=_FingerprintTarget(second_pid=43),  # type: ignore[arg-type]
-            socket_path="/run/s1.sock",
-        )
-        is None
+    assert stable.status is ProbeStatus.PRESENT
+    assert stable.fingerprint is not None
+    assert (stable.fingerprint.pid, stable.fingerprint.boot_id, stable.fingerprint.start_ticks) == (
+        42,
+        "boot-x",
+        98765,
     )
-    assert (
-        capture_tmux_server_fingerprint(
-            target=_FingerprintTarget(second_ticks=98766),  # type: ignore[arg-type]
-            socket_path="/run/s1.sock",
-        )
-        is None
+    changed_pid = capture_tmux_server_fingerprint(
+        target=_FingerprintTarget(second_pid=43),  # type: ignore[arg-type]
+        socket_path="/run/s1.sock",
     )
+    changed_ticks = capture_tmux_server_fingerprint(
+        target=_FingerprintTarget(second_ticks=98766),  # type: ignore[arg-type]
+        socket_path="/run/s1.sock",
+    )
+    assert changed_pid.status is ProbeStatus.UNKNOWN
+    assert changed_ticks.status is ProbeStatus.UNKNOWN
 
 
 # ---------------------------------------------------------------------------
@@ -149,9 +152,9 @@ def test_fingerprint_capture_requires_two_matching_pid_and_stat_reads() -> None:
 
 
 class _SpyResult:
-    def __init__(self, ok: bool = True, stdout: str = "") -> None:
-        self.ok = ok
-        self.returncode = 0 if ok else 1
+    def __init__(self, ok: bool = True, stdout: str = "", *, returncode: int | None = None) -> None:
+        self.returncode = (0 if ok else 1) if returncode is None else returncode
+        self.ok = self.returncode == 0
         self.stdout = stdout
         self.stderr = ""
 
@@ -207,6 +210,34 @@ def stub_agent_socket_setup(monkeypatch: pytest.MonkeyPatch) -> None:
     agent mode; admin-mode tests don't need it."""
     monkeypatch.setattr("agentworks.sessions.tmux.ensure_agent_socket_root", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.sessions.tmux.ensure_agent_socket_dir", lambda *a, **k: None)
+
+
+def test_existing_socket_is_untouched_when_server_probe_is_indeterminate(
+    spy_target: _SpyTarget,
+) -> None:
+    calls: list[str] = []
+
+    def run(command: str, **kwargs: object) -> _SpyResult:
+        calls.append(command)
+        if command.startswith("test -e "):
+            return _SpyResult()
+        if "list-sessions" in command:
+            return _SpyResult(returncode=255)
+        raise AssertionError(command)
+
+    with pytest.raises(StateError):
+        create_session(
+            session_name="s1",
+            workspace_path="/workspace",
+            command="claude",
+            linux_user="agentworks",
+            run_command=run,
+            target=spy_target,
+            admin_username="agentworks",
+            is_admin=True,
+        )
+
+    assert not any(command.startswith("rm -f ") or "new-session" in command for command in calls)
 
 
 def test_admin_create_session_passes_env_to_run_command(

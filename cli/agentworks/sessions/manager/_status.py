@@ -12,7 +12,7 @@ from agentworks.errors import (
     AgentworksError,
     StateError,
 )
-from agentworks.ssh import SSH_TRANSPORT_ERROR
+from agentworks.sessions.tmux import ProbeStatus, probe_tmux_server, probe_tmux_session
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -20,9 +20,11 @@ if TYPE_CHECKING:
     from agentworks.transports import Transport
 
 
-def _pid_alive(pid: int, *, target: Transport) -> bool:
-    """Check if a PID is alive via /proc."""
-    return target.run(f"test -d /proc/{pid}", check=False).ok
+def _pid_presence(pid: int, *, target: Transport) -> ProbeStatus:
+    """Probe a PID without treating a transport failure as process absence."""
+    from agentworks.sessions.tmux import _presence_from_result
+
+    return _presence_from_result(target.run(f"test -d /proc/{pid}", check=False))
 
 
 def _get_boot_id(target: Transport) -> str | None:
@@ -77,20 +79,18 @@ def _check_dedicated_session(session: SessionRow, *, target: Transport) -> Sessi
     admin and agent sessions after the env-and-secrets SDD migrated admin
     sessions to per-session sockets.
     """
-    from agentworks.sessions.tmux import tmux_cmd
-
-    q_session = shlex.quote(f"={session.name}")
-    cmd = tmux_cmd(f"has-session -t {q_session}", session.socket_path) + " 2>/dev/null"
-    result = target.run(cmd, check=False)
-    if result.returncode == SSH_TRANSPORT_ERROR:
-        return SessionStatus.UNKNOWN  # SSH transport failure, not a session state
-    if result.ok:
+    socket_path = session.socket_path
+    assert socket_path is not None
+    session_presence = probe_tmux_session(session.name, run_command=target.run, socket_path=socket_path)
+    if session_presence is ProbeStatus.UNKNOWN:
+        return SessionStatus.UNKNOWN
+    if session_presence is ProbeStatus.PRESENT:
         return SessionStatus.OK
 
-    server = target.run(tmux_cmd("list-sessions", session.socket_path) + " 2>/dev/null", check=False)
-    if server.returncode == SSH_TRANSPORT_ERROR:
+    server_presence = probe_tmux_server(run_command=target.run, socket_path=socket_path)
+    if server_presence is ProbeStatus.UNKNOWN:
         return SessionStatus.UNKNOWN
-    if server.ok:
+    if server_presence is ProbeStatus.PRESENT:
         return SessionStatus.RESIDUAL
 
     # has-session failed -- STOPPED or BROKEN?
@@ -100,7 +100,10 @@ def _check_dedicated_session(session: SessionRow, *, target: Transport) -> Sessi
         return SessionStatus.UNKNOWN  # can't verify boot cycle, unsafe to offer --force
     if session.boot_id is not None and session.boot_id != current_boot:
         return SessionStatus.STOPPED  # stale boot, PID is meaningless
-    if not _pid_alive(session.pid, target=target):
+    pid_presence = _pid_presence(session.pid, target=target)
+    if pid_presence is ProbeStatus.UNKNOWN:
+        return SessionStatus.UNKNOWN
+    if pid_presence is ProbeStatus.ABSENT:
         return SessionStatus.STOPPED  # process is dead
     return SessionStatus.BROKEN  # same boot, process alive, socket unreachable
 
@@ -124,20 +127,6 @@ def batch_check_status(
     # Build compound command: has-session with inline boot_id + PID for any
     # session whose has-session probe fails. Admin and agent sessions now
     # follow the same dedicated-socket model after the env-and-secrets SDD.
-    # Legacy admin sessions with socket_path=None are skipped here with a
-    # one-time warning so that `agw session list` against a VM with a mix of
-    # legacy and new sessions still surfaces the new ones cleanly; the
-    # operator-facing single-session paths (`session attach`, etc.) go
-    # through `check_session_status`, which raises a typed StateError
-    # pointing at `agw session restart` (the primitive that auto-migrates).
-    legacy = [s.name for s in checkable if s.socket_path is None]
-    if legacy:
-        names = ", ".join(sorted(legacy))
-        output.warn(
-            f"{len(legacy)} session(s) predate the per-session-socket model; "
-            f"`agw session restart` migrates them to the new shape: {names}"
-        )
-
     parts = []
     for s in checkable:
         if s.socket_path is None:
@@ -147,14 +136,17 @@ def batch_check_status(
         has_cmd = tmux_cmd(f"has-session -t {q_session}", s.socket_path)
         server_cmd = tmux_cmd("list-sessions", s.socket_path)
         parts.append(
-            f"{has_cmd} 2>/dev/null; "
-            f"if [ $? -ne 0 ]; then "
-            f"{server_cmd} >/dev/null 2>&1; "
-            f'if [ $? -eq 0 ]; then echo "S:{name}:2"; else '
-            f"BOOT=$(cat /proc/sys/kernel/random/boot_id); "
-            f"test -d /proc/{s.pid}; "
-            f'echo "S:{name}:1:$BOOT:$?"; '
-            f'fi; else echo "S:{name}:0"; fi'
+            f"{has_cmd} 2>/dev/null; H=$?; "
+            f'if [ "$H" -eq 0 ]; then echo "S:{name}:0"; '
+            f'elif [ "$H" -ne 1 ]; then echo "S:{name}:U"; else '
+            f"{server_cmd} >/dev/null 2>&1; S=$?; "
+            f'if [ "$S" -eq 0 ]; then echo "S:{name}:2"; '
+            f'elif [ "$S" -ne 1 ]; then echo "S:{name}:U"; else '
+            f"BOOT=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null); B=$?; "
+            f'if [ "$B" -ne 0 ] || [ -z "$BOOT" ]; then echo "S:{name}:U"; else '
+            f"test -d /proc/{s.pid}; P=$?; "
+            f'if [ "$P" -le 1 ]; then echo "S:{name}:1:$BOOT:$P"; '
+            f'else echo "S:{name}:U"; fi; fi; fi; fi'
         )
     if not parts:
         return {}
@@ -163,9 +155,14 @@ def batch_check_status(
     result = target.run(cmd, check=False)
     stdout = getattr(result, "stdout", "") or ""
 
-    status_map: dict[str, SessionStatus] = {}
+    status_map: dict[str, SessionStatus] = {
+        session.name: SessionStatus.UNKNOWN for session in checkable if session.socket_path is not None
+    }
     # Build a quick lookup for stored boot_ids
     boot_ids = {s.name: s.boot_id for s in checkable}
+
+    if result.returncode not in {0, 1}:
+        return status_map
 
     for line in stdout.strip().splitlines():
         if not line.startswith("S:"):
@@ -195,9 +192,7 @@ def batch_check_status(
                     status_map[name] = SessionStatus.BROKEN  # PID alive, socket unreachable
                 else:
                     status_map[name] = SessionStatus.STOPPED  # PID dead
-        else:
-            # Admin session failure
-            status_map[name] = SessionStatus.STOPPED
+        # U or malformed output deliberately leaves the initialized UNKNOWN.
 
     return status_map
 

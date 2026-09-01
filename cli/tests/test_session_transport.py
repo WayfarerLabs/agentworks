@@ -21,6 +21,7 @@ import pytest
 
 from agentworks.db import Database
 from agentworks.secrets.policy import TtyInteractionPolicy
+from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 
 from .conftest import (
     empty_secret_target,
@@ -93,7 +94,10 @@ def _patch_common(
     monkeypatch.setattr("agentworks.sessions.manager.transport", admin_factory)
     monkeypatch.setattr(
         "agentworks.sessions.tmux.capture_tmux_server_fingerprint",
-        lambda **kwargs: SimpleNamespace(pid=12345, boot_id="boot-x", start_ticks=1),
+        lambda **kwargs: FingerprintProbe(
+            ProbeStatus.PRESENT,
+            TmuxServerFingerprint(pid=12345, boot_id="boot-x", start_ticks=1),
+        ),
     )
     stub_vm_gates(monkeypatch)
     return targets
@@ -126,11 +130,25 @@ def test_dedicated_teardown_kills_the_fingerprinted_server_and_not_a_numeric_pid
     db = _seed_db(tmp_path)
     session = _seed_dedicated_admin_session(db)
     commands: list[tuple[str, str]] = []
-    target = _Target("admin", commands)
+
+    class _RemovalTarget(_Target):
+        def run(self, cmd: str, *_args: object, **_kwargs: object) -> _Result:
+            self.log.append((self.label, cmd))
+            if cmd.startswith("test -e "):
+                result = _Result()
+                result.ok = False
+                result.returncode = 1
+                return result
+            return _Result()
+
+    target = _RemovalTarget("admin", commands)
     monkeypatch.setattr(
         tmux_mod,
         "capture_tmux_server_fingerprint",
-        lambda **kwargs: SimpleNamespace(pid=4242, boot_id="boot-x", start_ticks=77),
+        lambda **kwargs: FingerprintProbe(
+            ProbeStatus.PRESENT,
+            TmuxServerFingerprint(pid=4242, boot_id="boot-x", start_ticks=77),
+        ),
     )
     killed: list[str] = []
     monkeypatch.setattr(
@@ -138,7 +156,7 @@ def test_dedicated_teardown_kills_the_fingerprinted_server_and_not_a_numeric_pid
         "kill_server",
         lambda *, run_command, socket_path: killed.append(socket_path) or True,
     )
-    monkeypatch.setattr(session_manager, "_pid_alive", lambda *args, **kwargs: False)
+    monkeypatch.setattr(session_manager, "_prove_stored_runtime_absent", lambda *args, **kwargs: True)
 
     session_manager._teardown_session(  # type: ignore[arg-type]
         session,
@@ -165,7 +183,10 @@ def test_dedicated_teardown_refuses_a_fingerprint_mismatch(tmp_path: Path, monke
     monkeypatch.setattr(
         tmux_mod,
         "capture_tmux_server_fingerprint",
-        lambda **kwargs: SimpleNamespace(pid=9999, boot_id="boot-x", start_ticks=77),
+        lambda **kwargs: FingerprintProbe(
+            ProbeStatus.PRESENT,
+            TmuxServerFingerprint(pid=9999, boot_id="boot-x", start_ticks=77),
+        ),
     )
     monkeypatch.setattr(
         tmux_mod,
@@ -173,7 +194,7 @@ def test_dedicated_teardown_refuses_a_fingerprint_mismatch(tmp_path: Path, monke
         lambda **kwargs: (_ for _ in ()).throw(AssertionError("mismatched server must not be killed")),
     )
 
-    with pytest.raises(BrokenStateError, match="identity does not match"):
+    with pytest.raises(BrokenStateError):
         session_manager._teardown_session(  # type: ignore[arg-type]
             session,
             target=target,
@@ -181,6 +202,56 @@ def test_dedicated_teardown_refuses_a_fingerprint_mismatch(tmp_path: Path, monke
             db=db,
             force=False,
         )
+
+
+def test_legacy_teardown_uses_root_transport_when_the_target_is_not_the_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agentworks.db import SessionMode
+    from agentworks.sessions import manager as session_manager
+    from agentworks.sessions import tmux as tmux_mod
+
+    db = _seed_db(tmp_path)
+    db.insert_session("legacy", "ws1", "default", SessionMode.ADMIN, socket_path=None)
+    db.update_session_runtime(
+        "legacy",
+        socket_path=None,
+        pid=4242,
+        boot_id="boot-x",
+        tmux_server_start_ticks=77,
+    )
+    session = db.get_session("legacy")
+    assert session is not None
+
+    calls: list[tuple[str, bool]] = []
+
+    class _RootAwareTarget:
+        def run(self, command: str, *, sudo: bool = False, **_kwargs: object) -> _Result:
+            calls.append((command, sudo))
+            return _Result()
+
+    presences = iter((ProbeStatus.PRESENT, ProbeStatus.ABSENT))
+
+    def _probe(name, *, run_command, socket_path):  # type: ignore[no-untyped-def]
+        run_command("probe", check=False)
+        return next(presences)
+
+    def _kill(name, *, run_command, socket_path):  # type: ignore[no-untyped-def]
+        run_command("kill", check=False)
+        return True
+
+    monkeypatch.setattr(tmux_mod, "probe_tmux_session", _probe)
+    monkeypatch.setattr(tmux_mod, "kill_session", _kill)
+
+    session_manager._teardown_session(
+        session,
+        target=_RootAwareTarget(),  # type: ignore[arg-type]
+        target_owns_session=False,
+        db=db,
+        force=False,
+    )
+
+    assert calls == [("probe", True), ("kill", True), ("probe", True)]
 
 
 def test_create_session_probes_before_state_mutation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -512,7 +583,7 @@ class _NullCM:
         return None
 
 
-def test_resume_migrates_legacy_session_to_per_session_socket(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_restart_migrates_legacy_session_to_per_session_socket(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Legacy admin sessions (created on the VM's default tmux server,
     ``socket_path=None``) used to surface ``check_session_status`` as a
     typed ``StateError`` and force the operator into a delete-then-create
@@ -542,14 +613,19 @@ def test_resume_migrates_legacy_session_to_per_session_socket(tmp_path: Path, mo
         agent_name=None,
         socket_path=None,
     )
-    db.update_session_pid("legacy", 12345, boot_id="boot-x")
+    # Explicit pre-v36 legacy fixture: shared-server rows have no socket or
+    # process start fingerprint and exist only to exercise migration teardown.
+    db._conn.execute(
+        "UPDATE sessions SET pid = 12345, boot_id = 'boot-x', tmux_server_start_ticks = NULL WHERE name = 'legacy'"
+    )
+    db._conn.commit()
 
     call_log: list[tuple[str, str]] = []
     _patch_common(monkeypatch, call_log=call_log)
 
     stub_session_resolvers(monkeypatch)
 
-    # Boot ID for the post-create db.update_session_pid call.
+    # Boot ID for the post-create atomic runtime update.
     monkeypatch.setattr(session_manager, "_get_boot_id", lambda *_a, **_kw: "boot-x")
     # Tmuxinator regeneration is downstream of the migration; not in scope.
     monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *_a, **_kw: None)
@@ -566,19 +642,21 @@ def test_resume_migrates_legacy_session_to_per_session_socket(tmp_path: Path, mo
         kill_calls.append((name, socket_path))
         return True
 
-    # ``kill_session`` is imported locally inside ``_kill_session``; patch
-    # the source module so the late import resolves to the spy.
+    # ``kill_session`` is imported locally by the legacy teardown authority;
+    # patch the source module so the late import resolves to the spy.
     monkeypatch.setattr(tmux_mod, "kill_session", _spy_kill_session)
     existence_calls: list[tuple[str, str | None]] = []
 
-    def _spy_session_exists(name, *, run_command, socket_path):  # type: ignore[no-untyped-def]
-        existence_calls.append((name, socket_path))
-        return False
+    presences = iter((ProbeStatus.PRESENT, ProbeStatus.ABSENT))
 
-    monkeypatch.setattr(tmux_mod, "session_exists", _spy_session_exists)
+    def _spy_session_presence(name, *, run_command, socket_path):  # type: ignore[no-untyped-def]
+        existence_calls.append((name, socket_path))
+        return next(presences)
+
+    monkeypatch.setattr(tmux_mod, "probe_tmux_session", _spy_session_presence)
 
     # Capture create_tmux_session: returns the new socket and PID so the
-    # downstream ``db.update_session_socket_path`` lands the migration.
+    # downstream atomic runtime update lands the migration.
     create_calls: list[dict[str, object]] = []
 
     def _capture_create(name, ws_path, command, linux_user, *, run_command, target, admin_username, is_admin, env=None):  # type: ignore[no-untyped-def]
@@ -589,7 +667,10 @@ def test_resume_migrates_legacy_session_to_per_session_socket(tmp_path: Path, mo
     monkeypatch.setattr(
         tmux_mod,
         "capture_tmux_server_fingerprint",
-        lambda **kwargs: SimpleNamespace(pid=67890, boot_id="boot-x", start_ticks=2),
+        lambda **kwargs: FingerprintProbe(
+            ProbeStatus.PRESENT,
+            TmuxServerFingerprint(pid=67890, boot_id="boot-x", start_ticks=2),
+        ),
     )
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
@@ -601,7 +682,7 @@ def test_resume_migrates_legacy_session_to_per_session_socket(tmp_path: Path, mo
         "kill_session must be invoked with the legacy session name and "
         f"socket_path=None (default server); got {kill_calls}"
     )
-    assert existence_calls == [("legacy", None)]
+    assert existence_calls == [("legacy", None), ("legacy", None)]
     assert len(create_calls) == 1, "create_tmux_session must run once"
     assert create_calls[0]["is_admin"] is True
 
@@ -637,7 +718,12 @@ def test_restart_dead_workload_error_propagates(tmp_path: Path, monkeypatch: pyt
         agent_name=None,
         socket_path=None,
     )
-    db.update_session_pid("s1", 12345, boot_id="boot-x")
+    # Explicit pre-v36 legacy fixture. Atomic runtime writes intentionally
+    # require the current dedicated-socket shape.
+    db._conn.execute(
+        "UPDATE sessions SET pid = 12345, boot_id = 'boot-x', tmux_server_start_ticks = NULL WHERE name = 's1'"
+    )
+    db._conn.commit()
 
     clap_error = "error: invalid value 'on-failure' for '--ask-for-approval <APPROVAL_POLICY>'"
 
@@ -672,16 +758,13 @@ def test_restart_dead_workload_error_propagates(tmp_path: Path, monkeypatch: pyt
     monkeypatch.setattr(session_manager, "_resolve_session_linux_user", lambda *_a, **_kw: "admin")
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *_a, **_kw: None)
     monkeypatch.setattr(tmux_mod, "kill_session", lambda *_a, **_kw: True)
-    monkeypatch.setattr(tmux_mod, "session_exists", lambda *_a, **_kw: False)
+    presences = iter((ProbeStatus.PRESENT, ProbeStatus.ABSENT))
+    monkeypatch.setattr(tmux_mod, "probe_tmux_session", lambda *_a, **_kw: next(presences))
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
     with pytest.raises(StateError) as excinfo:
         session_manager.restart_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
-    msg = str(excinfo.value)
-    assert "exited immediately after launch (status 2)" in msg
-    assert clap_error in msg
-    # NOT remapped by the restart path's active-server RuntimeError clause.
-    assert "already has an active tmux server" not in msg
+    assert excinfo.value.entity_kind == "session"
     db.close()

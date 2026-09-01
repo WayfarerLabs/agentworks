@@ -124,12 +124,8 @@ def running_session_names(db: Database, config: Config, vm_name: str) -> list[st
     sessions = filter_sessions(db, vm_name=vm_name)
     status_map = batch_check_all_sessions(sessions, db=db, config=config)
 
-    # If we have sessions that *should* have been probed but none came back
-    # with a status, the probe almost certainly failed (e.g. SSH unreachable).
-    # batch_check_all_sessions warns on exceptions but returns silently on
-    # `check=False` non-zero exits, so we cannot rely on the warning alone.
     checkable = [s for s in sessions if s.pid is not None and s.pid != PID_STOPPED and s.pid > 0 and s.boot_id]
-    if checkable and not status_map:
+    if any(status_map.get(session.name, SessionStatus.UNKNOWN) == SessionStatus.UNKNOWN for session in checkable):
         raise ConnectivityError(
             f"could not determine running sessions on VM '{vm_name}' (status probe returned no results)",
             entity_kind="vm",

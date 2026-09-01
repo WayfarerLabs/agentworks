@@ -1,6 +1,6 @@
 """Live-tmux probing and high-level lifecycle/list/describe entrypoints.
 
-``kill_session_windows``, ``_console_tmux_exists``, ``_prepare_vm_target``,
+``kill_session_windows``, ``_console_tmux_presence``, ``_prepare_vm_target``,
 and ``_live_target`` are monkeypatched by tests directly on the
 ``agentworks.sessions.multi_console`` package object (they intercept, e.g., the
 live-sync path of ``crud.remove_sessions`` or ``restore.restore_session``
@@ -30,7 +30,7 @@ from agentworks.errors import (
 )
 from agentworks.name_filters import validate_name_filters
 from agentworks.resources.access import named_console_template
-from agentworks.sessions.tmux import tmux_cmd
+from agentworks.sessions.tmux import ProbeStatus, tmux_cmd
 from agentworks.vms.manager import gated_vm_boundary
 
 from ._helpers import _require_console, _shell_summary, tmux_session_name, tmux_staging_name
@@ -177,34 +177,59 @@ while true; do
     else
         echo "Session {session_name} exited (status $rc)."
     fi
-    echo 'Waiting for session to resume...'
+    echo 'Waiting for session to start again...'
     while ! {has} 2>/dev/null; do sleep 2; done
 done
 """
 
 
-def _tmux_session_exists(target: Transport, tmux_name: str) -> bool:
+def _tmux_session_presence(target: Transport, tmux_name: str) -> ProbeStatus:
+    """Probe an exact console tmux name without conflating failure and absence."""
+    from agentworks.sessions.tmux import _presence_from_result
+
     q = shlex.quote(f"={tmux_name}")
-    return target.run(f"tmux has-session -t {q} 2>/dev/null", check=False).ok
+    return _presence_from_result(target.run(f"tmux has-session -t {q} 2>/dev/null", check=False))
 
 
-def _console_tmux_exists(target: Transport, console_name: str) -> bool:
-    return _tmux_session_exists(target, tmux_session_name(console_name))
+def _console_tmux_presence(target: Transport, console_name: str) -> ProbeStatus:
+    return _tmux_session_presence(target, tmux_session_name(console_name))
+
+
+def _console_runtime_presence(target: Transport, console_name: str) -> tuple[ProbeStatus, ProbeStatus]:
+    """Return canonical and staging presence, refusing no state implicitly."""
+    return (
+        _console_tmux_presence(target, console_name),
+        _tmux_session_presence(target, tmux_staging_name(console_name)),
+    )
 
 
 def _teardown_console_tmux(target: Transport, console_name: str) -> None:
     """Remove and verify the canonical and staging console runtimes."""
-    for tmux_name in (tmux_session_name(console_name), tmux_staging_name(console_name)):
-        q = shlex.quote(f"={tmux_name}")
-        target.run(f"tmux kill-session -t {q}", check=False)
-    remaining = [
-        name
-        for name in (tmux_session_name(console_name), tmux_staging_name(console_name))
-        if _tmux_session_exists(target, name)
-    ]
-    if remaining:
+    from agentworks.sessions.tmux import ProbeStatus, _presence_from_result
+
+    names = (tmux_session_name(console_name), tmux_staging_name(console_name))
+    initial = {name: _tmux_session_presence(target, name) for name in names}
+    if any(presence is ProbeStatus.UNKNOWN for presence in initial.values()):
         raise StateError(
-            f"failed to remove console '{console_name}' tmux state",
+            f"could not determine console '{console_name}' tmux state",
+            entity_kind="console",
+            entity_name=console_name,
+        )
+    for tmux_name, presence in initial.items():
+        if presence is ProbeStatus.ABSENT:
+            continue
+        q = shlex.quote(f"={tmux_name}")
+        killed = target.run(f"tmux kill-session -t {q}", check=False)
+        if _presence_from_result(killed) is ProbeStatus.UNKNOWN:
+            raise StateError(
+                f"could not remove console '{console_name}' tmux state",
+                entity_kind="console",
+                entity_name=console_name,
+            )
+    final = {name: _tmux_session_presence(target, name) for name in names}
+    if any(presence is not ProbeStatus.ABSENT for presence in final.values()):
+        raise StateError(
+            f"failed to verify removal of console '{console_name}' tmux state",
             entity_kind="console",
             entity_name=console_name,
             hint="Inspect the canonical and staging tmux sessions before retrying.",
@@ -212,10 +237,27 @@ def _teardown_console_tmux(target: Transport, console_name: str) -> None:
 
 
 def _teardown_console_staging(target: Transport, console_name: str) -> None:
+    from agentworks.sessions.tmux import ProbeStatus, _presence_from_result
+
     staging_name = tmux_staging_name(console_name)
+    presence = _tmux_session_presence(target, staging_name)
+    if presence is ProbeStatus.UNKNOWN:
+        raise StateError(
+            f"could not determine staging tmux state for console '{console_name}'",
+            entity_kind="console",
+            entity_name=console_name,
+        )
+    if presence is ProbeStatus.ABSENT:
+        return
     q = shlex.quote(f"={staging_name}")
-    target.run(f"tmux kill-session -t {q}", check=False)
-    if _tmux_session_exists(target, staging_name):
+    killed = target.run(f"tmux kill-session -t {q}", check=False)
+    if _presence_from_result(killed) is ProbeStatus.UNKNOWN:
+        raise StateError(
+            f"could not remove staging tmux state for console '{console_name}'",
+            entity_kind="console",
+            entity_name=console_name,
+        )
+    if _tmux_session_presence(target, staging_name) is not ProbeStatus.ABSENT:
         raise StateError(
             f"failed to remove staging tmux state for console '{console_name}'",
             entity_kind="console",
@@ -247,7 +289,14 @@ def kill_session_windows(
         by_console.setdefault(con, []).append(sess)
     try:
         for console_name, session_names in by_console.items():
-            if not _mc._console_tmux_exists(target, console_name):
+            presence = _mc._console_tmux_presence(target, console_name)
+            if presence is ProbeStatus.UNKNOWN:
+                raise StateError(
+                    f"could not determine console '{console_name}' tmux state",
+                    entity_kind="console",
+                    entity_name=console_name,
+                )
+            if presence is ProbeStatus.ABSENT:
                 continue
             q_con = shlex.quote(f"={tmux_session_name(console_name)}")
             for session_name in session_names:
@@ -512,6 +561,13 @@ def _realize_console(
     from agentworks.secrets import resolve_for_command
 
     console = _require_console(db, name)
+    if not db.list_console_sessions(name) and not console.admin_shell:
+        raise StateError(
+            f"console '{name}' has no configured windows",
+            entity_kind="console",
+            entity_name=name,
+            hint="Add a session or enable the admin shell before starting it.",
+        )
     registry = load_request_registry(config, live_database=db)
     with _mc._prepare_vm_target(
         db,
@@ -520,12 +576,17 @@ def _realize_console(
         registry=registry,
         interaction=interaction,
     ) as (vm, target):
-        canonical = _mc._console_tmux_exists(target, name)
-        staging = _tmux_session_exists(target, tmux_staging_name(name))
+        canonical, staging = _console_runtime_presence(target, name)
+        if ProbeStatus.UNKNOWN in {canonical, staging}:
+            raise StateError(
+                f"could not determine console '{name}' tmux state",
+                entity_kind="console",
+                entity_name=name,
+            )
         if not replace_running:
-            if staging:
+            if staging is ProbeStatus.PRESENT:
                 _teardown_console_staging(target, name)
-            if canonical:
+            if canonical is ProbeStatus.PRESENT:
                 output.result(f"Console '{name}' is already running")
                 return
         secret_values = resolve_for_command(
@@ -591,6 +652,16 @@ def stop_console(
     output.result(f"Console '{name}' stopped")
 
 
+def refuse_console_nesting(*, allow_nesting: bool) -> None:
+    """Refuse a nested console operation before any lifecycle mutation."""
+    if os.environ.get("TMUX") and not allow_nesting:
+        raise StateError(
+            "already inside a tmux session. Nesting is not recommended "
+            "(prefix key conflicts, confusing detach behavior).",
+            hint="Pass --allow-nesting to override.",
+        )
+
+
 def attach_console(
     db: Database,
     config: Config,
@@ -604,12 +675,7 @@ def attach_console(
     Returns the interactive attach's exit code; the CLI layer owns the
     translation to process exit (check 9: no sys.exit in the service).
     """
-    if os.environ.get("TMUX") and not allow_nesting:
-        raise StateError(
-            "already inside a tmux session. Nesting is not recommended "
-            "(prefix key conflicts, confusing detach behavior).",
-            hint="Pass --allow-nesting to override.",
-        )
+    refuse_console_nesting(allow_nesting=allow_nesting)
 
     from agentworks.bootstrap import load_request_registry
 
@@ -624,9 +690,15 @@ def attach_console(
         registry=registry,
         interaction=interaction,
     ) as (_vm, target):
-        canonical = _mc._console_tmux_exists(target, name)
-        staging = _tmux_session_exists(target, tmux_staging_name(name))
-        if not canonical or staging:
+        canonical, staging = _console_runtime_presence(target, name)
+        if ProbeStatus.UNKNOWN in {canonical, staging}:
+            raise StateError(
+                f"could not determine console '{name}' tmux state",
+                entity_kind="console",
+                entity_name=name,
+                hint="Retry after transport access is reliable.",
+            )
+        if canonical is not ProbeStatus.PRESENT or staging is not ProbeStatus.ABSENT:
             raise StateError(
                 f"console '{name}' is not ready to attach",
                 entity_kind="console",

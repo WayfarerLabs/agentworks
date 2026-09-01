@@ -64,8 +64,8 @@ file is ``<session-name>.thread``, and discovery matches the workspace
 directory), so at create time either would hand a brand-new session the
 conversation of a deleted predecessor that shared its name or its workspace. A
 create means a brand-new session row, which by definition owns no codex
-conversation yet, so ``start`` probes nothing at all and additionally clears
-any leftover recording. That closes the recorder channel outright: a recreated
+conversation yet, so forced-fresh start reads only the recorder identity it
+must reject and clears that recording in the launch command. That closes the recorder channel outright: a recreated
 namesake can never resume the dead conversation as a BOUND id. It NARROWS but
 does not close layer 2, whose candidate set is the workspace: if the dead
 session's rollout is the only interactive one there, the first later start can still
@@ -413,9 +413,9 @@ class CodexIntegration(HarnessIntegration):
 
         ``session create`` mints a brand-new session row, so by definition
         no codex conversation belongs to this session yet: there is nothing
-        to resume and nothing legitimate to adopt. So create probes nothing
-        (no recorder read, no rollout probe, no discovery) and needs no
-        launch target: only a later ordinary start can adopt an id.
+        to resume and nothing legitimate to adopt. Create reads the recorder
+        identity it must reject, but performs no rollout probe or discovery;
+        it therefore requires the owning launch target without adopting from it.
 
         Both of this integration's identity channels are name-derived on
         the target (the recorder file is ``<session-name>.thread``;
@@ -423,9 +423,10 @@ class CodexIntegration(HarnessIntegration):
         either would hand a new session the conversation of a deleted
         predecessor that shared its name or its workspace.
 
-        For the RECORDER channel that is closed outright: create never
-        reads the file, and the fresh command deletes it, so no op can ever
-        resume a dead namesake's id as a BOUND one. The DISCOVERY channel
+        For the RECORDER channel that is closed outright: create reads only
+        the identity it must reject, records that rejection, and the fresh
+        command deletes the file, so no later op can adopt a dead namesake's
+        id as a BOUND one. The DISCOVERY channel
         is narrowed, not closed, and this is the honest limit of what
         ships: if the dead session's rollout is the only interactive one in
         the workspace, this session's first later start can still adopt it
@@ -491,7 +492,13 @@ class CodexIntegration(HarnessIntegration):
     def _force_new(self, ctx: RunContext) -> str:
         """Reject the visible recorder binding and launch bare Codex."""
         launch_target = ctx.admin_target() if self._admin else ctx.agent_target()
-        recorded = self._recorded_thread_id(launch_target) if launch_target is not None else None
+        if launch_target is None:
+            raise StateError(
+                "codex forced-fresh start requires its owning launch target",
+                entity_kind="session",
+                entity_name=self._session_name,
+            )
+        recorded = self._recorded_thread_id(launch_target)
         self._state.pop("session_id", None)
         self._state["fresh_pending"] = recorded
         self._decision = "fresh"

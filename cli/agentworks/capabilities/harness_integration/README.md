@@ -306,8 +306,8 @@ the shared `require_commands` helper with the executables the launch target must
 
 Keep readiness to tool PRESENCE. Session state (is there something to resume?) is an op-time
 concern: readiness is read-only and re-runnable by contract, and it runs at command start against a
-world the op changes (on resume, the resume decision must see the old process already dead, which
-only the op-time probe does).
+world the op changes (on restart, the continuation decision must see the old process already dead,
+which only the op-time probe does).
 
 #### Operation: Returning the Launch Decision
 
@@ -389,7 +389,7 @@ The surrounding wiring supplies the following behavior and debugging boundaries:
 
 ### Best Practices
 
-#### Session Resume: The Stateful-Integration Pattern
+#### Stateful Starts
 
 The `claude-code` and `grok-build` integrations are the caller-assigned-identity examples; `codex`
 is the tool-assigned-identity example. The pattern generalizes to any harness with resumable
@@ -413,11 +413,11 @@ sessions. Five rules, each earned:
    resume. The manager's persistence contract makes any of these survive restarts. Derivation
    schemes (from session name, cwd, or the tool's own directory layout) are brittle against renames
    and tool-version drift; a stored opaque value the tool itself reported is not.
-2. **Decide resume-vs-launch at op time, on the launch target, from the tool's own durable state.**
-   Probe for the stored id's artifact (for Claude, the transcript `<sid>.jsonl` under the projects
-   dir) over the transport, with the same `$SHELL -lic` environment the pane will get. Do it per op,
-   not cached: the world changes between ops, and resume runs with the old process dead precisely so
-   this probe sees settled state.
+2. **Decide continuation-vs-launch at op time, on the launch target, from the tool's own durable
+   state.** Probe for the stored id's artifact (for Claude, the transcript `<sid>.jsonl` under the
+   projects dir) over the transport, with the same `$SHELL -lic` environment the pane will get. Do
+   it per op, not cached: the world changes between ops, and restart calls `start` with the old
+   process dead so this probe sees settled state.
 3. **Verify empirically that the probe boundary equals the tool's resume boundary.** The claude work
    ran a controlled experiment (sessions abandoned at every stage) to confirm transcript presence
    and Claude's own resume boundary are the SAME line, which is what makes both failure modes (blind

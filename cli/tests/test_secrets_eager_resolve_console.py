@@ -21,6 +21,7 @@ import pytest
 
 from agentworks.errors import SecretUnavailableError
 from agentworks.secrets.policy import TtyInteractionPolicy
+from agentworks.sessions.tmux import ProbeStatus
 
 from ._secrets_eager_support import _seed_basic_db, _stub_build_registry
 from .conftest import stub_vm_gates
@@ -159,7 +160,7 @@ def test_start_console_eager_resolves_before_tmux(
     from agentworks.sessions import multi_console
 
     db = _seed_basic_db(tmp_path)
-    db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')")
+    db._conn.execute("INSERT INTO consoles (name, vm_name, admin_shell) VALUES ('c1', 'vm1', 1)")
     db._conn.commit()
 
     stub_vm_gates(monkeypatch)
@@ -175,11 +176,9 @@ def test_start_console_eager_resolves_before_tmux(
 
     monkeypatch.setattr(multi_console, "_prepare_vm_target", _fake_prepare)
     monkeypatch.setattr(
-        multi_console,
-        "_console_tmux_exists",
-        lambda *a, **k: False,
+        "agentworks.sessions.multi_console.attach._console_runtime_presence",
+        lambda *a, **k: (ProbeStatus.ABSENT, ProbeStatus.ABSENT),
     )
-    monkeypatch.setattr("agentworks.sessions.multi_console.attach._tmux_session_exists", lambda *a, **k: False)
     monkeypatch.setattr(
         multi_console,
         "_console_build_secret_targets",
@@ -307,11 +306,9 @@ def test_attach_console_existing_tmux_session_skips_eager_resolve(
 
     monkeypatch.setattr(multi_console, "_prepare_vm_target", _fake_prepare)
     monkeypatch.setattr(
-        multi_console,
-        "_console_tmux_exists",
-        lambda *a, **k: True,
+        "agentworks.sessions.multi_console.attach._console_runtime_presence",
+        lambda *a, **k: (ProbeStatus.PRESENT, ProbeStatus.ABSENT),
     )
-    monkeypatch.setattr("agentworks.sessions.multi_console.attach._tmux_session_exists", lambda *a, **k: False)
 
     resolve_called: list[bool] = []
 
@@ -376,8 +373,8 @@ def test_console_add_sessions_does_not_eager_resolve_live_branch(
     )
     monkeypatch.setattr(
         multi_console,
-        "_console_tmux_exists",
-        lambda *a, **k: True,
+        "_console_tmux_presence",
+        lambda *a, **k: ProbeStatus.PRESENT,
     )
     monkeypatch.setattr(
         multi_console,
@@ -569,8 +566,8 @@ def test_restore_session_window_missing_branch_eager_resolves(
     monkeypatch.setattr(multi_console, "_prepare_vm_target", _fake_prepare)
     monkeypatch.setattr(
         multi_console,
-        "_console_tmux_exists",
-        lambda *a, **k: True,
+        "_console_tmux_presence",
+        lambda *a, **k: ProbeStatus.PRESENT,
     )
     monkeypatch.setattr(
         multi_console,

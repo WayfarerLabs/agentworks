@@ -237,6 +237,7 @@ def _start_session_slice(
             f"Starting session '{name}' on workspace '{workspace_name}' ({mode_label}, template: {template.name})..."
         )
 
+        retain_unknown_runtime = False
         try:
             # Everything that creates partial session state (on-VM group
             # membership, implicit-grant row, session row, restricted-config
@@ -337,17 +338,40 @@ def _start_session_slice(
                 env=session_env,
             )
 
-            from agentworks.sessions.tmux import capture_tmux_server_fingerprint, kill_server
+            from agentworks.sessions.tmux import (
+                ProbeStatus,
+                capture_tmux_server_fingerprint,
+                kill_server_and_probe,
+            )
 
             fingerprint_target = agent_target if mode == SessionMode.AGENT else target
             assert fingerprint_target is not None
-            fingerprint = capture_tmux_server_fingerprint(target=fingerprint_target, socket_path=sock)
-            if fingerprint is None or (pid is not None and fingerprint.pid != pid):
-                kill_server(run_command=session_run_command, socket_path=sock)
+            fingerprint_probe = capture_tmux_server_fingerprint(target=fingerprint_target, socket_path=sock)
+            fingerprint = fingerprint_probe.fingerprint
+            if (
+                fingerprint_probe.status is not ProbeStatus.PRESENT
+                or fingerprint is None
+                or (pid is not None and fingerprint.pid != pid)
+            ):
+                cleanup = kill_server_and_probe(run_command=session_run_command, socket_path=sock)
+                if cleanup is not ProbeStatus.ABSENT:
+                    db.update_session_runtime(
+                        name,
+                        socket_path=sock,
+                        pid=None,
+                        boot_id=None,
+                        tmux_server_start_ticks=None,
+                    )
+                    retain_unknown_runtime = True
                 raise ExternalError(
                     f"could not capture a stable tmux server fingerprint for session '{name}'",
                     entity_kind="session",
                     entity_name=name,
+                    hint=(
+                        f"The session row and socket {sock} were retained because runtime absence could not be proved."
+                        if retain_unknown_runtime
+                        else None
+                    ),
                 )
             db.update_session_runtime(
                 name,
@@ -362,7 +386,8 @@ def _start_session_slice(
             # realized ephemerals are unwound by the outer handlers,
             # whose warn prints one clean reason line before the
             # rollback's delete messages start landing.
-            session_node.teardown()
+            if not retain_unknown_runtime:
+                session_node.teardown()
             raise
 
         # The session's realizing slice is complete: flip the node.

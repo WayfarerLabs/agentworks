@@ -3,7 +3,7 @@ plus the live-tmux best-effort sync each one triggers when the console's
 tmux session is already up.
 
 ``kill_session_windows``, ``_pane_secret_target``, ``_live_target``,
-``_console_tmux_exists``, and ``_add_session_window`` are monkeypatched by
+``_console_tmux_presence``, and ``_add_session_window`` are monkeypatched by
 tests directly on the ``agentworks.sessions.multi_console`` package object
 (so a test can, e.g., exercise ``remove_sessions``'s live-sync path without a
 live VM). A patch on the package object only rebinds the package's own
@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 
 import agentworks.sessions.multi_console as _mc
 from agentworks import output
-from agentworks.errors import AlreadyExistsError, NotFoundError, ValidationError
+from agentworks.errors import AlreadyExistsError, NotFoundError, StateError, ValidationError
 from agentworks.naming import MAX_FREEFORM_NAME_LENGTH, validate_name
 from agentworks.resources.access import named_console_template
 from agentworks.sessions.multi_console_layout import (
@@ -28,6 +28,7 @@ from agentworks.sessions.multi_console_layout import (
     _reorder_session_windows,
     _reorder_shell_panes,
 )
+from agentworks.sessions.tmux import ProbeStatus
 
 from ._helpers import (
     SessionSpec,
@@ -173,15 +174,33 @@ def create_console(
         console = _require_console(db, name)
         from .tmux_build import _build_console_tmux
 
-        _build_console_tmux(
-            target,
-            db,
-            registry,
-            console,
-            vm,
-            values=secret_values,
-            layout=named_console_template(registry).tmux_layout,
-        )
+        try:
+            _build_console_tmux(
+                target,
+                db,
+                registry,
+                console,
+                vm,
+                values=secret_values,
+                layout=named_console_template(registry).tmux_layout,
+            )
+        except Exception as exc:
+            canonical, staging = _mc._console_runtime_presence(target, name)
+            if canonical is ProbeStatus.ABSENT and staging is ProbeStatus.ABSENT:
+                from agentworks.errors import ExternalError
+
+                raise ExternalError(
+                    f"console '{name}' was saved, but its runtime did not start",
+                    entity_kind="console",
+                    entity_name=name,
+                    hint=f"The stopped definition was retained; retry with `agw console start {name}`.",
+                ) from exc
+            raise StateError(
+                f"console '{name}' was saved, but runtime cleanup could not be verified",
+                entity_kind="console",
+                entity_name=name,
+                hint="Inspect the canonical and staging tmux sessions before retrying.",
+            ) from exc
 
     extras_note = " + admin shell" if add_admin_shell else ""
     output.result(f"Console '{name}' created with {len(specs)} session(s){extras_note}.")
@@ -318,7 +337,10 @@ def add_sessions(
         if live is None:
             return
         vm, target = live
-        if not _mc._console_tmux_exists(target, console_name):
+        presence = _mc._console_tmux_presence(target, console_name)
+        if presence is ProbeStatus.UNKNOWN:
+            raise StateError(f"could not determine console '{console_name}' tmux state")
+        if presence is ProbeStatus.ABSENT:
             return
         preserve_memo: PreserveEnvMemo = {}
         for spec in specs:
@@ -491,7 +513,10 @@ def reorder_sessions(
         if live is None:
             return
         _vm, target = live
-        if not _mc._console_tmux_exists(target, console_name):
+        presence = _mc._console_tmux_presence(target, console_name)
+        if presence is ProbeStatus.UNKNOWN:
+            raise StateError(f"could not determine console '{console_name}' tmux state")
+        if presence is ProbeStatus.ABSENT:
             return
         _reorder_session_windows(
             target,
@@ -597,7 +622,10 @@ def add_shell(
         if live is None:
             return
         vm, target = live
-        if not _mc._console_tmux_exists(target, console_name):
+        presence = _mc._console_tmux_presence(target, console_name)
+        if presence is ProbeStatus.UNKNOWN:
+            raise StateError(f"could not determine console '{console_name}' tmux state")
+        if presence is ProbeStatus.ABSENT:
             return
         session = db.get_session(session_name)
         if session is None:

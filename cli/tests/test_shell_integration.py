@@ -248,7 +248,6 @@ def test_merge_default_shape_when_neither_declares_required() -> None:
 def test_start_returns_the_command() -> None:
     result = _harness_integration({"command": "claude"}).start(RunContext(), force_new=True)
     assert result.command == "claude"
-    assert result.note is None
 
 
 def test_start_empty_config_is_a_login_shell() -> None:
