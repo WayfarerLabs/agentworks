@@ -90,8 +90,8 @@ site.
    (which Kubernetes External Secrets Operator and similar systems need because they materialize
    values into long-lived stores). Operator rotates a secret in their vault → the next shell-open
    picks up the new value automatically. Existing shells retain the env they captured at create
-   time, consistent with FRD R5 "Attach inherits create-time env" and the broader "resume to pick up
-   new values" contract.
+   time, consistent with FRD R5 "Attach inherits create-time env" and the broader "start or restart
+   to pick up new values" contract.
 
 ### Negative
 

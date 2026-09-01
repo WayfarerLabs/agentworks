@@ -97,6 +97,12 @@ from ._pids import (
     _resolve_session_linux_user as _resolve_session_linux_user,
 )
 from ._pids import (
+    _validated_observed_boot_id as _validated_observed_boot_id,
+)
+from ._pids import (
+    _validated_stored_boot_id as _validated_stored_boot_id,
+)
+from ._pids import (
     _validated_stored_start_ticks as _validated_stored_start_ticks,
 )
 from ._pids import (

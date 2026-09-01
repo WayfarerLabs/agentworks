@@ -68,7 +68,7 @@ def _seed_live_session(db: Database, *, name: str, ws: str, agent: str) -> None:
     db._conn.execute(
         "INSERT INTO sessions (name, workspace_name, template, mode, "
         "agent_name, socket_path, pid, boot_id, tmux_server_start_ticks) VALUES (?, ?, 'default', "
-        "'agent', ?, ?, 4242, 'boot-1', 1)",
+        "'agent', ?, ?, 4242, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', 1)",
         (name, ws, agent, f"/run/agentworks/agent-tmux-sockets/agt-{agent}/{name}.sock"),
     )
     db._conn.commit()
@@ -481,7 +481,11 @@ def test_delete_choreography_end_to_end_standalone(
         "agentworks.sessions.tmux.capture_tmux_server_fingerprint",
         lambda **kwargs: FingerprintProbe(
             ProbeStatus.PRESENT,
-            TmuxServerFingerprint(pid=4242, boot_id="boot-1", start_ticks=1),
+            TmuxServerFingerprint(
+                pid=4242,
+                boot_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                start_ticks=1,
+            ),
         ),
     )
     monkeypatch.setattr("agentworks.sessions.manager._prove_stored_runtime_absent", lambda *args, **kwargs: True)

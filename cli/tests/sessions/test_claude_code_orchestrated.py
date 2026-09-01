@@ -122,7 +122,7 @@ def _capture_pane_command(monkeypatch: pytest.MonkeyPatch, events: list[str], ca
         "capture_tmux_server_fingerprint",
         lambda **kwargs: FingerprintProbe(
             ProbeStatus.PRESENT,
-            TmuxServerFingerprint(pid=4243, boot_id="boot-x", start_ticks=1),
+            TmuxServerFingerprint(pid=4243, boot_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", start_ticks=1),
         ),
     )
 
@@ -144,7 +144,7 @@ def _common_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
     stub_vm_gates(monkeypatch)
     stub_session_resolvers(monkeypatch)
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *a, **k: None)
-    monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: "boot-x")
+    monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
     monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
 
 
@@ -231,7 +231,13 @@ def _restart_stubs(
 
     db = _seed_db(tmp_path)
     db.insert_session("s1", "ws1", "claude", SessionMode.ADMIN, harness_integration_state=stored_state)
-    db.update_session_runtime("s1", socket_path="/tmp/s1.sock", pid=4242, boot_id="boot-x", tmux_server_start_ticks=77)
+    db.update_session_runtime(
+        "s1",
+        socket_path="/tmp/s1.sock",
+        pid=4242,
+        boot_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        tmux_server_start_ticks=77,
+    )
 
     events: list[str] = []
     captured: dict[str, str] = {}

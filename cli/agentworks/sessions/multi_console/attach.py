@@ -185,10 +185,13 @@ done
 
 def _tmux_session_presence(target: Transport, tmux_name: str) -> ProbeStatus:
     """Probe an exact console tmux name without conflating failure and absence."""
-    from agentworks.sessions.tmux import _presence_from_result
+    from agentworks.sessions.tmux import _tmux_presence_from_result
 
     q = shlex.quote(f"={tmux_name}")
-    return _presence_from_result(target.run(f"tmux has-session -t {q} 2>/dev/null", check=False))
+    return _tmux_presence_from_result(
+        target.run(f"tmux has-session -t {q}", check=False),
+        missing_target_is_absent=True,
+    )
 
 
 def _console_tmux_presence(target: Transport, console_name: str) -> ProbeStatus:
@@ -205,7 +208,7 @@ def _console_runtime_presence(target: Transport, console_name: str) -> tuple[Pro
 
 def _teardown_console_tmux(target: Transport, console_name: str) -> None:
     """Remove and verify the canonical and staging console runtimes."""
-    from agentworks.sessions.tmux import ProbeStatus, _presence_from_result
+    from agentworks.sessions.tmux import ProbeStatus, _test_presence_from_result
 
     names = (tmux_session_name(console_name), tmux_staging_name(console_name))
     initial = {name: _tmux_session_presence(target, name) for name in names}
@@ -220,7 +223,7 @@ def _teardown_console_tmux(target: Transport, console_name: str) -> None:
             continue
         q = shlex.quote(f"={tmux_name}")
         killed = target.run(f"tmux kill-session -t {q}", check=False)
-        if _presence_from_result(killed) is ProbeStatus.UNKNOWN:
+        if _test_presence_from_result(killed) is ProbeStatus.UNKNOWN:
             raise StateError(
                 f"could not remove console '{console_name}' tmux state",
                 entity_kind="console",
@@ -237,7 +240,7 @@ def _teardown_console_tmux(target: Transport, console_name: str) -> None:
 
 
 def _teardown_console_staging(target: Transport, console_name: str) -> None:
-    from agentworks.sessions.tmux import ProbeStatus, _presence_from_result
+    from agentworks.sessions.tmux import ProbeStatus, _test_presence_from_result
 
     staging_name = tmux_staging_name(console_name)
     presence = _tmux_session_presence(target, staging_name)
@@ -251,7 +254,7 @@ def _teardown_console_staging(target: Transport, console_name: str) -> None:
         return
     q = shlex.quote(f"={staging_name}")
     killed = target.run(f"tmux kill-session -t {q}", check=False)
-    if _presence_from_result(killed) is ProbeStatus.UNKNOWN:
+    if _test_presence_from_result(killed) is ProbeStatus.UNKNOWN:
         raise StateError(
             f"could not remove staging tmux state for console '{console_name}'",
             entity_kind="console",

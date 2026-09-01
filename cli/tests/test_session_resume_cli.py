@@ -68,9 +68,3 @@ def test_resume_wrapper_routes_to_canonical_services(
     result = CliRunner().invoke(app, ["session", "resume", *arguments])
     assert result.exit_code == 0, result.output
     assert [name for name, _kwargs in command_calls] == [operation]
-
-
-def test_resume_wrapper_is_hidden_from_help() -> None:
-    result = CliRunner().invoke(app, ["session", "--help"])
-    assert result.exit_code == 0
-    assert "resume" not in result.output

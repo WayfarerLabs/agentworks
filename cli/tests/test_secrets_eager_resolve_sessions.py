@@ -160,11 +160,11 @@ def test_session_create_calls_resolve_with_session_target(
 # ---------------------------------------------------------------------------
 
 
-def test_session_resume_broken_no_force_bails_before_eager_resolve(
+def test_session_restart_broken_no_force_bails_before_eager_resolve(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A BROKEN session restartd without --force must raise BrokenStateError
+    """A BROKEN session restarted without --force must raise BrokenStateError
     BEFORE eager-resolve runs. The operator gets a clean error without
     being asked for credentials they would have discarded."""
     from agentworks.db import SessionMode, SessionStatus

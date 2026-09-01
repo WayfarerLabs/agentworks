@@ -55,7 +55,9 @@ def test_add_session_live_sync_skipped_when_console_absent(db: Database, fake_ta
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
 
     fake_target.commands.clear()
-    fake_target.responses["has-session -t =aw-console-con"] = _FakeResult(returncode=1)
+    fake_target.responses["has-session -t =aw-console-con"] = _FakeResult(
+        returncode=1, stderr="can't find session: aw-console-con"
+    )
     add_sessions(db, _StubConfig(), console_name="con", session_specs=["b"], interaction=TtyInteractionPolicy.REFUSE)
 
     assert not any("new-window" in c for c in fake_target.commands)
@@ -321,7 +323,9 @@ def test_reorder_sessions_live_sync_skipped_when_console_absent(db: Database, fa
     create_console(db, name="con", vm_name="vm1", session_specs=["a", "b"])
 
     fake_target.commands.clear()
-    fake_target.responses["has-session -t =aw-console-con"] = _FakeResult(returncode=1)
+    fake_target.responses["has-session -t =aw-console-con"] = _FakeResult(
+        returncode=1, stderr="can't find session: aw-console-con"
+    )
 
     reorder_sessions(db, _StubConfig(), console_name="con", session_names=["b"])
 
@@ -421,7 +425,9 @@ def test_kill_session_windows_kills_live_only(db: Database, fake_target: _FakeTa
     from agentworks.sessions.multi_console import kill_session_windows
 
     fake_target.responses["has-session -t =aw-console-alive"] = _FakeResult(returncode=0)
-    fake_target.responses["has-session -t =aw-console-dead"] = _FakeResult(returncode=1)
+    fake_target.responses["has-session -t =aw-console-dead"] = _FakeResult(
+        returncode=1, stderr="can't find session: aw-console-dead"
+    )
 
     kill_session_windows(
         fake_target,  # type: ignore[arg-type]
