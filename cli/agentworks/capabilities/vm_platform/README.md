@@ -492,10 +492,11 @@ The three managed cloud platforms therefore use different evidence:
   pre-mutation refusal. An unavailable or incomplete listing warns and defers to the real request;
   deny assignments, policy, locks, and later RBAC changes remain authoritative at mutation time.
 - EC2 uses exact `DryRun` requests only at composite safety boundaries. It proves revoke permission
-  before opening an SSH tuple and security-group deletion permission before terminating the VM.
-  Other responses are indeterminate, and IAM policy simulation is not used as an authorization gate.
-  Explicit delete raises on termination, confirmation, or security-group cleanup failure so core
-  retains the VM row for retry.
+  before opening an SSH tuple and security-group deletion permission before terminating the VM. Only
+  `DryRunOperation` is positive evidence; unknown results stop before the guarded mutation. IAM
+  policy simulation is not used as an authorization gate. Explicit delete raises on missing provider
+  IDs, termination, confirmation, or security-group cleanup failure so core retains the VM row for
+  retry.
 - GCE makes its definitive project, zone, network, image, and shape reads before mutation, then lets
   exact mutations authorize themselves under provider-ID-owned rollback. Its IAM test methods apply
   to existing resources and are advisory; the future VM, boot disk, and firewall rules do not exist

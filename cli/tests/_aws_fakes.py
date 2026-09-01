@@ -64,8 +64,8 @@ class Controls:
     # finally succeeds (drives the DependencyViolation retry test).
     sg_delete_errors: list[Exception] = field(default_factory=list)
     # Outcomes for successive DryRun calls across the EC2 client. An Exception
-    # is raised; None models an inert fake normal return. Once exhausted, the
-    # realistic allowed answer is DryRunOperation.
+    # is raised; None models an invalid normal return. Once exhausted, the
+    # documented positive answer is DryRunOperation.
     dry_run_outcomes: list[Exception | None] = field(default_factory=list)
 
 

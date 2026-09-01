@@ -579,7 +579,7 @@ class TestTransientRoute:
     def test_revoke_denial_happens_before_route_mutation(self, monkeypatch: pytest.MonkeyPatch) -> None:
         controls = Controls(
             dry_run_outcomes=[
-                None,
+                client_error("DryRunOperation", "allowed", "RevokeSecurityGroupIngress"),
                 client_error("UnauthorizedOperation", "denied", "RevokeSecurityGroupIngress"),
             ]
         )
@@ -597,27 +597,42 @@ class TestTransientRoute:
         assert _ec2(platform).ingress == {}
 
     @pytest.mark.parametrize(
-        "outcome",
+        ("outcome", "error_type"),
         [
-            None,
-            client_error("InvalidPermission.NotFound", "gone", "RevokeSecurityGroupIngress"),
-            client_error("AccessDenied", "indeterminate dry run", "RevokeSecurityGroupIngress"),
-            unreachable(),
+            pytest.param(None, EC2Error, id="normal-return"),
+            pytest.param(
+                client_error("InvalidPermission.NotFound", "gone", "RevokeSecurityGroupIngress"),
+                EC2Error,
+                id="validation-result",
+            ),
+            pytest.param(
+                client_error("AccessDenied", "denied", "RevokeSecurityGroupIngress"),
+                AuthorizationError,
+                id="access-denied",
+            ),
+            pytest.param(unreachable(), EC2Error, id="transport-result"),
+            pytest.param(
+                client_error("AuthFailure", "rejected", "RevokeSecurityGroupIngress"),
+                TokenRejectedError,
+                id="credential-rejection",
+            ),
         ],
-        ids=["normal-return", "validation-result", "access-denied-indeterminate", "transport-result"],
     )
-    def test_indeterminate_revoke_dry_run_preserves_authorize(
+    def test_unconfirmed_revoke_dry_run_prevents_authorize(
         self,
         monkeypatch: pytest.MonkeyPatch,
         outcome: Exception | None,
+        error_type: type[Exception],
     ) -> None:
         rec = install_fakes(monkeypatch, Controls(dry_run_outcomes=[outcome]))
         platform = _platform()
 
-        with platform.transient_route(_vm(), RunContext(), config=_config()):
-            assert _ec2(platform).ingress["sg-123"] == {_DETECTED_PREFIX: "sgr-1"}
+        route = platform.transient_route(_vm(), RunContext(), config=_config())
+        with pytest.raises(error_type), route:
+            pass
 
-        assert rec.authorized_cidrs() == [_DETECTED_PREFIX]
+        assert rec.authorized_cidrs() == []
+        assert _ec2(platform).ingress == {}
 
     def test_removes_on_body_exception(self, monkeypatch: pytest.MonkeyPatch) -> None:
         install_fakes(monkeypatch)
@@ -628,7 +643,7 @@ class TestTransientRoute:
 
     def test_partial_poke_failure_is_still_swept(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A poke that fails on the second prefix still has the first prefix
-        revoked by the finally (the poke sits inside the guarded region)."""
+        revoked by the poke's own partial-failure cleanup."""
         install_fakes(monkeypatch)
         platform = _platform()
 
@@ -826,21 +841,49 @@ class TestDelete:
         assert rec.calls == [("ec2", "delete_security_group", {"GroupId": "sg-123", "DryRun": True})]
 
     @pytest.mark.parametrize(
-        "outcome",
+        ("outcome", "error_type"),
         [
-            None,
-            client_error("InvalidGroup.NotFound", "gone", "DeleteSecurityGroup"),
-            client_error("AccessDenied", "indeterminate dry run", "DeleteSecurityGroup"),
-            unreachable(),
+            pytest.param(None, EC2Error, id="normal-return"),
+            pytest.param(
+                client_error("DependencyViolation", "attached", "DeleteSecurityGroup"),
+                EC2Error,
+                id="validation-result",
+            ),
+            pytest.param(
+                client_error("AccessDenied", "denied", "DeleteSecurityGroup"),
+                AuthorizationError,
+                id="access-denied",
+            ),
+            pytest.param(unreachable(), EC2Error, id="transport-result"),
+            pytest.param(
+                client_error("AuthFailure", "rejected", "DeleteSecurityGroup"),
+                TokenRejectedError,
+                id="credential-rejection",
+            ),
         ],
-        ids=["normal-return", "validation-result", "access-denied-indeterminate", "transport-result"],
     )
-    def test_indeterminate_delete_dry_run_preserves_delete_behavior(
+    def test_unconfirmed_delete_dry_run_prevents_termination(
         self,
         monkeypatch: pytest.MonkeyPatch,
         outcome: Exception | None,
+        error_type: type[Exception],
     ) -> None:
         rec = install_fakes(monkeypatch, Controls(dry_run_outcomes=[outcome]))
+
+        with pytest.raises(error_type):
+            _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
+
+        assert "terminate_instances" not in rec.methods("ec2")
+        assert self._sg_deleted(rec) == 0
+
+    def test_already_absent_security_group_needs_no_delete_permission(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = install_fakes(
+            monkeypatch,
+            Controls(
+                dry_run_outcomes=[client_error("InvalidGroup.NotFound", "gone", "DeleteSecurityGroup")],
+                sg_delete_errors=[client_error("InvalidGroup.NotFound", "gone", "DeleteSecurityGroup")],
+            ),
+        )
 
         _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
 
@@ -878,6 +921,20 @@ class TestDelete:
         )
         with pytest.raises(TokenRejectedError):
             _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
+
+    def test_malformed_instance_id_is_not_treated_as_absent(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = install_fakes(monkeypatch)
+        monkeypatch.setattr(
+            "tests._aws_fakes._FakeEC2.terminate_instances",
+            lambda self, **kw: (_ for _ in ()).throw(
+                client_error("InvalidInstanceID.Malformed", "malformed", "Terminate")
+            ),
+        )
+
+        with pytest.raises(EC2Error):
+            _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
+
+        assert self._sg_deleted(rec) == 0
 
     def test_termination_wait_failure_is_strict(self, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = install_fakes(monkeypatch)
@@ -946,8 +1003,16 @@ class TestDelete:
         assert rec.methods("ec2").count("terminate_instances") == 2
         assert self._sg_deleted(rec) == 1
 
-    def test_without_instance_id_is_a_noop(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_without_instance_id_fails_before_any_provider_call(self, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = install_fakes(monkeypatch)
         vm = SimpleNamespace(name="dev", admin_username="agw", platform_metadata={})
-        _platform().delete(vm, RunContext())  # type: ignore[arg-type]
-        assert rec.methods("ec2") == []
+        with pytest.raises(StateError):
+            _platform().delete(vm, RunContext())  # type: ignore[arg-type]
+        assert rec.calls == []
+
+    def test_without_security_group_id_fails_before_any_provider_call(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = install_fakes(monkeypatch)
+        vm = SimpleNamespace(name="dev", admin_username="agw", platform_metadata={"instance_id": "i-123"})
+        with pytest.raises(StateError):
+            _platform().delete(vm, RunContext())  # type: ignore[arg-type]
+        assert rec.calls == []

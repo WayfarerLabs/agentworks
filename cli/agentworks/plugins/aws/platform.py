@@ -550,12 +550,10 @@ class EC2Platform(VMPlatform):
 
     def delete(self, vm: VMRow, ctx: RunContext) -> None:
         output.info(f"Deleting EC2 instance '{vm.name}'...")
-        instance_id = vm.platform_metadata.get("instance_id")
-        if not instance_id:
-            output.warn("no EC2 instance id, skipping EC2 cleanup")
-            return
+        instance_id = self._instance_id(vm)
+        security_group_id = self._security_group_id(vm)
         ec2 = self._client("ec2", self._region_of(vm), ctx)
-        terminate_and_cleanup_strict(ec2, str(instance_id), vm.platform_metadata.get("security_group_id"))
+        terminate_and_cleanup_strict(ec2, instance_id, security_group_id)
         output.info(f"EC2 instance '{vm.name}' deleted")
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:

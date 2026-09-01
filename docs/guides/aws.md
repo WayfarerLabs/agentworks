@@ -79,13 +79,15 @@ EC2 does provide exact-request `DryRun` authorization. Agentworks uses it where 
 permission would make an earlier mutation unsafe:
 
 - Before opening an SSH ingress tuple, it verifies that the same tuple can be revoked. A definitive
-  `UnauthorizedOperation` opens no route.
+  positive result is required before any route opens.
 - Before terminating a VM, it verifies that the VM's security group can be deleted. A definitive
-  denial leaves both the instance and its database row intact.
+  positive result, or proof that the group is already absent, is required before termination.
 
-Other provider responses are indeterminate, not proof that a permission is missing. Agentworks lets
-the real operation remain authoritative. A failed explicit delete keeps the VM row so the operator
-can correct IAM and retry `agw vm delete`.
+Only EC2's documented `DryRunOperation` response is positive permission evidence. An already-absent
+security group also needs no cleanup. Permission denials, credential failures, transport failures,
+validation errors, and unexpected responses stop these composite operations before the guarded
+mutation. A failed explicit delete keeps the VM row so the operator can correct IAM and retry
+`agw vm delete`.
 
 ## Network and cleanup model
 

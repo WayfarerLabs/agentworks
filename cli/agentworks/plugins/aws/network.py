@@ -94,7 +94,7 @@ _PERMISSION_NOT_FOUND_CODE = "InvalidPermission.NotFound"
 _GROUP_NOT_FOUND_CODES = frozenset({"InvalidGroup.NotFound", "InvalidGroupId.NotFound"})
 # A terminate of an instance that is already terminated or never existed: silent
 # success (the delete op and rollback are idempotent).
-_INSTANCE_NOT_FOUND_CODES = frozenset({"InvalidInstanceID.NotFound", "InvalidInstanceID.Malformed"})
+_INSTANCE_NOT_FOUND_CODES = frozenset({"InvalidInstanceID.NotFound"})
 
 
 class EC2Error(ProvisioningError):
@@ -168,38 +168,60 @@ def is_authorization_denial(exc: Exception) -> bool:
     return error_code(exc) in _AUTHORIZATION_DENIAL_CODES
 
 
-def _raise_on_dry_run_unauthorized(
+def _require_dry_run_permission(
     call: Callable[[], object],
     *,
     operation: str,
     entity_kind: str,
     entity_name: str,
+    absent_codes: frozenset[str] = frozenset(),
 ) -> None:
-    """Raise only for structured ``UnauthorizedOperation``.
+    """Require positive authorization evidence for one exact dry run.
 
-    ``DryRunOperation`` and an inert normal return pass. Every other result is
-    indeterminate, so the guarded operation proceeds. This is not a generic AWS
-    permission checker: only composite safety boundaries call it.
+    ``DryRunOperation`` is EC2's documented positive result. A caller may name
+    already-absent results that make its cleanup unnecessary. Permission,
+    credential, transport, validation, and protocol failures all stop before
+    the guarded mutation because none proves that its cleanup can run.
     """
     try:
         call()
     except Exception as exc:
         code = error_code(exc)
-        if code == _DRY_RUN_ALLOWED_CODE:
+        if code == _DRY_RUN_ALLOWED_CODE or code in absent_codes:
             return
-        if code == "UnauthorizedOperation":
+        if code in _AUTHORIZATION_DENIAL_CODES:
             raise AuthorizationError(
                 f"AWS denied permission to {operation} ({code})",
                 entity_kind=entity_kind,
                 entity_name=entity_name,
             ) from exc
+        if code in _CREDENTIAL_REJECTION_CODES:
+            raise TokenRejectedError(
+                f"AWS rejected the selected credential while checking permission to {operation} ({code})",
+                entity_kind=entity_kind,
+                entity_name=entity_name,
+            ) from exc
+        raise EC2Error(
+            f"AWS could not confirm permission to {operation}",
+            detail=str(exc),
+            entity_kind=entity_kind,
+            entity_name=entity_name,
+            hint="retry when AWS can return a definitive DryRun result",
+        ) from exc
+    raise EC2Error(
+        f"AWS did not confirm permission to {operation}",
+        detail="the EC2 DryRun request returned normally instead of DryRunOperation",
+        entity_kind=entity_kind,
+        entity_name=entity_name,
+        hint="retry when AWS can return a definitive DryRun result",
+    )
 
 
 def _check_ssh_revoke_permissions(ec2: Any, security_group_id: str, prefixes: Sequence[str]) -> None:
     """Dry-run every exact revoke before any matching authorize occurs."""
     for prefix in prefixes:
         permission = _ssh_permission(prefix, with_description=False)
-        _raise_on_dry_run_unauthorized(
+        _require_dry_run_permission(
             partial(
                 ec2.revoke_security_group_ingress,
                 GroupId=security_group_id,
@@ -214,11 +236,12 @@ def _check_ssh_revoke_permissions(ec2: Any, security_group_id: str, prefixes: Se
 
 def _check_security_group_delete_permission(ec2: Any, security_group_id: str) -> None:
     """Dry-run the exact security-group delete used after termination."""
-    _raise_on_dry_run_unauthorized(
+    _require_dry_run_permission(
         lambda: ec2.delete_security_group(GroupId=security_group_id, DryRun=True),
         operation="delete the VM security group",
         entity_kind="security-group",
         entity_name=security_group_id,
+        absent_codes=_GROUP_NOT_FOUND_CODES,
     )
 
 
@@ -381,15 +404,14 @@ def _terminate_instance(ec2: Any, instance_id: str) -> bool:
         return False
 
 
-def terminate_and_cleanup_strict(ec2: Any, instance_id: str, security_group_id: str | None) -> None:
+def terminate_and_cleanup_strict(ec2: Any, instance_id: str, security_group_id: str) -> None:
     """Strict explicit-delete teardown for one EC2 VM.
 
     Dry-run a recorded group's exact delete before termination, then require
     termination, confirmation, and bounded group deletion. Already-gone
     resources make retries idempotent.
     """
-    if security_group_id:
-        _check_security_group_delete_permission(ec2, security_group_id)
+    _check_security_group_delete_permission(ec2, security_group_id)
 
     already_gone = False
     try:
@@ -406,8 +428,7 @@ def terminate_and_cleanup_strict(ec2: Any, instance_id: str, security_group_id: 
         except Exception as exc:
             raise wrap_ec2_error(exc) from exc
 
-    if security_group_id:
-        _delete_security_group_strict(ec2, security_group_id)
+    _delete_security_group_strict(ec2, security_group_id)
 
 
 def _delete_security_group_strict(ec2: Any, security_group_id: str) -> None:

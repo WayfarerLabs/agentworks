@@ -98,12 +98,12 @@ Organization or folder firewall policies evaluate outside the ordinary project C
 This release does not inspect them. The project is supported only when no higher-level policy
 terminal-allows ingress around the VPC deny or denies the operator's scoped SSH route.
 
-Google's `testIamPermissions` methods operate on existing resources and are advisory rather than an
-authorization gate. The future VM, boot disk, and firewall rules do not exist during runup, and the
-Compute network and project resources expose no equivalent test. Agentworks therefore makes its
-definitive project, zone, network, image, and shape reads before mutation, then lets each exact
-mutation remain authoritative under bounded provider-ID-owned rollback. It does not display a false
-whole-lifecycle permission confirmation.
+Google's `testIamPermissions` methods are resource-scoped and advisory rather than an authorization
+gate. Available project, network, and other existing-resource tests cannot model the complete future
+request or its conditions: the VM, boot disk, and firewall rules do not exist during runup.
+Agentworks therefore makes its definitive project, zone, network, image, and shape reads before
+mutation, then lets each exact mutation remain authoritative under bounded provider-ID-owned
+rollback. It does not display a false whole-lifecycle permission confirmation.
 
 ## Authenticate the host
 
