@@ -58,6 +58,7 @@ from agentworks.transports import SSHTransport
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
+    from azure.mgmt.authorization import AuthorizationManagementClient
     from azure.mgmt.compute import ComputeManagementClient
     from azure.mgmt.network import NetworkManagementClient
     from azure.mgmt.resource.resources import ResourceManagementClient
@@ -263,7 +264,7 @@ class AzureVMPlatform(VMPlatform):
             self._resource_cached[az.subscription_id] = resource
         return resource
 
-    def _authorization_client(self, az: _HasSubscriptionId, ctx: RunContext) -> Any:
+    def _authorization_client(self, az: _HasSubscriptionId, ctx: RunContext) -> AuthorizationManagementClient:
         """Build an authorization client for the one create-time query."""
         from azure.mgmt.authorization import AuthorizationManagementClient
 
