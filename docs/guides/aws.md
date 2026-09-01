@@ -105,12 +105,14 @@ association before the dry run or any termination, then waits for termination an
 after its network interface detaches. A mutation-time `NotFound` succeeds only after bounded,
 consecutive read-only absence checks.
 
-Every `RunInstances` request carries a fresh idempotency token. If AWS may have accepted a launch but
-its response does not reach Agentworks, rollback looks up that token and accepts only one instance
-with the expected `agentworks:vm` tag and recorded security group. An absent, ambiguous, malformed,
-or differently owned result is never guessed away. Agentworks retains the failed VM row with the
-token so a later `agw vm delete <name>` can resolve it after AWS settles; repeated absence reads are
-required before that explicit path treats the token as unused.
+Every `RunInstances` request carries a fresh idempotency token. If AWS may have accepted a launch
+but its response does not reach Agentworks, rollback looks up that token and accepts only one
+instance with the expected `agentworks:vm` tag and recorded security group. An absent, ambiguous,
+malformed, or differently owned result is never guessed away. Agentworks retains the failed VM row
+with the token so a later `agw vm delete <name>` can resolve it after AWS settles; repeated absence
+reads are required before that explicit path treats the token as unused. Once any token lookup
+observes the owned instance, deletion requires AWS to accept its termination and never downgrades a
+later `NotFound` response to “the launch never happened.”
 
 Create rollback never accepts `NotFound` for a newly returned provider ID as proof of cleanup. It
 retries the exact termination or group deletion because the resource may still be propagating. If

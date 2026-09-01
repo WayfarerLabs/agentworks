@@ -76,6 +76,7 @@ class Controls:
     # Whether a DescribeInstances client-token reconciliation finds the
     # instance whose RunInstances response was lost.
     client_token_instance: bool = False
+    client_token_instance_outcomes: list[bool | Exception] = field(default_factory=list)
 
 
 @dataclass
@@ -132,6 +133,7 @@ class _FakeEC2:
         self._terminate_attempts = 0
         self._dry_run_attempts = 0
         self._instance_describe_attempts = 0
+        self._client_token_describe_attempts = 0
         self._security_group_describe_attempts = 0
         # sg_id -> {cidr: rule_id}; the per-SG ingress the exposure tests read.
         self.ingress: dict[str, dict[str, str]] = {}
@@ -154,7 +156,15 @@ class _FakeEC2:
         self._record("describe_instances", **kwargs)
         filters = kwargs.get("Filters")
         if filters and any(item.get("Name") == "client-token" for item in filters):
-            if self._c.client_token_instance:
+            idx = self._client_token_describe_attempts
+            self._client_token_describe_attempts += 1
+            present = self._c.client_token_instance
+            if idx < len(self._c.client_token_instance_outcomes):
+                outcome = self._c.client_token_instance_outcomes[idx]
+                if isinstance(outcome, Exception):
+                    raise outcome
+                present = outcome
+            if present:
                 return {
                     "Reservations": [
                         {

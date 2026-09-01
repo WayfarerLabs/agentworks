@@ -451,6 +451,37 @@ class TestCreateRollback:
         } == {token}
         assert rec.kwargs_for("terminate_instances") == {"InstanceIds": ["i-123"]}
 
+    def test_interrupt_during_lost_response_reconciliation_retains_the_token(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from tests import _aws_fakes
+
+        rec = install_fakes(monkeypatch)
+        original_describe = _aws_fakes._FakeEC2.describe_instances
+
+        def _lose_response(self: Any, **kwargs: object) -> object:
+            self._record("run_instances", **kwargs)
+            raise unreachable()
+
+        def _interrupt_token_read(self: Any, **kwargs: Any) -> dict[str, Any]:
+            filters = kwargs.get("Filters", [])
+            if any(item.get("Name") == "client-token" for item in filters):
+                raise KeyboardInterrupt("stop reconciliation")
+            return original_describe(self, **kwargs)
+
+        monkeypatch.setattr("tests._aws_fakes._FakeEC2.run_instances", _lose_response)
+        monkeypatch.setattr("tests._aws_fakes._FakeEC2.describe_instances", _interrupt_token_read)
+
+        with pytest.raises(RetainedProvisioningError) as caught:
+            _platform().create(_request(), RunContext(config=_config()))
+
+        assert isinstance(caught.value.__cause__, KeyboardInterrupt)
+        assert caught.value.platform_metadata["client_token"] == rec.kwargs_for("run_instances")["ClientToken"]
+        assert "instance_id" not in caught.value.platform_metadata
+        assert "terminate_instances" not in rec.methods("ec2")
+        assert "delete_security_group" not in rec.methods("ec2")
+
     @pytest.mark.parametrize(
         ("backend_name", "security_group_id"),
         [("other", "sg-123"), ("dev", "sg-other")],
@@ -659,9 +690,7 @@ class TestCreateRollback:
         with pytest.raises(RetainedProvisioningError) as caught:
             _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
         assert isinstance(caught.value.__cause__, KeyboardInterrupt)
-        metadata = dict(caught.value.platform_metadata)
-        assert UUID(metadata.pop("client_token")).version == 4
-        assert metadata == {
+        assert caught.value.platform_metadata == {
             "region": "us-east-1",
             "backend_name": "dev",
             "account_id": "111122223333",
@@ -990,6 +1019,60 @@ class TestDelete:
             ("ec2", "get_waiter", False),
             ("ec2", "delete_security_group", False),
         ]
+
+    def test_token_reconciliation_never_forgets_an_observed_instance(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr("agentworks.plugins.aws.network.time.sleep", lambda _seconds: None)
+        rec = install_fakes(
+            monkeypatch,
+            Controls(
+                client_token_instance_outcomes=[False, True],
+                instance_security_group_id="sg-detached",
+                security_group_presence_outcomes=[False, False, False],
+            ),
+        )
+        metadata = _vm().platform_metadata | {
+            "create_incomplete": "true",
+            "client_token": "retained-token",
+        }
+        del metadata["instance_id"]
+
+        _platform().delete(SimpleNamespace(name="dev", platform_metadata=metadata), RunContext())  # type: ignore[arg-type]
+
+        token_reads = [
+            kwargs
+            for service, method, kwargs in rec.calls
+            if service == "ec2" and method == "describe_instances" and kwargs.get("Filters")
+        ]
+        assert len(token_reads) == 2
+        assert rec.kwargs_for("terminate_instances") == {"InstanceIds": ["i-123"]}
+
+    def test_token_observation_requires_positive_termination(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("agentworks.plugins.aws.network.time.sleep", lambda _seconds: None)
+        not_found = client_error("InvalidInstanceID.NotFound", "propagating", "Terminate")
+        rec = install_fakes(
+            monkeypatch,
+            Controls(
+                client_token_instance=True,
+                instance_security_group_id="sg-detached",
+                security_group_presence_outcomes=[False, False, False],
+                instance_presence_outcomes=[False, False, False],
+                terminate_errors=[not_found] * 6,
+            ),
+        )
+        metadata = _vm().platform_metadata | {
+            "create_incomplete": "true",
+            "client_token": "retained-token",
+        }
+        del metadata["instance_id"]
+
+        with pytest.raises(EC2Error):
+            _platform().delete(SimpleNamespace(name="dev", platform_metadata=metadata), RunContext())  # type: ignore[arg-type]
+
+        assert rec.methods("ec2").count("terminate_instances") == 6
+        assert rec.methods("ec2").count("describe_instances") == 1
 
     def test_account_mismatch_prevents_all_ec2_calls(self, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = install_fakes(monkeypatch, Controls(account_id="999988887777"))

@@ -473,7 +473,7 @@ class EC2Platform(VMPlatform):
                 metadata["security_group_id"] = security_group_id
             if incomplete:
                 metadata["create_incomplete"] = "true"
-                if launch_attempted:
+                if launch_attempted and instance_id is None:
                     metadata["client_token"] = client_token
             return metadata
 
@@ -492,12 +492,12 @@ class EC2Platform(VMPlatform):
                 return failure.detail
             if isinstance(failure, Exception):
                 return str(wrap_ec2_error(failure))
-            return "cleanup was interrupted"
+            return "operation was interrupted"
 
         def _raise_retained(
             cause: BaseException,
             *,
-            reconciliation_error: Exception | None = None,
+            reconciliation_error: BaseException | None = None,
             cleanup_error: BaseException | None = None,
         ) -> None:
             summaries = []
@@ -537,6 +537,8 @@ class EC2Platform(VMPlatform):
                         security_group_id,
                         require_security_group=True,
                     )
+                except KeyboardInterrupt as interrupt:
+                    _raise_retained(interrupt, reconciliation_error=interrupt)
                 except Exception as exc:
                     reconciliation_error = exc
             try:
@@ -695,6 +697,7 @@ class EC2Platform(VMPlatform):
                 entity_name=vm.name,
             )
         ec2 = self._client("ec2", self._region_of(vm), ctx)
+        reconciled_instance: dict[str, Any] | None = None
         if partial_create and instance_id is None:
             client_token = self._optional_metadata(vm, "client_token")
             if client_token is not None:
@@ -709,6 +712,7 @@ class EC2Platform(VMPlatform):
                         security_group_id,
                         require_security_group=False,
                     )
+                    reconciled_instance = reconciled
         terminate_and_cleanup_strict(
             ec2,
             instance_id,
@@ -716,6 +720,7 @@ class EC2Platform(VMPlatform):
             backend_name,
             account_bound=recorded_account_id is not None,
             partial_create=partial_create,
+            observed_instance=reconciled_instance,
         )
         output.info(f"EC2 instance '{vm.name}' deleted")
 

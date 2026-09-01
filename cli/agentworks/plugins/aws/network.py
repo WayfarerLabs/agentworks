@@ -550,15 +550,13 @@ def _confirm_absent(lookup: Callable[[], object | None], *, entity_kind: str, en
 
 
 def reconcile_instance_by_client_token(ec2: Any, client_token: str) -> dict[str, Any] | None:
-    """Resolve a retained launch token, requiring repeated absence evidence."""
-    instance = describe_instance_by_client_token(ec2, client_token)
-    if instance is not None:
-        return instance
-    _confirm_absent(
-        partial(describe_instance_by_client_token, ec2, client_token),
-        entity_kind="RunInstances client token",
-        entity_name=client_token,
-    )
+    """Resolve a retained launch token without forgetting observed existence."""
+    for attempt in range(_ABSENCE_CONFIRM_SUCCESSES):
+        instance = describe_instance_by_client_token(ec2, client_token)
+        if instance is not None:
+            return instance
+        if attempt + 1 < _ABSENCE_CONFIRM_SUCCESSES:
+            time.sleep(1)
     return None
 
 
@@ -570,9 +568,12 @@ def terminate_and_cleanup_strict(
     *,
     account_bound: bool,
     partial_create: bool,
+    observed_instance: Mapping[str, Any] | None = None,
 ) -> None:
     """Strict explicit-delete teardown with positive permission and absence proof."""
-    instance = describe_instance_exact(ec2, instance_id) if instance_id is not None else None
+    instance = dict(observed_instance) if observed_instance is not None else None
+    if instance is None and instance_id is not None:
+        instance = describe_instance_exact(ec2, instance_id)
     if instance_id is not None and instance is None:
         if not account_bound:
             raise EC2Error(
@@ -623,22 +624,28 @@ def terminate_and_cleanup_strict(
         _check_security_group_delete_permission(ec2, security_group_id)
 
     if instance_id is not None and instance is not None:
-        try:
-            ec2.terminate_instances(InstanceIds=[instance_id])
-        except Exception as exc:
-            if error_code(exc) in _INSTANCE_NOT_FOUND_CODES:
-                _confirm_absent(
-                    partial(describe_instance_exact, ec2, instance_id),
-                    entity_kind="instance",
-                    entity_name=instance_id,
-                )
-            else:
-                raise wrap_ec2_error(exc) from exc
+        if observed_instance is not None:
+            # Once token reconciliation has proved this uncertain launch
+            # existed, later NotFound reads cannot downgrade it to "never
+            # created." Require a positively accepted termination instead.
+            _terminate_created_instance(ec2, instance_id)
         else:
             try:
-                ec2.get_waiter("instance_terminated").wait(InstanceIds=[instance_id])
+                ec2.terminate_instances(InstanceIds=[instance_id])
             except Exception as exc:
-                raise wrap_ec2_error(exc) from exc
+                if error_code(exc) in _INSTANCE_NOT_FOUND_CODES:
+                    _confirm_absent(
+                        partial(describe_instance_exact, ec2, instance_id),
+                        entity_kind="instance",
+                        entity_name=instance_id,
+                    )
+                else:
+                    raise wrap_ec2_error(exc) from exc
+            else:
+                try:
+                    ec2.get_waiter("instance_terminated").wait(InstanceIds=[instance_id])
+                except Exception as exc:
+                    raise wrap_ec2_error(exc) from exc
 
     if security_group is not None:
         _delete_security_group_strict(ec2, security_group_id)
