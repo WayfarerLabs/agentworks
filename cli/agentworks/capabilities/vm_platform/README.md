@@ -195,7 +195,9 @@ and DB migration.
   enough to prove current-account ownership, or its ambiguous `NotFound` retains the row. `delete`
   is NOT unconditionally best-effort though: a delete that cannot remove the backend VM must raise a
   typed error (the manager deletes the DB row only on success, so a swallowed backend failure
-  orphans the VM; #329). Azure enforces this with a post-teardown existence probe
+  orphans the VM; #329). A platform that discovers a provider ID needed for safe continuation raises
+  `RetainedDeletionError` before its next provider call; core persists the replacement metadata and
+  retries once. Azure enforces the ordinary failure contract with a post-teardown existence probe
   (`verify_vm_deleted`), GCE requires provider-ID-owned instance absence before removing its
   lifetime deny, and EC2 requires an STS account match, provider-owned security-group proof, its
   termination waiter or bounded absence confirmation, and security-group cleanup. Only Azure's
@@ -504,10 +506,11 @@ The three managed cloud platforms therefore use different evidence:
   confirmation, or security-group cleanup failure so core retains the VM row for retry. Create sends
   an idempotency token with `RunInstances`; a lost launch response is reconciled only to one
   instance bearing the exact backend tag and recorded security group. Rollback retries
-  propagation-time `NotFound` instead of treating it as absence, and explicit deletion never forgets
-  an instance once token reconciliation observes it. If reconciliation or positive cleanup never
-  arrives, `RetainedProvisioningError` makes the provisional row, known provider identifiers, and
-  launch token durable for explicit deletion.
+  propagation-time `NotFound` instead of treating it as absence. Explicit deletion raises the
+  internal retained-deletion handoff as soon as token reconciliation observes an instance, making
+  that ID durable before teardown resumes; later token-filter inconsistency therefore cannot forget
+  it. If reconciliation or positive cleanup never arrives, `RetainedProvisioningError` makes the
+  provisional row, known provider identifiers, and launch token durable for explicit deletion.
 - GCE makes its definitive project, zone, network, image, and shape reads before mutation, then lets
   exact mutations authorize themselves under provider-ID-owned rollback. Its IAM test methods apply
   to existing resources and are advisory; the future VM, boot disk, and firewall rules do not exist

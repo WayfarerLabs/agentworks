@@ -111,8 +111,9 @@ instance with the expected `agentworks:vm` tag and recorded security group. An a
 malformed, or differently owned result is never guessed away. Agentworks retains the failed VM row
 with the token so a later `agw vm delete <name>` can resolve it after AWS settles; repeated absence
 reads are required before that explicit path treats the token as unused. Once any token lookup
-observes the owned instance, deletion requires AWS to accept its termination and never downgrades a
-later `NotFound` response to “the launch never happened.”
+observes the owned instance, Agentworks records its ID before making another provider request and
+then resumes deletion. An interruption therefore leaves the exact ID in the VM row. AWS must accept
+its termination; a later `NotFound` response never downgrades it to “the launch never happened.”
 
 Create rollback never accepts `NotFound` for a newly returned provider ID as proof of cleanup. It
 retries the exact termination or group deletion because the resource may still be propagating. If

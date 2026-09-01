@@ -130,6 +130,25 @@ class RetainedProvisioningError(ProvisioningError):
         self.platform_metadata = dict(platform_metadata)
 
 
+class RetainedDeletionError(ProvisioningError):
+    """Delete discovered provider identity that must be durable before teardown.
+
+    The VM manager atomically replaces ``platform_metadata`` and retries the
+    delete once. A failure or interrupt in that retry therefore leaves the row
+    able to target every provider resource already observed.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        platform_metadata: dict[str, str],
+        entity_name: str,
+    ) -> None:
+        super().__init__(message, entity_kind="vm", entity_name=entity_name)
+        self.platform_metadata = dict(platform_metadata)
+
+
 class VMPlatform(Capability):
     """Capability: the code that runs VMs on one backend kind.
 
@@ -309,10 +328,13 @@ class VMPlatform(Capability):
         caller (``delete_vm``) deletes the DB row only after this op
         returns, so a swallowed backend failure orphans a surviving VM
         with nothing left to target it; a raise keeps the row for a
-        retry. Best-effort warn-and-continue is acceptable only for
-        auxiliary resources an operator can still find and remove
-        (azure's NIC/IP/NSG/disk sweep); the VM itself is the gate,
-        which azure enforces with a post-teardown existence probe."""
+        retry. A platform that discovers a more exact provider identity
+        needed for retry raises ``RetainedDeletionError`` before its next
+        provider call; core persists that metadata and invokes ``delete``
+        once more against the refreshed row. Best-effort warn-and-continue
+        is acceptable only for auxiliary resources an operator can still
+        find and remove (azure's NIC/IP/NSG/disk sweep); the VM itself is
+        the gate, which azure enforces with a post-teardown existence probe."""
 
     @abstractmethod
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import contextlib
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.capabilities.base import RunContext
+from agentworks.capabilities.vm_platform.base import RetainedDeletionError
 from agentworks.db import VMStatus
 from agentworks.errors import StateError, UserAbort
 from agentworks.naming import NAME_RE
@@ -280,7 +282,16 @@ def delete_vm(
         # nothing left to target it (#329). ``--force`` does not soften
         # this: force skips the child-count guard and the confirm
         # prompt, never a failed backend delete.
-        platform.delete(vm, ops_ctx)
+        try:
+            platform.delete(vm, ops_ctx)
+        except RetainedDeletionError as retained:
+            # The platform positively discovered a provider identity that was
+            # previously represented only by an indeterminate request token.
+            # Make it durable before ANY later provider call. If the one retry
+            # fails or is interrupted, the row can resume from that exact ID.
+            db.update_vm_platform_metadata(name, retained.platform_metadata)
+            vm = replace(vm, platform_metadata=retained.platform_metadata)
+            platform.delete(vm, ops_ctx)
 
     # Clean up logs
     from agentworks.ssh import LOG_DIR

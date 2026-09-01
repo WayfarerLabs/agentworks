@@ -568,13 +568,11 @@ def terminate_and_cleanup_strict(
     *,
     account_bound: bool,
     partial_create: bool,
-    observed_instance: Mapping[str, Any] | None = None,
+    positively_observed_instance: bool = False,
 ) -> None:
     """Strict explicit-delete teardown with positive permission and absence proof."""
-    instance = dict(observed_instance) if observed_instance is not None else None
-    if instance is None and instance_id is not None:
-        instance = describe_instance_exact(ec2, instance_id)
-    if instance_id is not None and instance is None:
+    instance = describe_instance_exact(ec2, instance_id) if instance_id is not None else None
+    if instance_id is not None and instance is None and not positively_observed_instance:
         if not account_bound:
             raise EC2Error(
                 f"cannot confirm absent legacy instance '{instance_id}' belongs to the current AWS account",
@@ -623,11 +621,11 @@ def terminate_and_cleanup_strict(
             )
         _check_security_group_delete_permission(ec2, security_group_id)
 
-    if instance_id is not None and instance is not None:
-        if observed_instance is not None:
-            # Once token reconciliation has proved this uncertain launch
-            # existed, later NotFound reads cannot downgrade it to "never
-            # created." Require a positively accepted termination instead.
+    if instance_id is not None and (instance is not None or positively_observed_instance):
+        if positively_observed_instance:
+            # Once durable token reconciliation has proved this uncertain
+            # launch existed, later NotFound reads cannot downgrade it to
+            # "never created." Require a positively accepted termination.
             _terminate_created_instance(ec2, instance_id)
         else:
             try:

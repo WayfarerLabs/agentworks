@@ -15,7 +15,7 @@ from uuid import UUID
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.vm_platform import ProvisionRequest, RetainedProvisioningError
+from agentworks.capabilities.vm_platform import ProvisionRequest, RetainedDeletionError, RetainedProvisioningError
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
@@ -532,7 +532,13 @@ class TestCreateRollback:
         assert metadata["client_token"] == rec.kwargs_for("run_instances")["ClientToken"]
 
         controls.client_token_instance = True
-        platform.delete(SimpleNamespace(name="dev", platform_metadata=metadata), RunContext())  # type: ignore[arg-type]
+        with pytest.raises(RetainedDeletionError) as retained:
+            platform.delete(SimpleNamespace(name="dev", platform_metadata=metadata), RunContext())  # type: ignore[arg-type]
+        assert retained.value.platform_metadata["instance_id"] == "i-123"
+        platform.delete(  # type: ignore[arg-type]
+            SimpleNamespace(name="dev", platform_metadata=retained.value.platform_metadata),
+            RunContext(),
+        )
         assert rec.kwargs_for("terminate_instances") == {"InstanceIds": ["i-123"]}
 
     def test_retained_partial_create_allows_detached_group_cleanup(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1030,6 +1036,7 @@ class TestDelete:
             Controls(
                 client_token_instance_outcomes=[False, True],
                 instance_security_group_id="sg-detached",
+                instance_presence_outcomes=[False],
                 security_group_presence_outcomes=[False, False, False],
             ),
         )
@@ -1039,7 +1046,13 @@ class TestDelete:
         }
         del metadata["instance_id"]
 
-        _platform().delete(SimpleNamespace(name="dev", platform_metadata=metadata), RunContext())  # type: ignore[arg-type]
+        platform = _platform()
+        with pytest.raises(RetainedDeletionError) as retained:
+            platform.delete(SimpleNamespace(name="dev", platform_metadata=metadata), RunContext())  # type: ignore[arg-type]
+        platform.delete(  # type: ignore[arg-type]
+            SimpleNamespace(name="dev", platform_metadata=retained.value.platform_metadata),
+            RunContext(),
+        )
 
         token_reads = [
             kwargs
@@ -1068,11 +1081,17 @@ class TestDelete:
         }
         del metadata["instance_id"]
 
+        platform = _platform()
+        with pytest.raises(RetainedDeletionError) as retained:
+            platform.delete(SimpleNamespace(name="dev", platform_metadata=metadata), RunContext())  # type: ignore[arg-type]
         with pytest.raises(EC2Error):
-            _platform().delete(SimpleNamespace(name="dev", platform_metadata=metadata), RunContext())  # type: ignore[arg-type]
+            platform.delete(  # type: ignore[arg-type]
+                SimpleNamespace(name="dev", platform_metadata=retained.value.platform_metadata),
+                RunContext(),
+            )
 
         assert rec.methods("ec2").count("terminate_instances") == 6
-        assert rec.methods("ec2").count("describe_instances") == 1
+        assert rec.methods("ec2").count("describe_instances") == 2
 
     def test_account_mismatch_prevents_all_ec2_calls(self, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = install_fakes(monkeypatch, Controls(account_id="999988887777"))

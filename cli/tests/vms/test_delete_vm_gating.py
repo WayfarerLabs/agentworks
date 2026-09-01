@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from agentworks.capabilities.vm_platform import RetainedDeletionError
 from agentworks.db import VMStatus
 from agentworks.errors import AuthorizationError, StateError, UserAbort
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
@@ -398,6 +399,71 @@ def test_backend_delete_failure_keeps_the_row(
     assert db.get_vm("dvm") is not None
     assert db.get_workspace("kept") is not None
     assert artifact.read_text() == "keep"
+
+
+def test_reconciled_delete_identity_is_durable_before_retry(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed(db)
+    db.update_vm_platform_metadata(
+        "dvm",
+        {
+            "backend_name": "dvm",
+            "security_group_id": "sg-123",
+            "client_token": "retained-token",
+            "create_incomplete": "true",
+        },
+    )
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
+    calls: list[dict[str, str]] = []
+    interrupt_retry = True
+
+    def _delete(self: ProxmoxPlatform, row: VMRow, ctx: object) -> None:
+        nonlocal interrupt_retry
+        del self, ctx
+        calls.append(dict(row.platform_metadata))
+        if len(calls) == 1:
+            metadata = dict(row.platform_metadata)
+            metadata["instance_id"] = "i-reconciled"
+            raise RetainedDeletionError(
+                "provider identity reconciled",
+                platform_metadata=metadata,
+                entity_name=row.name,
+            )
+        persisted = db.get_vm(row.name)
+        assert persisted is not None
+        assert persisted.platform_metadata == row.platform_metadata
+        if interrupt_retry:
+            interrupt_retry = False
+            raise KeyboardInterrupt("interrupt after durable reconciliation")
+
+    monkeypatch.setattr(ProxmoxPlatform, "delete", _delete)
+
+    with pytest.raises(KeyboardInterrupt):
+        vm_manager.delete_vm(
+            db,
+            make_config(),
+            "dvm",
+            yes=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    row = db.get_vm("dvm")
+    assert row is not None
+    assert row.platform_metadata["instance_id"] == "i-reconciled"
+    assert calls[1] == row.platform_metadata
+
+    vm_manager.delete_vm(
+        db,
+        make_config(),
+        "dvm",
+        yes=True,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+    assert calls[2] == row.platform_metadata
+    assert db.get_vm("dvm") is None
 
 
 def test_force_does_not_suppress_backend_delete_failure(

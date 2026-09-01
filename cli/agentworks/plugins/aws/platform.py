@@ -26,6 +26,7 @@ from agentworks import output
 from agentworks.capabilities.vm_platform.base import (
     ProvisionRequest,
     ProvisionResult,
+    RetainedDeletionError,
     RetainedProvisioningError,
     VMPlatform,
 )
@@ -686,6 +687,7 @@ class EC2Platform(VMPlatform):
         output.info(f"Deleting EC2 instance '{vm.name}'...")
         partial_create = vm.platform_metadata.get("create_incomplete") == "true"
         instance_id = self._optional_metadata(vm, "instance_id") if partial_create else self._instance_id(vm)
+        client_token = self._optional_metadata(vm, "client_token") if partial_create else None
         security_group_id = self._security_group_id(vm)
         backend_name = self._backend_name(vm)
         recorded_account_id = self._recorded_account_id(vm)
@@ -697,22 +699,28 @@ class EC2Platform(VMPlatform):
                 entity_name=vm.name,
             )
         ec2 = self._client("ec2", self._region_of(vm), ctx)
-        reconciled_instance: dict[str, Any] | None = None
-        if partial_create and instance_id is None:
-            client_token = self._optional_metadata(vm, "client_token")
-            if client_token is not None:
-                reconciled = reconcile_instance_by_client_token(ec2, client_token)
-                if reconciled is not None:
-                    # A prior termination may already have detached the group,
-                    # so retained-delete reconciliation requires the exact tag;
-                    # strict teardown below still verifies every live resource.
-                    instance_id = require_owned_instance(
-                        reconciled,
-                        backend_name,
-                        security_group_id,
-                        require_security_group=False,
-                    )
-                    reconciled_instance = reconciled
+        if instance_id is None and client_token is not None:
+            reconciled = reconcile_instance_by_client_token(ec2, client_token)
+            if reconciled is not None:
+                # A prior termination may already have detached the group, so
+                # token reconciliation requires the exact ownership tag but
+                # permits that one expected lifecycle transition.
+                instance_id = require_owned_instance(
+                    reconciled,
+                    backend_name,
+                    security_group_id,
+                    require_security_group=False,
+                )
+                durable_metadata = dict(vm.platform_metadata)
+                durable_metadata["instance_id"] = instance_id
+                # Stop before the next provider call. Core persists this exact
+                # identity and retries with the client token retained as proof
+                # that the ID came from positive launch reconciliation.
+                raise RetainedDeletionError(
+                    f"AWS reconciled retained VM '{vm.name}' to instance '{instance_id}'",
+                    platform_metadata=durable_metadata,
+                    entity_name=vm.name,
+                )
         terminate_and_cleanup_strict(
             ec2,
             instance_id,
@@ -720,7 +728,7 @@ class EC2Platform(VMPlatform):
             backend_name,
             account_bound=recorded_account_id is not None,
             partial_create=partial_create,
-            observed_instance=reconciled_instance,
+            positively_observed_instance=instance_id is not None and client_token is not None,
         )
         output.info(f"EC2 instance '{vm.name}' deleted")
 
