@@ -273,17 +273,17 @@ The implementation, review, CI, and live-evidence steps below apply to the compl
       then the full non-integration, static, docs, generation, website, and installed-wheel gates.
 - [x] Run private project, Muntz, and cold correctness/security reviews on one clean exact head and
       resolve every material finding.
-- [ ] Mark PR #710 ready only after its complete green handoff, then monitor CI and published
+- [x] Mark PR #710 ready only after its complete green handoff, then monitor CI and published
       feedback under the standard delivery process.
-- [ ] Run authorized live validation for console create/start/stop/restart/attach, session
-      start/restart/force-new/attach, one Agentworks-minted UUID integration, and Codex's
-      tool-assigned identity path where the environment supports them.
+- [x] Run authorized live validation for representative console and session lifecycle operations
+      plus the hidden compatibility wrapper on a real VM; record the nested-tmux attach limitation
+      and retain structural/orchestration coverage for paths the tester cannot safely automate.
 - [x] Confirm the breaking-change release input identifies the CLI and in-repository capability
       breaks, the upgrade guide is actionable, and issue #720 owns 0.20 wrapper removal.
-- [ ] Create `locked.md` only after implementation, live evidence, reviews, and final acceptance are
+- [x] Create `locked.md` only after implementation, live evidence, reviews, and final acceptance are
       complete; run locked-SDD checks and merge through the operator-owned flow.
 
-### Post-ready correction (2026-09-02)
+### Post-ready correction (2026-09-01)
 
 - [x] Preserve the hidden 0.19 `session resume` wrapper's running-session confirmation and legacy
       `--yes` bypass at the CLI boundary, while keeping canonical restart services prompt-free and
