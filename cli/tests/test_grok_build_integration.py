@@ -168,7 +168,7 @@ def test_absent_summary_starts_fresh() -> None:
     assert _grok_argv(command)[:2] == ["--session-id", _SID]
 
 
-def test_start_and_resume_use_the_same_state_based_decision() -> None:
+def test_repeated_start_uses_the_same_state_based_decision() -> None:
     target = _FakeTarget({"summary.json": _FakeResult(0)})
     integration = _integration()
     assert integration.start(_op_ctx(target)) == integration.start(_op_ctx(target))

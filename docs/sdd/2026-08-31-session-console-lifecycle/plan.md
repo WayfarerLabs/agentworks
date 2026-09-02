@@ -308,6 +308,9 @@ The implementation, review, CI, and live-evidence steps below apply to the compl
       honest live-versus-structural evidence before the final merge gate.
 - [x] Incorporate the late exact-production tester pass, including live `--all-running` selection
       and the explicit legacy/incomplete-identity live-test limits, into the lock before merge.
+- [x] Complete final review hygiene by making the remaining live-runtime fixture fingerprint
+      truthful, preserving structured console error metadata, and naming repeated-start tests for
+      the version-1 harness contract.
 
 ### Phase 6 Definition of Done
 

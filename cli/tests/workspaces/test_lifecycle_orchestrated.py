@@ -96,12 +96,12 @@ def _seed_workspace(db: Database, *, vm_name: str, name: str) -> None:
 
 
 def _seed_live_session(db: Database, *, name: str, ws: str) -> None:
-    """A session row that reads as alive (pid + boot_id + socket), so
+    """A session row that reads as alive (complete fingerprint + socket), so
     delete's status-aware kill loop probes and kills it."""
     db._conn.execute(
         "INSERT INTO sessions (name, workspace_name, template, mode, "
-        "socket_path, pid, boot_id) VALUES (?, ?, 'default', 'admin', "
-        "?, 4242, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')",
+        "socket_path, pid, boot_id, tmux_server_start_ticks) VALUES (?, ?, 'default', 'admin', "
+        "?, 4242, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', 77)",
         (name, ws, f"/tmp/{name}.sock"),
     )
     db._conn.commit()

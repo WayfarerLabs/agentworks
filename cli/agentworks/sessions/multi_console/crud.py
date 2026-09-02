@@ -343,7 +343,11 @@ def add_sessions(
         vm, target = live
         presence = _mc._console_tmux_presence(target, console_name)
         if presence is ProbeStatus.UNKNOWN:
-            raise StateError(f"could not determine console '{console_name}' tmux state")
+            raise StateError(
+                f"could not determine console '{console_name}' tmux state",
+                entity_kind="console",
+                entity_name=console_name,
+            )
         if presence is ProbeStatus.ABSENT:
             return
         preserve_memo: PreserveEnvMemo = {}
@@ -519,7 +523,11 @@ def reorder_sessions(
         _vm, target = live
         presence = _mc._console_tmux_presence(target, console_name)
         if presence is ProbeStatus.UNKNOWN:
-            raise StateError(f"could not determine console '{console_name}' tmux state")
+            raise StateError(
+                f"could not determine console '{console_name}' tmux state",
+                entity_kind="console",
+                entity_name=console_name,
+            )
         if presence is ProbeStatus.ABSENT:
             return
         _reorder_session_windows(
@@ -628,7 +636,11 @@ def add_shell(
         vm, target = live
         presence = _mc._console_tmux_presence(target, console_name)
         if presence is ProbeStatus.UNKNOWN:
-            raise StateError(f"could not determine console '{console_name}' tmux state")
+            raise StateError(
+                f"could not determine console '{console_name}' tmux state",
+                entity_kind="console",
+                entity_name=console_name,
+            )
         if presence is ProbeStatus.ABSENT:
             return
         session = db.get_session(session_name)

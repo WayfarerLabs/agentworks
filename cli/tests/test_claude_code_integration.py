@@ -173,7 +173,7 @@ def test_absent_transcript_launches_fresh() -> None:
     assert "starting new session s1" in command
 
 
-def test_start_and_restart_are_symmetric() -> None:
+def test_repeated_start_uses_the_same_state_based_decision() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})
     harness_integration = _harness_integration()
     assert harness_integration.start(_op_ctx(target)) == harness_integration.start(_op_ctx(target))
