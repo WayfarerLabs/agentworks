@@ -53,14 +53,17 @@ separate security effort tracked by issue #715.
 
 ## Verification and review
 
-The final production checkpoint is `41d0fead9ce79d3e7c1fdc1e77921fd0bac51605`, based on
+The final production checkpoint is `8efcc98f6fbee2b796736c5c265eeb92aa1ac89d`, based on
 `origin/main` at `8695afcd833790ee433b50bb9f5d5c696177233d`. The complete pipeline and live
 validation ran at `1081470fa0ab315c3e0221da8142a87ad9b292a1`. Subsequent bounded corrections
 completed one runtime fixture fingerprint, added established entity metadata to three console
 errors, corrected two repeated-start test names, and made the atomic session-runtime update
-participate in explicit database transactions. Verification recorded:
+participate in explicit database transactions. The final correction also made migration repair stop
+on indeterminate fingerprints, normalized only the canonical local Windows forced-TTY close
+advisory, replaced elevated PID exit-code inference with explicit present/absent facts, and reduced
+ordinary session-list repair output to one aggregate status-check indication. Verification recorded:
 
-- 8,225 non-integration tests with one platform-specific skip;
+- 8,232 non-integration tests with one platform-specific skip at the final production checkpoint;
 - focused session, console, harness, compatibility, completion, cascade, migration, and adversarial
   suites;
 - Ruff check and format plus strict mypy across 745 source files;
@@ -72,17 +75,18 @@ participate in explicit database transactions. Verification recorded:
   suite passed locally, and the final docs-only lock head must clear the complete aggregate gate
   before merge.
 
-The private project-values and Muntz reviews converged cleanly at the exact final production
-checkpoint; the preceding production checkpoint also received a clean cold correctness/security
-review, and final hosted CI remains required before merge. Their correction rounds closed fail-open
-transport and tmux probes, legacy and parent-cascade teardown gaps, malformed identity handling,
-ambiguous console state, post-launch cleanup, duplicated status classification, stale collateral,
+The private project-values, Muntz, and cold correctness/security reviews converged cleanly at the
+exact final production checkpoint. Final hosted CI and targeted operator Windows validation of the
+corrected artifact remain required before merge. Their correction rounds closed fail-open transport
+and tmux probes, legacy and parent-cascade teardown gaps, malformed identity handling, ambiguous
+console state, post-launch cleanup, duplicated status classification, stale collateral,
 compatibility safety, process-global test isolation, invalid runtime-identity fixtures, and
-test-quality findings. The final compatibility correction uses only read-only status facts before
-consent and conservatively gates incomplete dedicated rows whose status is missing or unknown. The
-final console correction reuses the established safe repair authority before live selection,
-preserves the typed legacy migration refusal, and fails closed when incomplete identity remains
-unresolved.
+test-quality findings. They also replayed privileged-shell refusal, malformed and spoofed PID facts,
+and forced-TTY stream handling against the final production checkpoint. The final compatibility
+correction uses only read-only status facts before consent and conservatively gates incomplete
+dedicated rows whose status is missing or unknown. The final console correction reuses the
+established safe repair authority before live selection, preserves the typed legacy migration
+refusal, and fails closed when incomplete identity remains unresolved.
 
 The integration tester first drove the shipped lifecycle on a real VM at `f4d3a920`: session stop,
 start, idempotent start, and restart; console create, stop, start, and restart; the hidden resume

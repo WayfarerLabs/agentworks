@@ -323,6 +323,8 @@ The implementation, review, CI, and live-evidence steps below apply to the compl
       as indeterminate in singular status, absence proof, and batched status.
 - [x] Keep root probing confined to dedicated agent-owned runtime state and remove the impossible
       legacy agent/shared-server probe surface and fixture.
+- [x] Refresh the lock from the superseded transaction checkpoint to the final reviewed fail-closed
+      repair checkpoint and record the exact local evidence and remaining live/CI gates.
 
 ### Phase 6 Definition of Done
 
