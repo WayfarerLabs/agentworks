@@ -113,10 +113,10 @@ def running_session_names(db: Database, config: Config, vm_name: str) -> list[st
     Uses the same one-round-trip-per-VM check that powers ``aw session list``.
     Returns alphabetically sorted names.
 
-    Raises ConnectivityError when the VM has sessions eligible to be probed
-    (valid PID + boot_id) but the probe came back empty -- almost always a
-    transport failure that we don't want to silently report as "nothing
-    running". A VM with zero eligible sessions simply returns an empty list.
+    Raises ConnectivityError when any eligible session has indeterminate
+    runtime status -- almost always a transport failure that we don't want to
+    silently report as "nothing running". A VM with zero eligible sessions
+    simply returns an empty list.
     """
     from agentworks.db import PID_STOPPED, SessionStatus
     from agentworks.sessions.manager import batch_check_all_sessions, filter_sessions
@@ -127,7 +127,7 @@ def running_session_names(db: Database, config: Config, vm_name: str) -> list[st
     checkable = [s for s in sessions if s.pid is not None and s.pid != PID_STOPPED and s.pid > 0 and s.boot_id]
     if any(status_map.get(session.name, SessionStatus.UNKNOWN) == SessionStatus.UNKNOWN for session in checkable):
         raise ConnectivityError(
-            f"could not determine running sessions on VM '{vm_name}' (status probe returned no results)",
+            f"could not determine running sessions on VM '{vm_name}' (one or more statuses were indeterminate)",
             entity_kind="vm",
             entity_name=vm_name,
             hint="Check VM reachability.",

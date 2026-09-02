@@ -357,10 +357,16 @@ new canonical lifecycle operations:
 - `--all-stopped` MUST dispatch to `session start --all`; and
 - `--all` MUST dispatch to `session restart --all`.
 
-The wrapper MUST use the ordinary suppressible deprecation channel, MUST identify the canonical
-replacement, and MUST NOT duplicate lifecycle implementation. Canonical help, completion, docs, and
-examples MUST expose only start/restart. The compatibility wrapper and its legacy-only options MUST
-be removed in 0.20.
+Before a named or `--all` wrapper invocation replaces any running session, the CLI wrapper MUST
+preserve the prior confirmation gate unless legacy `--yes` is present. That bounded interaction MUST
+use read-only status facts and MUST NOT repair or mutate durable state before consent. When
+interactive input is unavailable, a replacement that would require confirmation MUST refuse unless
+`--yes` is present. The interaction MUST remain in the wrapper; canonical restart services MUST
+remain prompt-free and MUST own the actual lifecycle transition. The wrapper MUST use the ordinary
+suppressible deprecation channel, MUST identify the exact canonical mapping for that invocation, and
+MUST NOT duplicate lifecycle implementation. Canonical help, completion, docs, and examples MUST
+expose only start/restart. The compatibility wrapper and its legacy-only options MUST be removed in
+0.20.
 
 For 0.19, `console attach --recreate` MUST remain as a deprecated compatibility form that performs
 restart followed by attach through the canonical service operations. Ordinary `console attach` MUST

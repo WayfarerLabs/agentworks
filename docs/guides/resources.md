@@ -446,7 +446,7 @@ brand-new conversation, while the adoption and picker outcomes belong to ordinar
 and an adoption names the Codex conversation id it chose, so you can see it happen and fix it (pick
 the right conversation from the picker, or archive the stale one) rather than discovering it later.
 Overriding `notify` yourself through `extra_args` turns the recording off (yours wins, because
-`extra_args` follows generated options), which leaves resume relying on that fallback.
+`extra_args` follows generated options), which leaves later continuation relying on that fallback.
 
 Its config is all optional, and `agw resource explain harness-integration/codex` documents every
 field. The field reference omits these details because they describe Codex behavior rather than the

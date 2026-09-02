@@ -421,9 +421,14 @@ The 0.19 hidden command accepts the legacy argument shapes and normalizes immedi
 | `session resume --all-stopped ...` | `start_all_sessions(...)`   |
 | `session resume --all ...`         | `restart_all_sessions(...)` |
 
-Legacy `--yes` remains parser-compatible but does not recreate the old running-session prompt. Every
-invocation emits one suppressible deprecation warning. The wrapper is absent from help and
-completion and is deleted in 0.20.
+For named and `--all` forms, the wrapper uses the existing read-only batched status-query authority
+before dispatch. A known-running row requires confirmation; an incomplete dedicated-runtime row is
+conservatively treated the same way without invoking PID/fingerprint repair. Declining raises
+`UserAbort` before canonical restart. If interactive input is unavailable, the same selection raises
+a fixed `--yes` requirement instead of reading stdin. `--all-stopped` needs no confirmation because
+it dispatches to idempotent start. This interaction is compatibility-only CLI choreography, not a
+second lifecycle path. Every invocation emits one suppressible deprecation warning naming its exact
+mapping. The wrapper is absent from help and completion and is deleted in 0.20.
 
 The output package exposes one `deprecation(message)` helper. It emits through the ordinary warning
 presentation only when `deprecations_suppressed()` is false. Command wrappers call this helper once;

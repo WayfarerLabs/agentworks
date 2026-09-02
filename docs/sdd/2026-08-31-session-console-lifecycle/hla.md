@@ -218,9 +218,12 @@ Compatibility is isolated at the CLI boundary for 0.19:
 - hidden `console attach --recreate` invokes canonical restart, then canonical attach.
 
 Wrappers accept the bounded legacy option spellings needed by existing automation, emit the ordinary
-suppressible deprecation warning, and contain no lifecycle implementation. Internal manager and
-capability names switch completely to the new vocabulary. Canonical help, completion, docs, and
-examples contain only the new commands. The wrappers are removed in 0.20.
+suppressible deprecation warning, and contain no lifecycle implementation. The session wrapper alone
+preserves its former pre-dispatch confirmation for running named/`--all` selections, with legacy
+`--yes` as the bypass. Its selection is read-only, and a non-interactive replacement refuses without
+that bypass; the canonical restart services remain prompt-free. Internal manager and capability
+names switch completely to the new vocabulary. Canonical help, completion, docs, and examples
+contain only the new commands. The wrappers are removed in 0.20.
 
 The CLI output layer gains one small deprecation emitter that respects the existing global
 `--no-deprecations` state. Completion introspection excludes hidden subcommands as well as hidden

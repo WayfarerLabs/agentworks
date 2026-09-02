@@ -283,6 +283,16 @@ The implementation, review, CI, and live-evidence steps below apply to the compl
 - [ ] Create `locked.md` only after implementation, live evidence, reviews, and final acceptance are
       complete; run locked-SDD checks and merge through the operator-owned flow.
 
+### Post-ready correction (2026-09-02)
+
+- [x] Preserve the hidden 0.19 `session resume` wrapper's running-session confirmation and legacy
+      `--yes` bypass at the CLI boundary, while keeping canonical restart services prompt-free and
+      naming the exact start/restart mapping in migration guidance.
+- [x] Correct the accepted status diagnostic, test-docstring, and harness-continuation wording nits
+      without adding authored-prose assertions.
+- [x] Make compatibility consent read-only and fail closed without `--yes` when interactive input is
+      unavailable; canonical restart and its manager contract remain unchanged.
+
 ### Phase 6 Definition of Done
 
 - Full gates and scoped live tests pass on the shipped artifact.

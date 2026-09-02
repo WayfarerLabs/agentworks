@@ -62,9 +62,11 @@ agw session resume --all             -> agw session restart --all
 ```
 
 Existing VM, workspace, agent, admin, and force filters normalize into the corresponding canonical
-manager parameters. Legacy `--yes` remains accepted for parser compatibility but does not restore a
-prompt that canonical restart intentionally removes. The wrapper emits the ordinary suppressible
-deprecation warning and identifies the replacement.
+manager parameters. For named and `--all` forms, the hidden wrapper retains the old confirmation
+before replacing running sessions; legacy `--yes` still bypasses it and is required when interactive
+input is unavailable. The read-only gate stays in the CLI compatibility shim, while canonical
+restart remains intentionally prompt-free. The wrapper emits the ordinary suppressible deprecation
+warning and identifies the exact mapping.
 
 The wrapper is excluded from help, completion, examples, and permanent teaching. It is deleted in
 0.20.

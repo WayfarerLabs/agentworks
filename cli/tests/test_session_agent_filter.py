@@ -5,7 +5,7 @@ Pins the new flags' plumbing (CLI → manager), the mode-mutex
 (``--admin`` and ``--agent`` are mutually exclusive), and the
 precondition that the batch filters (``--vm``, ``--workspace``,
 ``--agent``, ``--admin``) require one of the batch flags
-(``--all`` / ``--all``).
+(``--all``).
 """
 
 from __future__ import annotations

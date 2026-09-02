@@ -16,8 +16,11 @@ For batch automation, replace `session resume --all-stopped` with `session start
 `session resume --all` with `session restart --all`. Existing VM, workspace, agent, admin, and force
 filters remain available.
 
-The old `session resume` forms remain accepted, hidden, and warning-producing in 0.19. They are
-removed in 0.20.
+The old `session resume` forms remain accepted, hidden, and warning-producing in 0.19. A named form
+maps to restart, `--all-stopped` maps to batch start, and `--all` maps to batch restart. Named and
+`--all` compatibility forms still confirm before replacing running sessions unless legacy `--yes` is
+present; pass `--yes` for those forms when interactive input is unavailable. They are removed in
+0.20.
 
 ## Start consoles before attaching
 

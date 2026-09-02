@@ -1,6 +1,6 @@
 """Unknown names in the list/batch commands' name filters are hard errors.
 
-Issue #304: ``session start --all-stopped --vm wf-test`` with no VM by
+Issue #304: ``session start --all --vm wf-test`` with no VM by
 that name reported "no sessions to restart" instead of failing. Every
 service-layer function that accepts name filters (``--vm`` /
 ``--workspace`` / ``--agent``) now validates them against the state
@@ -135,7 +135,7 @@ def test_session_list_valid_filter_empty_result_succeeds(
 
 
 # ---------------------------------------------------------------------------
-# session stop --all / session start --all-stopped
+# session stop --all / session start --all
 # ---------------------------------------------------------------------------
 
 
@@ -155,7 +155,7 @@ def test_stop_all_sessions_valid_filter_empty_result_succeeds(
 
 
 def test_start_all_sessions_rejects_unknown_vm(db: Database) -> None:
-    """The issue #304 reproducer: restart --all-stopped with an unknown
+    """The issue #304 reproducer: start --all with an unknown
     ``--vm`` must be a hard error, not "no sessions to restart"."""
     _seed(db)
     with pytest.raises(NotFoundError, match="unknown VM 'wf-test'"):
