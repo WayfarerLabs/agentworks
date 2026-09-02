@@ -109,8 +109,9 @@ did, or what it declined and why, then:
 - Resolve the round's own information-only comments at once, its summary included, since they record
   rather than ask.
 
-A round that changes the proposed head re-runs the private quality loop lanes that change requires
-before it hands off, because that loop binds the first handoff and a round produces a later one that
-nothing else covers; the round's summary says which lanes ran. Close each round as an ordinary
-handoff whose summary names the round number, the budget, and what changed. A round that changed
-nothing has no head to hand off, so it posts that summary and ends the loop there.
+A round that changes the head re-runs the lanes the private quality loop binds to that change, which
+is a lookup in that loop rather than a fresh judgment about how big the round was, before it hands
+off, because that loop binds the first handoff and a round produces a later one that nothing else
+covers; the round's summary says which lanes ran. Close each round as an ordinary handoff whose
+summary names the round number, the budget, and what changed. A round that changed nothing has no
+head to hand off, so it posts that summary and ends the loop there.

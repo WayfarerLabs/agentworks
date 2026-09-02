@@ -16,8 +16,9 @@ CI logs, and raw tool output are not messages and take no signature; their prove
 version control and the systems that produce them.
 
 - **Agentworks workloads** sign with the session name from the `AGENTWORKS_SESSION` environment
-  variable, read fresh at posting time, plus a short role descriptor when the name alone does not
-  convey it. The leading `--` is the classic mail sig-dash convention, kept deliberately. Example:
+  variable, read fresh at posting time, or, for a delegate acting on its own, with the identifier
+  its charter gave it (below), plus a short role descriptor when the name alone does not convey it.
+  The leading `--` is the classic mail sig-dash convention, kept deliberately. Example:
 
   ```text
   -- agw-test-codex (agentworks integration-test session)
@@ -37,15 +38,19 @@ session, and whoever posts it signs as themselves. A delegate that commits, push
 own rather than handing back does exactly that: it signs and trails as itself, not as its lead,
 since the point is to say which worker produced the thing. A delegate inherits its lead's
 environment, so `AGENTWORKS_SESSION` names the lead and nothing in that environment names the
-delegate. The lead supplies it: charter each delegate with `AGENTWORKS_DELEGATE`, holding the
-**complete** identifier the delegate uses verbatim, not a fragment it joins to something else. A
-lead with a namespace for that delegate's scratch and fixtures has the obvious value to hand it.
-Nothing is invented and nothing is composed, because the lead assigns and the delegate reads.
+delegate. The lead supplies one, in the charter: a complete identifier the delegate uses verbatim
+rather than a fragment it joins to something else. State it in the launch prompt; a harness able to
+set a variable for a delegate may deliver it as `AGENTWORKS_DELEGATE`, but none does today, so the
+charter is where it lives. A lead with a namespace for that delegate's scratch and fixtures has the
+obvious value to hand it. Nothing is invented and nothing is composed, because the lead assigns and
+the delegate reads.
 
-A delegate acting on its own uses `AGENTWORKS_DELEGATE` for both surfaces, its signature and its
-`Agentworks-Session` trailer; everything else uses `AGENTWORKS_SESSION`. One value under the
-existing key keeps an effort's commits findable as a set while a delegate's stay distinguishable
-within it, which is why a lead composing that value usually builds it from its own session name:
+A delegate acting on its own uses that identifier for both surfaces, its signature and its
+`Agentworks-Session` trailer; everything else uses `AGENTWORKS_SESSION`. A delegate given none says
+so in its hand-off and signs with an honest label for what it is, exactly as an unidentified
+workload does, rather than signing as the lead it is not. One value under the existing key keeps an
+effort's commits findable as a set while a delegate's stay distinguishable within it, which is why a
+lead composing that value usually builds it from its own session name:
 
 ```text
 Agentworks-Session: agw-ns-instance-model/dev-3
