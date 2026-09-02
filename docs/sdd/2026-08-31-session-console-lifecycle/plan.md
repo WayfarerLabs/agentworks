@@ -311,6 +311,8 @@ The implementation, review, CI, and live-evidence steps below apply to the compl
 - [x] Complete final review hygiene by making the remaining live-runtime fixture fingerprint
       truthful, preserving structured console error metadata, and naming repeated-start tests for
       the version-1 harness contract.
+- [x] Make the atomic session-runtime update participate in explicit database transactions and prove
+      rollback leaves no partial runtime fingerprint.
 
 ### Phase 6 Definition of Done
 

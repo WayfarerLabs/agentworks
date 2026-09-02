@@ -858,7 +858,7 @@ class Database:
             "WHERE name = ?",
             (socket_path, pid, boot_id, tmux_server_start_ticks, name),
         )
-        self._conn.commit()
+        self._commit_unless_in_tx()
 
     def update_session_harness_integration_state(self, name: str, harness_integration_state: dict[str, object]) -> None:
         """Persist the harness integration's per-session state blob.
