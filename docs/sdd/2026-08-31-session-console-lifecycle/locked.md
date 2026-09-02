@@ -25,7 +25,9 @@ this file records the final reviewed and operator-accepted implementation state.
 - Consoles have explicit create, start, stop, restart, and attach-only operations. Create validates
   and stages before publishing, retains its durable definition after a post-commit build failure,
   and reports whether runtime absence was verified or remained indeterminate. Exact canonical and
-  staging tmux names share the same fail-closed probe and teardown rules.
+  staging tmux names share the same fail-closed probe and teardown rules. `--all-running` applies
+  safe runtime-identity repair before batched status selection and refuses unresolved non-stopped
+  rows rather than silently creating a partial console.
 - The hidden 0.19 `session resume` and `console attach --recreate` compatibility spellings remain
   CLI-only and are scheduled for removal in 0.20 by issue #720. Resume reports its exact canonical
   mapping, preserves the former confirmation before replacing known or conservatively possible
@@ -51,29 +53,41 @@ separate security effort tracked by issue #715.
 
 ## Verification and review
 
-The final runtime checkpoint is `715d6d445cda42867589f26070c4390945a58dd1`, based on `origin/main`
-at `8695afcd833790ee433b50bb9f5d5c696177233d`. The implementation and permanent collateral passed:
+The final production checkpoint is `1081470fa0ab315c3e0221da8142a87ad9b292a1`, based on
+`origin/main` at `8695afcd833790ee433b50bb9f5d5c696177233d`. Verification recorded:
 
-- 8,218 non-integration tests with one platform-specific skip;
+- 8,224 non-integration tests with one platform-specific skip;
 - focused session, console, harness, compatibility, completion, cascade, migration, and adversarial
   suites;
 - Ruff check and format plus strict mypy across 745 source files;
 - file lint, locked-SDD, Rulesync drift, Typer-isolation, package/install, and diff gates;
 - 160 Python and 103 Node website tests plus deterministic root and project builds; and
-- hosted CI on Python 3.12, 3.13, and 3.14, CodeQL, and every repository aggregate gate.
+- hosted CI on Python 3.12, 3.13, and 3.14 plus CodeQL and every non-website repository gate. The
+  production checkpoint's Website job ran 160 Python tests; one browser test failed during setup,
+  before its assertions, when Chromium did not publish a DevTools endpoint. The identical suite
+  passed locally, and the final docs-only lock head must clear the complete aggregate gate before
+  merge.
 
 The private project-values, Muntz, and cold correctness/security reviews converged cleanly at the
-exact runtime checkpoint. Their correction rounds closed fail-open transport and tmux probes, legacy
-and parent-cascade teardown gaps, malformed identity handling, ambiguous console state, post-launch
-cleanup, duplicated status classification, stale collateral, compatibility safety, and test-quality
-findings. The final compatibility correction uses only read-only status facts before consent and
-conservatively gates incomplete dedicated rows whose status is missing or unknown.
+exact production checkpoint. Their correction rounds closed fail-open transport and tmux probes,
+legacy and parent-cascade teardown gaps, malformed identity handling, ambiguous console state,
+post-launch cleanup, duplicated status classification, stale collateral, compatibility safety,
+process-global test isolation, invalid runtime-identity fixtures, and test-quality findings. The
+final compatibility correction uses only read-only status facts before consent and conservatively
+gates incomplete dedicated rows whose status is missing or unknown. The final console correction
+reuses the established safe repair authority before live selection, preserves the typed legacy
+migration refusal, and fails closed when incomplete identity remains unresolved.
 
 The integration tester first drove the shipped lifecycle on a real VM at `f4d3a920`: session stop,
 start, idempotent start, and restart; console create, stop, start, and restart; the hidden resume
-wrapper; parent-delete gating; and cleanup. The exact-head follow-up at `715d6d44` reran all gates
-and verified the three compatibility mappings plus effective `--yes` handling. Both runs reported no
-blocker or open finding and left no tester-created repository change.
+wrapper; parent-delete gating; and cleanup. The follow-up at `715d6d44` reran all gates and verified
+the three compatibility mappings plus effective `--yes` handling. A third pass at the exact final
+production checkpoint reran the full pipeline and drove `console create --all-running` with two
+running sessions and with mixed running/stopped state, confirmed the distinct `--all` behavior,
+rechecked compatibility handling, and deleted the VM without residue. All three runs reported no
+blocker or open finding and left no tester-created repository change. Current writers cannot create
+the legacy null-socket rows, and the tester did not corrupt live runtime identity; those migration,
+repair, and unresolved-state cases remain covered by behavioral and orchestration tests.
 
 ## Permanent homes and accepted limits
 
@@ -88,8 +102,9 @@ Interactive console attach was not driven live because the tester itself ran ins
 nesting guard correctly refused it, while behavioral and orchestration tests cover attach-only and
 the explicit override. Force-new integration identities, Agentworks-minted UUIDs, Codex's
 tool-assigned identity path, malformed and indeterminate transport cases, and destructive cascade
-faults are covered by focused structural/orchestration tests rather than destructive live fault
-injection. The operator accepted the tester's clean report with these stated limits.
+faults, plus incomplete `--all-running` identity repair and refusal, are covered by focused
+structural/orchestration tests rather than destructive live fault injection. The operator accepted
+the tester's clean report with these stated limits.
 
 Issue #720 owns deletion of both hidden 0.19 compatibility spellings in 0.20. Issue #715 owns any
 future systemd/cgroup containment work. No other in-scope implementation, review, migration, or

@@ -304,6 +304,10 @@ The implementation, review, CI, and live-evidence steps below apply to the compl
 - [x] Make console `--all-running` apply the established safe identity-repair pass before batched
       status classification and refuse unresolved non-stopped rows rather than silently omitting
       them; correct the one-round-trip and read-only collateral claims.
+- [x] Refresh the lock to the final production checkpoint, complete correction/review record, and
+      honest live-versus-structural evidence before the final merge gate.
+- [x] Incorporate the late exact-production tester pass, including live `--all-running` selection
+      and the explicit legacy/incomplete-identity live-test limits, into the lock before merge.
 
 ### Phase 6 Definition of Done
 
