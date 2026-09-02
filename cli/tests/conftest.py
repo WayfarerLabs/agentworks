@@ -187,6 +187,26 @@ def _restore_agw_debug() -> Generator[None, None, None]:
 
 
 @pytest.fixture(autouse=True)
+def _reset_cli_request_flags() -> Generator[None, None, None]:
+    """Keep process-global CLI request flags isolated between tests.
+
+    A real CLI process handles one invocation, but ``CliRunner`` exercises
+    several invocations in one pytest worker. The root callback seeds these
+    flags for each invocation, so a test ending with either flag enabled must
+    not affect a later test that calls the output layer directly.
+    """
+    from agentworks import output
+
+    output.set_non_interactive(False)
+    output.set_suppress_deprecations(False)
+    try:
+        yield
+    finally:
+        output.set_non_interactive(False)
+        output.set_suppress_deprecations(False)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_inherited_aw_secrets(
     request: pytest.FixtureRequest,
     monkeypatch: pytest.MonkeyPatch,

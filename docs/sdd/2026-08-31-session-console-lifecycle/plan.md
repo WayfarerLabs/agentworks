@@ -294,6 +294,9 @@ The implementation, review, CI, and live-evidence steps below apply to the compl
       unavailable; canonical restart and its manager contract remain unchanged.
 - [x] Keep VM-delete teardown warnings free of transport-originated exception text and correct the
       console restart recovery spelling; leave pre-existing test-isolation hygiene to issue #722.
+- [x] Reset process-global CLI request flags at each pytest boundary after the recurring cross-test
+      `--non-interactive` leak blocked exact-head CI; retain issue #722 for the broader pre-existing
+      isolation audit.
 
 ### Phase 6 Definition of Done
 
