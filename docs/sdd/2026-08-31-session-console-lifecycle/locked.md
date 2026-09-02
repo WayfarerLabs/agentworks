@@ -53,8 +53,11 @@ separate security effort tracked by issue #715.
 
 ## Verification and review
 
-The final production checkpoint is `1081470fa0ab315c3e0221da8142a87ad9b292a1`, based on
-`origin/main` at `8695afcd833790ee433b50bb9f5d5c696177233d`. Verification recorded:
+The final production checkpoint is `a654a694a0854bba0afbc9da6b872c58a21d8924`, based on
+`origin/main` at `8695afcd833790ee433b50bb9f5d5c696177233d`. The complete pipeline and live
+validation ran at `1081470fa0ab315c3e0221da8142a87ad9b292a1`, before a final bounded cleanup that
+completed one runtime fixture fingerprint, added established entity metadata to three console
+errors, and corrected two repeated-start test names. Verification recorded:
 
 - 8,224 non-integration tests with one platform-specific skip;
 - focused session, console, harness, compatibility, completion, cascade, migration, and adversarial
@@ -62,32 +65,33 @@ The final production checkpoint is `1081470fa0ab315c3e0221da8142a87ad9b292a1`, b
 - Ruff check and format plus strict mypy across 745 source files;
 - file lint, locked-SDD, Rulesync drift, Typer-isolation, package/install, and diff gates;
 - 160 Python and 103 Node website tests plus deterministic root and project builds; and
-- hosted CI on Python 3.12, 3.13, and 3.14 plus CodeQL and every non-website repository gate. The
-  production checkpoint's Website job ran 160 Python tests; one browser test failed during setup,
-  before its assertions, when Chromium did not publish a DevTools endpoint. The identical suite
-  passed locally, and the final docs-only lock head must clear the complete aggregate gate before
-  merge.
+- hosted CI on Python 3.12, 3.13, and 3.14 plus CodeQL and every non-website repository gate. That
+  full-validation checkpoint's Website job ran 160 Python tests; one browser test failed during
+  setup, before its assertions, when Chromium did not publish a DevTools endpoint. The identical
+  suite passed locally, and the final docs-only lock head must clear the complete aggregate gate
+  before merge.
 
 The private project-values, Muntz, and cold correctness/security reviews converged cleanly at the
-exact production checkpoint. Their correction rounds closed fail-open transport and tmux probes,
-legacy and parent-cascade teardown gaps, malformed identity handling, ambiguous console state,
-post-launch cleanup, duplicated status classification, stale collateral, compatibility safety,
-process-global test isolation, invalid runtime-identity fixtures, and test-quality findings. The
-final compatibility correction uses only read-only status facts before consent and conservatively
-gates incomplete dedicated rows whose status is missing or unknown. The final console correction
-reuses the established safe repair authority before live selection, preserves the typed legacy
-migration refusal, and fails closed when incomplete identity remains unresolved.
+exact final production checkpoint; final hosted CI remains required before merge. Their correction
+rounds closed fail-open transport and tmux probes, legacy and parent-cascade teardown gaps,
+malformed identity handling, ambiguous console state, post-launch cleanup, duplicated status
+classification, stale collateral, compatibility safety, process-global test isolation, invalid
+runtime-identity fixtures, and test-quality findings. The final compatibility correction uses only
+read-only status facts before consent and conservatively gates incomplete dedicated rows whose
+status is missing or unknown. The final console correction reuses the established safe repair
+authority before live selection, preserves the typed legacy migration refusal, and fails closed when
+incomplete identity remains unresolved.
 
 The integration tester first drove the shipped lifecycle on a real VM at `f4d3a920`: session stop,
 start, idempotent start, and restart; console create, stop, start, and restart; the hidden resume
 wrapper; parent-delete gating; and cleanup. The follow-up at `715d6d44` reran all gates and verified
-the three compatibility mappings plus effective `--yes` handling. A third pass at the exact final
-production checkpoint reran the full pipeline and drove `console create --all-running` with two
-running sessions and with mixed running/stopped state, confirmed the distinct `--all` behavior,
-rechecked compatibility handling, and deleted the VM without residue. All three runs reported no
-blocker or open finding and left no tester-created repository change. Current writers cannot create
-the legacy null-socket rows, and the tester did not corrupt live runtime identity; those migration,
-repair, and unresolved-state cases remain covered by behavioral and orchestration tests.
+the three compatibility mappings plus effective `--yes` handling. A third pass at `1081470f` reran
+the full pipeline and drove `console create --all-running` with two running sessions and with mixed
+running/stopped state, confirmed the distinct `--all` behavior, rechecked compatibility handling,
+and deleted the VM without residue. All three runs reported no blocker or open finding and left no
+tester-created repository change. Current writers cannot create the legacy null-socket rows, and the
+tester did not corrupt live runtime identity; those migration, repair, and unresolved-state cases
+remain covered by behavioral and orchestration tests.
 
 ## Permanent homes and accepted limits
 
