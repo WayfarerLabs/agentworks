@@ -97,17 +97,19 @@ def test_running_session_names_raises_on_unreachable(db: Database, fake_target: 
         running_session_names(db, _StubConfig(), "vm1")
 
 
-def test_running_session_names_rejects_live_legacy_row_before_connectivity_probe(
+@pytest.mark.parametrize("pid", [None, 100])
+def test_running_session_names_rejects_legacy_row_before_connectivity_probe(
     db: Database,
     fake_target: _FakeTarget,
+    pid: int | None,
 ) -> None:
     from agentworks.sessions.multi_console import running_session_names
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["legacy"])
     db._conn.execute(
-        "UPDATE sessions SET socket_path = NULL, pid = 100, boot_id = ? WHERE name = 'legacy'",
-        (BOOT_ID,),
+        "UPDATE sessions SET socket_path = NULL, pid = ?, boot_id = ? WHERE name = 'legacy'",
+        (pid, BOOT_ID),
     )
     db._conn.commit()
 
@@ -117,6 +119,60 @@ def test_running_session_names_rejects_live_legacy_row_before_connectivity_probe
     assert caught.value.entity_kind == "session"
     assert caught.value.entity_name == "legacy"
     assert caught.value.hint is not None
+    assert fake_target.commands == []
+
+
+def test_running_session_names_repairs_incomplete_live_identity(
+    db: Database,
+    fake_target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.sessions.multi_console import running_session_names
+    from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["alpha"])
+    monkeypatch.setattr(
+        "agentworks.sessions.tmux.capture_tmux_server_fingerprint",
+        lambda **kwargs: FingerprintProbe(
+            ProbeStatus.PRESENT,
+            TmuxServerFingerprint(pid=100, boot_id=BOOT_ID, start_ticks=77),
+        ),
+    )
+
+    def stub_run(command: str, **kwargs: object) -> _FakeResult:
+        fake_target.commands.append(command)
+        boot_hex = BOOT_ID.encode().hex()
+        return _FakeResult(returncode=0, stdout=f"S:alpha:0::0::0:{boot_hex}:0\n")
+
+    fake_target.run = stub_run  # type: ignore[assignment]
+
+    assert running_session_names(db, _StubConfig(), "vm1") == ["alpha"]
+    repaired = db.get_session("alpha")
+    assert repaired is not None
+    assert (repaired.pid, repaired.boot_id, repaired.tmux_server_start_ticks) == (100, BOOT_ID, 77)
+
+
+def test_running_session_names_refuses_unresolved_incomplete_identity(
+    db: Database,
+    fake_target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.sessions.multi_console import running_session_names
+    from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["alpha"])
+    monkeypatch.setattr(
+        "agentworks.sessions.tmux.capture_tmux_server_fingerprint",
+        lambda **kwargs: FingerprintProbe(ProbeStatus.UNKNOWN),
+    )
+
+    with pytest.raises(ConnectivityError):
+        running_session_names(db, _StubConfig(), "vm1")
+
+    unresolved = db.get_session("alpha")
+    assert unresolved is not None and unresolved.pid is None
     assert fake_target.commands == []
 
 

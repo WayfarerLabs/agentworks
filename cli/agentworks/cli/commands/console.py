@@ -50,7 +50,7 @@ def console_create(
         bool,
         typer.Option(
             "--all-running",
-            help=("Like --all but only sessions whose live tmux state is OK (one SSH probe; VM must be reachable)"),
+            help=("Like --all but only sessions whose live tmux state is OK (VM must be reachable)"),
         ),
     ] = False,
     add_admin_shell: Annotated[
@@ -90,10 +90,11 @@ def console_create(
     config = load_config()
 
     if all_running:
-        # Live SSH probe (one round-trip per VM) so --all-running reflects
-        # reality, not stale DB state. If the probe finds nothing and the
-        # operator didn't list sessions or pass --add-admin-shell,
-        # create_console below raises the canonical "empty console" error.
+        # Repair incomplete runtime identity, then live-probe the VM so
+        # --all-running reflects reality rather than stale DB state. If the
+        # probe finds nothing and the operator didn't list sessions or pass
+        # --add-admin-shell, create_console below raises the canonical empty
+        # console error.
         running = running_session_names(db, config, resolved_vm.name)
         explicit_names = {parse_session_spec(s).name for s in specs}
         extras = [n for n in running if n not in explicit_names]

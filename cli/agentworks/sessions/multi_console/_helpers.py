@@ -1,10 +1,4 @@
-"""Shared constants, spec parsing, and read-only DB helpers for named consoles.
-
-Carved out of the ``multi_console`` package's top level so that ``crud``,
-``attach``, ``restore``, ``secrets_env``, and ``tmux_build`` all have a
-dependency-free base to import from. Nothing here talks to tmux or opens a
-live transport; that lives in ``tmux_build`` / ``attach``.
-"""
+"""Shared constants, spec parsing, and DB/status helpers for named consoles."""
 
 from __future__ import annotations
 
@@ -110,8 +104,9 @@ def _vm_sessions(db: Database, vm_name: str) -> list[SessionRow]:
 def running_session_names(db: Database, config: Config, vm_name: str) -> list[str]:
     """SSH-probe the VM and return names of sessions whose live tmux state is OK.
 
-    Uses the same one-round-trip-per-VM check that powers ``aw session list``.
-    Returns alphabetically sorted names.
+    Safely repairs incomplete runtime identity before using the same batched
+    status check that powers ``agw session list``. Returns alphabetically
+    sorted names.
 
     Raises StateError for a live legacy shared-server row that requires
     migration, or ConnectivityError when any dedicated session has
@@ -122,17 +117,21 @@ def running_session_names(db: Database, config: Config, vm_name: str) -> list[st
     from agentworks.sessions.manager import (
         _legacy_session_status_error,
         batch_check_all_sessions,
+        ensure_pids_batch,
         filter_sessions,
     )
 
     sessions = filter_sessions(db, vm_name=vm_name)
     for session in sessions:
-        if session.pid is not None and session.pid != PID_STOPPED and session.pid > 0 and session.socket_path is None:
+        if session.pid != PID_STOPPED and session.socket_path is None:
             raise _legacy_session_status_error(session)
+    sessions = ensure_pids_batch(sessions, db=db, config=config)
     status_map = batch_check_all_sessions(sessions, db=db, config=config)
 
-    checkable = [s for s in sessions if s.pid is not None and s.pid != PID_STOPPED and s.pid > 0 and s.boot_id]
-    if any(status_map.get(session.name, SessionStatus.UNKNOWN) == SessionStatus.UNKNOWN for session in checkable):
+    potentially_running = [session for session in sessions if session.pid != PID_STOPPED]
+    if any(
+        status_map.get(session.name, SessionStatus.UNKNOWN) == SessionStatus.UNKNOWN for session in potentially_running
+    ):
         raise ConnectivityError(
             f"could not determine running sessions on VM '{vm_name}' (one or more statuses were indeterminate)",
             entity_kind="vm",

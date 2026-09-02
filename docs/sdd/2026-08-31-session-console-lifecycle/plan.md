@@ -301,6 +301,9 @@ The implementation, review, CI, and live-evidence steps below apply to the compl
       reuse one immutable config load across selection and create.
 - [x] Make every test fixture that claims a valid runtime identity use a canonical boot UUID while
       retaining malformed values only in explicit rejection and opaque database-storage tests.
+- [x] Make console `--all-running` apply the established safe identity-repair pass before batched
+      status classification and refuse unresolved non-stopped rows rather than silently omitting
+      them; correct the one-round-trip and read-only collateral claims.
 
 ### Phase 6 Definition of Done
 

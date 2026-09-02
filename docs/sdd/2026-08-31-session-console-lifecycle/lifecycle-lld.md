@@ -322,8 +322,11 @@ security design tracked in [issue #715](https://github.com/WayfarerLabs/agentwor
 
 Create validates an in-memory `ConsoleDefinition` carrying name, VM, ordered members, shell
 declarations, and admin-shell setting. Existing validation and expansion of `--all` or
-`--all-running` occurs before persistence. Build-secret target derivation is adjusted to accept this
-definition rather than requiring an inserted row.
+`--all-running` occurs before persistence. `--all-running` first applies the established safe
+runtime-identity repair pass, then classifies the refreshed rows through the shared batched status
+authority; any non-stopped row that remains indeterminate refuses rather than producing a partial
+console. Build-secret target derivation is adjusted to accept this definition rather than requiring
+an inserted row.
 
 No public schema or new database table is introduced. The prospective value is an internal service
 record used to keep stale-runtime verification ahead of insertion.

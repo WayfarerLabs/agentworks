@@ -857,8 +857,9 @@ panes you want preloaded into a session's window.
 - `--all` -- include every session on the VM with 0 shells, appended after the explicit specs
   (alphabetical).
 - `--all-running` -- like `--all` but restricted to sessions whose live tmux state on the VM is OK
-  (one SSH round-trip; same probe `agw session list` uses). Mutually exclusive with `--all`.
-  Requires the VM to be reachable.
+  (using the same safe identity repair and batched status check as `agw session list`). Mutually
+  exclusive with `--all`. Requires the VM to be reachable. Repair may update incomplete persisted
+  runtime identity from authoritative live facts before selection.
 - `--add-admin-shell`: include a top-level admin-shell window as window 0.
 
 `console reorder-sessions` moves the listed members in argument order while preserving the relative

@@ -8,7 +8,7 @@ be attached, modified, or deleted independently.
 This is a package rather than a single module because the implementation
 outgrew a single 500-line file. The submodules are organized by concern:
 
-- ``_helpers``: constants, spec parsing, and read-only DB lookups shared by
+- ``_helpers``: constants, spec parsing, and DB/status helpers shared by
   everything else.
 - ``crud``: DB-level create/add/remove/reorder/delete plus their live-tmux
   best-effort sync.
