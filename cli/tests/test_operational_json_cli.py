@@ -550,9 +550,16 @@ def test_session_json_status_repairs_and_no_status_are_preserved(
 
     repairs = 0
 
-    def repair(rows: list[SessionRow], *, db: Database, config: object) -> list[SessionRow]:
+    def repair(
+        rows: list[SessionRow],
+        *,
+        db: Database,
+        config: object,
+        announce: bool,
+    ) -> list[SessionRow]:
         nonlocal repairs
         del config
+        assert not announce
         repairs += 1
         db.update_session_runtime(
             "live",

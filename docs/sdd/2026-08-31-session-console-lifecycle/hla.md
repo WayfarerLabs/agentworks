@@ -108,6 +108,11 @@ live process, evidence missing from the applicable branch, or indeterminate chec
 manual-recovery guidance. Core never signals the numeric PID, and a legacy row whose PID may name a
 shared server cannot widen that boundary.
 
+Per-VM repair and status retain the VM admin transport. Their probes of agent-owned tmux servers and
+`/proc` identities therefore use the existing non-interactive root boundary; owner-targeted singular
+operations continue without elevation. An indeterminate fingerprint is terminal for the repair
+attempt and cannot enter absence proof or become persisted stopped state.
+
 The harness integration has no stop or restart API. If a future integration demonstrates a concrete
 application-specific shutdown requirement that exact tmux teardown cannot satisfy, that requirement
 gets a separately designed seam rather than speculative lifecycle machinery now.

@@ -272,8 +272,15 @@ def test_session_list_status_and_late_repair_use_the_same_resolution_path(
         assert auth_key_name is not None
         keys.append(auth_keys.get(auth_key_name))
 
-    def repair(rows: list[SessionRow], *, db: Database, config: Config) -> list[SessionRow]:
+    def repair(
+        rows: list[SessionRow],
+        *,
+        db: Database,
+        config: Config,
+        announce: bool,
+    ) -> list[SessionRow]:
         del rows, config
+        assert not announce
         db.update_session_runtime(
             "session-a",
             socket_path="/tmp/SECRET_SOCKET",
@@ -322,7 +329,7 @@ def test_session_list_status_and_late_repair_use_the_same_resolution_path(
     )
     human = CliRunner().invoke(app, ["session", "list", "--output", "human"])
     assert human.exit_code == 0, human.output
-    assert human.stdout_bytes.splitlines()[0] == b"VM 'box' is stopped. Starting..."
+    assert b"VM 'box' is stopped. Starting..." in human.stdout_bytes.splitlines()
     assert human.stderr_bytes == b""
     assert calls == [
         (

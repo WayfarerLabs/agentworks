@@ -313,6 +313,16 @@ The implementation, review, CI, and live-evidence steps below apply to the compl
       the version-1 harness contract.
 - [x] Make the atomic session-runtime update participate in explicit database transactions and prove
       rollback leaves no partial runtime fingerprint.
+- [x] Keep migration repair fail closed when a fingerprint is indeterminate, inspect agent-owned
+      tmux and process identity through the established batch root boundary, and accept only the
+      canonical local Windows forced-TTY close advisory alongside one remote tmux absence result.
+- [x] Give ordinary session listing one aggregate status-check indication while suppressing per-row
+      repair and normalization narration; retain the same durable convergence and status derivation.
+- [x] Replace the elevated PID probe's ambiguous shell-test exit code with fixed facts emitted only
+      after the selected shell starts; treat sudo refusal, malformed output, and every other failure
+      as indeterminate in singular status, absence proof, and batched status.
+- [x] Keep root probing confined to dedicated agent-owned runtime state and remove the impossible
+      legacy agent/shared-server probe surface and fixture.
 
 ### Phase 6 Definition of Done
 

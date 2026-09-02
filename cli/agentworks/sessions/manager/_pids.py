@@ -89,6 +89,7 @@ def _repair_session_pid(
     *,
     target: Transport,
     db: Database,
+    announce: bool = True,
 ) -> bool:
     """Core repair logic for a single session. Returns True if the DB was updated.
 
@@ -99,7 +100,11 @@ def _repair_session_pid(
 
     sock = session.socket_path
     if sock is None:
-        presence = probe_tmux_session(session.name, run_command=target.run, socket_path=None)
+        presence = probe_tmux_session(
+            session.name,
+            run_command=target.run,
+            socket_path=None,
+        )
         if presence is ProbeStatus.PRESENT:
             raise StateError(
                 f"session '{session.name}' is live on a legacy shared tmux server",
@@ -120,7 +125,8 @@ def _repair_session_pid(
                 entity_name=session.name,
             )
     else:
-        probe = capture_tmux_server_fingerprint(target=target, socket_path=sock)
+        sudo = session.mode == SessionMode.AGENT.value
+        probe = capture_tmux_server_fingerprint(target=target, socket_path=sock, sudo=sudo)
         if probe.status is ProbeStatus.PRESENT:
             fingerprint = probe.fingerprint
             assert fingerprint is not None
@@ -139,7 +145,8 @@ def _repair_session_pid(
                     boot_id=observed_boot_id,
                     tmux_server_start_ticks=fingerprint.start_ticks,
                 )
-                output.info(f"Recovered runtime identity for session '{session.name}'")
+                if announce:
+                    output.info(f"Recovered runtime identity for session '{session.name}'")
                 return True
             raise StateError(
                 f"session '{session.name}' has a live tmux server whose identity does not match its row",
@@ -147,7 +154,14 @@ def _repair_session_pid(
                 entity_name=session.name,
                 hint="Investigate the tmux server manually.",
             )
-        if not _prove_stored_runtime_absent(session, target=target):
+        if probe.status is ProbeStatus.UNKNOWN:
+            raise StateError(
+                f"session '{session.name}' runtime state could not be determined",
+                entity_kind="session",
+                entity_name=session.name,
+                hint="Investigate the tmux server manually.",
+            )
+        if not _prove_stored_runtime_absent(session, target=target, sudo=sudo):
             raise StateError(
                 f"session '{session.name}' runtime absence could not be proved",
                 entity_kind="session",
@@ -162,7 +176,8 @@ def _repair_session_pid(
         boot_id=None,
         tmux_server_start_ticks=None,
     )
-    output.info(f"Session '{session.name}' is not running; marked stopped")
+    if announce:
+        output.info(f"Session '{session.name}' is not running; marked stopped")
     return True
 
 
@@ -210,7 +225,12 @@ def _validated_observed_boot_id(value: object, *, session: SessionRow) -> str:
     return boot_id
 
 
-def _prove_stored_runtime_absent(session: SessionRow, *, target: Transport) -> bool:
+def _prove_stored_runtime_absent(
+    session: SessionRow,
+    *,
+    target: Transport,
+    sudo: bool = False,
+) -> bool:
     """Prove the stored process incarnation absent without signaling its PID."""
     from agentworks.sessions.tmux import ProbeStatus, probe_process_start_ticks
 
@@ -232,7 +252,7 @@ def _prove_stored_runtime_absent(session: SessionRow, *, target: Transport) -> b
     if current_boot != stored_boot_id:
         return True
 
-    pid_presence = _mgr._pid_presence(session.pid, target=target)
+    pid_presence = _mgr._pid_presence(session.pid, target=target, sudo=sudo)
     if pid_presence is ProbeStatus.ABSENT:
         return True
     if pid_presence is ProbeStatus.UNKNOWN:
@@ -244,9 +264,9 @@ def _prove_stored_runtime_absent(session: SessionRow, *, target: Transport) -> b
     if stored_ticks is None:
         return False
 
-    ticks = probe_process_start_ticks(session.pid, target=target)
+    ticks = probe_process_start_ticks(session.pid, target=target, sudo=sudo)
     if ticks.status is ProbeStatus.ABSENT:
-        return _mgr._pid_presence(session.pid, target=target) is ProbeStatus.ABSENT
+        return _mgr._pid_presence(session.pid, target=target, sudo=sudo) is ProbeStatus.ABSENT
     if ticks.status is ProbeStatus.UNKNOWN or ticks.value is None:
         raise StateError(
             f"could not verify the stored process start time for session '{session.name}'",
@@ -278,7 +298,13 @@ def _ensure_pid(session: SessionRow, *, target: Transport, db: Database) -> Sess
     return result
 
 
-def ensure_pids_batch(sessions: list[SessionRow], *, db: Database, config: Config) -> list[SessionRow]:
+def ensure_pids_batch(
+    sessions: list[SessionRow],
+    *,
+    db: Database,
+    config: Config,
+    announce: bool = True,
+) -> list[SessionRow]:
     """Auto-recover PID + boot ID for sessions missing either. Returns updated list."""
     need_repair = [s for s in sessions if _needs_repair(s)]
     if not need_repair:
@@ -301,7 +327,8 @@ def ensure_pids_batch(sessions: list[SessionRow], *, db: Database, config: Confi
                 require_vm_ssh_boundary(db, config, vm)
                 vm_cache[ws.vm_name] = _mgr.transport(vm, config)
             except Exception as exc:
-                output.warn(f"Cannot reach VM '{ws.vm_name}': {exc}")
+                if announce:
+                    output.warn(f"Cannot reach VM '{ws.vm_name}': {exc}")
                 continue
         by_vm.setdefault(ws.vm_name, []).append(s)
 
@@ -310,12 +337,14 @@ def ensure_pids_batch(sessions: list[SessionRow], *, db: Database, config: Confi
         target = vm_cache[vm_name]
         for session in vm_sessions:
             try:
-                if _repair_session_pid(session, target=target, db=db):
+                if _repair_session_pid(session, target=target, db=db, announce=announce):
                     repaired_names.add(session.name)
             except (ConnectivityError, StateError) as exc:
-                output.warn(str(exc))
+                if announce:
+                    output.warn(str(exc))
             except Exception as exc:
-                output.warn(f"Failed to repair session '{session.name}': {exc}")
+                if announce:
+                    output.warn(f"Failed to repair session '{session.name}': {exc}")
 
     # Return original list with repaired sessions refreshed from DB
     if not repaired_names:

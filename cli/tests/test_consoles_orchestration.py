@@ -143,7 +143,8 @@ def test_running_session_names_repairs_incomplete_live_identity(
     def stub_run(command: str, **kwargs: object) -> _FakeResult:
         fake_target.commands.append(command)
         boot_hex = BOOT_ID.encode().hex()
-        return _FakeResult(returncode=0, stdout=f"S:alpha:0::0::0:{boot_hex}:0\n")
+        present_hex = b"present".hex()
+        return _FakeResult(returncode=0, stdout=f"S:alpha:0::0::0:{boot_hex}:0:{present_hex}\n")
 
     fake_target.run = stub_run  # type: ignore[assignment]
 
@@ -198,12 +199,14 @@ def test_running_session_names_uses_live_status_check(db: Database, fake_target:
             missing_session = b"can't find session: gamma".hex()
             missing_server = b"no server running on /gamma".hex()
             boot_hex = BOOT_ID.encode().hex()
+            present_hex = b"present".hex()
+            absent_hex = b"absent".hex()
             return _FakeResult(
                 returncode=0,
                 stdout=(
-                    f"S:alpha:0::0::0:{boot_hex}:0\n"
-                    f"S:beta:0::0::0:{boot_hex}:0\n"
-                    f"S:gamma:1:{missing_session}:1:{missing_server}:0:{boot_hex}:1\n"
+                    f"S:alpha:0::0::0:{boot_hex}:0:{present_hex}\n"
+                    f"S:beta:0::0::0:{boot_hex}:0:{present_hex}\n"
+                    f"S:gamma:1:{missing_session}:1:{missing_server}:0:{boot_hex}:0:{absent_hex}\n"
                 ),
             )
         return _FakeResult()

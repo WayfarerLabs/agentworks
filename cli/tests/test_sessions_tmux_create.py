@@ -159,6 +159,34 @@ def test_fingerprint_capture_requires_two_matching_pid_and_stat_reads() -> None:
     assert changed_ticks.status is ProbeStatus.UNKNOWN
 
 
+def test_fingerprint_capture_elevates_agent_tmux_and_process_reads() -> None:
+    class _ElevatedTarget(_FingerprintTarget):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls: list[tuple[str, bool]] = []
+
+        def run(self, command: str, **kwargs: object) -> _SpyResult:
+            elevated = kwargs.get("sudo") is True
+            self.calls.append((command, elevated))
+            if ("display-message" in command or "/proc/42/stat" in command) and not elevated:
+                return _SpyResult(returncode=1)
+            return super().run(command, **kwargs)
+
+    target = _ElevatedTarget()
+    result = capture_tmux_server_fingerprint(  # type: ignore[arg-type]
+        target=target,
+        socket_path="/run/s1.sock",
+        sudo=True,
+    )
+
+    from agentworks.sessions.tmux import ProbeStatus
+
+    assert result.status is ProbeStatus.PRESENT
+    assert all(
+        elevated for command, elevated in target.calls if "display-message" in command or "/proc/42/stat" in command
+    )
+
+
 @pytest.mark.parametrize(
     "target",
     [
@@ -187,6 +215,38 @@ def test_tmux_presence_classifier_distinguishes_absence_from_permission_failure(
             text=True,
         )
         assert _tmux_presence_from_result(missing_server, missing_target_is_absent=False) is ProbeStatus.ABSENT
+
+        windows_tty_missing_server = subprocess.CompletedProcess(
+            args=["ssh", "-tt"],
+            returncode=1,
+            stdout=missing_server.stderr,
+            stderr="Connection to 100.64.0.1 closed.\r\n",
+        )
+        assert (
+            _tmux_presence_from_result(windows_tty_missing_server, missing_target_is_absent=False) is ProbeStatus.ABSENT
+        )
+
+        windows_tty_permission_failure = subprocess.CompletedProcess(
+            args=["ssh", "-tt"],
+            returncode=1,
+            stdout="error connecting to /run/agentworks/s.sock (Permission denied)\r\n",
+            stderr="Connection to 100.64.0.1 closed.\r\n",
+        )
+        assert (
+            _tmux_presence_from_result(windows_tty_permission_failure, missing_target_is_absent=False)
+            is ProbeStatus.UNKNOWN
+        )
+
+        remote_close_shaped_output = subprocess.CompletedProcess(
+            args=["ssh", "-tt"],
+            returncode=1,
+            stdout="Connection to 100.64.0.1 closed.\r\n",
+            stderr=missing_server.stderr,
+        )
+        assert (
+            _tmux_presence_from_result(remote_close_shaped_output, missing_target_is_absent=False)
+            is ProbeStatus.UNKNOWN
+        )
 
         transition = subprocess.CompletedProcess(
             args=["tmux"],

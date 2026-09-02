@@ -133,6 +133,16 @@ _TMUX_SERVER_ABSENCE_DIAGNOSTICS = (
     re.compile(r"error connecting to .+ \((?:No such file or directory|Connection refused)\)", re.ASCII),
 )
 _TMUX_TARGET_ABSENCE_DIAGNOSTIC = re.compile(r"can't find session: .+", re.ASCII)
+_SSH_TTY_CLOSE_DIAGNOSTIC = re.compile(r"(?:Shared connection|Connection) to .+ closed\.", re.ASCII)
+
+
+def _normalized_probe_streams(result: object) -> tuple[str, str]:
+    """Strip only the local forced-TTY close advisory from probe output."""
+    stdout = (getattr(result, "stdout", "") or "").strip()
+    stderr = (getattr(result, "stderr", "") or "").strip()
+    if stdout and _SSH_TTY_CLOSE_DIAGNOSTIC.fullmatch(stderr):
+        stderr = ""
+    return stdout, stderr
 
 
 def _tmux_presence_from_result(result: object, *, missing_target_is_absent: bool) -> ProbeStatus:
@@ -145,11 +155,8 @@ def _tmux_presence_from_result(result: object, *, missing_target_is_absent: bool
     if returncode != 1:
         return ProbeStatus.UNKNOWN
 
-    streams = [
-        value.strip()
-        for value in (getattr(result, "stdout", "") or "", getattr(result, "stderr", "") or "")
-        if value.strip()
-    ]
+    stdout, stderr = _normalized_probe_streams(result)
+    streams = [value for value in (stdout, stderr) if value]
     if len(streams) != 1 or "\n" in streams[0] or "\r" in streams[0]:
         return ProbeStatus.UNKNOWN
     diagnostic = streams[0]
@@ -446,10 +453,9 @@ def deploy_restricted_config(
 def tmux_cmd(base: str, socket_path: str | None = None, *, sudo: bool = False) -> str:
     """Build a tmux command string, optionally with ``-S`` and ``sudo``.
 
-    Session commands (has-session, kill-session, send-keys, capture-pane) do
-    NOT use sudo -- socket access goes through group permissions, and failures
-    surface as BROKEN status. ``sudo=True`` is only for infrastructure
-    operations (e.g. cleanup_stale_sockets probing sockets during setup).
+    Owner-targeted session commands do not need sudo because socket access goes
+    through group permissions. Admin-targeted batch operations use
+    ``sudo=True`` when inspecting agent-owned runtimes.
     """
     cmd = f"tmux -S {shlex.quote(socket_path)} {base}" if socket_path else f"tmux {base}"
     return f"sudo -n {cmd}" if sudo else cmd
@@ -958,9 +964,14 @@ def parse_process_start_ticks(stat_line: str) -> int:
     return ticks
 
 
-def probe_process_start_ticks(pid: int, *, target: Transport) -> IntegerProbe:
+def probe_process_start_ticks(
+    pid: int,
+    *,
+    target: Transport,
+    sudo: bool = False,
+) -> IntegerProbe:
     """Probe one process start time without conflating failure with absence."""
-    result = target.run(f"cat /proc/{pid}/stat", check=False)
+    result = target.run(f"cat /proc/{pid}/stat", sudo=sudo, check=False)
     if getattr(result, "returncode", 0 if getattr(result, "ok", False) else 1) != 0:
         return IntegerProbe(ProbeStatus.UNKNOWN)
     try:
@@ -980,12 +991,12 @@ def capture_tmux_server_fingerprint(
     if first_pid.status is not ProbeStatus.PRESENT:
         return FingerprintProbe(first_pid.status)
     assert first_pid.value is not None
-    first_ticks = probe_process_start_ticks(first_pid.value, target=target)
+    first_ticks = probe_process_start_ticks(first_pid.value, target=target, sudo=sudo)
     boot = target.run("cat /proc/sys/kernel/random/boot_id", check=False)
     boot_succeeded = getattr(boot, "returncode", 0 if getattr(boot, "ok", False) else 1) == 0
     boot_id = canonical_boot_id(getattr(boot, "stdout", "")) if boot_succeeded else None
     second_pid = probe_tmux_server_pid(target=target, socket_path=socket_path, sudo=sudo)
-    second_ticks = probe_process_start_ticks(first_pid.value, target=target)
+    second_ticks = probe_process_start_ticks(first_pid.value, target=target, sudo=sudo)
     if second_pid.status is ProbeStatus.ABSENT:
         return FingerprintProbe(ProbeStatus.ABSENT)
     if (

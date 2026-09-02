@@ -7,8 +7,9 @@ from dataclasses import dataclass
 import pytest
 
 from agentworks.db import SessionRow, SessionStatus
-from agentworks.errors import StateError
+from agentworks.errors import ConnectivityError, StateError
 from agentworks.sessions.manager import (
+    _repair_session_pid,
     _validated_stored_start_ticks,
     batch_check_status,
     check_session_status,
@@ -81,11 +82,12 @@ def _batch_row(
     boot_returncode: int = 0,
     boot_id: str = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
     pid_returncode: int = 0,
+    pid_fact: str = "present",
 ) -> str:
     return (
         f"S:{name}:{has_returncode}:{has_diagnostic.encode().hex()}:"
         f"{server_returncode}:{server_diagnostic.encode().hex()}:"
-        f"{boot_returncode}:{boot_id.encode().hex()}:{pid_returncode}"
+        f"{boot_returncode}:{boot_id.encode().hex()}:{pid_returncode}:{pid_fact.encode().hex()}"
     )
 
 
@@ -114,6 +116,7 @@ def test_batch_mixed() -> None:
                         server_diagnostic="no server running on /sock2",
                         boot_id=BOOT_STALE,
                         pid_returncode=1,
+                        pid_fact="",
                     )
                     + "\n"
                 ),
@@ -145,6 +148,67 @@ def test_batch_builds_compound_command() -> None:
     batch_check_status(sessions, target=target)
     assert len(target.commands) == 1
     assert "has-session" in target.commands[0]
+    assert "sudo -n tmux -S /sock has-session" in target.commands[0]
+    assert "sudo -n sh -c 'if test -d /proc/100; then printf present; else printf absent; fi'" in target.commands[0]
+    assert "sudo -n tmux -S /sock2" not in target.commands[0]
+    assert "sh -c 'if test -d /proc/200; then printf present; else printf absent; fi'" in target.commands[0]
+
+
+def test_agent_fingerprint_repair_uses_elevation_and_refuses_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An indeterminate cross-user probe never becomes stopped state."""
+    from agentworks.sessions.tmux import FingerprintProbe
+
+    session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
+    calls: list[bool] = []
+
+    def capture(**kwargs: object) -> FingerprintProbe:
+        calls.append(kwargs.get("sudo") is True)
+        return FingerprintProbe(ProbeStatus.UNKNOWN)
+
+    monkeypatch.setattr("agentworks.sessions.tmux.capture_tmux_server_fingerprint", capture)
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._pids._prove_stored_runtime_absent",
+        lambda *args, **kwargs: pytest.fail("indeterminate fingerprint entered absence proof"),
+    )
+
+    class _NoMutationDB:
+        def update_session_runtime(self, *args: object, **kwargs: object) -> None:
+            pytest.fail("indeterminate repair mutated session runtime state")
+
+    with pytest.raises(StateError):
+        _repair_session_pid(session, target=_FakeTarget(), db=_NoMutationDB())  # type: ignore[arg-type]
+
+    assert calls == [True]
+
+
+def test_repair_can_converge_without_pre_table_narration(
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Listing can retain repair side effects while leaving status to its table."""
+    from agentworks.sessions.tmux import FingerprintProbe
+
+    session = _session("s1", pid=42, socket_path="/sock", mode="admin", boot_id=BOOT_CURRENT)
+    updates: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        "agentworks.sessions.tmux.capture_tmux_server_fingerprint",
+        lambda **kwargs: FingerprintProbe(ProbeStatus.ABSENT),
+    )
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._pids._prove_stored_runtime_absent",
+        lambda *args, **kwargs: True,
+    )
+
+    class _DB:
+        def update_session_runtime(self, name: str, **kwargs: object) -> None:
+            updates.append({"name": name, **kwargs})
+
+    assert _repair_session_pid(session, target=_FakeTarget(), db=_DB(), announce=False)  # type: ignore[arg-type]
+    assert len(updates) == 1
+    assert captured_output.lines == []
 
 
 # -- check_session_status ---------------------------------------------------
@@ -168,7 +232,7 @@ def test_agent_stopped_pid_dead() -> None:
             "has-session": _FakeResult(ok=False, stderr="can't find session: s1"),
             "list-sessions": _FakeResult(ok=False, stderr="no server running on /sock"),
             "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
-            "test -d /proc/42": _FakeResult(ok=False),
+            "test -d /proc/42": _FakeResult(ok=True, stdout="absent"),
         }
     )
     assert check_session_status(session, target=target) == SessionStatus.STOPPED
@@ -197,10 +261,76 @@ def test_agent_broken() -> None:
             "has-session": _FakeResult(ok=False, stderr="can't find session: s1"),
             "list-sessions": _FakeResult(ok=False, stderr="no server running on /sock"),
             "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
-            "test -d /proc/42": _FakeResult(ok=True),
+            "test -d /proc/42": _FakeResult(ok=True, stdout="present"),
         }
     )
     assert check_session_status(session, target=target) == SessionStatus.BROKEN
+
+
+def test_agent_status_elevates_cross_user_pid_probe() -> None:
+    """The admin-side singular status path can inspect an agent-owned PID."""
+    session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
+
+    class _ElevatedPidTarget(_FakeTarget):
+        def __init__(self) -> None:
+            super().__init__(
+                {
+                    "has-session": _FakeResult(ok=False, stderr="can't find session: s1"),
+                    "list-sessions": _FakeResult(ok=False, stderr="no server running on /sock"),
+                    "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
+                }
+            )
+            self.pid_sudo: list[bool] = []
+
+        def run(self, command: str, **kwargs: object) -> _FakeResult:
+            if "test -d /proc/42" in command:
+                elevated = kwargs.get("sudo") is True
+                self.pid_sudo.append(elevated)
+                return _FakeResult(ok=elevated, returncode=0 if elevated else 2, stdout="present" if elevated else "")
+            return super().run(command, **kwargs)
+
+    target = _ElevatedPidTarget()
+    assert check_session_status(session, target=target) == SessionStatus.BROKEN
+    assert target.pid_sudo == [True]
+
+
+def test_agent_status_treats_sudo_refusal_as_unknown() -> None:
+    session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
+    target = _FakeTarget(
+        {
+            "has-session": _FakeResult(ok=False, stderr="can't find session: s1"),
+            "list-sessions": _FakeResult(ok=False, stderr="no server running on /sock"),
+            "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
+            "test -d /proc/42": _FakeResult(ok=False, returncode=1, stderr="sudo: a password is required"),
+        }
+    )
+
+    assert check_session_status(session, target=target) == SessionStatus.UNKNOWN
+
+
+def test_agent_repair_does_not_treat_sudo_refusal_as_absence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.sessions.tmux import FingerprintProbe
+
+    session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
+    monkeypatch.setattr(
+        "agentworks.sessions.tmux.capture_tmux_server_fingerprint",
+        lambda **kwargs: FingerprintProbe(ProbeStatus.ABSENT),
+    )
+    target = _FakeTarget(
+        {
+            "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
+            "test -d /proc/42": _FakeResult(ok=False, returncode=1, stderr="sudo: a password is required"),
+        }
+    )
+
+    class _NoMutationDB:
+        def update_session_runtime(self, *args: object, **kwargs: object) -> None:
+            pytest.fail("sudo refusal mutated session runtime state")
+
+    with pytest.raises(ConnectivityError):
+        _repair_session_pid(session, target=target, db=_NoMutationDB())  # type: ignore[arg-type]
 
 
 def test_reachable_server_without_canonical_session_is_residual() -> None:
@@ -234,7 +364,7 @@ def test_admin_stopped_dead_pid() -> None:
             "has-session": _FakeResult(ok=False, stderr="can't find session: s1"),
             "list-sessions": _FakeResult(ok=False, stderr="no server running on /sock"),
             "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
-            "test -d /proc/42": _FakeResult(ok=False),
+            "test -d /proc/42": _FakeResult(ok=True, stdout="absent"),
         }
     )
     assert check_session_status(session, target=target) == SessionStatus.STOPPED
@@ -252,7 +382,7 @@ def test_admin_broken_after_setenv_pivot() -> None:
             "has-session": _FakeResult(ok=False, stderr="can't find session: s1"),
             "list-sessions": _FakeResult(ok=False, stderr="no server running on /sock"),
             "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
-            "test -d /proc/42": _FakeResult(ok=True),
+            "test -d /proc/42": _FakeResult(ok=True, stdout="present"),
         }
     )
     assert check_session_status(session, target=target) == SessionStatus.BROKEN
@@ -417,6 +547,24 @@ def test_batch_empty_boot_id_is_unknown() -> None:
     assert result["a1"] == SessionStatus.UNKNOWN
 
 
+def test_batch_sudo_refusal_is_unknown() -> None:
+    session = _session("a1", pid=100, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
+    row = _batch_row(
+        "a1",
+        has_returncode=1,
+        has_diagnostic="can't find session: a1",
+        server_returncode=1,
+        server_diagnostic="no server running on /sock",
+        pid_returncode=1,
+        pid_fact="",
+    )
+
+    assert (
+        batch_check_status([session], target=_FakeTarget({"has-session": _FakeResult(stdout=row)}))["a1"]
+        is SessionStatus.UNKNOWN
+    )
+
+
 def test_batch_malformed_stored_boot_id_does_not_drop_valid_sibling() -> None:
     sessions = [
         _session("valid", pid=100, socket_path="/valid", mode="agent", boot_id=BOOT_CURRENT),
@@ -429,7 +577,7 @@ def test_batch_malformed_stored_boot_id_does_not_drop_valid_sibling() -> None:
             has_diagnostic=f"can't find session: {name}",
             server_returncode=1,
             server_diagnostic=f"no server running on /{name}",
-            pid_returncode=1,
+            pid_fact="absent",
         )
         for name in ("valid", "invalid")
     )

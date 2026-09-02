@@ -21,7 +21,12 @@ derivation while combining sessions on a VM into one SSH request.
 
 Before a command checks status, an incomplete reachable row may be repaired from the server's
 reported PID and a stable double-read of its boot ID and process start time. A provably absent
-server is recorded as stopped. Indeterminate or mismatched live identity fails closed.
+server is recorded as stopped. Indeterminate or mismatched live identity fails closed. Batched
+checks use the VM admin connection and elevate only the tmux and process probes needed to inspect an
+agent-owned runtime; this prevents Linux `/proc` visibility policy from masquerading as process
+absence. The ordinary list view reports the resulting status in its table without narrating each
+internal repair or normalization first; one aggregate status-check line explains the remote work
+before the table appears.
 
 Reachable dedicated runtimes stop with tmux `kill-server`, which removes the canonical session and
 any operator-added sessions, windows, or panes on that dedicated server. Older shared-server rows

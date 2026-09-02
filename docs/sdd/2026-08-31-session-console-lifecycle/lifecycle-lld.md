@@ -206,7 +206,12 @@ sentinel clears the start time. Existing positive-PID rows migrate with a null s
 their tmux socket is reachable, lifecycle preparation may backfill through the same repeated capture
 only when the socket-reported server PID matches the stored PID and the stored boot ID matches the
 VM. A same-boot broken row whose stored PID still exists but has no provable start time cannot
-distinguish that process from the old server and fails closed with manual-recovery guidance.
+distinguish that process from the old server and fails closed with manual-recovery guidance. Per-VM
+repair and status retain the VM admin transport, so agent-owned tmux and `/proc/PID` probes use the
+existing non-interactive root execution boundary. Owner-targeted singular operations do not elevate.
+The process-existence probe emits one fixed `present` or `absent` fact only after the selected shell
+has started successfully. A failed outer shell or sudo invocation, missing or malformed fact, extra
+output, or any other return status is `UNKNOWN`; ordinary sudo exit codes never mean absence.
 
 ### Absent-runtime launch
 
@@ -311,6 +316,11 @@ transport failure, or any other indeterminate result refuses recovery with manua
 Core never invokes `kill` for the numeric PID. Legacy rows get the same absence-only treatment and
 never signal or destroy a possibly shared server. Parent deletion paths preserve their current
 best-effort or fail-closed policy when a target cannot be reached.
+
+Fingerprint `UNKNOWN` is terminal for that repair attempt: only authoritative `ABSENT` may enter the
+conditional absence proof. On Windows, the tmux diagnostic classifier may discard the single
+canonical local OpenSSH forced-TTY close advisory that accompanies one remote tmux diagnostic; every
+other extra, multiline, permission, or protocol diagnostic remains `UNKNOWN`.
 
 This contract deliberately stops at tmux-owned terminal state. A process that deliberately detaches
 from its terminal may outlive tmux; systemd/cgroup containment of all descendants is the separate

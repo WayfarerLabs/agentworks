@@ -663,6 +663,8 @@ def session_listing(
     status_map: dict[str, SessionStatus] = {}
     status_keepalive_vms: list[VMRow] = [] if no_status else _mgr._distinct_vms_for_sessions(db, sessions)
     status_vm_names = frozenset(vm.name for vm in status_keepalive_vms)
+    if not no_status:
+        output.info("Checking session status...")
     with _mgr._best_effort_batch_vm_boundary(
         db,
         config,
@@ -676,7 +678,12 @@ def session_listing(
                 if (workspace := db.get_workspace(session.workspace_name)) is not None
                 and workspace.vm_name in usable_vm_names
             ]
-            usable_sessions = _mgr.ensure_pids_batch(usable_sessions, db=db, config=config)
+            usable_sessions = _mgr.ensure_pids_batch(
+                usable_sessions,
+                db=db,
+                config=config,
+                announce=False,
+            )
             refreshed = {session.name: session for session in usable_sessions}
             sessions = [refreshed.get(session.name, session) for session in sessions]
             status_map = _mgr.batch_check_all_sessions(usable_sessions, db=db, config=config)

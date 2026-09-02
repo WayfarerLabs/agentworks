@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
 from agentworks import output
-from agentworks.db import PID_STOPPED, SessionStatus
+from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
 from agentworks.errors import (
     AgentworksError,
     StateError,
@@ -20,12 +20,32 @@ if TYPE_CHECKING:
     from agentworks.db import Database, SessionRow
     from agentworks.transports import Transport
 
+_PID_PRESENT_FACT = "present"
+_PID_ABSENT_FACT = "absent"
 
-def _pid_presence(pid: int, *, target: Transport) -> ProbeStatus:
+
+def _pid_probe_script(pid: int) -> str:
+    """Return a shell probe whose fact exists only after the shell started."""
+    return f"if test -d /proc/{pid}; then printf {_PID_PRESENT_FACT}; else printf {_PID_ABSENT_FACT}; fi"
+
+
+def _pid_presence_from_fact(returncode: object, fact: object, *, stderr: object = "") -> ProbeStatus:
+    if returncode != 0 or not isinstance(fact, str) or not isinstance(stderr, str):
+        return ProbeStatus.UNKNOWN
+    if fact == _PID_PRESENT_FACT and not stderr:
+        return ProbeStatus.PRESENT
+    if fact == _PID_ABSENT_FACT and not stderr:
+        return ProbeStatus.ABSENT
+    return ProbeStatus.UNKNOWN
+
+
+def _pid_presence(pid: int, *, target: Transport, sudo: bool = False) -> ProbeStatus:
     """Probe a PID without treating a transport failure as process absence."""
-    from agentworks.sessions.tmux import _test_presence_from_result
+    from agentworks.sessions.tmux import _normalized_probe_streams
 
-    return _test_presence_from_result(target.run(f"test -d /proc/{pid}", check=False))
+    result = target.run(_pid_probe_script(pid), sudo=sudo, check=False)
+    stdout, stderr = _normalized_probe_streams(result)
+    return _pid_presence_from_fact(getattr(result, "returncode", None), stdout, stderr=stderr)
 
 
 def _get_boot_id(target: Transport) -> str | None:
@@ -106,7 +126,11 @@ def _check_dedicated_session(session: SessionRow, *, target: Transport) -> Sessi
     stored_boot_id = _mgr._validated_stored_boot_id(session)
     if stored_boot_id != current_boot:
         return SessionStatus.STOPPED  # stale boot, PID is meaningless
-    pid_presence = _pid_presence(session.pid, target=target)
+    pid_presence = _pid_presence(
+        session.pid,
+        target=target,
+        sudo=session.mode == SessionMode.AGENT.value,
+    )
     if pid_presence is ProbeStatus.UNKNOWN:
         return SessionStatus.UNKNOWN
     if pid_presence is ProbeStatus.ABSENT:
@@ -138,10 +162,14 @@ def batch_check_status(
     for s in checkable:
         if s.socket_path is None:
             continue
+        assert s.pid is not None
         q_session = shlex.quote(f"={s.name}")  # exact tmux target
         name = s.name  # raw for output field (names are validated, no shell-special chars)
-        has_cmd = tmux_cmd(f"has-session -t {q_session}", s.socket_path)
-        server_cmd = tmux_cmd("list-sessions", s.socket_path)
+        needs_sudo = s.mode == SessionMode.AGENT.value
+        has_cmd = tmux_cmd(f"has-session -t {q_session}", s.socket_path, sudo=needs_sudo)
+        server_cmd = tmux_cmd("list-sessions", s.socket_path, sudo=needs_sudo)
+        pid_probe = _pid_probe_script(s.pid)
+        pid_cmd = f"sudo -n sh -c {shlex.quote(pid_probe)}" if needs_sudo else f"sh -c {shlex.quote(pid_probe)}"
         parts.append(
             f"HERR=$({has_cmd} 2>&1 >/dev/null); H=$?; "
             'HHEX=$(printf %s "$HERR" | hex); '
@@ -149,8 +177,10 @@ def batch_check_status(
             'SHEX=$(printf %s "$SERR" | hex); '
             f"BOOT=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null); B=$?; "
             'BOOT_HEX=$(printf %s "$BOOT" | hex); '
-            f"test -d /proc/{s.pid}; P=$?; "
-            f'printf "S:{name}:%s:%s:%s:%s:%s:%s:%s\\n" "$H" "$HHEX" "$S" "$SHEX" "$B" "$BOOT_HEX" "$P"'
+            f"PFACT=$({pid_cmd} 2>/dev/null); P=$?; "
+            'PHEX=$(printf %s "$PFACT" | hex); '
+            f'printf "S:{name}:%s:%s:%s:%s:%s:%s:%s:%s\\n" '
+            '"$H" "$HHEX" "$S" "$SHEX" "$B" "$BOOT_HEX" "$P" "$PHEX"'
         )
     if not parts:
         return {}
@@ -171,7 +201,7 @@ def batch_check_status(
         if not line.startswith("S:"):
             continue
         fields = line.split(":")
-        if len(fields) != 9:
+        if len(fields) != 10:
             continue
         name = fields[1]
         session = sessions_by_name.get(name)
@@ -196,13 +226,20 @@ def batch_check_status(
             boot_returncode = int(fields[6])
             observed_boot = bytes.fromhex(fields[7]).decode("ascii")
             pid_returncode = int(fields[8])
+            pid_fact = bytes.fromhex(fields[9]).decode("ascii")
             stored_boot = _mgr._validated_stored_boot_id(session)
         except (StateError, UnicodeDecodeError, ValueError):
             continue
         current_boot = canonical_boot_id(observed_boot) if boot_returncode == 0 else None
-        if current_boot is None or pid_returncode not in {0, 1}:
+        if current_boot is None:
             continue
-        if stored_boot != current_boot or pid_returncode == 1:
+        if stored_boot != current_boot:
+            status_map[name] = SessionStatus.STOPPED
+            continue
+        pid_presence = _pid_presence_from_fact(pid_returncode, pid_fact)
+        if pid_presence is ProbeStatus.UNKNOWN:
+            continue
+        if pid_presence is ProbeStatus.ABSENT:
             status_map[name] = SessionStatus.STOPPED
         else:
             status_map[name] = SessionStatus.BROKEN
