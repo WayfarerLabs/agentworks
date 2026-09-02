@@ -62,11 +62,12 @@ def check_session_status(
 
     if session.socket_path is not None:
         return _check_dedicated_session(session, target=target)
-    # Legacy admin session predating per-session sockets. Surface as a
-    # typed StateError so the CLI's top-level error wrapper renders it
-    # as a one-liner; the new admin-mode path always stores a
-    # socket_path.
-    raise StateError(
+    raise _legacy_session_status_error(session)
+
+
+def _legacy_session_status_error(session: SessionRow) -> StateError:
+    """Build the canonical refusal for a live legacy shared-server row."""
+    return StateError(
         f"session '{session.name}' has no socket_path",
         entity_kind="session",
         entity_name=session.name,

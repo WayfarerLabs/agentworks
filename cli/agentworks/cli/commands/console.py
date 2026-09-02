@@ -87,20 +87,21 @@ def console_create(
     if vm is None:
         vm = infer_vm_from_session_specs(db, specs)
     resolved_vm = prompt_vm(db, vm)
+    config = load_config()
 
     if all_running:
         # Live SSH probe (one round-trip per VM) so --all-running reflects
         # reality, not stale DB state. If the probe finds nothing and the
         # operator didn't list sessions or pass --add-admin-shell,
         # create_console below raises the canonical "empty console" error.
-        running = running_session_names(db, load_config(), resolved_vm.name)
+        running = running_session_names(db, config, resolved_vm.name)
         explicit_names = {parse_session_spec(s).name for s in specs}
         extras = [n for n in running if n not in explicit_names]
         specs.extend(extras)
 
     create_console(
         db,
-        load_config(),
+        config,
         name=name,
         vm_name=resolved_vm.name,
         session_specs=specs,

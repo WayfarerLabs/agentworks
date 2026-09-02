@@ -113,15 +113,22 @@ def running_session_names(db: Database, config: Config, vm_name: str) -> list[st
     Uses the same one-round-trip-per-VM check that powers ``aw session list``.
     Returns alphabetically sorted names.
 
-    Raises ConnectivityError when any eligible session has indeterminate
-    runtime status -- almost always a transport failure that we don't want to
-    silently report as "nothing running". A VM with zero eligible sessions
-    simply returns an empty list.
+    Raises StateError for a live legacy shared-server row that requires
+    migration, or ConnectivityError when any dedicated session has
+    indeterminate runtime status. A VM with zero eligible sessions simply
+    returns an empty list.
     """
     from agentworks.db import PID_STOPPED, SessionStatus
-    from agentworks.sessions.manager import batch_check_all_sessions, filter_sessions
+    from agentworks.sessions.manager import (
+        _legacy_session_status_error,
+        batch_check_all_sessions,
+        filter_sessions,
+    )
 
     sessions = filter_sessions(db, vm_name=vm_name)
+    for session in sessions:
+        if session.pid is not None and session.pid != PID_STOPPED and session.pid > 0 and session.socket_path is None:
+            raise _legacy_session_status_error(session)
     status_map = batch_check_all_sessions(sessions, db=db, config=config)
 
     checkable = [s for s in sessions if s.pid is not None and s.pid != PID_STOPPED and s.pid > 0 and s.boot_id]

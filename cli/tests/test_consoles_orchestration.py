@@ -10,6 +10,7 @@ Shared seed helpers and stub Config classes live in
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -19,6 +20,7 @@ from agentworks.errors import (
     AlreadyExistsError,
     ConnectivityError,
     NotFoundError,
+    StateError,
     ValidationError,
 )
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -93,6 +95,29 @@ def test_running_session_names_raises_on_unreachable(db: Database, fake_target: 
         running_session_names(db, _StubConfig(), "vm1")
 
 
+def test_running_session_names_rejects_live_legacy_row_before_connectivity_probe(
+    db: Database,
+    fake_target: _FakeTarget,
+) -> None:
+    from agentworks.sessions.multi_console import running_session_names
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["legacy"])
+    db._conn.execute(
+        "UPDATE sessions SET socket_path = NULL, pid = 100, boot_id = ? WHERE name = 'legacy'",
+        ("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",),
+    )
+    db._conn.commit()
+
+    with pytest.raises(StateError) as caught:
+        running_session_names(db, _StubConfig(), "vm1")
+
+    assert caught.value.entity_kind == "session"
+    assert caught.value.entity_name == "legacy"
+    assert caught.value.hint is not None
+    assert fake_target.commands == []
+
+
 def test_running_session_names_uses_live_status_check(db: Database, fake_target: _FakeTarget) -> None:
     """running_session_names SSH-probes via batch_check_all_sessions and
     returns only sessions whose live tmux state is OK."""
@@ -130,6 +155,46 @@ def test_running_session_names_uses_live_status_check(db: Database, fake_target:
 
     names = running_session_names(db, _StubConfig(), "vm1")
     assert names == ["alpha", "beta"]
+
+
+def test_console_create_all_running_reuses_one_loaded_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.cli.commands import console as console_commands
+    from agentworks.sessions import multi_console
+
+    database = object()
+    config = object()
+    load_calls: list[None] = []
+    observed_configs: list[object] = []
+
+    def load_config() -> object:
+        load_calls.append(None)
+        return config
+
+    monkeypatch.setattr(console_commands, "get_db", lambda: database)
+    monkeypatch.setattr(console_commands, "prompt_vm", lambda candidate, name: SimpleNamespace(name=name))
+    monkeypatch.setattr("agentworks.config.load_config", load_config)
+    monkeypatch.setattr(
+        multi_console,
+        "running_session_names",
+        lambda candidate, loaded, vm_name: observed_configs.append(loaded) or [],
+    )
+    monkeypatch.setattr(
+        multi_console,
+        "create_console",
+        lambda candidate, loaded, **kwargs: observed_configs.append(loaded),
+    )
+
+    console_commands.console_create(
+        name="focused",
+        sessions=[],
+        vm="vm1",
+        all_sessions=False,
+        all_running=True,
+        add_admin_shell=True,
+    )
+
+    assert load_calls == [None]
+    assert observed_configs == [config, config]
 
 
 def test_infer_vm_from_session_specs(db: Database) -> None:

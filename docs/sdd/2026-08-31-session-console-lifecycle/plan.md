@@ -297,6 +297,8 @@ The implementation, review, CI, and live-evidence steps below apply to the compl
 - [x] Reset process-global CLI request flags at each pytest boundary after the recurring cross-test
       `--non-interactive` leak blocked exact-head CI; retain issue #722 for the broader pre-existing
       isolation audit.
+- [x] Make console `--all-running` distinguish live legacy rows from transport indeterminacy and
+      reuse one immutable config load across selection and create.
 
 ### Phase 6 Definition of Done
 

@@ -178,6 +178,9 @@ from ._status import (
     _get_boot_id as _get_boot_id,
 )
 from ._status import (
+    _legacy_session_status_error as _legacy_session_status_error,
+)
+from ._status import (
     _pid_presence as _pid_presence,
 )
 from ._status import (
