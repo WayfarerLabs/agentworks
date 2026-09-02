@@ -299,6 +299,8 @@ The implementation, review, CI, and live-evidence steps below apply to the compl
       isolation audit.
 - [x] Make console `--all-running` distinguish live legacy rows from transport indeterminacy and
       reuse one immutable config load across selection and create.
+- [x] Make every test fixture that claims a valid runtime identity use a canonical boot UUID while
+      retaining malformed values only in explicit rejection and opaque database-storage tests.
 
 ### Phase 6 Definition of Done
 

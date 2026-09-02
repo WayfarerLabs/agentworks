@@ -633,7 +633,8 @@ def test_restart_migrates_legacy_session_to_per_session_socket(tmp_path: Path, m
     # Explicit pre-v36 legacy fixture: shared-server rows have no socket or
     # process start fingerprint and exist only to exercise migration teardown.
     db._conn.execute(
-        "UPDATE sessions SET pid = 12345, boot_id = 'boot-x', tmux_server_start_ticks = NULL WHERE name = 'legacy'"
+        "UPDATE sessions SET pid = 12345, boot_id = ?, tmux_server_start_ticks = NULL WHERE name = 'legacy'",
+        (BOOT_ID,),
     )
     db._conn.commit()
 
@@ -738,7 +739,8 @@ def test_restart_dead_workload_error_propagates(tmp_path: Path, monkeypatch: pyt
     # Explicit pre-v36 legacy fixture. Atomic runtime writes intentionally
     # require the current dedicated-socket shape.
     db._conn.execute(
-        "UPDATE sessions SET pid = 12345, boot_id = 'boot-x', tmux_server_start_ticks = NULL WHERE name = 's1'"
+        "UPDATE sessions SET pid = 12345, boot_id = ?, tmux_server_start_ticks = NULL WHERE name = 's1'",
+        (BOOT_ID,),
     )
     db._conn.commit()
 

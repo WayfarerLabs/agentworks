@@ -44,6 +44,8 @@ from tests.console_helpers import create_console_record as create_console
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
 
+BOOT_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
 
 def _refuse_live_target(*args: object, **kwargs: object) -> None:
     raise ConnectivityError("SSH identity unavailable")
@@ -86,7 +88,7 @@ def test_running_session_names_raises_on_unreachable(db: Database, fake_target: 
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["alpha"])
-    db._conn.execute("UPDATE sessions SET pid = 100, boot_id = 'b' WHERE name = 'alpha'")
+    db._conn.execute("UPDATE sessions SET pid = 100, boot_id = ? WHERE name = 'alpha'", (BOOT_ID,))
     db._conn.commit()
     # Probe returns empty stdout (simulates transport failure caught by check=False).
     fake_target.run = lambda command, **kwargs: _FakeResult(returncode=255, stdout="")  # type: ignore[assignment]
@@ -105,7 +107,7 @@ def test_running_session_names_rejects_live_legacy_row_before_connectivity_probe
     _seed_sessions(db, ["legacy"])
     db._conn.execute(
         "UPDATE sessions SET socket_path = NULL, pid = 100, boot_id = ? WHERE name = 'legacy'",
-        ("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",),
+        (BOOT_ID,),
     )
     db._conn.commit()
 
@@ -126,10 +128,9 @@ def test_running_session_names_uses_live_status_check(db: Database, fake_target:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["alpha", "beta", "gamma"])
     # Give each session a PID so it's eligible for the batch check.
-    boot_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-    db._conn.execute("UPDATE sessions SET pid = 100, boot_id = ? WHERE name = 'alpha'", (boot_id,))
-    db._conn.execute("UPDATE sessions SET pid = 200, boot_id = ? WHERE name = 'beta'", (boot_id,))
-    db._conn.execute("UPDATE sessions SET pid = 300, boot_id = ? WHERE name = 'gamma'", (boot_id,))
+    db._conn.execute("UPDATE sessions SET pid = 100, boot_id = ? WHERE name = 'alpha'", (BOOT_ID,))
+    db._conn.execute("UPDATE sessions SET pid = 200, boot_id = ? WHERE name = 'beta'", (BOOT_ID,))
+    db._conn.execute("UPDATE sessions SET pid = 300, boot_id = ? WHERE name = 'gamma'", (BOOT_ID,))
     db._conn.commit()
 
     # batch_check_all_sessions emits one compound shell command per VM. We
@@ -140,7 +141,7 @@ def test_running_session_names_uses_live_status_check(db: Database, fake_target:
         if "has-session -t =alpha" in command and "has-session -t =beta" in command:
             missing_session = b"can't find session: gamma".hex()
             missing_server = b"no server running on /gamma".hex()
-            boot_hex = boot_id.encode().hex()
+            boot_hex = BOOT_ID.encode().hex()
             return _FakeResult(
                 returncode=0,
                 stdout=(

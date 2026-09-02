@@ -101,7 +101,7 @@ def _seed_live_session(db: Database, *, name: str, ws: str) -> None:
     db._conn.execute(
         "INSERT INTO sessions (name, workspace_name, template, mode, "
         "socket_path, pid, boot_id) VALUES (?, ?, 'default', 'admin', "
-        "?, 4242, 'boot-1')",
+        "?, 4242, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')",
         (name, ws, f"/tmp/{name}.sock"),
     )
     db._conn.commit()

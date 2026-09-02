@@ -44,6 +44,8 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
     from agentworks.db import Database
 
+BOOT_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
 
 @pytest.fixture(autouse=True)
 def _stub_ssh_identity(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -210,9 +212,7 @@ def test_list_status_reports_identity_refusal_as_unknown_without_transport(
 ) -> None:
     _seed_vm(db, "vm-a", "100.64.0.11")
     db.insert_session("s-a", "ws-vm-a", "default", SessionMode.ADMIN, socket_path="/tmp/s-a.sock")
-    db.update_session_runtime(
-        "s-a", socket_path="/tmp/s-a.sock", pid=4321, boot_id="boot-a", tmux_server_start_ticks=77
-    )
+    db.update_session_runtime("s-a", socket_path="/tmp/s-a.sock", pid=4321, boot_id=BOOT_ID, tmux_server_start_ticks=77)
 
     def refuse(*args: object, **kwargs: object) -> None:
         raise StateError("SSH identity drift")

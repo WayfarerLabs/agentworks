@@ -24,6 +24,9 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow
 
+LIST_BOOT_ID = "deadbeef-0000-4000-8000-000000000002"
+DESCRIBE_BOOT_ID = "deadbeef-0000-4000-8000-000000000003"
+
 
 @pytest.fixture(autouse=True)
 def _stub_ssh_identity(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -555,7 +558,7 @@ def test_session_json_status_repairs_and_no_status_are_preserved(
             "live",
             socket_path="/tmp/live.sock",
             pid=4321,
-            boot_id="secret-boot-live",
+            boot_id=LIST_BOOT_ID,
             tmux_server_start_ticks=77,
         )
         return db.list_sessions()
@@ -577,10 +580,10 @@ def test_session_json_status_repairs_and_no_status_are_preserved(
         ("stopped", "stopped", None),
     ]
     repaired = db.get_session("live")
-    assert repaired is not None and (repaired.pid, repaired.boot_id) == (4321, "secret-boot-live")
+    assert repaired is not None and (repaired.pid, repaired.boot_id) == (4321, LIST_BOOT_ID)
     assert repairs == 1
     assert boundary_calls == 1
-    assert b"secret-boot-live" not in status_result.stdout_bytes
+    assert LIST_BOOT_ID.encode() not in status_result.stdout_bytes
 
     db.update_session_runtime(
         "live", socket_path="/tmp/live.sock", pid=None, boot_id=None, tmux_server_start_ticks=None
@@ -645,7 +648,7 @@ def test_session_describe_json_positive_and_stopped_pid_with_degraded_template(
             row.name,
             socket_path="/tmp/live.sock",
             pid=7777,
-            boot_id="secret-boot-describe",
+            boot_id=DESCRIBE_BOOT_ID,
             tmux_server_start_ticks=77,
         )
         repaired = db.get_session(row.name)
@@ -665,7 +668,7 @@ def test_session_describe_json_positive_and_stopped_pid_with_degraded_template(
         None,
     )
     assert marker.encode() not in live.stdout_bytes
-    assert b"secret-boot-describe" not in live.stdout_bytes
+    assert DESCRIBE_BOOT_ID.encode() not in live.stdout_bytes
     session_state = live_record["instance_state"]
     assert session_state["declarations"]["session"]["current"] == {
         "status": "unresolved",
