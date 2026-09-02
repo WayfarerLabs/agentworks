@@ -325,6 +325,8 @@ The implementation, review, CI, and live-evidence steps below apply to the compl
       legacy agent/shared-server probe surface and fixture.
 - [x] Refresh the lock from the superseded transaction checkpoint to the final reviewed fail-closed
       repair checkpoint and record the exact local evidence and remaining live/CI gates.
+- [x] Document the noticeable one-time runtime-identity backfill for existing sessions in the 0.19
+      upgrade guide and final lock after the operator encountered it during status listing.
 
 ### Phase 6 Definition of Done
 

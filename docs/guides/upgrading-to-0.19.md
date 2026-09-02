@@ -3,6 +3,10 @@
 Agentworks 0.19 makes session and console lifecycle explicit. Most operators need only replace old
 commands in scripts; resource declarations and stored session/console definitions do not change.
 
+The first status-aware session command that reaches each VM, such as `agw session list`, may take
+noticeably longer while Agentworks backfills stable runtime identity for existing sessions. Let the
+command finish; successful backfill is a one-time operation for each session.
+
 ## Replace session resume with start or restart
 
 Choose the operation that matches the intended runtime change:

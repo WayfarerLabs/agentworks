@@ -35,7 +35,9 @@ this file records the final reviewed and operator-accepted implementation state.
   bypass. Canonical restart stays prompt-free.
 - Database schema version 36 stores the tmux server start ticks. Atomic runtime updates replace the
   former partial PID setters, and migration repair backfills only from authoritative live facts or
-  records stopped state only after exact absence proof.
+  records stopped state only after exact absence proof. The first status-aware operation that
+  reaches each VM may therefore spend noticeable time backfilling pre-0.19 sessions; successful
+  repair is one-time per session and the 0.19 upgrade guide calls it out.
 
 ## Final design boundaries
 
