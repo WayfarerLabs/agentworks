@@ -406,7 +406,7 @@ def _reorder_session_windows(
             f"console '{console_name}' has duplicate window name(s) "
             f"({', '.join(duplicated)}); cannot reorder live tmux safely. "
             f"DB order was updated; run "
-            f"`agentworks console restart {q_console}` to rebuild "
+            f"`agw console restart {q_console}` to rebuild "
             f"tmux from DB state."
         )
         return

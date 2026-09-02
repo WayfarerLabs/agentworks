@@ -292,6 +292,8 @@ The implementation, review, CI, and live-evidence steps below apply to the compl
       without adding authored-prose assertions.
 - [x] Make compatibility consent read-only and fail closed without `--yes` when interactive input is
       unavailable; canonical restart and its manager contract remain unchanged.
+- [x] Keep VM-delete teardown warnings free of transport-originated exception text and correct the
+      console restart recovery spelling; leave pre-existing test-isolation hygiene to issue #722.
 
 ### Phase 6 Definition of Done
 

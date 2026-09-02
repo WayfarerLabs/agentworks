@@ -288,8 +288,8 @@ def delete_vm(
                                 db=db,
                                 force=True,
                             )
-                        except Exception as exc:
-                            output.warn(f"session '{session.name}' teardown skipped during VM deletion: {exc}")
+                        except Exception:
+                            output.warn(f"session '{session.name}' teardown skipped during VM deletion")
                     _mgr._tailscale_logout(vm, config, platform, ops_ctx)
             except UserAbort:
                 raise

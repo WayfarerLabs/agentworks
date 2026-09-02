@@ -171,6 +171,52 @@ def test_reachable_vm_delete_routes_sessions_through_shared_teardown(
     assert db.get_vm("dvm") is None
 
 
+def test_vm_delete_does_not_render_session_teardown_exception_text(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    from types import SimpleNamespace
+
+    from agentworks.db import SessionMode
+    from agentworks.sessions import manager as session_manager
+
+    sentinel = "REMOTE-TEARDOWN-SENTINEL"
+    _seed(db)
+    db.insert_workspace("ws1", "/srv/ws1", "dvm", "ws-ws1")
+    db.insert_session(
+        "s1",
+        "ws1",
+        "default",
+        SessionMode.ADMIN,
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/s1.sock",
+    )
+    _fake_backend(monkeypatch)
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *args, **kwargs: None)
+    monkeypatch.setattr(session_manager, "ensure_pids_batch", lambda sessions, **kwargs: sessions)
+    monkeypatch.setattr(
+        "agentworks.transports.transport",
+        lambda *args, **kwargs: SimpleNamespace(run=lambda *args, **kwargs: None),
+    )
+    monkeypatch.setattr(
+        session_manager,
+        "_teardown_session",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError(sentinel)),
+    )
+
+    vm_manager.delete_vm(
+        db,
+        make_config(),
+        "dvm",
+        force=True,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+
+    assert sentinel not in "\n".join(captured_output.warnings)
+    assert db.get_vm("dvm") is None
+
+
 def test_delete_removes_only_its_workspace_artifacts(
     db: Database,
     tmp_path: Path,
