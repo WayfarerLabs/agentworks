@@ -271,7 +271,7 @@ The implementation, review, CI, and live-evidence steps below apply to the compl
       authored prose.
 - [x] Run focused session, console, capability, secret-boundary, completion, and cascade suites,
       then the full non-integration, static, docs, generation, website, and installed-wheel gates.
-- [ ] Run private project, Muntz, and cold correctness/security reviews on one clean exact head and
+- [x] Run private project, Muntz, and cold correctness/security reviews on one clean exact head and
       resolve every material finding.
 - [ ] Mark PR #710 ready only after its complete green handoff, then monitor CI and published
       feedback under the standard delivery process.
