@@ -49,8 +49,13 @@ is simply whatever is currently set, which in this scenario is already
 the broken raw mode, and the exit pass faithfully puts that same broken
 mode back. Recovering it would mean fabricating a "sane" discipline
 rather than restoring a real one, which is a different and more
-opinionated operation than this guard performs. A tab left not echoing
-by a killed attach therefore stays that way.
+opinionated operation than this guard performs. So the guard leaves a
+raw line discipline untouched; `ensure_cooked_input` is where that
+opinionated recovery happens instead, at the next interactive prompt,
+which knows unconditionally that it needs cooked line mode because it is
+about to do a line read. On Windows that matters: PSReadLine carries a
+killed attach's raw mode forward to every later command, so without the
+prompt-side cook a tab left not echoing would stay that way.
 
 Scope note: the other places agentworks hands the terminal to a
 full-screen program are `agw config edit` and `agw resource edit`,
@@ -235,6 +240,15 @@ _STD_OUTPUT_HANDLE = 0xFFFFFFF5
 # visible `<-[?1000l` garbage, which would make a bad terminal worse.
 _ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
 
+# Console INPUT mode bits (STD_INPUT_HANDLE). Together they are "cooked"
+# line mode; losing them is the raw-mode / dead-prompt state. An ssh -t
+# attach clears them and restores them on a clean exit, but a hard-killed
+# attach leaves them off, and PSReadLine then carries that raw mode to
+# every later command (see ensure_cooked_input).
+_ENABLE_PROCESSED_INPUT = 0x0001  # off => Ctrl-C is a raw byte, not SIGINT
+_ENABLE_LINE_INPUT = 0x0002  # off => Enter never completes the read (it hangs)
+_ENABLE_ECHO_INPUT = 0x0004  # off => typed characters are invisible
+
 # Snapshot/restore failures are never worth failing an attach over: this
 # is a best-effort cleanup wrapped around the operator's real work, and
 # the exit half runs inside a `finally` where an escaping exception
@@ -295,6 +309,52 @@ def emit_clear() -> None:
     screen. Best-effort and tty-gated, exactly like the sanitize path.
     """
     _emit_to_terminal(TERMINAL_CLEAR)
+
+
+def ensure_cooked_input() -> None:
+    """Force the local console's stdin back into cooked line mode (Windows only).
+
+    A deliberate, opinionated recovery the terminal guard itself declines to do
+    (it only restores a snapshot, which in the broken case is already the raw
+    mode; see this module's docstring). A hard-killed ``ssh -t`` attach leaves
+    the console with ENABLE_PROCESSED_INPUT / LINE_INPUT / ECHO_INPUT cleared,
+    and PSReadLine then hands that raw mode to every later command, so a plain
+    line prompt (``input()`` / ``typer.confirm``) hangs with nothing echoed and
+    a dead Ctrl-C. Interactive line prompts call this first so they read in a
+    sane mode no matter how the console got there.
+
+    Windows-only by design, not an oversight. A hard-killed ssh leaves the tty
+    raw on any OS, but bash/zsh reset it to their saved sane state every time
+    they redraw a prompt (part of job control), so a later prompt there already
+    reads cooked and this would be a no-op. PSReadLine instead preserves
+    whatever mode it inherits, carrying raw forward, so Windows is the one place
+    the shell does not self-heal and the cook has anything to do.
+
+    Best-effort and idempotent: OR-ing bits that are already set is a no-op, so
+    calling it before every prompt is cheap and cannot make a healthy console
+    worse. A no-op whenever stdin is not a real console (redirected / piped,
+    where ``GetConsoleMode`` fails). Deliberately not used by the hidden secret
+    prompt, which reads character by character (unaffected by the cooked bits,
+    verified in a raw console) and must not turn echo on.
+    """
+    if sys.platform != "win32":
+        return
+    kernel32 = _kernel32()
+    if kernel32 is None:
+        return
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        handle = kernel32.GetStdHandle(_STD_INPUT_HANDLE)
+        mode = wintypes.DWORD()
+        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            return  # not a real console (redirected); nothing to cook
+        cooked = mode.value | _ENABLE_PROCESSED_INPUT | _ENABLE_LINE_INPUT | _ENABLE_ECHO_INPUT
+        if cooked != mode.value:
+            kernel32.SetConsoleMode(handle, cooked)
+    except (*_TTY_ERRORS, ImportError, _ctypes_argument_error()):
+        pass
 
 
 # -- escape-sequence half (gated on stdout) ----------------------------------

@@ -34,6 +34,7 @@ from agentworks.terminal import (
     TERMINAL_SANITIZE_CLEAN_EXIT,
     clear_screen_on_detach,
     emit_clear,
+    ensure_cooked_input,
     guarded_terminal,
 )
 
@@ -552,3 +553,46 @@ def test_windows_falls_back_to_a_plain_write_without_a_console_handle(
     with guarded_terminal():
         pass
     assert out.getvalue() == TERMINAL_SANITIZE * 2
+
+
+# ---------------------------------------------------------------------------
+# ensure_cooked_input(): recover a raw console before a line prompt
+# ---------------------------------------------------------------------------
+
+_COOKED_BITS = 0x1 | 0x2 | 0x4  # PROCESSED | LINE | ECHO
+
+
+def test_ensure_cooked_input_forces_line_mode_bits_on_a_raw_console(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A hard-killed ssh -t attach leaves stdin raw (PROCESSED/LINE/ECHO off,
+    VT input on). ensure_cooked_input ORs the three cooked bits back on with a
+    single SetConsoleMode."""
+    fake = _FakeKernel32(in_mode=0x03E8)  # the exact broken mode seen in the wild
+    _install_windows(monkeypatch, fake)
+    ensure_cooked_input()
+    assert fake.calls == [("SetConsoleMode", _IN_HANDLE, 0x03E8 | _COOKED_BITS)]
+
+
+def test_ensure_cooked_input_is_a_noop_when_already_cooked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Idempotent: OR-ing bits already set changes nothing, so it must not
+    issue a SetConsoleMode (calling it before every prompt stays cheap)."""
+    fake = _FakeKernel32(in_mode=0x01F7)  # a normal cooked console mode
+    _install_windows(monkeypatch, fake)
+    ensure_cooked_input()
+    assert not any(c[0] == "SetConsoleMode" for c in fake.calls)
+
+
+def test_ensure_cooked_input_is_a_noop_when_stdin_is_not_a_console(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Redirected / piped stdin makes GetConsoleMode fail; nothing is set."""
+    fake = _FakeKernel32(in_mode=None)  # models a non-console (redirected) stream
+    _install_windows(monkeypatch, fake)
+    ensure_cooked_input()
+    assert not any(c[0] == "SetConsoleMode" for c in fake.calls)
+
+
+def test_ensure_cooked_input_is_a_noop_off_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Windows-only: on other platforms it returns before touching kernel32."""
+    touched: list[str] = []
+    monkeypatch.setattr("sys.platform", "linux")
+    monkeypatch.setattr("agentworks.terminal._kernel32", lambda: touched.append("k32"))
+    ensure_cooked_input()
+    assert touched == []
