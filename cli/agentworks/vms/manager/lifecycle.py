@@ -31,10 +31,12 @@ from agentworks.db import SYSTEM_SLUG_KEY, InitStatus, ProvisioningStatus
 from agentworks.debian import CURRENT_DEBIAN_RELEASE, DebianRelease, probe_debian_release
 from agentworks.errors import (
     AlreadyExistsError,
+    AuthorizationError,
     ConfigError,
     ExternalError,
     ProvisioningError,
     StateError,
+    TokenRejectedError,
     UserAbort,
 )
 from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
@@ -537,9 +539,9 @@ def create_vm(
                 log.unwind()
                 output.warn(f"Log: {logger.display_path}")
                 raise
-            except (ConfigError, StateError):
-                # Release-map misses and live-release verification failures
-                # are already typed with their owning platform's remediation.
+            except (AuthorizationError, ConfigError, StateError, TokenRejectedError):
+                # These failures are already typed with their owning
+                # platform's remediation.
                 # A compliant platform has not mutated, or has rolled back,
                 # so only the provisional row remains to unwind.
                 log.unwind()

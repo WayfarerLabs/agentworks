@@ -16,7 +16,16 @@ from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest, ProvisionResult, RetainedProvisioningError
 from agentworks.config import load_config
 from agentworks.debian import DebianRelease
-from agentworks.errors import ConfigError, NotFoundError, ProvisioningError, StateError, UserAbort, ValidationError
+from agentworks.errors import (
+    AuthorizationError,
+    ConfigError,
+    NotFoundError,
+    ProvisioningError,
+    StateError,
+    TokenRejectedError,
+    UserAbort,
+    ValidationError,
+)
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from tests.conftest import CapturedOutput, ManifestDoc, write_manifests
@@ -286,15 +295,17 @@ def test_create_vm_metadata_failure_retains_owner_and_reports_once(
     [
         ConfigError("site has no Trixie template", hint="set template_vmids.trixie"),
         StateError("plugin has no Trixie selector", hint="update the plugin"),
+        AuthorizationError("provider denied create", hint="grant the required action"),
+        TokenRejectedError("provider rejected the credential", hint="check the credential"),
     ],
-    ids=("operator-map", "code-map"),
+    ids=("operator-map", "code-map", "authorization", "credential"),
 )
-def test_create_vm_preserves_typed_release_mapping_failure(
+def test_create_vm_preserves_typed_platform_failure(
     db: Database,
     make_config,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: object,
-    failure: ConfigError | StateError,
+    failure: ConfigError | StateError | AuthorizationError | TokenRejectedError,
 ) -> None:
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
