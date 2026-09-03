@@ -56,7 +56,7 @@ separate security effort tracked by issue #715.
 
 ## Verification and review
 
-The final production checkpoint is `211edd0b2074d8517930172a23d1f6b8ceba5123`, based on
+The final production checkpoint is `9c388fc3f8783b0635cced0b4358643d21707ebc`, based on
 `origin/main` at `41022f4d680f7e831429229eedcc19acd0ee9c8d`. The complete pipeline and live
 validation ran at `1081470fa0ab315c3e0221da8142a87ad9b292a1`. Subsequent bounded corrections
 completed one runtime fixture fingerprint, added established entity metadata to three console
@@ -65,7 +65,9 @@ participate in explicit database transactions. The final corrections also made m
 on indeterminate fingerprints, normalized only the canonical local Windows forced-TTY close
 advisory, replaced elevated PID exit-code inference with explicit present/absent facts, made exact
 tmux targets safe for zsh, removed eager repair from inspection, and announced bounded remote status
-and console checks before they begin. Verification recorded:
+and console checks before they begin. A final feedback correction removed the normal attach path's
+duplicate nesting refusal and made the harness ADR's superseded contract-version note unambiguous.
+Verification recorded:
 
 - 8,247 non-integration tests with one platform-specific skip at the final production checkpoint;
 - focused session, console, harness, compatibility, completion, cascade, migration, and adversarial
