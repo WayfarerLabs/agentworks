@@ -283,7 +283,7 @@ def batch_check_all_sessions(
     """Batch status check grouped by VM, parallel across VMs (capped at 8).
 
     Returns {session_name: SessionStatus}. Sessions with no reachable VM or
-    pid=None/PID_STOPPED are excluded from the result.
+    an explicit PID_STOPPED sentinel are excluded from the result.
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from contextvars import copy_context

@@ -122,6 +122,30 @@ def _seed_dedicated_admin_session(db: Database, name: str = "s1") -> object:
     return session
 
 
+def _seed_dedicated_agent_session(db: Database, name: str = "s1") -> object:
+    from agentworks.db import SessionMode
+
+    socket = f"/run/agentworks/agent-tmux-sockets/aw-a1/{name}.sock"
+    db.insert_session(
+        name,
+        "ws1",
+        "default",
+        SessionMode.AGENT,
+        agent_name="a1",
+        socket_path=socket,
+    )
+    db.update_session_runtime(
+        name,
+        socket_path=socket,
+        pid=4242,
+        boot_id=BOOT_ID,
+        tmux_server_start_ticks=77,
+    )
+    session = db.get_session(name)
+    assert session is not None
+    return session
+
+
 def test_dedicated_teardown_kills_the_fingerprinted_server_and_not_a_numeric_pid(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -204,6 +228,59 @@ def test_dedicated_teardown_refuses_a_fingerprint_mismatch(tmp_path: Path, monke
             db=db,
             force=False,
         )
+
+
+@pytest.mark.parametrize("operation", ["recover", "post-kill"])
+def test_admin_transport_elevates_agent_runtime_absence_proof(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    from agentworks.errors import BrokenStateError, ExternalError
+    from agentworks.sessions import manager as session_manager
+    from agentworks.sessions import tmux as tmux_mod
+    from agentworks.sessions.manager import _lifecycle as lifecycle_mod
+
+    db = _seed_db(tmp_path)
+    session = _seed_dedicated_agent_session(db)
+    target = _Target("admin", [])
+    observed_sudo: list[bool] = []
+
+    def _still_live(_session, *, target, sudo=False):  # type: ignore[no-untyped-def]
+        observed_sudo.append(sudo)
+        return False
+
+    monkeypatch.setattr(session_manager, "_prove_stored_runtime_absent", _still_live)
+
+    if operation == "recover":
+        with pytest.raises(BrokenStateError):
+            lifecycle_mod._recover_broken_session(  # type: ignore[arg-type]
+                session,
+                target=target,
+                target_owns_session=False,
+                db=db,
+            )
+    else:
+        monkeypatch.setattr(
+            tmux_mod,
+            "capture_tmux_server_fingerprint",
+            lambda **kwargs: FingerprintProbe(
+                ProbeStatus.PRESENT,
+                TmuxServerFingerprint(pid=4242, boot_id=BOOT_ID, start_ticks=77),
+            ),
+        )
+        monkeypatch.setattr(tmux_mod, "kill_server", lambda **kwargs: True)
+        with pytest.raises(ExternalError):
+            session_manager._teardown_session(  # type: ignore[arg-type]
+                session,
+                target=target,
+                target_owns_session=False,
+                db=db,
+                force=False,
+            )
+
+    assert observed_sudo == [True]
+    assert db.get_session("s1") == session
 
 
 def test_runtime_absence_proof_rejects_a_malformed_stored_boot_identity(tmp_path: Path) -> None:

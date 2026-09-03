@@ -118,7 +118,11 @@ def _recover_broken_session(
     db: Database,
 ) -> None:
     """Clean stale state only after proving the prior server is absent."""
-    if not _mgr._prove_stored_runtime_absent(session, target=target):
+    if not _mgr._prove_stored_runtime_absent(
+        session,
+        target=target,
+        sudo=not target_owns_session,
+    ):
         raise BrokenStateError(
             f"session '{session.name}' may still own a live tmux server; refusing stale cleanup",
             entity_kind="session",
@@ -252,7 +256,11 @@ def _teardown_session(
     kill_server(run_command=run_runtime, socket_path=socket_path)
     refreshed = db.get_session(session.name)
     assert refreshed is not None
-    if not _mgr._prove_stored_runtime_absent(refreshed, target=target):
+    if not _mgr._prove_stored_runtime_absent(
+        refreshed,
+        target=target,
+        sudo=not target_owns_session,
+    ):
         raise ExternalError(
             f"tmux server for session '{session.name}' survived kill-server",
             entity_kind="session",

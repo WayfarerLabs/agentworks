@@ -212,6 +212,7 @@ def test_console_create_all_running_reuses_one_loaded_config(monkeypatch: pytest
     config = object()
     load_calls: list[None] = []
     observed_configs: list[object] = []
+    events: list[str] = []
 
     def load_config() -> object:
         load_calls.append(None)
@@ -219,16 +220,20 @@ def test_console_create_all_running_reuses_one_loaded_config(monkeypatch: pytest
 
     monkeypatch.setattr(console_commands, "get_db", lambda: database)
     monkeypatch.setattr(console_commands, "prompt_vm", lambda candidate, name: SimpleNamespace(name=name))
+    monkeypatch.setattr(
+        "agentworks.cli.commands.console.output.info",
+        lambda message: events.append("progress"),
+    )
     monkeypatch.setattr("agentworks.config.load_config", load_config)
     monkeypatch.setattr(
         multi_console,
         "running_session_names",
-        lambda candidate, loaded, vm_name: observed_configs.append(loaded) or [],
+        lambda candidate, loaded, vm_name: events.append("selection") or observed_configs.append(loaded) or [],
     )
     monkeypatch.setattr(
         multi_console,
         "create_console",
-        lambda candidate, loaded, **kwargs: observed_configs.append(loaded),
+        lambda candidate, loaded, **kwargs: events.append("create") or observed_configs.append(loaded),
     )
 
     console_commands.console_create(
@@ -242,6 +247,7 @@ def test_console_create_all_running_reuses_one_loaded_config(monkeypatch: pytest
 
     assert load_calls == [None]
     assert observed_configs == [config, config]
+    assert events == ["progress", "selection", "create"]
 
 
 def test_infer_vm_from_session_specs(db: Database) -> None:

@@ -340,6 +340,9 @@ The implementation, review, CI, and live-evidence steps below apply to the compl
       stopped-state narration.
 - [x] Resolve final published feedback by keeping the early nesting refusal only on the deprecated
       recreate wrapper and making the harness ADR's superseded version note unambiguous.
+- [x] Preserve the agent-owner privilege boundary through final process-absence verification, use
+      exact matching in generated workspace wrappers, and announce `--all-running` selection before
+      its remote status check.
 
 ### Phase 6 Definition of Done
 

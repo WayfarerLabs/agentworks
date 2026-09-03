@@ -6,6 +6,7 @@ from typing import Annotated
 
 import typer
 
+from agentworks import output
 from agentworks.cli._app import app
 from agentworks.cli._helpers import (
     get_db,
@@ -90,11 +91,9 @@ def console_create(
     config = load_config()
 
     if all_running:
-        # Repair incomplete runtime identity, then live-probe the VM so
-        # --all-running reflects reality rather than stale DB state. If the
-        # probe finds nothing and the operator didn't list sessions or pass
-        # --add-admin-shell, create_console below raises the canonical empty
-        # console error.
+        # Live-probe the VM without repairing persisted runtime identity so
+        # --all-running reflects observable state rather than stale DB state.
+        output.info(f"Checking running sessions on VM '{resolved_vm.name}'...")
         running = running_session_names(db, config, resolved_vm.name)
         explicit_names = {parse_session_spec(s).name for s in specs}
         extras = [n for n in running if n not in explicit_names]
