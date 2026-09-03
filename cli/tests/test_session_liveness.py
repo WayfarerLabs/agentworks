@@ -9,6 +9,7 @@ import pytest
 from agentworks.db import SessionRow, SessionStatus
 from agentworks.errors import ConnectivityError, StateError
 from agentworks.sessions.manager import (
+    _needs_repair,
     _repair_session_pid,
     _validated_stored_start_ticks,
     batch_check_status,
@@ -407,9 +408,56 @@ def test_unknown_no_pid() -> None:
 
 
 def test_unknown_no_boot_id() -> None:
-    """PID present but boot_id missing -> UNKNOWN (triggers auto-repair)."""
+    """A legacy row without boot identity remains indeterminate."""
     session = _session("s1", pid=42, boot_id=None)
     assert check_session_status(session, target=_FakeTarget()) == SessionStatus.UNKNOWN
+
+
+def test_missing_start_ticks_alone_does_not_trigger_eager_identity_repair() -> None:
+    session = _session("s1", pid=42, socket_path="/sock", boot_id=BOOT_CURRENT)
+    assert session.tmux_server_start_ticks is None
+
+    assert not _needs_repair(session)
+
+
+@pytest.mark.parametrize(
+    ("pid", "boot_id"),
+    [
+        (None, BOOT_CURRENT),
+        (42, None),
+    ],
+)
+def test_incomplete_dedicated_identity_is_live_when_exact_tmux_session_is_present(
+    pid: int | None,
+    boot_id: str | None,
+) -> None:
+    session = _session("s1", pid=pid, socket_path="/sock", boot_id=boot_id)
+    target = _FakeTarget({"has-session": _FakeResult(ok=True)})
+
+    assert check_session_status(session, target=target) == SessionStatus.OK
+    assert len(target.commands) == 1
+
+
+@pytest.mark.parametrize(
+    ("pid", "boot_id"),
+    [
+        (None, BOOT_CURRENT),
+        (42, None),
+    ],
+)
+def test_incomplete_dedicated_identity_stays_unknown_when_tmux_is_absent(
+    pid: int | None,
+    boot_id: str | None,
+) -> None:
+    session = _session("s1", pid=pid, socket_path="/sock", boot_id=boot_id)
+    target = _FakeTarget(
+        {
+            "has-session": _FakeResult(ok=False, stderr="can't find session: s1"),
+            "list-sessions": _FakeResult(ok=False, stderr="no server running on /sock"),
+        }
+    )
+
+    assert check_session_status(session, target=target) == SessionStatus.UNKNOWN
 
 
 def test_stopped_pid_sentinel() -> None:

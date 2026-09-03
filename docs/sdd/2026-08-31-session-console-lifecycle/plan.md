@@ -328,6 +328,17 @@ The implementation, review, CI, and live-evidence steps below apply to the compl
 - [x] Document the noticeable one-time runtime-identity backfill for existing sessions in the 0.19
       upgrade guide and final lock after the operator encountered it during status listing.
 
+### Windows lifecycle correction (2026-09-03)
+
+- [x] Always shell-quote exact tmux targets so zsh cannot interpret the leading equals sign as
+      command-path expansion; retain the established Windows forced-TTY transport policy.
+- [x] Remove eager runtime-identity repair from list, describe, logs, attach, and console
+      `--all-running`; use read-only presence-first status and defer fingerprint backfill to
+      lifecycle mutation. This supersedes the earlier checked query-time repair and upgrade-guidance
+      records without rewriting their historical text.
+- [x] Announce bounded session and console remote checks before they begin, without per-session
+      stopped-state narration.
+
 ### Phase 6 Definition of Done
 
 - Full gates and scoped live tests pass on the shipped artifact.

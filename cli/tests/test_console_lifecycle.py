@@ -55,7 +55,7 @@ def test_create_persists_and_publishes_only_canonical_runtime(
     assert db.get_console("con") is not None
     assert model.has_session("aw-console-con")
     assert not model.has_session("aw-console-build+con")
-    assert any("rename-session -t =aw-console-build+con aw-console-con" in command for command in target.commands)
+    assert any("rename-session -t '=aw-console-build+con' aw-console-con" in command for command in target.commands)
 
 
 def test_create_failure_retains_stopped_definition_and_cleans_staging(
@@ -67,7 +67,7 @@ def test_create_failure_retains_stopped_definition_and_cleans_staging(
     model = TmuxModel()
     console_target_factory(
         model,
-        {"new-window -t =aw-console-build+con": _FakeResult(returncode=1, stderr="boom")},
+        {"new-window -t '=aw-console-build+con'": _FakeResult(returncode=1, stderr="boom")},
     )
 
     with pytest.raises(ExternalError):
@@ -97,7 +97,7 @@ def test_create_failure_retains_definition_when_runtime_absence_is_indeterminate
     model = TmuxModel()
     console_target_factory(
         model,
-        {"new-window -t =aw-console-build+con": _FakeResult(returncode=1, stderr="boom")},
+        {"new-window -t '=aw-console-build+con'": _FakeResult(returncode=1, stderr="boom")},
     )
     monkeypatch.setattr(
         multi_console,
@@ -207,7 +207,7 @@ def test_console_transport_failure_never_triggers_teardown_or_build(
     model = TmuxModel()
     target = console_target_factory(
         model,
-        {"has-session -t =aw-console-con": _FakeResult(returncode=255)},
+        {"has-session -t '=aw-console-con'": _FakeResult(returncode=255)},
     )
 
     with pytest.raises(StateError):

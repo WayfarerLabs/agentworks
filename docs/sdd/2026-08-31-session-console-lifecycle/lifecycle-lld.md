@@ -202,16 +202,19 @@ socket-reported PID, boot ID, and `/proc/PID/stat`, then repeats the socket PID 
 before persistence; both PID and start-time observations must match. Parsing locates the final `)`
 ending the process command and selects the twentieth whitespace-delimited field after it, which is
 Linux stat field 22; it does not split the command's `(tmux: server)` value on whitespace. A stopped
-sentinel clears the start time. Existing positive-PID rows migrate with a null start time. When
-their tmux socket is reachable, lifecycle preparation may backfill through the same repeated capture
-only when the socket-reported server PID matches the stored PID and the stored boot ID matches the
-VM. A same-boot broken row whose stored PID still exists but has no provable start time cannot
-distinguish that process from the old server and fails closed with manual-recovery guidance. Per-VM
-repair and status retain the VM admin transport, so agent-owned tmux and `/proc/PID` probes use the
-existing non-interactive root execution boundary. Owner-targeted singular operations do not elevate.
-The process-existence probe emits one fixed `present` or `absent` fact only after the selected shell
-has started successfully. A failed outer shell or sudo invocation, missing or malformed fact, extra
-output, or any other return status is `UNKNOWN`; ordinary sudo exit codes never mean absence.
+sentinel clears the start time. Existing positive-PID rows migrate with a null start time. Read-only
+status probes exact tmux presence first and does not repair persisted identity: session presence is
+`OK`, server-only presence is `RESIDUAL`, and absent tmux state with insufficient stored identity is
+`UNKNOWN`. When a lifecycle mutation needs a complete fingerprint and the tmux socket is reachable,
+preparation may backfill through the same repeated capture only when the socket-reported server PID
+matches the stored PID and the stored boot ID matches the VM. A same-boot broken row whose stored
+PID still exists but has no provable start time cannot distinguish that process from the old server
+and fails closed with manual-recovery guidance. Per-VM status retains the VM admin transport, so
+agent-owned tmux and `/proc/PID` probes use the existing non-interactive root execution boundary.
+Owner-targeted singular operations do not elevate. The process-existence probe emits one fixed
+`present` or `absent` fact only after the selected shell has started successfully. A failed outer
+shell or sudo invocation, missing or malformed fact, extra output, or any other return status is
+`UNKNOWN`; ordinary sudo exit codes never mean absence.
 
 ### Absent-runtime launch
 
@@ -318,9 +321,11 @@ never signal or destroy a possibly shared server. Parent deletion paths preserve
 best-effort or fail-closed policy when a target cannot be reached.
 
 Fingerprint `UNKNOWN` is terminal for that repair attempt: only authoritative `ABSENT` may enter the
-conditional absence proof. On Windows, the tmux diagnostic classifier may discard the single
-canonical local OpenSSH forced-TTY close advisory that accompanies one remote tmux diagnostic; every
-other extra, multiline, permission, or protocol diagnostic remains `UNKNOWN`.
+conditional absence proof. Every exact tmux target is rendered as a shell-quoted `'=NAME'`; leaving
+the leading equals sign bare lets zsh interpret it as command-path expansion before tmux runs. On
+Windows, the tmux diagnostic classifier may discard the single canonical local OpenSSH forced-TTY
+close advisory that accompanies one remote tmux diagnostic; every other extra, multiline,
+permission, or protocol diagnostic remains `UNKNOWN`.
 
 This contract deliberately stops at tmux-owned terminal state. A process that deliberately detaches
 from its terminal may outlive tmux; systemd/cgroup containment of all descendants is the separate
@@ -332,11 +337,10 @@ security design tracked in [issue #715](https://github.com/WayfarerLabs/agentwor
 
 Create validates an in-memory `ConsoleDefinition` carrying name, VM, ordered members, shell
 declarations, and admin-shell setting. Existing validation and expansion of `--all` or
-`--all-running` occurs before persistence. `--all-running` first applies the established safe
-runtime-identity repair pass, then classifies the refreshed rows through the shared batched status
-authority; any non-stopped row that remains indeterminate refuses rather than producing a partial
-console. Build-secret target derivation is adjusted to accept this definition rather than requiring
-an inserted row.
+`--all-running` occurs before persistence. `--all-running` uses the same read-only, presence-first
+batched status authority as session listing; any non-stopped row that remains indeterminate refuses
+rather than producing a partial console. Build-secret target derivation is adjusted to accept this
+definition rather than requiring an inserted row.
 
 No public schema or new database table is introduced. The prospective value is an internal service
 record used to keep stale-runtime verification ahead of insertion.
@@ -364,7 +368,8 @@ the canonical name is absent. A failed step tears down the staging session and v
 and canonical names absent before returning failure. This makes canonical-name presence an objective
 complete-runtime signal, so idempotent start needs no new persisted status.
 
-Every console tmux command that accepts a target uses tmux's exact `=NAME` target form. This
+Every console tmux command that accepts a target uses tmux's exact `=NAME` target form, rendered as
+a shell-quoted `'=NAME'` so zsh cannot apply its leading-equals command-path expansion. This
 includes canonical and staging probes, attach, kill, window/pane setup, selection, and the source of
 the final rename. Creation supplies the complete staging name directly, and rename supplies the
 complete canonical destination. No console helper may rely on tmux prefix matching. Behavioral

@@ -44,7 +44,6 @@ def session_logs(
         _run_as_root,
         target,
     ):
-        session = _mgr._ensure_pid(session, target=target, db=db)
         status = _mgr.check_session_status(session, target=target)
 
         if status == SessionStatus.STOPPED:

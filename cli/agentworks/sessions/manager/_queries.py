@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shlex
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
@@ -18,6 +17,7 @@ from agentworks.errors import (
     UserAbort,
 )
 from agentworks.sessions._resource_cleanup import cleanup_now_empty_resource
+from agentworks.sessions.tmux import exact_tmux_target
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -441,7 +441,6 @@ def session_description(
             target,
         ):
             probe_started = True
-            session = _mgr._ensure_pid(session, target=target, db=db)
             status = _mgr.check_session_status(session, target=target)
             return _session_structural_description(db, config, name, status)
     except (NotFoundError, StateError) as error:
@@ -649,7 +648,7 @@ def session_listing(
     no_status: bool = False,
     interaction: TtyInteractionPolicy,
 ) -> SessionListing:
-    """Collect ordered session list facts with the existing status repair pass."""
+    """Collect ordered session list facts with read-only live status checks."""
     sessions = _mgr.filter_sessions(
         db,
         workspace_name=workspace_name,
@@ -664,7 +663,10 @@ def session_listing(
     status_keepalive_vms: list[VMRow] = [] if no_status else _mgr._distinct_vms_for_sessions(db, sessions)
     status_vm_names = frozenset(vm.name for vm in status_keepalive_vms)
     if not no_status:
-        output.info("Checking session status...")
+        output.info(
+            f"Checking status for {output.count(len(sessions), 'session')} "
+            f"across {output.count(len(status_keepalive_vms), 'VM')}..."
+        )
     with _mgr._best_effort_batch_vm_boundary(
         db,
         config,
@@ -678,14 +680,6 @@ def session_listing(
                 if (workspace := db.get_workspace(session.workspace_name)) is not None
                 and workspace.vm_name in usable_vm_names
             ]
-            usable_sessions = _mgr.ensure_pids_batch(
-                usable_sessions,
-                db=db,
-                config=config,
-                announce=False,
-            )
-            refreshed = {session.name: session for session in usable_sessions}
-            sessions = [refreshed.get(session.name, session) for session in sessions]
             status_map = _mgr.batch_check_all_sessions(usable_sessions, db=db, config=config)
     identity_refused_vm_names = status_vm_names - usable_vm_names
 
@@ -716,7 +710,7 @@ def session_listing(
             status = "unavailable"
         elif session.pid == PID_STOPPED:
             status = "stopped"
-        elif resolved_vm_name in identity_refused_vm_names or session.pid is None or session.boot_id is None:
+        elif resolved_vm_name in identity_refused_vm_names:
             status = "unknown"
         elif session.name in status_map:
             status = {
@@ -726,6 +720,8 @@ def session_listing(
                 SessionStatus.RESIDUAL: "residual",
                 SessionStatus.UNKNOWN: "unknown",
             }[status_map[session.name]]
+        elif session.pid is None or session.boot_id is None:
+            status = "unknown"
         else:
             status = "unavailable"
         facts.append(
@@ -819,7 +815,6 @@ def attach_session(
         _run_as_root,
         target,
     ):
-        session = _mgr._ensure_pid(session, target=target, db=db)
         status = _mgr.check_session_status(session, target=target)
 
         if status == SessionStatus.STOPPED:
@@ -851,7 +846,7 @@ def attach_session(
 
         from agentworks.terminal import clear_screen_on_detach
 
-        q_session = shlex.quote(f"={name}")
+        q_session = exact_tmux_target(name)
         # A session attach is a full-screen tmux; clear the local screen on
         # detach where we don't trust the terminal to restore cleanly.
         return target.interactive(

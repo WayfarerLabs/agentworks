@@ -30,7 +30,7 @@ from agentworks.errors import (
 )
 from agentworks.name_filters import validate_name_filters
 from agentworks.resources.access import named_console_template
-from agentworks.sessions.tmux import ProbeStatus, tmux_cmd
+from agentworks.sessions.tmux import ProbeStatus, exact_tmux_target, tmux_cmd
 from agentworks.vms.manager import gated_vm_boundary
 
 from ._helpers import _require_console, _shell_summary, tmux_session_name, tmux_staging_name
@@ -149,7 +149,7 @@ def _attach_loop_wrapper(session_name: str, socket_path: str | None) -> str:
     console's kill-window binding. Names are validated to [a-z0-9_-]+, so
     embedding the raw session_name inside the single-quoted strings is safe.
     """
-    q = shlex.quote(f"={session_name}")
+    q = exact_tmux_target(session_name)
     has = tmux_cmd(f"has-session -t {q}", socket_path)
     att = tmux_cmd(f"attach -t {q}", socket_path)
     return f"""\
@@ -187,7 +187,7 @@ def _tmux_session_presence(target: Transport, tmux_name: str) -> ProbeStatus:
     """Probe an exact console tmux name without conflating failure and absence."""
     from agentworks.sessions.tmux import _tmux_presence_from_result
 
-    q = shlex.quote(f"={tmux_name}")
+    q = exact_tmux_target(tmux_name)
     return _tmux_presence_from_result(
         target.run(f"tmux has-session -t {q}", check=False),
         missing_target_is_absent=True,
@@ -225,7 +225,7 @@ def _teardown_console_tmux(target: Transport, console_name: str) -> None:
     for tmux_name, presence in initial.items():
         if presence is ProbeStatus.ABSENT:
             continue
-        q = shlex.quote(f"={tmux_name}")
+        q = exact_tmux_target(tmux_name)
         killed = target.run(f"tmux kill-session -t {q}", check=False)
         if _test_presence_from_result(killed) is ProbeStatus.UNKNOWN:
             raise StateError(
@@ -260,7 +260,7 @@ def _teardown_console_staging(target: Transport, console_name: str) -> None:
         )
     if presence is ProbeStatus.ABSENT:
         return
-    q = shlex.quote(f"={staging_name}")
+    q = exact_tmux_target(staging_name)
     killed = target.run(f"tmux kill-session -t {q}", check=False)
     if _test_presence_from_result(killed) is ProbeStatus.UNKNOWN:
         raise StateError(
@@ -312,7 +312,7 @@ def kill_session_windows(
                 )
             if presence is ProbeStatus.ABSENT:
                 continue
-            q_con = shlex.quote(f"={tmux_session_name(console_name)}")
+            q_con = exact_tmux_target(tmux_session_name(console_name))
             for session_name in session_names:
                 target.run(
                     f"tmux kill-window -t {q_con}:{shlex.quote(session_name)}",
@@ -583,6 +583,7 @@ def _realize_console(
             hint="Add a session or enable the admin shell before starting it.",
         )
     registry = load_request_registry(config, live_database=db)
+    output.info(f"Checking console '{name}' runtime...")
     with _mc._prepare_vm_target(
         db,
         config,
@@ -655,6 +656,7 @@ def stop_console(
 
     console = _require_console(db, name)
     registry = load_request_registry(config, live_database=db)
+    output.info(f"Checking console '{name}' runtime...")
     with _mc._prepare_vm_target(
         db,
         config,
@@ -695,6 +697,7 @@ def attach_console(
 
     console = _require_console(db, name)
     registry = load_request_registry(config, live_database=db)
+    output.info(f"Checking console '{name}' runtime...")
     # The gate's held-active span covers the build and the interactive
     # attach (the hold this caller used to open itself).
     with _mc._prepare_vm_target(
@@ -726,7 +729,7 @@ def attach_console(
         # A console attach is a full-screen tmux; clear the local screen on
         # detach where we don't trust the terminal to restore cleanly.
         return target.interactive(
-            f"tmux attach -t {shlex.quote(f'={tmux_name}')}",
+            f"tmux attach -t {exact_tmux_target(tmux_name)}",
             clear_screen_on_exit=clear_screen_on_detach(config.terminal.clear_on_detach),
         )
 

@@ -30,6 +30,7 @@ from agentworks.sessions.tmux import (
     admin_socket_path,
     capture_tmux_server_fingerprint,
     create_session,
+    exact_tmux_target,
     parse_process_start_ticks,
 )
 
@@ -78,6 +79,18 @@ def test_tmux_env_flags_emits_per_pair() -> None:
 def test_tmux_env_flags_quotes_values_with_spaces() -> None:
     out = _tmux_env_flags({"GREET": "hello world"})
     assert "-e 'GREET=hello world'" in out
+
+
+@pytest.mark.skipif(shutil.which("zsh") is None, reason="zsh is not installed")
+def test_exact_tmux_target_survives_zsh_equals_expansion() -> None:
+    target = exact_tmux_target("aw-console-test")
+    result = subprocess.run(
+        ["zsh", "-f", "-c", f'set -- {target}; printf %s "$1"'],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout == "=aw-console-test"
 
 
 def test_tmux_env_flags_round_trip_through_shlex_for_single_quotes() -> None:

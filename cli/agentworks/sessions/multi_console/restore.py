@@ -27,7 +27,7 @@ from agentworks.sessions.multi_console_layout import (
     _list_panes_with_tags,
     _reorder_shell_panes,
 )
-from agentworks.sessions.tmux import ProbeStatus
+from agentworks.sessions.tmux import ProbeStatus, exact_tmux_target
 
 from ._helpers import _require_console, tmux_session_name
 from .attach import _session_linux_user
@@ -107,7 +107,7 @@ def restore_session(
                 ),
             )
 
-        q_con = shlex.quote(f"={tmux_session_name(console_name)}")
+        q_con = exact_tmux_target(tmux_session_name(console_name))
         q_win = shlex.quote(session_name)
         layout = named_console_template(registry).tmux_layout
         configured_count = len(member.shells)

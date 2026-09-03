@@ -6,7 +6,8 @@ Linux process start time captured when the server is created.
 
 The persisted PID has three meanings:
 
-- `NULL`: runtime identity evidence is incomplete, so the status is `UNKNOWN` until safe repair.
+- `NULL`: runtime identity evidence is incomplete. Exact tmux presence can still prove the session
+  `OK`; absence stays `UNKNOWN` until a lifecycle operation can safely repair or replace it.
 - `-1` (`PID_STOPPED`): the session is known to be stopped.
 - A positive PID paired with a boot ID and process start time: the last observed tmux server
   identity. The start time prevents PID reuse from matching an older server.
@@ -19,14 +20,18 @@ fingerprint with an unreachable socket is `BROKEN`. An SSH transport failure or 
 identity is `UNKNOWN`, never evidence that the session stopped. Batch checks preserve the same
 derivation while combining sessions on a VM into one SSH request.
 
-Before a command checks status, an incomplete reachable row may be repaired from the server's
-reported PID and a stable double-read of its boot ID and process start time. A provably absent
-server is recorded as stopped. Indeterminate or mismatched live identity fails closed. Batched
-checks use the VM admin connection and elevate only the tmux and process probes needed to inspect an
-agent-owned runtime; this prevents Linux `/proc` visibility policy from masquerading as process
-absence. The ordinary list view reports the resulting status in its table without narrating each
-internal repair or normalization first; one aggregate status-check line explains the remote work
-before the table appears.
+Inspection is read-only. It probes exact tmux session/server presence first, so a reachable runtime
+can be reported `OK` or `RESIDUAL` without a complete stored fingerprint. Only an absent tmux server
+needs PID and boot evidence to distinguish `STOPPED` from `BROKEN`; incomplete or indeterminate
+evidence stays `UNKNOWN`. Batched checks use one remote status request per reachable VM, elevate
+only the tmux and process probes needed to inspect agent-owned runtimes, and never repair rows. The
+list view announces how many sessions and VMs it is checking before that remote work begins.
+
+A lifecycle command that needs teardown or replacement may repair an incomplete reachable row from
+the server's reported PID and a stable double-read of its boot ID and process start time. A provably
+absent server can be recorded as stopped. Indeterminate or mismatched live identity fails closed.
+This keeps ordinary inspection bounded while preserving the stronger identity required for a
+destructive decision.
 
 Reachable dedicated runtimes stop with tmux `kill-server`, which removes the canonical session and
 any operator-added sessions, windows, or panes on that dedicated server. Older shared-server rows

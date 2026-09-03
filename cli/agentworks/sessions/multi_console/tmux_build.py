@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 import agentworks.sessions.multi_console as _mc
 from agentworks import output
 from agentworks.errors import ExternalError
+from agentworks.sessions.tmux import exact_tmux_target
 
 from ._helpers import ADMIN_SHELL_WINDOW, tmux_session_name, tmux_staging_name
 
@@ -214,7 +215,7 @@ def _split_shell_pane(
     cwd = shell["cwd"]
     full_path = posixpath.join(workspace_path, cwd) if cwd else workspace_path
     q_full = shlex.quote(full_path)
-    q_con = shlex.quote(f"={tmux_name or tmux_session_name(console_name)}")
+    q_con = exact_tmux_target(tmux_name or tmux_session_name(console_name))
     q_win = shlex.quote(window_name)
     use_admin = shell["admin"] or session_user == admin_user
 
@@ -403,7 +404,7 @@ def _add_session_window(
         return SessionWindowBuild(built=False)
 
     runtime_name = tmux_name or tmux_session_name(console_name)
-    q_con = shlex.quote(f"={runtime_name}")
+    q_con = exact_tmux_target(runtime_name)
     q_session = shlex.quote(session.name)
     wrapper = _attach_loop_wrapper(session.name, session.socket_path)
 
@@ -568,7 +569,7 @@ def _build_console_tmux(
                 )
 
         if placeholder_used:
-            removed = target.run(f"tmux kill-window -t {shlex.quote(f'={staging_name}:{placeholder}')}")
+            removed = target.run(f"tmux kill-window -t {exact_tmux_target(f'{staging_name}:{placeholder}')}")
             if not removed.ok:
                 raise ExternalError(
                     f"failed to remove the staging placeholder for console '{console.name}'",
@@ -576,7 +577,7 @@ def _build_console_tmux(
                     entity_name=console.name,
                 )
         published = target.run(
-            f"tmux rename-session -t {shlex.quote(f'={staging_name}')} {shlex.quote(canonical_name)}"
+            f"tmux rename-session -t {exact_tmux_target(staging_name)} {shlex.quote(canonical_name)}"
         )
         if not published.ok:
             raise ExternalError(

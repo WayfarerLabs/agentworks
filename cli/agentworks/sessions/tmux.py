@@ -461,6 +461,16 @@ def tmux_cmd(base: str, socket_path: str | None = None, *, sudo: bool = False) -
     return f"sudo -n {cmd}" if sudo else cmd
 
 
+def exact_tmux_target(name: str) -> str:
+    """Return an always-quoted exact tmux target for every supported shell.
+
+    Tmux's leading ``=`` requests exact matching, but zsh interprets an
+    unquoted ``=name`` as command-path expansion. ``shlex.quote`` deliberately
+    leaves ``=`` unquoted, so exact targets need this explicit shell boundary.
+    """
+    return "'" + ("=" + name).replace("'", "'\"'\"'") + "'"
+
+
 def _grant_server_access(
     run_command: RunCommand,
     socket_path: str,
@@ -568,7 +578,7 @@ def _probe_pane_liveness(
     Both facts ride one round trip: ``#{pane_dead}`` and
     ``#{pane_dead_status}`` in a single display-message.
     """
-    q_session = shlex.quote(f"={session_name}")
+    q_session = exact_tmux_target(session_name)
     cmd = (
         tmux_cmd(f"display-message -p -t {q_session} '#{{pane_dead}} #{{pane_dead_status}}'", socket_path)
         + " 2>/dev/null"
@@ -605,7 +615,7 @@ def _raise_workload_died(
         # message there, invisible to the main-screen capture. One
         # best-effort attempt; tmux errors out when no alternate screen
         # exists, hence check=False.
-        q_session = shlex.quote(f"={session_name}")
+        q_session = exact_tmux_target(session_name)
         alt = run_command(
             tmux_cmd(f"capture-pane -t {q_session} -p -J -a", socket_path) + " 2>/dev/null",
             check=False,
@@ -819,7 +829,7 @@ def kill_session(
     socket_path: str | None = None,
 ) -> bool:
     """Kill a session's tmux session. Returns True if the session existed."""
-    q_session = shlex.quote(f"={session_name}")
+    q_session = exact_tmux_target(session_name)
     result = run_command(
         tmux_cmd(f"kill-session -t {q_session}", socket_path),
         check=False,
@@ -846,7 +856,7 @@ def probe_tmux_session(
     socket_path: str | None = None,
 ) -> ProbeStatus:
     """Probe an exact tmux session without conflating failure with absence."""
-    q_session = shlex.quote(f"={session_name}")
+    q_session = exact_tmux_target(session_name)
     result = run_command(
         tmux_cmd(f"has-session -t {q_session}", socket_path),
         check=False,
@@ -897,7 +907,7 @@ def capture_output(
     longer than the pane width survives later per-line trimming as one
     line; off by default to keep other callers' output shape unchanged.
     """
-    q_session = shlex.quote(f"={session_name}")
+    q_session = exact_tmux_target(session_name)
     flags = "-p -J" if join_wrapped else "-p"
     result = run_command(
         tmux_cmd(f"capture-pane -t {q_session} {flags} -S -{lines}", socket_path),

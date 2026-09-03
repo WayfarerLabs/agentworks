@@ -368,8 +368,9 @@ def _reorder_session_windows(
     # Lazy import to avoid an import cycle with multi_console (which itself
     # imports symbols from this module).
     from agentworks.sessions.multi_console import tmux_session_name
+    from agentworks.sessions.tmux import exact_tmux_target
 
-    q_con = shlex.quote(f"={tmux_session_name(console_name)}")
+    q_con = exact_tmux_target(tmux_session_name(console_name))
     res = target.run(
         f"tmux list-windows -t {q_con} -F '#{{window_index}}|#{{window_name}}'",
         check=False,

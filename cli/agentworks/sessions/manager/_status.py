@@ -77,11 +77,10 @@ def check_session_status(
     """
     if session.pid == PID_STOPPED:
         return SessionStatus.STOPPED
-    if session.pid is None or session.boot_id is None:
-        return SessionStatus.UNKNOWN
-
     if session.socket_path is not None:
         return _check_dedicated_session(session, target=target)
+    if session.pid is None or session.boot_id is None:
+        return SessionStatus.UNKNOWN
     raise _legacy_session_status_error(session)
 
 
@@ -119,7 +118,8 @@ def _check_dedicated_session(session: SessionRow, *, target: Transport) -> Sessi
         return SessionStatus.RESIDUAL
 
     # has-session failed -- STOPPED or BROKEN?
-    assert session.pid is not None and session.pid > 0
+    if session.pid is None or session.pid <= 0 or session.boot_id is None:
+        return SessionStatus.UNKNOWN
     current_boot = _mgr._get_boot_id(target)
     if current_boot is None:
         return SessionStatus.UNKNOWN  # can't verify boot cycle, unsafe to offer --force
@@ -145,12 +145,14 @@ def batch_check_status(
 ) -> dict[str, SessionStatus]:
     """Check status for multiple sessions in one SSH call per VM.
 
-    Returns {session_name: SessionStatus}. Sessions with pid=None or PID_STOPPED
-    are excluded (callers handle those via the enum directly).
+    Returns {session_name: SessionStatus}. Dedicated rows are probed even when
+    their persisted runtime identity is incomplete: exact tmux presence is
+    sufficient for ``OK``; absence remains ``UNKNOWN`` until the stored
+    identity can prove more. ``PID_STOPPED`` rows are excluded.
     """
-    from agentworks.sessions.tmux import canonical_boot_id, tmux_cmd
+    from agentworks.sessions.tmux import canonical_boot_id, exact_tmux_target, tmux_cmd
 
-    checkable = [s for s in sessions if s.pid is not None and s.pid > 0 and s.boot_id is not None]
+    checkable = [s for s in sessions if s.pid != PID_STOPPED and s.socket_path is not None]
     if not checkable:
         return {}
 
@@ -162,14 +164,18 @@ def batch_check_status(
     for s in checkable:
         if s.socket_path is None:
             continue
-        assert s.pid is not None
-        q_session = shlex.quote(f"={s.name}")  # exact tmux target
+        q_session = exact_tmux_target(s.name)
         name = s.name  # raw for output field (names are validated, no shell-special chars)
         needs_sudo = s.mode == SessionMode.AGENT.value
         has_cmd = tmux_cmd(f"has-session -t {q_session}", s.socket_path, sudo=needs_sudo)
         server_cmd = tmux_cmd("list-sessions", s.socket_path, sudo=needs_sudo)
-        pid_probe = _pid_probe_script(s.pid)
-        pid_cmd = f"sudo -n sh -c {shlex.quote(pid_probe)}" if needs_sudo else f"sh -c {shlex.quote(pid_probe)}"
+        pid_probe = _pid_probe_script(s.pid) if s.pid is not None and s.pid > 0 else None
+        if pid_probe is None:
+            pid_cmd = "false"
+        elif needs_sudo:
+            pid_cmd = f"sudo -n sh -c {shlex.quote(pid_probe)}"
+        else:
+            pid_cmd = f"sh -c {shlex.quote(pid_probe)}"
         parts.append(
             f"HERR=$({has_cmd} 2>&1 >/dev/null); H=$?; "
             'HHEX=$(printf %s "$HERR" | hex); '
@@ -220,6 +226,9 @@ def batch_check_status(
             status_map[name] = SessionStatus.RESIDUAL
             continue
         if server_presence is ProbeStatus.UNKNOWN:
+            continue
+
+        if session.pid is None or session.pid <= 0 or session.boot_id is None:
             continue
 
         try:

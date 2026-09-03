@@ -158,7 +158,7 @@ def test_named_console_attach_holds_across_the_interactive_attach(
     multi_console.attach_console(db, config, name="c1", interaction=TtyInteractionPolicy.REFUSE)
 
     assert events == ["hold-open", "interactive", "hold-close"]
-    assert target.interactive_calls == ["tmux attach -t =aw-console-c1"]
+    assert target.interactive_calls == ["tmux attach -t '=aw-console-c1'"]
 
 
 def test_console_recreate_multiline_environment_secret_refuses_before_rebuild(
@@ -223,7 +223,7 @@ def test_named_console_stopped_vm_gate_burst_seeds_the_boundary(
 
     assert events == ["status", "start", "tailscale"]
     assert resolve_counter == [["proxmox-token"]]
-    assert target.interactive_calls == ["tmux attach -t =aw-console-c1"]
+    assert target.interactive_calls == ["tmux attach -t '=aw-console-c1'"]
 
 
 def test_named_console_no_tailscale_fails_with_zero_resolves_and_zero_gate(
@@ -306,8 +306,8 @@ def test_restore_session_stopped_vm_drives_the_real_gated_composition(
 
     assert events == ["status", "start", "tailscale"]  # the gate ran
     assert resolve_counter == [["proxmox-token"]]
-    assert any("has-session -t =aw-console-c1" in c for c in fake.commands)
-    assert any("list-windows -t =aw-console-c1" in c for c in fake.commands)
+    assert any("has-session -t '=aw-console-c1'" in c for c in fake.commands)
+    assert any("list-windows -t '=aw-console-c1'" in c for c in fake.commands)
     # The no-op landing focus still fires (post-restore focus parity).
-    assert any("select-pane -t =aw-console-c1:s1.0" in c for c in fake.commands)
+    assert any("select-pane -t '=aw-console-c1':s1.0" in c for c in fake.commands)
     assert any("already matches config" in m for m in captured_output.info)

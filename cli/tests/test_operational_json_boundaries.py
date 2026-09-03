@@ -25,11 +25,9 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
     from agentworks.config import Config
-    from agentworks.db import Database, SessionRow
+    from agentworks.db import Database
     from agentworks.resources.registry import Registry
     from agentworks.secrets.base import SecretDecl
-
-LATE_REPAIR_BOOT_ID = "deadbeef-0000-4000-8000-000000000001"
 
 
 @pytest.fixture(autouse=True)
@@ -243,7 +241,7 @@ def test_session_describe_uses_the_same_real_gate_chain_for_both_formats(
         assert excluded not in machine.stdout_bytes
 
 
-def test_session_list_status_and_late_repair_use_the_same_resolution_path(
+def test_session_list_status_is_read_only_inside_the_resolution_path(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
@@ -272,26 +270,12 @@ def test_session_list_status_and_late_repair_use_the_same_resolution_path(
         assert auth_key_name is not None
         keys.append(auth_keys.get(auth_key_name))
 
-    def repair(
-        rows: list[SessionRow],
-        *,
-        db: Database,
-        config: Config,
-        announce: bool,
-    ) -> list[SessionRow]:
-        del rows, config
-        assert not announce
-        db.update_session_runtime(
-            "session-a",
-            socket_path="/tmp/SECRET_SOCKET",
-            pid=9090,
-            boot_id=LATE_REPAIR_BOOT_ID,
-            tmux_server_start_ticks=77,
-        )
-        return db.list_sessions()
-
     monkeypatch.setattr(vms, "_ensure_tailscale", reconnect)
-    monkeypatch.setattr(sessions, "ensure_pids_batch", repair)
+    monkeypatch.setattr(
+        sessions,
+        "ensure_pids_batch",
+        lambda *args, **kwargs: pytest.fail("session list performed durable runtime repair"),
+    )
     monkeypatch.setattr(
         sessions,
         "batch_check_all_sessions",
@@ -299,13 +283,12 @@ def test_session_list_status_and_late_repair_use_the_same_resolution_path(
     )
 
     machine = CliRunner().invoke(app, ["session", "list", "--output", "json"])
-    repaired = db.get_session("session-a")
+    unchanged = db.get_session("session-a")
 
     assert machine.exit_code == 0, machine.output
     _assert_json_envelope_only(machine, "session.list")
     assert machine.stderr_bytes == b""
-    assert repaired is not None and (repaired.pid, repaired.boot_id) == (9090, LATE_REPAIR_BOOT_ID)
-    assert LATE_REPAIR_BOOT_ID.encode() not in machine.stdout_bytes
+    assert unchanged is not None and (unchanged.pid, unchanged.boot_id) == (None, None)
     assert keys == ["late-repair-value"]
     assert calls == [
         (

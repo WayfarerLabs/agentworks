@@ -280,7 +280,7 @@ def _needs_repair(session: SessionRow) -> bool:
     """True if the session is missing PID or boot_id and needs auto-repair."""
     if session.pid == PID_STOPPED:
         return False
-    return session.pid is None or session.boot_id is None or session.tmux_server_start_ticks is None
+    return session.pid is None or session.boot_id is None
 
 
 def _ensure_pid(session: SessionRow, *, target: Transport, db: Database) -> SessionRow:

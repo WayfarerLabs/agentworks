@@ -150,16 +150,19 @@ per-session socket model through canonical start or restart.
 ### Tmux server fingerprints
 
 The database migration leaves `tmux_server_start_ticks` null for existing rows. A new runtime stores
-it atomically with PID, boot ID, and socket path. A reachable existing dedicated server may backfill
-it only after tmux reports the stored PID and the current boot matches the stored boot ID. A broken
-same-boot row whose stored PID remains live but has no provable start time cannot prove prior-server
-absence; it fails closed and asks for manual recovery rather than risking cleanup around a live or
-unrelated process. A changed boot or absent PID already proves the old process gone.
+it atomically with PID, boot ID, and socket path. Inspection remains read-only and can identify an
+exact live tmux session without this field. A lifecycle mutation may backfill it from a reachable
+existing dedicated server only after tmux reports the stored PID and the current boot matches the
+stored boot ID. A broken same-boot row whose stored PID remains live but has no provable start time
+cannot prove prior-server absence; it fails closed and asks for manual recovery rather than risking
+cleanup around a live or unrelated process. A changed boot or absent PID already proves the old
+process gone.
 
-Migration repair groups sessions behind the VM admin transport. Agent-owned tmux and `/proc/PID`
-probes use the existing non-interactive root boundary; an indeterminate fingerprint remains unknown
-and never falls through to the stopped-state absence proof. Process absence is accepted only from a
-fixed fact emitted by a successfully started selected shell, never from a generic sudo failure code.
+Per-VM status groups sessions behind the VM admin transport without repairing them. Agent-owned tmux
+and `/proc/PID` probes use the existing non-interactive root boundary; an indeterminate fingerprint
+remains unknown and never falls through to the stopped-state absence proof. Process absence is
+accepted only from a fixed fact emitted by a successfully started selected shell, never from a
+generic sudo failure code.
 
 Stopping a retained session clears the start time with the PID sentinel. An older binary may leave a
 stale or null value after rollback; a later new binary never trusts that value unless it matches the

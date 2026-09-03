@@ -24,9 +24,6 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow
 
-LIST_BOOT_ID = "deadbeef-0000-4000-8000-000000000002"
-DESCRIBE_BOOT_ID = "deadbeef-0000-4000-8000-000000000003"
-
 
 @pytest.fixture(autouse=True)
 def _stub_ssh_identity(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -518,11 +515,11 @@ def _seed_session_rows(db: Database) -> None:
     )
 
 
-def test_session_json_status_repairs_and_no_status_are_preserved(
+def test_session_json_status_is_read_only_and_no_status_is_preserved(
     db: Database,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Actual session Typer paths retain PID repair writes and sentinel rules."""
+    """Actual session Typer paths preserve read-only status and sentinel rules."""
     from agentworks.cli.commands import session as command
     from agentworks.sessions import manager
 
@@ -548,30 +545,12 @@ def test_session_json_status_repairs_and_no_status_are_preserved(
         boundary_calls += 1
         yield frozenset({"box"})
 
-    repairs = 0
-
-    def repair(
-        rows: list[SessionRow],
-        *,
-        db: Database,
-        config: object,
-        announce: bool,
-    ) -> list[SessionRow]:
-        nonlocal repairs
-        del config
-        assert not announce
-        repairs += 1
-        db.update_session_runtime(
-            "live",
-            socket_path="/tmp/live.sock",
-            pid=4321,
-            boot_id=LIST_BOOT_ID,
-            tmux_server_start_ticks=77,
-        )
-        return db.list_sessions()
-
     monkeypatch.setattr(manager, "_best_effort_batch_vm_boundary", boundary)
-    monkeypatch.setattr(manager, "ensure_pids_batch", repair)
+    monkeypatch.setattr(
+        manager,
+        "ensure_pids_batch",
+        lambda *args, **kwargs: pytest.fail("session list repaired durable runtime identity"),
+    )
     monkeypatch.setattr(
         manager,
         "batch_check_all_sessions",
@@ -586,11 +565,9 @@ def test_session_json_status_repairs_and_no_status_are_preserved(
         ("live", "running", None),
         ("stopped", "stopped", None),
     ]
-    repaired = db.get_session("live")
-    assert repaired is not None and (repaired.pid, repaired.boot_id) == (4321, LIST_BOOT_ID)
-    assert repairs == 1
+    unchanged = db.get_session("live")
+    assert unchanged is not None and (unchanged.pid, unchanged.boot_id) == (None, None)
     assert boundary_calls == 1
-    assert LIST_BOOT_ID.encode() not in status_result.stdout_bytes
 
     db.update_session_runtime(
         "live", socket_path="/tmp/live.sock", pid=None, boot_id=None, tmux_server_start_ticks=None
@@ -609,12 +586,12 @@ def test_session_json_status_repairs_and_no_status_are_preserved(
     assert unrepaired is not None and unrepaired.pid is None
 
 
-def test_session_describe_json_positive_and_stopped_pid_with_degraded_template(
+def test_session_describe_json_is_read_only_and_maps_stopped_pid_with_degraded_template(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Describe repairs a positive PID, maps PID_STOPPED to null, and leaks no fallback error."""
+    """Describe is read-only, maps PID_STOPPED to null, and leaks no fallback error."""
     from agentworks.cli.commands import session as command
     from agentworks.sessions import manager
 
@@ -649,33 +626,23 @@ def test_session_describe_json_positive_and_stopped_pid_with_degraded_template(
         assert workspace is not None and vm is not None
         yield workspace, vm, object(), object(), object()
 
-    def repair(row: SessionRow, *, target: object, db: Database) -> SessionRow:
-        del target
-        db.update_session_runtime(
-            row.name,
-            socket_path="/tmp/live.sock",
-            pid=7777,
-            boot_id=DESCRIBE_BOOT_ID,
-            tmux_server_start_ticks=77,
-        )
-        repaired = db.get_session(row.name)
-        assert repaired is not None
-        return repaired
-
     monkeypatch.setattr(manager, "_prepare_vm", prepare)
-    monkeypatch.setattr(manager, "_ensure_pid", repair)
+    monkeypatch.setattr(
+        manager,
+        "_ensure_pid",
+        lambda *args, **kwargs: pytest.fail("session describe repaired durable runtime identity"),
+    )
     monkeypatch.setattr(manager, "check_session_status", lambda row, *, target: SessionStatus.OK)
 
     live = CliRunner().invoke(app, ["session", "describe", "live", "--output", "json"])
     assert live.exit_code == 0, live.output
     live_record = json.loads(live.stdout_bytes)["data"]["session"]
     assert (live_record["pid"], live_record["status"], live_record["harness_integration"]) == (
-        7777,
+        None,
         "running",
         None,
     )
     assert marker.encode() not in live.stdout_bytes
-    assert DESCRIBE_BOOT_ID.encode() not in live.stdout_bytes
     session_state = live_record["instance_state"]
     assert session_state["declarations"]["session"]["current"] == {
         "status": "unresolved",
@@ -688,7 +655,6 @@ def test_session_describe_json_positive_and_stopped_pid_with_degraded_template(
         {"console_name": "zeta", "position": 1},
     ]
 
-    monkeypatch.setattr(manager, "_ensure_pid", lambda row, *, target, db: row)
     monkeypatch.setattr(manager, "check_session_status", lambda row, *, target: SessionStatus.STOPPED)
     stopped = CliRunner().invoke(app, ["session", "describe", "stopped", "--output", "json"])
     assert stopped.exit_code == 0, stopped.output

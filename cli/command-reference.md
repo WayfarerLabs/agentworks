@@ -800,8 +800,8 @@ when the operation launches a runtime. A running `session start --force-new` is 
 silently replacing the runtime.
 
 Maintainers: [Session status internals](../docs/guides/session-status.md) documents the persisted
-PID and boot-ID model, live status derivation, automatic repair, and the safety boundary for
-`--force`.
+PID and boot-ID model, read-only live status derivation, lifecycle repair, and the safety boundary
+for `--force`.
 
 `session create <name>` takes the session name as a required positional. Optional flags:
 `--workspace`, `--template`, `--spec`, `--admin`, and `--agent`. If `--workspace` /
@@ -857,9 +857,10 @@ panes you want preloaded into a session's window.
 - `--all` -- include every session on the VM with 0 shells, appended after the explicit specs
   (alphabetical).
 - `--all-running` -- like `--all` but restricted to sessions whose live tmux state on the VM is OK
-  (using the same safe identity repair and batched status check as `agw session list`). Mutually
-  exclusive with `--all`. Requires the VM to be reachable. Repair may update incomplete persisted
-  runtime identity from authoritative live facts before selection.
+  (using the same read-only batched status check as `agw session list`). Mutually exclusive with
+  `--all`. Requires the VM to be reachable. Exact tmux presence includes a running session even when
+  its persisted runtime fingerprint is incomplete; an indeterminate non-stopped row refuses the
+  operation rather than silently producing a partial console.
 - `--add-admin-shell`: include a top-level admin-shell window as window 0.
 
 `console reorder-sessions` moves the listed members in argument order while preserving the relative

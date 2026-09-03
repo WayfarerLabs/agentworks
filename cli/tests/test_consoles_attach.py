@@ -19,8 +19,8 @@ if TYPE_CHECKING:
 
 def test_attach_loop_uses_exact_session_targets() -> None:
     wrapper = _attach_loop_wrapper("backend", "/tmp/backend.sock")
-    assert "tmux -S /tmp/backend.sock has-session -t =backend" in wrapper
-    assert "tmux -S /tmp/backend.sock attach -t =backend" in wrapper
+    assert "tmux -S /tmp/backend.sock has-session -t '=backend'" in wrapper
+    assert "tmux -S /tmp/backend.sock attach -t '=backend'" in wrapper
 
 
 def test_attach_joins_existing_canonical_runtime_without_building(
@@ -46,5 +46,5 @@ def test_attach_joins_existing_canonical_runtime_without_building(
         )
         == 0
     )
-    assert interactive == ["tmux attach -t =aw-console-con"]
+    assert interactive == ["tmux attach -t '=aw-console-con'"]
     assert not any("new-session" in command for command in target.commands)

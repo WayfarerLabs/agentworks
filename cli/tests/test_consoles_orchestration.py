@@ -122,51 +122,38 @@ def test_running_session_names_rejects_legacy_row_before_connectivity_probe(
     assert fake_target.commands == []
 
 
-def test_running_session_names_repairs_incomplete_live_identity(
+def test_running_session_names_includes_incomplete_live_identity_without_repair(
     db: Database,
     fake_target: _FakeTarget,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agentworks.sessions.multi_console import running_session_names
-    from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["alpha"])
-    monkeypatch.setattr(
-        "agentworks.sessions.tmux.capture_tmux_server_fingerprint",
-        lambda **kwargs: FingerprintProbe(
-            ProbeStatus.PRESENT,
-            TmuxServerFingerprint(pid=100, boot_id=BOOT_ID, start_ticks=77),
-        ),
-    )
 
     def stub_run(command: str, **kwargs: object) -> _FakeResult:
         fake_target.commands.append(command)
-        boot_hex = BOOT_ID.encode().hex()
-        present_hex = b"present".hex()
-        return _FakeResult(returncode=0, stdout=f"S:alpha:0::0::0:{boot_hex}:0:{present_hex}\n")
+        return _FakeResult(returncode=0, stdout="S:alpha:0::0::1::1:\n")
 
     fake_target.run = stub_run  # type: ignore[assignment]
 
     assert running_session_names(db, _StubConfig(), "vm1") == ["alpha"]
-    repaired = db.get_session("alpha")
-    assert repaired is not None
-    assert (repaired.pid, repaired.boot_id, repaired.tmux_server_start_ticks) == (100, BOOT_ID, 77)
+    unchanged = db.get_session("alpha")
+    assert unchanged is not None
+    assert (unchanged.pid, unchanged.boot_id, unchanged.tmux_server_start_ticks) == (None, None, None)
+    assert len(fake_target.commands) == 1
 
 
 def test_running_session_names_refuses_unresolved_incomplete_identity(
     db: Database,
     fake_target: _FakeTarget,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agentworks.sessions.multi_console import running_session_names
-    from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["alpha"])
-    monkeypatch.setattr(
-        "agentworks.sessions.tmux.capture_tmux_server_fingerprint",
-        lambda **kwargs: FingerprintProbe(ProbeStatus.UNKNOWN),
+    fake_target.run = lambda command, **kwargs: (  # type: ignore[assignment]
+        fake_target.commands.append(command) or _FakeResult(returncode=255)
     )
 
     with pytest.raises(ConnectivityError):
@@ -174,7 +161,7 @@ def test_running_session_names_refuses_unresolved_incomplete_identity(
 
     unresolved = db.get_session("alpha")
     assert unresolved is not None and unresolved.pid is None
-    assert fake_target.commands == []
+    assert len(fake_target.commands) == 1
 
 
 def test_running_session_names_uses_live_status_check(db: Database, fake_target: _FakeTarget) -> None:
@@ -195,7 +182,7 @@ def test_running_session_names_uses_live_status_check(db: Database, fake_target:
     # claims the session is gone.
     def stub_run(command: str, **kwargs: object) -> _FakeResult:
         fake_target.commands.append(command)
-        if "has-session -t =alpha" in command and "has-session -t =beta" in command:
+        if "has-session -t '=alpha'" in command and "has-session -t '=beta'" in command:
             missing_session = b"can't find session: gamma".hex()
             missing_server = b"no server running on /gamma".hex()
             boot_hex = BOOT_ID.encode().hex()

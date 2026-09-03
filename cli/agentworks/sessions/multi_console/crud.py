@@ -28,7 +28,7 @@ from agentworks.sessions.multi_console_layout import (
     _reorder_session_windows,
     _reorder_shell_panes,
 )
-from agentworks.sessions.tmux import ProbeStatus
+from agentworks.sessions.tmux import ProbeStatus, exact_tmux_target
 
 from ._helpers import (
     SessionSpec,
@@ -147,6 +147,7 @@ def create_console(
         ),
     )
     registry = load_request_registry(config, live_database=db)
+    output.info(f"Checking console '{name}' runtime...")
     with _mc._prepare_vm_target(
         db,
         config,
@@ -669,7 +670,7 @@ def add_shell(
             # One pane, so no probe verdict to share with a sibling split.
             preserve_memo={},
         )
-        q_con = shlex.quote(f"={tmux_session_name(console_name)}")
+        q_con = exact_tmux_target(tmux_session_name(console_name))
         q_win = shlex.quote(session_name)
         # `_split_shell_pane` splits the window's active pane, which after an
         # attach is the session pane, so the new shell lands directly below it,
