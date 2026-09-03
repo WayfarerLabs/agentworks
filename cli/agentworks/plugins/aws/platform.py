@@ -475,7 +475,12 @@ class EC2Platform(VMPlatform):
                     remove_ssh_allow(ec2, security_group_id, ssh_allow_prefixes)
                 cleanup_created_resources(ec2, instance_id, security_group_id)
             except (Exception, KeyboardInterrupt) as cleanup_error:
-                detail = cleanup_error.detail if isinstance(cleanup_error, EC2Error) else "cleanup was interrupted"
+                if isinstance(cleanup_error, EC2Error):
+                    detail = cleanup_error.detail
+                elif isinstance(cleanup_error, KeyboardInterrupt):
+                    detail = "cleanup was interrupted"
+                else:
+                    detail = str(cleanup_error) or type(cleanup_error).__name__
                 recovery = (
                     f"After AWS permissions or service availability recover, run 'agw vm delete {request.vm_name}'."
                 )

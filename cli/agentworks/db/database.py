@@ -368,7 +368,7 @@ class Database:
 
     def update_vm_provisioning_status(self, name: str, status: ProvisioningStatus) -> None:
         self._conn.execute("UPDATE vms SET provisioning_status = ? WHERE name = ?", (status.value, name))
-        self._conn.commit()
+        self._commit_unless_in_tx()
 
     def update_vm_init_status(self, name: str, status: InitStatus) -> None:
         self._conn.execute("UPDATE vms SET init_status = ? WHERE name = ?", (status.value, name))
@@ -403,7 +403,7 @@ class Database:
             "UPDATE vms SET platform_metadata = ? WHERE name = ?",
             (json.dumps(metadata), name),
         )
-        self._conn.commit()
+        self._commit_unless_in_tx()
 
     def set_operator_stopped(self, name: str, stopped: bool) -> None:
         """Record operator stop/start intent (gates the activation gate's auto-start)."""
