@@ -338,6 +338,8 @@ The implementation, review, CI, and live-evidence steps below apply to the compl
       records without rewriting their historical text.
 - [x] Announce bounded session and console remote checks before they begin, without per-session
       stopped-state narration.
+- [x] Resolve final published feedback by keeping the early nesting refusal only on the deprecated
+      recreate wrapper and making the harness ADR's superseded version note unambiguous.
 
 ### Phase 6 Definition of Done
 

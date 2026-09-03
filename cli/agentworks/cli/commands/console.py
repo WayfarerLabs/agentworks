@@ -201,7 +201,8 @@ def console_attach(
     from agentworks.config import load_config
     from agentworks.sessions.multi_console import attach_console, refuse_console_nesting, restart_console
 
-    refuse_console_nesting(allow_nesting=allow_nesting)
+    if recreate:
+        refuse_console_nesting(allow_nesting=allow_nesting)
     db = get_db()
     config = load_config()
     if recreate:
