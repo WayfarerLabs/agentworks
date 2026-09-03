@@ -515,6 +515,7 @@ def create_vm(
 
                 render_overlay_outcome(overlay_outcome)
                 output.warn(f"VM '{vm_name}' is retained in failed state because backend cleanup was not confirmed.")
+                output.warn(f"Log: {logger.display_path}")
                 raise
             except KeyboardInterrupt:
                 # The platform's create owns rolling back its own partial

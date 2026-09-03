@@ -288,8 +288,6 @@ class _FakeEC2:
 
     def delete_security_group(self, **kwargs: Any) -> dict[str, Any]:
         self._record("delete_security_group", **kwargs)
-        if kwargs.get("DryRun"):
-            return self._dry_run("DeleteSecurityGroup")
         idx = self._sg_delete_attempts
         self._sg_delete_attempts += 1
         if idx < len(self._c.sg_delete_errors):

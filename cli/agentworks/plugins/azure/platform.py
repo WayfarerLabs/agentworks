@@ -16,7 +16,7 @@ from agentworks.capabilities.vm_platform.debian_release import (
 )
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
-from agentworks.errors import AuthorizationError, NotFoundError, StateError
+from agentworks.errors import NotFoundError, StateError
 from agentworks.plugins.azure.auth import (
     _build_ambient_credential,
     _build_service_principal_credential,
@@ -51,14 +51,12 @@ from agentworks.plugins.azure.network import (
     verify_vm_deleted,
     wrap_azure_error,
 )
-from agentworks.plugins.azure.permissions import missing_resource_group_actions
 from agentworks.topics import TopicProse
 from agentworks.transports import SSHTransport
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
-    from azure.mgmt.authorization import AuthorizationManagementClient
     from azure.mgmt.compute import ComputeManagementClient
     from azure.mgmt.network import NetworkManagementClient
     from azure.mgmt.resource.resources import ResourceManagementClient
@@ -93,11 +91,9 @@ class AzureVMPlatform(VMPlatform):
         one vm-site per subscription and group you target.
 
         The resource group must already exist: `vm create` checks it at runup with an
-        authenticated read-only probe, then checks any complete permission listing for
-        required create and rollback grants. Definitive omissions fail; inconclusive queries
-        warn. Sizes come from a built-in B-series catalog unless the site overrides it, and
-        `vm create` picks the smallest entry that satisfies the vm-template's request (an
-        off-ratio request rounds up and warns).
+        authenticated read-only probe. Sizes come from a built-in B-series catalog unless the
+        site overrides it, and `vm create` picks the smallest entry that satisfies the
+        vm-template's request (an off-ratio request rounds up and warns).
 
         `auth` says how the site authenticates and defaults to `{mode: ambient}`, the
         ambient Azure credential chain (`az login`, `AZURE_*` variables, managed
@@ -264,15 +260,9 @@ class AzureVMPlatform(VMPlatform):
             self._resource_cached[az.subscription_id] = resource
         return resource
 
-    def _authorization_client(self, az: _HasSubscriptionId, ctx: RunContext) -> AuthorizationManagementClient:
-        """Build an authorization client for the one create-time query."""
-        from azure.mgmt.authorization import AuthorizationManagementClient
-
-        return AuthorizationManagementClient(self._get_credential(ctx), az.subscription_id)  # type: ignore[arg-type]
-
     def runup(self, ctx: RunContext) -> None:
-        """Provisioning runup: read-only resource-group existence and Azure
-        permission checks before create. A missing group is a definitive rejection
+        """Provisioning runup: an authenticated, read-only resource-group
+        existence check. A missing group is a definitive rejection
         (fatal, before the DB row or any Azure resource exists), so
         ``vm create`` aborts here with a clear message instead of failing
         partway through creating a public IP / NSG / VNet / NIC in a group
@@ -308,9 +298,6 @@ class AzureVMPlatform(VMPlatform):
         ``ClientAuthenticationError`` (see
         :func:`_build_service_principal_credential`).
 
-        Permission discovery has the opposite classification: only a complete,
-        well-formed listing can prove a grant absent. Otherwise runup warns.
-        Finding no omission is not preauthorization; Azure remains authoritative.
         """
         from types import SimpleNamespace
 
@@ -343,29 +330,6 @@ class AzureVMPlatform(VMPlatform):
                     f"-l {az.region}', or point vm-site '{self.site_name}' at an "
                     f"existing resource group"
                 ),
-            )
-
-        # A query or response failure cannot prove a grant absent, so warn and
-        # leave the real create operations authoritative.
-        try:
-            authorization = self._authorization_client(az, ctx)
-            blocks = authorization.permissions.list_for_resource_group(az.resource_group)
-            missing_actions = missing_resource_group_actions(blocks)
-        except Exception as exc:
-            output.warn(
-                f"could not verify Azure create permissions for resource group "
-                f"'{az.resource_group}' ({wrap_azure_error(exc).summary}); continuing unverified"
-            )
-            return
-
-        if missing_actions:
-            missing = ", ".join(missing_actions)
-            raise AuthorizationError(
-                f"the active Azure credential lacks required create or rollback permissions "
-                f"on resource group '{az.resource_group}': {missing}",
-                entity_kind="resource-group",
-                entity_name=az.resource_group,
-                hint="grant a role containing the missing actions at this resource group or a parent scope, then retry",
             )
 
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:

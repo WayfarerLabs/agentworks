@@ -44,14 +44,13 @@ open, so the worst case is a benign re-poke on the next entry, never exposure.
 from __future__ import annotations
 
 import time
-from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from agentworks import output
 from agentworks.errors import AgentworksError, AuthorizationError, ProvisioningError, TokenRejectedError
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Mapping, Sequence
 
 
 # The tag key every agentworks-created EC2 resource carries, its value the
@@ -160,78 +159,46 @@ def is_authorization_denial(exc: Exception) -> bool:
     return error_code(exc) in _AUTHORIZATION_DENIAL_CODES
 
 
-def _require_dry_run_permission(
-    call: Callable[[], object],
-    *,
-    operation: str,
-    entity_kind: str,
-    entity_name: str,
-) -> None:
-    """Require positive authorization evidence for one exact dry run.
-
-    ``DryRunOperation`` is EC2's documented positive result. Permission,
-    credential, transport, validation, and protocol failures all stop before
-    the guarded mutation because none proves that its cleanup can run.
-    """
-    try:
-        call()
-    except Exception as exc:
-        code = error_code(exc)
-        if code == _DRY_RUN_ALLOWED_CODE:
-            return
-        if code in _AUTHORIZATION_DENIAL_CODES:
-            raise AuthorizationError(
-                f"AWS denied permission to {operation} ({code})",
-                entity_kind=entity_kind,
-                entity_name=entity_name,
-            ) from exc
-        if code in _CREDENTIAL_REJECTION_CODES:
-            raise TokenRejectedError(
-                f"AWS rejected the selected credential while checking permission to {operation} ({code})",
-                entity_kind=entity_kind,
-                entity_name=entity_name,
-            ) from exc
-        raise EC2Error(
-            f"AWS could not confirm permission to {operation}",
-            detail=str(exc),
-            entity_kind=entity_kind,
-            entity_name=entity_name,
-            hint="retry when AWS can return a definitive DryRun result",
-        ) from exc
-    raise EC2Error(
-        f"AWS did not confirm permission to {operation}",
-        detail="the EC2 DryRun request returned normally instead of DryRunOperation",
-        entity_kind=entity_kind,
-        entity_name=entity_name,
-        hint="retry when AWS can return a definitive DryRun result",
-    )
-
-
 def _check_ssh_revoke_permissions(ec2: Any, security_group_id: str, prefixes: Sequence[str]) -> None:
     """Dry-run every exact revoke before any matching authorize occurs."""
     for prefix in prefixes:
         permission = _ssh_permission(prefix)
-        _require_dry_run_permission(
-            partial(
-                ec2.revoke_security_group_ingress,
+        try:
+            ec2.revoke_security_group_ingress(
                 GroupId=security_group_id,
                 IpPermissions=[permission],
                 DryRun=True,
-            ),
-            operation="revoke the planned SSH ingress rule",
+            )
+        except Exception as exc:
+            code = error_code(exc)
+            if code == _DRY_RUN_ALLOWED_CODE:
+                continue
+            if code in _AUTHORIZATION_DENIAL_CODES:
+                raise AuthorizationError(
+                    f"AWS denied permission to revoke the planned SSH ingress rule ({code})",
+                    entity_kind="security-group",
+                    entity_name=security_group_id,
+                ) from exc
+            if code in _CREDENTIAL_REJECTION_CODES:
+                raise TokenRejectedError(
+                    f"AWS rejected the selected credential while checking SSH cleanup permission ({code})",
+                    entity_kind="security-group",
+                    entity_name=security_group_id,
+                ) from exc
+            raise EC2Error(
+                "AWS could not confirm permission to revoke the planned SSH ingress rule",
+                detail=str(exc),
+                entity_kind="security-group",
+                entity_name=security_group_id,
+                hint="retry when AWS can return a definitive DryRun result",
+            ) from exc
+        raise EC2Error(
+            "AWS did not confirm permission to revoke the planned SSH ingress rule",
+            detail="the EC2 DryRun request returned normally instead of DryRunOperation",
             entity_kind="security-group",
             entity_name=security_group_id,
+            hint="retry when AWS can return a definitive DryRun result",
         )
-
-
-def _check_security_group_delete_permission(ec2: Any, security_group_id: str) -> None:
-    """Dry-run the exact security-group delete used after termination."""
-    _require_dry_run_permission(
-        lambda: ec2.delete_security_group(GroupId=security_group_id, DryRun=True),
-        operation="delete the VM security group",
-        entity_kind="security-group",
-        entity_name=security_group_id,
-    )
 
 
 def vm_tag(backend_name: str) -> dict[str, str]:
@@ -437,27 +404,23 @@ def require_owned_instance(
     instance: Mapping[str, Any],
     backend_name: str,
     security_group_id: str,
-) -> str:
-    """Return an instance ID only after exact ownership checks."""
-    instance_id = instance.get("InstanceId")
+) -> None:
+    """Require the ownership tag and recorded security-group association."""
     tags = instance.get("Tags")
     groups = instance.get("SecurityGroups")
-    valid_instance_id = isinstance(instance_id, str) and bool(instance_id)
     owns_instance = isinstance(tags, list) and any(
         isinstance(tag, dict) and tag.get("Key") == VM_TAG_KEY and tag.get("Value") == backend_name for tag in tags
     )
     has_security_group = isinstance(groups, list) and any(
         isinstance(group, dict) and group.get("GroupId") == security_group_id for group in groups
     )
-    if not valid_instance_id or not owns_instance or not has_security_group:
+    if not owns_instance or not has_security_group:
         raise EC2Error(
             f"instance is not owned by backend '{backend_name}'",
             detail=f"the exact {VM_TAG_KEY} tag or recorded security-group association did not match",
             entity_kind="instance",
-            entity_name=str(instance_id or backend_name),
+            entity_name=str(instance["InstanceId"]),
         )
-    assert isinstance(instance_id, str)
-    return instance_id
 
 
 def describe_security_group_exact(ec2: Any, security_group_id: str) -> dict[str, Any] | None:
@@ -505,18 +468,7 @@ def terminate_and_cleanup_strict(
                 entity_name=instance_id,
             )
     elif instance is not None:
-        owned_instance_id = require_owned_instance(
-            instance,
-            backend_name,
-            security_group_id,
-        )
-        if owned_instance_id != instance_id:
-            raise EC2Error(
-                f"EC2 did not return the requested instance '{instance_id}'",
-                detail=f"the exact lookup returned '{owned_instance_id}'",
-                entity_kind="instance",
-                entity_name=instance_id,
-            )
+        require_owned_instance(instance, backend_name, security_group_id)
 
     security_group = describe_security_group_exact(ec2, security_group_id)
     if security_group is not None:
@@ -531,8 +483,6 @@ def terminate_and_cleanup_strict(
                 entity_kind="security-group",
                 entity_name=security_group_id,
             )
-        _check_security_group_delete_permission(ec2, security_group_id)
-
     if instance_id is not None and instance is not None:
         try:
             ec2.terminate_instances(InstanceIds=[instance_id])

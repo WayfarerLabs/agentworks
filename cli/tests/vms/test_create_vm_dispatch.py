@@ -19,7 +19,7 @@ from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError, NotFoundError, ProvisioningError, StateError, UserAbort, ValidationError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
-from tests.conftest import ManifestDoc, write_manifests
+from tests.conftest import CapturedOutput, ManifestDoc, write_manifests
 from tests.orchestrated_fixtures import proxmox_site
 from tests.ssh_fixtures import TEST_SSH_PUBLIC_KEY, write_test_ssh_keypair
 
@@ -201,6 +201,7 @@ def test_create_vm_retains_platform_metadata_when_rollback_is_unconfirmed(
     db: Database,
     make_config,
     monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
 ) -> None:
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
     from agentworks.db import ProvisioningStatus
@@ -230,6 +231,10 @@ def test_create_vm_retains_platform_metadata_when_rollback_is_unconfirmed(
     assert row is not None
     assert row.platform_metadata == {"instance_name": "retained-backend", "create_incomplete": "true"}
     assert row.provisioning_status == ProvisioningStatus.FAILED.value
+    assert any(
+        "retained-" in message and message.endswith("-vm-create.log")
+        for _role, _level, message in captured_output.lines
+    )
 
 
 def test_create_vm_metadata_failure_retains_owner_and_reports_once(

@@ -452,6 +452,7 @@ class EC2Platform(VMPlatform):
         instance_id: str | None = None
         prov_transport: Transport | None = None
         tailscale_ip: str | None = None
+        bootstrap_ssh_open = False
 
         def _metadata(*, incomplete: bool) -> dict[str, str]:
             metadata = {
@@ -470,6 +471,8 @@ class EC2Platform(VMPlatform):
 
         def _cleanup_or_retain() -> None:
             try:
+                if bootstrap_ssh_open and security_group_id is not None:
+                    remove_ssh_allow(ec2, security_group_id, ssh_allow_prefixes)
                 cleanup_created_resources(ec2, instance_id, security_group_id)
             except (Exception, KeyboardInterrupt) as cleanup_error:
                 detail = cleanup_error.detail if isinstance(cleanup_error, EC2Error) else "cleanup was interrupted"
@@ -555,6 +558,7 @@ class EC2Platform(VMPlatform):
             # these prefixes, recorded in platform_metadata below.
             output.detail("Opening scoped SSH bootstrap access...")
             poke_ssh_allow(ec2, security_group_id, ssh_allow_prefixes)
+            bootstrap_ssh_open = True
 
             # Read the auto-assigned public IP LIVE (never cached).
             public_ip = self._public_ip(ec2, instance_id)
@@ -1005,14 +1009,26 @@ class EC2Platform(VMPlatform):
             result = ec2.describe_images(ImageIds=[ami])
         except Exception as exc:
             mapped = wrap_ec2_error(exc)
-            if isinstance(mapped, (AuthorizationError, TokenRejectedError)):
-                raise mapped from exc
+            if isinstance(mapped, AuthorizationError):
+                raise AuthorizationError(
+                    str(mapped),
+                    entity_kind="vm-site",
+                    entity_name=self.site_name,
+                    hint="grant ec2:DescribeImages to the selected AWS credential and retry",
+                ) from exc
+            if isinstance(mapped, TokenRejectedError):
+                raise TokenRejectedError(
+                    str(mapped),
+                    entity_kind="vm-site",
+                    entity_name=self.site_name,
+                    hint="verify the selected AWS credential and retry",
+                ) from exc
             raise EC2Error(
                 f"could not read AMI '{ami}' to size the disk for vm-site '{self.site_name}'",
                 detail=str(exc),
                 entity_kind="vm-site",
                 entity_name=self.site_name,
-                hint="grant ec2:DescribeImages to the credential, or drop the vm-template's disk request",
+                hint="verify the AMI is readable and retry",
             ) from exc
         images = result.get("Images", [])
         root_device = images[0].get("RootDeviceName") if images else None
@@ -1022,6 +1038,6 @@ class EC2Platform(VMPlatform):
                 detail="describe_images returned no RootDeviceName for the image",
                 entity_kind="vm-site",
                 entity_name=self.site_name,
-                hint="verify the AMI id, or drop the vm-template's disk request to keep the image's own root size",
+                hint="verify the selected Debian AMI publishes root-device metadata and retry",
             )
         return str(root_device)

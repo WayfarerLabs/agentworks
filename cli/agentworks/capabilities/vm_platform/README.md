@@ -68,56 +68,32 @@ described below.
 
 A vm-platform stands up a machine and hands Agentworks an administrative foothold on it. It:
 
-- **MUST** provision exactly `ProvisionRequest.debian_release`, resolving it through a
-  platform-owned, release-keyed artifact map without inferring "current", substituting another
-  release or operating system, or falling back. An unresolved release **MUST** fail before backend
-  mutation and identify an outdated code-owned platform or the missing operator-owned mapping. Any
-  other platform-owned value whose correctness varies by Debian release **MUST** also be keyed by
-  release.
-- **MUST NOT** make the current creation release or its artifact availability a requirement for
-  operations on an existing VM. Core owns recorded release observations and support warnings;
-  current, previous, and legacy guests proceed through the same platform lifecycle checks.
-- **MUST** create the admin user with the operator-configured name, holding full passwordless `sudo`
-  over the machine, reachable by the operator's installed SSH public key and never by password.
-- **MUST** provide a transport that runs arbitrary commands as the admin user: the single foothold
-  every later provisioning step is driven through. Core independently attests that the live guest is
-  Debian at the requested release before accepting creation and persists only that observation. The
-  check has no operator bypass, and a mismatch leaves enough backend identity for deletion.
-- **MUST** consume the required Tailscale auth key, complete the join before `create()` returns, and
-  attempt cleanup before propagating a join failure or interruption. IP discovery may be deferred
-  after a successful join.
-- **MUST** provision the VM to the requested cpus, memory, and disk, rounding up to the nearest
-  available shape where the backend sells only fixed shapes. A backend that structurally cannot
-  honor a per-VM shape (WSL2, whose limits are global) is the exception, and it **MUST** at least
-  warn that the requested resources are being ignored
+- **MUST** provision exactly `ProvisionRequest.debian_release`, using platform-owned, release-keyed
+  values. A missing mapping **MUST** fail clearly before mutation, without fallback or substitution.
+- **MUST NOT** gate existing-VM operations on the current creation release or image catalog.
+- **MUST** create the configured admin with passwordless `sudo`, SSH-key access, and no password.
+- **MUST** return an admin transport. Core verifies the guest is Debian at the requested release,
+  without bypass, and persists only the observed result.
+- **MUST** complete the Tailscale join before returning from `create()`.
+- **MUST** honor requested CPU, memory, and disk, rounding up to an available shape if needed. A
+  backend that cannot set a per-VM shape **MUST** warn instead
   ([#369](https://github.com/WayfarerLabs/agentworks/issues/369)).
-- **MUST** support the lifecycle Agentworks drives, create, start, stop, and delete, and report the
-  VM's status; `create` **MUST** be collision-checked and either fail loudly on a name that already
-  exists or pick and persist a new, collision-free backend name, never impacting an existing VM
-  outside its control.
-- **SHOULD** take reasonable steps to validate that the calling identity has the necessary
-  permissions before starting any operation. It **MUST NOT** present incomplete or advisory evidence
-  as proof of authorization; the provider's real request remains authoritative. See
-  [Provider-Native Permission Diagnostics](#provider-native-permission-diagnostics).
-- **MUST** provide a stop that preserves filesystem and configuration state for a later resume. A
-  platform **MAY** stop through a full OS shutdown and restart; running processes need not survive.
-- **SHOULD** take reasonable steps to reduce the cost and resource usage of a stopped VM, releasing
-  billable or heavy resources where the backend allows it.
-- **MUST** attempt cleanup of its own backend state after a failed or interrupted `create`. If it
-  cannot confirm cleanup, it **MUST** fail while preserving enough identifiers for explicit deletion
-  and report any residue with recovery guidance.
-- **MUST NOT** report `delete` as successful until the backend VM is confirmed gone. A failure
-  **MUST** retain the Agentworks row for retry.
-- **MUST** scope every VM-specific backend resource to one VM and **MUST NOT** reconfigure or tear
-  down another VM's resources, another site's state, or shared operator infrastructure such as a
-  resource group, VPC, subnet, or bridge.
-- On a full-control cloud host it **MUST** default to zero standing inbound exposure, opening only a
-  narrowly scoped, ephemeral hole for the one operation that needs it and closing it after, failing
-  closed rather than open; on an externally administered or local host it **MUST NOT** manage the
-  host's or network's security at all.
-- **MUST NOT** share host filesystem paths into the guest by default (a VM is self-contained), and
-  **MUST NOT** log or persist resolved secret values (its metadata carries only non-secret state
-  required for safe lifecycle operations).
+- **MUST** implement create, start, stop, delete, and status. Create **MUST** avoid collisions, and
+  later operations **MUST** use the persisted backend identity.
+- A platform **SHOULD** surface provider authorization failures clearly. Where a failure could leave
+  unsafe exposure or leaked resources, it **SHOULD** use additional provider mechanisms to validate
+  the resulting state.
+- Stop **MUST** preserve filesystem and configuration state; platforms **SHOULD** release costly
+  stopped resources where practical.
+- A failed or interrupted create **MUST** attempt cleanup. Unconfirmed cleanup **MUST** retain the
+  identifiers needed for deletion and report recovery guidance.
+- Delete **MUST NOT** succeed until the backend VM is confirmed gone; failure **MUST** retain the
+  Agentworks row for retry.
+- **MUST NOT** mutate another VM, site, or shared operator infrastructure. VM-specific resources
+  **MUST** belong to one VM.
+- A full-control cloud host **MUST** default to no standing inbound exposure and close any scoped,
+  temporary access. Other hosts **MUST NOT** manage the perimeter.
+- **MUST NOT** share host paths by default or log or persist resolved secrets.
 
 VM platforms do not create agent users, workspaces, groups, or sessions or manage their secrets.
 Core owns those resources through platform-agnostic mechanisms.
@@ -186,11 +162,9 @@ and DB migration.
 - `create(request, ctx) -> ProvisionResult` is deliberately **not** `@idempotent_op`: it runs a
   pre-flight collision check, then either raises `StateError` (all six in-tree platforms) or, for a
   soft-name backend, selects a different collision-free backend name and records that identifier in
-  `platform_metadata`. A re-run must never target or replace an existing VM; Proxmox's remaining
-  failure-closed collision-query gap is tracked in #719. A create that cannot confirm rollback
-  raises `RetainedProvisioningError` with addressable platform metadata; core persists that metadata
-  and retains the provisional row in failed state so `vm delete` can finish cleanup. EC2 implements
-  that retained handoff; the remaining platform rollback paths are tracked in #718.
+  `platform_metadata`. A re-run must never target or replace an existing VM. A create that cannot
+  confirm rollback raises `RetainedProvisioningError` with addressable platform metadata; core
+  persists that metadata and retains the provisional row so `vm delete` can finish cleanup.
 - `start(vm, ctx)`, `stop(vm, ctx)`, `delete(vm, ctx)` are flagged `@idempotent_op` and must land in
   the same place run twice as run once. The marker is inherited through the MRO, so an override does
   not restate the decorator. `reinit` re-applies everything and failed commands are retried, so the
@@ -198,17 +172,12 @@ and DB migration.
   first and short-circuit, because the backend verb is not reliably a no-op on an already-in-state
   instance; WSL2's `start` needs no guard because running a command boots a stopped distro and is a
   plain exec on a running one; Azure and EC2 rely on idempotent provider verbs, while GCE uses live
-  state guards; `delete` treats provider-confirmed already-gone as success on all six. EC2 can
-  confirm this only for an account-bound row; a legacy row with no account ID must still be live
-  enough to prove current-account ownership, or its ambiguous `NotFound` retains the row. `delete`
-  is NOT unconditionally best-effort though: a delete that cannot remove the backend VM must raise a
-  typed error (the manager deletes the DB row only on success, so a swallowed backend failure
-  orphans the VM; #329). Azure enforces the ordinary failure contract with a post-teardown existence
-  probe (`verify_vm_deleted`), GCE requires provider-ID-owned instance absence before removing its
-  lifetime deny, and EC2 requires an STS account match, exact resource ownership, its termination
-  waiter, and security-group cleanup. Only Azure's auxiliary-resource stragglers stay
-  warn-and-continue. Lima, WSL2, and Proxmox do not yet verify; their teardown verbs remain
-  fire-and-forget (tracked in #356).
+  state guards; `delete` treats provider-confirmed absence as success. EC2 can confirm this only for
+  an account-bound row; an ambiguous legacy `NotFound` retains the row. A delete that cannot remove
+  the backend VM must raise because core drops the row only on success (#329). Azure confirms VM
+  absence, GCE confirms instance absence before removing its lifetime deny, and EC2 verifies account
+  and ownership before terminating, waiting, and deleting its security group. Lima, WSL2, and
+  Proxmox remain fire-and-forget (#356).
 - `status(vm, ctx) -> VMStatus` is a read-only query.
 - `display_backend_name(vm) -> str` is pure display and takes no `ctx`.
 
@@ -490,36 +459,6 @@ rather than degrading it to UNKNOWN, so a misconfigured site never reads as UNKN
 `AssumeRoleCredentialFetcher` + `DeferredRefreshableCredentials`) rather than a one-shot assume, so
 a long op cannot fail with `ExpiredToken` from a frozen cache. See `test_platform_runup.py` and
 `test_aws_ec2_ops.py` (directly under `cli/tests/`) for the halves.
-
-### Provider-Native Permission Diagnostics
-
-Permission evidence belongs at the narrowest provider boundary that can state it truthfully. The
-vm-platform API does not define one generic permission roster or a boolean capability certificate:
-provider authorization can depend on a future resource identity, exact request fields, tags, linked
-resources, conditions, denies, and policy changes after a check.
-
-The three managed cloud platforms therefore use different evidence:
-
-- Azure's create-time `runup` fully consumes the caller's resource-group permission listing. A
-  complete response that lacks a create, rollback, or bootstrap-route-closure grant is a definitive
-  pre-mutation refusal. An unavailable or incomplete listing warns and defers to the real request;
-  deny assignments, policy, locks, and later RBAC changes remain authoritative at mutation time.
-- EC2 uses exact `DryRun` requests only at composite safety boundaries. It proves revoke permission
-  before opening an SSH tuple and security-group deletion permission before terminating the VM. Only
-  `DryRunOperation` is positive evidence; unknown results stop before the guarded mutation. IAM
-  policy simulation is not used as an authorization gate. New rows bind provider IDs to the creating
-  AWS account. Explicit delete raises on missing or mismatched identity, ownership, termination, or
-  security-group cleanup failure so core retains the VM row for retry. Rollback retries
-  propagation-time `NotFound` for concrete provider IDs instead of treating it as absence. If that
-  cleanup cannot be confirmed, `RetainedProvisioningError` makes the provisional row and known
-  provider identifiers durable for explicit deletion.
-- GCE makes its definitive project, zone, network, image, and shape reads before mutation, then lets
-  exact mutations authorize themselves under provider-ID-owned rollback. Its IAM test methods apply
-  to existing resources and are advisory; the future VM, boot disk, and firewall rules do not exist
-  during runup, so no honest whole-lifecycle precheck is available.
-
-Operator setup and the exact action inventories live in the Amazon EC2, Azure Virtual Machines, and
-Google Compute Engine guides under `docs/guides/`.
 
 ### Exposure on a Cloud Platform: Baseline Deny, Ephemeral Scoped Allows
 

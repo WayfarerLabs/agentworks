@@ -111,7 +111,6 @@ def _install_fakes(
         "compute_build": 0,
         "network_build": 0,
         "resource_build": 0,
-        "authorization_build": 0,
     }
 
     class _FakeDefaultCred:
@@ -171,18 +170,12 @@ def _install_fakes(
             counters["resource_build"] += 1
             self.subscription_id = subscription_id
 
-    class _FakeAuthorization:
-        def __init__(self, credential: object, subscription_id: str) -> None:
-            counters["authorization_build"] += 1
-            self.subscription_id = subscription_id
-
     monkeypatch.setattr("azure.identity.DefaultAzureCredential", _FakeDefaultCred)
     monkeypatch.setattr("azure.identity.InteractiveBrowserCredential", _FakeBrowserCred)
     monkeypatch.setattr("azure.identity.ClientSecretCredential", _FakeClientSecretCred)
     monkeypatch.setattr("azure.mgmt.compute.ComputeManagementClient", _FakeCompute)
     monkeypatch.setattr("azure.mgmt.network.NetworkManagementClient", _FakeNetwork)
     monkeypatch.setattr("azure.mgmt.resource.resources.ResourceManagementClient", _FakeResource)
-    monkeypatch.setattr("azure.mgmt.authorization.AuthorizationManagementClient", _FakeAuthorization)
     return counters
 
 
@@ -371,17 +364,6 @@ class TestCredentialSelection:
         assert counters["cred_build"] == 1
         assert counters["sp_build"] == 0
         assert _sp_args == []
-
-    def test_authorization_client_uses_the_selected_service_principal(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        counters = _install_fakes(monkeypatch)
-
-        _sp_platform()._authorization_client(SimpleNamespace(subscription_id="sub-A"), _sp_ctx())
-
-        assert counters["authorization_build"] == 1
-        assert counters["sp_build"] == 1
-        assert counters["sp_get_token"] == 1
-        assert counters["cred_build"] == 0
-        assert counters["browser_build"] == 0
 
     def test_service_principal_builds_from_the_delivered_secret(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A declared service principal is built from the site's

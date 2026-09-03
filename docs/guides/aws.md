@@ -68,28 +68,15 @@ therefore needs no Elastic IP actions, `iam:PassRole`, snapshot actions, or `ec2
 the shipped request. An account whose selected AMI or EBS encryption defaults use a customer-managed
 KMS key may also require the KMS actions that key policy and EBS encryption require.
 
-## What Agentworks verifies
+## Safety checks
 
-`vm create` authenticates with STS and performs its resource reads before creating anything. A
-credential, permission, transport, or invalid-response failure from that identity call stops runup;
-create cannot safely continue without the account binding recorded on the new VM. AWS does not
-provide a reliable general answer for whether an identity can operate future resources, especially
-when policies use resource ARNs, request tags, resource tags, VPCs, or region conditions. Agentworks
-therefore does not use IAM policy simulation or claim that the runup check certifies the whole
-lifecycle. New VMs record the validated 12-digit AWS account ID alongside their provider IDs.
+Before creating resources, `vm create` uses STS to bind the VM to the selected 12-digit AWS account.
+Credential, permission, transport, and invalid-response failures stop there. Agentworks does not use
+IAM policy simulation; each EC2 operation remains authoritative.
 
-EC2 does provide exact-request `DryRun` authorization. Agentworks uses it where a later missing
-permission would make an earlier mutation unsafe:
-
-- Before opening an SSH ingress tuple, it verifies that the same tuple can be revoked. A definitive
-  positive result is required before any route opens.
-- Before terminating a VM, it verifies that the VM's security group can be deleted. A definitive
-  positive result, or proof that the group is already absent, is required before termination.
-
-Only EC2's documented `DryRunOperation` response is positive permission evidence. An already-absent
-security group also needs no cleanup. Permission denials, credential failures, transport failures,
-validation errors, and unexpected responses stop these composite operations before the guarded
-mutation. A failed explicit delete keeps the VM row so the operator can correct IAM and retry
+Before opening an SSH ingress tuple, Agentworks uses EC2's exact-request `DryRun` to verify that it
+can revoke the tuple. Only `DryRunOperation` is positive evidence; every other result stops before
+the route opens. A failed explicit delete keeps the VM row so the operator can correct IAM and retry
 `agw vm delete`.
 
 ## Network and cleanup model
@@ -101,9 +88,9 @@ opened.
 
 `agw vm delete <name>` refreshes the STS identity and refuses an account mismatch. It reads the
 recorded instance and security group, verifies their `agentworks:vm` ownership and recorded
-association before the dry run or any termination, then waits for termination and deletes the group
-after its network interface detaches. An account-bound instance that is already absent needs no
-termination. An absent legacy instance remains ambiguous, so Agentworks retains its row.
+association before termination, then waits for termination and deletes the group after its network
+interface detaches. An account-bound instance that is already absent needs no termination. An absent
+legacy instance remains ambiguous, so Agentworks retains its row.
 
 Create rollback never accepts `NotFound` for a newly returned provider ID as proof of cleanup. It
 retries the exact termination or group deletion because the resource may still be propagating. If

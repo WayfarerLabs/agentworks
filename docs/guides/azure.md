@@ -79,23 +79,8 @@ Microsoft.Resources/subscriptions/resourceGroups/read
 
 No snapshot actions are required.
 
-## What Agentworks verifies
-
-Before `vm create` writes local state or Azure resources, Agentworks confirms that the configured
-resource group exists. It then asks Azure for the caller's resource-group permissions and checks the
-create, rollback, and bootstrap-route-closure actions. A complete response that definitively lacks
-one of those grants fails before provisioning.
-
-This is a negative diagnostic, not an authorization certificate. Azure can still refuse a request
-because of deny assignments, conditions, policy, locks, propagation delay, linked-resource scope, or
-a later RBAC change. If the permission listing itself is unavailable or incomplete, Agentworks warns
-and lets the real operation remain authoritative. The permission query uses
-`Microsoft.Authorization/permissions/read`; a role that cannot make that query is not assumed to
-lack VM permissions.
-
-Start, deallocate, delete, and native-route operations run against existing resources that may have
-more specific role assignments than the resource group. Agentworks lets those exact operations
-authorize themselves instead of rejecting them from a broader-scope approximation.
+Before provisioning, `vm create` confirms that the configured resource group exists. Azure
+authorizes each operation directly; correct RBAC and retry if Azure denies it.
 
 ## Network and cleanup model
 

@@ -18,7 +18,7 @@ from agentworks.capabilities.vm_platform import ProvisionRequest, RetainedProvis
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
-from agentworks.errors import AuthorizationError, ConfigError, StateError, TokenRejectedError
+from agentworks.errors import AgentworksError, AuthorizationError, ConfigError, StateError, TokenRejectedError
 from agentworks.plugins.aws.network import EC2Error, poke_ssh_allow, remove_ssh_allow
 from agentworks.plugins.aws.platform import EC2Platform
 from agentworks.ssh import SSHError
@@ -310,14 +310,29 @@ class TestCreate:
         (bdm,) = rec.kwargs_for("run_instances")["BlockDeviceMappings"]
         assert bdm["Ebs"]["VolumeSize"] == 50
 
-    def test_disk_describe_images_failure_is_typed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.parametrize(
+        ("code", "error_type"),
+        [
+            pytest.param("UnauthorizedOperation", AuthorizationError, id="authorization"),
+            pytest.param("AuthFailure", TokenRejectedError, id="credential"),
+        ],
+    )
+    def test_disk_describe_images_failure_is_typed(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        code: str,
+        error_type: type[AgentworksError],
+    ) -> None:
         install_fakes(monkeypatch)
         monkeypatch.setattr(
             "tests._aws_fakes._FakeEC2.describe_images",
-            lambda self, **kw: (_ for _ in ()).throw(client_error("UnauthorizedOperation", "denied", "DescribeImages")),
+            lambda self, **kw: (_ for _ in ()).throw(client_error(code, "denied", "DescribeImages")),
         )
-        with pytest.raises(AuthorizationError) as exc:
+        with pytest.raises(error_type) as exc:
             _platform().create(_request(disk=40), RunContext(config=_config()))
+        assert exc.value.entity_kind == "vm-site"
+        assert exc.value.entity_name == "aws-site"
+        assert exc.value.hint is not None
         assert exc.value.__cause__ is not None
 
     def test_tailscale_path_waits_for_bootstrap(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -386,15 +401,16 @@ class TestCreateRollback:
     def test_unconfirmed_rollback_retains_exact_metadata(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("agentworks.plugins.aws.network.time.sleep", lambda _seconds: None)
         not_found = client_error("InvalidInstanceID.NotFound", "propagating", "Terminate")
-        install_fakes(monkeypatch, Controls(terminate_errors=[not_found] * 6))
+        rec = install_fakes(monkeypatch, Controls(terminate_errors=[not_found] * 6))
         monkeypatch.setattr(
             EphemeralTailscaleBootstrap,
             "complete",
             lambda self, auth_key: (_ for _ in ()).throw(OSError("bootstrap failed")),
         )
+        platform = _platform()
 
         with pytest.raises(RetainedProvisioningError) as caught:
-            _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
+            platform.create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
 
         assert isinstance(caught.value.__cause__, EC2Error)
         assert caught.value.__cause__.detail
@@ -402,6 +418,8 @@ class TestCreateRollback:
         assert caught.value.platform_metadata["security_group_id"] == "sg-123"
         assert caught.value.platform_metadata["account_id"] == "111122223333"
         assert caught.value.platform_metadata["create_incomplete"] == "true"
+        assert rec.revoked_cidrs() == [_DETECTED_PREFIX]
+        assert _ec2(platform).ingress.get("sg-123", {}) == {}
 
     def test_run_failure_cleans_the_known_security_group(self, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = install_fakes(monkeypatch)
@@ -433,7 +451,7 @@ class TestCreateRollback:
         metadata = caught.value.platform_metadata
         assert "instance_id" not in metadata
         platform.delete(SimpleNamespace(name="dev", platform_metadata=metadata), RunContext())  # type: ignore[arg-type]
-        assert rec.methods("ec2").count("delete_security_group") == 3
+        assert rec.methods("ec2").count("delete_security_group") == 2
 
     @pytest.mark.parametrize(
         ("failure_command", "message", "expected_commands"),
@@ -905,7 +923,6 @@ class TestDelete:
             ("sts", "get_caller_identity", False),
             ("ec2", "describe_instances", False),
             ("ec2", "describe_security_groups", False),
-            ("ec2", "delete_security_group", True),
             ("ec2", "terminate_instances", False),
             ("ec2", "get_waiter", False),
             ("ec2", "delete_security_group", False),
@@ -968,32 +985,13 @@ class TestDelete:
 
         assert rec.methods("ec2") == ["describe_instances", "describe_security_groups"]
 
-    def test_security_group_delete_denial_prevents_all_mutation(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        rec = install_fakes(
-            monkeypatch,
-            Controls(dry_run_outcomes=[client_error("UnauthorizedOperation", "denied", "DeleteSecurityGroup")]),
-        )
-
-        with pytest.raises(AuthorizationError) as exc:
-            _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
-
-        assert exc.value.entity_kind == "security-group"
-        assert exc.value.entity_name == "sg-123"
-        assert rec.calls == [
-            ("sts", "get_caller_identity", {}),
-            ("ec2", "describe_instances", {"InstanceIds": ["i-123"]}),
-            ("ec2", "describe_security_groups", {"GroupIds": ["sg-123"]}),
-            ("ec2", "delete_security_group", {"GroupId": "sg-123", "DryRun": True}),
-        ]
-
-    def test_already_absent_security_group_needs_no_delete_permission(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_already_absent_security_group_needs_no_cleanup(self, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = install_fakes(monkeypatch, Controls(security_group_presence_outcomes=[False]))
 
         _platform().delete(_vm(), RunContext())  # type: ignore[arg-type]
 
         assert rec.kwargs_for("terminate_instances") == {"InstanceIds": ["i-123"]}
         assert rec.methods("ec2").count("describe_security_groups") == 1
-        assert rec.dry_runs("delete_security_group") == []
         assert self._sg_deleted(rec) == 0
 
     def test_account_bound_terminate_not_found_proceeds_to_group_cleanup(self, monkeypatch: pytest.MonkeyPatch) -> None:

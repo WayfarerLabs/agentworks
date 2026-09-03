@@ -53,10 +53,6 @@ delete) Agentworks drives through that one admin foothold. See
 [`vm_platform/README.md`](vm_platform/README.md) for what a platform must provide and the specifics
 of each.
 
-Cloud permission diagnostics follow the provider-evidence model in the
-[`vm-platform` guide](vm_platform/README.md#provider-native-permission-diagnostics); the capability
-contract does not flatten different provider guarantees into a misleading common readiness result.
-
 ### Harness Integration
 
 The `harness-integration` capability decides what an agent session actually runs and how that

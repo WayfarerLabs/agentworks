@@ -145,13 +145,7 @@ def _wire_rg(monkeypatch: pytest.MonkeyPatch, *, exists: bool) -> None:
     """Fake the cached resource client so ``check_existence`` returns
     ``exists`` without building a credential or touching Azure."""
     fake_resource = SimpleNamespace(resource_groups=SimpleNamespace(check_existence=lambda *a, **k: exists))
-    fake_authorization = SimpleNamespace(
-        permissions=SimpleNamespace(
-            list_for_resource_group=lambda *a, **k: [SimpleNamespace(actions=["*"], not_actions=[])]
-        )
-    )
     monkeypatch.setattr(AzureVMPlatform, "_resource_client", lambda self, az, ctx: fake_resource)
-    monkeypatch.setattr(AzureVMPlatform, "_authorization_client", lambda self, az, ctx: fake_authorization)
 
 
 def test_azure_runup_ok_when_group_exists(monkeypatch: pytest.MonkeyPatch) -> None:

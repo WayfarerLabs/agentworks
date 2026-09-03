@@ -40,13 +40,12 @@ Before declaring a site:
 
 1. Enable the Compute Engine API (`compute.googleapis.com`) in the target project.
 2. Give the selected host identity permission to read the project, zone, machine/image/disk types,
-   network and firewall state, and to create, start, stop, and delete instances and classic VPC
-   firewall rules. The predefined `Compute Instance Admin (v1)` and `Compute Security Admin` roles
-   are a straightforward starting point. A custom role needs the common actions below, plus exactly
-   one of the network-mode additions that follows. Both modes read the selected VPC network, while
-   only a configured-subnet site reads a subnetwork. Grant `compute.images.getFromFamily` and
-   `compute.images.useReadOnly` on the public `debian-cloud` image project where Google permits that
-   scope.
+   network and firewall state, and to create, start, stop, and delete instances, their boot disks,
+   and classic VPC firewall rules. The predefined `Compute Instance Admin (v1)` and
+   `Compute Security Admin` roles are a straightforward starting point. The list below is the
+   effective permission set, plus one network-mode addition. A target-project custom role covers
+   target resources; Google's public-image access supplies `compute.images.getFromFamily` and
+   `compute.images.useReadOnly` on `debian-cloud`.
 
    ```text
    compute.diskTypes.get
@@ -109,13 +108,6 @@ priority-0 allows and conflicting priority-0 SSH denies before mutation.
 Organization or folder firewall policies evaluate outside the ordinary project Compute boundary.
 This release does not inspect them. The project is supported only when no higher-level policy
 terminal-allows ingress around the VPC deny or denies the operator's scoped SSH route.
-
-Google's `testIamPermissions` methods are resource-scoped and advisory rather than an authorization
-gate. Available project, network, and other existing-resource tests cannot model the complete future
-request or its conditions: the VM, boot disk, and firewall rules do not exist during runup.
-Agentworks therefore makes its definitive project, zone, network, image, and shape reads before
-mutation, then lets each exact mutation remain authoritative under bounded provider-ID-owned
-rollback. It does not display a false whole-lifecycle permission confirmation.
 
 ## Authenticate the host
 
