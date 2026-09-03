@@ -25,19 +25,20 @@ this file records the final reviewed and operator-accepted implementation state.
 - Consoles have explicit create, start, stop, restart, and attach-only operations. Create validates
   and stages before publishing, retains its durable definition after a post-commit build failure,
   and reports whether runtime absence was verified or remained indeterminate. Exact canonical and
-  staging tmux names share the same fail-closed probe and teardown rules. `--all-running` applies
-  safe runtime-identity repair before batched status selection and refuses unresolved non-stopped
-  rows rather than silently creating a partial console.
+  staging tmux names share the same fail-closed probe and teardown rules. Exact targets are always
+  shell-quoted so zsh cannot reinterpret the leading equals sign. `--all-running` uses the same
+  read-only, presence-first batched status selection as session listing and refuses indeterminate
+  non-stopped rows rather than silently creating a partial console.
 - The hidden 0.19 `session resume` and `console attach --recreate` compatibility spellings remain
   CLI-only and are scheduled for removal in 0.20 by issue #720. Resume reports its exact canonical
   mapping, preserves the former confirmation before replacing known or conservatively possible
   running state, honors `--yes`, and refuses non-interactive replacement without that explicit
   bypass. Canonical restart stays prompt-free.
 - Database schema version 36 stores the tmux server start ticks. Atomic runtime updates replace the
-  former partial PID setters, and migration repair backfills only from authoritative live facts or
-  records stopped state only after exact absence proof. The first status-aware operation that
-  reaches each VM may therefore spend noticeable time backfilling pre-0.19 sessions; successful
-  repair is one-time per session and the 0.19 upgrade guide calls it out.
+  former partial PID setters, and lifecycle preparation backfills only from authoritative live facts
+  or records stopped state only after exact absence proof. Inspection never repairs rows: it probes
+  exact tmux presence first, needs stored identity only to interpret absence, and performs one
+  batched status request per reachable VM.
 
 ## Final design boundaries
 
@@ -55,17 +56,18 @@ separate security effort tracked by issue #715.
 
 ## Verification and review
 
-The final production checkpoint is `8efcc98f6fbee2b796736c5c265eeb92aa1ac89d`, based on
-`origin/main` at `8695afcd833790ee433b50bb9f5d5c696177233d`. The complete pipeline and live
+The final production checkpoint is `211edd0b2074d8517930172a23d1f6b8ceba5123`, based on
+`origin/main` at `41022f4d680f7e831429229eedcc19acd0ee9c8d`. The complete pipeline and live
 validation ran at `1081470fa0ab315c3e0221da8142a87ad9b292a1`. Subsequent bounded corrections
 completed one runtime fixture fingerprint, added established entity metadata to three console
 errors, corrected two repeated-start test names, and made the atomic session-runtime update
-participate in explicit database transactions. The final correction also made migration repair stop
+participate in explicit database transactions. The final corrections also made migration repair stop
 on indeterminate fingerprints, normalized only the canonical local Windows forced-TTY close
-advisory, replaced elevated PID exit-code inference with explicit present/absent facts, and reduced
-ordinary session-list repair output to one aggregate status-check indication. Verification recorded:
+advisory, replaced elevated PID exit-code inference with explicit present/absent facts, made exact
+tmux targets safe for zsh, removed eager repair from inspection, and announced bounded remote status
+and console checks before they begin. Verification recorded:
 
-- 8,232 non-integration tests with one platform-specific skip at the final production checkpoint;
+- 8,247 non-integration tests with one platform-specific skip at the final production checkpoint;
 - focused session, console, harness, compatibility, completion, cascade, migration, and adversarial
   suites;
 - Ruff check and format plus strict mypy across 745 source files;
@@ -77,18 +79,18 @@ ordinary session-list repair output to one aggregate status-check indication. Ve
   suite passed locally, and the final docs-only lock head must clear the complete aggregate gate
   before merge.
 
-The private project-values, Muntz, and cold correctness/security reviews converged cleanly at the
-exact final production checkpoint. Final hosted CI and targeted operator Windows validation of the
-corrected artifact remain required before merge. Their correction rounds closed fail-open transport
-and tmux probes, legacy and parent-cascade teardown gaps, malformed identity handling, ambiguous
-console state, post-launch cleanup, duplicated status classification, stale collateral,
+The private project-values, Muntz, and cold correctness/security reviews must converge cleanly at
+the exact final production checkpoint. Final hosted CI and targeted operator Windows validation of
+the corrected artifact remain required before merge. Earlier correction rounds closed fail-open
+transport and tmux probes, legacy and parent-cascade teardown gaps, malformed identity handling,
+ambiguous console state, post-launch cleanup, duplicated status classification, stale collateral,
 compatibility safety, process-global test isolation, invalid runtime-identity fixtures, and
 test-quality findings. They also replayed privileged-shell refusal, malformed and spoofed PID facts,
-and forced-TTY stream handling against the final production checkpoint. The final compatibility
+and forced-TTY stream handling against their reviewed checkpoints. The final compatibility
 correction uses only read-only status facts before consent and conservatively gates incomplete
-dedicated rows whose status is missing or unknown. The final console correction reuses the
-established safe repair authority before live selection, preserves the typed legacy migration
-refusal, and fails closed when incomplete identity remains unresolved.
+dedicated rows whose status is missing or unknown. The final console correction uses the established
+presence-first status authority before live selection, preserves the typed legacy migration refusal,
+and fails closed when incomplete identity remains unresolved.
 
 The integration tester first drove the shipped lifecycle on a real VM at `f4d3a920`: session stop,
 start, idempotent start, and restart; console create, stop, start, and restart; the hidden resume
@@ -114,9 +116,10 @@ Interactive console attach was not driven live because the tester itself ran ins
 nesting guard correctly refused it, while behavioral and orchestration tests cover attach-only and
 the explicit override. Force-new integration identities, Agentworks-minted UUIDs, Codex's
 tool-assigned identity path, malformed and indeterminate transport cases, and destructive cascade
-faults, plus incomplete `--all-running` identity repair and refusal, are covered by focused
-structural/orchestration tests rather than destructive live fault injection. The operator accepted
-the tester's clean report with these stated limits.
+faults, plus incomplete `--all-running` presence-first classification and refusal, are covered by
+focused structural/orchestration tests rather than destructive live fault injection. The operator
+accepted the tester's earlier clean report with these stated limits; the Windows regression
+correction still requires the targeted live validation named above.
 
 Issue #720 owns deletion of both hidden 0.19 compatibility spellings in 0.20. Issue #715 owns any
 future systemd/cgroup containment work. No other in-scope implementation, review, migration, or
