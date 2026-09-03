@@ -1,6 +1,6 @@
 # Session and console lifecycle: locked
 
-**Locked:** 2026-09-01
+**Locked:** 2026-09-03
 
 This effort is complete in PR #710. The lock takes effect when that PR lands on `main`; until then,
 this file records the final reviewed and operator-accepted implementation state.
@@ -56,7 +56,7 @@ separate security effort tracked by issue #715.
 
 ## Verification and review
 
-The final production checkpoint is `9c388fc3f8783b0635cced0b4358643d21707ebc`, based on
+The final production checkpoint is `b320e55e8f5232e9249dfd2f217bda4b452ea4cc`, based on
 `origin/main` at `41022f4d680f7e831429229eedcc19acd0ee9c8d`. The complete pipeline and live
 validation ran at `1081470fa0ab315c3e0221da8142a87ad9b292a1`. Subsequent bounded corrections
 completed one runtime fixture fingerprint, added established entity metadata to three console
@@ -67,9 +67,11 @@ advisory, replaced elevated PID exit-code inference with explicit present/absent
 tmux targets safe for zsh, removed eager repair from inspection, and announced bounded remote status
 and console checks before they begin. A final feedback correction removed the normal attach path's
 duplicate nesting refusal and made the harness ADR's superseded contract-version note unambiguous.
-Verification recorded:
+The final review correction preserved elevated process-absence proof for agent-owned runtimes, made
+generated workspace wrappers use exact targets, and announced `--all-running` selection before its
+remote status check. Verification recorded:
 
-- 8,247 non-integration tests with one platform-specific skip at the final production checkpoint;
+- 8,250 non-integration tests with one platform-specific skip at the final production checkpoint;
 - focused session, console, harness, compatibility, completion, cascade, migration, and adversarial
   suites;
 - Ruff check and format plus strict mypy across 745 source files;
