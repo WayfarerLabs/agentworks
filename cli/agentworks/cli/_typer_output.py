@@ -19,7 +19,7 @@ from agentworks.output import (
     non_interactive,
     presentation_suppressed,
 )
-from agentworks.terminal import MOUSE_TRACKING_DISABLE
+from agentworks.terminal import MOUSE_TRACKING_DISABLE, ensure_cooked_input
 
 if TYPE_CHECKING:
     from agentworks.output import Progress
@@ -119,6 +119,10 @@ class TyperHandler:
         return click.style(text, fg=color)
 
     def confirm(self, message: str, level: int, default: bool = False) -> bool:
+        # Re-cook the console input mode before this line read: a hard-killed
+        # ssh -t attach can leave the console raw (no line input / echo / Ctrl-C),
+        # which hangs the read. See agentworks.terminal.ensure_cooked_input.
+        ensure_cooked_input()
         # stdout is the stream typer.confirm() prompts and reads on (its
         # default err=False), so that is the stream that must be a real
         # terminal for the reset to make sense; stream.isatty() is used
@@ -154,6 +158,7 @@ class TyperHandler:
             raise UserAbort("interrupted") from None
 
     def choose(self, message: str, options: list[str], level: int) -> int:
+        ensure_cooked_input()  # see confirm(): recover a raw console before the line read
         prompt_on_stderr = presentation_suppressed()
         typer.echo(f"{_pad(level)}{message}", err=prompt_on_stderr)
         for i, option in enumerate(options, 1):
@@ -180,6 +185,7 @@ class TyperHandler:
             )
 
     def pause(self, message: str, level: int) -> None:
+        ensure_cooked_input()  # see confirm(): recover a raw console before the line read
         try:
             click.prompt(
                 f"{_pad(level)}{message}",
@@ -192,6 +198,7 @@ class TyperHandler:
             raise UserAbort("interrupted") from None
 
     def prompt(self, label: str, level: int, default: str | None = None) -> str:
+        ensure_cooked_input()  # see confirm(): recover a raw console before the line read
         try:
             # An empty default is a valid answer (e.g. declining the
             # system slug) but "[]" as a rendered default suffix is
