@@ -1,6 +1,6 @@
-# Upgrading to 0.19
+# Upgrading to 0.18
 
-Agentworks 0.19 makes session and console lifecycle explicit. Most operators need only replace old
+Agentworks 0.18 makes session and console lifecycle explicit. Most operators need only replace old
 commands in scripts; resource declarations and stored session/console definitions do not change.
 
 Existing running sessions acquire the new process-start fingerprint lazily when a lifecycle command
@@ -20,11 +20,11 @@ For batch automation, replace `session resume --all-stopped` with `session start
 `session resume --all` with `session restart --all`. Existing VM, workspace, agent, admin, and force
 filters remain available.
 
-The old `session resume` forms remain accepted, hidden, and warning-producing in 0.19. A named form
+The old `session resume` forms remain accepted, hidden, and warning-producing in 0.18. A named form
 maps to restart, `--all-stopped` maps to batch start, and `--all` maps to batch restart. Named and
 `--all` compatibility forms still confirm before replacing running sessions unless legacy `--yes` is
 present; pass `--yes` for those forms when interactive input is unavailable. They are removed in
-0.20.
+0.19.
 
 ## Start consoles before attaching
 
@@ -38,7 +38,7 @@ agw console attach NAME
 Use `agw console restart NAME` to rebuild a running or stopped console from its stored definition.
 Replace `console attach NAME --recreate` with `console restart NAME`, followed by
 `console attach NAME` when an interactive attachment is wanted. The hidden `--recreate`
-compatibility form remains accepted with a warning in 0.19 and is removed in 0.20.
+compatibility form remains accepted with a warning in 0.18 and is removed in 0.19.
 
 ## Update harness integrations
 

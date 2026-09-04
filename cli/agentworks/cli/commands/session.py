@@ -363,7 +363,7 @@ def _confirm_legacy_resume_replacement(
     agent_name: str | list[str] | None,
     admin_only: bool,
 ) -> None:
-    """Preserve the 0.18 running-session confirmation at the CLI shim."""
+    """Preserve the 0.17 running-session confirmation at the CLI shim."""
     from agentworks import output
     from agentworks.db import PID_STOPPED, SessionStatus
     from agentworks.errors import UserAbort
@@ -484,9 +484,9 @@ def session_resume(
     force: Annotated[bool, typer.Option("--force")] = False,
     yes: Annotated[bool, typer.Option("--yes", "-y")] = False,
 ) -> None:
-    """Compatibility wrapper for the 0.18 session resume grammar.
+    """Compatibility wrapper for the 0.17 session resume grammar.
 
-    Removed in 0.20.
+    Removed in 0.19.
     """
     from agentworks import output
     from agentworks.config import load_config

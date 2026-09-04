@@ -5,6 +5,11 @@
 This effort is complete in PR #710. The lock takes effect when that PR lands on `main`; until then,
 this file records the final reviewed and operator-accepted implementation state.
 
+**Release sequencing correction (2026-09-03):** The lifecycle change is introduced in 0.18 after
+0.17 landed. Its compatibility wrappers accept the old 0.17 grammar and are removed one release
+later in 0.19. This corrects the release labels assumed during planning; the shipped behavior and
+verification evidence are unchanged.
+
 ## What shipped
 
 - Sessions use explicit `start`, `stop`, `restart`, and `attach` operations. Ordinary start is
@@ -29,8 +34,8 @@ this file records the final reviewed and operator-accepted implementation state.
   shell-quoted so zsh cannot reinterpret the leading equals sign. `--all-running` uses the same
   read-only, presence-first batched status selection as session listing and refuses indeterminate
   non-stopped rows rather than silently creating a partial console.
-- The hidden 0.19 `session resume` and `console attach --recreate` compatibility spellings remain
-  CLI-only and are scheduled for removal in 0.20 by issue #720. Resume reports its exact canonical
+- The hidden 0.18 `session resume` and `console attach --recreate` compatibility spellings remain
+  CLI-only and are scheduled for removal in 0.19 by issue #720. Resume reports its exact canonical
   mapping, preserves the former confirmation before replacing known or conservatively possible
   running state, honors `--yes`, and refuses non-interactive replacement without that explicit
   bypass. Canonical restart stays prompt-free.
@@ -117,7 +122,7 @@ the final production checkpoint.
 ## Permanent homes and accepted limits
 
 The operator contract lives in `cli/command-reference.md`, `cli/README.md`, the root `README.md`,
-`docs/guides/resources.md`, `docs/guides/session-status.md`, `docs/guides/upgrading-to-0.19.md`, and
+`docs/guides/resources.md`, `docs/guides/session-status.md`, `docs/guides/upgrading-to-0.18.md`, and
 the management guide topic. The executable harness contract lives in
 `cli/agentworks/capabilities/harness_integration/` and its README; lifecycle code, database
 migrations, completion projections, and behavioral tests carry the implementation contract. Nothing
@@ -129,7 +134,7 @@ tool-assigned identity path, malformed and indeterminate transport cases, and de
 faults, plus incomplete `--all-running` presence-first classification and refusal, are covered by
 focused structural/orchestration tests rather than destructive live fault injection.
 
-Issue #720 owns deletion of both hidden 0.19 compatibility spellings in 0.20. Issue #715 owns any
+Issue #720 owns deletion of both hidden 0.18 compatibility spellings in 0.19. Issue #715 owns any
 future systemd/cgroup containment work. No other in-scope implementation, review, migration, or
 documentation finding remains.
 
