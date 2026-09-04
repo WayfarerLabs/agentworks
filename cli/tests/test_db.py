@@ -290,6 +290,35 @@ def test_vm_retained_state_updates_rollback_together(db: Database) -> None:
     assert vm.provisioning_status == "pending"
 
 
+def test_ordinary_crud_updates_join_explicit_transaction(db: Database) -> None:
+    from agentworks.db import SessionMode
+
+    db.insert_vm("dev-vm", site="lima", hostname="lima--dev-vm")
+    db.insert_workspace("ws", workspace_path="/tmp/ws", vm_name="dev-vm", linux_group="ws-ws")
+    db.insert_agent("coder", "dev-vm", "agt--coder")
+    db.insert_session("ws-s1", "ws", "default", SessionMode.ADMIN)
+
+    with pytest.raises(RuntimeError, match="rollback"), db.transaction():
+        db.update_vm_tailscale("dev-vm", "100.64.0.1")
+        db.set_setting("system_slug", "test-system")
+        db.update_workspace_path("ws", "/tmp/moved-ws")
+        db.insert_agent_grant("coder", "ws", "explicit")
+        db.update_session_harness_integration_state("ws-s1", {"client_id": "client-1"})
+        raise RuntimeError("rollback")
+
+    vm = db.get_vm("dev-vm")
+    assert vm is not None
+    assert vm.tailscale_host is None
+    assert db.get_setting("system_slug") is None
+    workspace = db.get_workspace("ws")
+    assert workspace is not None
+    assert workspace.workspace_path == "/tmp/ws"
+    assert not db.has_any_grant("coder", "ws")
+    session = db.get_session("ws-s1")
+    assert session is not None
+    assert session.harness_integration_state == {}
+
+
 def test_vm_events(db: Database) -> None:
     db.insert_vm("dev-vm", site="lima", hostname="lima--dev-vm")
 
