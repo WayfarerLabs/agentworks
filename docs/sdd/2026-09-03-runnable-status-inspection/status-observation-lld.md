@@ -220,9 +220,10 @@ and its docstring no longer names session list.
 
 `running_session_names`, used by `console create --all-running`, continues to consume the low-level
 batch observer. It receives the renamed `RUNNING` enum and the same timeout safety without acquiring
-list presentation policy. It no longer excludes `PID_STOPPED` rows before observation: an exact
-manually resurrected runtime is truthfully selected, while any selected session left unknown refuses
-partial `--all-running` selection.
+list presentation policy. The caller preserves its existing `pid != PID_STOPPED` eligibility filter
+before observation and refuses an unknown result only within that eligible set. This keeps the
+status-inspection change from altering console creation semantics; list and describe still observe
+persisted-stopped rows when status is requested.
 
 ## Console observation
 

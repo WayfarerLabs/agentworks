@@ -97,9 +97,9 @@ list from the activation-boundary documentation and tests. This sequence keeps o
 implementation at every commit.
 
 The low-level session batch probe remains reusable by console `--all-running`; only its timeout,
-TTY, result completeness, and enum naming change. `--all-running` now observes persisted-stopped
-rows too: a manually resurrected exact runtime is included, and an inconclusive row refuses partial
-selection.
+TTY, result completeness, and enum naming change. The caller preserves its existing eligibility
+rule: persisted-stopped rows are excluded before observation, and unknown refusal applies to the
+same eligible set. List and describe observation do not inherit that lifecycle selection policy.
 
 ### 3. Add console observation
 
