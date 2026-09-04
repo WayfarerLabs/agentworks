@@ -92,7 +92,7 @@ assert behavior and structure, never authored prose.
       the complete artifact set.
 - [x] Obtain clean private project-reviewer and Muntz passes on one exact design head and
       incorporate every material finding authorized by the current design charter.
-- [ ] Commit and push the coherent design head, open the draft PR, apply
+- [x] Commit and push the coherent design head, open the draft PR, apply
       `sdd:runnable-status-inspection` and `review-requested`, and publish the exact design handoff.
 - [ ] Complete up to three authorized published design feedback/fix rounds, or stop sooner when one
       full batch produces no material changes.
