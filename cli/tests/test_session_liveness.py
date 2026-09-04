@@ -209,7 +209,9 @@ def test_batch_builds_compound_command() -> None:
     assert 'sudo -n sh -c "if test -d /proc/$PID' in target.commands[0]
 
 
-def test_bounded_singular_status_target_closes_stdin() -> None:
+def test_bounded_singular_status_target_forces_safe_policy() -> None:
+    # The wrapper forces the bounded, non-pty observation policy; stdin closing
+    # is the transport's job (``-n`` on any no-payload call), not this wrapper's.
     calls: list[tuple[str, dict[str, object]]] = []
 
     class Target:
@@ -226,7 +228,6 @@ def test_bounded_singular_status_target_closes_stdin() -> None:
                 "timeout": 10,
                 "retries": 1,
                 "tty": False,
-                "input_data": "",
             },
         )
     ]

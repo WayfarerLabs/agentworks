@@ -233,14 +233,12 @@ def test_console_plain_and_status_lists_keep_their_distinct_safety_boundaries(
     class Target:
         def run(self, command: str, **kwargs: object) -> _Result:
             assert command == "tmux list-sessions -F '#{session_name}'"
-            input_data = kwargs.pop("input_data")
             assert kwargs == {
                 "check": False,
                 "tty": False,
                 "timeout": 10,
                 "retries": 1,
             }
-            assert input_data == ""
             events.append("transport-read")
             return _Result(0, "aw-console-desk\n")
 
