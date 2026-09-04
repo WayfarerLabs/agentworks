@@ -54,6 +54,10 @@ class _VMPlatformKind:
         A vm-platform knows how to create, start, stop, and delete VMs on one backend,
         and how to reach them over SSH once they exist.
 
+        Every platform must also provide a native administrative transport that works
+        independently of the VM's Tailscale state. Proxmox does not yet satisfy that
+        obligation; issue #727 tracks the correction.
+
         Contract version 1 receives core's concrete current Debian release, resolves it
         to a platform-owned artifact, and fails before backend mutation when the mapping is
         missing. A platform completes its Tailscale join before returning transport and backend identity,

@@ -276,6 +276,20 @@ def test_provisioning_status(db: Database) -> None:
     assert vm.provisioning_status == "complete"
 
 
+def test_vm_retained_state_updates_rollback_together(db: Database) -> None:
+    db.insert_vm("dev-vm", site="lima", hostname="lima--dev-vm")
+
+    with pytest.raises(RuntimeError, match="rollback"), db.transaction():
+        db.update_vm_platform_metadata("dev-vm", {"instance_id": "i-123"})
+        db.update_vm_provisioning_status("dev-vm", ProvisioningStatus.FAILED)
+        raise RuntimeError("rollback")
+
+    vm = db.get_vm("dev-vm")
+    assert vm is not None
+    assert vm.platform_metadata == {}
+    assert vm.provisioning_status == "pending"
+
+
 def test_vm_events(db: Database) -> None:
     db.insert_vm("dev-vm", site="lima", hostname="lima--dev-vm")
 

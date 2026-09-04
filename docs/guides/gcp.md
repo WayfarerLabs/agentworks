@@ -40,11 +40,58 @@ Before declaring a site:
 
 1. Enable the Compute Engine API (`compute.googleapis.com`) in the target project.
 2. Give the selected host identity permission to read the project, zone, machine/image/disk types,
-   network and firewall state, and to create, start, stop, and delete instances, disks, and classic
-   VPC firewall rules. The predefined `Compute Instance Admin (v1)` and `Compute Security Admin`
-   roles are a straightforward starting point. A narrower custom role must also allow use of the
-   selected subnet and an external IPv4 address. No guest service-account impersonation permission
-   is required: Agentworks explicitly attaches no guest service account or OAuth scopes.
+   network and firewall state, and to create, start, stop, and delete instances, their boot disks,
+   and classic VPC firewall rules. The predefined `Compute Instance Admin (v1)` and
+   `Compute Security Admin` roles are a straightforward starting point. The list below is the
+   effective permission set, plus one network-mode addition. A target-project custom role covers
+   target resources; Google's public-image access supplies `compute.images.getFromFamily` and
+   `compute.images.useReadOnly` on `debian-cloud`.
+
+   ```text
+   compute.diskTypes.get
+   compute.disks.create
+   compute.firewalls.create
+   compute.firewalls.delete
+   compute.firewalls.get
+   compute.firewalls.list
+   compute.globalOperations.get
+   compute.images.getFromFamily
+   compute.images.useReadOnly
+   compute.instances.create
+   compute.instances.delete
+   compute.instances.get
+   compute.instances.setMetadata
+   compute.instances.setTags
+   compute.instances.start
+   compute.instances.stop
+   compute.machineTypes.get
+   compute.networks.get
+   compute.networks.updatePolicy
+   compute.projects.get
+   compute.zoneOperations.get
+   compute.zones.get
+   ```
+
+   For a site that uses the project's `default` network, add:
+
+   ```text
+   compute.networks.use
+   compute.networks.useExternalIp
+   ```
+
+   For a site that names a configured subnet, add:
+
+   ```text
+   compute.subnetworks.get
+   compute.subnetworks.use
+   compute.subnetworks.useExternalIp
+   ```
+
+   Agentworks creates the boot disk as part of `instances.insert` and marks it for automatic
+   deletion with the instance. It makes no separate disk-delete request. No guest service-account
+   impersonation permission is required because Agentworks attaches no guest service account or
+   OAuth scopes.
+
 3. Provide either the project's `default` network or a subnet in the zone's region. The subnet and
    network must belong to the target project; this version does not support Shared VPC host-project
    indirection.

@@ -68,52 +68,44 @@ described below.
 
 A vm-platform stands up a machine and hands Agentworks an administrative foothold on it. It:
 
-- **MUST** translate `ProvisionRequest.debian_release` through a platform-owned artifact map. Core
-  selects the concrete Debian release; a platform never infers "current" or falls back to another
-  artifact. An operator-owned catalog such as Proxmox must provide the requested release key.
-- **MUST** create the admin user with the operator-configured name, holding full passwordless `sudo`
-  over the machine, reachable by the operator's installed SSH public key and never by password.
-- **MUST** provide a transport that runs arbitrary commands as the admin user: the single foothold
-  every later provisioning step is driven through.
-- **MUST** consume the required Tailscale auth key, complete the join before `create()` returns, and
-  roll back partial backend state before propagating a join failure or interruption. IP discovery
-  may be deferred after a successful join; Phase A retries only `tailscale ip -4`.
-- **MUST** provision the VM to the requested cpus, memory, and disk, rounding up to the nearest
-  available shape where the backend sells only fixed shapes. A backend that structurally cannot
-  honor a per-VM shape (WSL2, whose limits are global) is the exception, and it **MUST** at least
-  warn that the requested resources are being ignored
+- **MUST** provision exactly `ProvisionRequest.debian_release`, using platform-owned, release-keyed
+  values. A missing mapping **MUST** fail clearly before mutation, without fallback or substitution.
+  Core independently inspects the live VM during provisioning and records the release only when it
+  matches.
+- **MUST NOT** gate existing-VM operations on the current creation release or image catalog.
+- **MUST** create the configured admin with passwordless `sudo`, SSH-key access, and no password.
+- **MUST** provide a native administrative `Transport` that runs arbitrary commands as the admin
+  without depending on the VM's Tailscale state or identity. Proxmox does not currently satisfy this
+  obligation ([#727](https://github.com/WayfarerLabs/agentworks/issues/727)).
+- **MUST** complete the Tailscale join before returning from `create()`.
+- **MUST** honor requested CPU, memory, and disk, rounding up to an available shape if needed. A
+  backend that cannot set a per-VM shape **MUST** warn instead
   ([#369](https://github.com/WayfarerLabs/agentworks/issues/369)).
-- **MUST** support the lifecycle Agentworks drives, create, start, stop, and delete, and report the
-  VM's status; `create` **MUST** be collision-checked and either fail loudly on a name that already
-  exists or pick and persist a new, collision-free backend name, never impacting an existing VM
-  outside its control.
-- **MUST** provide a stop that preserves all system state for a later resume. Snapshotting and
-  restoring running state is preferable, but a platform **MAY** implement stop as a full OS
-  shutdown/restart, since Agentworks is built to be robust against restarts and the loss of running
-  processes.
-- **SHOULD** take reasonable steps to reduce the cost and resource usage of a stopped VM, releasing
-  billable or heavy resources (compute, memory) for the duration of the stop where the backend
-  allows it. Some standing costs are over that line and accepted: Azure keeps its permanent public
-  IP attached (and billing) while stopped, because detaching it would incur unnecessary complexity.
-- **MUST** roll back its own partial backend state before letting a failure or an operator interrupt
-  propagate out of `create`, and **MUST NOT** report a `delete` as successful unless the backend VM
-  is actually gone. A delete that cannot remove the VM **MUST** raise so Agentworks retains its row
-  for a retry rather than orphaning a backend resource.
-- **MUST NOT** leave billed or orphaned backend resources behind after a delete or a rolled-back
-  create: every resource it creates is scoped to exactly one VM and shares that VM's lifecycle.
-- **MUST NOT** touch, reconfigure, or tear down anything it did not create for this VM, whether
-  another VM's resources, another site's state, or the operator's shared infrastructure (a resource
-  group, VPC, subnet, or bridge), which it reads and existence-checks but never creates or deletes.
-- On a full-control cloud host it **MUST** default to zero standing inbound exposure, opening only a
-  narrowly scoped, ephemeral hole for the one operation that needs it and closing it after, failing
-  closed rather than open; on an externally administered or local host it **MUST NOT** manage the
-  host's or network's security at all.
-- **MUST NOT** share host filesystem paths into the guest by default (a VM is self-contained), and
-  **MUST NOT** log or persist resolved secret values (its metadata carries only non-secret state
-  required for safe lifecycle operations).
+- **MUST** implement create, start, stop, delete, and status. Start, stop, and delete **MUST** be
+  idempotent.
+- Before mutation, create **MUST** fail clearly if its planned backend name or identifier already
+  exists, or choose a collision-free one. Later operations **MUST** use the persisted backend
+  identity.
+- A platform **SHOULD** surface provider authorization failures clearly. Where a failure could leave
+  unsafe exposure or leaked resources, it **SHOULD** use additional provider mechanisms to validate
+  the resulting state.
+- Stop **MUST** preserve filesystem and configuration state; platforms **SHOULD** release costly
+  stopped resources where practical.
+- A failed or interrupted create **MUST** attempt cleanup. Unconfirmed cleanup **MUST** retain the
+  identifiers needed for deletion and report recovery guidance.
+- Delete **MUST NOT** succeed until the backend VM is confirmed gone; failure **MUST** retain the
+  Agentworks row for retry.
+- Every VM-specific backend resource **MUST** be attributable to exactly one VM.
+- **MUST NOT** mutate another VM, site, or shared operator infrastructure.
+- A platform that manages public ingress **MUST NOT** configure standing inbound exposure. Any
+  public ingress it opens **MUST** be narrowly scoped to an active Agentworks operation and it
+  **MUST** attempt removal on every exit path. An unconfirmed removal **MUST** identify the
+  remaining rule or known scope and provide a recovery action.
+- **MUST NOT** alter operator-managed perimeter controls.
+- **MUST NOT** share host paths by default or log or persist resolved secrets.
 
-Notably, VM platforms do not create agent users, workspaces, groups, sessions, or inject secrets.
-Those are managed by the Agentworks core system through platform-agnostic mechanisms.
+VM platforms do not create agent users, workspaces, groups, or sessions or manage their secrets.
+Core owns those resources through platform-agnostic mechanisms.
 
 ## Technical Overview
 
@@ -177,9 +169,15 @@ and DB migration.
 `RunContext` after `vm` (see the next section for what that is and how to read from it):
 
 - `create(request, ctx) -> ProvisionResult` is deliberately **not** `@idempotent_op`: it runs a
-  pre-flight collision check, then either raises `StateError` (all six in-tree platforms) or, for a
+  pre-flight collision check, then either raises `StateError` (all six bundled platforms) or, for a
   soft-name backend, selects a different collision-free backend name and records that identifier in
-  `platform_metadata`. A re-run must never target or replace an existing VM.
+  `platform_metadata`. A re-run must never target or replace an existing VM. Proxmox currently
+  treats a failed collision query as absence
+  ([#719](https://github.com/WayfarerLabs/agentworks/issues/719)). A create that cannot confirm
+  rollback raises `RetainedProvisioningError` with addressable platform metadata; core persists that
+  metadata and retains the provisional row so `vm delete` can finish cleanup. EC2 currently
+  implements this retained-cleanup handoff; the other platforms are tracked in
+  [#718](https://github.com/WayfarerLabs/agentworks/issues/718).
 - `start(vm, ctx)`, `stop(vm, ctx)`, `delete(vm, ctx)` are flagged `@idempotent_op` and must land in
   the same place run twice as run once. The marker is inherited through the MRO, so an override does
   not restate the decorator. `reinit` re-applies everything and failed commands are retried, so the
@@ -187,13 +185,12 @@ and DB migration.
   first and short-circuit, because the backend verb is not reliably a no-op on an already-in-state
   instance; WSL2's `start` needs no guard because running a command boots a stopped distro and is a
   plain exec on a running one; Azure and EC2 rely on idempotent provider verbs, while GCE uses live
-  state guards; `delete` treats already-gone as success on all six. `delete` is NOT unconditionally
-  best-effort though: a delete that cannot remove the backend VM must raise a typed error (the
-  manager deletes the DB row only on success, so a swallowed backend failure orphans the VM; #329).
-  Azure enforces this with a post-teardown existence probe (`verify_vm_deleted`), and GCE requires
-  provider-ID-owned instance absence before removing its lifetime deny. Only auxiliary-resource
-  stragglers stay warn-and-continue. Lima, WSL2, Proxmox, and EC2 do not yet verify; their teardown
-  verbs remain fire-and-forget (tracked in #356).
+  state guards; `delete` treats provider-confirmed absence as success. EC2 can confirm this only for
+  an account-bound row; an ambiguous legacy `NotFound` retains the row. A delete that cannot remove
+  the backend VM must raise because core drops the row only on success (#329). Azure confirms VM
+  absence, GCE confirms instance absence before removing its lifetime deny, and EC2 verifies account
+  and ownership before terminating, waiting, and deleting its security group. Lima, WSL2, and
+  Proxmox remain fire-and-forget (#356).
 - `status(vm, ctx) -> VMStatus` is a read-only query.
 - `display_backend_name(vm) -> str` is pure display and takes no `ctx`.
 
@@ -211,17 +208,17 @@ do: opening a route to a cloud VM is a backend call, so a platform reads any cre
 from `ctx.secret(name)` here exactly as in an op. Lima and WSL2 accept and ignore it (their
 transports are local); Azure, EC2, and GCE use it:
 
-- `native_transport(vm, ctx, *, config=None) -> Transport | None` (default `None`). The
-  `agentworks.transports.native_transport` factory wraps the call in `transient_route`, probes
-  reachability with an `echo ok` retry loop, and raises a typed `StateError` (using
-  `no_native_transport_hint`) when a platform returns `None`. Lima returns a `limactl shell`
-  transport, Azure, EC2, and GCE an `SSHTransport` against the VM's current public IP (Azure reads
-  its persistent address live off the NIC; EC2 reads its address live off a fresh
+- `native_transport(vm, ctx, *, config=None) -> Transport | None`. The contract requires a
+  `Transport` that remains usable when the VM's Tailscale state or identity is unavailable. The
+  optional return and default `None` remain as compatibility for the currently non-compliant Proxmox
+  implementation ([#727](https://github.com/WayfarerLabs/agentworks/issues/727)); they do not make
+  the transport optional. The `agentworks.transports.native_transport` factory wraps the call in
+  `transient_route`, probes reachability with an `echo ok` retry loop, and raises a typed
+  `StateError` (using `no_native_transport_hint`) when a platform returns `None`. Lima returns a
+  `limactl shell` transport, Azure, EC2, and GCE an `SSHTransport` against the VM's current public
+  IP (Azure reads its persistent address live off the NIC; EC2 reads its address live off a fresh
   `describe_instances`, because EC2 reassigns the auto-assigned IP across stop/start; GCE likewise
-  reads its lifetime ephemeral access config live), WSL2 a `wsl.exe`-backed transport. Proxmox
-  deliberately returns the default `None` and sets `no_native_transport_hint` to point the operator
-  at the Proxmox web-UI serial console, because its guest-agent exec is one-shot and cannot host an
-  interactive shell.
+  reads its lifetime ephemeral access config live), WSL2 a `wsl.exe`-backed transport.
 - `transient_route(vm, ctx, *, config=None) -> context manager` (default `nullcontext()`). Azure
   opens a scoped SSH route on enter (heals a missing public IP, converges the NSG onto the
   baseline-deny model, pokes this operation's own ephemeral allow rule scoped to the operator's
@@ -311,10 +308,10 @@ after persisting the metadata, it probes the returned transport and persists onl
 observation. This is not a security sandbox for in-process plugin code. The metadata is written
 verbatim to `vms.platform_metadata` and read back only by the owning platform (Lima stores
 `instance_name`, WSL2 `distro_name`, Azure `resource_id`, Proxmox `vmid` + `node`, EC2
-`instance_id` + `security_group_id` + `region` + `backend_name`, and never the public IP, which it
-reads live). An omitted IP means discovery failed after a successful join, not that bootstrap is
-incomplete. Phase A retries only `tailscale ip -4` before it records the address and verifies
-Tailscale SSH.
+`instance_id` + `security_group_id` + `region` + `backend_name` + `account_id` as its
+provider-identity subset, and never the public IP, which it reads live). An omitted IP means
+discovery failed after a successful join, not that bootstrap is incomplete. Phase A retries only
+`tailscale ip -4` before it records the address and verifies Tailscale SSH.
 
 Before the create boundary resolves secrets, the pending VM node calls
 `validate_create_release(release)` with that same concrete core selection. The hook is pure and
@@ -465,14 +462,13 @@ is reachable in a way config validation cannot catch.
 Read `AzureAuth`, `_build_service_principal_credential`, and `_get_credential` together: that trio
 is the whole pattern. On EC2 the analogous trio is `AwsAuth`, `_build_access_key_session`, and
 `_get_session`; two things differ deliberately, both because the SDKs differ. First, `_get_session`
-does NOT probe at build (boto3 sessions are inert), so the runup and status classify a definitive
-credential rejection apart from an unreachable endpoint: azure-identity collapses an Entra rejection
-and an unreachable Entra into one `ClientAuthenticationError`, so azure must treat every credential
-failure as fatal, but botocore surfaces a rejection as a `ClientError` with an auth error code and
-an outage as an `EndpointConnectionError`, so `aws-ec2` follows proxmox (runup makes a rejection
-fatal and warns-and-continues on indeterminacy) and its `status` re-raises a rejection typed rather
-than degrading to UNKNOWN, so a misconfigured site never reads as UNKNOWN in `vm describe` (the
-exact #303 hole). Second, an `assume_role_arn` builds AUTO-REFRESHING credentials (botocore's
+does NOT probe at build (boto3 sessions are inert), so runup makes the STS identity call after
+secret resolution. That identity is the mandatory account binding for later destructive operations:
+rejection, permission denial, transport failure, and an invalid response are all fatal before
+create. Only an indeterminate optional subnet read warns. `status` still distinguishes structured
+credential or authorization rejection from an unreachable endpoint, re-raising the former typed
+rather than degrading it to UNKNOWN, so a misconfigured site never reads as UNKNOWN in `vm describe`
+(the exact #303 hole). Second, an `assume_role_arn` builds AUTO-REFRESHING credentials (botocore's
 `AssumeRoleCredentialFetcher` + `DeferredRefreshableCredentials`) rather than a one-shot assume, so
 a long op cannot fail with `ExpiredToken` from a frozen cache. See `test_platform_runup.py` and
 `test_aws_ec2_ops.py` (directly under `cli/tests/`) for the halves.

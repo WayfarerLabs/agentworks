@@ -13,13 +13,22 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.vm_platform import ProvisionRequest, ProvisionResult
+from agentworks.capabilities.vm_platform import ProvisionRequest, ProvisionResult, RetainedProvisioningError
 from agentworks.config import load_config
 from agentworks.debian import DebianRelease
-from agentworks.errors import ConfigError, NotFoundError, ProvisioningError, StateError, UserAbort, ValidationError
+from agentworks.errors import (
+    AuthorizationError,
+    ConfigError,
+    NotFoundError,
+    ProvisioningError,
+    StateError,
+    TokenRejectedError,
+    UserAbort,
+    ValidationError,
+)
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
-from tests.conftest import ManifestDoc, write_manifests
+from tests.conftest import CapturedOutput, ManifestDoc, write_manifests
 from tests.orchestrated_fixtures import proxmox_site
 from tests.ssh_fixtures import TEST_SSH_PUBLIC_KEY, write_test_ssh_keypair
 
@@ -197,6 +206,46 @@ def test_create_vm_request_build_failure_unwinds_owner_and_overlay_without_outco
     assert outcomes == []
 
 
+def test_create_vm_retains_platform_metadata_when_rollback_is_unconfirmed(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.db import ProvisioningStatus
+
+    failure = RetainedProvisioningError(
+        "backend cleanup was not confirmed",
+        platform_metadata={"instance_name": "retained-backend", "create_incomplete": "true"},
+        entity_name="retained",
+        hint="delete the retained VM",
+    )
+    monkeypatch.setattr(
+        LimaPlatform,
+        "create",
+        lambda *args, **kwargs: (_ for _ in ()).throw(failure),
+    )
+
+    with pytest.raises(RetainedProvisioningError) as caught:
+        vm_manager.create_vm(
+            db,
+            make_config(),
+            name="retained",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert caught.value is failure
+    row = db.get_vm("retained")
+    assert row is not None
+    assert row.platform_metadata == {"instance_name": "retained-backend", "create_incomplete": "true"}
+    assert row.provisioning_status == ProvisioningStatus.FAILED.value
+    assert any(
+        "retained-" in message and message.endswith("-vm-create.log")
+        for _role, _level, message in captured_output.lines
+    )
+
+
 def test_create_vm_metadata_failure_retains_owner_and_reports_once(
     db: Database,
     make_config,
@@ -246,15 +295,17 @@ def test_create_vm_metadata_failure_retains_owner_and_reports_once(
     [
         ConfigError("site has no Trixie template", hint="set template_vmids.trixie"),
         StateError("plugin has no Trixie selector", hint="update the plugin"),
+        AuthorizationError("provider denied create", hint="grant the required action"),
+        TokenRejectedError("provider rejected the credential", hint="check the credential"),
     ],
-    ids=("operator-map", "code-map"),
+    ids=("operator-map", "code-map", "authorization", "credential"),
 )
-def test_create_vm_preserves_typed_release_mapping_failure(
+def test_create_vm_preserves_typed_platform_failure(
     db: Database,
     make_config,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: object,
-    failure: ConfigError | StateError,
+    failure: ConfigError | StateError | AuthorizationError | TokenRejectedError,
 ) -> None:
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 

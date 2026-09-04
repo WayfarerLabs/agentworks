@@ -154,8 +154,11 @@ def native_transport(
     ctx: RunContext,
     stack: contextlib.ExitStack,
 ) -> Transport:
-    """Platform-native transport for a VM. Used only at bootstrap and
-    via the explicit ``vm shell --platform`` opt-in.
+    """Platform-native transport for an existing VM.
+
+    Used for start-time Tailscale recovery, Tailscale rekey and logout,
+    and the explicit ``vm shell --platform`` opt-in. VM creation obtains
+    its initial transport separately from :meth:`VMPlatform.create`.
 
     ``platform`` is the VM's bound platform, resolved at the caller's
     composition root (the node factories via ``resolve_site``). ``stack``
@@ -175,9 +178,8 @@ def native_transport(
     arrive by delivery, not by hoping an earlier op in the same process
     warmed a cache.
 
-    A ``None`` from :meth:`VMPlatform.native_transport` (proxmox: the
-    one-shot QEMU guest-agent exec can't host an interactive shell)
-    re-raises as a typed :class:`StateError` with the console hint.
+    A ``None`` return raises a typed :class:`StateError` with the platform
+    hint.
     Surfaces a typed error if the transport resolves to an SSH target
     with an empty host (Azure's defensive guard from PR #118).
 

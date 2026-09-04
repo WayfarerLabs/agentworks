@@ -10,10 +10,10 @@ group that denies all inbound by default; SSH via ephemeral rules scoped to the
 operator's egress prefixes; ``post_tailscale_ready`` / ``secure_failed_vm`` /
 ``transient_route`` close hooks; create rollback on both failure and operator
 interrupt). Two deliberate divergences from azure are documented where they
-live: ``runup`` / ``status`` classify a definitive credential rejection apart
-from an unreachable endpoint (botocore can; azure-identity cannot), and the
-security-group mechanics in ``network.py`` note the SG-natural-deny asymmetry
-and the shared-tuple concurrency behavior EC2's rule model forces.
+live: ``runup`` / ``status`` classify credential rejection, authorization
+denial, and an unreachable endpoint separately, and the security-group
+mechanics in ``network.py`` note the SG-natural-deny asymmetry and the
+shared-tuple concurrency behavior EC2's rule model forces.
 """
 
 from __future__ import annotations
@@ -23,7 +23,12 @@ import gzip
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from agentworks import output
-from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
+from agentworks.capabilities.vm_platform.base import (
+    ProvisionRequest,
+    ProvisionResult,
+    RetainedProvisioningError,
+    VMPlatform,
+)
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.debian_release import (
@@ -33,7 +38,7 @@ from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs,
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
-from agentworks.errors import ConfigError, NotFoundError, StateError, TokenRejectedError
+from agentworks.errors import AuthorizationError, ConfigError, NotFoundError, StateError, TokenRejectedError
 from agentworks.plugins.aws.auth import _build_access_key_session, _build_ambient_session
 from agentworks.plugins.aws.config import (
     AwsAmbientAuth,
@@ -50,16 +55,16 @@ from agentworks.plugins.aws.config import (
 from agentworks.plugins.aws.network import (
     SUBNET_NOT_FOUND_CODES,
     EC2Error,
-    cleanup_partial,
+    cleanup_created_resources,
     create_security_group,
     error_code,
     first_instance_public_ip,
     first_instance_state,
-    is_auth_rejection,
+    is_authorization_denial,
+    is_credential_rejection,
     poke_ssh_allow,
     remove_ssh_allow,
-    rollback_create_on_interrupt,
-    terminate_and_cleanup,
+    terminate_and_cleanup_strict,
     vm_tag,
     wrap_ec2_error,
 )
@@ -123,9 +128,14 @@ class EC2Platform(VMPlatform):
         ...}` replaces that chain for this site; add `assume_role_arn` to layer an STS
         AssumeRole on top.
 
+        Create records the validated STS account ID. Delete refreshes that identity,
+        refuses a different account, and confirms the recorded security group's
+        ownership before terminating the instance.
+
         EC2 retains credential-free UserData. After cloud-init is ready, creation sends
         the required Tailscale key through one fixed SSH command on stdin and returns
-        only after join succeeds. Failure terminates the new instance and security group.
+        only after join succeeds. Failure terminates the new instance and security group;
+        an unconfirmed cleanup retains an addressable failed VM row.
 
         Ships as the opt-in `aws` system plugin, so a site stays not-ready until
         `[plugins] system` lists it.
@@ -155,6 +165,7 @@ class EC2Platform(VMPlatform):
         # keep operating regardless of what the config says today.
         self._session_cached: Any | None = None
         self._clients: dict[tuple[str, str], Any] = {}
+        self._account_id_cached: str | None = None
 
     # No preflight override, on either credential path, for the same reasons
     # spelled out on azure's platform: whether a declared secret resolves is
@@ -216,6 +227,32 @@ class EC2Platform(VMPlatform):
             self._clients[key] = client
         return client
 
+    def _account_id_from_identity(self, identity: Any) -> str:
+        """Validate one STS GetCallerIdentity response at the provider boundary."""
+        account_id = identity.get("Account") if isinstance(identity, dict) else None
+        if not self._valid_account_id(account_id):
+            raise EC2Error(
+                f"AWS returned an invalid account identity for vm-site '{self.site_name}'",
+                detail="GetCallerIdentity returned no 12-digit Account value",
+                entity_kind="vm-site",
+                entity_name=self.site_name,
+            )
+        return str(account_id)
+
+    def _current_account_id(self, ctx: RunContext, *, refresh: bool = False) -> str:
+        if refresh or self._account_id_cached is None:
+            sts = self._client("sts", self.config.region, ctx)
+            try:
+                identity = sts.get_caller_identity()
+            except Exception as exc:
+                raise wrap_ec2_error(exc) from exc
+            self._account_id_cached = self._account_id_from_identity(identity)
+        return self._account_id_cached
+
+    @staticmethod
+    def _valid_account_id(value: object) -> bool:
+        return isinstance(value, str) and len(value) == 12 and value.isascii() and value.isdigit()
+
     def runup(self, ctx: RunContext) -> None:
         """Provisioning-phase runup: an authenticated, read-only check before
         ``create`` mutates anything. It probes the credential with STS
@@ -228,18 +265,11 @@ class EC2Platform(VMPlatform):
         a failed AssumeRole, aborts ``vm create`` here with a typed, secret-free
         error before any DB row or AWS resource exists.
 
-        The classification DELIBERATELY differs from azure's fatal-only stance,
-        and it can because botocore distinguishes the cases azure cannot.
-        azure-identity collapses a definitive Entra rejection and an unreachable
-        Entra into one ``ClientAuthenticationError``, so azure must treat every
-        credential failure as fatal. botocore instead answers a real rejection
-        with a ``ClientError`` carrying an auth error code (``AuthFailure``,
-        ``InvalidClientTokenId``, ...) and an unreachable endpoint with an
-        ``EndpointConnectionError`` and friends, so EC2 follows proxmox: a
-        definitive rejection is fatal (a ``TokenRejectedError`` before any VM
-        exists), and a transient or unreachable failure warns and continues
-        unverified, so an outage never blocks work a valid credential would have
-        done.
+        STS identity is mandatory because create records the account binding
+        used to make later destructive operations safe. Credential rejection,
+        permission denial, transport failure, and an invalid response therefore
+        all fail here, before any VM resource or database row exists. Structured
+        credential and authorization denials retain their domain error types.
         """
         from botocore.exceptions import BotoCoreError, ClientError
 
@@ -261,11 +291,17 @@ class EC2Platform(VMPlatform):
         ec2 = self._client("ec2", region, ctx)
 
         def _reject_or_warn(exc: ClientError) -> None:
-            """A definitive auth rejection is fatal; anything else warns and
-            continues unverified."""
-            if is_auth_rejection(exc):
+            """Raise definitive failures; warn on an indeterminate subnet read."""
+            if is_credential_rejection(exc):
                 raise TokenRejectedError(
                     f"AWS rejected {cred_label} for vm-site '{self.site_name}' ({error_code(exc)})",
+                    entity_kind="vm-site",
+                    entity_name=self.site_name,
+                    hint=cred_hint,
+                ) from exc
+            if is_authorization_denial(exc):
+                raise AuthorizationError(
+                    f"AWS denied {cred_label} permission for vm-site '{self.site_name}' ({error_code(exc)})",
                     entity_kind="vm-site",
                     entity_name=self.site_name,
                     hint=cred_hint,
@@ -274,13 +310,14 @@ class EC2Platform(VMPlatform):
 
         # 1. Identity probe (validates the credential on both paths).
         try:
-            sts.get_caller_identity()
+            identity = sts.get_caller_identity()
         except ClientError as exc:
-            _reject_or_warn(exc)
-            return  # warned: nothing more to verify unverified
+            if is_credential_rejection(exc) or is_authorization_denial(exc):
+                _reject_or_warn(exc)
+            raise wrap_ec2_error(exc) from exc
         except BotoCoreError as exc:
-            output.warn(f"could not reach AWS for '{self.site_name}' ({exc}); continuing unverified")
-            return
+            raise wrap_ec2_error(exc) from exc
+        self._account_id_cached = self._account_id_from_identity(identity)
 
         # 2. A configured subnet that does not exist in the region is a
         # definitive misconfiguration (fatal), like azure's missing group.
@@ -304,6 +341,7 @@ class EC2Platform(VMPlatform):
 
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
         region = self.config.region
+        account_id = self._current_account_id(ctx)
         subnet_id = self.config.subnet_id
         ssm_release = code_owned_release_value(
             _DEBIAN_SSM_RELEASES,
@@ -414,6 +452,56 @@ class EC2Platform(VMPlatform):
         instance_id: str | None = None
         prov_transport: Transport | None = None
         tailscale_ip: str | None = None
+        bootstrap_ssh_open = False
+
+        def _metadata(*, incomplete: bool) -> dict[str, str]:
+            metadata = {
+                "region": region,
+                "backend_name": backend_name,
+                "account_id": account_id,
+                "bootstrap_ssh_prefixes": ",".join(ssh_allow_prefixes),
+            }
+            if instance_id is not None:
+                metadata["instance_id"] = instance_id
+            if security_group_id is not None:
+                metadata["security_group_id"] = security_group_id
+            if incomplete:
+                metadata["create_incomplete"] = "true"
+            return metadata
+
+        def _cleanup_or_retain() -> None:
+            try:
+                if bootstrap_ssh_open and security_group_id is not None:
+                    remove_ssh_allow(ec2, security_group_id, ssh_allow_prefixes)
+                cleanup_created_resources(ec2, instance_id, security_group_id)
+            except (Exception, KeyboardInterrupt) as cleanup_error:
+                if isinstance(cleanup_error, EC2Error):
+                    detail = cleanup_error.detail
+                elif isinstance(cleanup_error, KeyboardInterrupt):
+                    detail = "cleanup was interrupted"
+                else:
+                    detail = str(cleanup_error) or type(cleanup_error).__name__
+                recovery = (
+                    f"After AWS permissions or service availability recover, run 'agw vm delete {request.vm_name}'."
+                )
+                if instance_id is None and security_group_id is not None:
+                    recovery = (
+                        f"AWS did not return an instance ID. Inspect EC2 account {account_id} in {region}; "
+                        f"only if an instance has agentworks:vm={backend_name} and uses security group "
+                        f"{security_group_id}, terminate that instance manually. Then run "
+                        f"'agw vm delete {request.vm_name}' to remove the retained security group."
+                    )
+                raise RetainedProvisioningError(
+                    f"AWS cleanup for VM '{request.vm_name}' could not be confirmed: {detail}",
+                    platform_metadata=_metadata(incomplete=True),
+                    entity_name=request.vm_name,
+                    hint=(
+                        f"Instance: {instance_id or 'not returned'}; "
+                        f"security group: {security_group_id or 'not created'}; region: {region}; "
+                        f"ownership tag: agentworks:vm={backend_name}. {recovery}"
+                    ),
+                ) from cleanup_error
+
         # The WHOLE fallible region is guarded by both arms of the create
         # rollback contract: a failure (including a non-SSHError from transport
         # construction or the inline bootstrap wait) AND an operator interrupt
@@ -459,7 +547,13 @@ class EC2Platform(VMPlatform):
             if block_device_mappings:
                 run_kwargs["BlockDeviceMappings"] = block_device_mappings
             run_result = ec2.run_instances(**run_kwargs)
-            instance_id = str(run_result["Instances"][0]["InstanceId"])
+            returned_instance_id = run_result["Instances"][0]["InstanceId"]
+            if not isinstance(returned_instance_id, str) or not returned_instance_id:
+                raise EC2Error(
+                    "EC2 returned an invalid RunInstances response",
+                    detail="the response did not contain one non-empty InstanceId",
+                )
+            instance_id = returned_instance_id
 
             output.detail("Waiting for instance to run...")
             ec2.get_waiter("instance_running").wait(InstanceIds=[instance_id])
@@ -469,6 +563,7 @@ class EC2Platform(VMPlatform):
             # these prefixes, recorded in platform_metadata below.
             output.detail("Opening scoped SSH bootstrap access...")
             poke_ssh_allow(ec2, security_group_id, ssh_allow_prefixes)
+            bootstrap_ssh_open = True
 
             # Read the auto-assigned public IP LIVE (never cached).
             public_ip = self._public_ip(ec2, instance_id)
@@ -487,28 +582,23 @@ class EC2Platform(VMPlatform):
             # credential. Wait for it, then join once over stdin.
             tailscale_ip = EphemeralTailscaleBootstrap(prov_transport).complete(request.tailscale_auth_key)
         except KeyboardInterrupt:
-            rollback_create_on_interrupt(ec2, region, backend_name, instance_id, security_group_id)
+            output.warn(
+                f"Interrupted: cleaning up partial AWS resources for '{backend_name}', "
+                f"please wait (Ctrl-C again retains them for explicit deletion)..."
+            )
+            _cleanup_or_retain()
             raise
         except Exception as exc:
             output.detail("Cleaning up resources...")
-            cleanup_partial(ec2, instance_id, security_group_id)
-            if isinstance(exc, StateError):
+            _cleanup_or_retain()
+            if isinstance(exc, (AuthorizationError, StateError, TokenRejectedError)):
                 raise
             raise wrap_ec2_error(exc) from exc
 
         # Reached only when the guarded region completed (both except arms
         # re-raise), so the transport was built.
         assert prov_transport is not None
-        metadata = {
-            "instance_id": instance_id,
-            "security_group_id": security_group_id,
-            "region": region,
-            "backend_name": backend_name,
-            # Exactly the prefixes the bootstrap allow was poked with, so the
-            # close hooks revoke those tuples and nothing else (a concurrent
-            # native route's distinct allow survives).
-            "bootstrap_ssh_prefixes": ",".join(ssh_allow_prefixes),
-        }
+        metadata = _metadata(incomplete=False)
         return ProvisionResult(
             native_transport=prov_transport,
             platform_metadata=metadata,
@@ -543,12 +633,26 @@ class EC2Platform(VMPlatform):
 
     def delete(self, vm: VMRow, ctx: RunContext) -> None:
         output.info(f"Deleting EC2 instance '{vm.name}'...")
-        instance_id = vm.platform_metadata.get("instance_id")
-        if not instance_id:
-            output.warn("no EC2 instance id, skipping EC2 cleanup")
-            return
+        partial_create = vm.platform_metadata.get("create_incomplete") == "true"
+        instance_id = self._optional_metadata(vm, "instance_id") if partial_create else self._instance_id(vm)
+        security_group_id = self._security_group_id(vm)
+        backend_name = self._backend_name(vm)
+        recorded_account_id = self._recorded_account_id(vm)
+        current_account_id = self._current_account_id(ctx, refresh=True)
+        if recorded_account_id is not None and recorded_account_id != current_account_id:
+            raise StateError(
+                f"VM '{vm.name}' belongs to AWS account '{recorded_account_id}', not the current account",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
         ec2 = self._client("ec2", self._region_of(vm), ctx)
-        terminate_and_cleanup(ec2, str(instance_id), vm.platform_metadata.get("security_group_id"))
+        terminate_and_cleanup_strict(
+            ec2,
+            instance_id,
+            security_group_id,
+            backend_name,
+            account_bound=recorded_account_id is not None,
+        )
         output.info(f"EC2 instance '{vm.name}' deleted")
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
@@ -563,13 +667,14 @@ class EC2Platform(VMPlatform):
         # was rejected would hide a misconfiguration behind a plausible-looking
         # answer, exactly in `vm describe` where an operator checks a broken
         # site. botocore lets us tell the two apart at the call site, so a
-        # rejection re-raises typed (via the same classifier runup uses) and
-        # only a transient/unreachable failure degrades to UNKNOWN.
+        # credential or authorization rejection re-raises typed (via the same
+        # structured classifiers runup uses) and only a transient/unreachable
+        # failure degrades to UNKNOWN.
         ec2 = self._client("ec2", self._region_of(vm), ctx)
         try:
             result = ec2.describe_instances(InstanceIds=[instance_id])
         except Exception as exc:
-            if is_auth_rejection(exc):
+            if is_credential_rejection(exc) or is_authorization_denial(exc):
                 raise wrap_ec2_error(exc) from exc
             return VMStatus.UNKNOWN
         state = first_instance_state(result)
@@ -665,22 +770,25 @@ class EC2Platform(VMPlatform):
         Enter pokes this operation's SSH allow scoped to the operator's egress
         prefixes (widened by ``config.operator.ssh_allow_cidrs``); the finally
         revokes exactly those prefixes on every unwind path, so a concurrent
-        native op's non-overlapping allows are untouched. The poke sits INSIDE
-        the try, so a poke that partially failed is still swept by the finally;
-        a shared prefix across concurrent ops is idempotent to poke and tolerant
-        to revoke (see network.py's poke_ssh_allow / remove_ssh_allow, which
-        carry the full contract). Unlike azure there is no public-IP heal on
-        enter: the EC2 auto-assigned IP is permanent for the VM's lifetime.
+        native op's non-overlapping allows are untouched. A shared prefix across
+        concurrent ops is idempotent to poke and tolerant to revoke (see
+        network.py's poke_ssh_allow / remove_ssh_allow, which carry the full
+        contract). Unlike azure there is no public-IP heal on enter: the EC2
+        auto-assigned IP is permanent for the VM's lifetime.
 
         ``ctx`` is the op-start context threaded from the factory; ``config``
         carries OPERATOR settings (``operator.ssh_allow_cidrs``), mirroring
         azure and :meth:`native_transport`.
+
+        ``poke_ssh_allow`` checks the matching revoke permissions before it
+        mutates ingress and cleans up any partial poke itself. Once the poke
+        succeeds, this context's ``finally`` owns the matching close.
         """
         ec2 = self._client("ec2", self._region_of(vm), ctx)
         security_group_id = self._security_group_id(vm)
         prefixes = operator_ssh_prefixes(config_allow_cidrs(config))
+        poke_ssh_allow(ec2, security_group_id, prefixes)
         try:
-            poke_ssh_allow(ec2, security_group_id, prefixes)
             yield
         finally:
             remove_ssh_allow(ec2, security_group_id, prefixes)
@@ -688,27 +796,47 @@ class EC2Platform(VMPlatform):
     # -- Helpers ---------------------------------------------------------------
 
     def _instance_id(self, vm: VMRow) -> str:
-        """The VM's EC2 instance id from platform metadata, or a typed error."""
-        instance_id = vm.platform_metadata.get("instance_id")
-        if not instance_id:
-            raise StateError(
-                f"VM '{vm.name}' has no EC2 instance_id in its platform metadata; the DB row is incomplete",
-                entity_kind="vm",
-                entity_name=vm.name,
-            )
-        return str(instance_id)
+        return self._required_metadata(vm, "instance_id")
 
     def _security_group_id(self, vm: VMRow) -> str:
-        """The VM's security-group id from platform metadata, or a typed error
-        (the transient route cannot open without it)."""
-        security_group_id = vm.platform_metadata.get("security_group_id")
-        if not security_group_id:
+        return self._required_metadata(vm, "security_group_id")
+
+    def _backend_name(self, vm: VMRow) -> str:
+        return self._required_metadata(vm, "backend_name")
+
+    def _required_metadata(self, vm: VMRow, key: str) -> str:
+        value = vm.platform_metadata.get(key)
+        if not isinstance(value, str) or not value:
             raise StateError(
-                f"VM '{vm.name}' has no EC2 security_group_id in its platform metadata; the DB row is incomplete",
+                f"VM '{vm.name}' has invalid EC2 {key} platform metadata",
                 entity_kind="vm",
                 entity_name=vm.name,
             )
-        return str(security_group_id)
+        return value
+
+    def _optional_metadata(self, vm: VMRow, key: str) -> str | None:
+        value = vm.platform_metadata.get(key)
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value:
+            raise StateError(
+                f"VM '{vm.name}' has invalid EC2 {key} platform metadata",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+        return value
+
+    def _recorded_account_id(self, vm: VMRow) -> str | None:
+        if "account_id" not in vm.platform_metadata:
+            return None
+        account_id = vm.platform_metadata.get("account_id")
+        if not self._valid_account_id(account_id):
+            raise StateError(
+                f"VM '{vm.name}' has an invalid AWS account_id in its platform metadata",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+        return str(account_id)
 
     def _region_of(self, vm: VMRow) -> str:
         """The VM's region: the recorded one (decouples existing VMs from config
@@ -885,12 +1013,27 @@ class EC2Platform(VMPlatform):
         try:
             result = ec2.describe_images(ImageIds=[ami])
         except Exception as exc:
+            mapped = wrap_ec2_error(exc)
+            if isinstance(mapped, AuthorizationError):
+                raise AuthorizationError(
+                    str(mapped),
+                    entity_kind="vm-site",
+                    entity_name=self.site_name,
+                    hint="grant ec2:DescribeImages to the selected AWS credential and retry",
+                ) from exc
+            if isinstance(mapped, TokenRejectedError):
+                raise TokenRejectedError(
+                    str(mapped),
+                    entity_kind="vm-site",
+                    entity_name=self.site_name,
+                    hint="verify the selected AWS credential and retry",
+                ) from exc
             raise EC2Error(
                 f"could not read AMI '{ami}' to size the disk for vm-site '{self.site_name}'",
                 detail=str(exc),
                 entity_kind="vm-site",
                 entity_name=self.site_name,
-                hint="grant ec2:DescribeImages to the credential, or drop the vm-template's disk request",
+                hint="verify the AMI is readable and retry",
             ) from exc
         images = result.get("Images", [])
         root_device = images[0].get("RootDeviceName") if images else None
@@ -900,6 +1043,6 @@ class EC2Platform(VMPlatform):
                 detail="describe_images returned no RootDeviceName for the image",
                 entity_kind="vm-site",
                 entity_name=self.site_name,
-                hint="verify the AMI id, or drop the vm-template's disk request to keep the image's own root size",
+                hint="verify the selected Debian AMI publishes root-device metadata and retry",
             )
         return str(root_device)

@@ -21,7 +21,7 @@ import pytest
 
 from agentworks.capabilities.base import RunContext
 from agentworks.db import VMStatus
-from agentworks.errors import ConfigError
+from agentworks.errors import AuthorizationError, ConfigError
 from agentworks.plugins.aws.network import EC2Error
 from agentworks.plugins.aws.platform import EC2Platform
 from tests._aws_fakes import client_error, install_fakes
@@ -158,10 +158,9 @@ class TestCredentialSelection:
         assert rec.sessions == []  # no fallback to an ambient session
         assert platform._session_cached is None
 
-    def test_rejection_at_the_op_never_falls_back(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """When the server rejects the configured credential mid-op, the op
-        raises the wrapped error and the ONLY session ever built is the
-        explicit one (never a silent ambient retry)."""
+    def test_permission_denial_at_the_op_never_falls_back(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A permission denial remains typed authorization and never retries
+        with the ambient credential chain."""
         rec = install_fakes(monkeypatch)
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
@@ -170,7 +169,7 @@ class TestCredentialSelection:
 
         monkeypatch.setattr("tests._aws_fakes._FakeEC2.start_instances", lambda self, **kw: _reject(**kw))
 
-        with pytest.raises(EC2Error):
+        with pytest.raises(AuthorizationError):
             _creds_platform().start(vm, _ctx())
 
         (session,) = rec.sessions

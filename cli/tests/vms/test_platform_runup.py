@@ -23,7 +23,8 @@ from types import SimpleNamespace
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.errors import NotFoundError, TokenRejectedError, ValidationError
+from agentworks.errors import AuthorizationError, NotFoundError, TokenRejectedError, ValidationError
+from agentworks.plugins.aws.network import EC2Error
 from agentworks.plugins.azure.network import AzureError
 from agentworks.plugins.azure.platform import AzureVMPlatform
 from agentworks.plugins.proxmox.api import (
@@ -295,12 +296,9 @@ def test_azure_runup_without_the_client_secret_is_typed(monkeypatch: pytest.Monk
 
 # -- EC2 (aws) -------------------------------------------------------------
 #
-# The aws-ec2 platform's runup DELIBERATELY diverges from azure's fatal-only stance
-# and follows proxmox: botocore distinguishes a definitive auth rejection (a
-# ClientError carrying an auth error code) from an unreachable endpoint (an
-# EndpointConnectionError), so a rejection is fatal and anything indeterminate
-# warns and continues unverified. A configured-but-missing subnet is fatal the
-# way azure's missing resource group is.
+# The aws-ec2 platform requires a validated STS account identity because create
+# persists it as the destructive-operation account binding. A configured but
+# missing subnet is also fatal, like Azure's missing resource group.
 
 _EC2_CONFIG = {"region": "us-east-1", "auth": {"mode": "ambient"}}
 _EC2_CREDS_CONFIG = {
@@ -332,24 +330,39 @@ def test_aws_ec2_runup_auth_rejection_is_fatal(monkeypatch: pytest.MonkeyPatch) 
         EC2Platform("aws", _EC2_CONFIG).runup(RunContext())
 
 
-def test_aws_ec2_runup_unreachable_warns(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    from agentworks.plugins.aws.platform import EC2Platform
-    from tests._aws_fakes import Controls, install_fakes, unreachable
-
-    install_fakes(monkeypatch, Controls(identity_error=unreachable()))
-    EC2Platform("aws", _EC2_CONFIG).runup(RunContext())  # no raise
-    assert "could not reach AWS" in capsys.readouterr().err
-
-
-def test_aws_ec2_runup_non_auth_client_error_warns(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize("code", ["UnauthorizedOperation", "AccessDenied", "AccessDeniedException"])
+def test_aws_ec2_runup_permission_denial_is_authorization(
+    monkeypatch: pytest.MonkeyPatch,
+    code: str,
 ) -> None:
     from agentworks.plugins.aws.platform import EC2Platform
     from tests._aws_fakes import Controls, client_error, install_fakes
 
+    install_fakes(monkeypatch, Controls(identity_error=client_error(code, "denied", "GetCallerIdentity")))
+
+    with pytest.raises(AuthorizationError) as exc:
+        EC2Platform("aws", _EC2_CONFIG).runup(RunContext())
+
+    assert exc.value.entity_kind == "vm-site"
+    assert exc.value.entity_name == "aws"
+
+
+def test_aws_ec2_runup_unreachable_is_fatal(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.plugins.aws.platform import EC2Platform
+    from tests._aws_fakes import Controls, install_fakes, unreachable
+
+    install_fakes(monkeypatch, Controls(identity_error=unreachable()))
+    with pytest.raises(EC2Error):
+        EC2Platform("aws", _EC2_CONFIG).runup(RunContext())
+
+
+def test_aws_ec2_runup_non_auth_client_error_is_fatal(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.plugins.aws.platform import EC2Platform
+    from tests._aws_fakes import Controls, client_error, install_fakes
+
     install_fakes(monkeypatch, Controls(identity_error=client_error("Throttling", "slow down", "GetCallerIdentity")))
-    EC2Platform("aws", _EC2_CONFIG).runup(RunContext())  # no raise
-    assert "could not verify" in capsys.readouterr().err
+    with pytest.raises(EC2Error):
+        EC2Platform("aws", _EC2_CONFIG).runup(RunContext())
 
 
 def test_aws_ec2_runup_missing_subnet_is_fatal(monkeypatch: pytest.MonkeyPatch) -> None:

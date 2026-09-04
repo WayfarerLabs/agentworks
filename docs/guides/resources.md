@@ -284,8 +284,9 @@ spec:
     auth: { mode: ambient }
 ```
 
-See [Using Google Compute Engine](gcp.md) for IAM, API, VPC firewall-policy, credential, and safe
-recovery prerequisites.
+See [Using Amazon EC2](aws.md), [Using Azure Virtual Machines](azure.md), and
+[Using Google Compute Engine](gcp.md) for provider permissions, credentials, network prerequisites,
+and safe cleanup behavior.
 
 - `spec.platform` is one table: its `name` key names a `vm-platform` capability row and the
   remaining keys are that platform's configuration, validated by it (unknown keys are errors).

@@ -90,11 +90,10 @@ class AzureVMPlatform(VMPlatform):
         Creates Azure Virtual Machines in one subscription and resource group. Declare
         one vm-site per subscription and group you target.
 
-        The resource group must already exist: `vm create` checks it at runup, with an
-        authenticated read-only probe, and fails cleanly before provisioning anything.
-        Sizes come from a built-in B-series catalog unless the site overrides it, and
-        `vm create` picks the smallest entry that satisfies the vm-template's request
-        (an off-ratio request rounds up and warns).
+        The resource group must already exist: `vm create` checks it at runup with an
+        authenticated read-only probe. Sizes come from a built-in B-series catalog unless the
+        site overrides it, and `vm create` picks the smallest entry that satisfies the
+        vm-template's request (an off-ratio request rounds up and warns).
 
         `auth` says how the site authenticates and defaults to `{mode: ambient}`, the
         ambient Azure credential chain (`az login`, `AZURE_*` variables, managed
@@ -262,9 +261,8 @@ class AzureVMPlatform(VMPlatform):
         return resource
 
     def runup(self, ctx: RunContext) -> None:
-        """Provisioning-phase runup: an authenticated, read-only check that
-        the site's configured resource group exists before ``create``
-        provisions into it. A missing group is a definitive rejection
+        """Provisioning runup: an authenticated, read-only resource-group
+        existence check. A missing group is a definitive rejection
         (fatal, before the DB row or any Azure resource exists), so
         ``vm create`` aborts here with a clear message instead of failing
         partway through creating a public IP / NSG / VNet / NIC in a group
@@ -299,6 +297,7 @@ class AzureVMPlatform(VMPlatform):
         rejection and an unreachable Entra identically, as
         ``ClientAuthenticationError`` (see
         :func:`_build_service_principal_credential`).
+
         """
         from types import SimpleNamespace
 
