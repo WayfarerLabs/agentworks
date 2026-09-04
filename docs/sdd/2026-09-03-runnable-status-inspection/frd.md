@@ -96,9 +96,8 @@ authority that match its runtime.
   not inherit operator stdin when they carry no fact input. VM calls shall use provider-native
   bounds where supported; a provider SDK without cancellable timeout support may still block after
   progress has been shown. Once per-boundary dispatch begins, a failure shall mark only that
-  boundary's rows unknown and allow other boundaries to finish. A
-  shared VM registry, preflight, or credential-resolution failure before dispatch may mark every
-  selected VM row unknown.
+  boundary's rows unknown and allow other boundaries to finish. A shared VM registry, preflight, or
+  credential-resolution failure before dispatch may mark every selected VM row unknown.
 - **R10.** Expected operational failures, including unreachable guests, unavailable credentials,
   unsupported local backends, and provider lookup failures, shall produce unknown live status.
   Invalid CLI input, corrupt local invariants, and unexpected programming failures shall retain

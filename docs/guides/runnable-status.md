@@ -50,7 +50,7 @@ useful work in progress.
 
 Session and console observers create the canonical SSH transport directly, with no VM activation or
 provider credential work. They use `tty=False`, one attempt, and a 10-second timeout. Probes that do
-not send fact data explicitly close stdin so noninteractive Windows SSH clients do not retain the
+not send fact data explicitly close stdin so non-interactive Windows SSH clients do not retain the
 operator's console handle. Sessions use one compound probe per selected VM; consoles use one exact
 tmux session-name enumeration per selected VM. Independent VMs run with finite concurrency.
 
