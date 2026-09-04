@@ -7,11 +7,11 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
-from agentworks import output
 from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
 from agentworks.errors import (
     AgentworksError,
     StateError,
+    UserAbort,
 )
 from agentworks.sessions.tmux import ProbeStatus, probe_tmux_server, probe_tmux_session
 
@@ -22,6 +22,8 @@ if TYPE_CHECKING:
 
 _PID_PRESENT_FACT = "present"
 _PID_ABSENT_FACT = "absent"
+_OBSERVATION_TIMEOUT_SECONDS = 10
+_OBSERVATION_ATTEMPTS = 1
 
 
 def _pid_probe_script(pid: int) -> str:
@@ -75,8 +77,6 @@ def check_session_status(
     can't safely migrate, so they surface the typed error and let the
     operator restart.
     """
-    if session.pid == PID_STOPPED:
-        return SessionStatus.STOPPED
     if session.socket_path is not None:
         return _check_dedicated_session(session, target=target)
     if session.pid is None or session.boot_id is None:
@@ -109,7 +109,7 @@ def _check_dedicated_session(session: SessionRow, *, target: Transport) -> Sessi
     if session_presence is ProbeStatus.UNKNOWN:
         return SessionStatus.UNKNOWN
     if session_presence is ProbeStatus.PRESENT:
-        return SessionStatus.OK
+        return SessionStatus.RUNNING
 
     server_presence = probe_tmux_server(run_command=target.run, socket_path=socket_path)
     if server_presence is ProbeStatus.UNKNOWN:
@@ -117,7 +117,12 @@ def _check_dedicated_session(session: SessionRow, *, target: Transport) -> Sessi
     if server_presence is ProbeStatus.PRESENT:
         return SessionStatus.RESIDUAL
 
-    # has-session failed -- STOPPED or BROKEN?
+    # Exact session and dedicated server are authoritatively absent. The
+    # stopped sentinel is supporting evidence only after those live facts.
+    if session.pid == PID_STOPPED:
+        return SessionStatus.STOPPED
+
+    # has-session failed: STOPPED or BROKEN?
     if session.pid is None or session.pid <= 0 or session.boot_id is None:
         return SessionStatus.UNKNOWN
     current_boot = _mgr._get_boot_id(target)
@@ -142,17 +147,21 @@ def batch_check_status(
     sessions: list[SessionRow],
     *,
     target: Transport,
+    timeout: int = _OBSERVATION_TIMEOUT_SECONDS,
+    retries: int = _OBSERVATION_ATTEMPTS,
+    tty: bool = False,
 ) -> dict[str, SessionStatus]:
     """Check status for multiple sessions in one SSH call per VM.
 
     Returns {session_name: SessionStatus}. Dedicated rows are probed even when
     their persisted runtime identity is incomplete: exact tmux presence is
-    sufficient for ``OK``; absence remains ``UNKNOWN`` until the stored
-    identity can prove more. ``PID_STOPPED`` rows are excluded.
+    sufficient for ``RUNNING``; absence remains ``UNKNOWN`` until the stored
+    identity can prove more. Persisted-stopped rows are still probed so a
+    manually resurrected exact session cannot be hidden by stale evidence.
     """
     from agentworks.sessions.tmux import canonical_boot_id, exact_tmux_target, tmux_cmd
 
-    checkable = [s for s in sessions if s.pid != PID_STOPPED and s.socket_path is not None]
+    checkable = [s for s in sessions if s.socket_path is not None]
     if not checkable:
         return {}
 
@@ -192,7 +201,7 @@ def batch_check_status(
         return {}
     cmd = encoder + "; ".join(parts)
 
-    result = target.run(cmd, check=False)
+    result = target.run(cmd, check=False, timeout=timeout, retries=retries, tty=tty)
     stdout = getattr(result, "stdout", "") or ""
 
     status_map: dict[str, SessionStatus] = {
@@ -216,7 +225,7 @@ def batch_check_status(
 
         has_presence = _batch_tmux_presence(fields[2], fields[3], missing_target_is_absent=True)
         if has_presence is ProbeStatus.PRESENT:
-            status_map[name] = SessionStatus.OK
+            status_map[name] = SessionStatus.RUNNING
             continue
         if has_presence is ProbeStatus.UNKNOWN:
             continue
@@ -226,6 +235,10 @@ def batch_check_status(
             status_map[name] = SessionStatus.RESIDUAL
             continue
         if server_presence is ProbeStatus.UNKNOWN:
+            continue
+
+        if session.pid == PID_STOPPED:
+            status_map[name] = SessionStatus.STOPPED
             continue
 
         if session.pid is None or session.pid <= 0 or session.boot_id is None:
@@ -274,56 +287,75 @@ def _batch_tmux_presence(
     return _tmux_presence_from_result(result, missing_target_is_absent=missing_target_is_absent)
 
 
-def batch_check_all_sessions(
+def observe_session_statuses(
     sessions: list[SessionRow],
     *,
     db: Database,
     config: Config,
 ) -> dict[str, SessionStatus]:
-    """Batch status check grouped by VM, parallel across VMs (capped at 8).
-
-    Returns {session_name: SessionStatus}. Sessions with no reachable VM or
-    an explicit PID_STOPPED sentinel are excluded from the result.
-    """
+    """Observe every selected session, grouped and bounded by backing VM."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from contextvars import copy_context
 
     # Resolve each session's VM and group
     by_vm: dict[str, list[SessionRow]] = {}
     vm_targets: dict[str, Transport] = {}
+    unavailable_vms: set[str] = set()
+    result_map = {session.name: SessionStatus.UNKNOWN for session in sessions}
 
     for s in sessions:
-        ws = db.get_workspace(s.workspace_name)
-        if not ws:
+        ws = _mgr._require_workspace(db, s.workspace_name)
+        vm = _mgr._require_vm_for_workspace(db, ws)
+        if ws.vm_name in unavailable_vms:
             continue
         if ws.vm_name not in vm_targets:
-            vm = db.get_vm(ws.vm_name)
-            if not vm or not vm.tailscale_host:
+            if not vm.tailscale_host:
                 continue
             try:
                 from agentworks.vms.manager import require_vm_ssh_boundary
 
                 require_vm_ssh_boundary(db, config, vm)
-                vm_targets[ws.vm_name] = _mgr.transport(vm, config)
+                vm_targets[ws.vm_name] = _mgr.transport(
+                    vm,
+                    config,
+                    default_timeout=_OBSERVATION_TIMEOUT_SECONDS,
+                )
+            except UserAbort:
+                raise
             except AgentworksError:
+                unavailable_vms.add(ws.vm_name)
                 continue
         by_vm.setdefault(ws.vm_name, []).append(s)
 
     if not by_vm:
-        return {}
-
-    result_map: dict[str, SessionStatus] = {}
+        return result_map
 
     def _check_vm(vm_name: str) -> dict[str, SessionStatus]:
-        return batch_check_status(by_vm[vm_name], target=vm_targets[vm_name])
+        return batch_check_status(
+            by_vm[vm_name],
+            target=vm_targets[vm_name],
+            timeout=_OBSERVATION_TIMEOUT_SECONDS,
+            retries=_OBSERVATION_ATTEMPTS,
+            tty=False,
+        )
 
     with ThreadPoolExecutor(max_workers=min(8, len(by_vm))) as executor:
-        futures = {executor.submit(copy_context().run, _check_vm, name): name for name in by_vm}
+        futures = [executor.submit(copy_context().run, _check_vm, name) for name in by_vm]
         for future in as_completed(futures):
-            vm_name = futures[future]
             try:
                 result_map.update(future.result())
-            except Exception as exc:
-                output.warn(f"Failed to check sessions on VM '{vm_name}': {exc}")
+            except UserAbort:
+                raise
+            except AgentworksError:
+                continue
 
     return result_map
+
+
+def observe_session_status(
+    db: Database,
+    config: Config,
+    session: SessionRow,
+) -> SessionStatus:
+    """Observe one session without activating or repairing its VM."""
+    return observe_session_statuses([session], db=db, config=config)[session.name]

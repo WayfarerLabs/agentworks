@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 from dataclasses import FrozenInstanceError
 from typing import TYPE_CHECKING, cast
@@ -19,10 +18,8 @@ from tests.conftest import stub_vm_ssh_identity
 from tests.instance_state_support import stub_instance_state
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
-
     from agentworks.config import Config
-    from agentworks.db import Database, SessionRow
+    from agentworks.db import Database
 
 
 @pytest.fixture(autouse=True)
@@ -147,6 +144,8 @@ def test_nonempty_operational_lists_have_exact_ordered_json(monkeypatch: pytest.
                 "created_at": row.created_at,
                 "debian_release": row.debian_release,
                 "debian_release_observed_at": row.debian_release_observed_at,
+                "observed_status": row.observed_status,
+                "status_disposition": row.status_disposition,
             }
             for row in vm_rows
         ]
@@ -188,7 +187,13 @@ def test_nonempty_operational_lists_have_exact_ordered_json(monkeypatch: pytest.
     }
     expected_consoles = {
         "consoles": [
-            {"name": row.name, "vm_name": row.vm_name, "session_count": row.session_count} for row in console_rows
+            {
+                "name": row.name,
+                "vm_name": row.vm_name,
+                "session_count": row.session_count,
+                "status": row.status,
+            }
+            for row in console_rows
         ]
     }
     for argv, command, data in (
@@ -482,6 +487,7 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
             "admin_shell": True,
             "created_at": "2026-01-09",
             "updated_at": "2026-01-10",
+            "status": "unknown",
             "sessions": [
                 {
                     "position": 2,
@@ -515,11 +521,11 @@ def _seed_session_rows(db: Database) -> None:
     )
 
 
-def test_session_json_status_is_read_only_and_no_status_is_preserved(
+def test_session_json_status_is_explicit_and_plain_list_is_local(
     db: Database,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Actual session Typer paths preserve read-only status and sentinel rules."""
+    """Actual session Typer paths distinguish skipped and requested status."""
     from agentworks.cli.commands import session as command
     from agentworks.sessions import manager
 
@@ -530,22 +536,6 @@ def test_session_json_status_is_read_only_and_no_status_is_preserved(
     monkeypatch.setattr(manager, "_display_registry", lambda _config: None)
     monkeypatch.setattr(manager, "_display_harness_integration", lambda _registry, _template: "-")
 
-    boundary_calls = 0
-
-    @contextlib.contextmanager
-    def boundary(
-        _db: object,
-        _config: object,
-        _vms: object,
-        *,
-        interaction: TtyInteractionPolicy,
-    ) -> Iterator[frozenset[str]]:
-        assert interaction is TtyInteractionPolicy.ALLOW
-        nonlocal boundary_calls
-        boundary_calls += 1
-        yield frozenset({"box"})
-
-    monkeypatch.setattr(manager, "_best_effort_batch_vm_boundary", boundary)
     monkeypatch.setattr(
         manager,
         "ensure_pids_batch",
@@ -553,37 +543,68 @@ def test_session_json_status_is_read_only_and_no_status_is_preserved(
     )
     monkeypatch.setattr(
         manager,
-        "batch_check_all_sessions",
-        lambda rows, *, db, config: {"live": SessionStatus.OK},
+        "observe_session_statuses",
+        lambda rows, *, db, config: {
+            "live": SessionStatus.RUNNING,
+            "stopped": SessionStatus.UNKNOWN,
+        },
     )
 
-    status_result = CliRunner().invoke(app, ["session", "list", "--output", "json"])
+    status_result = CliRunner().invoke(app, ["session", "list", "--status", "--output", "json"])
     assert status_result.exit_code == 0, status_result.output
     status_document = cast("dict[str, object]", json.loads(status_result.stdout_bytes))
     rows = cast("list[dict[str, object]]", cast("dict[str, object]", status_document["data"])["sessions"])
     assert [(row["name"], row["status"], row["harness_integration"]) for row in rows] == [
         ("live", "running", None),
-        ("stopped", "stopped", None),
+        ("stopped", "unknown", None),
     ]
     unchanged = db.get_session("live")
     assert unchanged is not None and (unchanged.pid, unchanged.boot_id) == (None, None)
-    assert boundary_calls == 1
 
     db.update_session_runtime(
         "live", socket_path="/tmp/live.sock", pid=None, boot_id=None, tmux_server_start_ticks=None
     )
 
     def forbidden(*_args: object, **_kwargs: object) -> object:
-        raise AssertionError("--no-status must not repair or probe")
+        raise AssertionError("plain session list must not repair or probe")
 
     monkeypatch.setattr(manager, "ensure_pids_batch", forbidden)
-    monkeypatch.setattr(manager, "batch_check_all_sessions", forbidden)
-    no_status = CliRunner().invoke(app, ["session", "list", "--no-status", "--output", "json"])
-    assert no_status.exit_code == 0, no_status.output
-    no_status_rows = json.loads(no_status.stdout_bytes)["data"]["sessions"]
-    assert [row["status"] for row in no_status_rows] == ["unavailable", "unavailable"]
+    monkeypatch.setattr(manager, "observe_session_statuses", forbidden)
+    plain = CliRunner().invoke(app, ["session", "list", "--output", "json"])
+    assert plain.exit_code == 0, plain.output
+    plain_rows = json.loads(plain.stdout_bytes)["data"]["sessions"]
+    assert [row["status"] for row in plain_rows] == ["unavailable", "unavailable"]
     unrepaired = db.get_session("live")
     assert unrepaired is not None and unrepaired.pid is None
+
+
+def test_session_no_status_compatibility_is_hidden_local_noop(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.cli.commands import session as command
+    from agentworks.sessions import manager
+
+    _seed_session_rows(db)
+    monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
+    monkeypatch.setattr(command, "get_db", lambda: db)
+    monkeypatch.setattr(manager, "_display_registry", lambda _config: None)
+    monkeypatch.setattr(manager, "_display_harness_integration", lambda _registry, _template: "-")
+    monkeypatch.setattr(
+        manager,
+        "observe_session_statuses",
+        lambda *_args, **_kwargs: pytest.fail("compatibility no-op reached live observation"),
+    )
+
+    result = CliRunner().invoke(app, ["session", "list", "--no-status", "--output", "json"])
+
+    assert result.exit_code == 0
+    assert result.stderr_bytes
+    rows = json.loads(result.stdout_bytes)["data"]["sessions"]
+    assert [row["status"] for row in rows] == ["unavailable", "unavailable"]
+    help_result = CliRunner().invoke(app, ["session", "list", "--help"])
+    assert help_result.exit_code == 0
+    assert b"--no-status" not in help_result.stdout_bytes
 
 
 def test_session_describe_json_is_read_only_and_maps_stopped_pid_with_degraded_template(
@@ -610,29 +631,12 @@ def test_session_describe_json_is_read_only_and_maps_stopped_pid_with_degraded_t
     monkeypatch.setattr(manager, "_display_registry", lambda _config: None)
     monkeypatch.setattr(manager, "_display_harness_integration", lambda _registry, _template: "-")
 
-    @contextlib.contextmanager
-    def prepare(
-        db: Database,
-        config: object,
-        row: SessionRow,
-        *,
-        operation: str | None,
-        interaction: TtyInteractionPolicy,
-    ) -> Iterator[tuple[object, object, object, object, object]]:
-        del config, operation
-        assert interaction is TtyInteractionPolicy.ALLOW
-        workspace = db.get_workspace(row.workspace_name)
-        vm = db.get_vm("box")
-        assert workspace is not None and vm is not None
-        yield workspace, vm, object(), object(), object()
-
-    monkeypatch.setattr(manager, "_prepare_vm", prepare)
     monkeypatch.setattr(
         manager,
         "_ensure_pid",
         lambda *args, **kwargs: pytest.fail("session describe repaired durable runtime identity"),
     )
-    monkeypatch.setattr(manager, "check_session_status", lambda row, *, target: SessionStatus.OK)
+    monkeypatch.setattr(manager, "observe_session_status", lambda *_args: SessionStatus.RUNNING)
 
     live = CliRunner().invoke(app, ["session", "describe", "live", "--output", "json"])
     assert live.exit_code == 0, live.output
@@ -655,7 +659,7 @@ def test_session_describe_json_is_read_only_and_maps_stopped_pid_with_degraded_t
         {"console_name": "zeta", "position": 1},
     ]
 
-    monkeypatch.setattr(manager, "check_session_status", lambda row, *, target: SessionStatus.STOPPED)
+    monkeypatch.setattr(manager, "observe_session_status", lambda *_args: SessionStatus.STOPPED)
     stopped = CliRunner().invoke(app, ["session", "describe", "stopped", "--output", "json"])
     assert stopped.exit_code == 0, stopped.output
     stopped_record = json.loads(stopped.stdout_bytes)["data"]["session"]
@@ -687,32 +691,9 @@ def test_session_list_and_describe_degrade_harness_integration_without_error_tex
         db._conn.execute("UPDATE sessions SET template = 'missing-template'")
         db._conn.commit()
 
-    @contextlib.contextmanager
-    def batch_boundary(*_args: object, **_kwargs: object) -> Iterator[None]:
-        yield
+    monkeypatch.setattr(manager, "observe_session_status", lambda *_args: SessionStatus.STOPPED)
 
-    @contextlib.contextmanager
-    def prepare(
-        db: Database,
-        config: object,
-        row: SessionRow,
-        *,
-        operation: str | None,
-        interaction: TtyInteractionPolicy,
-    ) -> Iterator[tuple[object, object, object, object, object]]:
-        del config, operation
-        assert interaction is TtyInteractionPolicy.ALLOW
-        workspace = db.get_workspace(row.workspace_name)
-        vm = db.get_vm("box")
-        assert workspace is not None and vm is not None
-        yield workspace, vm, object(), object(), object()
-
-    monkeypatch.setattr(manager, "_batch_vm_boundary", batch_boundary)
-    monkeypatch.setattr(manager, "_prepare_vm", prepare)
-    monkeypatch.setattr(manager, "_ensure_pid", lambda row, *, target, db: row)
-    monkeypatch.setattr(manager, "check_session_status", lambda row, *, target: SessionStatus.STOPPED)
-
-    listing = CliRunner().invoke(app, ["session", "list", "--no-status", "--output", "json"])
+    listing = CliRunner().invoke(app, ["session", "list", "--output", "json"])
     description = CliRunner().invoke(app, ["session", "describe", "stopped", "--output", "json"])
 
     assert listing.exit_code == description.exit_code == 0

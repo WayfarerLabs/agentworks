@@ -46,6 +46,22 @@ def test_lima_stop_skips_when_already_stopped(monkeypatch: pytest.MonkeyPatch, c
     platform.stop(_vm(), RunContext())  # type: ignore[arg-type]
 
 
+def test_lima_status_uses_bounded_provider_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    platform = LimaPlatform("lima", {"placement": {"mode": "local"}})
+    calls: list[dict[str, object]] = []
+
+    def run(_command: str, **kwargs: object) -> str:
+        calls.append(kwargs)
+        return '{"status":"Running"}\n'
+
+    monkeypatch.setattr(platform, "_run_lima", run)
+
+    assert platform.status(_vm(), RunContext()) is VMStatus.RUNNING  # type: ignore[arg-type]
+    assert calls == [{"check": False, "timeout": 10}]
+
+
 def test_lima_start_proceeds_when_stopped(monkeypatch: pytest.MonkeyPatch, captured_output: object) -> None:
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
@@ -79,6 +95,43 @@ def test_proxmox_stop_skips_when_already_stopped(monkeypatch: pytest.MonkeyPatch
     )
     monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, vm, ctx: VMStatus.STOPPED)
     platform.stop(_vm(), RunContext())  # type: ignore[arg-type]
+
+
+def test_proxmox_status_uses_bounded_provider_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+
+    platform = ProxmoxPlatform(
+        "px",
+        {"api_url": "https://pve:8006", "node": "n", "token_id": "t", "template_vmid": 1},
+    )
+    calls: list[tuple[str, int, float | None]] = []
+
+    class _API:
+        def vm_status(self, node: str, vmid: int, *, timeout: float | None = None) -> dict[str, str]:
+            calls.append((node, vmid, timeout))
+            return {"status": "running"}
+
+    monkeypatch.setattr(platform, "_api", lambda _ctx: _API())
+    vm = SimpleNamespace(name="v1", platform_metadata={"node": "pve", "vmid": 100})
+
+    assert platform.status(vm, RunContext()) is VMStatus.RUNNING  # type: ignore[arg-type]
+    assert calls == [("pve", 100, 10)]
+
+
+def test_wsl2_status_uses_bounded_provider_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.capabilities.vm_platform import wsl2 as wsl2_mod
+    from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
+
+    calls: list[dict[str, object]] = []
+
+    def run(_args: list[str], **kwargs: object) -> str:
+        calls.append(kwargs)
+        return "v1 Running 2\n"
+
+    monkeypatch.setattr(wsl2_mod, "_wsl", run)
+
+    assert WSL2Platform("wsl2", {}).status(_vm(), RunContext()) is VMStatus.RUNNING  # type: ignore[arg-type]
+    assert calls == [{"check": False, "timeout": 10}]
 
 
 def test_wsl2_stop_skips_when_already_stopped(monkeypatch: pytest.MonkeyPatch, captured_output: object) -> None:

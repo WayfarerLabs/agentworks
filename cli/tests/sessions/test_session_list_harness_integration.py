@@ -6,11 +6,8 @@ harness integration column between TEMPLATE and MODE. These pins cover the colum
 value for the default (``shell``) and a declared ``claude-code``
 template, the guard that a template which fails to resolve shows ``-``
 without aborting the render, the 20-char truncation the shared
-``output.render_table`` helper applies, that ``--no-status`` still shows
+``output.render_table`` helper applies, that plain local inventory still shows
 the harness integration, and that ``--names-only`` stays pure (no registry cost).
-
-All tests drive ``no_status=True`` so the listing never touches SSH; the
-HARNESS INTEGRATION derivation is orthogonal to the STATUS batch.
 """
 
 from __future__ import annotations
@@ -73,7 +70,7 @@ def test_list_shows_harness_integration_column_between_template_and_mode(
     _seed_session(db, "s-shell", "ws-box", "default")
     _seed_session(db, "s-claude", "ws-box", "claude")
 
-    session_manager.list_sessions(db, config, no_status=True, interaction=TtyInteractionPolicy.REFUSE)
+    session_manager.list_sessions(db, config, interaction=TtyInteractionPolicy.REFUSE)
 
     _header, rows = _header_and_rows(captured_output.info)
     by_name = {row.split()[0]: row.split() for row in rows}
@@ -98,7 +95,6 @@ def test_listing_uses_the_live_session_overlay_harness_integration(
     listing = session_manager.session_listing(
         db,
         config,
-        no_status=True,
         interaction=TtyInteractionPolicy.REFUSE,
     )
 
@@ -117,7 +113,7 @@ def test_list_unresolvable_template_shows_dash_and_still_renders(
     _seed_session(db, "s-good", "ws-box", "default")
     _seed_session(db, "s-bad", "ws-box", "ghost-template")
 
-    session_manager.list_sessions(db, config, no_status=True, interaction=TtyInteractionPolicy.REFUSE)
+    session_manager.list_sessions(db, config, interaction=TtyInteractionPolicy.REFUSE)
 
     _header, rows = _header_and_rows(captured_output.info)
     by_name = {row.split()[0]: row.split() for row in rows}
@@ -136,7 +132,7 @@ def test_list_truncates_over_cap_values_with_ellipsis(
     _seed_vm(db, "box", "ws-box")
     _seed_session(db, long_name, "ws-box", "default")
 
-    session_manager.list_sessions(db, config, no_status=True, interaction=TtyInteractionPolicy.REFUSE)
+    session_manager.list_sessions(db, config, interaction=TtyInteractionPolicy.REFUSE)
 
     _header, rows = _header_and_rows(captured_output.info)
     assert rows[0].startswith(long_name[:17] + "...")
@@ -161,7 +157,7 @@ def test_list_mode_column_uses_wider_cap(
         socket_path="/tmp/s1.sock",
     )
 
-    session_manager.list_sessions(db, config, no_status=True, interaction=TtyInteractionPolicy.REFUSE)
+    session_manager.list_sessions(db, config, interaction=TtyInteractionPolicy.REFUSE)
 
     _header, rows = _header_and_rows(captured_output.info)
     mode_cell = re.split(r" {2,}", rows[0])[5]
@@ -169,24 +165,23 @@ def test_list_mode_column_uses_wider_cap(
     assert mode_cell.endswith("...")
 
 
-def test_list_no_status_still_shows_harness_integration(
+def test_plain_list_shows_harness_integration_without_status(
     db: Database,
     make_config,  # noqa: ANN001
     captured_output,  # noqa: ANN001
 ) -> None:
-    # --no-status skips only the SSH STATUS batch; HARNESS INTEGRATION is cheap and
-    # stays. STATUS renders as "-" for every row.
+    # Plain list performs no SSH work but retains the local harness declaration.
     config = make_config()
     _seed_vm(db, "box", "ws-box")
     _seed_session(db, "s1", "ws-box", "default")
 
-    session_manager.list_sessions(db, config, no_status=True, interaction=TtyInteractionPolicy.REFUSE)
+    session_manager.list_sessions(db, config, interaction=TtyInteractionPolicy.REFUSE)
 
     header, rows = _header_and_rows(captured_output.info)
     assert "HARNESS" in header
+    assert "STATUS" not in header
     fields = rows[0].split()
     assert "shell" in fields
-    assert fields[-1] == "-"
 
 
 def test_list_resolves_each_distinct_template_at_most_once(
@@ -210,7 +205,7 @@ def test_list_resolves_each_distinct_template_at_most_once(
 
     monkeypatch.setattr(session_manager, "_display_harness_integration", _counting)
 
-    session_manager.list_sessions(db, config, no_status=True, interaction=TtyInteractionPolicy.REFUSE)
+    session_manager.list_sessions(db, config, interaction=TtyInteractionPolicy.REFUSE)
 
     assert seen == ["default"]
 
@@ -237,7 +232,7 @@ def test_list_bad_registry_degrades_harness_integration_to_dash_and_still_render
 
     monkeypatch.setattr(bootstrap, "build_registry", _boom)
 
-    session_manager.list_sessions(db, config, no_status=True, interaction=TtyInteractionPolicy.REFUSE)
+    session_manager.list_sessions(db, config, interaction=TtyInteractionPolicy.REFUSE)
 
     header, rows = _header_and_rows(captured_output.info)
     assert "HARNESS" in header
@@ -264,6 +259,6 @@ def test_names_only_stays_pure_and_pays_no_registry_cost(
 
     monkeypatch.setattr(bootstrap, "build_registry", _boom)
 
-    session_manager.list_sessions(db, config, no_status=True, names_only=True, interaction=TtyInteractionPolicy.REFUSE)
+    session_manager.list_sessions(db, config, names_only=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert captured_output.info == ["s1"]

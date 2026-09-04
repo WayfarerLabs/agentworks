@@ -42,7 +42,7 @@ class SessionMode(Enum):
 class SessionStatus(Enum):
     """Session liveness state, computed live from has-session + PID/boot_id checks."""
 
-    OK = "ok"
+    RUNNING = "running"
     STOPPED = "stopped"
     RESIDUAL = "residual"
     BROKEN = "broken"

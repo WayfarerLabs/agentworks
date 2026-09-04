@@ -153,7 +153,7 @@ def test_vm_describe_json_suppresses_the_ordinary_resolver_presentation(
     machine = CliRunner().invoke(app, ["vm", "describe", "box", "--output", "json"])
 
     assert human.exit_code == machine.exit_code == 0, machine.output
-    assert human.stdout_bytes.startswith(b"Name:")
+    assert human.stdout_bytes.startswith(b"Checking VM 'box' runtime...")
     assert human.stderr_bytes == b""
     document = _assert_json_envelope_only(machine, "vm.describe")
     assert machine.stderr_bytes == b""
@@ -175,102 +175,56 @@ def test_vm_describe_json_suppresses_the_ordinary_resolver_presentation(
     ]
 
 
-def test_session_describe_uses_the_same_real_gate_chain_for_both_formats(
+def test_session_describe_bypasses_activation_for_both_formats(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Typer reaches _prepare_vm, gated_vm_boundary, and gate_secret_resolver unchanged."""
-    from agentworks.orchestration import activation
+    """Session observation never enters the activation composition root."""
     from agentworks.sessions import manager as sessions
-    from agentworks.vms import manager as vms
 
     config = make_config()
     _seed_session(db)
     _wire_cli(monkeypatch, db, config)
-    _platform_fast_path(monkeypatch)
-    _install_skipped_backend(monkeypatch)
-    monkeypatch.setattr(sessions, "_ensure_pid", lambda row, *, target, db: row)
-    monkeypatch.setattr(sessions, "check_session_status", lambda row, *, target: SessionStatus.STOPPED)
+    monkeypatch.setattr(sessions, "observe_session_status", lambda *_args: SessionStatus.STOPPED)
 
     chain: list[str] = []
-    real_prepare = sessions._prepare_vm
-    from agentworks.vms.manager import boundary as vm_boundary
-
-    real_boundary = vm_boundary.gated_vm_boundary
-    real_gate_resolver = activation.gate_secret_resolver
 
     @contextlib.contextmanager
     def prepare(*args: object, **kwargs: object) -> Iterator[object]:
         chain.append("_prepare_vm")
-        with real_prepare(*args, **kwargs) as value:  # type: ignore[arg-type]
-            yield value
-
-    @contextlib.contextmanager
-    def boundary(*args: object, **kwargs: object) -> Iterator[object]:
-        chain.append("gated_vm_boundary")
-        with real_boundary(*args, **kwargs) as value:  # type: ignore[arg-type]
-            yield value
-
-    def gate_resolver(*args: object, **kwargs: object):  # noqa: ANN202
-        chain.append("gate_secret_resolver")
-        return real_gate_resolver(*args, **kwargs)  # type: ignore[arg-type]
+        yield object()
 
     monkeypatch.setattr(sessions, "_prepare_vm", prepare)
-    monkeypatch.setattr("agentworks.sessions.manager._scope.gated_vm_boundary", boundary)
-    monkeypatch.setattr(activation, "gate_secret_resolver", gate_resolver)
-    monkeypatch.setattr(vms, "_is_tailscale_reachable", lambda _host: True)
 
     human = CliRunner().invoke(app, ["session", "describe", "session-a", "--output", "human"])
     machine = CliRunner().invoke(app, ["session", "describe", "session-a", "--output", "json"])
 
     assert human.exit_code == machine.exit_code == 0, machine.output
-    assert human.stdout_bytes.startswith(b"Name:")
+    assert human.stdout_bytes.startswith(b"Checking session 'session-a' runtime...")
     assert human.stderr_bytes == b""
     _assert_json_envelope_only(machine, "session.describe")
     assert machine.stderr_bytes == b""
-    assert chain == [
-        "_prepare_vm",
-        "gated_vm_boundary",
-        "gate_secret_resolver",
-        "_prepare_vm",
-        "gated_vm_boundary",
-        "gate_secret_resolver",
-    ]
+    assert chain == []
     for excluded in (b"SECRET_HARNESS_STATE", b"SECRET_SOCKET"):
         assert excluded not in machine.stdout_bytes
 
 
-def test_session_list_status_is_read_only_inside_the_resolution_path(
+def test_session_list_status_bypasses_provider_resolution_and_activation(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The batch boundary and lazy rejoin-key pass are presentation-neutral."""
-    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+    """Explicit session status uses only its non-activating observer."""
     from agentworks.sessions import manager as sessions
-    from agentworks.vms import manager as vms
 
-    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "late-repair-value")
     config = make_config()
     _seed_session(db)
     db.update_session_runtime(
         "session-a", socket_path="/tmp/SECRET_SOCKET", pid=None, boot_id=None, tmux_server_start_ticks=None
     )
     _wire_cli(monkeypatch, db, config)
-    _install_skipped_backend(monkeypatch)
     calls = _resolution_spy(monkeypatch)
-    monkeypatch.setattr(vms, "_tailscale_rejoin_required", lambda *_args, **_kwargs: True)
-    monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.STOPPED)
-    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: None)
-    keys: list[str] = []
-
-    def reconnect(*_args: object, auth_keys=None, auth_key_name=None, **_kwargs: object) -> None:  # noqa: ANN001
-        assert auth_keys is not None
-        assert auth_key_name is not None
-        keys.append(auth_keys.get(auth_key_name))
-
-    monkeypatch.setattr(vms, "_ensure_tailscale", reconnect)
     monkeypatch.setattr(
         sessions,
         "ensure_pids_batch",
@@ -278,64 +232,36 @@ def test_session_list_status_is_read_only_inside_the_resolution_path(
     )
     monkeypatch.setattr(
         sessions,
-        "batch_check_all_sessions",
-        lambda rows, *, db, config: {"session-a": SessionStatus.OK},
+        "observe_session_statuses",
+        lambda rows, *, db, config: {"session-a": SessionStatus.RUNNING},
     )
 
-    machine = CliRunner().invoke(app, ["session", "list", "--output", "json"])
+    machine = CliRunner().invoke(app, ["session", "list", "--status", "--output", "json"])
     unchanged = db.get_session("session-a")
 
     assert machine.exit_code == 0, machine.output
     _assert_json_envelope_only(machine, "session.list")
     assert machine.stderr_bytes == b""
     assert unchanged is not None and (unchanged.pid, unchanged.boot_id) == (None, None)
-    assert keys == ["late-repair-value"]
-    assert calls == [
-        (
-            ("proxmox-token",),
-            ("env-var", "env-var", "prompt"),
-            "unavailable",
-            False,
-        ),
-        (
-            ("tailscale-auth-key",),
-            ("env-var", "env-var", "prompt"),
-            "unavailable",
-            False,
-        ),
-    ]
+    assert calls == []
 
     calls.clear()
-    keys.clear()
     db.update_session_runtime(
         "session-a", socket_path="/tmp/SECRET_SOCKET", pid=None, boot_id=None, tmux_server_start_ticks=None
     )
-    human = CliRunner().invoke(app, ["session", "list", "--output", "human"])
+    human = CliRunner().invoke(app, ["session", "list", "--status", "--output", "human"])
     assert human.exit_code == 0, human.output
-    assert b"VM 'box' is stopped. Starting..." in human.stdout_bytes.splitlines()
+    assert b"STATUS" in human.stdout_bytes
     assert human.stderr_bytes == b""
-    assert calls == [
-        (
-            ("proxmox-token",),
-            ("env-var", "env-var", "prompt"),
-            "unavailable",
-            False,
-        ),
-        (
-            ("tailscale-auth-key",),
-            ("env-var", "env-var", "prompt"),
-            "unavailable",
-            False,
-        ),
-    ]
+    assert calls == []
 
 
-def test_session_json_suppresses_activation_output_around_the_envelope(
+def test_session_json_never_enters_activation_around_the_envelope(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Request-local suppression keeps activation presentation out of JSON stdout."""
+    """Describe JSON reaches only the non-activating session observer."""
     from agentworks import output
     from agentworks.plugins.proxmox.platform import ProxmoxPlatform
     from agentworks.sessions import manager as sessions
@@ -348,8 +274,7 @@ def test_session_json_suppresses_activation_output_around_the_envelope(
     monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.STOPPED)
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: output.info("ACTIVATION_OUTPUT_SENTINEL"))
     monkeypatch.setattr(vms, "_ensure_tailscale", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(sessions, "_ensure_pid", lambda row, *, target, db: row)
-    monkeypatch.setattr(sessions, "check_session_status", lambda row, *, target: SessionStatus.STOPPED)
+    monkeypatch.setattr(sessions, "observe_session_status", lambda *_args: SessionStatus.STOPPED)
 
     result = CliRunner().invoke(app, ["session", "describe", "session-a", "--output", "json"])
 
@@ -636,4 +561,5 @@ def test_vm_describe_propagates_operator_abort_in_service_and_both_cli_formats(
         result = CliRunner().invoke(app, ["vm", "describe", "box", "--output", output_format])
         assert result.exit_code == 1
         assert isinstance(result.exception, UserAbort)
-        assert result.stdout_bytes == b""
+        if output_format == "json":
+            assert result.stdout_bytes == b""

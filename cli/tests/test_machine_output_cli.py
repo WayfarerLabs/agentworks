@@ -57,7 +57,7 @@ def test_operational_list_json_commands_are_closed_parseable_envelopes(monkeypat
         (["vm", "list", "--output", "json"], "vm.list", "vms"),
         (["workspace", "list", "--output", "json"], "workspace.list", "workspaces"),
         (["agent", "list", "--output", "json"], "agent.list", "agents"),
-        (["session", "list", "--output", "json", "--no-status"], "session.list", "sessions"),
+        (["session", "list", "--output", "json"], "session.list", "sessions"),
         (["console", "list", "--output", "json"], "console.list", "consoles"),
     ):
         result = CliRunner().invoke(app, argv)
@@ -81,10 +81,14 @@ def test_operational_json_usage_errors_have_empty_stdout_before_work(monkeypatch
     for argv in (
         ["vm", "list", "--output", "yaml"],
         ["vm", "list", "--names-only", "--output", "json"],
+        ["vm", "list", "--names-only", "--status"],
         ["workspace", "list", "--names-only", "--output", "json"],
         ["agent", "list", "--names-only", "--output", "json"],
         ["session", "list", "--names-only", "--output", "json"],
+        ["session", "list", "--names-only", "--status"],
+        ["session", "list", "--status", "--no-status"],
         ["console", "list", "--names-only", "--output", "json"],
+        ["console", "list", "--names-only", "--status"],
     ):
         result = CliRunner().invoke(app, argv)
         assert result.exit_code != 0
@@ -283,7 +287,7 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
             ["console", "describe", "c", "--output", "json"],
             "console.describe",
             "console",
-            ["name", "vm_name", "admin_shell", "created_at", "updated_at", "sessions"],
+            ["name", "vm_name", "admin_shell", "created_at", "updated_at", "status", "sessions"],
         ),
     ):
         first = CliRunner().invoke(app, argv)

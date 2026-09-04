@@ -209,7 +209,7 @@ def test_restart_reads_uuid_and_detects_after_killing_old_workload(
     _common_stubs(monkeypatch, _GrokTarget(events, session_present=True))
     _capture_tmux(monkeypatch, events, captured)
     monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, **kwargs: session)
-    monkeypatch.setattr(session_manager, "check_session_status", lambda *args, **kwargs: SessionStatus.OK)
+    monkeypatch.setattr(session_manager, "check_session_status", lambda *args, **kwargs: SessionStatus.RUNNING)
 
     def teardown(*args: object, **kwargs: object) -> None:
         events.append("kill")

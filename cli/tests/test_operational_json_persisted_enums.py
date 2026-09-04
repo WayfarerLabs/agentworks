@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 from enum import Enum
 from types import SimpleNamespace
@@ -22,7 +21,7 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from tests.instance_state_support import stub_instance_state
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable
 
     from agentworks.config import Config
     from agentworks.db import Database
@@ -85,7 +84,6 @@ def test_invalid_database_enums_are_closed_in_shared_facts(
     session_fact = session_listing(
         db,
         config,
-        no_status=True,
         interaction=TtyInteractionPolicy.REFUSE,
     ).sessions[0]
     assert session_fact.mode == "unknown"
@@ -105,13 +103,7 @@ def test_real_list_and_describe_clis_never_echo_invalid_persisted_enums(
     config = make_config()
     _wire_cli(monkeypatch, db, config)
 
-    @contextlib.contextmanager
-    def prepared_vm(*_args: object, **_kwargs: object) -> Iterator[object]:
-        yield db.get_workspace("ws"), db.get_vm("box"), None, None, object()
-
-    monkeypatch.setattr(sessions, "_prepare_vm", prepared_vm)
-    monkeypatch.setattr(sessions, "_ensure_pid", lambda row, **_kwargs: row)
-    monkeypatch.setattr(sessions, "check_session_status", lambda row, **_kwargs: SessionStatus.STOPPED)
+    monkeypatch.setattr(sessions, "observe_session_status", lambda *_args: SessionStatus.STOPPED)
     platform = SimpleNamespace(
         name="fixture-platform",
         display_backend_name=lambda _vm: "fixture-backend",
@@ -130,7 +122,7 @@ def test_real_list_and_describe_clis_never_echo_invalid_persisted_enums(
     vm_list = runner.invoke(app, ["vm", "list", "--output", "json"])
     vm_describe = runner.invoke(app, ["vm", "describe", "box", "--output", "json"])
     workspace_describe = runner.invoke(app, ["workspace", "describe", "ws", "--output", "json"])
-    session_list = runner.invoke(app, ["session", "list", "--no-status", "--output", "json"])
+    session_list = runner.invoke(app, ["session", "list", "--output", "json"])
     session_describe = runner.invoke(app, ["session", "describe", "session-a", "--output", "json"])
 
     vm_data = _json_data(vm_list)
@@ -159,7 +151,7 @@ def test_real_list_and_describe_clis_never_echo_invalid_persisted_enums(
         ["vm", "list", "--output", "human"],
         ["vm", "describe", "box", "--output", "human"],
         ["workspace", "describe", "ws", "--output", "human"],
-        ["session", "list", "--no-status", "--output", "human"],
+        ["session", "list", "--output", "human"],
         ["session", "describe", "session-a", "--output", "human"],
     )
     all_output = b"".join(runner.invoke(app, command).stdout_bytes for command in human_commands)

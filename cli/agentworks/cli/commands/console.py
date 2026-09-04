@@ -51,7 +51,7 @@ def console_create(
         bool,
         typer.Option(
             "--all-running",
-            help=("Like --all but only sessions whose live tmux state is OK (VM must be reachable)"),
+            help=("Like --all but only sessions whose live tmux state is running (VM must be reachable)"),
         ),
     ] = False,
     add_admin_shell: Annotated[
@@ -116,6 +116,7 @@ def console_list(
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace")] = None,
     agent: Annotated[str | None, typer.Option("--agent", help="Filter by agent")] = None,
+    status: Annotated[bool, typer.Option("--status", help="Include live runtime status")] = False,
     names_only: Annotated[
         bool,
         typer.Option(
@@ -136,28 +137,54 @@ def console_list(
     """
     if names_only and output_format is OutputFormat.JSON:
         raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
+    if status and names_only:
+        raise typer.BadParameter("cannot be used with --names-only", param_hint="--status")
 
     from agentworks.sessions.multi_console import console_listing, render_console_listing
 
-    listing = console_listing(
-        get_db(),
-        vm_name=parse_csv_filter(vm),
-        workspace_name=parse_csv_filter(workspace),
-        agent_name=parse_csv_filter(agent),
-    )
+    config = None
+    interaction = None
+    if status:
+        from agentworks.config import load_config
+
+        config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
+        interaction = ordinary_tty_interaction_policy()
     if output_format is OutputFormat.JSON:
         from click import get_binary_stream
 
+        from agentworks import output
         from agentworks.machine_output import MachineOutputCommand, write_json_envelope
         from agentworks.sessions.multi_console.attach import console_listing_data
 
+        with output.suppress_presentation():
+            listing = console_listing(
+                get_db(),
+                config=config,
+                vm_name=parse_csv_filter(vm),
+                workspace_name=parse_csv_filter(workspace),
+                agent_name=parse_csv_filter(agent),
+                include_status=status,
+                interaction=interaction,
+            )
         write_json_envelope(
             MachineOutputCommand.CONSOLE_LIST,
             console_listing_data(listing),
             get_binary_stream("stdout"),
         )
         return
-    render_console_listing(listing, names_only=names_only)
+    listing = console_listing(
+        get_db(),
+        config=config,
+        vm_name=parse_csv_filter(vm),
+        workspace_name=parse_csv_filter(workspace),
+        agent_name=parse_csv_filter(agent),
+        include_status=status,
+        interaction=interaction,
+    )
+    if status:
+        render_console_listing(listing, names_only=names_only, include_status=True)
+    else:
+        render_console_listing(listing, names_only=names_only)
 
 
 @console_app.command("describe")
@@ -169,21 +196,27 @@ def console_describe(
     ] = OutputFormat.HUMAN,
 ) -> None:
     """Show a console's membership and shell layout."""
+    interaction = ordinary_tty_interaction_policy()
+    from agentworks.config import load_config
     from agentworks.sessions.multi_console import console_description, render_console_description
 
-    description = console_description(get_db(), name=name)
+    config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
     if output_format is OutputFormat.JSON:
         from click import get_binary_stream
 
+        from agentworks import output
         from agentworks.machine_output import MachineOutputCommand, write_json_envelope
         from agentworks.sessions.multi_console.attach import console_description_data
 
+        with output.suppress_presentation():
+            description = console_description(get_db(), config, name=name, interaction=interaction)
         write_json_envelope(
             MachineOutputCommand.CONSOLE_DESCRIBE,
             console_description_data(description),
             get_binary_stream("stdout"),
         )
         return
+    description = console_description(get_db(), config, name=name, interaction=interaction)
     render_console_description(description)
 
 

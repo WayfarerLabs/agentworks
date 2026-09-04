@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import pytest
 
-from agentworks.db import SessionRow, SessionStatus
-from agentworks.errors import ConnectivityError, StateError
+from agentworks.db import SessionMode, SessionRow, SessionStatus
+from agentworks.errors import ConnectivityError, NotFoundError, StateError
 from agentworks.sessions.manager import (
     _needs_repair,
     _repair_session_pid,
     _validated_stored_start_ticks,
     batch_check_status,
     check_session_status,
+    observe_session_statuses,
 )
 from agentworks.sessions.tmux import ProbeStatus, probe_tmux_server_pid
 
@@ -36,6 +38,7 @@ class _FakeTarget:
     def __init__(self, responses: dict[str, _FakeResult] | None = None) -> None:
         self._responses = responses or {}
         self.commands: list[str] = []
+        self.call_options: list[tuple[bool | None, int | None, int | None]] = []
 
     def run(
         self,
@@ -45,8 +48,10 @@ class _FakeTarget:
         sudo: bool = False,
         tty: bool | None = None,
         timeout: int | None = None,
+        retries: int | None = None,
     ) -> _FakeResult:
         self.commands.append(command)
+        self.call_options.append((tty, timeout, retries))
         for pattern, result in self._responses.items():
             if pattern in command:
                 return result
@@ -96,7 +101,7 @@ def _batch_row(
 
 
 def test_batch_mixed() -> None:
-    """Batch: agent OK, admin stopped, NULL-PID excluded."""
+    """Batch: agent running, admin stopped, NULL-PID excluded."""
     sessions = [
         _session("a1", pid=100, socket_path="/sock1", mode="agent", boot_id=BOOT_CURRENT),
         _session("s1", pid=200, socket_path="/sock2", mode="admin", boot_id=BOOT_CURRENT),
@@ -125,7 +130,7 @@ def test_batch_mixed() -> None:
         }
     )
     result = batch_check_status(sessions, target=target)
-    assert result["a1"] == SessionStatus.OK
+    assert result["a1"] == SessionStatus.RUNNING
     assert result["s1"] == SessionStatus.STOPPED
     assert "s2" not in result
 
@@ -139,6 +144,15 @@ def test_batch_all_missing_pid() -> None:
     assert batch_check_status(sessions, target=_FakeTarget()) == {}
 
 
+def test_session_observer_preserves_missing_workspace_as_structural_failure() -> None:
+    class _DB:
+        def get_workspace(self, _name: str) -> None:
+            return None
+
+    with pytest.raises(NotFoundError, match="workspace 'ws' not found"):
+        observe_session_statuses([_session("s1", socket_path="/sock")], db=_DB(), config=object())  # type: ignore[arg-type]
+
+
 def test_batch_builds_compound_command() -> None:
     """Compound command includes has-session for both agent and admin sessions."""
     sessions = [
@@ -148,6 +162,7 @@ def test_batch_builds_compound_command() -> None:
     target = _FakeTarget({"has-session": _FakeResult(ok=True, stdout=f"{_batch_row('a1')}\n{_batch_row('s1')}\n")})
     batch_check_status(sessions, target=target)
     assert len(target.commands) == 1
+    assert target.call_options == [(False, 10, 1)]
     assert "has-session" in target.commands[0]
     assert "sudo -n tmux -S /sock has-session" in target.commands[0]
     assert "sudo -n sh -c 'if test -d /proc/100; then printf present; else printf absent; fi'" in target.commands[0]
@@ -219,10 +234,10 @@ BOOT_STALE = "11111111-2222-3333-4444-555555555555"
 
 
 def test_agent_ok() -> None:
-    """Agent session: has-session succeeds -> OK."""
+    """Agent session: has-session succeeds and reports running."""
     session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
     target = _FakeTarget({"has-session": _FakeResult(ok=True)})
-    assert check_session_status(session, target=target) == SessionStatus.OK
+    assert check_session_status(session, target=target) == SessionStatus.RUNNING
 
 
 def test_agent_stopped_pid_dead() -> None:
@@ -347,10 +362,10 @@ def test_reachable_server_without_canonical_session_is_residual() -> None:
 
 
 def test_admin_ok() -> None:
-    """Admin session: has-session succeeds -> OK."""
+    """Admin session: has-session succeeds and reports running."""
     session = _session("s1", pid=42, socket_path="/sock", mode="admin", boot_id=BOOT_CURRENT)
     target = _FakeTarget({"has-session": _FakeResult(ok=True)})
-    assert check_session_status(session, target=target) == SessionStatus.OK
+    assert check_session_status(session, target=target) == SessionStatus.RUNNING
 
 
 def test_admin_stopped_dead_pid() -> None:
@@ -434,7 +449,7 @@ def test_incomplete_dedicated_identity_is_live_when_exact_tmux_session_is_presen
     session = _session("s1", pid=pid, socket_path="/sock", boot_id=boot_id)
     target = _FakeTarget({"has-session": _FakeResult(ok=True)})
 
-    assert check_session_status(session, target=target) == SessionStatus.OK
+    assert check_session_status(session, target=target) == SessionStatus.RUNNING
     assert len(target.commands) == 1
 
 
@@ -463,8 +478,14 @@ def test_incomplete_dedicated_identity_stays_unknown_when_tmux_is_absent(
 def test_stopped_pid_sentinel() -> None:
     from agentworks.db import PID_STOPPED
 
-    session = _session("s1", pid=PID_STOPPED)
-    assert check_session_status(session, target=_FakeTarget()) == SessionStatus.STOPPED
+    session = _session("s1", pid=PID_STOPPED, socket_path="/sock")
+    target = _FakeTarget(
+        {
+            "has-session": _FakeResult(ok=False, stderr="can't find session: s1"),
+            "list-sessions": _FakeResult(ok=False, stderr="no server running on /sock"),
+        }
+    )
+    assert check_session_status(session, target=target) == SessionStatus.STOPPED
 
 
 # -- get_tmux_server_pid ----------------------------------------------------
@@ -491,27 +512,38 @@ def test_probe_pid_with_socket() -> None:
 
 
 def test_batch_status_pid_stopped_not_unknown() -> None:
-    """PID_STOPPED sessions should NOT appear in batch status_map (by design)
-    and should NOT be treated as unknown by batch commands."""
+    """Persisted-stopped rows are classified only after live tmux absence."""
     from agentworks.db import PID_STOPPED
 
     sessions = [
         _session("ok1", pid=100, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT),
-        _session("stopped1", pid=PID_STOPPED, boot_id=BOOT_CURRENT),
+        _session("stopped1", pid=PID_STOPPED, socket_path="/stopped", boot_id=BOOT_CURRENT),
     ]
-    target = _FakeTarget({"has-session": _FakeResult(ok=True, stdout=f"{_batch_row('ok1')}\n")})
+    target = _FakeTarget(
+        {
+            "has-session": _FakeResult(
+                ok=True,
+                stdout="\n".join(
+                    (
+                        _batch_row("ok1"),
+                        _batch_row(
+                            "stopped1",
+                            has_returncode=1,
+                            has_diagnostic="can't find session: stopped1",
+                            server_returncode=1,
+                            server_diagnostic="no server running on /stopped",
+                            pid_returncode=1,
+                            pid_fact="",
+                        ),
+                    )
+                ),
+            )
+        }
+    )
     result = batch_check_status(sessions, target=target)
 
-    # ok1 should be in the map, stopped1 should NOT (excluded by design)
-    assert result["ok1"] == SessionStatus.OK
-    assert "stopped1" not in result
-
-    # The unknown detection logic should NOT flag stopped1:
-    # s.pid == PID_STOPPED -> skip
-    unknown = [
-        s for s in sessions if s.pid != PID_STOPPED and (s.pid is None or s.boot_id is None or s.name not in result)
-    ]
-    assert unknown == []
+    assert result["ok1"] == SessionStatus.RUNNING
+    assert result["stopped1"] == SessionStatus.STOPPED
 
 
 # -- _check_dedicated_agent_session edge cases ------------------------------
@@ -634,6 +666,47 @@ def test_batch_malformed_stored_boot_id_does_not_drop_valid_sibling() -> None:
 
     assert result["valid"] is SessionStatus.STOPPED
     assert result["invalid"] is SessionStatus.UNKNOWN
+
+
+def test_session_observer_isolates_one_vm_transport_failure(
+    db,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sessions: list[SessionRow] = []
+    for vm_name in ("vm-a", "vm-b"):
+        db.insert_vm(vm_name, site="site", hostname=vm_name)
+        db.update_vm_tailscale(vm_name, f"100.64.0.{1 if vm_name == 'vm-a' else 2}")
+        workspace_name = f"ws-{vm_name}"
+        session_name = f"session-{vm_name}"
+        db.insert_workspace(workspace_name, f"/srv/{workspace_name}", vm_name, workspace_name)
+        db.insert_session(
+            session_name,
+            workspace_name,
+            "default",
+            SessionMode.ADMIN,
+            socket_path=f"/tmp/{session_name}.sock",
+        )
+        session = db.get_session(session_name)
+        assert session is not None
+        sessions.append(session)
+
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "agentworks.sessions.manager.transport",
+        lambda vm, _config, **_kwargs: SimpleNamespace(vm_name=vm.name),
+    )
+
+    def batch(rows: list[SessionRow], *, target: object, **_kwargs: object) -> dict[str, SessionStatus]:
+        if target.vm_name == "vm-b":  # type: ignore[attr-defined]
+            raise ConnectivityError("offline")
+        return {row.name: SessionStatus.RUNNING for row in rows}
+
+    monkeypatch.setattr("agentworks.sessions.manager._status.batch_check_status", batch)
+
+    assert observe_session_statuses(sessions, db=db, config=object()) == {
+        "session-vm-a": SessionStatus.RUNNING,
+        "session-vm-b": SessionStatus.UNKNOWN,
+    }
 
 
 # -- _ensure_pid strict gate ------------------------------------------------

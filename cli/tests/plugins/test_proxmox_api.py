@@ -109,6 +109,14 @@ class TestResponseParsing:
         assert result["vmid"] == 100
 
     @patch("urllib.request.urlopen")
+    def test_vm_status_forwards_status_only_timeout(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
+        mock_urlopen.return_value = _mock_response({"status": "running"})
+
+        api.vm_status("pve", 100, timeout=10)
+
+        assert mock_urlopen.call_args.kwargs["timeout"] == 10
+
+    @patch("urllib.request.urlopen")
     def test_guest_agent_network(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
         net_data = {
             "result": [

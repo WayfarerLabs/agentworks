@@ -84,6 +84,7 @@ def vm_create(
 
 @vm_app.command("list")
 def vm_list(
+    status: Annotated[bool, typer.Option("--status", help="Include live runtime status")] = False,
     names_only: Annotated[
         bool,
         typer.Option(
@@ -100,6 +101,8 @@ def vm_list(
     """List VMs."""
     if names_only and output_format is OutputFormat.JSON:
         raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
+    if status and names_only:
+        raise typer.BadParameter("cannot be used with --names-only", param_hint="--status")
 
     from agentworks.vms.manager import list_vms, render_vm_listing, vm_listing
 
@@ -107,20 +110,39 @@ def vm_list(
         list_vms(get_db(), names_only=True)
         return
 
-    listing = vm_listing(get_db())
+    config = None
+    interaction = None
+    if status:
+        from agentworks.config import load_config
+
+        config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
+        interaction = ordinary_tty_interaction_policy()
     if output_format is OutputFormat.JSON:
         from click import get_binary_stream
 
+        from agentworks import output
         from agentworks.machine_output import MachineOutputCommand, write_json_envelope
         from agentworks.vms.manager.inspect import vm_listing_data
 
+        with output.suppress_presentation():
+            listing = (
+                vm_listing(get_db(), config, include_status=True, interaction=interaction)
+                if status
+                else vm_listing(get_db())
+            )
         write_json_envelope(
             MachineOutputCommand.VM_LIST,
             vm_listing_data(listing),
             get_binary_stream("stdout"),
         )
         return
-    render_vm_listing(listing, names_only=names_only)
+    listing = (
+        vm_listing(get_db(), config, include_status=True, interaction=interaction) if status else vm_listing(get_db())
+    )
+    if status:
+        render_vm_listing(listing, names_only=names_only, include_status=True)
+    else:
+        render_vm_listing(listing, names_only=names_only)
 
 
 @vm_app.command("backup")

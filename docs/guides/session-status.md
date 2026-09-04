@@ -7,25 +7,30 @@ Linux process start time captured when the server is created.
 The persisted PID has three meanings:
 
 - `NULL`: runtime identity evidence is incomplete. Exact tmux presence can still prove the session
-  `OK`; absence stays `UNKNOWN` until a lifecycle operation can safely repair or replace it.
+  `RUNNING`; absence stays `UNKNOWN` until a lifecycle operation can safely repair or replace it.
 - `-1` (`PID_STOPPED`): the session is known to be stopped.
 - A positive PID paired with a boot ID and process start time: the last observed tmux server
   identity. The start time prevents PID reuse from matching an older server.
 
 Status checking asks the stored dedicated server for the exact canonical session name. Success is
-`OK`. If that session is absent but the server still responds, the status is `RESIDUAL`: managed
-windows or panes remain but the canonical session cannot be attached. If the server does not
+`RUNNING`. If that session is absent but the server still responds, the status is `RESIDUAL`:
+managed windows or panes remain but the canonical session cannot be attached. If the server does not
 respond, a changed VM boot ID or a provably absent fingerprint is `STOPPED`; a live matching
 fingerprint with an unreachable socket is `BROKEN`. An SSH transport failure or indeterminate
 identity is `UNKNOWN`, never evidence that the session stopped. Batch checks preserve the same
 derivation while combining sessions on a VM into one SSH request.
 
 Inspection is read-only. It probes exact tmux session/server presence first, so a reachable runtime
-can be reported `OK` or `RESIDUAL` without a complete stored fingerprint. Only an absent tmux server
-needs PID and boot evidence to distinguish `STOPPED` from `BROKEN`; incomplete or indeterminate
-evidence stays `UNKNOWN`. Batched checks use one remote status request per reachable VM, elevate
-only the tmux and process probes needed to inspect agent-owned runtimes, and never repair rows. The
-list view announces how many sessions and VMs it is checking before that remote work begins.
+can be reported `RUNNING` or `RESIDUAL` without a complete stored fingerprint. Only an absent tmux
+server needs PID and boot evidence to distinguish `STOPPED` from `BROKEN`; incomplete or
+indeterminate evidence stays `UNKNOWN`. Batched checks use one remote status request per reachable
+VM, elevate only the tmux and process probes needed to inspect agent-owned runtimes, and never
+repair rows. Each guest call is non-interactive, makes one attempt, and has a 10-second timeout.
+
+Plain `agw session list` is local inventory and does not run these probes. Add `--status` to request
+them; the table adds `STATUS` and reports progress before SSH begins. `agw session describe NAME`
+always performs one non-activating observation before rendering its configured facts. A stopped or
+unreachable VM remains stopped and yields `UNKNOWN` rather than being started for inspection.
 
 A lifecycle command that needs teardown or replacement may repair an incomplete reachable row from
 the server's reported PID and a stable double-read of its boot ID and process start time. A provably

@@ -33,6 +33,8 @@ if TYPE_CHECKING:
     from agentworks.resources.graph import Readiness
     from agentworks.transports import Transport
 
+_STATUS_TIMEOUT_SECONDS = 10
+
 
 # -- Win32 job-object machinery for orphan-proof subprocess cleanup ----------
 #
@@ -899,8 +901,8 @@ class WSL2Platform(VMPlatform):
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
         distro_name = self._distro_name(vm)
         try:
-            listing = _wsl(["--list", "--verbose"], check=False)
-        except RuntimeError:
+            listing = _wsl(["--list", "--verbose"], check=False, timeout=_STATUS_TIMEOUT_SECONDS)
+        except (RuntimeError, subprocess.TimeoutExpired):
             return VMStatus.UNKNOWN
 
         for line in listing.strip().splitlines():

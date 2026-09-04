@@ -104,13 +104,13 @@ exception. For example, `agw guide list` has no human table presentation to swit
 does not also expose `--names-only`. Its list form remains static and side-effect-free because it
 backs shell completion directly.
 
-**Render-only work is skipped under `--names-only`.** Anything computed purely for display (status
-columns that probe live state, formatted timestamps, derived counts) belongs after the
-short-circuit, not before. The `session list` SSH status batch is the precedent: it computes the
-STATUS column and is gated by the names-only check so completion doesn't pay SSH round-trips on
-every TAB press. Filter logic, on the other hand, runs the same way in both modes so the result set
-stays consistent. Completion fires often and must be fast and side-effect-free; the rule keeps it
-that way.
+**Render-only work is skipped under `--names-only`.** Anything computed purely for display
+(formatted timestamps, derived counts) belongs after the short-circuit, not before. Live status is
+an explicit enrichment: runnable lists use `--status`, while their plain and `--names-only` forms
+remain local inventory reads. `--status` and `--names-only` conflict rather than silently dropping
+the requested observation. Filter logic runs the same way in both modes so the result set stays
+consistent. Completion fires often and must be fast and side-effect-free; the rule keeps it that
+way.
 
 ## Service layer is the authority
 
