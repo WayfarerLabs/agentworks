@@ -1,6 +1,6 @@
 """Unknown names in the list/batch commands' name filters are hard errors.
 
-Issue #304: ``session resume --all-stopped --vm wf-test`` with no VM by
+Issue #304: ``session start --all --vm wf-test`` with no VM by
 that name reported "no sessions to restart" instead of failing. Every
 service-layer function that accepts name filters (``--vm`` /
 ``--workspace`` / ``--agent``) now validates them against the state
@@ -135,7 +135,7 @@ def test_session_list_valid_filter_empty_result_succeeds(
 
 
 # ---------------------------------------------------------------------------
-# session stop --all / session resume --all-stopped
+# session stop --all / session start --all
 # ---------------------------------------------------------------------------
 
 
@@ -154,21 +154,19 @@ def test_stop_all_sessions_valid_filter_empty_result_succeeds(
     assert any("No running sessions to stop" in m for m in captured_output.info)
 
 
-def test_resume_all_sessions_rejects_unknown_vm(db: Database) -> None:
-    """The issue #304 reproducer: restart --all-stopped with an unknown
+def test_start_all_sessions_rejects_unknown_vm(db: Database) -> None:
+    """The issue #304 reproducer: start --all with an unknown
     ``--vm`` must be a hard error, not "no sessions to restart"."""
     _seed(db)
     with pytest.raises(NotFoundError, match="unknown VM 'wf-test'"):
-        session_manager.resume_all_sessions(db, None, vm_name="wf-test", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
+        session_manager.start_all_sessions(db, None, vm_name="wf-test", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
 
-def test_resume_all_sessions_valid_filter_empty_result_succeeds(
+def test_start_all_sessions_valid_filter_empty_result_succeeds(
     db: Database,
-    captured_output: CapturedOutput,
 ) -> None:
     _seed(db)
-    session_manager.resume_all_sessions(db, None, vm_name="dev-vm", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
-    assert any("No matching sessions to resume" in m for m in captured_output.info)
+    session_manager.start_all_sessions(db, None, vm_name="dev-vm", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------

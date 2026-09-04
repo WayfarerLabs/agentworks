@@ -4,7 +4,7 @@ login shell) as the session workload.
 The plain, default member. Its config vocabulary is exactly
 the flat session-template fields the harness integration model replaces: ``command``
 (the pane command; empty = login shell), ``resume_command`` (the
-command on ``session resume``, falling back to ``command``), and
+command on ordinary session start/restart, falling back to ``command``), and
 ``required_commands`` (the executables the launch target must have on
 PATH). All optional.
 """
@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, ClassVar, Literal
 
 from pydantic import Field
 
-from agentworks.capabilities.harness_integration.base import HarnessIntegration, require_commands
+from agentworks.capabilities.harness_integration.base import HarnessIntegration, HarnessStart, require_commands
 from agentworks.schema import AgwModel
 from agentworks.topics import TopicProse
 
@@ -62,7 +62,7 @@ class ShellConfig(AgwModel):
 class ShellIntegration(HarnessIntegration):
     """Runs an operator command (or a login shell) as the session."""
 
-    contract_version: ClassVar[int] = 2
+    contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "shell"
     description: ClassVar[str] = "Run an operator command or a login shell"
     prose: ClassVar[TopicProse | None] = TopicProse(
@@ -71,7 +71,7 @@ class ShellIntegration(HarnessIntegration):
         Runs whatever you tell it to. With no `command`, the session is a bare login
         shell, which is what a session-template that selects no integration gets.
 
-        `resume_command` is what `agw session resume` runs instead, falling back to
+        `resume_command` is what ordinary `agw session start` and `restart` run, falling back to
         `command` when it is empty. That pair is enough to drive a harness with no
         dedicated integration of its own: launch it one way, reattach another. A real
         integration is more robust (it knows whether a session exists to resume), but
@@ -90,20 +90,15 @@ class ShellIntegration(HarnessIntegration):
         """This session's validated shell config."""
         return self._config_as(ShellConfig)
 
-    def start(self, ctx: RunContext) -> str:
-        """The pane command for ``session create``: ``command`` verbatim
-        (empty = a bare login shell)."""
-        return self.config.command
-
-    def resume(self, ctx: RunContext) -> str:
-        """The pane command for ``session resume``: ``resume_command``
-        when declared, else ``command`` (empty = login shell).
+    def start(self, ctx: RunContext, *, force_new: bool = False) -> HarnessStart:
+        """Select continuation by default and ``command`` for forced fresh.
 
         The remaining ``or`` is the cross-field derivation the model's
         own description states, not a fallback to a literal: an empty
         ``resume_command`` means "rerun ``command``", and ``command`` is
         already resolved by the time it is read."""
-        return self.config.resume_command or self.config.command
+        command = self.config.command if force_new else self.config.resume_command or self.config.command
+        return HarnessStart(command)
 
     def _probe_target(self, transport: Transport) -> None:
         require_commands(

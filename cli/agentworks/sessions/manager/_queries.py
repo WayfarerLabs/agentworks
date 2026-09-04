@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shlex
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
@@ -13,13 +12,12 @@ from agentworks.db.projections import project_session_mode, project_session_stat
 from agentworks.errors import (
     AgentworksError,
     BrokenStateError,
-    ExternalError,
     NotFoundError,
     StateError,
     UserAbort,
 )
 from agentworks.sessions._resource_cleanup import cleanup_now_empty_resource
-from agentworks.sessions.tmux import AGENT_SOCKET_ROOT
+from agentworks.sessions.tmux import exact_tmux_target
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -29,7 +27,6 @@ if TYPE_CHECKING:
     from agentworks.resources.registry import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.sessions.template import SessionTemplate
-    from agentworks.sessions.tmux import RunCommand
 
 
 @dataclass(frozen=True)
@@ -142,10 +139,20 @@ def delete_session(
         _run_as_root,
         admin_target,
     ):
-        session = _mgr._ensure_pid(session, target=admin_target, db=db)
-        status = _mgr.check_session_status(session, target=admin_target)
+        legacy = session.socket_path is None and session.pid is not None and session.pid > 0
+        if legacy:
+            status = SessionStatus.OK
+        else:
+            session = _mgr._ensure_pid(session, target=admin_target, db=db)
+            status = _mgr.check_session_status(session, target=admin_target)
 
-        # UNKNOWN is impossible here -- _ensure_pid raises on unresolvable sessions
+        if status == SessionStatus.UNKNOWN:
+            raise StateError(
+                f"session '{name}' runtime state is unknown",
+                entity_kind="session",
+                entity_name=name,
+                hint="Retry after transport access is reliable; no runtime was changed.",
+            )
         if status == SessionStatus.BROKEN and not force:
             raise BrokenStateError(
                 f"session '{name}' is broken (PID alive but tmux unreachable).",
@@ -161,52 +168,19 @@ def delete_session(
         # confirmed the delete. The helper returns a same-uid target, so
         # no sudo is needed for the destructive ops below.
         session_target = _mgr._build_session_target(session, vm=vm, config=config, db=db, admin_target=admin_target)
-        session_run_command: RunCommand = session_target.run
-        kill_sudo = False
 
         # Confirm before any destructive action
         if not yes and not output.confirm(f"Delete session '{name}'?"):
             raise UserAbort("delete cancelled")
 
-        # Now kill if needed
-        if status == SessionStatus.OK:
-            sock = session.socket_path
-            if not _mgr._kill_session(name, run_command=session_run_command, socket_path=sock):
-                # Race: session may have exited between check and kill. Recheck.
-                recheck = _mgr.check_session_status(session, target=admin_target)
-                if recheck != SessionStatus.STOPPED:
-                    raise ExternalError(
-                        f"failed to stop session '{name}' for deletion",
-                        entity_kind="session",
-                        entity_name=name,
-                    )
-        elif status == SessionStatus.BROKEN:
-            from agentworks.sessions.tmux import force_kill_tmux_server
-
-            output.warn(f"Session '{name}' is broken (tmux unreachable), force-killing via PID")
-            assert session.pid is not None
-            killed = force_kill_tmux_server(
-                session.pid,
+        if status != SessionStatus.STOPPED:
+            _mgr._teardown_session(
+                session,
                 target=session_target,
-                socket_path=session.socket_path,
-                log=output.detail,
-                use_sudo=kill_sudo,
+                target_owns_session=True,
+                db=db,
+                force=force,
             )
-            if not killed:
-                raise ExternalError(
-                    f"failed to kill PID {session.pid} for session '{name}'",
-                    entity_kind="session",
-                    entity_name=name,
-                )
-
-        # Clean up socket if the server is dead (don't remove a live socket)
-        sock = session.socket_path
-        if sock and sock.startswith(AGENT_SOCKET_ROOT + "/"):
-            post_status = _mgr.check_session_status(session, target=admin_target)
-            if post_status == SessionStatus.STOPPED:
-                session_target.run(f"rm -f {shlex.quote(sock)}", sudo=kill_sudo, check=False)
-            else:
-                output.warn(f"Session '{name}' status is {post_status.value} after delete, socket preserved at {sock}")
 
         # Capture console memberships before delete; the FK cascade on
         # console_sessions zeroes the join table the moment the session row goes.
@@ -467,7 +441,6 @@ def session_description(
             target,
         ):
             probe_started = True
-            session = _mgr._ensure_pid(session, target=target, db=db)
             status = _mgr.check_session_status(session, target=target)
             return _session_structural_description(db, config, name, status)
     except (NotFoundError, StateError) as error:
@@ -516,6 +489,7 @@ def _session_structural_description(
                 SessionStatus.OK: "running",
                 SessionStatus.STOPPED: "stopped",
                 SessionStatus.BROKEN: "broken",
+                SessionStatus.RESIDUAL: "residual",
                 SessionStatus.UNKNOWN: "unknown",
             }[status],
             pid=session.pid if session.pid is not None and session.pid > 0 else None,
@@ -674,7 +648,7 @@ def session_listing(
     no_status: bool = False,
     interaction: TtyInteractionPolicy,
 ) -> SessionListing:
-    """Collect ordered session list facts with the existing status repair pass."""
+    """Collect ordered session list facts with read-only live status checks."""
     sessions = _mgr.filter_sessions(
         db,
         workspace_name=workspace_name,
@@ -688,6 +662,11 @@ def session_listing(
     status_map: dict[str, SessionStatus] = {}
     status_keepalive_vms: list[VMRow] = [] if no_status else _mgr._distinct_vms_for_sessions(db, sessions)
     status_vm_names = frozenset(vm.name for vm in status_keepalive_vms)
+    if not no_status:
+        output.info(
+            f"Checking status for {output.count(len(sessions), 'session')} "
+            f"across {output.count(len(status_keepalive_vms), 'VM')}..."
+        )
     with _mgr._best_effort_batch_vm_boundary(
         db,
         config,
@@ -701,9 +680,6 @@ def session_listing(
                 if (workspace := db.get_workspace(session.workspace_name)) is not None
                 and workspace.vm_name in usable_vm_names
             ]
-            usable_sessions = _mgr.ensure_pids_batch(usable_sessions, db=db, config=config)
-            refreshed = {session.name: session for session in usable_sessions}
-            sessions = [refreshed.get(session.name, session) for session in sessions]
             status_map = _mgr.batch_check_all_sessions(usable_sessions, db=db, config=config)
     identity_refused_vm_names = status_vm_names - usable_vm_names
 
@@ -734,15 +710,18 @@ def session_listing(
             status = "unavailable"
         elif session.pid == PID_STOPPED:
             status = "stopped"
-        elif resolved_vm_name in identity_refused_vm_names or session.pid is None or session.boot_id is None:
+        elif resolved_vm_name in identity_refused_vm_names:
             status = "unknown"
         elif session.name in status_map:
             status = {
                 SessionStatus.OK: "running",
                 SessionStatus.STOPPED: "stopped",
                 SessionStatus.BROKEN: "broken",
+                SessionStatus.RESIDUAL: "residual",
                 SessionStatus.UNKNOWN: "unknown",
             }[status_map[session.name]]
+        elif session.pid is None or session.boot_id is None:
+            status = "unknown"
         else:
             status = "unavailable"
         facts.append(
@@ -798,7 +777,7 @@ def render_session_listing(listing: SessionListing) -> None:
         if broken_names:
             output.warn(
                 f"{len(broken_names)} session(s) are broken (tmux unreachable): "
-                f"{', '.join(broken_names)}. Use resume/stop/delete --force."
+                f"{', '.join(broken_names)}. Use start/restart/stop/delete --force."
             )
         if unknown_names:
             output.warn(
@@ -836,7 +815,6 @@ def attach_session(
         _run_as_root,
         target,
     ):
-        session = _mgr._ensure_pid(session, target=target, db=db)
         status = _mgr.check_session_status(session, target=target)
 
         if status == SessionStatus.STOPPED:
@@ -844,6 +822,20 @@ def attach_session(
                 f"session '{name}' is not running",
                 entity_kind="session",
                 entity_name=name,
+            )
+        if status == SessionStatus.UNKNOWN:
+            raise StateError(
+                f"session '{name}' runtime state is unknown",
+                entity_kind="session",
+                entity_name=name,
+                hint="Retry after transport access is reliable.",
+            )
+        if status == SessionStatus.RESIDUAL:
+            raise StateError(
+                f"session '{name}' has a residual tmux server but no canonical session",
+                entity_kind="session",
+                entity_name=name,
+                hint=f"Run `agw session start {name}` or `agw session restart {name}` to recover it.",
             )
         if status == SessionStatus.BROKEN:
             raise BrokenStateError(
@@ -854,7 +846,7 @@ def attach_session(
 
         from agentworks.terminal import clear_screen_on_detach
 
-        q_session = shlex.quote(name)
+        q_session = exact_tmux_target(name)
         # A session attach is a full-screen tmux; clear the local screen on
         # detach where we don't trust the terminal to restore cleanly.
         return target.interactive(

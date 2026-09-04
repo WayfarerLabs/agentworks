@@ -587,8 +587,7 @@ def test_session_pid_default_null(db: Database) -> None:
     assert session.pid is None
 
 
-def test_update_session_pid(db: Database) -> None:
-    """update_session_pid stores and clears the PID."""
+def test_update_session_runtime_is_atomic(db: Database) -> None:
     from agentworks.db import SessionMode
 
     db.insert_vm("dev-vm", site="lima", hostname="lima--dev-vm")
@@ -597,18 +596,55 @@ def test_update_session_pid(db: Database) -> None:
     db.insert_session("ws-s1", "ws", "default", SessionMode.ADMIN)
 
     # Store a PID (requires boot_id)
-    db.update_session_pid("ws-s1", 12345, boot_id="abc-123")
+    db.update_session_runtime(
+        "ws-s1",
+        socket_path="/tmp/ws-s1.sock",
+        pid=12345,
+        boot_id="abc-123",
+        tmux_server_start_ticks=77,
+    )
     session = db.get_session("ws-s1")
     assert session is not None
     assert session.pid == 12345
     assert session.boot_id == "abc-123"
 
-    # Clear the PID (boot_id preserved as last-known)
-    db.update_session_pid("ws-s1", None)
+    db.update_session_runtime(
+        "ws-s1",
+        socket_path="/tmp/ws-s1.sock",
+        pid=None,
+        boot_id=None,
+        tmux_server_start_ticks=None,
+    )
     session = db.get_session("ws-s1")
     assert session is not None
     assert session.pid is None
-    assert session.boot_id == "abc-123"  # preserved, not cleared
+    assert session.boot_id is None
+    assert session.tmux_server_start_ticks is None
+
+
+def test_update_session_runtime_joins_explicit_transaction(db: Database) -> None:
+    from agentworks.db import SessionMode
+
+    db.insert_vm("dev-vm", site="lima", hostname="lima--dev-vm")
+    db.insert_workspace("ws", workspace_path="/tmp/ws", vm_name="dev-vm", linux_group="ws-ws")
+    db.insert_session("ws-s1", "ws", "default", SessionMode.ADMIN)
+
+    with pytest.raises(RuntimeError, match="rollback"), db.transaction():
+        db.update_session_runtime(
+            "ws-s1",
+            socket_path="/tmp/ws-s1.sock",
+            pid=12345,
+            boot_id="00000000-0000-0000-0000-000000000001",
+            tmux_server_start_ticks=77,
+        )
+        raise RuntimeError("rollback")
+
+    session = db.get_session("ws-s1")
+    assert session is not None
+    assert session.socket_path is None
+    assert session.pid is None
+    assert session.boot_id is None
+    assert session.tmux_server_start_ticks is None
 
 
 def test_migration_21_adds_boot_id(tmp_path: Path) -> None:

@@ -8,7 +8,10 @@ prefix key) while keeping a large scrollback buffer.
 
 from __future__ import annotations
 
+import re
 import shlex
+from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING, Literal, NoReturn, Protocol
 
 from agentworks.errors import StateError
@@ -78,6 +81,104 @@ class RunCommand(Protocol):
         check: bool = True,
         env: dict[str, str] | None = None,
     ) -> object: ...
+
+
+@dataclass(frozen=True)
+class TmuxServerFingerprint:
+    """The persisted identity of one Linux tmux server process."""
+
+    pid: int
+    boot_id: str
+    start_ticks: int
+
+
+class ProbeStatus(Enum):
+    """Tri-state result for a remote runtime-presence probe."""
+
+    PRESENT = "present"
+    ABSENT = "absent"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class IntegerProbe:
+    """A tri-state remote probe carrying a positive integer when present."""
+
+    status: ProbeStatus
+    value: int | None = None
+
+
+@dataclass(frozen=True)
+class FingerprintProbe:
+    """A tri-state stable tmux-server fingerprint probe."""
+
+    status: ProbeStatus
+    fingerprint: TmuxServerFingerprint | None = None
+
+
+def _test_presence_from_result(result: object) -> ProbeStatus:
+    """Classify a shell ``test`` result, whose 0/1 contract is unambiguous."""
+    returncode = getattr(result, "returncode", None)
+    if returncode is None:
+        return ProbeStatus.PRESENT if getattr(result, "ok", False) else ProbeStatus.ABSENT
+    if returncode == 0:
+        return ProbeStatus.PRESENT
+    if returncode == 1:
+        return ProbeStatus.ABSENT
+    return ProbeStatus.UNKNOWN
+
+
+_TMUX_SERVER_ABSENCE_DIAGNOSTICS = (
+    re.compile(r"no server running on .+", re.ASCII),
+    re.compile(r"error connecting to .+ \((?:No such file or directory|Connection refused)\)", re.ASCII),
+)
+_TMUX_TARGET_ABSENCE_DIAGNOSTIC = re.compile(r"can't find session: .+", re.ASCII)
+_SSH_TTY_CLOSE_DIAGNOSTIC = re.compile(r"(?:Shared connection|Connection) to .+ closed\.", re.ASCII)
+
+
+def _normalized_probe_streams(result: object) -> tuple[str, str]:
+    """Strip only the local forced-TTY close advisory from probe output."""
+    stdout = (getattr(result, "stdout", "") or "").strip()
+    stderr = (getattr(result, "stderr", "") or "").strip()
+    if stdout and _SSH_TTY_CLOSE_DIAGNOSTIC.fullmatch(stderr):
+        stderr = ""
+    return stdout, stderr
+
+
+def _tmux_presence_from_result(result: object, *, missing_target_is_absent: bool) -> ProbeStatus:
+    """Classify one tmux presence probe from its exit and canonical diagnostic."""
+    returncode = getattr(result, "returncode", None)
+    if returncode is None:
+        return ProbeStatus.PRESENT if getattr(result, "ok", False) else ProbeStatus.UNKNOWN
+    if returncode == 0:
+        return ProbeStatus.PRESENT
+    if returncode != 1:
+        return ProbeStatus.UNKNOWN
+
+    stdout, stderr = _normalized_probe_streams(result)
+    streams = [value for value in (stdout, stderr) if value]
+    if len(streams) != 1 or "\n" in streams[0] or "\r" in streams[0]:
+        return ProbeStatus.UNKNOWN
+    diagnostic = streams[0]
+    if any(pattern.fullmatch(diagnostic) for pattern in _TMUX_SERVER_ABSENCE_DIAGNOSTICS):
+        return ProbeStatus.ABSENT
+    if missing_target_is_absent and _TMUX_TARGET_ABSENCE_DIAGNOSTIC.fullmatch(diagnostic):
+        return ProbeStatus.ABSENT
+    return ProbeStatus.UNKNOWN
+
+
+_BOOT_ID_PATTERN = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+    re.ASCII,
+)
+
+
+def canonical_boot_id(value: object) -> str | None:
+    """Return one canonical Linux boot UUID or ``None``."""
+    if not isinstance(value, str):
+        return None
+    candidate = value.strip()
+    return candidate if _BOOT_ID_PATTERN.fullmatch(candidate) else None
 
 
 def agent_socket_dir(linux_user: str) -> str:
@@ -239,8 +340,8 @@ def _cleanup_stale_sockets_under(target: Transport, dir_path: str) -> int:
         if not sock_path:
             continue
         q_sock = shlex.quote(sock_path)
-        check = target.run(f"tmux -S {q_sock} list-sessions 2>/dev/null", sudo=True, check=False)
-        if not check.ok:
+        check = target.run(f"tmux -S {q_sock} list-sessions", sudo=True, check=False)
+        if _tmux_presence_from_result(check, missing_target_is_absent=False) is ProbeStatus.ABSENT:
             target.run(f"rm -f {q_sock}", sudo=True, check=False)
             removed += 1
     return removed
@@ -352,13 +453,22 @@ def deploy_restricted_config(
 def tmux_cmd(base: str, socket_path: str | None = None, *, sudo: bool = False) -> str:
     """Build a tmux command string, optionally with ``-S`` and ``sudo``.
 
-    Session commands (has-session, kill-session, send-keys, capture-pane) do
-    NOT use sudo -- socket access goes through group permissions, and failures
-    surface as BROKEN status. ``sudo=True`` is only for infrastructure
-    operations (e.g. cleanup_stale_sockets probing sockets during setup).
+    Owner-targeted session commands do not need sudo because socket access goes
+    through group permissions. Admin-targeted batch operations use
+    ``sudo=True`` when inspecting agent-owned runtimes.
     """
     cmd = f"tmux -S {shlex.quote(socket_path)} {base}" if socket_path else f"tmux {base}"
     return f"sudo -n {cmd}" if sudo else cmd
+
+
+def exact_tmux_target(name: str) -> str:
+    """Return an always-quoted exact tmux target for every supported shell.
+
+    Tmux's leading ``=`` requests exact matching, but zsh interprets an
+    unquoted ``=name`` as command-path expansion. ``shlex.quote`` deliberately
+    leaves ``=`` unquoted, so exact targets need this explicit shell boundary.
+    """
+    return "'" + ("=" + name).replace("'", "'\"'\"'") + "'"
 
 
 def _grant_server_access(
@@ -468,7 +578,7 @@ def _probe_pane_liveness(
     Both facts ride one round trip: ``#{pane_dead}`` and
     ``#{pane_dead_status}`` in a single display-message.
     """
-    q_session = shlex.quote(session_name)
+    q_session = exact_tmux_target(session_name)
     cmd = (
         tmux_cmd(f"display-message -p -t {q_session} '#{{pane_dead}} #{{pane_dead_status}}'", socket_path)
         + " 2>/dev/null"
@@ -505,7 +615,7 @@ def _raise_workload_died(
         # message there, invisible to the main-screen capture. One
         # best-effort attempt; tmux errors out when no alternate screen
         # exists, hence check=False.
-        q_session = shlex.quote(session_name)
+        q_session = exact_tmux_target(session_name)
         alt = run_command(
             tmux_cmd(f"capture-pane -t {q_session} -p -J -a", socket_path) + " 2>/dev/null",
             check=False,
@@ -638,11 +748,25 @@ def create_session(
     # behind it, remove it before creating the new session. An active server
     # is a conflict (something else owns this name).
     sock_exists = run_command(f"test -e {q_sock}", check=False)
-    if getattr(sock_exists, "ok", False):
-        server_alive = run_command(f"tmux -S {q_sock} list-sessions 2>/dev/null", check=False)
-        if getattr(server_alive, "ok", False):
+    socket_presence = _test_presence_from_result(sock_exists)
+    if socket_presence is ProbeStatus.UNKNOWN:
+        raise StateError(
+            f"could not determine whether managed tmux socket {sock} exists",
+            entity_kind="session",
+            entity_name=session_name,
+        )
+    if socket_presence is ProbeStatus.PRESENT:
+        server_presence = probe_tmux_server(run_command=run_command, socket_path=sock)
+        if server_presence is ProbeStatus.PRESENT:
             raise RuntimeError(
                 f"Socket {sock} already has an active tmux server. Kill it first or choose a different session name."
+            )
+        if server_presence is ProbeStatus.UNKNOWN:
+            raise StateError(
+                f"could not determine whether managed tmux socket {sock} has an active server",
+                entity_kind="session",
+                entity_name=session_name,
+                hint="Retry after transport access is reliable; the socket was left unchanged.",
             )
         from agentworks import output as _output
 
@@ -705,7 +829,7 @@ def kill_session(
     socket_path: str | None = None,
 ) -> bool:
     """Kill a session's tmux session. Returns True if the session existed."""
-    q_session = shlex.quote(session_name)
+    q_session = exact_tmux_target(session_name)
     result = run_command(
         tmux_cmd(f"kill-session -t {q_session}", socket_path),
         check=False,
@@ -713,34 +837,60 @@ def kill_session(
     return getattr(result, "ok", True)
 
 
-def session_exists(
+def kill_server(*, run_command: RunCommand, socket_path: str) -> bool:
+    """Destroy the complete dedicated tmux server behind ``socket_path``."""
+    result = run_command(tmux_cmd("kill-server", socket_path), check=False)
+    return getattr(result, "ok", True)
+
+
+def kill_server_and_probe(*, run_command: RunCommand, socket_path: str) -> ProbeStatus:
+    """Request dedicated-server teardown and return its verified presence."""
+    kill_server(run_command=run_command, socket_path=socket_path)
+    return probe_tmux_server_after_teardown(run_command=run_command, socket_path=socket_path)
+
+
+def probe_tmux_session(
     session_name: str,
     *,
     run_command: RunCommand,
     socket_path: str | None = None,
-) -> bool:
-    """Check if a session's tmux session is alive."""
-    q_session = shlex.quote(session_name)
+) -> ProbeStatus:
+    """Probe an exact tmux session without conflating failure with absence."""
+    q_session = exact_tmux_target(session_name)
     result = run_command(
-        tmux_cmd(f"has-session -t {q_session}", socket_path) + " 2>/dev/null",
+        tmux_cmd(f"has-session -t {q_session}", socket_path),
         check=False,
     )
-    return getattr(result, "ok", False)
+    return _tmux_presence_from_result(result, missing_target_is_absent=True)
 
 
-def send_keys(
+def probe_tmux_server(*, run_command: RunCommand, socket_path: str) -> ProbeStatus:
+    """Probe a dedicated tmux server without conflating failure with absence."""
+    result = run_command(tmux_cmd("list-sessions", socket_path), check=False)
+    return _tmux_presence_from_result(result, missing_target_is_absent=False)
+
+
+def _stable_absence_probe(probe: Callable[[], ProbeStatus]) -> ProbeStatus:
+    """Re-probe one indeterminate post-teardown transition without waiting."""
+    status = probe()
+    return probe() if status is ProbeStatus.UNKNOWN else status
+
+
+def probe_tmux_session_after_teardown(
     session_name: str,
-    keys: str,
     *,
     run_command: RunCommand,
     socket_path: str | None = None,
-) -> None:
-    """Send keys to a session's tmux session."""
-    q_session = shlex.quote(session_name)
-    run_command(
-        tmux_cmd(f"send-keys -t {q_session} {keys}", socket_path),
-        check=False,
+) -> ProbeStatus:
+    """Probe a removed session twice only across an indeterminate transition."""
+    return _stable_absence_probe(
+        lambda: probe_tmux_session(session_name, run_command=run_command, socket_path=socket_path)
     )
+
+
+def probe_tmux_server_after_teardown(*, run_command: RunCommand, socket_path: str) -> ProbeStatus:
+    """Probe a stopped server twice only across an indeterminate transition."""
+    return _stable_absence_probe(lambda: probe_tmux_server(run_command=run_command, socket_path=socket_path))
 
 
 def capture_output(
@@ -757,7 +907,7 @@ def capture_output(
     longer than the pane width survives later per-line trimming as one
     line; off by default to keep other callers' output shape unchanged.
     """
-    q_session = shlex.quote(session_name)
+    q_session = exact_tmux_target(session_name)
     flags = "-p -J" if join_wrapped else "-p"
     result = run_command(
         tmux_cmd(f"capture-pane -t {q_session} {flags} -S -{lines}", socket_path),
@@ -783,77 +933,93 @@ def _parse_pid(raw: str, context: str) -> int:
 # -- PID-based liveness helpers --------------------------------------------
 
 
-def get_tmux_server_pid(
+def probe_tmux_server_pid(
     *,
     target: Transport,
     socket_path: str | None = None,
-) -> int | None:
-    """Retrieve the PID of a running tmux server.
-
-    Returns None if the server is not running or unreachable.
-    """
-    cmd = tmux_cmd("display-message -p '#{pid}'", socket_path) + " 2>/dev/null"
-    result = target.run(cmd, check=False)
-    if not result.ok:
-        return None
+    sudo: bool = False,
+) -> IntegerProbe:
+    """Probe the positive PID of a running tmux server."""
+    cmd = tmux_cmd("display-message -p '#{pid}'", socket_path)
+    result = target.run(cmd, sudo=True, check=False) if sudo else target.run(cmd, check=False)
+    presence = _tmux_presence_from_result(result, missing_target_is_absent=False)
+    if presence is not ProbeStatus.PRESENT:
+        return IntegerProbe(presence)
     pid_str = result.stdout.strip()
     if not pid_str:
-        return None
+        return IntegerProbe(ProbeStatus.UNKNOWN)
     try:
         pid = int(pid_str)
     except ValueError:
-        return None
-    return pid if pid > 0 else None
+        return IntegerProbe(ProbeStatus.UNKNOWN)
+    if pid <= 0:
+        return IntegerProbe(ProbeStatus.UNKNOWN)
+    return IntegerProbe(ProbeStatus.PRESENT, pid)
 
 
-def force_kill_tmux_server(
+def parse_process_start_ticks(stat_line: str) -> int:
+    """Parse Linux ``/proc/PID/stat`` field 22 without splitting ``comm``."""
+    close = stat_line.rfind(")")
+    if close < 0:
+        raise ValueError("process stat has no closing command delimiter")
+    fields = stat_line[close + 1 :].split()
+    if len(fields) < 20:
+        raise ValueError("process stat is missing field 22")
+    try:
+        ticks = int(fields[19])
+    except ValueError:
+        raise ValueError("process stat field 22 is not an integer") from None
+    if ticks <= 0:
+        raise ValueError("process stat field 22 is not positive")
+    return ticks
+
+
+def probe_process_start_ticks(
     pid: int,
     *,
     target: Transport,
-    socket_path: str | None = None,
-    log: Callable[[str], None] | None = None,
-    use_sudo: bool = True,
-) -> bool:
-    """Kill a tmux server by PID with SIGTERM -> SIGKILL escalation.
+    sudo: bool = False,
+) -> IntegerProbe:
+    """Probe one process start time without conflating failure with absence."""
+    result = target.run(f"cat /proc/{pid}/stat", sudo=sudo, check=False)
+    if getattr(result, "returncode", 0 if getattr(result, "ok", False) else 1) != 0:
+        return IntegerProbe(ProbeStatus.UNKNOWN)
+    try:
+        return IntegerProbe(ProbeStatus.PRESENT, parse_process_start_ticks(result.stdout.strip()))
+    except ValueError:
+        return IntegerProbe(ProbeStatus.UNKNOWN)
 
-    Cleans up socket file if present. Returns True if the process is dead.
 
-    ``use_sudo`` defaults True for the admin path (cross-uid kill of an
-    agent's tmux pid; admin's NOPASSWD sudo). Pass False when ``target`` is
-    the agent's own ``Transport``: the agent can kill its own pid and remove
-    its own socket without sudo. The admin force-kill carve-out
-    applies to batch operations; single-session agent ops go through agent
-    SSH directly (no sudo).
-    """
-    if pid <= 1:
-        raise ValueError(f"refusing to kill PID {pid} (dangerous special value)")
-    import time
-
-    def _log(msg: str) -> None:
-        if log:
-            log(msg)
-
-    # SIGTERM
-    _log(f"Sending SIGTERM to PID {pid}")
-    target.run(f"kill {pid}", sudo=use_sudo, check=False)
-    time.sleep(2)
-
-    # Check if still alive
-    if target.run(f"test -d /proc/{pid}", check=False).ok:
-        _log(f"PID {pid} survived SIGTERM, escalating to SIGKILL")
-        target.run(f"kill -9 {pid}", sudo=use_sudo, check=False)
-        time.sleep(1)
-
-    # Final check
-    if target.run(f"test -d /proc/{pid}", check=False).ok:
-        _log(f"PID {pid} survived SIGKILL")
-        return False  # process survived
-
-    _log(f"PID {pid} is dead")
-
-    # Clean up stale socket (validate path is under expected root)
-    if socket_path and socket_path.startswith(AGENT_SOCKET_ROOT + "/"):
-        _log(f"Removing stale socket {socket_path}")
-        target.run(f"rm -f {shlex.quote(socket_path)}", sudo=use_sudo, check=False)
-
-    return True
+def capture_tmux_server_fingerprint(
+    *,
+    target: Transport,
+    socket_path: str,
+    sudo: bool = False,
+) -> FingerprintProbe:
+    """Capture a stable tmux PID, boot ID, and process start time."""
+    first_pid = probe_tmux_server_pid(target=target, socket_path=socket_path, sudo=sudo)
+    if first_pid.status is not ProbeStatus.PRESENT:
+        return FingerprintProbe(first_pid.status)
+    assert first_pid.value is not None
+    first_ticks = probe_process_start_ticks(first_pid.value, target=target, sudo=sudo)
+    boot = target.run("cat /proc/sys/kernel/random/boot_id", check=False)
+    boot_succeeded = getattr(boot, "returncode", 0 if getattr(boot, "ok", False) else 1) == 0
+    boot_id = canonical_boot_id(getattr(boot, "stdout", "")) if boot_succeeded else None
+    second_pid = probe_tmux_server_pid(target=target, socket_path=socket_path, sudo=sudo)
+    second_ticks = probe_process_start_ticks(first_pid.value, target=target, sudo=sudo)
+    if second_pid.status is ProbeStatus.ABSENT:
+        return FingerprintProbe(ProbeStatus.ABSENT)
+    if (
+        first_ticks.status is not ProbeStatus.PRESENT
+        or boot_id is None
+        or second_pid.status is not ProbeStatus.PRESENT
+        or second_ticks.status is not ProbeStatus.PRESENT
+        or second_pid.value != first_pid.value
+        or second_ticks.value != first_ticks.value
+    ):
+        return FingerprintProbe(ProbeStatus.UNKNOWN)
+    assert first_ticks.value is not None
+    return FingerprintProbe(
+        ProbeStatus.PRESENT,
+        TmuxServerFingerprint(first_pid.value, boot_id, first_ticks.value),
+    )

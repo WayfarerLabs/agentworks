@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
     from agentworks.config import Config
-    from agentworks.db import Database, SessionRow
+    from agentworks.db import Database
     from agentworks.resources.registry import Registry
     from agentworks.secrets.base import SecretDecl
 
@@ -64,7 +64,13 @@ def _seed_session(db: Database) -> None:
         socket_path="/tmp/SECRET_SOCKET",
         harness_integration_state={"SECRET_HARNESS_STATE": True},
     )
-    db.update_session_pid("session-a", PID_STOPPED, boot_id="SECRET_BOOT_ID")
+    db.update_session_runtime(
+        "session-a",
+        socket_path="/tmp/SECRET_SOCKET",
+        pid=PID_STOPPED,
+        boot_id=None,
+        tmux_server_start_ticks=None,
+    )
 
 
 def _wire_cli(monkeypatch: pytest.MonkeyPatch, db: Database, config: Config) -> None:
@@ -231,11 +237,11 @@ def test_session_describe_uses_the_same_real_gate_chain_for_both_formats(
         "gated_vm_boundary",
         "gate_secret_resolver",
     ]
-    for excluded in (b"SECRET_HARNESS_STATE", b"SECRET_SOCKET", b"SECRET_BOOT_ID"):
+    for excluded in (b"SECRET_HARNESS_STATE", b"SECRET_SOCKET"):
         assert excluded not in machine.stdout_bytes
 
 
-def test_session_list_status_and_late_repair_use_the_same_resolution_path(
+def test_session_list_status_is_read_only_inside_the_resolution_path(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
@@ -248,7 +254,9 @@ def test_session_list_status_and_late_repair_use_the_same_resolution_path(
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "late-repair-value")
     config = make_config()
     _seed_session(db)
-    db.update_session_pid("session-a", None)
+    db.update_session_runtime(
+        "session-a", socket_path="/tmp/SECRET_SOCKET", pid=None, boot_id=None, tmux_server_start_ticks=None
+    )
     _wire_cli(monkeypatch, db, config)
     _install_skipped_backend(monkeypatch)
     calls = _resolution_spy(monkeypatch)
@@ -262,13 +270,12 @@ def test_session_list_status_and_late_repair_use_the_same_resolution_path(
         assert auth_key_name is not None
         keys.append(auth_keys.get(auth_key_name))
 
-    def repair(rows: list[SessionRow], *, db: Database, config: Config) -> list[SessionRow]:
-        del rows, config
-        db.update_session_pid("session-a", 9090, boot_id="LATE_REPAIR_BOOT_SECRET")
-        return db.list_sessions()
-
     monkeypatch.setattr(vms, "_ensure_tailscale", reconnect)
-    monkeypatch.setattr(sessions, "ensure_pids_batch", repair)
+    monkeypatch.setattr(
+        sessions,
+        "ensure_pids_batch",
+        lambda *args, **kwargs: pytest.fail("session list performed durable runtime repair"),
+    )
     monkeypatch.setattr(
         sessions,
         "batch_check_all_sessions",
@@ -276,13 +283,12 @@ def test_session_list_status_and_late_repair_use_the_same_resolution_path(
     )
 
     machine = CliRunner().invoke(app, ["session", "list", "--output", "json"])
-    repaired = db.get_session("session-a")
+    unchanged = db.get_session("session-a")
 
     assert machine.exit_code == 0, machine.output
     _assert_json_envelope_only(machine, "session.list")
     assert machine.stderr_bytes == b""
-    assert repaired is not None and (repaired.pid, repaired.boot_id) == (9090, "LATE_REPAIR_BOOT_SECRET")
-    assert b"LATE_REPAIR_BOOT_SECRET" not in machine.stdout_bytes
+    assert unchanged is not None and (unchanged.pid, unchanged.boot_id) == (None, None)
     assert keys == ["late-repair-value"]
     assert calls == [
         (
@@ -301,10 +307,12 @@ def test_session_list_status_and_late_repair_use_the_same_resolution_path(
 
     calls.clear()
     keys.clear()
-    db.update_session_pid("session-a", None)
+    db.update_session_runtime(
+        "session-a", socket_path="/tmp/SECRET_SOCKET", pid=None, boot_id=None, tmux_server_start_ticks=None
+    )
     human = CliRunner().invoke(app, ["session", "list", "--output", "human"])
     assert human.exit_code == 0, human.output
-    assert human.stdout_bytes.splitlines()[0] == b"VM 'box' is stopped. Starting..."
+    assert b"VM 'box' is stopped. Starting..." in human.stdout_bytes.splitlines()
     assert human.stderr_bytes == b""
     assert calls == [
         (

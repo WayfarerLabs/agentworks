@@ -55,10 +55,19 @@ from ._lifecycle import (
     _execute_stop as _execute_stop,
 )
 from ._lifecycle import (
-    resume_all_sessions as resume_all_sessions,
+    _teardown_session as _teardown_session,
 )
 from ._lifecycle import (
-    resume_session as resume_session,
+    restart_all_sessions as restart_all_sessions,
+)
+from ._lifecycle import (
+    restart_session as restart_session,
+)
+from ._lifecycle import (
+    start_all_sessions as start_all_sessions,
+)
+from ._lifecycle import (
+    start_session as start_session,
 )
 from ._lifecycle import (
     stop_all_sessions as stop_all_sessions,
@@ -76,16 +85,25 @@ from ._pids import (
     _ensure_pid as _ensure_pid,
 )
 from ._pids import (
-    _kill_session as _kill_session,
+    _needs_repair as _needs_repair,
 )
 from ._pids import (
-    _needs_repair as _needs_repair,
+    _prove_stored_runtime_absent as _prove_stored_runtime_absent,
 )
 from ._pids import (
     _repair_session_pid as _repair_session_pid,
 )
 from ._pids import (
     _resolve_session_linux_user as _resolve_session_linux_user,
+)
+from ._pids import (
+    _validated_observed_boot_id as _validated_observed_boot_id,
+)
+from ._pids import (
+    _validated_stored_boot_id as _validated_stored_boot_id,
+)
+from ._pids import (
+    _validated_stored_start_ticks as _validated_stored_start_ticks,
 )
 from ._pids import (
     ensure_pids_batch as ensure_pids_batch,
@@ -160,7 +178,10 @@ from ._status import (
     _get_boot_id as _get_boot_id,
 )
 from ._status import (
-    _pid_alive as _pid_alive,
+    _legacy_session_status_error as _legacy_session_status_error,
+)
+from ._status import (
+    _pid_presence as _pid_presence,
 )
 from ._status import (
     batch_check_all_sessions as batch_check_all_sessions,
@@ -178,8 +199,10 @@ __all__ = [
     "list_sessions",
     "stop_session",
     "stop_all_sessions",
-    "resume_session",
-    "resume_all_sessions",
+    "start_session",
+    "start_all_sessions",
+    "restart_session",
+    "restart_all_sessions",
     "delete_session",
     "attach_session",
     "session_logs",

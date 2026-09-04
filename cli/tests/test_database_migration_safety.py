@@ -98,7 +98,7 @@ def test_version_33_advances_through_checkpoint_retirement(tmp_path: Path) -> No
     Database(path).close()
 
     after = sqlite3.connect(path)
-    assert _version(path) == 35
+    assert _version(path) == 36
     assert (
         after.execute("SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'vm_checkpoints'").fetchone()
         is None

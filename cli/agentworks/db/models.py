@@ -44,6 +44,7 @@ class SessionStatus(Enum):
 
     OK = "ok"
     STOPPED = "stopped"
+    RESIDUAL = "residual"
     BROKEN = "broken"
     UNKNOWN = "unknown"
 
@@ -154,6 +155,7 @@ class SessionRow:
     socket_path: str | None = None
     pid: int | None = None
     boot_id: str | None = None
+    tmux_server_start_ticks: int | None = None
     # The session's harness-integration-state blob (owned by the harness integration
     # and OPAQUE to the core: JSON object stored as TEXT),
     # namespaced by harness integration name:

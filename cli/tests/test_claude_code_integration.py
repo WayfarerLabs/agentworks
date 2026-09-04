@@ -18,6 +18,7 @@ import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
 from agentworks.capabilities.config import capability_config_references, validate_capability_config
+from agentworks.capabilities.harness_integration import HarnessStart
 from agentworks.errors import ConfigError, StateError
 from agentworks.plugins.claude.harness_integration import ClaudeCodeConfig, ClaudeCodeIntegration
 from agentworks.schema import RefOwner, merge_model
@@ -158,7 +159,7 @@ def test_construct_revalidates_config() -> None:
 
 def test_present_transcript_resumes() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})  # found
-    command = _harness_integration().start(_op_ctx(target))
+    command = _harness_integration().start(_op_ctx(target)).command
     assert f"--resume {_SID}" in command
     assert "--session-id" not in command
     assert "resuming session s1" in command
@@ -166,31 +167,26 @@ def test_present_transcript_resumes() -> None:
 
 def test_absent_transcript_launches_fresh() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})  # not found
-    command = _harness_integration().start(_op_ctx(target))
+    command = _harness_integration().start(_op_ctx(target)).command
     assert f"--session-id {_SID}" in command
     assert "--resume" not in command
     assert "starting new session s1" in command
 
 
-def test_launch_note_reports_resume() -> None:
-    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})  # found
-    harness_integration = _harness_integration()
-    assert harness_integration.launch_note() is None  # nothing decided before the op
-    harness_integration.start(_op_ctx(target))
-    assert harness_integration.launch_note() == "Existing Claude Code session found. Resuming..."
+def test_forced_fresh_reports_a_distinct_decision_from_missing_state() -> None:
+    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
+    missing = _harness_integration().start(_op_ctx(target))
+    forced = _harness_integration().start(_op_ctx(target), force_new=True)
+
+    assert missing.note is not None
+    assert forced.note is not None
+    assert forced.note != missing.note
 
 
-def test_launch_note_reports_fresh_start() -> None:
-    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})  # not found
-    harness_integration = _harness_integration()
-    harness_integration.start(_op_ctx(target))
-    assert harness_integration.launch_note() == "No existing Claude Code session. Starting a new one..."
-
-
-def test_start_and_restart_are_symmetric() -> None:
+def test_repeated_start_uses_the_same_state_based_decision() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})
     harness_integration = _harness_integration()
-    assert harness_integration.start(_op_ctx(target)) == harness_integration.resume(_op_ctx(target))
+    assert harness_integration.start(_op_ctx(target)) == harness_integration.start(_op_ctx(target))
 
 
 def test_probe_is_slug_independent_and_finds_by_stored_id() -> None:
@@ -240,7 +236,7 @@ def test_first_start_mints_and_records_the_session_id() -> None:
     state: dict[str, object] = {}
     harness_integration = _harness_integration(state=state)
     target = _FakeTarget()  # empty state means no id yet; find returns default ok
-    command = harness_integration.start(_op_ctx(target))
+    command = harness_integration.start(_op_ctx(target)).command
 
     minted = state["session_id"]
     assert isinstance(minted, str) and len(minted) == 36  # a uuid
@@ -253,7 +249,7 @@ def test_resume_reads_the_stored_id_back_verbatim() -> None:
     the state blob) is used verbatim on a later restart, never re-minted."""
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})
     harness_integration = _harness_integration(state={"session_id": _SID})
-    command = harness_integration.resume(_op_ctx(target))
+    command = harness_integration.start(_op_ctx(target)).command
     assert f"--resume {_SID}" in command
     assert harness_integration.state == {"session_id": _SID}  # unchanged
 
@@ -330,15 +326,19 @@ def test_base_hoist_is_a_no_op() -> None:
 
 def test_permission_mode_model_and_reasoning_effort_map_to_their_flags() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
-    command = _harness_integration(
-        {"permission_mode": "acceptEdits", "model": "sonnet", "reasoning_effort": "future-effort"}
-    ).start(_op_ctx(target))
+    command = (
+        _harness_integration({"permission_mode": "acceptEdits", "model": "sonnet", "reasoning_effort": "future-effort"})
+        .start(_op_ctx(target))
+        .command
+    )
     assert "--permission-mode acceptEdits" in command
     assert "--model sonnet" in command
     assert "--effort future-effort" in command
 
 
-def _claude_argv(command: str) -> list[str]:
+def _claude_argv(command: str | HarnessStart) -> list[str]:
+    if isinstance(command, HarnessStart):
+        command = command.command
     outer = shlex.split(command)
     assert outer[:2] == ["sh", "-c"]
     inner = shlex.split(outer[2])
@@ -410,7 +410,7 @@ def test_resume_reapplies_process_controls_but_not_fresh_conversation_content() 
                 "agent": "reviewer",
                 "append_system_prompt": "Fresh instructions",
             }
-        ).resume(_op_ctx(target))
+        ).start(_op_ctx(target))
     )
     assert argv[argv.index("--agent") + 1] == "reviewer"
     assert argv[argv.index("--append-system-prompt") + 1] == "Fresh instructions"
@@ -445,9 +445,13 @@ def test_vim_mode_and_terminal_bell_share_session_local_settings(
 
 def test_extra_args_appended_verbatim_last_and_quoted() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
-    command = _harness_integration(
-        {"model": "opus", "reasoning_effort": "high", "vim_mode": True, "extra_args": ["--foo", "bar baz"]}
-    ).start(_op_ctx(target))
+    command = (
+        _harness_integration(
+            {"model": "opus", "reasoning_effort": "high", "vim_mode": True, "extra_args": ["--foo", "bar baz"]}
+        )
+        .start(_op_ctx(target))
+        .command
+    )
     # One argv token stays one token: "bar baz" is quoted, not re-split.
     assert shlex.quote("bar baz") in command
     # Appended last: after the managed flag and settings override.
@@ -479,7 +483,7 @@ def test_extra_args_with_shell_metacharacters_cannot_inject() -> None:
     must be ``shlex.quote``d into one inert argv token, never shell-active."""
     payload = "a'; touch /tmp/pwned #"
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
-    command = _harness_integration({"extra_args": ["--append-system-prompt", payload]}).start(_op_ctx(target))
+    command = _harness_integration({"extra_args": ["--append-system-prompt", payload]}).start(_op_ctx(target)).command
 
     # The command is `sh -c '<inner>'`; the payload is nested-quoted (once
     # into the argv, once into the sh -c wrapper). Peeling both quoting
@@ -495,8 +499,8 @@ def test_extra_args_with_shell_metacharacters_cannot_inject() -> None:
 def test_name_is_set_on_both_branches_as_the_display_label() -> None:
     present = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})
     absent = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
-    assert "--name s1" in _harness_integration().start(_op_ctx(present))
-    assert "--name s1" in _harness_integration().start(_op_ctx(absent))
+    assert "--name s1" in _harness_integration().start(_op_ctx(present)).command
+    assert "--name s1" in _harness_integration().start(_op_ctx(absent)).command
 
 
 # -- the returned pane string shape ------------------------------------------
@@ -506,7 +510,7 @@ def test_returned_string_is_a_single_sh_c_that_echoes_then_execs() -> None:
     """A single ``sh -c`` (so it survives the pane's ``exec`` wrapping),
     echoing the visible decision before exec-ing claude."""
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
-    command = _harness_integration().start(_op_ctx(target))
+    command = _harness_integration().start(_op_ctx(target)).command
     assert command.startswith("sh -c ")
     assert "echo " in command
     assert "exec claude" in command

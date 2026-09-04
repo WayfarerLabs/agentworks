@@ -25,6 +25,7 @@ from agentworks.errors import StateError, ValidationError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import multi_console
+from agentworks.sessions.tmux import ProbeStatus
 from agentworks.vms import manager as vm_manager
 from tests.conftest import ManifestDoc, stub_vm_ssh_identity
 
@@ -73,6 +74,13 @@ class _FakeTarget:
         self.interactive_calls: list[str] = []
 
     def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
+        if "aw-console-build+c1" in cmd:
+            return SimpleNamespace(
+                ok=False,
+                returncode=1,
+                stdout="",
+                stderr="can't find session: aw-console-build+c1",
+            )
         return SimpleNamespace(ok=True, returncode=0, stdout="", stderr="")
 
     def interactive(self, cmd: str, **kwargs: object) -> int:
@@ -150,7 +158,7 @@ def test_named_console_attach_holds_across_the_interactive_attach(
     multi_console.attach_console(db, config, name="c1", interaction=TtyInteractionPolicy.REFUSE)
 
     assert events == ["hold-open", "interactive", "hold-close"]
-    assert any("Attaching to running console 'c1'" in m for m in captured_output.info)
+    assert target.interactive_calls == ["tmux attach -t '=aw-console-c1'"]
 
 
 def test_console_recreate_multiline_environment_secret_refuses_before_rebuild(
@@ -174,7 +182,7 @@ def test_console_recreate_multiline_environment_secret_refuses_before_rebuild(
     _seed_vm(db)
     db.insert_console("c1", "box", admin_shell=True)
     _reachable(monkeypatch, True)
-    monkeypatch.setattr(multi_console, "_console_tmux_exists", lambda *args: True)
+    monkeypatch.setattr(multi_console, "_console_tmux_presence", lambda *args: ProbeStatus.PRESENT)
     rebuilds: list[str] = []
     monkeypatch.setattr(
         "agentworks.sessions.multi_console.attach._build_console_tmux",
@@ -182,11 +190,10 @@ def test_console_recreate_multiline_environment_secret_refuses_before_rebuild(
     )
 
     with pytest.raises(ValidationError) as caught:
-        multi_console.attach_console(
+        multi_console.restart_console(
             db,
             config,
             name="c1",
-            recreate=True,
             interaction=TtyInteractionPolicy.REFUSE,
         )
 
@@ -216,7 +223,7 @@ def test_named_console_stopped_vm_gate_burst_seeds_the_boundary(
 
     assert events == ["status", "start", "tailscale"]
     assert resolve_counter == [["proxmox-token"]]
-    assert target.interactive_calls == ["tmux attach -t aw-console-c1"]
+    assert target.interactive_calls == ["tmux attach -t '=aw-console-c1'"]
 
 
 def test_named_console_no_tailscale_fails_with_zero_resolves_and_zero_gate(
@@ -299,8 +306,8 @@ def test_restore_session_stopped_vm_drives_the_real_gated_composition(
 
     assert events == ["status", "start", "tailscale"]  # the gate ran
     assert resolve_counter == [["proxmox-token"]]
-    assert any("has-session -t aw-console-c1" in c for c in fake.commands)
-    assert any("list-windows -t aw-console-c1" in c for c in fake.commands)
+    assert any("has-session -t '=aw-console-c1'" in c for c in fake.commands)
+    assert any("list-windows -t '=aw-console-c1'" in c for c in fake.commands)
     # The no-op landing focus still fires (post-restore focus parity).
-    assert any("select-pane -t aw-console-c1:s1.0" in c for c in fake.commands)
+    assert any("select-pane -t '=aw-console-c1':s1.0" in c for c in fake.commands)
     assert any("already matches config" in m for m in captured_output.info)

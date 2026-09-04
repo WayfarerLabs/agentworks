@@ -274,6 +274,16 @@ class TmuxModel:
         """Model ``tmux kill-session``. Returns False if the session is gone."""
         return self._sessions.pop(session, None) is not None
 
+    def rename_session(self, source: str, destination: str) -> bool:
+        session = self._sessions.pop(source, None)
+        if session is None or destination in self._sessions:
+            if session is not None:
+                self._sessions[source] = session
+            return False
+        session.name = destination
+        self._sessions[destination] = session
+        return True
+
     def swap_panes(self, session: str, window_name: str, pane_id: str, pane_index: int) -> bool:
         """Model ``tmux swap-pane -s <pane_id> -t <session>:<window>.<index>``:
         exchange the positions of the source pane and the pane at the target
@@ -388,13 +398,13 @@ class TmuxModel:
 
     def _dispatch_has_session(self, tokens: list[str]) -> _FakeResult:
         target = _opt(tokens, "-t") or ""
-        session = target.split(":", 1)[0]
+        session = _strip_exact(target.split(":", 1)[0])
         if self.has_session(session):
             return _FakeResult(returncode=0)
         return _FakeResult(returncode=1, stderr=f"can't find session: {session}")
 
     def _dispatch_list_windows(self, tokens: list[str]) -> _FakeResult:
-        session = (_opt(tokens, "-t") or "").split(":", 1)[0]
+        session = _strip_exact((_opt(tokens, "-t") or "").split(":", 1)[0])
         if not self.has_session(session):
             return _FakeResult(returncode=1, stderr=f"can't find session: {session}")
         fmt = _opt(tokens, "-F") or ""
@@ -481,8 +491,13 @@ class TmuxModel:
         return _FakeResult(returncode=0 if ok else 1)
 
     def _dispatch_kill_session(self, tokens: list[str]) -> _FakeResult:
-        session = (_opt(tokens, "-t") or "").split(":", 1)[0]
+        session = _strip_exact((_opt(tokens, "-t") or "").split(":", 1)[0])
         return _FakeResult(returncode=0 if self.kill_session(session) else 1)
+
+    def _dispatch_rename_session(self, tokens: list[str]) -> _FakeResult:
+        source = _strip_exact(_opt(tokens, "-t") or "")
+        destination = tokens[-1] if tokens else ""
+        return _FakeResult(returncode=0 if self.rename_session(source, destination) else 1)
 
     def _dispatch_swap_pane(self, tokens: list[str]) -> _FakeResult:
         src_pid = _opt(tokens, "-s") or ""
@@ -522,6 +537,7 @@ class TmuxModel:
         "kill-window": _dispatch_kill_window,
         "kill-pane": _dispatch_kill_pane,
         "kill-session": _dispatch_kill_session,
+        "rename-session": _dispatch_rename_session,
         "swap-pane": _dispatch_swap_pane,
         "swap-window": _dispatch_swap_window,
     }
@@ -547,6 +563,7 @@ def _parse_target(target: str) -> tuple[str, str | None, int | None]:
     session names are ``[a-z0-9_-]`` (validate_name forbids dots), so the
     final ``.`` unambiguously separates the pane index."""
     session, _, rest = target.partition(":")
+    session = _strip_exact(session)
     if not rest:
         return session, None, None
     if "." in rest:
@@ -562,7 +579,12 @@ def _parse_window_index_target(target: str) -> tuple[str, int | None]:
     """Split a ``<session>:<window_index>`` target (swap-window, and
     new-window when an explicit index is given)."""
     session, _, idx_str = target.partition(":")
+    session = _strip_exact(session)
     try:
         return session, int(idx_str)
     except ValueError:
         return session, None
+
+
+def _strip_exact(value: str) -> str:
+    return value[1:] if value.startswith("=") else value

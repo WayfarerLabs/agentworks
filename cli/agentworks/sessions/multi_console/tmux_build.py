@@ -4,8 +4,8 @@ console rebuild.
 
 ``attach.py`` imports ``_build_console_tmux`` from this module at load time
 (the attach entrypoint needs it), so this module keeps its own references
-back into ``attach`` (``_attach_loop_wrapper``, ``_session_linux_user``,
-``_kill_console_tmux``) and into ``secrets_env`` (``_SUDO_PRESERVE_PROBE_VAR``)
+back into ``attach`` (``_attach_loop_wrapper``, ``_session_linux_user``) and
+into ``secrets_env`` (``_SUDO_PRESERVE_PROBE_VAR``)
 as function-local imports rather than module-level ones, to avoid a circular
 import between the two modules.
 
@@ -25,8 +25,10 @@ from typing import TYPE_CHECKING
 
 import agentworks.sessions.multi_console as _mc
 from agentworks import output
+from agentworks.errors import ExternalError
+from agentworks.sessions.tmux import exact_tmux_target
 
-from ._helpers import ADMIN_SHELL_WINDOW, tmux_session_name
+from ._helpers import ADMIN_SHELL_WINDOW, tmux_session_name, tmux_staging_name
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -54,13 +56,13 @@ class SessionWindowBuild:
 
     Two kinds of caller read this differently:
 
-    - Whole-console builders (``_build_console_tmux``, ``add_sessions``) ignore
-      it and warn-and-continue, so one bad shell in one window never aborts
-      building an entire console.
+    - The staged whole-console builder (``_build_console_tmux``) rejects a
+      partial build so it cannot publish incomplete state. Live
+      ``add_sessions`` remains best effort after the durable membership update.
     - ``restore_session``, rebuilding a single missing window on the operator's
       behalf, inspects both fields and raises ``ExternalError`` if the window
       was skipped or any shell failed, so a partial rebuild is loud rather than
-      a silent exit-0 that would leave the window a `--recreate`-only case.
+      a silent exit-0 that would require a full console restart.
     """
 
     built: bool
@@ -169,6 +171,7 @@ def _split_shell_pane(
     admin_user: str,
     config_index: int,
     preserve_memo: PreserveEnvMemo,
+    tmux_name: str | None = None,
 ) -> str | None:
     """Split off one shell pane in an existing console window and tag the new
     pane with its position in the configured shell list. The tag lets
@@ -212,7 +215,7 @@ def _split_shell_pane(
     cwd = shell["cwd"]
     full_path = posixpath.join(workspace_path, cwd) if cwd else workspace_path
     q_full = shlex.quote(full_path)
-    q_con = shlex.quote(tmux_session_name(console_name))
+    q_con = exact_tmux_target(tmux_name or tmux_session_name(console_name))
     q_win = shlex.quote(window_name)
     use_admin = shell["admin"] or session_user == admin_user
 
@@ -291,8 +294,8 @@ def _split_shell_pane(
         output.warn(
             f"added shell pane in '{window_name}' but couldn't capture its id; "
             f"the pane is untagged. restore-session won't be able to repair "
-            f"this window; use `agw console attach {q_console} "
-            f"--recreate` if you need clean tag state."
+            f"this window; use `agw console restart {q_console}` "
+            f"if you need clean tag state."
         )
         return None
     q_pane = shlex.quote(pane_id)
@@ -308,8 +311,8 @@ def _split_shell_pane(
         output.warn(
             f"added shell pane in '{window_name}' but tagging failed "
             f"({tag_res.stderr.strip() or 'tmux refused set-option'}); "
-            f"the pane is untagged. Use `agw console attach "
-            f"{q_console} --recreate` to rebuild and retag from scratch."
+            f"the pane is untagged. Use `agw console restart "
+            f"{q_console}` to rebuild and retag from scratch."
         )
         return None
     return pane_id
@@ -352,12 +355,13 @@ def _add_session_window(
     layout: str,
     preserve_memo: PreserveEnvMemo,
     place_last: bool = False,
+    tmux_name: str | None = None,
 ) -> SessionWindowBuild:
     """Create one session window in the console and attach its shell panes.
 
-    Missing or off-VM sessions are skipped with a warning; this keeps the
-    console attach functional even if a session has been deleted out from
-    under it.
+    Missing or off-VM sessions are skipped with a warning; live membership
+    synchronization can therefore proceed around a session deleted out from
+    under the console.
 
     ``place_last`` controls where the new window lands. By default ``tmux
     new-window`` fills the lowest free window index, which is what the build
@@ -378,10 +382,9 @@ def _add_session_window(
     `failed_shells` lists the configured shell indices whose panes failed to
     split or tag (best-effort per pane; `_split_shell_pane` warns on each).
 
-    Whole-console builders ignore the result and move on to the next window, so
-    one bad shell never aborts building an entire console. `restore_session`,
-    which rebuilds exactly one window and reports on it, inspects both fields so
-    a skipped build or a failed shell can't be reported as a success.
+    The staged whole-console builder and `restore_session` inspect both fields
+    so a skipped build or failed shell cannot be published or reported as
+    success. Live `add_sessions` remains best effort after its durable update.
     """
     from agentworks.sessions.multi_console_layout import _apply_layout, _focus_session_pane
 
@@ -400,7 +403,8 @@ def _add_session_window(
         output.warn(f"workspace for session '{member.session_name}' is missing; skipping window")
         return SessionWindowBuild(built=False)
 
-    q_con = shlex.quote(tmux_session_name(console_name))
+    runtime_name = tmux_name or tmux_session_name(console_name)
+    q_con = exact_tmux_target(runtime_name)
     q_session = shlex.quote(session.name)
     wrapper = _attach_loop_wrapper(session.name, session.socket_path)
 
@@ -429,8 +433,9 @@ def _add_session_window(
     try:
         base_pidx = int(res.stdout.strip())
     except ValueError:
-        # tmux is expected to print the pane index under -P -F; if it didn't,
-        # fall back to 0 (the base-index-0 default) rather than fail the build.
+        if tmux_name is not None:
+            output.warn(f"failed to read the pane index for '{session.name}'")
+            return SessionWindowBuild(built=False)
         base_pidx = 0
 
     failed_shells: list[int] = []
@@ -463,14 +468,17 @@ def _add_session_window(
                 admin_user=vm.admin_username,
                 config_index=config_index,
                 preserve_memo=preserve_memo,
+                tmux_name=runtime_name,
             )
             if pane_id is None:
                 failed_shells.append(config_index)
-        _apply_layout(target, q_con, q_session, layout)
+        if not _apply_layout(target, q_con, q_session, layout) and tmux_name is not None:
+            return SessionWindowBuild(built=False)
     # Focus the session pane so the operator lands on the attach output
     # rather than the most-recently-created shell pane. Done unconditionally
     # (cheap, and consistent across windows with and without shells).
-    _focus_session_pane(target, q_con, q_session, base_pidx)
+    if not _focus_session_pane(target, q_con, q_session, base_pidx) and tmux_name is not None:
+        return SessionWindowBuild(built=False)
     return SessionWindowBuild(built=True, failed_shells=failed_shells)
 
 
@@ -484,87 +492,107 @@ def _build_console_tmux(
     values: Mapping[str, str],
     layout: str,
 ) -> None:
-    """Kill any existing tmux session, then rebuild it from current DB state."""
-    # Lazy import: attach.py imports _build_console_tmux from this module at
-    # load time, so a module-level import back here would be circular.
-    from .attach import _kill_console_tmux
+    """Build under a reserved name and publish only a complete console."""
+    from agentworks.sessions.tmux import ProbeStatus
+
+    from .attach import _teardown_console_tmux, _tmux_session_presence
 
     members = db.list_console_sessions(console.name)
     if not members and not console.admin_shell:
-        # create_console rejects this; belt-and-suspenders for future caller paths.
-        output.warn(f"console '{console.name}' has no members; skipping tmux build")
-        return
-
-    tmux_name = tmux_session_name(console.name)
-    q_con = shlex.quote(tmux_name)
-
-    _kill_console_tmux(target, console.name)
-
-    if console.admin_shell:
-        # Window 0 is the admin shell. The literal tmux window name '--admin--'
-        # is impossible for any session (validate_name rejects leading hyphen,
-        # consecutive hyphens, and trailing hyphen), so we don't need extra
-        # logic to distinguish this internal window from real session windows.
-        # No sudo wrapper: the SSH user IS the admin user (direct
-        # target-user SSH), so a login shell at the pane is the goal directly.
-        target.run(
-            f"tmux new-session -d -s {q_con} -n {shlex.quote(ADMIN_SHELL_WINDOW)} {shlex.quote('exec $SHELL -l')}"
-        )
-        placeholder_used = False
-        placeholder = ""
-    else:
-        # tmux requires at least one window at all times. Create a transient
-        # placeholder whose name (leading underscore, all uppercase) is doubly
-        # impossible for any real session: validate_name requires names to
-        # start with an alphanumeric AND be lowercase, so this string can
-        # never collide with a session name, including legacy '--' names that
-        # the loose validator now allows by reference. Stands out visibly in
-        # tmux list-windows output.
-        placeholder = "_PLACEHOLDER"
-        target.run(f"tmux new-session -d -s {q_con} -n {shlex.quote(placeholder)}")
-        placeholder_used = True
-
-    if members:
-        # A sub-step of attach_console's "Building/Rebuilding console..." line.
-        output.detail(f"Adding {len(members)} session window(s) to console '{console.name}'...")
-    # One memo for the whole build: every window's agent panes ask the same VM
-    # the same question, so probe (and warn) once per agent user, not per pane.
-    preserve_memo: PreserveEnvMemo = {}
-    for member in members:
-        _mc._add_session_window(
-            target,
-            db,
-            registry,
-            values=values,
-            console_name=console.name,
-            member=member,
-            vm=vm,
-            layout=layout,
-            preserve_memo=preserve_memo,
+        raise ExternalError(
+            f"console '{console.name}' has no configured windows",
+            entity_kind="console",
+            entity_name=console.name,
         )
 
-    if not placeholder_used:
-        return
+    canonical_name = tmux_session_name(console.name)
+    staging_name = tmux_staging_name(console.name)
+    canonical_presence = _tmux_session_presence(target, canonical_name)
+    if canonical_presence is ProbeStatus.UNKNOWN:
+        raise ExternalError(
+            f"could not determine canonical tmux state for console '{console.name}'",
+            entity_kind="console",
+            entity_name=console.name,
+        )
+    if canonical_presence is ProbeStatus.PRESENT:
+        raise ExternalError(
+            f"console '{console.name}' already has a canonical tmux runtime",
+            entity_kind="console",
+            entity_name=console.name,
+        )
+    _teardown_console_tmux(target, console.name)
+    q_staging_create = shlex.quote(staging_name)
+    try:
+        if console.admin_shell:
+            # Window 0 is the admin shell. The literal tmux window name
+            # '--admin--' cannot collide with a valid session name.
+            created = target.run(
+                f"tmux new-session -d -s {q_staging_create} -n {shlex.quote(ADMIN_SHELL_WINDOW)} "
+                f"{shlex.quote('exec $SHELL -l')}"
+            )
+            placeholder_used = False
+            placeholder = ""
+        else:
+            # tmux requires one window while the real windows are constructed.
+            placeholder = "_PLACEHOLDER"
+            created = target.run(f"tmux new-session -d -s {q_staging_create} -n {shlex.quote(placeholder)}")
+            placeholder_used = True
+        if not created.ok:
+            raise ExternalError(
+                f"failed to create staging tmux state for console '{console.name}'",
+                entity_kind="console",
+                entity_name=console.name,
+            )
 
-    # Drop the placeholder once at least one real session window is in.
-    # If every member failed to attach (unusual), keep the placeholder so the
-    # tmux session survives for investigation.
-    result = target.run(f"tmux list-windows -t {q_con} -F '#W'", check=False)
-    if not result.ok:
-        output.warn(
-            f"could not list windows in console '{console.name}' to confirm "
-            f"placeholder cleanup ({result.stderr.strip() or 'transport error'}); "
-            f"placeholder may persist until next --recreate"
-        )
-        return
+        if members:
+            output.detail(f"Adding {len(members)} session window(s) to console '{console.name}'...")
+        preserve_memo: PreserveEnvMemo = {}
+        for member in members:
+            built = _mc._add_session_window(
+                target,
+                db,
+                registry,
+                values=values,
+                console_name=console.name,
+                member=member,
+                vm=vm,
+                layout=layout,
+                preserve_memo=preserve_memo,
+                tmux_name=staging_name,
+            )
+            if not built.built or built.failed_shells:
+                raise ExternalError(
+                    f"failed to build complete tmux state for console '{console.name}'",
+                    entity_kind="console",
+                    entity_name=console.name,
+                    hint=f"Retry with `agw console start {console.name}`.",
+                )
 
-    windows = [w.strip() for w in result.stdout.strip().splitlines() if w.strip()]
-    if any(w != placeholder for w in windows):
-        target.run(
-            f"tmux kill-window -t {q_con}:{shlex.quote(placeholder)}",
-            check=False,
+        if placeholder_used:
+            removed = target.run(f"tmux kill-window -t {exact_tmux_target(f'{staging_name}:{placeholder}')}")
+            if not removed.ok:
+                raise ExternalError(
+                    f"failed to remove the staging placeholder for console '{console.name}'",
+                    entity_kind="console",
+                    entity_name=console.name,
+                )
+        published = target.run(
+            f"tmux rename-session -t {exact_tmux_target(staging_name)} {shlex.quote(canonical_name)}"
         )
-    else:
-        output.warn(
-            f"console '{console.name}' has no usable session windows; placeholder kept so the tmux session survives"
-        )
+        if not published.ok:
+            raise ExternalError(
+                f"failed to publish tmux state for console '{console.name}'",
+                entity_kind="console",
+                entity_name=console.name,
+            )
+        canonical_presence = _tmux_session_presence(target, canonical_name)
+        staging_presence = _tmux_session_presence(target, staging_name)
+        if canonical_presence is not ProbeStatus.PRESENT or staging_presence is not ProbeStatus.ABSENT:
+            raise ExternalError(
+                f"console '{console.name}' staging publication could not be verified",
+                entity_kind="console",
+                entity_name=console.name,
+            )
+    except Exception:
+        _teardown_console_tmux(target, console.name)
+        raise

@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from dataclasses import dataclass
+from pathlib import Path
+
+import pytest
 
 from agentworks.db import SessionRow
 from agentworks.sessions.tmux import (
@@ -49,6 +54,35 @@ def test_generate_config_with_sessions() -> None:
     assert '  - "--admin--":' in config
     assert '  - "ws-1-build":' in config
     assert '  - "ws-1-test":' in config
+
+
+@pytest.mark.skipif(
+    shutil.which("tmux") is None or shutil.which("zsh") is None,
+    reason="tmux and zsh are required",
+)
+def test_generated_wrapper_does_not_match_a_session_name_prefix(tmp_path: Path) -> None:
+    socket_path = str(tmp_path / "tmux.sock")
+    subprocess.run(
+        ["tmux", "-S", socket_path, "new-session", "-d", "-s", "foobar", "sleep 30"],
+        check=True,
+    )
+    try:
+        session = SessionRow(
+            name="foo",
+            workspace_name="ws",
+            template="default",
+            mode="admin",
+            created_at="",
+            updated_at="",
+            socket_path=socket_path,
+        )
+        config = generate_config("ws", "/tmp/ws", sessions=[session])
+        wrapper = next(line.strip().removeprefix("- ") for line in config.splitlines() if "while tmux" in line)
+        probe = wrapper.removeprefix("unset TMUX; while ").split(" 2>/dev/null;", maxsplit=1)[0]
+        result = subprocess.run(["zsh", "-f", "-c", probe], check=False)
+        assert result.returncode == 1
+    finally:
+        subprocess.run(["tmux", "-S", socket_path, "kill-server"], check=False)
 
 
 def test_generate_config_admin_window_first() -> None:

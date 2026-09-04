@@ -37,6 +37,11 @@ The `vm`, `workspace`, `agent`, `session`, and `console` groups own their live s
 `agw GROUP list`, inspect one item with `agw GROUP describe NAME`, and use `agw GROUP --help` for
 the current operations. Read the result after a change rather than assuming it succeeded.
 
+Sessions and consoles have explicit runtime lifecycle. `start` realizes a stopped runtime and is a
+no-op when it is already running; `restart` replaces it; `stop` removes it; and `attach` only
+connects to a running runtime. Session start and restart continue the harness conversation when
+possible. For sessions, add `--force-new` when a new conversation is required.
+
 For setup, return to `agw guide show concept-onboarding`. For failures, use
 `agw guide show concept-troubleshooting`. Exceptional conversion from retired configuration belongs
 to `agw guide show concept-migration`.

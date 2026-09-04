@@ -3,7 +3,7 @@ plus the live-tmux best-effort sync each one triggers when the console's
 tmux session is already up.
 
 ``kill_session_windows``, ``_pane_secret_target``, ``_live_target``,
-``_console_tmux_exists``, and ``_add_session_window`` are monkeypatched by
+``_console_tmux_presence``, and ``_add_session_window`` are monkeypatched by
 tests directly on the ``agentworks.sessions.multi_console`` package object
 (so a test can, e.g., exercise ``remove_sessions``'s live-sync path without a
 live VM). A patch on the package object only rebinds the package's own
@@ -15,11 +15,12 @@ time (``_mc.<name>(...)``) rather than a direct or bare reference.
 from __future__ import annotations
 
 import shlex
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import agentworks.sessions.multi_console as _mc
 from agentworks import output
-from agentworks.errors import AlreadyExistsError, NotFoundError, ValidationError
+from agentworks.errors import AlreadyExistsError, NotFoundError, StateError, ValidationError
 from agentworks.naming import MAX_FREEFORM_NAME_LENGTH, validate_name
 from agentworks.resources.access import named_console_template
 from agentworks.sessions.multi_console_layout import (
@@ -27,6 +28,7 @@ from agentworks.sessions.multi_console_layout import (
     _reorder_session_windows,
     _reorder_shell_panes,
 )
+from agentworks.sessions.tmux import ProbeStatus, exact_tmux_target
 
 from ._helpers import (
     SessionSpec,
@@ -43,31 +45,45 @@ from .tmux_build import PreserveEnvMemo, _resolve_workspace_path, _split_shell_p
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.db import Database, ShellEntry
+    from agentworks.db import ConsoleSessionRow, Database, ShellEntry
     from agentworks.secrets import SecretTarget
     from agentworks.secrets.policy import TtyInteractionPolicy
 
 
+@dataclass(frozen=True)
+class ConsoleDefinition:
+    """A validated console definition before its database commit point."""
+
+    name: str
+    vm_name: str
+    admin_shell: bool
+    members: tuple[ConsoleSessionRow, ...]
+
+
 def create_console(
     db: Database,
+    config: Config,
     *,
     name: str,
     vm_name: str,
     session_specs: list[str],
     fill_all: bool = False,
     add_admin_shell: bool = False,
+    interaction: TtyInteractionPolicy,
 ) -> None:
     """Create a new console with the given sessions.
 
     Explicit *session_specs* keep their argument order. *fill_all* appends
     every other session on the VM in alphabetical order with zero shells.
     *add_admin_shell* adds a window 0 login shell as the VM admin, useful when
-    you want a top-level shell alongside the curated session windows. All inserts run in one transaction; the
-    console is not created if any step fails.
+    you want a top-level shell alongside the curated session windows. The
+    definition inserts atomically after validation, secret resolution, and
+    stale-runtime cleanup. A later build failure retains the durable
+    definition. It is honestly stopped only when cleanup proves both runtime
+    names absent; otherwise its runtime state is indeterminate.
 
-    Note: this function is DB-only. Live filtering (e.g. --all-running) is
-    resolved by the CLI layer into an explicit list of session names before
-    calling create_console.
+    Live filtering (e.g. ``--all-running``) is resolved by the CLI layer into
+    an explicit list of session names before calling this function.
     """
     validate_name(name, max_length=MAX_FREEFORM_NAME_LENGTH)
 
@@ -112,10 +128,84 @@ def create_console(
             entity_name=name,
         )
 
-    with db.transaction():
-        db.insert_console(name, vm_name, admin_shell=add_admin_shell)
-        for spec in specs:
-            db.add_console_session(name, spec.name, default_shells(spec.shells))
+    from agentworks.bootstrap import load_request_registry
+    from agentworks.db import ConsoleSessionRow
+    from agentworks.secrets import resolve_for_command
+
+    definition = ConsoleDefinition(
+        name=name,
+        vm_name=vm_name,
+        admin_shell=add_admin_shell,
+        members=tuple(
+            ConsoleSessionRow(
+                console_name=name,
+                session_name=spec.name,
+                position=position,
+                shells=default_shells(spec.shells),
+            )
+            for position, spec in enumerate(specs)
+        ),
+    )
+    registry = load_request_registry(config, live_database=db)
+    output.info(f"Checking console '{name}' runtime...")
+    with _mc._prepare_vm_target(
+        db,
+        config,
+        vm_name,
+        registry=registry,
+        interaction=interaction,
+    ) as (vm, target):
+        secret_values = resolve_for_command(
+            _mc._console_build_secret_targets(
+                db,
+                registry,
+                console=definition,
+                vm=vm,
+                members=definition.members,
+            ),
+            config,
+            registry,
+            allow_transient_auto_declare=True,
+            interaction=interaction,
+        )
+        _mc._teardown_console_tmux(target, name)
+        with db.transaction():
+            db.insert_console(name, vm_name, admin_shell=add_admin_shell)
+            for spec in specs:
+                db.add_console_session(name, spec.name, default_shells(spec.shells))
+        console = _require_console(db, name)
+        from .tmux_build import _build_console_tmux
+
+        try:
+            _build_console_tmux(
+                target,
+                db,
+                registry,
+                console,
+                vm,
+                values=secret_values,
+                layout=named_console_template(registry).tmux_layout,
+            )
+        except Exception as exc:
+            canonical, staging = _mc._console_runtime_presence(target, name)
+            if canonical is ProbeStatus.ABSENT and staging is ProbeStatus.ABSENT:
+                from agentworks.errors import ExternalError
+
+                raise ExternalError(
+                    f"console '{name}' was saved, but its runtime did not start",
+                    entity_kind="console",
+                    entity_name=name,
+                    hint=f"The stopped definition was retained; retry with `agw console start {name}`.",
+                ) from exc
+            raise StateError(
+                f"console '{name}' was saved, but its runtime state could not be determined",
+                entity_kind="console",
+                entity_name=name,
+                hint=(
+                    f"The definition was retained. Recover with `agw console start {name}`, "
+                    f"`agw console restart {name}`, or `agw console stop {name}` once transport is reliable."
+                ),
+            ) from exc
 
     extras_note = " + admin shell" if add_admin_shell else ""
     output.result(f"Console '{name}' created with {len(specs)} session(s){extras_note}.")
@@ -252,7 +342,14 @@ def add_sessions(
         if live is None:
             return
         vm, target = live
-        if not _mc._console_tmux_exists(target, console_name):
+        presence = _mc._console_tmux_presence(target, console_name)
+        if presence is ProbeStatus.UNKNOWN:
+            raise StateError(
+                f"could not determine console '{console_name}' tmux state",
+                entity_kind="console",
+                entity_name=console_name,
+            )
+        if presence is ProbeStatus.ABSENT:
             return
         preserve_memo: PreserveEnvMemo = {}
         for spec in specs:
@@ -425,7 +522,14 @@ def reorder_sessions(
         if live is None:
             return
         _vm, target = live
-        if not _mc._console_tmux_exists(target, console_name):
+        presence = _mc._console_tmux_presence(target, console_name)
+        if presence is ProbeStatus.UNKNOWN:
+            raise StateError(
+                f"could not determine console '{console_name}' tmux state",
+                entity_kind="console",
+                entity_name=console_name,
+            )
+        if presence is ProbeStatus.ABSENT:
             return
         _reorder_session_windows(
             target,
@@ -531,7 +635,14 @@ def add_shell(
         if live is None:
             return
         vm, target = live
-        if not _mc._console_tmux_exists(target, console_name):
+        presence = _mc._console_tmux_presence(target, console_name)
+        if presence is ProbeStatus.UNKNOWN:
+            raise StateError(
+                f"could not determine console '{console_name}' tmux state",
+                entity_kind="console",
+                entity_name=console_name,
+            )
+        if presence is ProbeStatus.ABSENT:
             return
         session = db.get_session(session_name)
         if session is None:
@@ -559,7 +670,7 @@ def add_shell(
             # One pane, so no probe verdict to share with a sibling split.
             preserve_memo={},
         )
-        q_con = shlex.quote(tmux_session_name(console_name))
+        q_con = exact_tmux_target(tmux_session_name(console_name))
         q_win = shlex.quote(session_name)
         # `_split_shell_pane` splits the window's active pane, which after an
         # attach is the session pane, so the new shell lands directly below it,

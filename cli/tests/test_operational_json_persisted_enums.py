@@ -36,7 +36,9 @@ def _seed_invalid_persisted_enums(db: Database) -> None:
     db.insert_vm("box", site="proxmox", hostname="box")
     db.insert_workspace("ws", "/srv/ws", "box", "ws-ws")
     db.insert_session("session-a", "ws", "default", SessionMode.ADMIN)
-    db.update_session_pid("session-a", PID_STOPPED, boot_id="boot")
+    db.update_session_runtime(
+        "session-a", socket_path="/tmp/session-a.sock", pid=PID_STOPPED, boot_id=None, tmux_server_start_ticks=None
+    )
     db._conn.execute(
         "UPDATE vms SET provisioning_status = ?, init_status = ? WHERE name = 'box'",
         (_RAW_TEXT, _RAW_BYTES),

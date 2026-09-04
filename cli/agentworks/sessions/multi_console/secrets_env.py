@@ -21,7 +21,7 @@ drives.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import agentworks.sessions.multi_console as _mc
 from agentworks.errors import NotFoundError
@@ -29,9 +29,9 @@ from agentworks.errors import NotFoundError
 from .attach import _session_linux_user
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
-    from agentworks.db import ConsoleRow, ConsoleSessionRow, Database, SessionRow, VMRow
+    from agentworks.db import ConsoleSessionRow, Database, SessionRow, VMRow
     from agentworks.resources.registry import Registry
     from agentworks.secrets import SecretTarget
 
@@ -40,6 +40,14 @@ if TYPE_CHECKING:
 # probe: a var the allowlist already covers would pass even without the
 # fragment. test_consoles pins the two against each other.
 _SUDO_PRESERVE_PROBE_VAR = "AWPROBE"
+
+
+class _ConsoleDefinition(Protocol):
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def admin_shell(self) -> bool: ...
 
 
 def _pane_secret_target(
@@ -144,8 +152,9 @@ def _console_build_secret_targets(
     db: Database,
     registry: Registry,
     *,
-    console: ConsoleRow,
+    console: _ConsoleDefinition,
     vm: VMRow,
+    members: Sequence[ConsoleSessionRow] | None = None,
 ) -> list[SecretTarget]:
     """Build the SecretTarget list for every pane the console build path
     would open from scratch.
@@ -176,7 +185,7 @@ def _console_build_secret_targets(
                 label=f"console={console.name}/admin-shell",
             ),
         )
-    for member in db.list_console_sessions(console.name):
+    for member in members if members is not None else db.list_console_sessions(console.name):
         session = db.get_session(member.session_name)
         if session is None:
             continue

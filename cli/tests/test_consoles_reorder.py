@@ -12,9 +12,10 @@ from agentworks.cli.commands import console as console_commands
 from agentworks.db import Database
 from agentworks.errors import ValidationError
 from agentworks.sessions import multi_console
-from agentworks.sessions.multi_console import create_console, reorder_sessions
+from agentworks.sessions.multi_console import reorder_sessions
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
 from tests._tmux_model import TmuxModel
+from tests.console_helpers import create_console_record as create_console
 
 if TYPE_CHECKING:
     from collections.abc import Callable

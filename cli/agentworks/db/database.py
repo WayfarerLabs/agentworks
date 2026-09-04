@@ -832,24 +832,33 @@ class Database:
         rows = self._conn.execute(sql, tuple(params)).fetchall()
         return [_to_session(r) for r in rows]
 
-    def update_session_pid(self, name: str, pid: int | None, boot_id: str | None = None) -> None:
-        """Store or clear the PID and boot ID for a session.
-
-        Valid pid values: None, PID_STOPPED (-1), or a positive integer.
-        When setting a positive PID, boot_id is required. When clearing
-        (PID_STOPPED or None), COALESCE preserves the existing boot_id.
-        """
+    def update_session_runtime(
+        self,
+        name: str,
+        *,
+        socket_path: str | None,
+        pid: int | None,
+        boot_id: str | None,
+        tmux_server_start_ticks: int | None,
+    ) -> None:
+        """Persist or clear the session runtime identity as one fact."""
         if pid is not None and pid != _db.PID_STOPPED and pid <= 0:
-            raise ValueError(f"invalid PID: {pid} (must be None, PID_STOPPED, or > 0)")
-        if pid is not None and pid > 0 and boot_id is None:
-            raise ValueError(f"boot_id is required when setting a positive PID ({pid})")
+            raise ValueError(f"invalid runtime PID: {pid}")
+        if (
+            pid is not None
+            and pid > 0
+            and (boot_id is None or tmux_server_start_ticks is None or tmux_server_start_ticks <= 0)
+        ):
+            raise ValueError("a live runtime requires boot ID and positive process start time")
+        if (pid is None or pid == _db.PID_STOPPED) and (boot_id is not None or tmux_server_start_ticks is not None):
+            raise ValueError("an unknown or stopped runtime cannot retain a process fingerprint")
         self._conn.execute(
-            "UPDATE sessions SET pid = ?, boot_id = COALESCE(?, boot_id), "
-            "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
+            "UPDATE sessions SET socket_path = ?, pid = ?, boot_id = ?, "
+            "tmux_server_start_ticks = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
             "WHERE name = ?",
-            (pid, boot_id, name),
+            (socket_path, pid, boot_id, tmux_server_start_ticks, name),
         )
-        self._conn.commit()
+        self._commit_unless_in_tx()
 
     def update_session_harness_integration_state(self, name: str, harness_integration_state: dict[str, object]) -> None:
         """Persist the harness integration's per-session state blob.
@@ -863,13 +872,6 @@ class Database:
             "UPDATE sessions SET harness_integration_state = ?, "
             "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE name = ?",
             (json.dumps(harness_integration_state), name),
-        )
-        self._conn.commit()
-
-    def update_session_socket_path(self, name: str, socket_path: str | None) -> None:
-        self._conn.execute(
-            "UPDATE sessions SET socket_path = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE name = ?",
-            (socket_path, name),
         )
         self._conn.commit()
 

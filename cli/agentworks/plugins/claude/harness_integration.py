@@ -34,7 +34,12 @@ from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 
 from pydantic import Field
 
-from agentworks.capabilities.harness_integration.base import HarnessIntegration, quote_literal_argv, require_commands
+from agentworks.capabilities.harness_integration.base import (
+    HarnessIntegration,
+    HarnessStart,
+    quote_literal_argv,
+    require_commands,
+)
 from agentworks.errors import StateError
 from agentworks.schema import AgwModel, MergeStrategy
 from agentworks.topics import TopicProse
@@ -123,7 +128,7 @@ _PROJECTS_DIR = "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"
 class ClaudeCodeIntegration(HarnessIntegration):
     """Runs Claude Code, resuming or launching fresh per on-disk state."""
 
-    contract_version: ClassVar[int] = 2
+    contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "claude-code"
     description: ClassVar[str] = "Run Claude Code, resuming its session when one exists"
     config_model: ClassVar[type[ClaudeCodeConfig]] = ClaudeCodeConfig
@@ -132,16 +137,16 @@ class ClaudeCodeIntegration(HarnessIntegration):
         overview="""
         Runs Claude Code as the session's workload. Starting a session that already has
         on-disk state resumes that conversation; starting a fresh one launches fresh, so
-        `agw session resume` and a reattach after a reboot behave the way an operator
-        expects without either being configured.
+        ordinary `agw session start` or `agw session restart` and a reattach after a
+        reboot behave the way an operator expects without either being configured.
 
         Ships as the opt-in `claude` system plugin, and needs the `claude` CLI on the
         session's target.
         """,
     )
 
-    # Set by _resume_or_launch on each start/restart; drives launch_note().
-    # None until the op runs (nothing decided yet).
+    # Set by _resume_or_launch on each start/restart; drives the ordinary
+    # HarnessStart note. None until the op runs (nothing decided yet).
     _resumed: bool | None = None
 
     @property
@@ -186,34 +191,24 @@ class ClaudeCodeIntegration(HarnessIntegration):
         if not (isinstance(namespaced, str) and namespaced):
             namespace["session_id"] = legacy
 
-    def start(self, ctx: RunContext) -> str:
-        """The pane command for ``session create``: resume the stored
-        session if its transcript exists, else launch fresh."""
-        return self._resume_or_launch(ctx)
+    def start(self, ctx: RunContext, *, force_new: bool = False) -> HarnessStart:
+        """Choose continuation when usable, or rotate the binding when forced."""
+        command = self._resume_or_launch(ctx, force_new=force_new)
+        if force_new:
+            note = "Fresh Claude Code session requested. Starting a new one without resuming prior state..."
+        elif self._resumed:
+            note = "Existing Claude Code session found. Resuming..."
+        else:
+            note = "No existing Claude Code session. Starting a new one..."
+        return HarnessStart(command, note)
 
-    def resume(self, ctx: RunContext) -> str:
-        """The pane command for ``session resume``: symmetric with
-        :meth:`start`. The orchestrator kills the old tmux BEFORE calling
-        this (R7), so the probe decides resume-vs-launch with the old
-        process already dead."""
-        return self._resume_or_launch(ctx)
-
-    def launch_note(self) -> str | None:
-        if self._resumed is None:
-            return None
-        return (
-            "Existing Claude Code session found. Resuming..."
-            if self._resumed
-            else "No existing Claude Code session. Starting a new one..."
-        )
-
-    def _resume_or_launch(self, ctx: RunContext) -> str:
+    def _resume_or_launch(self, ctx: RunContext, *, force_new: bool) -> str:
         """Read (or mint) the stored session id, probe the launch target
         for its transcript, and return the single ``sh -c`` pane command
         that echoes the visible decision and ``exec``s ``claude``."""
-        sid = self._session_id()
+        sid = self._session_id(force_new=force_new)
         launch_target = ctx.admin_target() if self._admin else ctx.agent_target()
-        resume = launch_target is not None and self._transcript_exists(launch_target, sid)
+        resume = not force_new and launch_target is not None and self._transcript_exists(launch_target, sid)
         self._resumed = resume
 
         if resume:
@@ -240,14 +235,14 @@ class ClaudeCodeIntegration(HarnessIntegration):
         inner = f"echo {shlex.quote(msg)}; exec claude {argv}"
         return f"sh -c {shlex.quote(inner)}"
 
-    def _session_id(self) -> str:
+    def _session_id(self, *, force_new: bool = False) -> str:
         """The stored Claude session id, minted (and recorded in the state
         blob) on first use. A v4 uuid: Claude accepts any valid uuid at
         ``--session-id``, and global uniqueness keeps the transcript probe
         slug-independent. ``self._state`` rides inside the session node's
         full namespaced blob, which the manager persists after the op, so
         a minted id survives to the next restart."""
-        sid = self._state.get("session_id")
+        sid = None if force_new else self._state.get("session_id")
         if not isinstance(sid, str):
             # If the op raises after this mint but before the manager
             # persists the blob, the id is lost. That window is benign: it
