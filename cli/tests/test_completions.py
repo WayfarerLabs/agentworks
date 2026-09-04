@@ -633,7 +633,7 @@ class TestOptionFlagsInSpec:
         session = commands["agentworks.session"]
         assert {"start", "restart"} <= session.subcommands.keys()
         assert "resume" not in session.subcommands
-        for parameter in ("name", "vm", "workspace", "agent"):
+        for parameter in ("name", "vm", "workspace", "agent", "console"):
             assert ("session.start", parameter) in DYNAMIC_COMPLETIONS
             assert ("session.restart", parameter) in DYNAMIC_COMPLETIONS
             assert ("session.resume", parameter) not in DYNAMIC_COMPLETIONS

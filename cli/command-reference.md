@@ -789,15 +789,16 @@ only; `--admin` matches admin-mode sessions only (the two are mutually exclusive
 
 `session stop`, `session start`, and `session restart` operate on a single session by default. Pass
 `--all` to batch over matching sessions. The batch form accepts `--vm <vm>`, `--workspace <ws>`,
-`--agent <agent>`, and `--admin` to narrow the set; filters compose with AND and require one of the
-batch flags. The name filters accept a single value or a comma-separated list (`--vm vm1,vm2`);
-commas within a filter are OR-ed together, and an unknown name in a filter is an error, not an empty
-result. `--agent` matches agent-mode sessions only; `--admin` matches admin-mode sessions only (the
-two are mutually exclusive). Pass `--force` only to recover broken state after Agentworks proves the
-prior managed tmux server is absent; Agentworks never signals a stored numeric PID. Start and
-restart continue the harness conversation when possible; `--force-new` requires a fresh conversation
-when the operation launches a runtime. A running `session start --force-new` is refused rather than
-silently replacing the runtime.
+`--agent <agent>`, `--console <console>`, and `--admin` to narrow the set; filters compose with AND
+and require `--all`. The name filters accept a single value or a comma-separated list
+(`--vm vm1,vm2`); commas within a filter are OR-ed together, and an unknown name in a filter is an
+error, not an empty result. `--console` selects sessions belonging to any named console. `--agent`
+matches agent-mode sessions only; `--admin` matches admin-mode sessions only (the two are mutually
+exclusive). Pass `--force` only to recover broken state after Agentworks proves the prior managed
+tmux server is absent; Agentworks never signals a stored numeric PID. Start and restart continue the
+harness conversation when possible; `--force-new` requires a fresh conversation when the operation
+launches a runtime. A running `session start --force-new` is refused rather than silently replacing
+the runtime.
 
 Maintainers: [Session status internals](../docs/guides/session-status.md) documents the persisted
 PID and boot-ID model, read-only live status derivation, lifecycle repair, and the safety boundary

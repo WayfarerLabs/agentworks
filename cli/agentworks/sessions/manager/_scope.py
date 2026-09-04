@@ -172,9 +172,10 @@ def filter_sessions(
     workspace_name: str | list[str] | None = None,
     vm_name: str | list[str] | None = None,
     agent_name: str | list[str] | None = None,
+    console_name: str | list[str] | None = None,
     admin_only: bool = False,
 ) -> list[SessionRow]:
-    """Load sessions with optional workspace, VM, agent, and/or admin filters.
+    """Load sessions with optional workspace, VM, agent, console, and/or admin filters.
 
     Each name filter accepts a single name or a list of names; lists
     OR within a filter, filters AND across the call. ``admin_only``
@@ -183,7 +184,7 @@ def filter_sessions(
     ``Database.list_sessions``.
 
     An unknown name in any filter raises ``NotFoundError`` rather than
-    matching nothing (issue #304); every element of a list filter is
+    matching nothing; every element of a list filter is
     checked. Because every batch session op (``list_sessions``,
     ``stop_all_sessions``, ``start_all_sessions``) funnels its filters
     through here, this is the single validation point for the session
@@ -194,11 +195,13 @@ def filter_sessions(
         vm_name=vm_name,
         workspace_name=workspace_name,
         agent_name=agent_name,
+        console_name=console_name,
     )
     return db.list_sessions(
         workspace_name=workspace_name,
         vm_name=vm_name,
         agent_name=agent_name,
+        console_name=console_name,
         admin_only=admin_only,
     )
 
