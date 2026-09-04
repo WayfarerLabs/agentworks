@@ -136,9 +136,11 @@ class ProxmoxPlatform(VMPlatform):
         resolved through the configured source chain like any other secret. The token id is not a
         secret and is written in the document.
 
-        There is no native interactive transport: the QEMU guest agent's exec interface
-        is one-shot and non-interactive, so the Proxmox web UI's serial console is the
-        equivalent escape hatch.
+        Proxmox does not currently implement the required native administrative transport
+        that works independently of the VM's Tailscale state. The QEMU guest agent's exec
+        interface provides the needed non-interactive foundation; issue #727 tracks the
+        transport correction. Until then, use the Proxmox web UI's serial console for manual
+        access.
 
         Creation passes the required Tailscale key through a private guest-agent staging
         file and verifies removal of that file before returning a Tailscale-backed transport.
@@ -151,10 +153,9 @@ class ProxmoxPlatform(VMPlatform):
         """,
     )
     no_native_transport_hint: ClassVar[str] = (
-        "The QEMU guest agent exec interface is one-shot and "
-        "non-interactive, so use the Proxmox web UI's serial console "
-        "(VM > Console in the Proxmox VE web UI) as the equivalent "
-        "escape hatch."
+        "Proxmox does not yet implement the required native administrative "
+        "transport (#727). Use the Proxmox web UI's serial console "
+        "(VM > Console in the Proxmox VE web UI) for manual access."
     )
 
     def __init__(self, owner_name: str, config: Mapping[str, object]) -> None:
@@ -485,9 +486,9 @@ class ProxmoxPlatform(VMPlatform):
         node = vm.platform_metadata.get("node") or self.config.node
         return f"{vmid}@{node}"
 
-    # native_transport: inherited None default. One-shot QEMU guest-agent
-    # exec can't host an interactive shell; the transports factory raises
-    # the typed StateError with the web-console hint.
+    # native_transport: inherited None default. This is a known contract
+    # violation (#727), not an optional capability. The transports factory
+    # raises the typed StateError with the web-console hint.
 
     # -- Helpers ---------------------------------------------------------------
 

@@ -184,10 +184,9 @@ class VMPlatform(Capability):
         """
         return None
 
-    # Operator guidance shown when native_transport returns None (the
-    # transports factory embeds it in the StateError hint). Platforms
-    # that opt out of a native transport override with prose naming
-    # their actual escape hatch.
+    # Operator guidance shown when a non-compliant platform returns None from
+    # native_transport (the factory embeds it in the StateError hint). This is
+    # compatibility for the current Proxmox gap, not a contract opt-out (#727).
     no_native_transport_hint: ClassVar[str] = "This platform has no interactive native transport."
 
     # Operator guidance warned when every reachability probe of the
@@ -329,10 +328,13 @@ class VMPlatform(Capability):
         """
 
     def native_transport(self, vm: VMRow, ctx: RunContext, *, config: Config | None = None) -> Transport | None:
-        """Platform-native :class:`Transport` for bootstrap and
-        ``vm shell --platform``, or ``None`` when the platform has no
-        interactive native transport (proxmox: one-shot QEMU guest-agent
-        exec can't host a shell).
+        """Platform-native :class:`Transport` for bootstrap, Tailscale
+        recovery, and ``vm shell --platform``.
+
+        The contract requires this transport to work independently of the VM's
+        Tailscale state. The optional return and default ``None`` temporarily
+        preserve the current non-compliant Proxmox behavior (#727); they do not
+        make the transport optional for an implementation.
 
         Callers reach this through the
         :func:`agentworks.transports.native_transport` factory, which

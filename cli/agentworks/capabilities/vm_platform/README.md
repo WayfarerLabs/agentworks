@@ -70,16 +70,22 @@ A vm-platform stands up a machine and hands Agentworks an administrative foothol
 
 - **MUST** provision exactly `ProvisionRequest.debian_release`, using platform-owned, release-keyed
   values. A missing mapping **MUST** fail clearly before mutation, without fallback or substitution.
+  Core independently inspects the live VM during provisioning and records the release only when it
+  matches.
 - **MUST NOT** gate existing-VM operations on the current creation release or image catalog.
 - **MUST** create the configured admin with passwordless `sudo`, SSH-key access, and no password.
-- **MUST** return an admin transport. Core verifies the guest is Debian at the requested release,
-  without bypass, and persists only the observed result.
+- **MUST** provide a native administrative `Transport` that runs arbitrary commands as the admin
+  without depending on the VM's Tailscale state or identity. Proxmox does not currently satisfy this
+  obligation ([#727](https://github.com/WayfarerLabs/agentworks/issues/727)).
 - **MUST** complete the Tailscale join before returning from `create()`.
 - **MUST** honor requested CPU, memory, and disk, rounding up to an available shape if needed. A
   backend that cannot set a per-VM shape **MUST** warn instead
   ([#369](https://github.com/WayfarerLabs/agentworks/issues/369)).
-- **MUST** implement create, start, stop, delete, and status. Create **MUST** avoid collisions, and
-  later operations **MUST** use the persisted backend identity.
+- **MUST** implement create, start, stop, delete, and status. Start, stop, and delete **MUST** be
+  idempotent.
+- Create **MUST** collision-check its intended backend identity before mutation and either fail
+  clearly or select and persist a collision-free identity. Later operations **MUST** use the
+  persisted identity.
 - A platform **SHOULD** surface provider authorization failures clearly. Where a failure could leave
   unsafe exposure or leaked resources, it **SHOULD** use additional provider mechanisms to validate
   the resulting state.
@@ -89,10 +95,12 @@ A vm-platform stands up a machine and hands Agentworks an administrative foothol
   identifiers needed for deletion and report recovery guidance.
 - Delete **MUST NOT** succeed until the backend VM is confirmed gone; failure **MUST** retain the
   Agentworks row for retry.
-- **MUST NOT** mutate another VM, site, or shared operator infrastructure. VM-specific resources
-  **MUST** belong to one VM.
-- A full-control cloud host **MUST** default to no standing inbound exposure and close any scoped,
-  temporary access. Other hosts **MUST NOT** manage the perimeter.
+- Every VM-specific backend resource **MUST** belong to one VM and share that VM's lifecycle.
+- **MUST NOT** mutate another VM, site, or shared operator infrastructure.
+- A platform that manages public ingress **MUST** leave no standing inbound exposure. Any public
+  ingress it opens **MUST** be narrowly scoped to an active Agentworks operation and removed on
+  success, failure, or interruption.
+- **MUST NOT** alter operator-managed perimeter controls.
 - **MUST NOT** share host paths by default or log or persist resolved secrets.
 
 VM platforms do not create agent users, workspaces, groups, or sessions or manage their secrets.
@@ -195,17 +203,19 @@ do: opening a route to a cloud VM is a backend call, so a platform reads any cre
 from `ctx.secret(name)` here exactly as in an op. Lima and WSL2 accept and ignore it (their
 transports are local); Azure, EC2, and GCE use it:
 
-- `native_transport(vm, ctx, *, config=None) -> Transport | None` (default `None`). The
-  `agentworks.transports.native_transport` factory wraps the call in `transient_route`, probes
-  reachability with an `echo ok` retry loop, and raises a typed `StateError` (using
-  `no_native_transport_hint`) when a platform returns `None`. Lima returns a `limactl shell`
-  transport, Azure, EC2, and GCE an `SSHTransport` against the VM's current public IP (Azure reads
-  its persistent address live off the NIC; EC2 reads its address live off a fresh
-  `describe_instances`, because EC2 reassigns the auto-assigned IP across stop/start; GCE likewise
-  reads its lifetime ephemeral access config live), WSL2 a `wsl.exe`-backed transport. Proxmox
-  deliberately returns the default `None` and sets `no_native_transport_hint` to point the operator
-  at the Proxmox web-UI serial console, because its guest-agent exec is one-shot and cannot host an
-  interactive shell.
+- `native_transport(vm, ctx, *, config=None) -> Transport | None`. The contract requires a
+  `Transport` that remains usable when the VM's Tailscale state or identity is unavailable. The
+  optional return and default `None` remain as compatibility for the currently non-compliant Proxmox
+  implementation ([#727](https://github.com/WayfarerLabs/agentworks/issues/727)); they do not make
+  the transport optional. The `agentworks.transports.native_transport` factory wraps the call in
+  `transient_route`, probes reachability with an `echo ok` retry loop, and raises a typed
+  `StateError` (using `no_native_transport_hint`) when the non-compliant platform returns `None`.
+  Lima returns a `limactl shell` transport, Azure, EC2, and GCE an `SSHTransport` against the VM's
+  current public IP (Azure reads its persistent address live off the NIC; EC2 reads its address live
+  off a fresh `describe_instances`, because EC2 reassigns the auto-assigned IP across stop/start;
+  GCE likewise reads its lifetime ephemeral access config live), WSL2 a `wsl.exe`-backed transport.
+  Proxmox currently returns `None` and points the operator at the Proxmox web-UI serial console.
+  That manual escape hatch does not satisfy the programmatic transport obligation.
 - `transient_route(vm, ctx, *, config=None) -> context manager` (default `nullcontext()`). Azure
   opens a scoped SSH route on enter (heals a missing public IP, converges the NSG onto the
   baseline-deny model, pokes this operation's own ephemeral allow rule scoped to the operator's

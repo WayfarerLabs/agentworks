@@ -175,9 +175,9 @@ def native_transport(
     arrive by delivery, not by hoping an earlier op in the same process
     warmed a cache.
 
-    A ``None`` from :meth:`VMPlatform.native_transport` (proxmox: the
-    one-shot QEMU guest-agent exec can't host an interactive shell)
-    re-raises as a typed :class:`StateError` with the console hint.
+    A ``None`` from :meth:`VMPlatform.native_transport` (currently the
+    non-compliant Proxmox implementation, #727) re-raises as a typed
+    :class:`StateError` with the console hint.
     Surfaces a typed error if the transport resolves to an SSH target
     with an empty host (Azure's defensive guard from PR #118).
 

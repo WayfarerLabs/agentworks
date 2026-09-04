@@ -189,6 +189,14 @@ agw vm describe test-vm
 agw vm delete test-vm
 ```
 
+### Native transport limitation
+
+Proxmox does not currently implement the required administrative transport that works independently
+of the VM's Tailscale state. Consequently, `vm shell --platform`, start-time Tailscale rejoin, and
+`vm rekey` cannot use Proxmox to recover a broken VM registration. Use the Proxmox web UI's serial
+console for manual access. [Issue #727](https://github.com/WayfarerLabs/agentworks/issues/727)
+tracks the native execution transport.
+
 ## How it works
 
 When you run `agw vm create <name> --site proxmox`:
@@ -196,12 +204,12 @@ When you run `agw vm create <name> --site proxmox`:
 1. Clones the template into the `agentworks` pool via the Proxmox REST API
 2. Configures CPU, memory, cloud-init user/SSH keys, and DHCP networking
 3. Starts the VM and waits for the QEMU guest agent to report an IP
-4. SSHs into the VM via ProxyJump through the Proxmox host
-5. Runs the bootstrap script (same one used by Lima and Azure) which installs system packages, sets
-   up the admin user, and joins Tailscale
-6. Hands off to the agentworks initializer (over Tailscale SSH) for remaining setup
+4. Waits for cloud-init and runs the private bootstrap script through QEMU Guest Agent
+5. The bootstrap installs system packages, configures the admin user, and joins Tailscale
+6. Returns Tailscale SSH to core, which verifies the live Debian release and completes
+   initialization
 
-After provisioning, everything works over Tailscale SSH -- identical to Lima and Azure VMs.
+After provisioning, normal operations use Tailscale SSH, as they do on Lima and Azure VMs.
 
 ## Troubleshooting
 
