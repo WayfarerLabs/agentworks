@@ -90,7 +90,7 @@ assert behavior and structure, never authored prose.
       strategy, prior-art research, and this plan in one artifact set.
 - [x] Run file lint, spelling, formatting, links, locked-SDD, diff, and release-chronology checks on
       the complete artifact set.
-- [ ] Obtain clean private project-reviewer and Muntz passes on one exact design head and
+- [x] Obtain clean private project-reviewer and Muntz passes on one exact design head and
       incorporate every material finding authorized by the current design charter.
 - [ ] Commit and push the coherent design head, open the draft PR, apply
       `sdd:runnable-status-inspection` and `review-requested`, and publish the exact design handoff.
