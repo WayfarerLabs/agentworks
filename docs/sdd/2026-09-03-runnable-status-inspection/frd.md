@@ -114,12 +114,14 @@ authority that match its runtime.
   server remains but the managed session does not. `broken` means stored same-boot process evidence
   remains live while tmux is unreachable. `unknown` means a requested observation could not prove
   another state. Persisted `PID_STOPPED` evidence does not bypass requested live observation or
-  override observed tmux state; a row without a canonical runtime locator becomes `unknown`.
+  override observed tmux state. After both the exact session and dedicated server are
+  authoritatively absent, `PID_STOPPED` is sufficient supporting evidence for `stopped`. A row
+  without a canonical runtime locator becomes `unknown`.
 - **R13.** Console live status shall use `running`, `stopped`, `residual`, or `unknown`. `running`
   means the exact canonical tmux session is present and its reserved staging session is absent.
   `stopped` means both managed names are absent. `residual` means the staging name is present,
-  whether or not the canonical name also exists. `unknown` means either presence fact is
-  inconclusive.
+  whether or not canonical presence is conclusive. `unknown` means staging is not known present and
+  at least one fact needed to distinguish running from stopped is inconclusive.
 - **R14.** Session and console observations shall use the canonical VM transport directly and shall
   not activate the VM. Their tmux targets shall preserve exact-name selection. A stopped or
   unreachable VM therefore yields unknown, not an automatic start.

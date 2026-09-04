@@ -60,7 +60,9 @@ The target design extracts the presence-to-console-status classifier from lifecy
 a read-only batch observer. The observer groups consoles by VM, obtains one formatted tmux session
 enumeration per VM, and compares each validated canonical and staging name by exact string equality.
 Unrelated user sessions are ignored. Lifecycle operations keep their gated boundary; inspection
-never uses it.
+never uses it. Lifecycle examines raw presence first and retains typed refusal on either unknown
+probe, even though the observation projection may call known staging presence `residual` without a
+canonical answer.
 
 ### VM
 

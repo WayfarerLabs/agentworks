@@ -142,6 +142,12 @@ else:                       STOPPED
 Staging presence is sufficient evidence of residual managed state even if canonical presence is
 inconclusive. Otherwise unknown dominates a partial observation.
 
+This classifier is an observation projection, not permission to mutate lifecycle state. A lifecycle
+operation examines the raw pair first and raises its existing typed refusal when either fact is
+`UNKNOWN`; it calls the classifier only after both facts are conclusive. Thus
+`(canonical=UNKNOWN, staging=PRESENT)` reports `RESIDUAL` to inspection but still blocks lifecycle
+mutation.
+
 `ConsoleListRow.status` is `unavailable` when not requested, otherwise the enum value.
 `ConsoleDescription.status` is always one console enum value projected to text.
 
@@ -167,6 +173,20 @@ is removed: a row with a dedicated socket is probed regardless of stored PID, wh
 row without a canonical runtime locator becomes unknown. Lifecycle callers that need typed errors
 continue to call it inside their own boundary.
 
+Both singular and batch classifiers use the same evidence order:
+
+```text
+exact session present                              -> RUNNING
+exact session absent, dedicated server present    -> RESIDUAL
+session and server absent, pid is PID_STOPPED      -> STOPPED
+session and server absent, live same-boot process  -> BROKEN
+session and server absent, dead or stale process   -> STOPPED
+any inconclusive required fact                     -> UNKNOWN
+```
+
+The sentinel therefore supports stopped only after live tmux absence is authoritative. It cannot
+hide a manually resurrected exact session or residual dedicated server.
+
 ### Batch observer
 
 `observe_session_statuses` receives the selected rows and returns every requested name:
@@ -184,7 +204,8 @@ return result
 
 `batch_check_status` no longer excludes `PID_STOPPED` rows that have a dedicated socket, and the
 list join no longer substitutes stopped before consulting the observer. A requested row without a
-canonical socket remains unknown.
+canonical socket remains unknown. The batch parser applies the same post-absence `PID_STOPPED`
+branch as the singular classifier.
 
 The remote command stays one compound fact script per VM. `batch_check_status` takes explicit probe
 policy rather than relying on an unbounded transport default. It passes `tty=False` so Windows' old
@@ -228,9 +249,9 @@ return complete mapping
 ```
 
 The observer is placed in a focused `_status.py` module rather than growing the already large
-console attach module. Existing lifecycle `_console_runtime_presence` calls the same pure
-canonical/staging classifier for its state decisions, but lifecycle keeps its gated transport and
-typed refusal behavior.
+console attach module. Existing lifecycle `_console_runtime_presence` keeps its gated transport,
+checks raw unknown presence before classification, and then calls the same pure canonical/staging
+classifier for conclusive state decisions.
 
 ### Singular observer
 
