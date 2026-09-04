@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 from dataclasses import dataclass
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -20,6 +23,9 @@ from agentworks.sessions.manager import (
 )
 from agentworks.sessions.manager._status import _batch_probe_command, _batch_probe_data, _encoded_probe_field
 from agentworks.sessions.tmux import ProbeStatus, probe_tmux_server_pid
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @dataclass
@@ -194,11 +200,8 @@ def test_batch_builds_compound_command() -> None:
     batch_check_status(sessions, target=target)
     assert len(target.commands) == 1
     assert target.call_options == [(False, 10, 1)]
-    assert "has-session" in target.commands[0]
     assert 'if [ "$M" = a ]; then sudo -n tmux' in target.commands[0]
     assert 'sudo -n sh -c "if test -d /proc/$PID' in target.commands[0]
-    assert target.commands[0].count("run_tmux has-session") == 1
-    assert target.commands[0].count("run_tmux list-sessions") == 1
 
 
 def test_batch_fleet_uses_constant_argv_and_unbounded_stdin_data(
@@ -250,6 +253,120 @@ def test_batch_command_is_valid_shell_syntax() -> None:
     result = subprocess.run(["bash", "-n", "-c", command], check=False, capture_output=True)
 
     assert result.returncode == 0
+
+
+def test_batch_probe_executes_only_read_only_guest_operations(tmp_path: Path) -> None:
+    """Reject unexpected PATH tools, sudo calls, tmux verbs, and temp-tree writes."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    audit = tmp_path / "audit"
+
+    for name in ("base64", "cat", "od", "tr"):
+        executable = shutil.which(name)
+        assert executable is not None
+        os.symlink(executable, bin_dir / name)
+
+    tmux = bin_dir / "tmux"
+    tmux.write_text(
+        "#!/bin/sh\n"
+        'printf tmux >> "$AGW_PROBE_AUDIT"\n'
+        'for arg in "$@"; do printf \'\\t%s\' "$arg" >> "$AGW_PROBE_AUDIT"; done\n'
+        "printf '\\n' >> \"$AGW_PROBE_AUDIT\"\n"
+    )
+    tmux.chmod(0o755)
+
+    sudo = bin_dir / "sudo"
+    sudo.write_text(
+        "#!/bin/sh\n"
+        'if [ "$#" -lt 2 ] || [ "$1" != -n ]; then\n'
+        '  printf \'unexpected\\tsudo\\t%s\\n\' "$*" >> "$AGW_PROBE_AUDIT"\n'
+        "  exit 97\n"
+        "fi\n"
+        'case "$2" in tmux|sh) ;; *)\n'
+        '  printf \'unexpected\\tsudo\\t%s\\n\' "$*" >> "$AGW_PROBE_AUDIT"\n'
+        "  exit 97\n"
+        "esac\n"
+        "shift\n"
+        'exec "$@"\n'
+    )
+    sudo.chmod(0o755)
+
+    shell = bin_dir / "sh"
+    shell.write_text(
+        "#!/bin/sh\n"
+        'printf \'sh\\t%s\\t%s\\n\' "$1" "$2" >> "$AGW_PROBE_AUDIT"\n'
+        'case "$*" in\n'
+        '  "-c if test -d /proc/10101; then printf present; else printf absent; fi"|\n'
+        '  "-c if test -d /proc/20202; then printf present; else printf absent; fi") ;;\n'
+        "  *) exit 97 ;;\n"
+        "esac\n"
+        "printf present\n"
+    )
+    shell.chmod(0o755)
+
+    def snapshot() -> dict[str, tuple[str, bytes | str]]:
+        observed: dict[str, tuple[str, bytes | str]] = {}
+        for path in tmp_path.rglob("*"):
+            if path == audit:
+                continue
+            relative = str(path.relative_to(tmp_path))
+            if path.is_symlink():
+                observed[relative] = ("link", os.readlink(path))
+            elif path.is_file():
+                observed[relative] = ("file", path.read_bytes())
+            else:
+                observed[relative] = ("directory", "")
+        return observed
+
+    before = snapshot()
+    sessions = [
+        _session("admin", socket_path="/tmp/admin.sock"),
+        _session("agent", socket_path="/tmp/agent.sock", mode="agent"),
+        _session("admin-pid", pid=10101, socket_path="/tmp/admin-pid.sock"),
+        _session("agent-pid", pid=20202, socket_path="/tmp/agent-pid.sock", mode="agent"),
+    ]
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "AGW_PROBE_AUDIT": str(audit),
+            "HOME": str(tmp_path),
+            "PATH": str(bin_dir),
+            "TMPDIR": str(tmp_path),
+        }
+    )
+    environment.pop("BASH_ENV", None)
+    program = (
+        "command_not_found_handle() { "
+        'printf \'unexpected\\t%s\\n\' "$*" >> "$AGW_PROBE_AUDIT"; return 127; }; '
+        f"{_batch_probe_command()}"
+    )
+
+    result = subprocess.run(
+        ["/bin/bash", "--noprofile", "--norc", "-c", program],
+        input=_batch_probe_data(sessions),
+        text=True,
+        capture_output=True,
+        check=False,
+        cwd=tmp_path,
+        env=environment,
+        timeout=5,
+    )
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert audit.read_text().splitlines() == [
+        "tmux\t-S\t/tmp/admin.sock\thas-session\t-t\t=admin",
+        "tmux\t-S\t/tmp/admin.sock\tlist-sessions",
+        "tmux\t-S\t/tmp/agent.sock\thas-session\t-t\t=agent",
+        "tmux\t-S\t/tmp/agent.sock\tlist-sessions",
+        "tmux\t-S\t/tmp/admin-pid.sock\thas-session\t-t\t=admin-pid",
+        "tmux\t-S\t/tmp/admin-pid.sock\tlist-sessions",
+        "sh\t-c\tif test -d /proc/10101; then printf present; else printf absent; fi",
+        "tmux\t-S\t/tmp/agent-pid.sock\thas-session\t-t\t=agent-pid",
+        "tmux\t-S\t/tmp/agent-pid.sock\tlist-sessions",
+        "sh\t-c\tif test -d /proc/20202; then printf present; else printf absent; fi",
+    ]
+    assert snapshot() == before
 
 
 def test_batch_accepts_exact_ssh_close_advisory_after_complete_frames() -> None:
