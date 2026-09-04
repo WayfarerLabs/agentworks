@@ -92,10 +92,11 @@ authority that match its runtime.
 - **R8.** Machine output shall remain one clean JSON document on stdout. Presentation suppression
   shall prevent human progress and diagnostic prose from entering the JSON stream.
 - **R9.** List observation shall batch or parallelize at the natural authority boundary with finite
-  concurrency. Session and console guest calls shall have a 10-second, one-attempt bound. VM calls
-  shall use provider-native bounds where supported; a provider SDK without cancellable timeout
-  support may still block after progress has been shown. Once per-boundary dispatch begins, a
-  failure shall mark only that boundary's rows unknown and allow other boundaries to finish. A
+  concurrency. Session and console guest calls shall have a 10-second, one-attempt bound and shall
+  not inherit operator stdin when they carry no fact input. VM calls shall use provider-native
+  bounds where supported; a provider SDK without cancellable timeout support may still block after
+  progress has been shown. Once per-boundary dispatch begins, a failure shall mark only that
+  boundary's rows unknown and allow other boundaries to finish. A
   shared VM registry, preflight, or credential-resolution failure before dispatch may mark every
   selected VM row unknown.
 - **R10.** Expected operational failures, including unreachable guests, unavailable credentials,

@@ -34,7 +34,12 @@ class _BoundedStatusTarget:
         self._target = target
 
     def run(self, command: str, **kwargs: Any) -> Any:
-        kwargs.update(timeout=_OBSERVATION_TIMEOUT_SECONDS, retries=1, tty=False)
+        kwargs.update(
+            timeout=_OBSERVATION_TIMEOUT_SECONDS,
+            retries=1,
+            tty=False,
+            input_data="",
+        )
         return self._target.run(command, **kwargs)
 
 
@@ -388,11 +393,7 @@ def observe_session_statuses(
                 unavailable_vms.add(ws.vm_name)
                 continue
             try:
-                vm_targets[ws.vm_name] = _mgr.transport(
-                    vm,
-                    config,
-                    default_timeout=_OBSERVATION_TIMEOUT_SECONDS,
-                )
+                vm_targets[ws.vm_name] = _mgr.transport(vm, config)
             except UserAbort:
                 raise
             except (ConnectivityError, StateError):

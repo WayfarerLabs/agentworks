@@ -62,6 +62,7 @@ def test_console_enumeration_is_bounded_and_noninteractive() -> None:
             "tty": False,
             "timeout": 10,
             "retries": 1,
+            "input_data": "",
         }
     ]
 

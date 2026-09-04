@@ -27,6 +27,8 @@ server needs PID and boot evidence to distinguish `STOPPED` from `BROKEN`; incom
 indeterminate evidence stays `UNKNOWN`. Batched checks use one remote status request per reachable
 VM, elevate only the tmux and process probes needed to inspect agent-owned runtimes, and never
 repair rows. Each guest call is non-interactive, makes one attempt, and has a 10-second timeout.
+Calls without fact input explicitly close stdin so Windows SSH does not retain the operator's
+console handle after returning the complete result.
 
 Plain `agw session list` is local inventory and does not run these probes. Add `--status` to request
 them; the table adds `STATUS` and reports progress before SSH begins. `agw session describe NAME`

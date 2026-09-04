@@ -439,7 +439,7 @@ def session_description(
             pass
         else:
             try:
-                target = _mgr.transport(vm, config, default_timeout=10)
+                target = _mgr.transport(vm, config)
             except UserAbort:
                 raise
             except (ConnectivityError, StateError):

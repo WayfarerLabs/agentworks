@@ -2,7 +2,7 @@
 
 - Status: Design
 - Date: 2026-09-03
-- Research basis: official documentation and upstream source inspected on 2026-09-03
+- Research basis: official documentation and upstream source inspected on 2026-09-03 and 2026-09-04
 
 ## Executive summary
 
@@ -91,6 +91,19 @@ Design consequence: Agentworks keeps one closed JSON row shape per command and u
 not-requested carriers. Scripts that need current session state add `--status`; they do not infer
 whether a human table happened to include a column.
 
+### 7. Noninteractive Windows SSH needs finite stdin
+
+The [OpenSSH client manual](https://man.openbsd.org/ssh) documents `-n` as preventing reads from
+stdin and requires it when SSH runs in the background. The
+[Win32 OpenSSH issue tracker](https://github.com/PowerShell/Win32-OpenSSH/issues/1338) records an
+intermittent race in which very short completed remote commands leave the Windows client hanging.
+
+Windows live validation reproduced the relevant boundary directly: with inherited stdin, two of
+eight concurrent console probes timed out after receiving complete newline-terminated stdout and
+no stderr; with empty finite stdin, 80 of 80 otherwise-identical concurrent probes completed. This
+evidence does not require claiming the exact upstream race as the cause. It establishes that guest
+status probes which carry no fact payload must send EOF rather than inherit the operator's console.
+
 ## Refuted or do-not-rely-on claims
 
 ### "List commands should always include status"
@@ -142,3 +155,5 @@ progress.
 | [kubectl get](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_get/)                                         | Primary project documentation    | Explicit list presentation, watch separation     |
 | [tmux manual source](https://github.com/tmux/tmux/blob/master/tmux.1)                                                      | Primary upstream source          | Exact session target rules                       |
 | [GitHub CLI formatting](https://cli.github.com/manual/gh_help_formatting)                                                  | Primary project documentation    | Explicit stable machine fields                   |
+| [OpenSSH client manual](https://man.openbsd.org/ssh)                                                                      | Primary upstream documentation   | Disabling stdin for background SSH               |
+| [Win32 OpenSSH issue 1338](https://github.com/PowerShell/Win32-OpenSSH/issues/1338)                                       | Primary upstream issue tracker   | Intermittent short-command client hang            |

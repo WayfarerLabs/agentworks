@@ -184,8 +184,9 @@ boundaries, and instrument activation, platform start, repair, and DB-write seam
 
 ### One unreachable guest or dispatched provider stalls the fleet
 
-Safeguard: emit progress before dispatch, use a 10-second one-attempt guest probe, retain finite
-parallelism, initialize requested rows to unknown, and isolate failures by VM or provider site.
+Safeguard: emit progress before dispatch, use a 10-second one-attempt guest probe with finite stdin,
+retain finite parallelism, initialize requested rows to unknown, and isolate failures by VM or
+provider site.
 
 Shared VM registry, preflight, and credential resolution remain one all-or-nothing setup boundary.
 Their expected failure leaves all selected VM observations unknown rather than introducing repeated

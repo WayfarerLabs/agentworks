@@ -117,6 +117,9 @@ assert behavior and structure, never authored prose.
 - [x] Refactor the session singular classifier and batch status observer, make the batch return a
       complete requested-name mapping, use a 10-second one-attempt transport budget, and preserve
       lifecycle callers.
+- [x] Supersede inherited stdin for no-input guest status probes after Windows live validation
+      proved intermittent client hangs after complete remote output; send empty stdin while
+      retaining the original one-attempt timeout policy.
 - [x] Add the console domain enum, canonical/staging pure classifier, exact session-enumeration
       observer, focused describe join, and one-call-per-VM failure isolation in a focused module.
 - [x] Add the non-gated VM multi-row observation composition with one all-or-nothing

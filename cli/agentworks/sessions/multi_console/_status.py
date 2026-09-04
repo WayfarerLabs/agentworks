@@ -53,6 +53,7 @@ def _enumerate_tmux_sessions(target: Transport) -> set[str] | None:
         tty=False,
         timeout=_OBSERVATION_TIMEOUT_SECONDS,
         retries=_OBSERVATION_ATTEMPTS,
+        input_data="",
     )
     raw_stdout = getattr(result, "stdout", "") or ""
     stdout, stderr = _normalized_probe_streams(result)
@@ -103,7 +104,7 @@ def observe_console_statuses(
         except (ConfigError, ConnectivityError, VMSSHIdentityPolicyError):
             continue
         try:
-            targets[vm_name] = transport(vm, config, default_timeout=_OBSERVATION_TIMEOUT_SECONDS)
+            targets[vm_name] = transport(vm, config)
         except UserAbort:
             raise
         except (ConnectivityError, StateError):

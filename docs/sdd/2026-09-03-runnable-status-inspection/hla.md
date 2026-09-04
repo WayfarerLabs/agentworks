@@ -48,7 +48,8 @@ is not.
 The target design removes list and describe status from both gated boundaries. Session observation
 uses the canonical SSH transport directly after local SSH-identity validation. It groups list rows
 by VM, sends one non-interactive fact command per VM, and caps each call at 10 seconds with one
-attempt. The existing eight-VM concurrency cap remains.
+attempt. Probes without fact input explicitly close stdin rather than inheriting the operator's
+console. The existing eight-VM concurrency cap remains.
 
 ### Console
 
@@ -125,8 +126,9 @@ Session and console need the same safety property but not a new lifecycle bounda
 1. resolve the row's VM locally;
 2. require the recorded canonical SSH identity;
 3. require a recorded Tailscale host;
-4. create the canonical transport with a 10-second default timeout;
-5. invoke a non-interactive probe with `tty=False`, `check=False`, and one attempt; and
+4. create the canonical transport;
+5. invoke a non-interactive probe with `tty=False`, `check=False`, and one attempt, explicitly
+   closing stdin when the probe carries no fact data; and
 6. return unknown for the affected VM on an expected transport or identity failure.
 
 They do not build live VM nodes, load provider credentials, call platform status, or enter
@@ -235,12 +237,14 @@ not converted to unknown merely because the operation is observational.
 
 ### Timeout and cancellation
 
-Guest probe calls use 10 seconds and one attempt. VM provider clients keep their existing
-provider-specific timeout controls; the worker pool limits concurrency but does not pretend Python
-can safely cancel a provider call that the provider library cannot cancel. Progress is emitted
-before dispatch so the operator understands the delay. Ctrl-C propagates, cancels queued futures,
-and shuts the executor down without waiting for the whole queued fleet. Already-running provider
-calls retain their provider-local cancellation behavior. Observation never persists partial results.
+Guest probe calls use 10 seconds and one attempt. A no-input guest probe closes stdin explicitly;
+`tty=False` alone does not prevent a Windows SSH client from inheriting the operator's console
+handle. VM provider clients keep their existing provider-specific timeout controls; the worker pool
+limits concurrency but does not pretend Python can safely cancel a provider call that the provider
+library cannot cancel. Progress is emitted before dispatch so the operator understands the delay.
+Ctrl-C propagates, cancels queued futures, and shuts the executor down without waiting for the whole
+queued fleet. Already-running provider calls retain their provider-local cancellation behavior.
+Observation never persists partial results.
 
 ## Security and side effects
 

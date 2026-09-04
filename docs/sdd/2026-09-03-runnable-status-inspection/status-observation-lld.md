@@ -14,7 +14,7 @@
    never an absent mapping and never `STOPPED`.
 4. List observation cannot affect filtering or row order.
 5. Session and console guest probes use exact tmux names, a non-interactive transport, a 10-second
-   timeout, and one attempt.
+   timeout, and one attempt. Probes without fact input explicitly close stdin.
 6. Describe uses the same classifier and observer as list for its resource.
 7. Machine not-requested state and requested-unknown state are distinct.
 8. Status names remain resource-owned. No cross-domain enum or protocol is introduced.
@@ -187,7 +187,7 @@ initialize result[name] = UNKNOWN for every row
 group every selected row by backing VM
 for each VM in an eight-worker pool:
     validate canonical SSH identity
-    create canonical transport with default_timeout=10
+    create canonical transport
     batch_check_status(rows, target)
     overwrite only returned conclusive or explicit UNKNOWN results
 return result
@@ -208,7 +208,9 @@ unframed, duplicate, unknown, missing, or malformed frames leave the entire VM u
 
 `batch_check_status` bakes in the sole probe policy at its transport call: `tty=False`,
 `timeout=10`, and `retries=1`. The last value is the transport's spelling for one total attempt and
-zero retries. There are no public policy knobs for callers to vary.
+zero retries. Its fact payload already gives SSH a finite stdin stream. Singular status probes carry
+no fact input and explicitly send empty input so SSH cannot inherit the operator's console. There
+are no public policy knobs for callers to vary.
 
 The function does not enter `_best_effort_batch_vm_boundary`. That boundary remains lifecycle-only
 and its docstring no longer names session list.
@@ -243,8 +245,8 @@ initialize every requested console to UNKNOWN
 group by vm_name
 for each VM in an eight-worker pool:
     validate row, SSH identity, and Tailscale address
-    create canonical admin transport with default_timeout=10
-    run one formatted session enumeration with tty=false, timeout=10, retries=1
+    create canonical admin transport
+    run one formatted session enumeration with tty=false, timeout=10, retries=1, empty stdin
     classify each canonical/staging pair by exact membership
 return complete mapping
 ```
@@ -431,8 +433,8 @@ Tests instrument these boundaries, not authored prose:
 - list with status: provider/transport read stubs may run, activation/repair/lifecycle and DB update
   stubs must remain untouched;
 - exact number of guest calls: one per distinct VM for each domain observer;
-- timeout policy: `tty=False`, `timeout=10`, and the transport's one-total-attempt spelling
-  `retries=1` reach the transport call;
+- timeout and input policy: `tty=False`, `timeout=10`, the transport's one-total-attempt spelling
+  `retries=1`, and finite stdin reach the transport call;
 - cancellation policy: exceptional exit cancels queued work and does not wait for the whole fleet;
 - process-launch `OSError` values become typed transport/provider failures and degrade to unknown at
   the observation boundary;

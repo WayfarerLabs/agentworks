@@ -21,7 +21,12 @@ from agentworks.sessions.manager import (
     check_session_status,
     observe_session_statuses,
 )
-from agentworks.sessions.manager._status import _batch_probe_command, _batch_probe_data, _encoded_probe_field
+from agentworks.sessions.manager._status import (
+    _batch_probe_command,
+    _batch_probe_data,
+    _BoundedStatusTarget,
+    _encoded_probe_field,
+)
 from agentworks.sessions.tmux import ProbeStatus, probe_tmux_server_pid
 
 if TYPE_CHECKING:
@@ -202,6 +207,29 @@ def test_batch_builds_compound_command() -> None:
     assert target.call_options == [(False, 10, 1)]
     assert 'if [ "$M" = a ]; then sudo -n tmux' in target.commands[0]
     assert 'sudo -n sh -c "if test -d /proc/$PID' in target.commands[0]
+
+
+def test_bounded_singular_status_target_closes_stdin() -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class Target:
+        def run(self, command: str, **kwargs: object) -> _FakeResult:
+            calls.append((command, kwargs))
+            return _FakeResult()
+
+    _BoundedStatusTarget(Target()).run("true")  # type: ignore[arg-type]
+
+    assert calls == [
+        (
+            "true",
+            {
+                "timeout": 10,
+                "retries": 1,
+                "tty": False,
+                "input_data": "",
+            },
+        )
+    ]
 
 
 def test_batch_fleet_uses_constant_argv_and_unbounded_stdin_data(
