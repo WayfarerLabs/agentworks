@@ -172,9 +172,13 @@ class SSHTransport(Transport):
         a teardown advisory into captured output); ``tty=None`` leaves pty
         selection to the operator's ssh config. Independently, ``-n`` is added
         when ``close_stdin`` is set so a stdin-reading remote command cannot
-        hang and ssh cannot pull from the operator's console. Callers writing
-        an ``input_text`` or ``input_data`` payload leave ``close_stdin`` false
-        so stdin stays open for the write.
+        hang and ssh cannot pull from the operator's console. On Windows ``-n``
+        also averts the Win32-OpenSSH short-connection stdin race
+        (PowerShell/Win32-OpenSSH#1338), where a brief remote command leaves the
+        client blocked on inherited console stdin; dropping the pty without
+        closing stdin does not fix it. Callers writing an ``input_text`` or
+        ``input_data`` payload leave ``close_stdin`` false so stdin stays open
+        for the write.
         """
         args = ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
         if tty:
