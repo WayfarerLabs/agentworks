@@ -51,6 +51,7 @@ class LimaTransport(Transport):
         timeout: int | None = None,
         env: dict[str, str] | None = None,
         input_text: str | None = None,
+        input_data: str | None = None,
         discard_output: bool = False,
         retries: int | None = None,
         on_retry: Callable[[int, int], None] | None = None,
@@ -64,6 +65,8 @@ class LimaTransport(Transport):
         Sensitive stdin is never logged, returned, or copied into an error.
         """
         del retries, on_retry  # Polymorphic ABC kwargs; Lima doesn't retry.
+        if input_text is not None and input_data is not None:
+            raise ValueError("Lima input_text and input_data are mutually exclusive")
         if input_text is not None and discard_output:
             raise ValueError("Lima input_text cannot be combined with discard_output")
         if sudo:
@@ -72,11 +75,12 @@ class LimaTransport(Transport):
         args = ["limactl", "shell", self.vm_name, "bash", "-lc", f"{env_prefix}{command}"]
         t = self._resolve_timeout(timeout)
         suppress_output = input_text is not None or discard_output
+        stdin = input_text if input_text is not None else input_data
         try:
             result = subprocess.run(
                 args,
                 # Byte-mode stdin: text mode rewrites LF to CRLF on Windows (see agentworks.subprocess_io).
-                input=stdin_bytes(input_text),
+                input=stdin_bytes(stdin),
                 stdout=subprocess.DEVNULL if suppress_output else subprocess.PIPE,
                 stderr=subprocess.DEVNULL if suppress_output else subprocess.PIPE,
                 timeout=t,
@@ -85,6 +89,10 @@ class LimaTransport(Transport):
             if input_text is not None:
                 raise SSHError(f"Lima stdin command timed out after {t}s: {command}") from None
             raise SSHError(f"Lima command timed out after {t}s: {command}") from err
+        except OSError as err:
+            if input_text is not None:
+                raise SSHError(f"Lima stdin command could not be executed: {command}") from None
+            raise SSHError(f"Lima command could not be executed: {command}") from err
         except Exception:
             if input_text is None:
                 raise

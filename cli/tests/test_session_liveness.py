@@ -2,20 +2,35 @@
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
 from dataclasses import dataclass
+from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import SessionRow, SessionStatus
-from agentworks.errors import ConnectivityError, StateError
+from agentworks.db import SessionMode, SessionRow, SessionStatus
+from agentworks.errors import ConnectivityError, NotFoundError, StateError
 from agentworks.sessions.manager import (
     _needs_repair,
     _repair_session_pid,
     _validated_stored_start_ticks,
     batch_check_status,
     check_session_status,
+    observe_session_statuses,
+)
+from agentworks.sessions.manager._status import (
+    _batch_probe_command,
+    _batch_probe_data,
+    _BoundedStatusTarget,
+    _encoded_probe_field,
 )
 from agentworks.sessions.tmux import ProbeStatus, probe_tmux_server_pid
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @dataclass
@@ -36,6 +51,7 @@ class _FakeTarget:
     def __init__(self, responses: dict[str, _FakeResult] | None = None) -> None:
         self._responses = responses or {}
         self.commands: list[str] = []
+        self.call_options: list[tuple[bool | None, int | None, int | None]] = []
 
     def run(
         self,
@@ -45,8 +61,11 @@ class _FakeTarget:
         sudo: bool = False,
         tty: bool | None = None,
         timeout: int | None = None,
+        retries: int | None = None,
+        input_data: str | None = None,
     ) -> _FakeResult:
         self.commands.append(command)
+        self.call_options.append((tty, timeout, retries))
         for pattern, result in self._responses.items():
             if pattern in command:
                 return result
@@ -86,7 +105,7 @@ def _batch_row(
     pid_fact: str = "present",
 ) -> str:
     return (
-        f"S:{name}:{has_returncode}:{has_diagnostic.encode().hex()}:"
+        f"S:{_encoded_probe_field(name)}:{has_returncode}:{has_diagnostic.encode().hex()}:"
         f"{server_returncode}:{server_diagnostic.encode().hex()}:"
         f"{boot_returncode}:{boot_id.encode().hex()}:{pid_returncode}:{pid_fact.encode().hex()}"
     )
@@ -96,7 +115,7 @@ def _batch_row(
 
 
 def test_batch_mixed() -> None:
-    """Batch: agent OK, admin stopped, NULL-PID excluded."""
+    """Batch: agent running, admin stopped, NULL-PID excluded."""
     sessions = [
         _session("a1", pid=100, socket_path="/sock1", mode="agent", boot_id=BOOT_CURRENT),
         _session("s1", pid=200, socket_path="/sock2", mode="admin", boot_id=BOOT_CURRENT),
@@ -125,7 +144,7 @@ def test_batch_mixed() -> None:
         }
     )
     result = batch_check_status(sessions, target=target)
-    assert result["a1"] == SessionStatus.OK
+    assert result["a1"] == SessionStatus.RUNNING
     assert result["s1"] == SessionStatus.STOPPED
     assert "s2" not in result
 
@@ -139,6 +158,43 @@ def test_batch_all_missing_pid() -> None:
     assert batch_check_status(sessions, target=_FakeTarget()) == {}
 
 
+def test_session_observer_preserves_missing_workspace_as_structural_failure() -> None:
+    class _DB:
+        def get_workspace(self, _name: str) -> None:
+            return None
+
+    with pytest.raises(NotFoundError) as caught:
+        observe_session_statuses([_session("s1", socket_path="/sock")], db=_DB(), config=object())  # type: ignore[arg-type]
+    assert caught.value.entity_kind == "workspace"
+    assert caught.value.entity_name == "ws"
+
+
+def test_session_observer_preserves_corrupt_ssh_applied_state(
+    db,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db.insert_vm("box", site="site", hostname="box")
+    db.update_vm_tailscale("box", "100.64.0.9")
+    db.insert_workspace("ws", "/srv/ws", "box", "ws-ws")
+    db.insert_session("alpha", "ws", "default", SessionMode.ADMIN, socket_path="/tmp/alpha.sock")
+    session = db.get_session("alpha")
+    assert session is not None
+    structural = StateError("corrupt SSH applied state", entity_kind="vm", entity_name="box")
+    monkeypatch.setattr(
+        "agentworks.vms.manager.require_vm_ssh_boundary",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(structural),
+    )
+    monkeypatch.setattr(
+        "agentworks.sessions.manager.transport",
+        lambda *_args, **_kwargs: pytest.fail("transport constructed after structural failure"),
+    )
+
+    with pytest.raises(StateError) as caught:
+        observe_session_statuses([session], db=db, config=object())
+
+    assert caught.value is structural
+
+
 def test_batch_builds_compound_command() -> None:
     """Compound command includes has-session for both agent and admin sessions."""
     sessions = [
@@ -148,11 +204,213 @@ def test_batch_builds_compound_command() -> None:
     target = _FakeTarget({"has-session": _FakeResult(ok=True, stdout=f"{_batch_row('a1')}\n{_batch_row('s1')}\n")})
     batch_check_status(sessions, target=target)
     assert len(target.commands) == 1
-    assert "has-session" in target.commands[0]
-    assert "sudo -n tmux -S /sock has-session" in target.commands[0]
-    assert "sudo -n sh -c 'if test -d /proc/100; then printf present; else printf absent; fi'" in target.commands[0]
-    assert "sudo -n tmux -S /sock2" not in target.commands[0]
-    assert "sh -c 'if test -d /proc/200; then printf present; else printf absent; fi'" in target.commands[0]
+    assert target.call_options == [(False, 10, 1)]
+    assert 'if [ "$M" = a ]; then sudo -n tmux' in target.commands[0]
+    assert 'sudo -n sh -c "if test -d /proc/$PID' in target.commands[0]
+
+
+def test_bounded_singular_status_target_closes_stdin() -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class Target:
+        def run(self, command: str, **kwargs: object) -> _FakeResult:
+            calls.append((command, kwargs))
+            return _FakeResult()
+
+    _BoundedStatusTarget(Target()).run("true")  # type: ignore[arg-type]
+
+    assert calls == [
+        (
+            "true",
+            {
+                "timeout": 10,
+                "retries": 1,
+                "tty": False,
+                "input_data": "",
+            },
+        )
+    ]
+
+
+def test_batch_fleet_uses_constant_argv_and_unbounded_stdin_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.sessions.tmux import MAX_SESSION_NAME_LENGTH, SUN_PATH_MAX
+    from agentworks.transports import SSHTransport
+
+    sessions = []
+    for index in range(512):
+        suffix = f"{index:08x}"
+        name = ("s" * (MAX_SESSION_NAME_LENGTH - len(suffix))) + suffix
+        fixed = f"/{suffix}/{name}"
+        socket_path = "/" + ("p" * (SUN_PATH_MAX - 2 - len(fixed))) + fixed
+        assert len(socket_path) == SUN_PATH_MAX - 1
+        sessions.append(_session(name, pid=100_000 + index, socket_path=socket_path, mode="agent"))
+
+    completed = subprocess.CompletedProcess(
+        [],
+        0,
+        stdout=("\n".join(_batch_row(session.name) for session in sessions) + "\n").encode(),
+        stderr=b"",
+    )
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def run_process(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        calls.append((argv, kwargs))
+        return completed
+
+    monkeypatch.setattr("agentworks.transports.ssh.subprocess.run", run_process)
+
+    status_map = batch_check_status(sessions, target=SSHTransport("vm-host"))
+
+    assert len(calls) == 1
+    argv, kwargs = calls[0]
+    assert argv[-1] == _batch_probe_command()
+    assert len(" ".join(argv).encode()) < 32_767
+    payload = kwargs["input"]
+    assert payload == _batch_probe_data(sessions).encode()
+    assert isinstance(payload, bytes)
+    assert len(payload) > 32_767
+    assert "-T" in argv
+    assert status_map == {session.name: SessionStatus.RUNNING for session in sessions}
+
+
+def test_batch_command_is_valid_shell_syntax() -> None:
+    command = _batch_probe_command()
+
+    result = subprocess.run(["bash", "-n", "-c", command], check=False, capture_output=True)
+
+    assert result.returncode == 0
+
+
+def test_batch_probe_executes_only_read_only_guest_operations(tmp_path: Path) -> None:
+    """Reject unexpected PATH tools, sudo calls, tmux verbs, and temp-tree writes."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    audit = tmp_path / "audit"
+
+    for name in ("base64", "cat", "od", "tr"):
+        executable = shutil.which(name)
+        assert executable is not None
+        os.symlink(executable, bin_dir / name)
+
+    tmux = bin_dir / "tmux"
+    tmux.write_text(
+        "#!/bin/sh\n"
+        'printf tmux >> "$AGW_PROBE_AUDIT"\n'
+        'for arg in "$@"; do printf \'\\t%s\' "$arg" >> "$AGW_PROBE_AUDIT"; done\n'
+        "printf '\\n' >> \"$AGW_PROBE_AUDIT\"\n"
+    )
+    tmux.chmod(0o755)
+
+    sudo = bin_dir / "sudo"
+    sudo.write_text(
+        "#!/bin/sh\n"
+        'if [ "$#" -lt 2 ] || [ "$1" != -n ]; then\n'
+        '  printf \'unexpected\\tsudo\\t%s\\n\' "$*" >> "$AGW_PROBE_AUDIT"\n'
+        "  exit 97\n"
+        "fi\n"
+        'case "$2" in tmux|sh) ;; *)\n'
+        '  printf \'unexpected\\tsudo\\t%s\\n\' "$*" >> "$AGW_PROBE_AUDIT"\n'
+        "  exit 97\n"
+        "esac\n"
+        "shift\n"
+        'exec "$@"\n'
+    )
+    sudo.chmod(0o755)
+
+    shell = bin_dir / "sh"
+    shell.write_text(
+        "#!/bin/sh\n"
+        'printf \'sh\\t%s\\t%s\\n\' "$1" "$2" >> "$AGW_PROBE_AUDIT"\n'
+        'case "$*" in\n'
+        '  "-c if test -d /proc/10101; then printf present; else printf absent; fi"|\n'
+        '  "-c if test -d /proc/20202; then printf present; else printf absent; fi") ;;\n'
+        "  *) exit 97 ;;\n"
+        "esac\n"
+        "printf present\n"
+    )
+    shell.chmod(0o755)
+
+    def snapshot() -> dict[str, tuple[str, bytes | str]]:
+        observed: dict[str, tuple[str, bytes | str]] = {}
+        for path in tmp_path.rglob("*"):
+            if path == audit:
+                continue
+            relative = str(path.relative_to(tmp_path))
+            if path.is_symlink():
+                observed[relative] = ("link", os.readlink(path))
+            elif path.is_file():
+                observed[relative] = ("file", path.read_bytes())
+            else:
+                observed[relative] = ("directory", "")
+        return observed
+
+    before = snapshot()
+    sessions = [
+        _session("admin", socket_path="/tmp/admin.sock"),
+        _session("agent", socket_path="/tmp/agent.sock", mode="agent"),
+        _session("admin-pid", pid=10101, socket_path="/tmp/admin-pid.sock"),
+        _session("agent-pid", pid=20202, socket_path="/tmp/agent-pid.sock", mode="agent"),
+    ]
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "AGW_PROBE_AUDIT": str(audit),
+            "HOME": str(tmp_path),
+            "PATH": str(bin_dir),
+            "TMPDIR": str(tmp_path),
+        }
+    )
+    environment.pop("BASH_ENV", None)
+    program = (
+        "command_not_found_handle() { "
+        'printf \'unexpected\\t%s\\n\' "$*" >> "$AGW_PROBE_AUDIT"; return 127; }; '
+        f"{_batch_probe_command()}"
+    )
+
+    result = subprocess.run(
+        ["/bin/bash", "--noprofile", "--norc", "-c", program],
+        input=_batch_probe_data(sessions),
+        text=True,
+        capture_output=True,
+        check=False,
+        cwd=tmp_path,
+        env=environment,
+        timeout=5,
+    )
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    parsed = batch_check_status(sessions, target=_FakeTarget({"has-session": _FakeResult(stdout=result.stdout)}))
+    assert parsed == {session.name: SessionStatus.RUNNING for session in sessions}
+    assert audit.read_text().splitlines() == [
+        "tmux\t-S\t/tmp/admin.sock\thas-session\t-t\t=admin",
+        "tmux\t-S\t/tmp/admin.sock\tlist-sessions",
+        "tmux\t-S\t/tmp/agent.sock\thas-session\t-t\t=agent",
+        "tmux\t-S\t/tmp/agent.sock\tlist-sessions",
+        "tmux\t-S\t/tmp/admin-pid.sock\thas-session\t-t\t=admin-pid",
+        "tmux\t-S\t/tmp/admin-pid.sock\tlist-sessions",
+        "sh\t-c\tif test -d /proc/10101; then printf present; else printf absent; fi",
+        "tmux\t-S\t/tmp/agent-pid.sock\thas-session\t-t\t=agent-pid",
+        "tmux\t-S\t/tmp/agent-pid.sock\tlist-sessions",
+        "sh\t-c\tif test -d /proc/20202; then printf present; else printf absent; fi",
+    ]
+    assert snapshot() == before
+
+
+def test_batch_accepts_exact_ssh_close_advisory_after_complete_frames() -> None:
+    session = _session("alpha", pid=42, socket_path="/tmp/alpha.sock")
+    target = _FakeTarget(
+        {
+            "has-session": _FakeResult(
+                stdout=f"{_batch_row('alpha')}\n",
+                stderr="Shared connection to vm.example closed.\n",
+            )
+        }
+    )
+
+    assert batch_check_status([session], target=target) == {"alpha": SessionStatus.RUNNING}
 
 
 def test_agent_fingerprint_repair_uses_elevation_and_refuses_unknown(
@@ -219,10 +477,10 @@ BOOT_STALE = "11111111-2222-3333-4444-555555555555"
 
 
 def test_agent_ok() -> None:
-    """Agent session: has-session succeeds -> OK."""
+    """Agent session: has-session succeeds and reports running."""
     session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
     target = _FakeTarget({"has-session": _FakeResult(ok=True)})
-    assert check_session_status(session, target=target) == SessionStatus.OK
+    assert check_session_status(session, target=target) == SessionStatus.RUNNING
 
 
 def test_agent_stopped_pid_dead() -> None:
@@ -347,10 +605,10 @@ def test_reachable_server_without_canonical_session_is_residual() -> None:
 
 
 def test_admin_ok() -> None:
-    """Admin session: has-session succeeds -> OK."""
+    """Admin session: has-session succeeds and reports running."""
     session = _session("s1", pid=42, socket_path="/sock", mode="admin", boot_id=BOOT_CURRENT)
     target = _FakeTarget({"has-session": _FakeResult(ok=True)})
-    assert check_session_status(session, target=target) == SessionStatus.OK
+    assert check_session_status(session, target=target) == SessionStatus.RUNNING
 
 
 def test_admin_stopped_dead_pid() -> None:
@@ -434,7 +692,7 @@ def test_incomplete_dedicated_identity_is_live_when_exact_tmux_session_is_presen
     session = _session("s1", pid=pid, socket_path="/sock", boot_id=boot_id)
     target = _FakeTarget({"has-session": _FakeResult(ok=True)})
 
-    assert check_session_status(session, target=target) == SessionStatus.OK
+    assert check_session_status(session, target=target) == SessionStatus.RUNNING
     assert len(target.commands) == 1
 
 
@@ -463,8 +721,14 @@ def test_incomplete_dedicated_identity_stays_unknown_when_tmux_is_absent(
 def test_stopped_pid_sentinel() -> None:
     from agentworks.db import PID_STOPPED
 
-    session = _session("s1", pid=PID_STOPPED)
-    assert check_session_status(session, target=_FakeTarget()) == SessionStatus.STOPPED
+    session = _session("s1", pid=PID_STOPPED, socket_path="/sock")
+    target = _FakeTarget(
+        {
+            "has-session": _FakeResult(ok=False, stderr="can't find session: s1"),
+            "list-sessions": _FakeResult(ok=False, stderr="no server running on /sock"),
+        }
+    )
+    assert check_session_status(session, target=target) == SessionStatus.STOPPED
 
 
 # -- get_tmux_server_pid ----------------------------------------------------
@@ -491,27 +755,38 @@ def test_probe_pid_with_socket() -> None:
 
 
 def test_batch_status_pid_stopped_not_unknown() -> None:
-    """PID_STOPPED sessions should NOT appear in batch status_map (by design)
-    and should NOT be treated as unknown by batch commands."""
+    """Persisted-stopped rows are classified only after live tmux absence."""
     from agentworks.db import PID_STOPPED
 
     sessions = [
         _session("ok1", pid=100, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT),
-        _session("stopped1", pid=PID_STOPPED, boot_id=BOOT_CURRENT),
+        _session("stopped1", pid=PID_STOPPED, socket_path="/stopped", boot_id=BOOT_CURRENT),
     ]
-    target = _FakeTarget({"has-session": _FakeResult(ok=True, stdout=f"{_batch_row('ok1')}\n")})
+    target = _FakeTarget(
+        {
+            "has-session": _FakeResult(
+                ok=True,
+                stdout="\n".join(
+                    (
+                        _batch_row("ok1"),
+                        _batch_row(
+                            "stopped1",
+                            has_returncode=1,
+                            has_diagnostic="can't find session: stopped1",
+                            server_returncode=1,
+                            server_diagnostic="no server running on /stopped",
+                            pid_returncode=1,
+                            pid_fact="",
+                        ),
+                    )
+                ),
+            )
+        }
+    )
     result = batch_check_status(sessions, target=target)
 
-    # ok1 should be in the map, stopped1 should NOT (excluded by design)
-    assert result["ok1"] == SessionStatus.OK
-    assert "stopped1" not in result
-
-    # The unknown detection logic should NOT flag stopped1:
-    # s.pid == PID_STOPPED -> skip
-    unknown = [
-        s for s in sessions if s.pid != PID_STOPPED and (s.pid is None or s.boot_id is None or s.name not in result)
-    ]
-    assert unknown == []
+    assert result["ok1"] == SessionStatus.RUNNING
+    assert result["stopped1"] == SessionStatus.STOPPED
 
 
 # -- _check_dedicated_agent_session edge cases ------------------------------
@@ -634,6 +909,85 @@ def test_batch_malformed_stored_boot_id_does_not_drop_valid_sibling() -> None:
 
     assert result["valid"] is SessionStatus.STOPPED
     assert result["invalid"] is SessionStatus.UNKNOWN
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        _FakeResult(returncode=1, stdout=f"{_batch_row('alpha')}\n{_batch_row('beta')}\n"),
+        _FakeResult(stdout=f"{_batch_row('alpha')}\n{_batch_row('beta')}\n", stderr="transport noise"),
+        _FakeResult(stdout=f"unframed\n{_batch_row('alpha')}\n{_batch_row('beta')}\n"),
+        _FakeResult(stdout=f"{_batch_row('alpha')}\n"),
+        _FakeResult(stdout=f"{_batch_row('alpha')}\n{_batch_row('alpha')}\n"),
+        _FakeResult(stdout=f"{_batch_row('alpha')}\n{_batch_row('other')}\n"),
+        _FakeResult(stdout=f"{_batch_row('alpha')}\nS:{_encoded_probe_field('beta')}:0:not-hex:0::0::0:\n"),
+        _FakeResult(stdout=f"{_batch_row('alpha')}\n\n{_batch_row('beta')}\n"),
+        _FakeResult(stdout=f"{_batch_row('alpha')}\r\n{_batch_row('beta')}\n"),
+        _FakeResult(stdout=f"{_batch_row('alpha')}\n{_batch_row('beta')}\x00\n"),
+    ],
+)
+def test_batch_response_must_be_complete_authoritative_framing(result: _FakeResult) -> None:
+    sessions = [_session(name, socket_path=f"/{name}") for name in ("alpha", "beta")]
+
+    assert batch_check_status(sessions, target=_FakeTarget({"has-session": result})) == {
+        "alpha": SessionStatus.UNKNOWN,
+        "beta": SessionStatus.UNKNOWN,
+    }
+
+
+def test_session_observer_isolates_one_vm_transport_failure(
+    db,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sessions: list[SessionRow] = []
+    for vm_name in ("vm-a", "vm-b"):
+        db.insert_vm(vm_name, site="site", hostname=vm_name)
+        db.update_vm_tailscale(vm_name, f"100.64.0.{1 if vm_name == 'vm-a' else 2}")
+        workspace_name = f"ws-{vm_name}"
+        session_name = f"session-{vm_name}"
+        db.insert_workspace(workspace_name, f"/srv/{workspace_name}", vm_name, workspace_name)
+        db.insert_session(
+            session_name,
+            workspace_name,
+            "default",
+            SessionMode.ADMIN,
+            socket_path=f"/tmp/{session_name}.sock",
+        )
+        session = db.get_session(session_name)
+        assert session is not None
+        sessions.append(session)
+
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "agentworks.orchestration.activation.activation_gate",
+        lambda *_args, **_kwargs: pytest.fail("session observation activated a VM"),
+    )
+    monkeypatch.setattr(
+        "agentworks.secrets.resolver.Resolver.resolve",
+        lambda *_args, **_kwargs: pytest.fail("session observation resolved provider secrets"),
+    )
+    monkeypatch.setattr(
+        "agentworks.sessions.manager.ensure_pids_batch",
+        lambda *_args, **_kwargs: pytest.fail("session observation repaired runtime identity"),
+    )
+    monkeypatch.setattr(
+        "agentworks.sessions.manager.transport",
+        lambda vm, _config, **_kwargs: SimpleNamespace(vm_name=vm.name),
+    )
+
+    def batch(rows: list[SessionRow], *, target: object, **_kwargs: object) -> dict[str, SessionStatus]:
+        if target.vm_name == "vm-b":  # type: ignore[attr-defined]
+            raise ConnectivityError("offline")
+        return {row.name: SessionStatus.RUNNING for row in rows}
+
+    monkeypatch.setattr("agentworks.sessions.manager._status.batch_check_status", batch)
+
+    changes_before = db._conn.total_changes  # noqa: SLF001
+    assert observe_session_statuses(sessions, db=db, config=object()) == {
+        "session-vm-a": SessionStatus.RUNNING,
+        "session-vm-b": SessionStatus.UNKNOWN,
+    }
+    assert db._conn.total_changes == changes_before  # noqa: SLF001
 
 
 # -- _ensure_pid strict gate ------------------------------------------------

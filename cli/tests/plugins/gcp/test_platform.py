@@ -133,8 +133,10 @@ class _Instances:
         self.insert_wait_failures: list[BaseException] = []
         self.insert_operation_errors: list[object] = []
         self.delete_failures: list[Exception] = []
+        self.get_calls: list[dict[str, object]] = []
 
-    def get(self, **_kwargs: object) -> compute_v1.Instance:
+    def get(self, **kwargs: object) -> compute_v1.Instance:
+        self.get_calls.append(kwargs)
         if self.get_failures:
             raise self.get_failures.pop(0)
         if self.resource is None:
@@ -587,7 +589,11 @@ def test_lifecycle_is_idempotent_live_ip_and_transient_routes_are_distinct(
 
     platform.post_tailscale_ready(vm, _ctx())
     assert result.platform_metadata["allow_rule"] not in firewalls.resources
+    instances.get_calls.clear()
     assert platform.status(vm, _ctx()) is VMStatus.RUNNING
+    assert len(instances.get_calls) == 1
+    assert instances.get_calls[0]["retry"] is None
+    assert instances.get_calls[0]["timeout"] == 10
     platform.stop(vm, _ctx())
     platform.stop(vm, _ctx())
     assert len(instances.stop_requests) == 1

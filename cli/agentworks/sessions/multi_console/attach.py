@@ -34,6 +34,7 @@ from agentworks.sessions.tmux import ProbeStatus, exact_tmux_target, tmux_cmd
 from agentworks.vms.manager import gated_vm_boundary
 
 from ._helpers import _require_console, _shell_summary, tmux_session_name, tmux_staging_name
+from ._status import ConsoleStatus, classify_console_status
 from .tmux_build import _build_console_tmux
 
 if TYPE_CHECKING:
@@ -58,6 +59,7 @@ class ConsoleListRow:
     name: str
     vm_name: str
     session_count: int
+    status: str
 
 
 @dataclass(frozen=True)
@@ -86,13 +88,19 @@ class ConsoleDescription:
     created_at: str
     updated_at: str
     sessions: tuple[ConsoleMember, ...]
+    status: str
 
 
 def console_listing_data(listing: ConsoleListing) -> JsonObject:
     """Project console list facts into the closed JSON v1 shape."""
     return {
         "consoles": [
-            {"name": console.name, "vm_name": console.vm_name, "session_count": console.session_count}
+            {
+                "name": console.name,
+                "vm_name": console.vm_name,
+                "session_count": console.session_count,
+                "status": console.status,
+            }
             for console in listing.consoles
         ],
     }
@@ -107,6 +115,7 @@ def console_description_data(description: ConsoleDescription) -> JsonObject:
             "admin_shell": description.admin_shell,
             "created_at": description.created_at,
             "updated_at": description.updated_at,
+            "status": description.status,
             "sessions": [
                 {
                     "position": member.position,
@@ -424,10 +433,12 @@ def _live_best_effort(action: str, *, console_name: str) -> Iterator[None]:
 
 def console_listing(
     db: Database,
+    config: Config | None = None,
     *,
     vm_name: str | list[str] | None = None,
     workspace_name: str | list[str] | None = None,
     agent_name: str | list[str] | None = None,
+    include_status: bool = False,
 ) -> ConsoleListing:
     """Collect ordered console list facts, optionally filtered by DB relationships.
 
@@ -449,16 +460,42 @@ def console_listing(
         workspace_name=workspace_name,
         agent_name=agent_name,
     )
+    for console, _session_count in consoles:
+        if db.get_vm(console.vm_name) is None:
+            raise NotFoundError(
+                f"VM '{console.vm_name}' not found",
+                entity_kind="vm",
+                entity_name=console.vm_name,
+            )
+    statuses: dict[str, ConsoleStatus] = {}
+    if include_status and consoles:
+        if config is None:
+            raise StateError("console status observation requires config")
+        output.info(
+            f"Checking status for {output.count(len(consoles), 'console')} "
+            f"across {output.count(len({console.vm_name for console, _count in consoles}), 'VM')}..."
+        )
+        statuses = _mc.observe_console_statuses(db, config, [console for console, _count in consoles])
 
     return ConsoleListing(
         consoles=tuple(
-            ConsoleListRow(name=console.name, vm_name=console.vm_name, session_count=session_count)
+            ConsoleListRow(
+                name=console.name,
+                vm_name=console.vm_name,
+                session_count=session_count,
+                status=(statuses.get(console.name, ConsoleStatus.UNKNOWN).value if include_status else "unavailable"),
+            )
             for console, session_count in consoles
         )
     )
 
 
-def render_console_listing(listing: ConsoleListing, *, names_only: bool = False) -> None:
+def render_console_listing(
+    listing: ConsoleListing,
+    *,
+    names_only: bool = False,
+    include_status: bool = False,
+) -> None:
     """Render console list facts with the legacy human layout."""
     consoles = listing.consoles
     if names_only:
@@ -473,46 +510,67 @@ def render_console_listing(listing: ConsoleListing, *, names_only: bool = False)
         output.info("No consoles found.")
         return
 
-    # Console names are freeform (cap 64) and display-only, but a very long one
-    # would balloon this dynamically-sized column, so cap the NAME cell at a
-    # bounded, table-friendly width and let short names size the column down.
+    # Keep the list-view name cap while the shared renderer sizes short rows down.
     rows = [
-        (output.truncate(console.name, _NAME_CELL_WIDTH), console.vm_name, str(console.session_count))
+        (
+            console.name,
+            console.vm_name,
+            str(console.session_count),
+            console.status,
+        )
         for console in consoles
     ]
-    name_w = max(len("NAME"), max(len(r[0]) for r in rows))
-    vm_w = max(len("VM"), max(len(r[1]) for r in rows))
+    headers = ["NAME", "VM", "SESSIONS"]
+    if include_status:
+        headers.append("STATUS")
+    projected_rows = [row if include_status else row[:-1] for row in rows]
+    for line in output.render_table(headers, projected_rows, max_col_width=_NAME_CELL_WIDTH):
+        output.info(line)
+    if include_status:
+        unknown_by_vm: dict[str, list[str]] = {}
+        for console in consoles:
+            if console.status == ConsoleStatus.UNKNOWN.value:
+                unknown_by_vm.setdefault(console.vm_name, []).append(console.name)
+        if unknown_by_vm:
+            output.info("")
+            groups = "; ".join(f"{vm}: {', '.join(names)}" for vm, names in unknown_by_vm.items())
+            output.warn(f"Console status is unknown by VM: {groups}.")
 
-    header = f"{'NAME':<{name_w}}  {'VM':<{vm_w}}  SESSIONS"
-    output.info(header)
-    output.info("-" * len(header))
-    for n, vm, count in rows:
-        output.info(f"{n:<{name_w}}  {vm:<{vm_w}}  {count}")
 
-
-def console_description(db: Database, *, name: str) -> ConsoleDescription:
-    """Collect a console's configured membership and shell facts.
-
-    Output describes the DB-declared target state; live tmux state may
-    differ (panes can be killed, layouts changed in tmux, etc.). The next
-    `restart` / `restore-session` reconciles live
-    state back to what's shown here.
-    """
+def console_description(
+    db: Database,
+    config: Config,
+    *,
+    name: str,
+) -> ConsoleDescription:
+    """Collect configured console facts plus non-activating live status."""
     console = _require_console(db, name)
+    if db.get_vm(console.vm_name) is None:
+        raise NotFoundError(
+            f"VM '{console.vm_name}' not found",
+            entity_kind="vm",
+            entity_name=console.vm_name,
+        )
+    members = tuple(
+        ConsoleMember(
+            position=member.position,
+            session_name=member.session_name,
+            shells=tuple(ConsoleShell(cwd=shell["cwd"], admin=shell["admin"]) for shell in member.shells),
+        )
+        for member in db.list_console_sessions(name)
+    )
+    output.info(f"Checking console '{name}' runtime...")
+    status = _mc.observe_console_statuses(db, config, [console])[console.name]
+    if status is ConsoleStatus.UNKNOWN:
+        output.warn(f"Console '{name}' runtime status could not be determined.")
     return ConsoleDescription(
         name=console.name,
         vm_name=console.vm_name,
         admin_shell=console.admin_shell,
         created_at=console.created_at,
         updated_at=console.updated_at,
-        sessions=tuple(
-            ConsoleMember(
-                position=member.position,
-                session_name=member.session_name,
-                shells=tuple(ConsoleShell(cwd=shell["cwd"], admin=shell["admin"]) for shell in member.shells),
-            )
-            for member in db.list_console_sessions(name)
-        ),
+        sessions=members,
+        status=status.value,
     )
 
 
@@ -524,6 +582,7 @@ def render_console_description(description: ConsoleDescription) -> None:
     output.info(f"Admin shell: {'yes' if description.admin_shell else 'no'}")
     output.info(f"Created:     {description.created_at}")
     output.info(f"Updated:     {description.updated_at}")
+    output.info(f"Status:      {description.status}")
     output.info("")
     output.info(f"Configured sessions: {len(description.sessions)}")
 
@@ -541,22 +600,37 @@ def render_console_description(description: ConsoleDescription) -> None:
 
 def list_consoles(
     db: Database,
+    config: Config | None = None,
     *,
     vm_name: str | list[str] | None = None,
     workspace_name: str | list[str] | None = None,
     agent_name: str | list[str] | None = None,
     names_only: bool = False,
+    include_status: bool = False,
 ) -> None:
     """Print the legacy console list presentation."""
     render_console_listing(
-        console_listing(db, vm_name=vm_name, workspace_name=workspace_name, agent_name=agent_name),
+        console_listing(
+            db,
+            config,
+            vm_name=vm_name,
+            workspace_name=workspace_name,
+            agent_name=agent_name,
+            include_status=include_status,
+        ),
         names_only=names_only,
+        include_status=include_status,
     )
 
 
-def describe_console(db: Database, *, name: str) -> None:
+def describe_console(
+    db: Database,
+    config: Config,
+    *,
+    name: str,
+) -> None:
     """Print the legacy console detail presentation."""
-    render_console_description(console_description(db, name=name))
+    render_console_description(console_description(db, config, name=name))
 
 
 # -- High-level entrypoints ------------------------------------------------
@@ -598,8 +672,12 @@ def _realize_console(
                 entity_kind="console",
                 entity_name=name,
             )
+        runtime_status = classify_console_status(
+            canonical_present=canonical is ProbeStatus.PRESENT,
+            staging_present=staging is ProbeStatus.PRESENT,
+        )
         if not replace_running:
-            if staging is ProbeStatus.PRESENT:
+            if runtime_status is ConsoleStatus.RESIDUAL:
                 _teardown_console_staging(target, name)
             if canonical is ProbeStatus.PRESENT:
                 output.result(f"Console '{name}' is already running")
@@ -715,7 +793,11 @@ def attach_console(
                 entity_name=name,
                 hint="Retry after transport access is reliable.",
             )
-        if canonical is not ProbeStatus.PRESENT or staging is not ProbeStatus.ABSENT:
+        runtime_status = classify_console_status(
+            canonical_present=canonical is ProbeStatus.PRESENT,
+            staging_present=staging is ProbeStatus.PRESENT,
+        )
+        if runtime_status is not ConsoleStatus.RUNNING:
             raise StateError(
                 f"console '{name}' is not ready to attach",
                 entity_kind="console",

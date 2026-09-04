@@ -107,7 +107,6 @@ def session_describe(
     ] = OutputFormat.HUMAN,
 ) -> None:
     """Show session details."""
-    interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config
     from agentworks.sessions.manager import describe_session, session_description
 
@@ -120,14 +119,14 @@ def session_describe(
         from agentworks.sessions.manager._queries import session_description_data
 
         with output.suppress_presentation():
-            description = session_description(get_db(), config, name=name, interaction=interaction)
+            description = session_description(get_db(), config, name=name)
         write_json_envelope(
             MachineOutputCommand.SESSION_DESCRIBE,
             session_description_data(description),
             get_binary_stream("stdout"),
         )
         return
-    describe_session(get_db(), config, name=name, interaction=interaction)
+    describe_session(get_db(), config, name=name)
 
 
 @session_app.command("list")
@@ -139,7 +138,8 @@ def session_list(
         typer.Option("--agent", help="Filter by agent (agent-mode sessions only)"),
     ] = None,
     admin: Annotated[bool, typer.Option("--admin", help="Only admin-mode sessions (no agent)")] = False,
-    no_status: Annotated[bool, typer.Option("--no-status", help="Skip SSH status check (faster)")] = False,
+    status: Annotated[bool, typer.Option("--status", help="Include live runtime status")] = False,
+    no_status: Annotated[bool, typer.Option("--no-status", hidden=True)] = False,
     names_only: Annotated[
         bool,
         typer.Option(
@@ -154,9 +154,17 @@ def session_list(
     ] = OutputFormat.HUMAN,
 ) -> None:
     """List sessions. Filters compose with AND; name filters accept comma-separated values for OR-within-filter."""
-    interaction = ordinary_tty_interaction_policy()
     if names_only and output_format is OutputFormat.JSON:
         raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
+    if status and names_only:
+        raise typer.BadParameter("cannot be used with --names-only", param_hint="--status")
+    if status and no_status:
+        raise typer.BadParameter("cannot be used with --no-status", param_hint="--status")
+    if no_status:
+        from agentworks import output
+
+        output.deprecation("`session list --no-status` is deprecated; use plain `session list`.")
+
     from agentworks.config import load_config
     from agentworks.sessions.manager import list_sessions, session_listing
 
@@ -184,8 +192,7 @@ def session_list(
                 vm_name=parse_csv_filter(vm),
                 agent_name=parsed_agent,
                 admin_only=admin,
-                no_status=no_status,
-                interaction=interaction,
+                include_status=status,
             )
         write_json_envelope(
             MachineOutputCommand.SESSION_LIST,
@@ -200,9 +207,8 @@ def session_list(
         vm_name=parse_csv_filter(vm),
         agent_name=parsed_agent,
         admin_only=admin,
-        no_status=no_status,
+        include_status=status,
         names_only=names_only,
-        interaction=interaction,
     )
 
 
@@ -371,8 +377,8 @@ def _confirm_legacy_resume_replacement(
     from agentworks.db import PID_STOPPED, SessionStatus
     from agentworks.errors import UserAbort
     from agentworks.sessions.manager import (
-        batch_check_all_sessions,
         filter_sessions,
+        observe_session_statuses,
     )
 
     if name is not None:
@@ -387,11 +393,11 @@ def _confirm_legacy_resume_replacement(
             admin_only=admin_only,
         )
 
-    status_map = batch_check_all_sessions(sessions, db=db, config=config)
+    status_map = observe_session_statuses(sessions, db=db, config=config)
     running: list[str] = []
     for session in sessions:
         status = status_map.get(session.name)
-        if status is SessionStatus.OK:
+        if status is SessionStatus.RUNNING:
             running.append(session.name)
             continue
         if (

@@ -56,6 +56,7 @@ class ProxmoxAPI:
         data: dict[str, Any] | None = None,
         *,
         json_body: bool = False,
+        timeout: float | None = None,
     ) -> Any:
         """Send an API request and return the parsed JSON ``data`` field.
 
@@ -80,7 +81,12 @@ class ProxmoxAPI:
             req.add_header("Content-Type", content_type)
 
         try:
-            with urllib.request.urlopen(req, context=self._ssl_ctx) as resp:
+            response = (
+                urllib.request.urlopen(req, context=self._ssl_ctx)
+                if timeout is None
+                else urllib.request.urlopen(req, context=self._ssl_ctx, timeout=timeout)
+            )
+            with response as resp:
                 resp_body = resp.read().decode()
         except urllib.error.HTTPError as e:
             err_body = e.read().decode() if e.fp else ""
@@ -165,9 +171,9 @@ class ProxmoxAPI:
         result = self._request("DELETE", f"/nodes/{node}/qemu/{vmid}")
         return str(result)
 
-    def vm_status(self, node: str, vmid: int) -> dict[str, Any]:
+    def vm_status(self, node: str, vmid: int, *, timeout: float | None = None) -> dict[str, Any]:
         """Get current VM status."""
-        result = self._request("GET", f"/nodes/{node}/qemu/{vmid}/status/current")
+        result = self._request("GET", f"/nodes/{node}/qemu/{vmid}/status/current", timeout=timeout)
         return result  # type: ignore[no-any-return]
 
     # -- Tasks -----------------------------------------------------------------

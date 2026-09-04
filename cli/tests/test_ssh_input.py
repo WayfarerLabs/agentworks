@@ -120,6 +120,7 @@ def test_transport_stdin_ignores_the_windows_tty_default() -> None:
 
     argv = process.call_args.args[0]
     assert "-tt" not in argv
+    assert "-T" in argv
     assert process.call_args.kwargs["input"] == secret.encode()
 
 
@@ -148,6 +149,11 @@ def test_ssh_run_translates_sensitive_native_failure_without_exception_link() ->
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
     assert secret not in repr(caught.value)
+
+
+def test_ssh_run_translates_process_launch_failure() -> None:
+    with patch("agentworks.ssh.subprocess.run", side_effect=FileNotFoundError("ssh")), pytest.raises(SSHError):
+        run(SSHTarget(host="vm-host"), "true")
 
 
 def test_ssh_run_sensitive_timeout_drops_partial_output_and_native_exception() -> None:

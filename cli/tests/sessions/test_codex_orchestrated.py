@@ -190,7 +190,7 @@ def _restart_stubs(
     _capture_pane_command(monkeypatch, events, captured)
 
     monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, **k: session)
-    monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: SessionStatus.OK)
+    monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: SessionStatus.RUNNING)
 
     def _spy_teardown(*args: object, **kwargs: object) -> None:
         events.append("kill")

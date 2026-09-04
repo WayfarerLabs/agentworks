@@ -184,13 +184,13 @@ from ._status import (
     _pid_presence as _pid_presence,
 )
 from ._status import (
-    batch_check_all_sessions as batch_check_all_sessions,
-)
-from ._status import (
     batch_check_status as batch_check_status,
 )
 from ._status import (
     check_session_status as check_session_status,
+)
+from ._status import (
+    observe_session_statuses as observe_session_statuses,
 )
 
 __all__ = [
@@ -211,7 +211,7 @@ __all__ = [
     "render_session_description",
     "check_session_status",
     "batch_check_status",
-    "batch_check_all_sessions",
+    "observe_session_statuses",
     "ensure_pids_batch",
     "filter_sessions",
     "_ensure_pid",

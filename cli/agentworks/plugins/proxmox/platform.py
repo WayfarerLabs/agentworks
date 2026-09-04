@@ -471,7 +471,7 @@ class ProxmoxPlatform(VMPlatform):
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
         try:
-            result = self._api(ctx).vm_status(self._vm_node(vm), self._vmid(vm))
+            result = self._api(ctx).vm_status(self._vm_node(vm), self._vmid(vm), timeout=10)
         except ProxmoxAPIError:
             return VMStatus.UNKNOWN
         pve_status = result.get("status", "")

@@ -29,6 +29,7 @@ from agentworks.ssh import (
 from agentworks.ssh import (
     run as ssh_run,
 )
+from agentworks.subprocess_io import decode_stream, stdin_bytes
 from agentworks.transports.base import Transport
 
 if TYPE_CHECKING:
@@ -36,6 +37,11 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from agentworks.ssh import SSHLogger
+
+
+def _decoded_output(value: str | bytes) -> str:
+    """Normalize text- and byte-mode subprocess output to transport text."""
+    return value if isinstance(value, str) else decode_stream(value)
 
 
 def keepalive_args() -> list[str]:
@@ -161,6 +167,9 @@ class SSHTransport(Transport):
         effective_tty = self.force_tty if force_tty is None else force_tty
         if effective_tty:
             args.insert(1, "-tt")
+        elif force_tty is False:
+            # Override RequestTTY force from operator SSH configuration.
+            args.insert(1, "-T")
         if self.port is not None:
             args.extend(["-p", str(self.port)])
         if self.identity_file is not None:
@@ -188,6 +197,7 @@ class SSHTransport(Transport):
         timeout: int | None = None,
         env: dict[str, str] | None = None,
         input_text: str | None = None,
+        input_data: str | None = None,
         discard_output: bool = False,
         retries: int | None = None,
         on_retry: Callable[[int, int], None] | None = None,
@@ -208,6 +218,8 @@ class SSHTransport(Transport):
         ``discard_output`` retains ordinary TTY selection while sending both
         process streams directly to the null device.
         """
+        if input_text is not None and input_data is not None:
+            raise ValueError("SSH input_text and input_data are mutually exclusive")
         if input_text is not None and discard_output:
             raise ValueError("SSH input_text cannot be combined with discard_output")
         if sudo:
@@ -240,6 +252,9 @@ class SSHTransport(Transport):
                 on_retry=on_retry,
                 env=env,
                 input_text=input_text,
+                # Sensitive stdin always needs a byte-exact non-TTY channel;
+                # explicit false also defeats RequestTTY force in ssh_config.
+                tty=False if tty is None else tty,
             )
             if self.logger is not None:
                 self.logger.log_command(command, stdin_result)
@@ -263,24 +278,36 @@ class SSHTransport(Transport):
             if attempt > 0 and on_retry is not None:
                 on_retry(attempt, attempts)
             try:
-                result = subprocess.run(
-                    args,
-                    stdout=subprocess.DEVNULL if discard_output else subprocess.PIPE,
-                    stderr=subprocess.DEVNULL if discard_output else subprocess.PIPE,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=t,
-                )
+                result: subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]
+                if input_data is None:
+                    result = subprocess.run(
+                        args,
+                        stdout=subprocess.DEVNULL if discard_output else subprocess.PIPE,
+                        stderr=subprocess.DEVNULL if discard_output else subprocess.PIPE,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        timeout=t,
+                    )
+                else:
+                    result = subprocess.run(
+                        args,
+                        input=stdin_bytes(input_data),
+                        stdout=subprocess.DEVNULL if discard_output else subprocess.PIPE,
+                        stderr=subprocess.DEVNULL if discard_output else subprocess.PIPE,
+                        timeout=t,
+                    )
             except subprocess.TimeoutExpired as err:
                 last_err = err
                 if self.logger is not None:
                     self.logger.log_timeout(command, attempt + 1, attempts)
                 continue
+            except OSError as err:
+                raise SSHError(f"SSH command could not be executed: {command}") from err
             ssh_result = SSHResult(
                 returncode=result.returncode,
-                stdout="" if discard_output else result.stdout,
-                stderr="" if discard_output else result.stderr,
+                stdout="" if discard_output else _decoded_output(result.stdout),
+                stderr="" if discard_output else _decoded_output(result.stderr),
             )
             if self.logger is not None:
                 self.logger.log_command(command, ssh_result)

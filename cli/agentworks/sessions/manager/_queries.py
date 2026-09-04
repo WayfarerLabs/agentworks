@@ -7,12 +7,13 @@ from typing import TYPE_CHECKING, cast
 
 import agentworks.sessions.manager as _mgr
 from agentworks import output
-from agentworks.db import PID_STOPPED, SessionStatus
+from agentworks.db import SessionStatus
 from agentworks.db.projections import project_session_mode, project_session_status
 from agentworks.errors import (
     AgentworksError,
     BrokenStateError,
-    NotFoundError,
+    ConfigError,
+    ConnectivityError,
     StateError,
     UserAbort,
 )
@@ -21,12 +22,13 @@ from agentworks.sessions.tmux import exact_tmux_target
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.db import Database, InstanceStateInspection, SessionRow, VMRow
+    from agentworks.db import Database, InstanceStateInspection, SessionRow
     from agentworks.instance_description import InstanceStateDescription
     from agentworks.machine_output import JsonObject
     from agentworks.resources.registry import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.sessions.template import SessionTemplate
+    from agentworks.transports import Transport
 
 
 @dataclass(frozen=True)
@@ -141,7 +143,7 @@ def delete_session(
     ):
         legacy = session.socket_path is None and session.pid is not None and session.pid > 0
         if legacy:
-            status = SessionStatus.OK
+            status = SessionStatus.RUNNING
         else:
             session = _mgr._ensure_pid(session, target=admin_target, db=db)
             status = _mgr.check_session_status(session, target=admin_target)
@@ -415,50 +417,48 @@ def session_description(
     config: Config,
     *,
     name: str,
-    interaction: TtyInteractionPolicy,
 ) -> SessionDescription:
-    """Collect session detail facts while retaining the live status behavior.
-
-    Runs inside ``_prepare_vm``'s gate span: a hold the imperative
-    body did not take (it gated and discarded the platform). The
-    superset is a no-op everywhere but WSL2, where it anchors the
-    status probes against the idle timer.
-    """
+    """Collect session detail facts with non-activating live status."""
     session = _mgr._require_session(db, name)
-    probe_started = False
-    try:
-        with _mgr._prepare_vm(
-            db,
-            config,
-            session,
-            operation=None,
-            interaction=interaction,
-        ) as (
-            _ws,
-            _vm,
-            _run_command,
-            _run_as_root,
-            target,
-        ):
-            probe_started = True
-            status = _mgr.check_session_status(session, target=target)
-            return _session_structural_description(db, config, name, status)
-    except (NotFoundError, StateError) as error:
-        if probe_started:
+    workspace = _mgr._require_workspace(db, session.workspace_name)
+    vm = _mgr._require_vm_for_workspace(db, workspace)
+    output.info(f"Checking session '{name}' runtime...")
+    status = SessionStatus.UNKNOWN
+    if session.socket_path is None:
+        status = _mgr.check_session_status(session)
+    else:
+        from agentworks.vms.applied_state import VMSSHIdentityPolicyError
+
+        try:
+            from agentworks.vms.manager import require_vm_ssh_boundary
+
+            require_vm_ssh_boundary(db, config, vm)
+        except UserAbort:
             raise
-        selected_template_missing = (
-            isinstance(error, NotFoundError)
-            and error.entity_kind == "session-template"
-            and error.entity_name == session.template
-        )
-        focused_spec_unavailable = (
-            isinstance(error, StateError) and error.entity_kind == "session" and error.entity_name == session.name
-        )
-        if not selected_template_missing and not focused_spec_unavailable:
-            raise
-        # Current declaration failure makes a live probe meaningless, but it
-        # must not hide the stored declaration and applied siblings.
-        return _session_structural_description(db, config, name, SessionStatus.UNKNOWN)
+        except (ConfigError, ConnectivityError, VMSSHIdentityPolicyError):
+            pass
+        else:
+            try:
+                target = _mgr.transport(vm, config)
+            except UserAbort:
+                raise
+            except (ConnectivityError, StateError):
+                pass
+            else:
+                from agentworks.sessions.manager._status import _BoundedStatusTarget
+
+                try:
+                    status = _mgr.check_session_status(
+                        session,
+                        target=cast("Transport", _BoundedStatusTarget(target)),
+                    )
+                except UserAbort:
+                    raise
+                except ConnectivityError:
+                    pass
+    if status is SessionStatus.UNKNOWN:
+        output.warn(f"Session '{name}' runtime status could not be determined.")
+    return _session_structural_description(db, config, name, status)
 
 
 def _session_structural_description(
@@ -486,7 +486,7 @@ def _session_structural_description(
             mode=project_session_mode(session.mode),
             agent_name=session.agent_name,
             status={
-                SessionStatus.OK: "running",
+                SessionStatus.RUNNING: "running",
                 SessionStatus.STOPPED: "stopped",
                 SessionStatus.BROKEN: "broken",
                 SessionStatus.RESIDUAL: "residual",
@@ -576,10 +576,9 @@ def describe_session(
     config: Config,
     *,
     name: str,
-    interaction: TtyInteractionPolicy,
 ) -> None:
     """Show session details."""
-    render_session_description(session_description(db, config, name=name, interaction=interaction))
+    render_session_description(session_description(db, config, name=name))
 
 
 def list_sessions(
@@ -590,14 +589,10 @@ def list_sessions(
     vm_name: str | list[str] | None = None,
     agent_name: str | list[str] | None = None,
     admin_only: bool = False,
-    no_status: bool = False,
+    include_status: bool = False,
     names_only: bool = False,
-    interaction: TtyInteractionPolicy,
 ) -> None:
-    """List sessions with batched status checks (one SSH call per VM, parallel).
-
-    Status resolution is has-session-first; PID/boot_id are only used as a
-    follow-up when agent checks fail.
+    """List sessions, optionally observing live status by backing VM.
 
     With ``names_only=True``, emit one session name per line and
     skip both the SSH status batch and the table render. Used by
@@ -623,18 +618,16 @@ def list_sessions(
             for session in names_by_ws[ws_name]:
                 output.info(session.name)
         return
-    render_session_listing(
-        _mgr.session_listing(
-            db,
-            config,
-            workspace_name=workspace_name,
-            vm_name=vm_name,
-            agent_name=agent_name,
-            admin_only=admin_only,
-            no_status=no_status,
-            interaction=interaction,
-        )
+    listing = _mgr.session_listing(
+        db,
+        config,
+        workspace_name=workspace_name,
+        vm_name=vm_name,
+        agent_name=agent_name,
+        admin_only=admin_only,
+        include_status=include_status,
     )
+    render_session_listing(listing, include_status=include_status)
 
 
 def session_listing(
@@ -645,10 +638,9 @@ def session_listing(
     vm_name: str | list[str] | None = None,
     agent_name: str | list[str] | None = None,
     admin_only: bool = False,
-    no_status: bool = False,
-    interaction: TtyInteractionPolicy,
+    include_status: bool = False,
 ) -> SessionListing:
-    """Collect ordered session list facts with read-only live status checks."""
+    """Collect local session inventory, optionally enriched by live status."""
     sessions = _mgr.filter_sessions(
         db,
         workspace_name=workspace_name,
@@ -659,30 +651,19 @@ def session_listing(
     if not sessions:
         return SessionListing(sessions=())
 
+    vm_names: dict[str, str] = {}
+    for session in sessions:
+        workspace = _mgr._require_workspace(db, session.workspace_name)
+        vm_names[session.name] = _mgr._require_vm_for_workspace(db, workspace).name
+
     status_map: dict[str, SessionStatus] = {}
-    status_keepalive_vms: list[VMRow] = [] if no_status else _mgr._distinct_vms_for_sessions(db, sessions)
-    status_vm_names = frozenset(vm.name for vm in status_keepalive_vms)
-    if not no_status:
+    if include_status:
+        selected_vms = _mgr._distinct_vms_for_sessions(db, sessions)
         output.info(
             f"Checking status for {output.count(len(sessions), 'session')} "
-            f"across {output.count(len(status_keepalive_vms), 'VM')}..."
+            f"across {output.count(len(selected_vms), 'VM')}..."
         )
-    with _mgr._best_effort_batch_vm_boundary(
-        db,
-        config,
-        status_keepalive_vms,
-        interaction=interaction,
-    ) as usable_vm_names:
-        if not no_status:
-            usable_sessions = [
-                session
-                for session in sessions
-                if (workspace := db.get_workspace(session.workspace_name)) is not None
-                and workspace.vm_name in usable_vm_names
-            ]
-            status_map = _mgr.batch_check_all_sessions(usable_sessions, db=db, config=config)
-    identity_refused_vm_names = status_vm_names - usable_vm_names
-
+        status_map = _mgr.observe_session_statuses(sessions, db=db, config=config)
     registry = _mgr._display_registry(config)
     harness_by_template: dict[str, str] = {}
 
@@ -704,31 +685,12 @@ def session_listing(
 
     facts: list[SessionListRow] = []
     for session in sessions:
-        workspace = db.get_workspace(session.workspace_name)
-        resolved_vm_name = workspace.vm_name if workspace is not None else ""
-        if no_status:
-            status = "unavailable"
-        elif session.pid == PID_STOPPED:
-            status = "stopped"
-        elif resolved_vm_name in identity_refused_vm_names:
-            status = "unknown"
-        elif session.name in status_map:
-            status = {
-                SessionStatus.OK: "running",
-                SessionStatus.STOPPED: "stopped",
-                SessionStatus.BROKEN: "broken",
-                SessionStatus.RESIDUAL: "residual",
-                SessionStatus.UNKNOWN: "unknown",
-            }[status_map[session.name]]
-        elif session.pid is None or session.boot_id is None:
-            status = "unknown"
-        else:
-            status = "unavailable"
+        status = status_map.get(session.name, SessionStatus.UNKNOWN).value if include_status else "unavailable"
         facts.append(
             SessionListRow(
                 name=session.name,
                 workspace_name=session.workspace_name,
-                vm_name=resolved_vm_name,
+                vm_name=vm_names[session.name],
                 template=session.template,
                 harness_integration=live_harness_for(session),
                 mode=project_session_mode(session.mode),
@@ -739,51 +701,49 @@ def session_listing(
     return SessionListing(sessions=tuple(facts))
 
 
-def render_session_listing(listing: SessionListing) -> None:
-    """Render session list facts with the legacy human layout."""
+def render_session_listing(listing: SessionListing, *, include_status: bool = False) -> None:
+    """Render session inventory, adding status only when requested."""
     if not listing.sessions:
         output.info("No sessions found.")
         return
 
-    rows: list[tuple[str, str, str, str, str, str, str]] = []
+    rows: list[tuple[str, ...]] = []
     broken_names: list[str] = []
-    unknown_names: list[str] = []
+    unknown_by_vm: dict[str, list[str]] = {}
     for session in listing.sessions:
         status = "-" if session.status == "unavailable" else session.status
         mode = project_session_mode(session.mode)
         mode_label = mode if mode == "unknown" else f"agent ({session.agent_name})" if session.agent_name else "admin"
-        rows.append(
-            (
-                session.name,
-                session.workspace_name,
-                session.vm_name,
-                session.template,
-                session.harness_integration or "-",
-                mode_label,
-                status,
-            )
+        row = (
+            session.name,
+            session.workspace_name,
+            session.vm_name,
+            session.template,
+            session.harness_integration or "-",
+            mode_label,
         )
-        if status == "broken":
+        rows.append((*row, status) if include_status else row)
+        if include_status and status == "broken":
             broken_names.append(session.name)
-        elif status == "unknown":
-            unknown_names.append(session.name)
+        elif include_status and status == "unknown":
+            unknown_by_vm.setdefault(session.vm_name, []).append(session.name)
 
-    headers = ["NAME", "WORKSPACE", "VM", "TEMPLATE", "HARNESS INT.", "MODE", "STATUS"]
+    headers = ["NAME", "WORKSPACE", "VM", "TEMPLATE", "HARNESS INT.", "MODE"]
+    if include_status:
+        headers.append("STATUS")
     for line in output.render_table(headers, rows, max_col_widths={headers.index("MODE"): 40}):
         output.info(line)
 
-    if broken_names or unknown_names:
+    if broken_names or unknown_by_vm:
         output.info("")
         if broken_names:
             output.warn(
                 f"{len(broken_names)} session(s) are broken (tmux unreachable): "
                 f"{', '.join(broken_names)}. Use start/restart/stop/delete --force."
             )
-        if unknown_names:
-            output.warn(
-                f"{len(unknown_names)} session(s) have unknown status: "
-                f"{', '.join(unknown_names)}. Status could not be determined."
-            )
+        if unknown_by_vm:
+            groups = "; ".join(f"{vm}: {', '.join(names)}" for vm, names in unknown_by_vm.items())
+            output.warn(f"Session status is unknown by VM: {groups}.")
 
 
 def attach_session(

@@ -237,10 +237,10 @@ def test_named_console_no_tailscale_fails_with_zero_resolves_and_zero_gate(
     _seed_named_console(db)
     _reachable(monkeypatch, False)
 
-    def _no_status(self: ProxmoxPlatform, row: object) -> VMStatus:
+    def _status_must_not_run(self: ProxmoxPlatform, row: object) -> VMStatus:
         raise AssertionError("the gate ran for an unattachable VM")
 
-    monkeypatch.setattr(ProxmoxPlatform, "status", _no_status)
+    monkeypatch.setattr(ProxmoxPlatform, "status", _status_must_not_run)
 
     with pytest.raises(StateError, match="no Tailscale address"):
         multi_console.attach_console(db, config, name="c1", interaction=TtyInteractionPolicy.REFUSE)

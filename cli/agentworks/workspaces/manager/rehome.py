@@ -75,13 +75,13 @@ def rehome_workspace(
 
     # Block unless all sessions are STOPPED
     from agentworks.db import PID_STOPPED, SessionStatus
-    from agentworks.sessions.manager import batch_check_all_sessions, ensure_pids_batch
+    from agentworks.sessions.manager import ensure_pids_batch, observe_session_statuses
 
     sessions = db.list_sessions(workspace_name=name)
     if sessions:
         try:
             sessions = ensure_pids_batch(sessions, db=db, config=config)
-            status_map = batch_check_all_sessions(sessions, db=db, config=config)
+            status_map = observe_session_statuses(sessions, db=db, config=config)
         except Exception as exc:
             raise ExternalError(
                 f"cannot verify session status for workspace '{name}' (VM may be unreachable): {exc}",

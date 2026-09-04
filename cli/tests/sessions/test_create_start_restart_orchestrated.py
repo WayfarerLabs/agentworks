@@ -159,7 +159,7 @@ def _restart_fixture(
     monkeypatch: pytest.MonkeyPatch,
     *,
     missing: set[str] | None = None,
-    status: SessionStatus = SessionStatus.OK,
+    status: SessionStatus = SessionStatus.RUNNING,
 ) -> tuple[Database, list[str]]:
     from agentworks.sessions import manager as session_manager
     from agentworks.sessions import tmux as tmux_mod
@@ -1498,7 +1498,7 @@ def test_restart_multiline_environment_secret_refuses_before_kill(
     captured_env: dict[str, str] = {}
     _patch_session_ops(monkeypatch, events, captured_env)
     monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, **kwargs: session)
-    monkeypatch.setattr(session_manager, "check_session_status", lambda *args, **kwargs: SessionStatus.OK)
+    monkeypatch.setattr(session_manager, "check_session_status", lambda *args, **kwargs: SessionStatus.RUNNING)
     monkeypatch.setattr(
         "agentworks.sessions.manager._lifecycle._teardown_session",
         lambda *args, **kwargs: events.append("kill"),

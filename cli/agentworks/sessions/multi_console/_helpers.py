@@ -102,10 +102,10 @@ def _vm_sessions(db: Database, vm_name: str) -> list[SessionRow]:
 
 
 def running_session_names(db: Database, config: Config, vm_name: str) -> list[str]:
-    """SSH-probe the VM and return names of sessions whose live tmux state is OK.
+    """Probe eligible rows and return sessions whose live tmux state is running.
 
     Uses the same read-only batched status check that powers ``agw session
-    list``. Returns alphabetically sorted names.
+    list --status``. Returns alphabetically sorted names.
 
     Raises StateError for a live legacy shared-server row that requires
     migration, or ConnectivityError when any dedicated session has
@@ -115,17 +115,16 @@ def running_session_names(db: Database, config: Config, vm_name: str) -> list[st
     from agentworks.db import PID_STOPPED, SessionStatus
     from agentworks.sessions.manager import (
         _legacy_session_status_error,
-        batch_check_all_sessions,
         filter_sessions,
+        observe_session_statuses,
     )
 
     sessions = filter_sessions(db, vm_name=vm_name)
     for session in sessions:
         if session.pid != PID_STOPPED and session.socket_path is None:
             raise _legacy_session_status_error(session)
-    status_map = batch_check_all_sessions(sessions, db=db, config=config)
-
     potentially_running = [session for session in sessions if session.pid != PID_STOPPED]
+    status_map = observe_session_statuses(potentially_running, db=db, config=config)
     if any(
         status_map.get(session.name, SessionStatus.UNKNOWN) == SessionStatus.UNKNOWN for session in potentially_running
     ):
@@ -136,7 +135,7 @@ def running_session_names(db: Database, config: Config, vm_name: str) -> list[st
             hint="Check VM reachability.",
         )
 
-    return sorted(s.name for s in sessions if status_map.get(s.name) == SessionStatus.OK)
+    return sorted(s.name for s in sessions if status_map.get(s.name) == SessionStatus.RUNNING)
 
 
 def infer_vm_from_session_specs(db: Database, session_specs: list[str]) -> str | None:
