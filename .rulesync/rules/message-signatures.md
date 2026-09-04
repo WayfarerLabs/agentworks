@@ -24,9 +24,9 @@ version control and the systems that produce them.
   -- agw-test-codex (agentworks integration-test session)
   ```
 
-  If `AGENTWORKS_SESSION` is unset, sign with an honest plain-language label for what you are (for
-  example `-- unidentified agentworks workload (integration tester)`) rather than guessing a name or
-  leaving the message unsigned.
+  Where that selection yields no name, sign with an honest plain-language label for what you are
+  (for example `-- unidentified agentworks workload (integration tester)`) rather than guessing a
+  name or leaving the message unsigned.
 
 - **Other environments** sign with their own appropriate identifier: a CI job name, a harness
   session id, or whatever stable identity that environment provides.
@@ -59,9 +59,9 @@ Most delegates never hit this, because most report back and the lead is what spe
 commits need no signature line, but an agent session's commits must carry a session trailer. In an
 Agentworks workload that trailer is `Agentworks-Session: <name>`, taking whichever name the
 selection above yields and mandatory whenever it yields one; harness-added trailers (this history's
-`Claude-Session: <url>`) may ride along but do not substitute for it. When `AGENTWORKS_SESSION` is
-absent, the environment's own stable harness or session trailer satisfies the requirement on its
-own; never invent a session name. Outside Agentworks, use the environment's own stable session
-identifier as the trailer. Author identity plus the trailer is the commit-side equivalent of the
-signature. When one session posts in several roles (for example, authoring work and relaying a
-review), the role descriptor is what disambiguates; keep it honest and current.
+`Claude-Session: <url>`) may ride along but do not substitute for it. Where that selection yields no
+name, the environment's own stable harness or session trailer satisfies the requirement on its own;
+never invent a session name. Outside Agentworks, use the environment's own stable session identifier
+as the trailer. Author identity plus the trailer is the commit-side equivalent of the signature.
+When one session posts in several roles (for example, authoring work and relaying a review), the
+role descriptor is what disambiguates; keep it honest and current.
