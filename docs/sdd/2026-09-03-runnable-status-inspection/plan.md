@@ -179,8 +179,7 @@ assert behavior and structure, never authored prose.
 
 ## Phase 4: Compatibility, completion, and permanent collateral
 
-- [ ] Retain hidden `session list --no-status` only at the 0.18 CLI boundary, conflict it with
-      `--status`, emit the shared suppressible warning, and remove all manager-level negative flags.
+- [ ] Implement R23 at the CLI boundary and remove all manager-level negative flags.
 - [ ] Update completion metadata and Bash, zsh, and PowerShell behavior to offer `--status` on all
       three lists, omit deprecated `--no-status`, and keep names-only sources status-free.
 - [ ] Update CLI README and command reference for list/describe grammar, progress, resource status

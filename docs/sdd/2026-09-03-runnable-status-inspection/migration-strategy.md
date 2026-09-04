@@ -35,7 +35,7 @@ Static scope at the snapshot:
 
 - 15 production/test files reference `SessionStatus.OK`.
 - 6 production/test files reference the Python name `no_status`.
-- 15 code/doc files reference the CLI spelling `--no-status`.
+- 12 code/doc files reference the CLI spelling `--no-status`.
 - Existing focused list coverage spans at least 8 VM, 12 session, and 8 console test files.
 
 The counts are planning evidence, not a permanent guard. Implementation performs a fresh residual
@@ -97,7 +97,9 @@ list from the activation-boundary documentation and tests. This sequence keeps o
 implementation at every commit.
 
 The low-level session batch probe remains reusable by console `--all-running`; only its timeout,
-TTY, result completeness, and enum naming change.
+TTY, result completeness, and enum naming change. `--all-running` now observes persisted-stopped
+rows too: a manually resurrected exact runtime is included, and an inconclusive row refuses partial
+selection.
 
 ### 3. Add console observation
 
@@ -118,16 +120,9 @@ false vocabulary available to new code and teach two names for one state.
 
 ### 6. Keep one bounded CLI compatibility shim
 
-In 0.18.0 only, hidden `session list --no-status`:
-
-- conflicts with `--status`;
-- emits the existing suppressible deprecation notice;
-- dispatches plain local session list; and
-- is absent from canonical help and completion.
-
-No manager argument, service branch, or status policy is preserved for it. The option is removed in
-0.19.0. The lifecycle release-sequencing cleanup establishes the same rule for 0.17 compatibility
-grammar: 0.18 accepts and warns, 0.19 retires.
+R23 owns the exact behavior and release window. The migration contains only its CLI adapter; no
+manager argument, service branch, or status policy is preserved. The compatibility matrix below is
+the transition summary shared with the lifecycle release-sequencing cleanup.
 
 ### 7. Update permanent collateral with behavior
 
@@ -152,6 +147,9 @@ agw session list --status --output json
 
 This makes the cost and remote dependency explicit. If one VM is unreachable, its affected rows are
 `unknown`; other VMs retain their observed states. The command does not start the unreachable VM.
+That includes a row carrying `PID_STOPPED`: a reachable guest whose session and dedicated server are
+authoritatively absent still reports `stopped`, while an unreachable guest reports `unknown` rather
+than trusting possibly stale persisted evidence.
 
 An automation already using `--no-status` can remove the flag. In 0.18.0 it still runs with a
 deprecation notice unless globally suppressed. In 0.19.0 the stale option is an ordinary usage

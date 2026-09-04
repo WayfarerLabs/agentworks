@@ -32,7 +32,7 @@ status: Annotated[
 
 This parameter is added to `vm list`, `session list`, and `console list`.
 
-Session list additionally retains this 0.18-only compatibility parameter:
+Session list additionally implements R23 with this CLI-only compatibility parameter:
 
 ```python
 no_status: Annotated[bool, typer.Option("--no-status", hidden=True)] = False
@@ -54,7 +54,7 @@ include_status: bool = False
 ```
 
 No manager, row builder, renderer, test helper, or permanent documentation retains `no_status`
-except the bounded compatibility adapter and its retirement test.
+except the R23 adapter and its retirement test.
 
 ## Observation request representation
 
@@ -130,23 +130,24 @@ class ConsoleStatus(Enum):
     UNKNOWN = "unknown"
 ```
 
-The pure classifier receives canonical and staging `ProbeStatus`:
+The pure classifier receives the conclusive membership facts from an authoritative enumeration:
 
-```text
-if staging is PRESENT:      RESIDUAL
-else if either is UNKNOWN:  UNKNOWN
-else if canonical PRESENT:  RUNNING
-else:                       STOPPED
+```python
+def classify_console_status(
+    *,
+    canonical_present: bool,
+    staging_present: bool,
+) -> ConsoleStatus:
+    if staging_present:
+        return ConsoleStatus.RESIDUAL
+    if canonical_present:
+        return ConsoleStatus.RUNNING
+    return ConsoleStatus.STOPPED
 ```
 
-Staging presence is sufficient evidence of residual managed state even if canonical presence is
-inconclusive. Otherwise unknown dominates a partial observation.
-
-This classifier is an observation projection, not permission to mutate lifecycle state. A lifecycle
-operation examines the raw pair first and raises its existing typed refusal when either fact is
-`UNKNOWN`; it calls the classifier only after both facts are conclusive. Thus
-`(canonical=UNKNOWN, staging=PRESENT)` reports `RESIDUAL` to inspection but still blocks lifecycle
-mutation.
+Enumeration failure becomes `UNKNOWN` at the observer and never calls this classifier. A lifecycle
+operation likewise examines its raw `ProbeStatus` pair first and raises its existing typed refusal
+when either fact is `UNKNOWN`; it converts both conclusive facts to booleans before classification.
 
 `ConsoleListRow.status` is `unavailable` when not requested, otherwise the enum value.
 `ConsoleDescription.status` is always one console enum value projected to text.
@@ -210,14 +211,18 @@ branch as the singular classifier.
 The remote command stays one compound fact script per VM. `batch_check_status` takes explicit probe
 policy rather than relying on an unbounded transport default. It passes `tty=False` so Windows' old
 interactive-shell TTY workaround does not merge parseable probe streams. Tests cover inherited-TTY
-diagnostics as input to the parser because older transports and fixtures may still produce them.
+diagnostics as input to the parser because older transports and fixtures may still produce them. The
+transport's historical `retries` parameter counts total attempts, so `retries=1` means one attempt
+and zero retries.
 
 The function does not enter `_best_effort_batch_vm_boundary`. That boundary remains lifecycle-only
 and its docstring no longer names session list.
 
 `running_session_names`, used by `console create --all-running`, continues to consume the low-level
 batch observer. It receives the renamed `RUNNING` enum and the same timeout safety without acquiring
-list presentation policy.
+list presentation policy. It no longer excludes `PID_STOPPED` rows before observation: an exact
+manually resurrected runtime is truthfully selected, while any selected session left unknown refuses
+partial `--all-running` selection.
 
 ## Console observation
 
@@ -428,7 +433,8 @@ Tests instrument these boundaries, not authored prose:
 - list with status: provider/transport read stubs may run, activation/repair/lifecycle and DB update
   stubs must remain untouched;
 - exact number of guest calls: one per distinct VM for each domain observer;
-- timeout policy: `tty=False`, `timeout=10`, `retries=1` reaches the transport call;
+- timeout policy: `tty=False`, `timeout=10`, and the transport's one-total-attempt spelling
+  `retries=1` reach the transport call;
 - partial failure after dispatch: one VM/provider unknown, unaffected rows keep their observed
   values; shared VM setup failure leaves all selected VM observations unknown;
 - state matrices: every session and console branch, including malformed and mixed diagnostics;

@@ -61,8 +61,7 @@ a read-only batch observer. The observer groups consoles by VM, obtains one form
 enumeration per VM, and compares each validated canonical and staging name by exact string equality.
 Unrelated user sessions are ignored. Lifecycle operations keep their gated boundary; inspection
 never uses it. Lifecycle examines raw presence first and retains typed refusal on either unknown
-probe, even though the observation projection may call known staging presence `residual` without a
-canonical answer.
+probe before projecting a conclusive pair.
 
 ### VM
 
@@ -94,9 +93,8 @@ database. VM and console list load config only when live observation needs it; s
 its existing local config load because the harness-integration column is derived from session
 templates and desired overlays.
 
-`session list --no-status` remains a hidden 0.18.0 compatibility option. The adapter validates it
-against `--status`, emits the shared suppressible deprecation warning, and otherwise dispatches the
-ordinary local list. No manager or renderer receives `no_status`.
+The session adapter implements the R23 compatibility shim before dispatching the ordinary local
+list. No manager or renderer receives `no_status`.
 
 Describe adapters keep their existing public shape. Console describe gains config and interaction
 policy only because live observation needs the canonical transport. JSON mode continues to assemble
@@ -275,15 +273,10 @@ The design and implementation ship together in one PR for 0.18.0. The new defaul
 observable: plain session list becomes local and status-free, while `session list --status` retains
 the old live question with corrected non-activating behavior.
 
-The only compatibility shim is CLI-local:
-
-- 0.18.0 accepts hidden `session list --no-status`, warns through the shared deprecation channel,
-  and runs plain session list.
-- 0.19.0 removes the option and its tests. Issue tracking is created during closeout if the removal
-  is not already represented by the release process.
-
-No old manager boolean or dual observation path remains. Completion, canonical help, permanent docs,
-and examples teach only `--status`.
+R23 defines the only compatibility shim and its release window. It remains CLI-local; no old manager
+boolean or dual observation path survives. Completion, canonical help, permanent docs, and examples
+teach only `--status`. Closeout reconciles its removal with the existing lifecycle compatibility
+tracker rather than creating overlapping work.
 
 ## Rejected alternatives
 
@@ -308,6 +301,14 @@ accumulate exceptions.
 
 Rejected because reliable observation cannot change the observed state. Starting a stopped VM to ask
 whether its session is running makes the result self-fulfilling and violates operator intent.
+
+### Generalize the singular no-gate VM boundary for list
+
+Rejected because the existing `_live_vm_boundary` is singular and fatal for lifecycle operations,
+while VM list prepares one multi-row union and degrades expected setup failures to unknown. VM
+describe also preserves stage-specific issues. Giving one helper both cardinality and error-policy
+modes would obscure those contracts; the implementation shares the existing scoped-context builder
+and status projector instead.
 
 ### Persist the latest observation
 

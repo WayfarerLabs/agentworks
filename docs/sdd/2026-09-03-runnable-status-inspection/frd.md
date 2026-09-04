@@ -55,8 +55,8 @@ authority that match its runtime.
    stable field shape and carry an explicit not-requested value.
 7. `--status` and `--names-only` are mutually exclusive. Silently ignoring an explicit status
    request would be misleading, and completion must remain local and fast.
-8. The existing `session list --no-status` spelling becomes a hidden deprecated compatibility no-op
-   in 0.18.0 and is removed in 0.19.0. It never re-enables the old default-live behavior.
+8. R23 owns the existing `session list --no-status` compatibility spelling and its release window.
+   The shim never re-enables the old default-live behavior or reaches a service policy.
 9. `SessionStatus.OK` is renamed to `SessionStatus.RUNNING`, with matching variables, comments,
    tests, and documentation. No persisted database value or external capability version changes.
 10. This effort adds no standalone `status` commands and no generic runnable service. The list and
@@ -120,8 +120,8 @@ authority that match its runtime.
 - **R13.** Console live status shall use `running`, `stopped`, `residual`, or `unknown`. `running`
   means the exact canonical tmux session is present and its reserved staging session is absent.
   `stopped` means both managed names are absent. `residual` means the staging name is present,
-  whether or not canonical presence is conclusive. `unknown` means staging is not known present and
-  at least one fact needed to distinguish running from stopped is inconclusive.
+  whether the canonical name is present or absent. `unknown` means the authoritative tmux
+  session-name enumeration was inconclusive.
 - **R14.** Session and console observations shall use the canonical VM transport directly and shall
   not activate the VM. Their tmux targets shall preserve exact-name selection. A stopped or
   unreachable VM therefore yields unknown, not an automatic start.
@@ -206,8 +206,7 @@ authority that match its runtime.
 6. All three describe commands include non-activating live status and preserve local facts when an
    expected observation is unavailable.
 7. `--status` completion and help are consistent across all three resources; `--status` with
-   `--names-only` fails before work; deprecated `--no-status` is hidden in 0.18.0 and scheduled for
-   removal in 0.19.0.
+   `--names-only` fails before work; compatibility follows R23.
 8. Focused tests, the full non-integration suite, Ruff, format, strict mypy, repository guards,
    installed-wheel smoke tests, and capability-appropriate live tests pass before merge intent.
 
