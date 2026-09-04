@@ -49,7 +49,6 @@ class SSHTarget:
     identity_file: Path | None = None
     proxy_jump: str | None = None
     login_shell: bool = False
-    force_tty: bool = False
 
 
 # SSH transport failure exit code (connection refused, host unreachable, etc.)
@@ -318,10 +317,20 @@ def _ssh_base_args(
     target: SSHTarget,
     *,
     env: dict[str, str] | None = None,
+    close_stdin: bool,
 ) -> list[str]:
+    """Build the base ``ssh`` argv with ``BatchMode=yes`` (no remote command yet).
+
+    When ``close_stdin`` is set, add ``-n`` so ssh closes stdin: a stdin-reading
+    remote command then cannot hang waiting on input, and ssh cannot pull from
+    the operator's console. ``-n`` must stay off while a byte-exact
+    ``input_text`` payload is written, so callers set ``close_stdin`` only for
+    the no-stdin-payload case (mirrors ``SSHTransport``). This primitive never
+    allocates a pty; a caller needing one uses ``SSHTransport.run(tty=True)``.
+    """
     args = ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
-    if target.force_tty:
-        args.insert(1, "-tt")
+    if close_stdin:
+        args.insert(1, "-n")
     if target.port is not None:
         args.extend(["-p", str(target.port)])
     if target.identity_file is not None:
@@ -378,13 +387,10 @@ def run(
     """
     if input_text is not None and logger is not None:
         raise ValueError("SSH stdin input cannot be combined with command logging")
-    if input_text is not None and target.force_tty:
-        # A forced TTY puts a line discipline between the pipe and the remote
-        # command, which echoes input and rewrites CR, so the byte-exact
-        # promise above cannot hold. Refuse rather than corrupt a secret.
-        raise ValueError("SSH stdin input cannot be combined with a forced TTY")
 
-    args = _ssh_base_args(target, env=env)
+    # Close stdin with ``-n`` only for a plain run: an ``input_text`` payload
+    # must keep stdin open for the byte-exact write.
+    args = _ssh_base_args(target, env=env, close_stdin=input_text is None)
     # Fence the remote command from ssh's option parser. See
     # ``SSHTransport.run`` in ``transports/ssh.py`` for the rationale.
     args.append("--")

@@ -19,7 +19,6 @@ owns only the per-phase step sequences and status/event bookkeeping.
 from __future__ import annotations
 
 import shlex
-import sys
 from collections.abc import Callable
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -368,12 +367,10 @@ def _phase_a_bootstrap(
     db.update_vm_provisioning_status(vm_name, ProvisioningStatus.COMPLETE)
 
     # Switch to Tailscale SSH, carrying over the SSH logger.
-    # On Windows, force TTY to prevent zsh/login shell pipe hangs.
     ts_target = SSHTransport(
         host=tailscale_ip,
         user=admin_username,
         identity_file=config.operator.ssh_private_key,
-        force_tty=sys.platform == "win32",
         default_timeout=60,
         logger=logger,
     )

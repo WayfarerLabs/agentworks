@@ -31,8 +31,29 @@ def test_ssh_run_streams_input_without_logging_it() -> None:
     assert result.stderr == ""
     argv = process.call_args.args[0]
     assert secret not in repr(argv)
+    # An input_text write keeps stdin open (no -n) and never forces a pty
+    # (-tt corrupts the byte-exact payload); it uses neither flag.
+    assert "-n" not in argv
+    assert "-tt" not in argv
     # Byte-exact delivery: the payload crosses the pipe with no newline rewriting.
     assert process.call_args.kwargs["input"] == secret.encode()
+
+
+def test_ssh_run_plain_closes_stdin_with_dash_n_and_no_tt() -> None:
+    """A plain ``ssh_run`` (no ``input_text``, no forced TTY) closes stdin with
+    ssh's own ``-n``: a stdin-reading remote command then cannot hang and ssh
+    cannot pull from the operator's console. This mirrors ``SSHTransport.run``'s
+    default, extending it to the bare-target primitive (``_run_lima``'s remote
+    Lima hop). ``-tt`` is never forced by default."""
+    with patch("agentworks.ssh.subprocess.run") as process:
+        process.return_value = subprocess.CompletedProcess([], 0, stdout=b"", stderr=b"")
+        run(SSHTarget(host="vm-host"), "limactl list --json")
+
+    argv = process.call_args.args[0]
+    assert "-n" in argv
+    assert "-tt" not in argv
+    # -n closes stdin, so no payload is written.
+    assert process.call_args.kwargs["input"] is None
 
 
 def test_ssh_run_failure_diagnostic_omits_input() -> None:
@@ -90,25 +111,12 @@ def test_ssh_run_rejects_logging_sensitive_input_before_subprocess() -> None:
     assert secret not in str(caught.value)
 
 
-def test_ssh_run_rejects_a_forced_tty_before_subprocess() -> None:
-    secret = "ssh-stdin-swordfish"
-
-    with patch("agentworks.ssh.subprocess.run") as process, pytest.raises(ValueError) as caught:
-        run(
-            SSHTarget(host="vm-host", force_tty=True),
-            "read -r token",
-            input_text=secret,
-        )
-
-    process.assert_not_called()
-    assert secret not in str(caught.value)
-
-
-def test_transport_stdin_ignores_the_windows_tty_default() -> None:
-    """The production path. Cloud platforms build the transport with
-    ``force_tty=sys.platform == "win32"``, and ``join_tailscale_ephemerally``
-    sends stdin without a ``tty`` override, so forwarding that default would
-    fail every Windows VM create at its tailnet join.
+def test_transport_stdin_allocates_no_tty_and_leaves_stdin_open() -> None:
+    """The production path. ``join_tailscale_ephemerally`` sends the
+    tailnet auth key over stdin with no ``tty`` override, so the stdin
+    branch must neither force a TTY (``-tt`` would corrupt the byte-exact
+    payload) nor close stdin (``-n`` would starve the remote reader). It
+    goes through ``ssh.run``, which builds argv without either flag.
     """
     from agentworks.transports.ssh import SSHTransport
 
@@ -116,10 +124,11 @@ def test_transport_stdin_ignores_the_windows_tty_default() -> None:
 
     with patch("agentworks.ssh.subprocess.run") as process:
         process.return_value = subprocess.CompletedProcess([], 0, stdout=b"", stderr=b"")
-        SSHTransport("vm-host", force_tty=True).run("read -r token", input_text=secret)
+        SSHTransport("vm-host").run("read -r token", input_text=secret)
 
     argv = process.call_args.args[0]
     assert "-tt" not in argv
+    assert "-n" not in argv
     assert process.call_args.kwargs["input"] == secret.encode()
 
 
