@@ -891,14 +891,16 @@ def test_session_human_listing_uses_one_fact_path_and_names_only_stays_lightweig
     monkeypatch.setattr(
         _queries,
         "render_session_listing",
-        lambda facts: calls.append("render") if facts is listing else pytest.fail("wrong facts"),
+        lambda facts, *, include_status: (
+            calls.append(f"render:{include_status}") if facts is listing else pytest.fail("wrong facts")
+        ),
     )
 
     _queries.list_sessions(
         cast("Database", object()),
         cast("Config", object()),
     )
-    assert calls == ["collect", "render"]
+    assert calls == ["collect", "render:False"]
 
     rows = [
         SessionRow("second", "zeta", "default", "admin", "created", "updated"),

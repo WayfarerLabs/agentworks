@@ -51,6 +51,7 @@ class WSL2Transport(Transport):
         timeout: int | None = None,
         env: dict[str, str] | None = None,
         input_text: str | None = None,
+        input_data: str | None = None,
         discard_output: bool = False,
         retries: int | None = None,
         on_retry: Callable[[int, int], None] | None = None,
@@ -61,6 +62,8 @@ class WSL2Transport(Transport):
         doesn't surface a retryable timeout, so both are no-ops here.
         """
         del tty, retries, on_retry  # not meaningful for non-interactive wsl.exe
+        if input_text is not None and input_data is not None:
+            raise ValueError("WSL2 input_text and input_data are mutually exclusive")
         if input_text is not None and discard_output:
             raise ValueError("WSL2 input_text cannot be combined with discard_output")
         if sudo:
@@ -80,11 +83,12 @@ class WSL2Transport(Transport):
         t = self._resolve_timeout(timeout)
         timed_out = False
         suppress_output = input_text is not None or discard_output
+        stdin = input_text if input_text is not None else input_data
         try:
             result = subprocess.run(
                 args,
                 # Byte-mode stdin: text mode rewrites LF to CRLF on Windows (see agentworks.subprocess_io).
-                input=stdin_bytes(input_text),
+                input=stdin_bytes(stdin),
                 stdout=subprocess.DEVNULL if suppress_output else subprocess.PIPE,
                 stderr=subprocess.DEVNULL if suppress_output else subprocess.PIPE,
                 timeout=t,

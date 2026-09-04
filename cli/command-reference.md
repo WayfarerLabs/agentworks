@@ -806,8 +806,6 @@ only; `--admin` matches admin-mode sessions only (the two are mutually exclusive
 Plain `session list` reads local inventory and omits `STATUS`. Add `--status` for bounded,
 non-activating live observation of the selected sessions; the human table then uses `running`,
 `stopped`, `residual`, `broken`, or `unknown`. `--status` cannot be combined with `--names-only`.
-The former `--no-status` spelling is a hidden warning-producing no-op in 0.18 and is removed in
-0.19; automation should use plain `session list`.
 
 `session stop`, `session start`, and `session restart` operate on a single session by default. Pass
 `--all` to batch over matching sessions. The batch form accepts `--vm <vm>`, `--workspace <ws>`,

@@ -198,11 +198,13 @@ list join no longer substitutes stopped before consulting the observer. A reques
 canonical socket remains unknown. The batch parser applies the same post-absence `PID_STOPPED`
 branch as the singular classifier.
 
-The remote command stays one compound fact script per VM. A compact fixed shell loop consumes
-base64-encoded row data, avoiding repeated per-row shell source and keeping a maximum-name fleet
-below Windows' 32,767-character process command-line limit. The parser accepts results only when the
-call succeeds without stderr and every requested row has exactly one valid, known frame; unframed,
-duplicate, unknown, missing, or malformed frames leave the entire VM unknown.
+The remote command stays one compound fact script per VM. A constant-size shell loop consumes
+base64-encoded row data from the transport's non-sensitive stdin channel, so an arbitrarily large
+valid fleet does not enlarge the process command line. Explicit `tty=False` adds OpenSSH `-T`,
+overriding even an operator `RequestTTY force` configuration and keeping stdout and stderr distinct.
+The parser accepts results only when the call succeeds without stderr (after removing the exact
+established local SSH close advisory) and every requested row has exactly one valid, known frame;
+unframed, duplicate, unknown, missing, or malformed frames leave the entire VM unknown.
 
 `batch_check_status` bakes in the sole probe policy at its transport call: `tty=False`,
 `timeout=10`, and `retries=1`. The last value is the transport's spelling for one total attempt and

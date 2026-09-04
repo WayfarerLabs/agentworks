@@ -18,7 +18,7 @@ from agentworks.sessions.manager import (
     check_session_status,
     observe_session_statuses,
 )
-from agentworks.sessions.manager._status import _batch_probe_command, _encoded_probe_field
+from agentworks.sessions.manager._status import _batch_probe_command, _batch_probe_data, _encoded_probe_field
 from agentworks.sessions.tmux import ProbeStatus, probe_tmux_server_pid
 
 
@@ -51,6 +51,7 @@ class _FakeTarget:
         tty: bool | None = None,
         timeout: int | None = None,
         retries: int | None = None,
+        input_data: str | None = None,
     ) -> _FakeResult:
         self.commands.append(command)
         self.call_options.append((tty, timeout, retries))
@@ -200,11 +201,14 @@ def test_batch_builds_compound_command() -> None:
     assert target.commands[0].count("run_tmux list-sessions") == 1
 
 
-def test_batch_command_fits_windows_argv_limit_for_large_valid_fleet() -> None:
+def test_batch_fleet_uses_constant_argv_and_unbounded_stdin_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agentworks.sessions.tmux import MAX_SESSION_NAME_LENGTH, SUN_PATH_MAX
+    from agentworks.transports import SSHTransport
 
     sessions = []
-    for index in range(128):
+    for index in range(512):
         suffix = f"{index:08x}"
         name = ("s" * (MAX_SESSION_NAME_LENGTH - len(suffix))) + suffix
         fixed = f"/{suffix}/{name}"
@@ -212,17 +216,54 @@ def test_batch_command_fits_windows_argv_limit_for_large_valid_fleet() -> None:
         assert len(socket_path) == SUN_PATH_MAX - 1
         sessions.append(_session(name, pid=100_000 + index, socket_path=socket_path, mode="agent"))
 
-    command = _batch_probe_command(sessions)
+    completed = subprocess.CompletedProcess(
+        [],
+        0,
+        stdout=("\n".join(_batch_row(session.name) for session in sessions) + "\n").encode(),
+        stderr=b"",
+    )
+    calls: list[tuple[list[str], dict[str, object]]] = []
 
-    assert len(command.encode()) < 32_767
+    def run_process(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        calls.append((argv, kwargs))
+        return completed
+
+    monkeypatch.setattr("agentworks.transports.ssh.subprocess.run", run_process)
+
+    status_map = batch_check_status(sessions, target=SSHTransport("vm-host"))
+
+    assert len(calls) == 1
+    argv, kwargs = calls[0]
+    assert argv[-1] == _batch_probe_command()
+    assert len(" ".join(argv).encode()) < 32_767
+    payload = kwargs["input"]
+    assert payload == _batch_probe_data(sessions).encode()
+    assert isinstance(payload, bytes)
+    assert len(payload) > 32_767
+    assert "-T" in argv
+    assert status_map == {session.name: SessionStatus.RUNNING for session in sessions}
 
 
 def test_batch_command_is_valid_shell_syntax() -> None:
-    command = _batch_probe_command([_session("alpha", pid=42, socket_path="/tmp/alpha.sock")])
+    command = _batch_probe_command()
 
     result = subprocess.run(["bash", "-n", "-c", command], check=False, capture_output=True)
 
     assert result.returncode == 0
+
+
+def test_batch_accepts_exact_ssh_close_advisory_after_complete_frames() -> None:
+    session = _session("alpha", pid=42, socket_path="/tmp/alpha.sock")
+    target = _FakeTarget(
+        {
+            "has-session": _FakeResult(
+                stdout=f"{_batch_row('alpha')}\n",
+                stderr="Shared connection to vm.example closed.\n",
+            )
+        }
+    )
+
+    assert batch_check_status([session], target=target) == {"alpha": SessionStatus.RUNNING}
 
 
 def test_agent_fingerprint_repair_uses_elevation_and_refuses_unknown(

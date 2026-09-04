@@ -120,6 +120,7 @@ def test_transport_stdin_ignores_the_windows_tty_default() -> None:
 
     argv = process.call_args.args[0]
     assert "-tt" not in argv
+    assert "-T" in argv
     assert process.call_args.kwargs["input"] == secret.encode()
 
 

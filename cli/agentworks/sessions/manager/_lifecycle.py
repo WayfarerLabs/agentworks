@@ -967,9 +967,9 @@ def _launch_all_sessions(
         # Error if any actionable sessions are still unknown after auto-repair.
         # The observer reports PID_STOPPED rows too; lifecycle omits them from
         # this refusal set because it does not need to act on them.
-        # Legacy sessions (``socket_path is None``) are also excluded from
-        # status_map by ``batch_check_status``; the singular launch migrates them
-        # to the new model, so don't treat them as "unknown" here.
+        # Legacy sessions remain UNKNOWN in the observer status map; the
+        # singular launch migrates them to the new model, so lifecycle alone
+        # excludes them from this refusal set.
         unknown = [
             s
             for s in sessions

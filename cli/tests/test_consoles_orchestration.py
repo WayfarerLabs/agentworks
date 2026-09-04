@@ -184,7 +184,10 @@ def test_running_session_names_uses_live_status_check(db: Database, fake_target:
     # claims the session is gone.
     def stub_run(command: str, **kwargs: object) -> _FakeResult:
         fake_target.commands.append(command)
-        if all(_encoded_probe_field(name) in command for name in ("alpha", "beta", "gamma")):
+        input_data = kwargs.get("input_data")
+        if isinstance(input_data, str) and all(
+            _encoded_probe_field(name) in input_data for name in ("alpha", "beta", "gamma")
+        ):
             missing_session = b"can't find session: gamma".hex()
             missing_server = b"no server running on /gamma".hex()
             boot_hex = BOOT_ID.encode().hex()

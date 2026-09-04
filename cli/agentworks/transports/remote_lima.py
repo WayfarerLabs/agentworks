@@ -79,6 +79,7 @@ class RemoteLimaTransport(Transport):
         timeout: int | None = None,
         env: dict[str, str] | None = None,
         input_text: str | None = None,
+        input_data: str | None = None,
         discard_output: bool = False,
         retries: int | None = None,
         on_retry: Callable[[int, int], None] | None = None,
@@ -88,9 +89,11 @@ class RemoteLimaTransport(Transport):
         ``env`` is embedded as scoped assignments in the lima payload
         (SetEnv at the host hop doesn't propagate into the limactl
         shell on the VM side). ``retries`` / ``on_retry`` propagate to
-        the inner SSH hop.
+        the inner SSH hop. ``tty`` controls the outer SSH hop; explicit
+        false therefore overrides an operator ``RequestTTY force`` setting.
         """
-        del tty  # tty doesn't apply to non-interactive remote_lima
+        if input_text is not None and input_data is not None:
+            raise ValueError("Remote Lima input_text and input_data are mutually exclusive")
         if input_text is not None and discard_output:
             raise ValueError("Remote Lima input_text cannot be combined with discard_output")
         if sudo:
@@ -100,8 +103,10 @@ class RemoteLimaTransport(Transport):
         return self._host_login.run(
             lima_cmd,
             check=check,
+            tty=tty,
             timeout=timeout,
             input_text=input_text,
+            input_data=input_data,
             discard_output=discard_output,
             retries=retries,
             on_retry=on_retry,

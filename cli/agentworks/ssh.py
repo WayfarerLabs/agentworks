@@ -318,10 +318,14 @@ def _ssh_base_args(
     target: SSHTarget,
     *,
     env: dict[str, str] | None = None,
+    tty: bool | None = None,
 ) -> list[str]:
     args = ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
-    if target.force_tty:
+    effective_tty = target.force_tty if tty is None else tty
+    if effective_tty:
         args.insert(1, "-tt")
+    elif tty is False:
+        args.insert(1, "-T")
     if target.port is not None:
         args.extend(["-p", str(target.port)])
     if target.identity_file is not None:
@@ -347,6 +351,7 @@ def run(
     logger: SSHLogger | None = None,
     env: dict[str, str] | None = None,
     input_text: str | None = None,
+    tty: bool | None = None,
 ) -> SSHResult:
     """Execute a command on a remote host via SSH.
 
@@ -378,13 +383,14 @@ def run(
     """
     if input_text is not None and logger is not None:
         raise ValueError("SSH stdin input cannot be combined with command logging")
-    if input_text is not None and target.force_tty:
+    effective_tty = target.force_tty if tty is None else tty
+    if input_text is not None and effective_tty:
         # A forced TTY puts a line discipline between the pipe and the remote
         # command, which echoes input and rewrites CR, so the byte-exact
         # promise above cannot hold. Refuse rather than corrupt a secret.
         raise ValueError("SSH stdin input cannot be combined with a forced TTY")
 
-    args = _ssh_base_args(target, env=env)
+    args = _ssh_base_args(target, env=env, tty=tty)
     # Fence the remote command from ssh's option parser. See
     # ``SSHTransport.run`` in ``transports/ssh.py`` for the rationale.
     args.append("--")

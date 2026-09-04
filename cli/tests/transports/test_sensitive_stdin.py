@@ -75,12 +75,49 @@ def test_remote_lima_transport_forwards_sensitive_input_to_the_safe_ssh_hop(monk
     assert forwarded_command.startswith("limactl shell vm1 -- sudo -n bash -c ")
     assert run.call_args.kwargs == {
         "check": True,
+        "tty": None,
         "timeout": 30,
         "input_text": f"{_SENTINEL}\n",
+        "input_data": None,
         "discard_output": False,
         "retries": None,
         "on_retry": None,
     }
+
+
+@pytest.mark.parametrize(
+    ("transport", "run_path"),
+    [
+        (SSHTransport("vm-host"), "agentworks.transports.ssh.subprocess.run"),
+        (LimaTransport("vm1"), "agentworks.transports.lima.subprocess.run"),
+        (WSL2Transport("Debian"), "agentworks.transports.wsl2.subprocess.run"),
+    ],
+)
+def test_transport_streams_non_sensitive_data_and_preserves_output(
+    monkeypatch,  # noqa: ANN001
+    transport: SSHTransport | LimaTransport | WSL2Transport,
+    run_path: str,
+) -> None:
+    process = MagicMock(return_value=_completed())
+    monkeypatch.setattr(run_path, process)
+
+    result = transport.run(_COMMAND, input_data="public protocol row\n", tty=False)
+
+    assert result.stdout == f"reflected {_SENTINEL}"
+    assert result.stderr == f"error {_SENTINEL}"
+    assert process.call_args.kwargs["input"] == b"public protocol row\n"
+
+
+def test_remote_lima_forwards_non_sensitive_input_data(monkeypatch) -> None:  # noqa: ANN001
+    transport = RemoteLimaTransport("vm1", "vm-host")
+    run = MagicMock(return_value=SSHResult(returncode=0, stdout="frame", stderr=""))
+    monkeypatch.setattr(transport._host_login, "run", run)
+
+    result = transport.run(_COMMAND, input_data="public protocol row\n", tty=False)
+
+    assert result.stdout == "frame"
+    assert run.call_args.kwargs["input_data"] == "public protocol row\n"
+    assert run.call_args.kwargs["tty"] is False
 
 
 def test_ssh_transport_discards_output_without_disabling_forced_tty(monkeypatch) -> None:  # noqa: ANN001

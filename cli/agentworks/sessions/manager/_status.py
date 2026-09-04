@@ -170,22 +170,23 @@ def batch_check_status(
     identity can prove more. Persisted-stopped rows are still probed so a
     manually resurrected exact session cannot be hidden by stale evidence.
     """
-    from agentworks.sessions.tmux import canonical_boot_id
+    from agentworks.sessions.tmux import _normalized_probe_streams, canonical_boot_id
 
     checkable = [s for s in sessions if s.socket_path is not None]
     if not checkable:
         return {}
 
-    cmd = _batch_probe_command(checkable)
+    cmd = _batch_probe_command()
     result = target.run(
         cmd,
         check=False,
         timeout=_OBSERVATION_TIMEOUT_SECONDS,
         retries=1,
         tty=False,
+        input_data=_batch_probe_data(checkable),
     )
     stdout = getattr(result, "stdout", "") or ""
-    stderr = getattr(result, "stderr", "") or ""
+    _, stderr = _normalized_probe_streams(result)
 
     status_map: dict[str, SessionStatus] = {
         session.name: SessionStatus.UNKNOWN for session in checkable if session.socket_path is not None
@@ -266,8 +267,8 @@ def _encoded_probe_field(value: str) -> str:
     return base64.b64encode(value.encode()).decode("ascii")
 
 
-def _batch_probe_command(sessions: list[SessionRow]) -> str:
-    """Build one compact loop program for a VM's selected session rows."""
+def _batch_probe_data(sessions: list[SessionRow]) -> str:
+    """Encode selected session rows as non-sensitive stdin protocol data."""
     records = []
     for session in sessions:
         assert session.socket_path is not None
@@ -287,7 +288,11 @@ def _batch_probe_command(sessions: list[SessionRow]) -> str:
                 )
             )
         )
-    data = "\n".join(records)
+    return "\n".join(records) + "\n"
+
+
+def _batch_probe_command() -> str:
+    """Build the constant-size loop program for a VM's session rows."""
     return (
         "hex() { od -An -tx1 | tr -d ' \\n'; }; "
         'decode() { printf %s "$1" | base64 -d; }; '
@@ -310,9 +315,7 @@ def _batch_probe_command(sessions: list[SessionRow]) -> str:
         'PHEX=$(printf %s "$PFACT" | hex); '
         'printf "S:%s:%s:%s:%s:%s:%s:%s:%s\\n" '
         '"$N64" "$H" "$HHEX" "$S" "$SHEX" "$B" "$BOOT_HEX" "$P" "$PHEX"; '
-        "done <<'AGW_STATUS_ROWS'\n"
-        f"{data}\n"
-        "AGW_STATUS_ROWS"
+        "done"
     )
 
 

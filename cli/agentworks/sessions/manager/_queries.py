@@ -627,10 +627,7 @@ def list_sessions(
         admin_only=admin_only,
         include_status=include_status,
     )
-    if include_status:
-        render_session_listing(listing, include_status=True)
-    else:
-        render_session_listing(listing)
+    render_session_listing(listing, include_status=include_status)
 
 
 def session_listing(
