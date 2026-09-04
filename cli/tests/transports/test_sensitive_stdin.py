@@ -83,15 +83,19 @@ def test_remote_lima_transport_forwards_sensitive_input_to_the_safe_ssh_hop(monk
     }
 
 
-def test_ssh_transport_discards_output_without_disabling_forced_tty(monkeypatch) -> None:  # noqa: ANN001
+def test_ssh_transport_discards_output_without_disabling_a_forced_tty(monkeypatch) -> None:  # noqa: ANN001
+    """``discard_output`` sends both process streams to the null device but
+    leaves TTY selection alone: a per-call ``tty=True`` still forces ``-tt``
+    (and never combines it with the stdin-closing ``-n``)."""
     process = MagicMock(return_value=subprocess.CompletedProcess([], 0, stdout=None, stderr=None))
     logger = MagicMock()
     monkeypatch.setattr("agentworks.transports.ssh.subprocess.run", process)
 
-    result = SSHTransport("vm-host", force_tty=True, logger=logger).run(_COMMAND, discard_output=True)
+    result = SSHTransport("vm-host", logger=logger).run(_COMMAND, discard_output=True, tty=True)
 
     assert (result.stdout, result.stderr) == ("", "")
     assert "-tt" in process.call_args.args[0]
+    assert "-n" not in process.call_args.args[0]
     assert process.call_args.kwargs["stdout"] is subprocess.DEVNULL
     assert process.call_args.kwargs["stderr"] is subprocess.DEVNULL
     logger.log_command.assert_called_once_with(_COMMAND, result)

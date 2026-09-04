@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import base64
 import contextlib
-import sys
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 from agentworks import output
@@ -645,7 +644,6 @@ class AzureVMPlatform(VMPlatform):
                     host=public_ip,
                     user=admin_username,
                     identity_file=request.ssh_private_key,
-                    force_tty=sys.platform == "win32",
                 )
 
                 # The provider-retained bootstrap installed Tailscale without
@@ -828,7 +826,6 @@ class AzureVMPlatform(VMPlatform):
             host=public_ip,
             user=vm.admin_username,
             identity_file=identity_file,
-            force_tty=sys.platform == "win32",
         )
 
     def post_tailscale_ready(self, vm: VMRow, ctx: RunContext) -> None:

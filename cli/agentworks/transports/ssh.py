@@ -115,9 +115,13 @@ class SSHTransport(Transport):
     Explicit ``user`` is set for VM connections where we control the
     username. Set ``login_shell=True`` to wrap the remote command in
     ``$SHELL -lc <command>`` so the operator's per-shell PATH
-    additions (e.g. Homebrew on macOS) resolve. Set ``force_tty=True``
-    to default-allocate a TTY (Windows-zsh workaround); the per-call
-    ``tty=`` parameter on ``run()`` overrides.
+    additions (e.g. Homebrew on macOS) resolve.
+
+    Non-interactive ``run()`` never allocates a TTY: it closes stdin
+    with ssh's ``-n`` so a stdin-reading remote command cannot hang and
+    ssh cannot steal the operator's console input. A caller that
+    genuinely needs a remote pty asks for it per-call with
+    ``run(tty=True)``, which uses ``-tt`` instead.
     """
 
     def __init__(
@@ -128,7 +132,6 @@ class SSHTransport(Transport):
         port: int | None = None,
         identity_file: Path | None = None,
         proxy_jump: str | None = None,
-        force_tty: bool = False,
         login_shell: bool = False,
         default_timeout: int | None = None,
         logger: SSHLogger | None = None,
@@ -139,7 +142,6 @@ class SSHTransport(Transport):
         self.port = port
         self.identity_file = identity_file
         self.proxy_jump = proxy_jump
-        self.force_tty = force_tty
         self.login_shell = login_shell
         self.default_timeout = default_timeout
         self.logger = logger
@@ -154,13 +156,22 @@ class SSHTransport(Transport):
         env: dict[str, str] | None = None,
     ) -> list[str]:
         """Build the base ``ssh`` argv with ``BatchMode=yes`` (no remote
-        command yet). ``force_tty`` overrides ``self.force_tty`` for this
-        call; ``None`` uses the constructor default.
+        command yet).
+
+        ``force_tty`` selects TTY allocation for this call; ``None`` or
+        ``False`` means no forced TTY, which is the default for
+        non-interactive ``run()``. Without a forced TTY we add ``-n`` so
+        ssh closes stdin: a stdin-reading remote command then cannot hang
+        waiting on input, and ssh cannot pull from the operator's console.
+        A forced TTY (``force_tty=True``, from an explicit
+        ``run(tty=True)``) uses ``-tt`` instead. The two are mutually
+        exclusive, since ``-tt`` already attaches stdin to the pty.
         """
         args = ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
-        effective_tty = self.force_tty if force_tty is None else force_tty
-        if effective_tty:
+        if force_tty:
             args.insert(1, "-tt")
+        else:
+            args.insert(1, "-n")
         if self.port is not None:
             args.extend(["-p", str(self.port)])
         if self.identity_file is not None:
@@ -224,11 +235,10 @@ class SSHTransport(Transport):
                     identity_file=self.identity_file,
                     proxy_jump=self.proxy_jump,
                     login_shell=self.login_shell,
-                    # The constructor's ``force_tty`` is a Windows-zsh
-                    # workaround for interactive shells, which a
-                    # non-interactive stdin write is not; forwarding it here
-                    # would put a line discipline in front of a payload this
-                    # branch promises to deliver byte-exact. An explicit
+                    # A byte-exact stdin write never wants a TTY: a line
+                    # discipline in front of the pipe would echo the input
+                    # and rewrite CR, breaking the delivery this branch
+                    # promises. So the default is no forced TTY. An explicit
                     # ``tty=True`` still reaches ``ssh.run``'s refusal, since
                     # a caller asking for both is asking for a contradiction.
                     force_tty=tty if tty is not None else False,

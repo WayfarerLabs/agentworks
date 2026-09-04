@@ -415,7 +415,6 @@ class ProxmoxPlatform(VMPlatform):
                     host=tailscale_ip,
                     user=request.admin_username,
                     identity_file=request.ssh_private_key,
-                    force_tty=sys.platform == "win32",
                 )
             except Exception:
                 # Re-raised unwrapped after rollback: the manager preserves
