@@ -94,9 +94,9 @@ assert behavior and structure, never authored prose.
       incorporate every material finding authorized by the current design charter.
 - [x] Commit and push the coherent design head, open the draft PR, apply
       `sdd:runnable-status-inspection` and `review-requested`, and publish the exact design handoff.
-- [ ] Complete up to three authorized published design feedback/fix rounds, or stop sooner when one
+- [x] Complete up to three authorized published design feedback/fix rounds, or stop sooner when one
       full batch produces no material changes.
-- [ ] Record design convergence before delegating or beginning implementation.
+- [x] Record design convergence before delegating or beginning implementation.
 
 ### Phase 0 definition of done
 
