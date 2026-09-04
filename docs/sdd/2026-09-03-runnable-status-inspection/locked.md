@@ -92,3 +92,22 @@ targets. No other in-scope implementation, review, migration, or documentation f
 The operator owns merging PR #736. The effort lead does not merge it.
 
 -- agw-ns-onboard-disco
+
+## Post-lock supersession (2026-09-04)
+
+PR #737 (drop the Windows forced-`-tt` SSH default) reworks two probe mechanisms this SDD recorded.
+Both changes preserve the no-TTY, one-attempt, ten-second observation policy; only the underlying
+SSH argv changed.
+
+- **Finite-stdin mechanism.** "Supplying explicit empty stdin" (an empty `input_data` payload on the
+  singular and console-enumeration probes) is superseded by closing stdin at the transport: any
+  no-payload SSH call now passes `-n`, so the probes inherit the fix without a per-call empty
+  payload. The `input_data` channel remains for the batch probe's real session-list payload, which
+  still keeps stdin open for a byte-exact write.
+- **Close-advisory handling.** The probes now pass `-T` (explicit no-pty, which also defeats an
+  operator's `RequestTTY force`). With no pty, OpenSSH emits no "connection closed" teardown
+  advisory, so the tmux presence classifier's advisory stripper was removed rather than retained;
+  the batch classifier still treats any non-empty stderr as `unknown`.
+
+Nothing in the shipped observation contract (facts, classification, JSON fields, timeouts) changed.
+See PR #737 for the code and rationale.
