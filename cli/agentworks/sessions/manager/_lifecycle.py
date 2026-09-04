@@ -824,11 +824,12 @@ def stop_all_sessions(
     vm_name: str | list[str] | None = None,
     workspace_name: str | list[str] | None = None,
     agent_name: str | list[str] | None = None,
+    console_name: str | list[str] | None = None,
     admin_only: bool = False,
     force: bool = False,
     interaction: TtyInteractionPolicy,
 ) -> None:
-    """Stop all running sessions, optionally filtered by VM, workspace, agent, and/or mode.
+    """Stop all running sessions, optionally filtered by VM, workspace, agent, console, or mode.
 
     Each name filter accepts a single name or a list of names; lists
     OR within a filter, filters AND across the call. ``agent_name``
@@ -840,6 +841,7 @@ def stop_all_sessions(
         workspace_name=workspace_name,
         vm_name=vm_name,
         agent_name=agent_name,
+        console_name=console_name,
         admin_only=admin_only,
     )
 
@@ -928,6 +930,7 @@ def _launch_all_sessions(
     vm_name: str | list[str] | None = None,
     workspace_name: str | list[str] | None = None,
     agent_name: str | list[str] | None = None,
+    console_name: str | list[str] | None = None,
     admin_only: bool = False,
     replace_running: bool,
     force: bool = False,
@@ -949,6 +952,7 @@ def _launch_all_sessions(
         workspace_name=workspace_name,
         vm_name=vm_name,
         agent_name=agent_name,
+        console_name=console_name,
         admin_only=admin_only,
     )
 

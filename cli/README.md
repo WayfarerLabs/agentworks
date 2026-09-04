@@ -103,7 +103,7 @@ agw console delete my-console              # Extra shells are lost but sessions 
 ```
 
 Automation upgrading from the former session-resume or console-create-on-attach grammar should
-follow [Upgrading to 0.19](../docs/guides/upgrading-to-0.19.md).
+follow [Upgrading to 0.18](../docs/guides/upgrading-to-0.18.md).
 
 ## Prerequisites
 

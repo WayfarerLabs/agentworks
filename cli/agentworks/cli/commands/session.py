@@ -219,18 +219,14 @@ def session_stop(
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM (with --all)")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace (with --all)")] = None,
     agent: Annotated[str | None, typer.Option("--agent", help="Filter by agent (with --all)")] = None,
+    console: Annotated[str | None, typer.Option("--console", help="Filter by console (with --all)")] = None,
     admin: Annotated[
         bool,
         typer.Option("--admin", help="Only admin-mode sessions (with --all)"),
     ] = False,
     force: Annotated[bool, typer.Option("--force", help="Recover broken session state before stopping")] = False,
 ) -> None:
-    """Stop a running session, or all running sessions with --all.
-
-    Filters compose with AND. ``--vm``, ``--workspace``, and ``--agent``
-    accept a single value or a comma-separated list (e.g.
-    ``--vm vm1,vm2``); commas within a filter are OR-ed together.
-    """
+    """Stop a running session, or all running sessions with --all."""
     interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config
     from agentworks.sessions.manager import stop_all_sessions, stop_session
@@ -238,13 +234,14 @@ def session_stop(
     parsed_vm = parse_csv_filter(vm)
     parsed_workspace = parse_csv_filter(workspace)
     parsed_agent = parse_csv_filter(agent)
+    parsed_console = parse_csv_filter(console)
 
     if name and all_sessions:
         raise typer.BadParameter("provide a session name or --all, not both")
     if admin and parsed_agent is not None:
         raise typer.BadParameter("--admin and --agent are mutually exclusive")
-    if (parsed_vm or parsed_workspace or parsed_agent or admin) and not all_sessions:
-        raise typer.BadParameter("--vm, --workspace, --agent, and --admin require --all")
+    if (parsed_vm or parsed_workspace or parsed_agent or parsed_console or admin) and not all_sessions:
+        raise typer.BadParameter("--vm, --workspace, --agent, --console, and --admin require --all")
     if all_sessions:
         stop_all_sessions(
             get_db(),
@@ -252,6 +249,7 @@ def session_stop(
             vm_name=parsed_vm,
             workspace_name=parsed_workspace,
             agent_name=parsed_agent,
+            console_name=parsed_console,
             admin_only=admin,
             force=force,
             interaction=interaction,
@@ -275,6 +273,7 @@ def _launch_sessions(
     vm: str | None,
     workspace: str | None,
     agent: str | None,
+    console: str | None,
     admin: bool,
     force: bool,
     force_new: bool,
@@ -295,13 +294,14 @@ def _launch_sessions(
     parsed_vm = parse_csv_filter(vm)
     parsed_workspace = parse_csv_filter(workspace)
     parsed_agent = parse_csv_filter(agent)
+    parsed_console = parse_csv_filter(console)
 
     if name and all_sessions:
         raise typer.BadParameter("provide a session name or --all, not both")
     if admin and parsed_agent is not None:
         raise typer.BadParameter("--admin and --agent are mutually exclusive")
-    if (parsed_vm or parsed_workspace or parsed_agent or admin) and not all_sessions:
-        raise typer.BadParameter("--vm, --workspace, --agent, and --admin require --all")
+    if (parsed_vm or parsed_workspace or parsed_agent or parsed_console or admin) and not all_sessions:
+        raise typer.BadParameter("--vm, --workspace, --agent, --console, and --admin require --all")
     if all_sessions:
         db = db or get_db()
         config = config or load_config()
@@ -312,6 +312,7 @@ def _launch_sessions(
             vm_name=parsed_vm,
             workspace_name=parsed_workspace,
             agent_name=parsed_agent,
+            console_name=parsed_console,
             admin_only=admin,
             force=force,
             force_new=force_new,
@@ -340,6 +341,7 @@ def _canonical_launch_options(
     vm: str | None,
     workspace: str | None,
     agent: str | None,
+    console: str | None,
     admin: bool,
     force: bool,
     force_new: bool,
@@ -351,6 +353,7 @@ def _canonical_launch_options(
         vm=vm,
         workspace=workspace,
         agent=agent,
+        console=console,
         admin=admin,
         force=force,
         force_new=force_new,
@@ -369,7 +372,7 @@ def _confirm_legacy_resume_replacement(
     agent_name: str | list[str] | None,
     admin_only: bool,
 ) -> None:
-    """Preserve the 0.18 running-session confirmation at the CLI shim."""
+    """Preserve the 0.17 running-session confirmation at the CLI shim."""
     from agentworks import output
     from agentworks.db import PID_STOPPED, SessionStatus
     from agentworks.errors import UserAbort
@@ -435,6 +438,7 @@ def session_start(
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM (with --all)")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace (with --all)")] = None,
     agent: Annotated[str | None, typer.Option("--agent", help="Filter by agent (with --all)")] = None,
+    console: Annotated[str | None, typer.Option("--console", help="Filter by console (with --all)")] = None,
     admin: Annotated[bool, typer.Option("--admin", help="Only admin-mode sessions (with --all)")] = False,
     force: Annotated[bool, typer.Option("--force", help="Recover broken session state")] = False,
     force_new: Annotated[bool, typer.Option("--force-new", help="Launch a fresh harness conversation")] = False,
@@ -446,6 +450,7 @@ def session_start(
         vm=vm,
         workspace=workspace,
         agent=agent,
+        console=console,
         admin=admin,
         force=force,
         force_new=force_new,
@@ -460,6 +465,7 @@ def session_restart(
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM (with --all)")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace (with --all)")] = None,
     agent: Annotated[str | None, typer.Option("--agent", help="Filter by agent (with --all)")] = None,
+    console: Annotated[str | None, typer.Option("--console", help="Filter by console (with --all)")] = None,
     admin: Annotated[bool, typer.Option("--admin", help="Only admin-mode sessions (with --all)")] = False,
     force: Annotated[bool, typer.Option("--force", help="Recover broken session state")] = False,
     force_new: Annotated[bool, typer.Option("--force-new", help="Launch a fresh harness conversation")] = False,
@@ -471,6 +477,7 @@ def session_restart(
         vm=vm,
         workspace=workspace,
         agent=agent,
+        console=console,
         admin=admin,
         force=force,
         force_new=force_new,
@@ -490,9 +497,9 @@ def session_resume(
     force: Annotated[bool, typer.Option("--force")] = False,
     yes: Annotated[bool, typer.Option("--yes", "-y")] = False,
 ) -> None:
-    """Compatibility wrapper for the 0.18 session resume grammar.
+    """Compatibility wrapper for the 0.17 session resume grammar.
 
-    Removed in 0.20.
+    Removed in 0.19.
     """
     from agentworks import output
     from agentworks.config import load_config
@@ -538,6 +545,7 @@ def session_resume(
         vm=vm,
         workspace=workspace,
         agent=agent,
+        console=None,
         admin=admin,
         force=force,
         force_new=False,

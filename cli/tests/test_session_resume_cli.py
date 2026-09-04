@@ -1,4 +1,4 @@
-"""CLI routing for canonical session lifecycle and the 0.19 wrapper."""
+"""CLI routing for canonical session lifecycle and the 0.18 wrapper."""
 
 from __future__ import annotations
 
