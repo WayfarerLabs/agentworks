@@ -512,17 +512,17 @@ other EC2-native divergence (tuple-identity rules, so concurrent same-egress rou
 and the poke/remove are idempotent/tolerant and fail closed) is covered under `transient_route`
 above and in `network.py`.
 
-### Resources on a Cloud Platform: Per-VM Lifecycle, Shared State Stays Ambient
+### Resources on a Cloud Platform: Per-VM Resources and Shared State
 
-One rule governs what a cloud platform creates: every Agentworks-managed resource should be scoped
-to exactly one VM and share that VM's lifecycle. It is created during that VM's `create` and torn
-down when the VM is deleted or when create rolls back, and nothing Agentworks makes outlives the VM
-it belongs to. The shipped platforms hold to this. Azure gives each VM its own NIC, public IP, NSG,
-OS disk, and even its own VNet (`{name}-vnet`, its own `10.0.0.0/16`), and the delete and rollback
-sweep removes exactly that set; EC2 gives each VM its own security group, instance, and ENI; GCE
-gives each VM one auto-deleted boot disk, one stable deny, and scoped allow rules while reusing the
-operator's network/subnet. Per-VM scoping is what makes teardown and rollback total: there is no
-shared thing a delete could half-break.
+Every platform-managed, VM-specific resource **MUST** belong to exactly one VM. That VM's delete and
+create rollback **MUST** attempt its removal. If removal is unconfirmed, the platform **MUST**
+report the resource or known scope that may remain and a recovery action. The shipped platforms
+apply this per-VM model: Azure gives each VM its own NIC, public IP, NSG, OS disk, and even its own
+VNet (`{name}-vnet`, its own `10.0.0.0/16`), and its delete and rollback sweeps target that set; EC2
+gives each VM its own security group, instance, and ENI; GCE gives each VM one auto-deleted boot
+disk, one stable deny, and scoped allow rules while reusing the operator's network/subnet. Exclusive
+per-VM ownership bounds each cleanup attempt: it does not target resources managed for another VM or
+owned by the operator.
 
 Shared infrastructure gets the opposite treatment: assume it, do not manage it. The resource group a
 VNet lives in, the VPC and subnet an instance launches into, and the GCE project network/subnet are
