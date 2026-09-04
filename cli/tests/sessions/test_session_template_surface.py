@@ -59,7 +59,7 @@ class _FakeHarnessIntegration(HarnessIntegration):
 
     name = "fake"
     description = "test double harness"
-    contract_version = 2
+    contract_version = 3
     config_model = _FakeConfig
 
     def start(  # type: ignore[no-untyped-def]

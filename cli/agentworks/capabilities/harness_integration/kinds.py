@@ -114,7 +114,7 @@ def _readiness(name: str, impl: Any) -> Readiness:
 
 HARNESS_INTEGRATION_DESCRIPTOR = CapabilityKindDescriptor(
     kind="harness-integration",
-    contract_version=2,
+    contract_version=3,
     implementation_contract=HarnessIntegration,
     registry=_registry,
     required_operations=frozenset({"start"}),

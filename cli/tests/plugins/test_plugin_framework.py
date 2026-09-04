@@ -244,7 +244,7 @@ class _PlatformOnAnUnsupportedContract(ConformingVMPlatform):
 class _HarnessOnAnUnsupportedContract(ConformingHarnessIntegration):
     name = "unsupported-contract-harness"
     description = "declares a contract this build does not support"
-    contract_version = 1
+    contract_version = 2
 
 
 class _BackendWithInstanceReadiness(ConformingSecretBackend):

@@ -86,10 +86,10 @@ harness conversation when possible. `CREATE` starts the first conversation for a
 session, while `FORCE_NEW` requests a fresh conversation without deleting external history. Keep
 those intents distinct in operator notes even when they share launch mechanics.
 
-All in-repository implementations move together to contract version 2. Agentworks matches contract
-versions exactly, so an external version-1 implementation is refused rather than adapted. The
-version number identifies the complete current shape; it does not restore compatibility with the
-other version-1 shapes that existed before 0.17 or during 0.18 development.
+All in-repository implementations move together to contract version 3. Agentworks matches contract
+versions exactly, so an external version-1 or version-2 implementation is refused rather than
+adapted. The version number identifies the complete current shape; it does not restore compatibility
+with the older contracts that shipped before 0.18.
 
 Core now owns runtime replacement and teardown. Integrations produce launch behavior; they do not
 implement session restart, stop, or process signaling.

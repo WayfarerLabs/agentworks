@@ -215,9 +215,9 @@ missing any of them, naming the plugin:
 - `contract_version`: the capability contract version this implementation is written against.
   Registration requires an exact match with the version its kind's descriptor declares supported, so
   a contract change is a hard cutover rather than a silent re-certification. The current contract is
-  version 2, and every shipped integration declares 2. The version number identifies this current
-  start-only contract; it does not imply compatibility with the earlier version-1 shape that shipped
-  before 0.17.
+  version 3, and every shipped integration declares 3. The version number identifies this current
+  start-only contract; it does not imply compatibility with the version-1 or version-2 shapes that
+  shipped before 0.18.
 - `config_model`: what the config IS (see below). A capability that accepts none declares a model
   with no fields beyond its tag, which is closed-world by construction.
 - `name` / `description`: the registry row's identity.
@@ -327,10 +327,10 @@ which only the op-time probe does).
 #### The Operator-Facing Decision Line
 
 `HarnessStart.note` carries an optional one-line note about what the operation decided and the
-session manager prints it in the CLI op output. Stateful integrations distinguish a continuation, a
-fresh launch after finding no usable state, and a forced-fresh launch that intentionally bypasses
-prior state. Default `None` keeps `shell` silent. Pair it with a pane-visible echo (below) so the
-decision is visible in both places the operator looks.
+session manager prints it in the CLI op output. Stateful integrations distinguish a new session's
+first launch, a continuation, a fresh launch after finding no usable state, and a forced-fresh
+launch that intentionally bypasses prior state. Default `None` keeps `shell` silent. Pair it with a
+pane-visible echo (below) so the decision is visible in both places the operator looks.
 
 #### Per-Session State: The Persisted Blob
 
