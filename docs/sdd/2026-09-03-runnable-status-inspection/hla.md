@@ -163,6 +163,11 @@ records do not duplicate that presentation input. Machine projectors use the row
 session and console rows carry `unavailable` when skipped, while VM rows carry null observed status.
 This preserves session JSON v1 and matches the established VM describe carrier.
 
+All three human list renderers delegate column sizing, truncation, spacing, and alignment to the
+shared table renderer. A domain may select an existing per-column cap, but it does not construct
+rows with bespoke format strings. Appending `STATUS` therefore uses the same alignment mechanism for
+VMs, sessions, and consoles.
+
 ### 5. Focused describe
 
 Focused describe always asks for status, but still assembles locally available facts when the live

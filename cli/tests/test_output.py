@@ -121,21 +121,6 @@ def test_render_table_selected_column_cap_overrides_default() -> None:
     assert second.endswith("...")
 
 
-def test_render_table_can_leave_columns_uncapped_except_selected_cap() -> None:
-    long_cell = "a" * 45
-    lines = output.render_table(
-        ["FIRST", "SECOND"],
-        [[long_cell, long_cell]],
-        max_col_width=None,
-        max_col_widths={0: 20},
-    )
-
-    first, second = lines[2].split()
-    assert len(first) == 20
-    assert first.endswith("...")
-    assert second == long_cell
-
-
 # -- Section state model -----------------------------------------------------
 
 

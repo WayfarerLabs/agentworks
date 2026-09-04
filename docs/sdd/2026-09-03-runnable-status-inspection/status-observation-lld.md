@@ -402,6 +402,12 @@ failure. Warnings explain actionable meaning without asserting that a resource i
 
 Authored wording is review-owned and is not pinned by unit tests.
 
+VM, session, and console list renderers pass complete header and row sequences to
+`output.render_table`; none pads or appends cells through domain-local format strings. Existing
+selected-column cap overrides remain available for domain values such as VM names and session mode.
+VM computes the renderer's general cap from the actual header and row values so non-name inventory
+fields retain their historically uncapped content while using shared spacing and alignment.
+
 ## JSON projection
 
 The JSON list projectors emit stable fields regardless of the flag:

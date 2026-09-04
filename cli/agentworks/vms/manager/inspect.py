@@ -486,13 +486,12 @@ def render_vm_listing(
         if vm.status_disposition:
             status += f" ({vm.status_disposition})"
         rows.append((*row, status) if include_status else row)
+    uncapped_width = max(len(cell) for row in [headers, *rows] for cell in row)
     for line in output.render_table(
         headers,
         rows,
-        max_col_width=None,
+        max_col_width=uncapped_width,
         max_col_widths={0: _NAME_CELL_WIDTH},
-        min_col_widths={1: 12, 2: 12, 3: 12, 4: 12, 5: 10, 6: 10, 7: 20},
-        column_separator=" ",
     ):
         output.info(line)
     if include_status:

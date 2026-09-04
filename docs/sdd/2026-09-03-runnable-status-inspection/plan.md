@@ -151,6 +151,9 @@ assert behavior and structure, never authored prose.
       unknown observations, while preserving a clean suppressed JSON envelope.
 - [x] Ensure empty and fully filtered lists perform no observation and preserve existing ordering
       and friendly human output.
+- [x] Supersede bespoke VM and console row formatting after Windows live validation exposed a
+      console status-column alignment defect; route all runnable list tables through the shared
+      renderer without truncating historically uncapped VM values.
 
 ### Phase 2 definition of done
 

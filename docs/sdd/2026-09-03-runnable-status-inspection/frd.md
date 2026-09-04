@@ -79,7 +79,8 @@ authority that match its runtime.
   one-name-per-line completion surface.
 - **R5.** Human mode without `--status` shall omit the status column entirely. Human mode with
   `--status` shall include it and summarize inconclusive observations after the table without
-  replacing successful rows.
+  replacing successful rows. VM, session, and console list tables shall use one shared alignment
+  mechanism so appending `STATUS` cannot produce a domain-specific column-spacing defect.
 
 ### Observation safety and progress
 
