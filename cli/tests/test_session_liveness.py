@@ -354,6 +354,8 @@ def test_batch_probe_executes_only_read_only_guest_operations(tmp_path: Path) ->
 
     assert result.returncode == 0
     assert result.stderr == ""
+    parsed = batch_check_status(sessions, target=_FakeTarget({"has-session": _FakeResult(stdout=result.stdout)}))
+    assert parsed == {session.name: SessionStatus.RUNNING for session in sessions}
     assert audit.read_text().splitlines() == [
         "tmux\t-S\t/tmp/admin.sock\thas-session\t-t\t=admin",
         "tmux\t-S\t/tmp/admin.sock\tlist-sessions",

@@ -313,7 +313,7 @@ def _batch_probe_command() -> str:
         'else PFACT=$(sh -c "if test -d /proc/$PID; then printf present; '
         'else printf absent; fi" 2>/dev/null); P=$?; fi; '
         'PHEX=$(printf %s "$PFACT" | hex); '
-        'printf "S:%s:%s:%s:%s:%s:%s:%s:%s\\n" '
+        'printf "S:%s:%s:%s:%s:%s:%s:%s:%s:%s\\n" '
         '"$N64" "$H" "$HHEX" "$S" "$SHEX" "$B" "$BOOT_HEX" "$P" "$PHEX"; '
         "done"
     )
