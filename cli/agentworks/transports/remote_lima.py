@@ -26,6 +26,11 @@ if TYPE_CHECKING:
     from agentworks.ssh import SSHLogger, SSHResult
 
 
+def _lima_shell_command(vm_name: str, command: str) -> str:
+    """Render one guest shell payload as a quoted placement-host command."""
+    return f"limactl shell {shlex.quote(vm_name)} bash -lc {shlex.quote(command)}"
+
+
 class RemoteLimaTransport(Transport):
     """Lima VM on a remote VM host: SSH-to-host + ``limactl shell``.
 
@@ -99,7 +104,7 @@ class RemoteLimaTransport(Transport):
         if sudo:
             command = f"sudo -n bash -c {shlex.quote(command)}"
         env_prefix = env_assignment_prefix(env)
-        lima_cmd = f"limactl shell {self.vm_name} -- {env_prefix}{command}"
+        lima_cmd = _lima_shell_command(self.vm_name, f"{env_prefix}{command}")
         return self._host_login.run(
             lima_cmd,
             check=check,
@@ -122,7 +127,7 @@ class RemoteLimaTransport(Transport):
         del env  # documented gap: no env propagation on interactive path
         inner = f"limactl shell {self.vm_name}"
         if command:
-            inner = f"limactl shell {self.vm_name} bash -lc {shlex.quote(command)}"
+            inner = _lima_shell_command(self.vm_name, command)
         wrapped = f"$SHELL -lc {shlex.quote(inner)}"
         args = [
             "ssh",
@@ -217,7 +222,7 @@ class RemoteLimaTransport(Transport):
     ) -> int:
         """Stream a remote command via SSH-to-host + ``limactl shell``."""
         env_prefix = env_assignment_prefix(env)
-        lima_cmd = f"limactl shell {self.vm_name} -- {env_prefix}{command}"
+        lima_cmd = _lima_shell_command(self.vm_name, f"{env_prefix}{command}")
         wrapped = f"$SHELL -lc {shlex.quote(lima_cmd)}"
         args = ["ssh", "-T", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes", self.vm_host_ssh, wrapped]
         return subprocess.call(args)

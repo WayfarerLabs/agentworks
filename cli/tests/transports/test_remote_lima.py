@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shlex
+import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -18,7 +20,7 @@ from tests.transports.conftest import ok_completed as _ok_completed
 
 def test_run_two_hops_ssh_to_host_then_limactl() -> None:
     """The outer hop is SSH to ``vm_host_ssh`` with login_shell=True;
-    the inner command is ``limactl shell <vm> -- <cmd>``. Locks in both
+    the inner command is ``limactl shell <vm> bash -lc <cmd>``. Locks in both
     pieces so a future refactor can't drop the login-shell wrap."""
     t = RemoteLimaTransport(vm_name="my-vm", vm_host_ssh="host.example")
     with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
@@ -32,7 +34,43 @@ def test_run_two_hops_ssh_to_host_then_limactl() -> None:
         payload = argv[-1]
         assert payload.startswith("$SHELL -lc ")
         assert "limactl shell my-vm" in payload
+        assert "bash -lc" in payload
         assert "echo hi" in payload
+
+
+def test_run_keeps_compound_guest_payload_inside_lima_bash_lc(tmp_path) -> None:  # noqa: ANN001
+    marker = tmp_path / "host-shell-leak"
+    guest_command = f"printf guest && touch {shlex.quote(str(marker))}; printf done"
+    t = RemoteLimaTransport(vm_name="my-vm", vm_host_ssh="host.example")
+
+    with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
+        mock_run.return_value = _ok_completed()
+        t.run(guest_command, env={"FLAG": "two words"}, input_data="row\n", tty=False)
+
+    outer_payload = mock_run.call_args.args[0][-1]
+    outer_argv = shlex.split(outer_payload)
+    assert outer_argv[:2] == ["$SHELL", "-lc"]
+    host_command = outer_argv[2]
+
+    probe = subprocess.run(
+        [
+            "bash",
+            "-c",
+            'limactl() { printf "%s\\n" "$@"; }; ' + host_command,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert probe.stdout.splitlines() == [
+        "shell",
+        "my-vm",
+        "bash",
+        "-lc",
+        f"FLAG='two words' {guest_command}",
+    ]
+    assert not marker.exists()
 
 
 def test_run_env_embedded_in_lima_payload() -> None:

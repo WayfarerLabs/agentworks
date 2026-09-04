@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 from unittest.mock import MagicMock
 
@@ -72,7 +73,10 @@ def test_remote_lima_transport_forwards_sensitive_input_to_the_safe_ssh_hop(monk
 
     forwarded_command = run.call_args.args[0]
     assert _SENTINEL not in forwarded_command
-    assert forwarded_command.startswith("limactl shell vm1 -- sudo -n bash -c ")
+    forwarded_argv = shlex.split(forwarded_command)
+    assert forwarded_argv[:4] == ["limactl", "shell", "vm1", "bash"]
+    assert forwarded_argv[4] == "-lc"
+    assert forwarded_argv[5].startswith("sudo -n bash -c ")
     assert run.call_args.kwargs == {
         "check": True,
         "tty": None,
