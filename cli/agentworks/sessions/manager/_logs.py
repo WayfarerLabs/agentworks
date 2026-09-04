@@ -44,7 +44,6 @@ def session_logs(
         _run_as_root,
         target,
     ):
-        session = _mgr._ensure_pid(session, target=target, db=db)
         status = _mgr.check_session_status(session, target=target)
 
         if status == SessionStatus.STOPPED:
@@ -52,6 +51,20 @@ def session_logs(
                 f"session '{name}' is not running",
                 entity_kind="session",
                 entity_name=name,
+            )
+        if status == SessionStatus.UNKNOWN:
+            raise StateError(
+                f"session '{name}' runtime state is unknown",
+                entity_kind="session",
+                entity_name=name,
+                hint="Retry after transport access is reliable.",
+            )
+        if status == SessionStatus.RESIDUAL:
+            raise StateError(
+                f"session '{name}' has a residual tmux server but no canonical session",
+                entity_kind="session",
+                entity_name=name,
+                hint=f"Run `agw session start {name}` or `agw session restart {name}` to recover it.",
             )
         if status == SessionStatus.BROKEN:
             raise BrokenStateError(

@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 import agentworks.sessions.manager as _mgr
 from agentworks import output
 from agentworks.db import SessionMode
-from agentworks.errors import NotFoundError, ValidationError
+from agentworks.errors import ExternalError, NotFoundError, ValidationError
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
@@ -237,6 +237,7 @@ def _start_session_slice(
             f"Starting session '{name}' on workspace '{workspace_name}' ({mode_label}, template: {template.name})..."
         )
 
+        retain_unknown_runtime = False
         try:
             # Everything that creates partial session state (on-VM group
             # membership, implicit-grant row, session row, restricted-config
@@ -269,12 +270,13 @@ def _start_session_slice(
                 agent_target=agent_target,
                 secrets=ScopedSecrets(secret_values, session_node.secret_refs()),
             )
+            harness_start = session_node.harness_integration.start(start_ctx, force_new=True)
             command = _mgr._substitute_template_vars(
-                session_node.harness_integration.start(start_ctx),
+                harness_start.command,
                 {"session_name": name, "workspace_name": workspace_name},
             )
-            if (note := session_node.harness_integration.launch_note()) is not None:
-                output.detail(note)
+            if harness_start.note is not None:
+                output.detail(harness_start.note)
 
             # Insert DB record before any tmux work so a crash mid-create
             # leaves a recoverable row (and the teardown can find it to
@@ -335,13 +337,57 @@ def _start_session_slice(
                 is_admin=(mode == SessionMode.ADMIN),
                 env=session_env,
             )
+
+            from agentworks.sessions.tmux import (
+                ProbeStatus,
+                capture_tmux_server_fingerprint,
+                kill_server_and_probe,
+            )
+
+            fingerprint_target = agent_target if mode == SessionMode.AGENT else target
+            assert fingerprint_target is not None
+            fingerprint_probe = capture_tmux_server_fingerprint(target=fingerprint_target, socket_path=sock)
+            fingerprint = fingerprint_probe.fingerprint
+            if (
+                fingerprint_probe.status is not ProbeStatus.PRESENT
+                or fingerprint is None
+                or (pid is not None and fingerprint.pid != pid)
+            ):
+                cleanup = kill_server_and_probe(run_command=session_run_command, socket_path=sock)
+                if cleanup is not ProbeStatus.ABSENT:
+                    db.update_session_runtime(
+                        name,
+                        socket_path=sock,
+                        pid=None,
+                        boot_id=None,
+                        tmux_server_start_ticks=None,
+                    )
+                    retain_unknown_runtime = True
+                raise ExternalError(
+                    f"could not capture a stable tmux server fingerprint for session '{name}'",
+                    entity_kind="session",
+                    entity_name=name,
+                    hint=(
+                        f"The session row and socket {sock} were retained because runtime absence could not be proved."
+                        if retain_unknown_runtime
+                        else None
+                    ),
+                )
+            db.update_session_runtime(
+                name,
+                socket_path=sock,
+                pid=fingerprint.pid,
+                boot_id=fingerprint.boot_id,
+                tmux_server_start_ticks=fingerprint.start_ticks,
+            )
         except (KeyboardInterrupt, Exception):
             # Session-internal cleanup only (DB row, grant, group
             # membership: the node's partial-state teardown). The
             # realized ephemerals are unwound by the outer handlers,
             # whose warn prints one clean reason line before the
             # rollback's delete messages start landing.
-            session_node.teardown()
+            if not retain_unknown_runtime:
+                session_node.teardown()
             raise
 
         # The session's realizing slice is complete: flip the node.
@@ -352,21 +398,9 @@ def _start_session_slice(
         # window as non-rollbackable.
         session_node.mark_realized()
 
-        # Persist socket path, PID, and boot ID
-        if sock:
-            db.update_session_socket_path(name, sock)
-        if pid is not None:
-            boot_id = _mgr._get_boot_id(target)
-            if boot_id is not None:
-                db.update_session_pid(name, pid, boot_id=boot_id)
-            else:
-                output.warn(f"Could not read boot ID for session '{name}', PID not stored")
-        else:
-            output.warn(f"Could not capture PID for session '{name}', will auto-repair on next access")
-
     # The section is closed: the terminal result line and the
     # post-start tmuxinator regeneration renders
-    # at column 0, mirroring resume_session. They stay inside the
+    # at column 0, mirroring existing-session launch. They stay inside the
     # outer try so a failure here still triggers the ephemeral
     # rollback (a completed session itself is never rolled back).
     mode_label = f"agent: {resolved_agent_name}" if resolved_agent_name else "admin"

@@ -1,0 +1,138 @@
+# Session and console lifecycle: locked
+
+**Locked:** 2026-09-03
+
+This effort is complete in PR #710. The lock takes effect when that PR lands on `main`; until then,
+this file records the final reviewed and operator-accepted implementation state.
+
+## What shipped
+
+- Sessions use explicit `start`, `stop`, `restart`, and `attach` operations. Ordinary start is
+  idempotent for an already-running session, restart deliberately replaces it, and `--force-new`
+  asks a stopped start or a restart to reject prior harness continuation state.
+- The harness-integration contract remains version 1 and exposes one start operation returning the
+  launch command and an optional pre-launch note. Each integration owns namespaced durable
+  continuation state, which the session manager persists separately. Core owns stop/restart
+  orchestration; no unused integration stop hook or generic runnable abstraction shipped.
+- Session teardown is one fail-closed authority. Dedicated tmux servers are identified by socket,
+  PID, boot ID, and positive process start ticks and are stopped with exact `kill-server`; legacy
+  shared-server rows use exact `kill-session`. Direct operations, batch operations, parent deletion,
+  and VM cascades all route through that authority.
+- Tmux, process, and persisted-identity probes preserve `UNKNOWN` rather than treating transport,
+  permission, protocol, malformed-state, or transition failures as absence. `RESIDUAL` reports a
+  reachable managed server without the expected session. Recovery mutates durable state only after
+  positive identity or absence proof.
+- Consoles have explicit create, start, stop, restart, and attach-only operations. Create validates
+  and stages before publishing, retains its durable definition after a post-commit build failure,
+  and reports whether runtime absence was verified or remained indeterminate. Exact canonical and
+  staging tmux names share the same fail-closed probe and teardown rules. Exact targets are always
+  shell-quoted so zsh cannot reinterpret the leading equals sign. `--all-running` uses the same
+  read-only, presence-first batched status selection as session listing and refuses indeterminate
+  non-stopped rows rather than silently creating a partial console.
+- The hidden 0.19 `session resume` and `console attach --recreate` compatibility spellings remain
+  CLI-only and are scheduled for removal in 0.20 by issue #720. Resume reports its exact canonical
+  mapping, preserves the former confirmation before replacing known or conservatively possible
+  running state, honors `--yes`, and refuses non-interactive replacement without that explicit
+  bypass. Canonical restart stays prompt-free.
+- Database schema version 36 stores the tmux server start ticks. Atomic runtime updates replace the
+  former partial PID setters, and lifecycle preparation backfills only from authoritative live facts
+  or records stopped state only after exact absence proof. Inspection never repairs rows: it probes
+  exact tmux presence first, needs stored identity only to interpret absence, and performs one
+  batched status request per reachable VM.
+
+## Final design boundaries
+
+The design deliberately keeps VMs distinct rather than introducing a shared runnable framework.
+Sessions and consoles share vocabulary and teardown principles, not a synthetic lifecycle type.
+Harness integrations decide whether and how to continue their own conversation state when core asks
+them to start; core owns resource state, tmux ownership, secret resolution, process realization, and
+teardown.
+
+The proposed integration-level cooperative stop hook was removed under the operator's later YAGNI
+ruling. Dedicated tmux servers are not shared, and exact tmux server/session teardown is the current
+domain authority. A future integration with a concrete checkpoint-or-shutdown requirement may add a
+bounded hook with its first consumer and tests. Stronger systemd-backed session containment is a
+separate security effort tracked by issue #715.
+
+## Verification and review
+
+The final production checkpoint is `564cde0c7c9d6aa560fcb7541dfdd789c834cbf5`, based on
+`origin/main` at `41022f4d680f7e831429229eedcc19acd0ee9c8d`. The complete pipeline and live
+validation ran at `1081470fa0ab315c3e0221da8142a87ad9b292a1`. Subsequent bounded corrections
+completed one runtime fixture fingerprint, added established entity metadata to three console
+errors, corrected two repeated-start test names, and made the atomic session-runtime update
+participate in explicit database transactions. The final corrections also made migration repair stop
+on indeterminate fingerprints, normalized only the canonical local Windows forced-TTY close
+advisory, replaced elevated PID exit-code inference with explicit present/absent facts, made exact
+tmux targets safe for zsh, removed eager repair from inspection, and announced bounded remote status
+and console checks before they begin. A final feedback correction removed the normal attach path's
+duplicate nesting refusal and made the harness ADR's superseded contract-version note unambiguous.
+The final review correction preserved elevated process-absence proof for agent-owned runtimes, made
+generated workspace wrappers use exact targets, and announced `--all-running` selection before its
+remote status check. The final operator-feedback correction made each stateful built-in distinguish
+forced-fresh policy from failure to find resumable state. Verification recorded:
+
+- 8,253 non-integration tests with one platform-specific skip at the final production checkpoint;
+- focused session, console, harness, compatibility, completion, cascade, migration, and adversarial
+  suites;
+- Ruff check and format plus strict mypy across 745 source files;
+- file lint, locked-SDD, Rulesync drift, Typer-isolation, package/install, and diff gates;
+- 160 Python and 103 Node website tests plus deterministic root and project builds; and
+- hosted CI at `9fd36e0b` on Python 3.12, 3.13, and 3.14 plus CodeQL, Website, lint, Rulesync,
+  locked-SDD, Python checks, and the aggregate gate; the final docs-only lock head must clear the
+  complete aggregate gate before merge.
+
+The private project-values, Muntz, and cold correctness/security reviews must converge cleanly at
+the exact final production checkpoint. Final hosted CI remains required before merge. Targeted
+operator Windows validation completed at `9fd36e0b`; the later production correction changes only
+harness decision notes and their documentation/tests. Earlier correction rounds closed fail-open
+transport and tmux probes, legacy and parent-cascade teardown gaps, malformed identity handling,
+ambiguous console state, post-launch cleanup, duplicated status classification, stale collateral,
+compatibility safety, process-global test isolation, invalid runtime-identity fixtures, and
+test-quality findings. They also replayed privileged-shell refusal, malformed and spoofed PID facts,
+and forced-TTY stream handling against their reviewed checkpoints. The final compatibility
+correction uses only read-only status facts before consent and conservatively gates incomplete
+dedicated rows whose status is missing or unknown. The final console correction uses the established
+presence-first status authority before live selection, preserves the typed legacy migration refusal,
+and fails closed when incomplete identity remains unresolved.
+
+The integration tester first drove the shipped lifecycle on a real VM at `f4d3a920`: session stop,
+start, idempotent start, and restart; console create, stop, start, and restart; the hidden resume
+wrapper; parent-delete gating; and cleanup. The follow-up at `715d6d44` reran all gates and verified
+the three compatibility mappings plus effective `--yes` handling. A third pass at `1081470f` reran
+the full pipeline and drove `console create --all-running` with two running sessions and with mixed
+running/stopped state, confirmed the distinct `--all` behavior, rechecked compatibility handling,
+and deleted the VM without residue. All three runs reported no blocker or open finding and left no
+tester-created repository change. Current writers cannot create the legacy null-socket rows, and the
+tester did not corrupt live runtime identity; those migration, repair, and unresolved-state cases
+remain covered by behavioral and orchestration tests.
+
+The operator's Windows pass at `9fd36e0b` backed up and migrated a restored version-35 database,
+completed steady-state session listing in 10.8 seconds rather than the prior multi-minute repair
+storm, classified the existing sessions successfully, and drove an existing console through stop,
+start, restart, and interactive attach. The pass retained the established forced-TTY policy and
+reported no further lifecycle failure. It then exposed the misleading forced-fresh note corrected at
+the final production checkpoint.
+
+## Permanent homes and accepted limits
+
+The operator contract lives in `cli/command-reference.md`, `cli/README.md`, the root `README.md`,
+`docs/guides/resources.md`, `docs/guides/session-status.md`, `docs/guides/upgrading-to-0.19.md`, and
+the management guide topic. The executable harness contract lives in
+`cli/agentworks/capabilities/harness_integration/` and its README; lifecycle code, database
+migrations, completion projections, and behavioral tests carry the implementation contract. Nothing
+in this SDD directory is required to operate or maintain the feature.
+
+The earlier tester could not drive interactive console attach because it ran inside tmux; the later
+operator Windows pass covered it. Force-new integration identities, Agentworks-minted UUIDs, Codex's
+tool-assigned identity path, malformed and indeterminate transport cases, and destructive cascade
+faults, plus incomplete `--all-running` presence-first classification and refusal, are covered by
+focused structural/orchestration tests rather than destructive live fault injection.
+
+Issue #720 owns deletion of both hidden 0.19 compatibility spellings in 0.20. Issue #715 owns any
+future systemd/cgroup containment work. No other in-scope implementation, review, migration, or
+documentation finding remains.
+
+The operator owns merging PR #710. The effort lead does not merge it.
+
+-- agw-ns-onboard-disco

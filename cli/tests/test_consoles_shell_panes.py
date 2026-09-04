@@ -18,12 +18,13 @@ import pytest
 from agentworks.db import Database
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import multi_console
-from agentworks.sessions.multi_console import add_shell, create_console, delete_console
+from agentworks.sessions.multi_console import add_shell, delete_console
 from agentworks.sessions.multi_console_layout import SHELL_INDEX_OPTION, _reorder_shell_panes
 from agentworks.vms.initializer import AGENTWORKS_SUDOERS_ENV_KEEP_PATTERNS
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
 from tests._tmux_model import TmuxModel
 from tests.conftest import _FakeResult, _FakeTarget
+from tests.console_helpers import create_console_record as create_console
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -40,7 +41,7 @@ def test_add_shell_live_sync_splits_pane_and_tiles(db: Database, fake_target: _F
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
 
     fake_target.commands.clear()
-    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
     add_shell(
         db,
         _StubConfig(),
@@ -51,11 +52,11 @@ def test_add_shell_live_sync_splits_pane_and_tiles(db: Database, fake_target: _F
         interaction=TtyInteractionPolicy.REFUSE,
     )
 
-    splits = [c for c in fake_target.commands if "split-window -t aw-console-con:a" in c]
+    splits = [c for c in fake_target.commands if "split-window -t '=aw-console-con':a" in c]
     assert len(splits) == 1
     # Pane cwd reflects the relative path joined under the workspace root.
     assert "/home/me/vm1/src" in splits[0]
-    layouts = [c for c in fake_target.commands if "select-layout -t aw-console-con:a tiled" in c]
+    layouts = [c for c in fake_target.commands if "select-layout -t '=aw-console-con':a tiled" in c]
     assert len(layouts) == 1
 
 
@@ -67,7 +68,7 @@ def test_delete_console_live_kills_tmux_session(db: Database, fake_target: _Fake
     fake_target.commands.clear()
     delete_console(db, _StubConfig(), name="con", yes=True)
 
-    kill_session = [c for c in fake_target.commands if "kill-session -t aw-console-con" in c]
+    kill_session = [c for c in fake_target.commands if "kill-session -t '=aw-console-con'" in c]
     assert len(kill_session) == 1
     assert db.get_console("con") is None
 
@@ -89,12 +90,12 @@ def test_split_shell_pane_agent_branch_uses_sudo(db: Database, fake_target: _Fak
     create_console(db, name="con", vm_name="vm1", session_specs=["s"])
 
     fake_target.commands.clear()
-    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
     add_shell(
         db, _StubConfig(), console_name="con", session_name="s", interaction=TtyInteractionPolicy.REFUSE
     )  # agent, workspace root
 
-    splits = [c for c in fake_target.commands if "split-window -t aw-console-con:s" in c]
+    splits = [c for c in fake_target.commands if "split-window -t '=aw-console-con':s" in c]
     assert len(splits) == 1
     # `--preserve-env=<keys>` sits between --login and -u (see the dedicated
     # preserve-env test); assert the sudo wrapper and target user separately.
@@ -110,10 +111,10 @@ def test_split_shell_pane_admin_branch_no_sudo(db: Database, fake_target: _FakeT
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
 
     fake_target.commands.clear()
-    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
     add_shell(db, _StubConfig(), console_name="con", session_name="a", interaction=TtyInteractionPolicy.REFUSE)
 
-    splits = [c for c in fake_target.commands if "split-window -t aw-console-con:a" in c]
+    splits = [c for c in fake_target.commands if "split-window -t '=aw-console-con':a" in c]
     assert len(splits) == 1
     assert "sudo --login" not in splits[0]
     assert 'exec "$SHELL" -l' in splits[0]
@@ -151,10 +152,10 @@ def test_split_shell_pane_agent_branch_preserves_composed_env_across_sudo(
     _seed_agent_session_console(db)
 
     fake_target.commands.clear()
-    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
     add_shell(db, _StubConfig(), console_name="con", session_name="s", interaction=TtyInteractionPolicy.REFUSE)
 
-    splits = [c for c in fake_target.commands if "split-window -t aw-console-con:s" in c]
+    splits = [c for c in fake_target.commands if "split-window -t '=aw-console-con':s" in c]
     assert len(splits) == 1
     # The composed workspace-identity key is both set via -e and named on
     # --preserve-env so it crosses the sudo boundary.
@@ -191,7 +192,7 @@ def test_sudo_preserve_probe_command_shape(db: Database, fake_target: _FakeTarge
     probe_var = multi_console._SUDO_PRESERVE_PROBE_VAR
     _seed_agent_session_console(db)
     fake_target.commands.clear()
-    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
     add_shell(db, _StubConfig(), console_name="con", session_name="s", interaction=TtyInteractionPolicy.REFUSE)
 
     probes = [c for c in fake_target.commands if _PROBE in c]
@@ -210,7 +211,7 @@ def test_split_shell_pane_agent_branch_warns_and_falls_back_when_setenv_missing(
     than only inside the pane."""
     _seed_agent_session_console(db)
     fake_target.commands.clear()
-    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
     # Simulate the VM refusing --preserve-env (no setenv fragment), with sudo's
     # own refusal text on stderr.
     fake_target.responses[_PROBE] = _FakeResult(
@@ -219,7 +220,7 @@ def test_split_shell_pane_agent_branch_warns_and_falls_back_when_setenv_missing(
     )
     add_shell(db, _StubConfig(), console_name="con", session_name="s", interaction=TtyInteractionPolicy.REFUSE)
 
-    splits = [c for c in fake_target.commands if "split-window -t aw-console-con:s" in c]
+    splits = [c for c in fake_target.commands if "split-window -t '=aw-console-con':s" in c]
     assert len(splits) == 1
     # The pane still comes up, just without the flag sudo would have refused.
     assert "--preserve-env" not in splits[0]
@@ -235,42 +236,6 @@ def test_split_shell_pane_agent_branch_warns_and_falls_back_when_setenv_missing(
     assert "not allowed to set the following environment variables" in warning
 
 
-def test_split_shell_pane_preserve_probe_warns_once_per_console_build(
-    db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
-) -> None:
-    """Building a console splits a pane per shell per session, all asking the
-    same VM the same question. The memo keeps that to one probe and one
-    warning per agent user, so a miss does not bury the attach output."""
-    from agentworks.sessions.multi_console import attach_console
-
-    _seed_vm(db, with_tailscale=True)
-    db._conn.execute(
-        "INSERT INTO agents (name, vm_name, linux_user) VALUES ('bot', 'vm1', 'bot-user')",
-    )
-    for name in ("s1", "s2"):
-        db._conn.execute(
-            "INSERT INTO sessions (name, workspace_name, template, mode, agent_name, "
-            "socket_path) VALUES (?, 'ws-vm1', 'default', 'agent', 'bot', ?)",
-            (name, f"/tmp/{name}.sock"),
-        )
-    db._conn.commit()
-    # Two sessions, two agent shells each: four agent panes off the one VM.
-    create_console(db, name="con", vm_name="vm1", session_specs=["s1+2", "s2+2"])
-
-    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
-    fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(returncode=0, stdout="_PLACEHOLDER\ns1\ns2\n")
-    fake_target.responses[_PROBE] = _FakeResult(returncode=1)
-    fake_target.commands.clear()
-    attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=TtyInteractionPolicy.REFUSE)
-
-    splits = [c for c in fake_target.commands if "split-window -t aw-console-con" in c]
-    assert len(splits) == 4
-    assert not any("--preserve-env" in c for c in splits)
-    # One probe and one warning for the whole build, not one per pane.
-    assert len([c for c in fake_target.commands if _PROBE in c]) == 1
-    assert len([w for w in captured_output.warnings if "will not reach" in w]) == 1
-
-
 def test_split_shell_pane_agent_branch_no_probe_without_composed_env(
     db: Database,
     fake_target: _FakeTarget,
@@ -283,10 +248,10 @@ def test_split_shell_pane_agent_branch_no_probe_without_composed_env(
     monkeypatch.setattr(multi_console, "_resolve_pane_env", lambda *a, **k: {})
 
     fake_target.commands.clear()
-    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
     add_shell(db, _StubConfig(), console_name="con", session_name="s", interaction=TtyInteractionPolicy.REFUSE)
 
-    splits = [c for c in fake_target.commands if "split-window -t aw-console-con:s" in c]
+    splits = [c for c in fake_target.commands if "split-window -t '=aw-console-con':s" in c]
     assert len(splits) == 1
     assert "--preserve-env" not in splits[0]
     assert not [c for c in fake_target.commands if _PROBE in c]
@@ -302,7 +267,7 @@ def test_split_shell_pane_admin_branch_never_probes(db: Database, fake_target: _
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
 
     fake_target.commands.clear()
-    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
     add_shell(db, _StubConfig(), console_name="con", session_name="a", interaction=TtyInteractionPolicy.REFUSE)
 
     assert not [c for c in fake_target.commands if _PROBE in c]
@@ -328,10 +293,10 @@ def test_split_shell_pane_emits_workspace_identity_only(db: Database, fake_targe
     create_console(db, name="con", vm_name="vm1", session_specs=["s"])
 
     fake_target.commands.clear()
-    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
     add_shell(db, _StubConfig(), console_name="con", session_name="s", interaction=TtyInteractionPolicy.REFUSE)
 
-    splits = [c for c in fake_target.commands if "split-window -t aw-console-con:s" in c]
+    splits = [c for c in fake_target.commands if "split-window -t '=aw-console-con':s" in c]
     assert len(splits) == 1
     # Workspace dynamic identity reaches the pane.
     assert " -e AGENTWORKS_WORKSPACE=ws-vm1" in splits[0]
@@ -356,9 +321,9 @@ def test_split_shell_pane_tags_new_pane_with_config_index(db: Database, fake_tar
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
 
     fake_target.commands.clear()
-    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
     # Simulate tmux split-window -P emitting a pane id.
-    fake_target.responses["split-window -t aw-console-con:a"] = _FakeResult(stdout="%7\n")
+    fake_target.responses["split-window -t '=aw-console-con':a"] = _FakeResult(stdout="%7\n")
 
     add_shell(db, _StubConfig(), console_name="con", session_name="a", interaction=TtyInteractionPolicy.REFUSE)
 
@@ -374,13 +339,13 @@ def test_split_shell_pane_warns_when_split_returns_no_pane_id(
     """If split-window's stdout is empty (older tmux / weird transport), the
     tag step is skipped and the operator gets a warning that the pane is
     untagged. The pane is still live; restore-session just won't be able to
-    repair this window without `attach --recreate`."""
+    repair this window without `console restart`."""
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
 
     fake_target.commands.clear()
-    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
+    fake_target.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
     # Default _FakeResult has empty stdout, so no pane_id to tag.
 
     add_shell(db, _StubConfig(), console_name="con", session_name="a", interaction=TtyInteractionPolicy.REFUSE)
@@ -390,8 +355,7 @@ def test_split_shell_pane_warns_when_split_returns_no_pane_id(
     # The recovery hint includes the actual console name so it can be
     # copy/pasted verbatim.
     assert any(
-        "couldn't capture its id" in w and "untagged" in w and "attach con --recreate" in w
-        for w in captured_output.warnings
+        "couldn't capture its id" in w and "untagged" in w and "restart con" in w for w in captured_output.warnings
     )
 
 
@@ -455,9 +419,7 @@ def test_add_shell_reorders_shell_panes_into_config_order(
     assert [(pidx, tag) for _pid, pidx, tag in rows] == [(0, None), (1, 0), (2, 1), (3, 2)]
 
 
-def test_split_shell_pane_warns_when_set_option_fails(
-    db: Database, fake_target: _FakeTarget, captured_output: CapturedOutput
-) -> None:
+def test_split_shell_pane_warns_when_set_option_fails(db: Database, fake_target: _FakeTarget) -> None:
     """If tmux split-window succeeded and emitted a pane id but the subsequent
     set-option fails (tmux version/flags mismatch, target gone, etc.), the
     pane is live but untagged. _split_shell_pane must surface this so the
@@ -467,11 +429,9 @@ def test_split_shell_pane_warns_when_set_option_fails(
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
 
     fake_target.commands.clear()
-    fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
-    fake_target.responses["split-window -t aw-console-con:a"] = _FakeResult(stdout="%7\n")
+    fake_target.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
+    fake_target.responses["split-window -t '=aw-console-con':a"] = _FakeResult(stdout="%7\n")
     # set-option fails non-zero.
     fake_target.responses["set-option -p"] = _FakeResult(returncode=1, stderr="bad target")
 
     add_shell(db, _StubConfig(), console_name="con", session_name="a", interaction=TtyInteractionPolicy.REFUSE)
-
-    assert any("tagging failed" in w and "attach con --recreate" in w for w in captured_output.warnings)

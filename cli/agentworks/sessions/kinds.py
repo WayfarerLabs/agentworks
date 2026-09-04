@@ -41,13 +41,13 @@ class _SessionTemplateKind:
 
     kind: str = "session-template"
     model: type[DeclaredResource] = SessionTemplate
-    description: str = "The workload a session runs, and how it resumes"
+    description: str = "The workload a session runs and how it continues"
     prose: TopicProse = TopicProse(
         title="Session templates",
         overview="""
         A session is a workload running as an agent (or as the admin) in a workspace on
         a VM, and a session-template says which workload. `spec.harness_integration`
-        selects the integration that owns starting and resuming it; a template that
+        selects the integration that owns starting it and continuing prior state; a template that
         selects none gets `shell`, a plain login shell, so a field-less template is
         still useful.
 
@@ -107,9 +107,9 @@ class _NamedConsoleTemplateKind:
 
         There is exactly one, named `default`: no command can select a named
         instance yet, so a declaration under any other name would be dead config and is
-        refused. The layout is re-read on every build, recreate, add-shell, and
+        refused. The layout is re-read on every build, restart, add-shell, and
         restore-session, so changing it and running
-        `agw console attach <name> --recreate` is enough to switch.
+        `agw console restart <name>` is enough to switch.
 
         Every layout but `aw-session-vertical` is a tmux built-in, so the same value can
         be applied live from a `tmux select-layout` key binding; the ones named `main-`

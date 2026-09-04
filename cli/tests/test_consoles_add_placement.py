@@ -13,9 +13,10 @@ from agentworks.db import Database
 from agentworks.errors import AlreadyExistsError, ValidationError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import multi_console
-from agentworks.sessions.multi_console import add_sessions, create_console
+from agentworks.sessions.multi_console import add_sessions
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
 from tests._tmux_model import TmuxModel
+from tests.console_helpers import create_console_record as create_console
 
 if TYPE_CHECKING:
     from collections.abc import Callable

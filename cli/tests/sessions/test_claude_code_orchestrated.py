@@ -5,7 +5,7 @@ carry the unit test cannot prove on its own (plan Tests P2 / P4).
   call site, and the minted Claude session id persists to the row's
   ``harness_integration_state`` in the NAMESPACED shape
   (``{"claude-code": {"session_id": ...}}``);
-- ``session resume`` produces the resume string, reading the stored id
+- ``session restart`` produces the resume string, reading the stored id
   back, with the restart-post-kill end state (row survives, kill precedes
   the tmux recreate);
 - a session predating the ``harness_integration_state`` column (blob ``{}``) mints and
@@ -33,6 +33,7 @@ import pytest
 
 from agentworks.db import Database, SessionMode, SessionStatus
 from agentworks.secrets.policy import TtyInteractionPolicy
+from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 
 from ..conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
 
@@ -116,6 +117,14 @@ def _capture_pane_command(monkeypatch: pytest.MonkeyPatch, events: list[str], ca
         return ("/tmp/s1.sock", 4243)
 
     monkeypatch.setattr(tmux_mod, "create_session", _capture)
+    monkeypatch.setattr(
+        tmux_mod,
+        "capture_tmux_server_fingerprint",
+        lambda **kwargs: FingerprintProbe(
+            ProbeStatus.PRESENT,
+            TmuxServerFingerprint(pid=4243, boot_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", start_ticks=1),
+        ),
+    )
 
 
 def _claude_ns(db: Database, name: str = "s1") -> dict[str, object]:
@@ -135,7 +144,7 @@ def _common_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
     stub_vm_gates(monkeypatch)
     stub_session_resolvers(monkeypatch)
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *a, **k: None)
-    monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: "boot-x")
+    monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
     monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
 
 
@@ -179,7 +188,9 @@ def test_create_produces_launch_string_and_persists_the_minted_id(
     db.close()
 
 
-def test_create_resumes_when_a_transcript_exists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_create_forces_a_fresh_conversation_when_a_transcript_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from agentworks.sessions.manager import create_session
 
     db = _seed_db(tmp_path)
@@ -200,12 +211,12 @@ def test_create_resumes_when_a_transcript_exists(tmp_path: Path, monkeypatch: py
     )
 
     sid = _claude_ns(db)["session_id"]
-    assert f"--resume {sid}" in captured["command"]
-    assert "resuming session s1" in captured["command"]
+    assert f"--session-id {sid}" in captured["command"]
+    assert "--resume" not in captured["command"]
     db.close()
 
 
-# -- restart: reads the stored id, resumes, post-kill end state --------------
+# -- restart: reads the stored id, continues, post-kill end state --------------
 
 
 def _restart_stubs(
@@ -220,7 +231,13 @@ def _restart_stubs(
 
     db = _seed_db(tmp_path)
     db.insert_session("s1", "ws1", "claude", SessionMode.ADMIN, harness_integration_state=stored_state)
-    db.update_session_pid("s1", 4242, boot_id="boot-x")
+    db.update_session_runtime(
+        "s1",
+        socket_path="/tmp/s1.sock",
+        pid=4242,
+        boot_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        tmux_server_start_ticks=77,
+    )
 
     events: list[str] = []
     captured: dict[str, str] = {}
@@ -232,16 +249,15 @@ def _restart_stubs(
     monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, **k: session)
     monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: SessionStatus.OK)
 
-    def _spy_kill(name: str, **kwargs: object) -> bool:
+    def _spy_teardown(*args: object, **kwargs: object) -> None:
         events.append("kill")
-        return True
 
-    monkeypatch.setattr(session_manager, "_kill_session", _spy_kill)
+    monkeypatch.setattr("agentworks.sessions.manager._lifecycle._teardown_session", _spy_teardown)
     return db, events, captured
 
 
-def test_resume_reads_stored_id_and_resumes_after_the_kill(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from agentworks.sessions.manager import resume_session
+def test_restart_reads_stored_id_and_resumes_after_the_kill(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.sessions.manager import restart_session
 
     db, events, captured = _restart_stubs(
         tmp_path,
@@ -250,11 +266,10 @@ def test_resume_reads_stored_id_and_resumes_after_the_kill(tmp_path: Path, monke
         stored_state={"claude-code": {"session_id": "939b1597-7c61-5ace-80f4-14617b7b4257"}},
     )
 
-    resume_session(
+    restart_session(
         db,
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),
         name="s1",
-        yes=True,
         interaction=TtyInteractionPolicy.REFUSE,
     )  # type: ignore[arg-type]
 
@@ -273,22 +288,21 @@ def test_resume_reads_stored_id_and_resumes_after_the_kill(tmp_path: Path, monke
     db.close()
 
 
-def test_resume_of_a_pre_column_session_mints_and_persists_the_id(
+def test_restart_of_a_pre_column_session_mints_and_persists_the_id(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A session predating the harness_integration_state column backfilled to ``{}``:
     its first restart under claude-code mints a fresh id (no transcript to
     resume) and persists it, so the NEXT restart can resume."""
-    from agentworks.sessions.manager import resume_session
+    from agentworks.sessions.manager import restart_session
 
     db, events, captured = _restart_stubs(tmp_path, monkeypatch, transcript_present=False, stored_state=None)
     assert db.get_session("s1").harness_integration_state == {}  # type: ignore[union-attr]
 
-    resume_session(
+    restart_session(
         db,
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),
         name="s1",
-        yes=True,
         interaction=TtyInteractionPolicy.REFUSE,
     )  # type: ignore[arg-type]
 
@@ -299,7 +313,7 @@ def test_resume_of_a_pre_column_session_mints_and_persists_the_id(
     db.close()
 
 
-def test_resume_hoists_a_pre_namespacing_row_and_resumes_its_id(
+def test_restart_hoists_a_pre_namespacing_row_and_resumes_its_id(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Compatibility (pre-namespacing harness_integration_state): DELETE on the next
@@ -308,7 +322,7 @@ def test_resume_hoists_a_pre_namespacing_row_and_resumes_its_id(
     hoists the id into the ``claude-code`` namespace and RESUMES with the
     SAME id (no new id is minted, history is kept), and the persisted row
     comes out namespaced with the flat key gone."""
-    from agentworks.sessions.manager import resume_session
+    from agentworks.sessions.manager import restart_session
 
     sid = "939b1597-7c61-5ace-80f4-14617b7b4257"
     db, events, captured = _restart_stubs(
@@ -318,11 +332,10 @@ def test_resume_hoists_a_pre_namespacing_row_and_resumes_its_id(
         stored_state={"session_id": sid},
     )
 
-    resume_session(
+    restart_session(
         db,
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),
         name="s1",
-        yes=True,
         interaction=TtyInteractionPolicy.REFUSE,
     )  # type: ignore[arg-type]
 
@@ -333,12 +346,12 @@ def test_resume_hoists_a_pre_namespacing_row_and_resumes_its_id(
     db.close()
 
 
-def test_resume_leaves_a_foreign_namespace_untouched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_restart_leaves_a_foreign_namespace_untouched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A foreign integration's namespace in the blob (a template re-pointed
     from another stateful integration) survives a claude-code op untouched:
     the claude id lands in its OWN namespace, and the foreign keys are
     neither read (no inherited ``session_id``) nor dropped on persist."""
-    from agentworks.sessions.manager import resume_session
+    from agentworks.sessions.manager import restart_session
 
     foreign_sid = "11111111-2222-4333-8444-555555555555"
     db, events, captured = _restart_stubs(
@@ -348,11 +361,10 @@ def test_resume_leaves_a_foreign_namespace_untouched(tmp_path: Path, monkeypatch
         stored_state={"other-harness": {"session_id": foreign_sid}},
     )
 
-    resume_session(
+    restart_session(
         db,
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),
         name="s1",
-        yes=True,
         interaction=TtyInteractionPolicy.REFUSE,
     )  # type: ignore[arg-type]
 
@@ -367,7 +379,7 @@ def test_resume_leaves_a_foreign_namespace_untouched(tmp_path: Path, monkeypatch
     db.close()
 
 
-def test_resume_under_another_harness_integration_leaves_the_flat_legacy_key_intact(
+def test_restart_under_another_harness_integration_leaves_the_flat_legacy_key_intact(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Compatibility (pre-namespacing harness_integration_state): DELETE on the next
@@ -376,7 +388,7 @@ def test_resume_under_another_harness_integration_leaves_the_flat_legacy_key_int
     the base no-op) must neither adopt nor drop it, so the persisted row
     keeps the flat key verbatim and a later re-point back to claude-code
     can still hoist it."""
-    from agentworks.sessions.manager import resume_session
+    from agentworks.sessions.manager import restart_session
 
     sid = "939b1597-7c61-5ace-80f4-14617b7b4257"
     db, events, captured = _restart_stubs(
@@ -387,11 +399,10 @@ def test_resume_under_another_harness_integration_leaves_the_flat_legacy_key_int
         harness_integration="shell",
     )
 
-    resume_session(
+    restart_session(
         db,
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),
         name="s1",
-        yes=True,
         interaction=TtyInteractionPolicy.REFUSE,
     )  # type: ignore[arg-type]
 

@@ -241,10 +241,10 @@ class _PlatformOnAnUnsupportedContract(ConformingVMPlatform):
     contract_version = 2
 
 
-class _HarnessOnAnOldContract(ConformingHarnessIntegration):
-    name = "old-contract-harness"
-    description = "written against the callback-era harness contract"
-    contract_version = 1
+class _HarnessOnAnUnsupportedContract(ConformingHarnessIntegration):
+    name = "unsupported-contract-harness"
+    description = "declares a contract this build does not support"
+    contract_version = 2
 
 
 class _BackendWithInstanceReadiness(ConformingSecretBackend):
@@ -494,11 +494,11 @@ def test_registration_rejects_mismatched_vm_platform_contract_without_writing() 
     assert _snapshot_registries() == before
 
 
-def test_registration_rejects_harness_integration_contract_v1_without_writing() -> None:
+def test_registration_rejects_unsupported_harness_integration_contract_without_writing() -> None:
     before = _snapshot_registries()
     plugin = Plugin(
         name="p",
-        capabilities={"harness-integration": (_HarnessOnAnOldContract,)},
+        capabilities={"harness-integration": (_HarnessOnAnUnsupportedContract,)},
     )
 
     with pytest.raises(PluginError):

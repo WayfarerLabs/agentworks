@@ -187,6 +187,26 @@ def _restore_agw_debug() -> Generator[None, None, None]:
 
 
 @pytest.fixture(autouse=True)
+def _reset_cli_request_flags() -> Generator[None, None, None]:
+    """Keep process-global CLI request flags isolated between tests.
+
+    A real CLI process handles one invocation, but ``CliRunner`` exercises
+    several invocations in one pytest worker. The root callback seeds these
+    flags for each invocation, so a test ending with either flag enabled must
+    not affect a later test that calls the output layer directly.
+    """
+    from agentworks import output
+
+    output.set_non_interactive(False)
+    output.set_suppress_deprecations(False)
+    try:
+        yield
+    finally:
+        output.set_non_interactive(False)
+        output.set_suppress_deprecations(False)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_inherited_aw_secrets(
     request: pytest.FixtureRequest,
     monkeypatch: pytest.MonkeyPatch,
@@ -625,7 +645,7 @@ def stub_session_resolvers(monkeypatch: pytest.MonkeyPatch) -> None:
     config.
 
     Also stubs the Phase 6 eager-prompting orchestration: ``create_session``
-    and ``resume_session`` call ``_session_secret_target`` +
+    and ``restart_session`` call ``_session_secret_target`` +
     ``resolve_for_command`` before the first mutation. Tests that don't
     care about secret resolution patch both out.
     """
@@ -645,7 +665,7 @@ def stub_session_resolvers(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda *a, **k: empty_secret_target(),
     )
     # ``resolve_for_command`` is imported locally inside create_session /
-    # resume_session, so patch its module-level home; the import inside
+    # restart_session, so patch its module-level home; the import inside
     # the function picks up the patched version.
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
 

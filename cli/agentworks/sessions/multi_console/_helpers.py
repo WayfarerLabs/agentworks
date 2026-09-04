@@ -1,10 +1,4 @@
-"""Shared constants, spec parsing, and read-only DB helpers for named consoles.
-
-Carved out of the ``multi_console`` package's top level so that ``crud``,
-``attach``, ``restore``, ``secrets_env``, and ``tmux_build`` all have a
-dependency-free base to import from. Nothing here talks to tmux or opens a
-live transport; that lives in ``tmux_build`` / ``attach``.
-"""
+"""Shared constants, spec parsing, and DB/status helpers for named consoles."""
 
 from __future__ import annotations
 
@@ -19,6 +13,7 @@ if TYPE_CHECKING:
     from agentworks.db import ConsoleRow, Database, SessionRow, ShellEntry
 
 TMUX_PREFIX = "aw-console-"
+TMUX_STAGING_PREFIX = "aw-console-build+"
 
 # Literal tmux window name for the optional admin-shell window. Wrapped in
 # double hyphens so it cannot collide with any session name: validate_name
@@ -29,6 +24,11 @@ ADMIN_SHELL_WINDOW = "--admin--"
 def tmux_session_name(console_name: str) -> str:
     """Return the tmux session name for a console."""
     return f"{TMUX_PREFIX}{console_name}"
+
+
+def tmux_staging_name(console_name: str) -> str:
+    """Return the reserved staging tmux name for a console build."""
+    return f"{TMUX_STAGING_PREFIX}{console_name}"
 
 
 # -- Spec parsing ----------------------------------------------------------
@@ -104,28 +104,33 @@ def _vm_sessions(db: Database, vm_name: str) -> list[SessionRow]:
 def running_session_names(db: Database, config: Config, vm_name: str) -> list[str]:
     """SSH-probe the VM and return names of sessions whose live tmux state is OK.
 
-    Uses the same one-round-trip-per-VM check that powers ``aw session list``.
-    Returns alphabetically sorted names.
+    Uses the same read-only batched status check that powers ``agw session
+    list``. Returns alphabetically sorted names.
 
-    Raises ConnectivityError when the VM has sessions eligible to be probed
-    (valid PID + boot_id) but the probe came back empty -- almost always a
-    transport failure that we don't want to silently report as "nothing
-    running". A VM with zero eligible sessions simply returns an empty list.
+    Raises StateError for a live legacy shared-server row that requires
+    migration, or ConnectivityError when any dedicated session has
+    indeterminate runtime status. A VM with zero eligible sessions simply
+    returns an empty list.
     """
     from agentworks.db import PID_STOPPED, SessionStatus
-    from agentworks.sessions.manager import batch_check_all_sessions, filter_sessions
+    from agentworks.sessions.manager import (
+        _legacy_session_status_error,
+        batch_check_all_sessions,
+        filter_sessions,
+    )
 
     sessions = filter_sessions(db, vm_name=vm_name)
+    for session in sessions:
+        if session.pid != PID_STOPPED and session.socket_path is None:
+            raise _legacy_session_status_error(session)
     status_map = batch_check_all_sessions(sessions, db=db, config=config)
 
-    # If we have sessions that *should* have been probed but none came back
-    # with a status, the probe almost certainly failed (e.g. SSH unreachable).
-    # batch_check_all_sessions warns on exceptions but returns silently on
-    # `check=False` non-zero exits, so we cannot rely on the warning alone.
-    checkable = [s for s in sessions if s.pid is not None and s.pid != PID_STOPPED and s.pid > 0 and s.boot_id]
-    if checkable and not status_map:
+    potentially_running = [session for session in sessions if session.pid != PID_STOPPED]
+    if any(
+        status_map.get(session.name, SessionStatus.UNKNOWN) == SessionStatus.UNKNOWN for session in potentially_running
+    ):
         raise ConnectivityError(
-            f"could not determine running sessions on VM '{vm_name}' (status probe returned no results)",
+            f"could not determine running sessions on VM '{vm_name}' (one or more statuses were indeterminate)",
             entity_kind="vm",
             entity_name=vm_name,
             hint="Check VM reachability.",

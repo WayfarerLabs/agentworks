@@ -10,6 +10,7 @@ Shared seed helpers and stub Config classes live in
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -19,13 +20,13 @@ from agentworks.errors import (
     AlreadyExistsError,
     ConnectivityError,
     NotFoundError,
+    StateError,
     ValidationError,
 )
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.multi_console import (
     add_sessions,
     add_shell,
-    create_console,
     delete_console,
     delete_console_record,
     describe_console,
@@ -33,15 +34,30 @@ from agentworks.sessions.multi_console import (
     remove_sessions,
     reorder_sessions,
 )
+from agentworks.sessions.multi_console import (
+    create_console as _real_create_console,
+)
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
 from tests.conftest import _FakeResult, _FakeTarget
+from tests.console_helpers import create_console_record as create_console
 
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
 
+BOOT_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
 
 def _refuse_live_target(*args: object, **kwargs: object) -> None:
     raise ConnectivityError("SSH identity unavailable")
+
+
+def _validate_create(db: Database, **kwargs: object) -> None:
+    _real_create_console(
+        db,
+        _StubConfig(),
+        interaction=TtyInteractionPolicy.REFUSE,
+        **kwargs,  # type: ignore[arg-type]
+    )
 
 
 # -- Orchestration: create_console -----------------------------------------
@@ -72,13 +88,80 @@ def test_running_session_names_raises_on_unreachable(db: Database, fake_target: 
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["alpha"])
-    db._conn.execute("UPDATE sessions SET pid = 100, boot_id = 'b' WHERE name = 'alpha'")
+    db._conn.execute("UPDATE sessions SET pid = 100, boot_id = ? WHERE name = 'alpha'", (BOOT_ID,))
     db._conn.commit()
     # Probe returns empty stdout (simulates transport failure caught by check=False).
     fake_target.run = lambda command, **kwargs: _FakeResult(returncode=255, stdout="")  # type: ignore[assignment]
 
-    with pytest.raises(ConnectivityError, match="could not determine running"):
+    with pytest.raises(ConnectivityError):
         running_session_names(db, _StubConfig(), "vm1")
+
+
+@pytest.mark.parametrize("pid", [None, 100])
+def test_running_session_names_rejects_legacy_row_before_connectivity_probe(
+    db: Database,
+    fake_target: _FakeTarget,
+    pid: int | None,
+) -> None:
+    from agentworks.sessions.multi_console import running_session_names
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["legacy"])
+    db._conn.execute(
+        "UPDATE sessions SET socket_path = NULL, pid = ?, boot_id = ? WHERE name = 'legacy'",
+        (pid, BOOT_ID),
+    )
+    db._conn.commit()
+
+    with pytest.raises(StateError) as caught:
+        running_session_names(db, _StubConfig(), "vm1")
+
+    assert caught.value.entity_kind == "session"
+    assert caught.value.entity_name == "legacy"
+    assert caught.value.hint is not None
+    assert fake_target.commands == []
+
+
+def test_running_session_names_includes_incomplete_live_identity_without_repair(
+    db: Database,
+    fake_target: _FakeTarget,
+) -> None:
+    from agentworks.sessions.multi_console import running_session_names
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["alpha"])
+
+    def stub_run(command: str, **kwargs: object) -> _FakeResult:
+        fake_target.commands.append(command)
+        return _FakeResult(returncode=0, stdout="S:alpha:0::0::1::1:\n")
+
+    fake_target.run = stub_run  # type: ignore[assignment]
+
+    assert running_session_names(db, _StubConfig(), "vm1") == ["alpha"]
+    unchanged = db.get_session("alpha")
+    assert unchanged is not None
+    assert (unchanged.pid, unchanged.boot_id, unchanged.tmux_server_start_ticks) == (None, None, None)
+    assert len(fake_target.commands) == 1
+
+
+def test_running_session_names_refuses_unresolved_incomplete_identity(
+    db: Database,
+    fake_target: _FakeTarget,
+) -> None:
+    from agentworks.sessions.multi_console import running_session_names
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["alpha"])
+    fake_target.run = lambda command, **kwargs: (  # type: ignore[assignment]
+        fake_target.commands.append(command) or _FakeResult(returncode=255)
+    )
+
+    with pytest.raises(ConnectivityError):
+        running_session_names(db, _StubConfig(), "vm1")
+
+    unresolved = db.get_session("alpha")
+    assert unresolved is not None and unresolved.pid is None
+    assert len(fake_target.commands) == 1
 
 
 def test_running_session_names_uses_live_status_check(db: Database, fake_target: _FakeTarget) -> None:
@@ -89,9 +172,9 @@ def test_running_session_names_uses_live_status_check(db: Database, fake_target:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["alpha", "beta", "gamma"])
     # Give each session a PID so it's eligible for the batch check.
-    db._conn.execute("UPDATE sessions SET pid = 100, boot_id = 'b' WHERE name = 'alpha'")
-    db._conn.execute("UPDATE sessions SET pid = 200, boot_id = 'b' WHERE name = 'beta'")
-    db._conn.execute("UPDATE sessions SET pid = 300, boot_id = 'b' WHERE name = 'gamma'")
+    db._conn.execute("UPDATE sessions SET pid = 100, boot_id = ? WHERE name = 'alpha'", (BOOT_ID,))
+    db._conn.execute("UPDATE sessions SET pid = 200, boot_id = ? WHERE name = 'beta'", (BOOT_ID,))
+    db._conn.execute("UPDATE sessions SET pid = 300, boot_id = ? WHERE name = 'gamma'", (BOOT_ID,))
     db._conn.commit()
 
     # batch_check_all_sessions emits one compound shell command per VM. We
@@ -99,10 +182,19 @@ def test_running_session_names_uses_live_status_check(db: Database, fake_target:
     # claims the session is gone.
     def stub_run(command: str, **kwargs: object) -> _FakeResult:
         fake_target.commands.append(command)
-        if "has-session -t alpha" in command and "has-session -t beta" in command:
+        if "has-session -t '=alpha'" in command and "has-session -t '=beta'" in command:
+            missing_session = b"can't find session: gamma".hex()
+            missing_server = b"no server running on /gamma".hex()
+            boot_hex = BOOT_ID.encode().hex()
+            present_hex = b"present".hex()
+            absent_hex = b"absent".hex()
             return _FakeResult(
                 returncode=0,
-                stdout="S:alpha:0\nS:beta:0\nS:gamma:1\n",
+                stdout=(
+                    f"S:alpha:0::0::0:{boot_hex}:0:{present_hex}\n"
+                    f"S:beta:0::0::0:{boot_hex}:0:{present_hex}\n"
+                    f"S:gamma:1:{missing_session}:1:{missing_server}:0:{boot_hex}:0:{absent_hex}\n"
+                ),
             )
         return _FakeResult()
 
@@ -110,6 +202,52 @@ def test_running_session_names_uses_live_status_check(db: Database, fake_target:
 
     names = running_session_names(db, _StubConfig(), "vm1")
     assert names == ["alpha", "beta"]
+
+
+def test_console_create_all_running_reuses_one_loaded_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.cli.commands import console as console_commands
+    from agentworks.sessions import multi_console
+
+    database = object()
+    config = object()
+    load_calls: list[None] = []
+    observed_configs: list[object] = []
+    events: list[str] = []
+
+    def load_config() -> object:
+        load_calls.append(None)
+        return config
+
+    monkeypatch.setattr(console_commands, "get_db", lambda: database)
+    monkeypatch.setattr(console_commands, "prompt_vm", lambda candidate, name: SimpleNamespace(name=name))
+    monkeypatch.setattr(
+        "agentworks.cli.commands.console.output.info",
+        lambda message: events.append("progress"),
+    )
+    monkeypatch.setattr("agentworks.config.load_config", load_config)
+    monkeypatch.setattr(
+        multi_console,
+        "running_session_names",
+        lambda candidate, loaded, vm_name: events.append("selection") or observed_configs.append(loaded) or [],
+    )
+    monkeypatch.setattr(
+        multi_console,
+        "create_console",
+        lambda candidate, loaded, **kwargs: events.append("create") or observed_configs.append(loaded),
+    )
+
+    console_commands.console_create(
+        name="focused",
+        sessions=[],
+        vm="vm1",
+        all_sessions=False,
+        all_running=True,
+        add_admin_shell=True,
+    )
+
+    assert load_calls == [None]
+    assert observed_configs == [config, config]
+    assert events == ["progress", "selection", "create"]
 
 
 def test_infer_vm_from_session_specs(db: Database) -> None:
@@ -157,13 +295,13 @@ def test_create_console_rejects_empty_without_all(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a"])
     with pytest.raises(ValidationError, match="specify at least one session"):
-        create_console(db, name="empty", vm_name="vm1", session_specs=[])
+        _validate_create(db, name="empty", vm_name="vm1", session_specs=[])
 
 
 def test_create_console_rejects_empty_fill_all(db: Database) -> None:
     _seed_vm(db)  # no sessions seeded
     with pytest.raises(ValidationError, match="VM 'vm1' has no sessions"):
-        create_console(db, name="empty", vm_name="vm1", session_specs=[], fill_all=True)
+        _validate_create(db, name="empty", vm_name="vm1", session_specs=[], fill_all=True)
 
 
 def test_create_console_rejects_duplicate_name(db: Database) -> None:
@@ -171,18 +309,18 @@ def test_create_console_rejects_duplicate_name(db: Database) -> None:
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
     with pytest.raises(AlreadyExistsError, match="already exists"):
-        create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+        _validate_create(db, name="con", vm_name="vm1", session_specs=["a"])
 
 
 def test_create_console_rejects_unknown_vm(db: Database) -> None:
     with pytest.raises(NotFoundError, match="not found"):
-        create_console(db, name="con", vm_name="ghost", session_specs=["a"])
+        _validate_create(db, name="con", vm_name="ghost", session_specs=["a"])
 
 
 def test_create_console_rejects_unknown_session(db: Database) -> None:
     _seed_vm(db)
     with pytest.raises(NotFoundError, match="not found"):
-        create_console(db, name="con", vm_name="vm1", session_specs=["ghost"])
+        _validate_create(db, name="con", vm_name="vm1", session_specs=["ghost"])
 
 
 def test_create_console_rejects_cross_vm_session(db: Database) -> None:
@@ -190,14 +328,14 @@ def test_create_console_rejects_cross_vm_session(db: Database) -> None:
     _seed_vm(db, "vm2")
     _seed_sessions(db, ["a"], workspace_name="ws-vm2")
     with pytest.raises(ValidationError, match="is not on VM 'vm1'"):
-        create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+        _validate_create(db, name="con", vm_name="vm1", session_specs=["a"])
 
 
 def test_create_console_rejects_dup_in_args(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a"])
     with pytest.raises(ValidationError, match="listed more than once"):
-        create_console(db, name="con", vm_name="vm1", session_specs=["a", "a+1"])
+        _validate_create(db, name="con", vm_name="vm1", session_specs=["a", "a+1"])
 
 
 def test_create_console_rolls_back_on_failure(db: Database) -> None:
@@ -206,7 +344,7 @@ def test_create_console_rolls_back_on_failure(db: Database) -> None:
     _seed_sessions(db, ["a"])
     db.insert_console("con", "vm1")
     with pytest.raises(AlreadyExistsError, match="already exists"):
-        create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+        _validate_create(db, name="con", vm_name="vm1", session_specs=["a"])
     assert db.list_console_sessions("con") == []
 
 

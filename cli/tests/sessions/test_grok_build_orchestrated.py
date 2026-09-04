@@ -10,6 +10,7 @@ import pytest
 
 from agentworks.db import Database, SessionMode, SessionStatus
 from agentworks.secrets.policy import TtyInteractionPolicy
+from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 
 from ..conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
 
@@ -78,7 +79,11 @@ def _common_stubs(monkeypatch: pytest.MonkeyPatch, target: _GrokTarget) -> None:
     stub_vm_gates(monkeypatch)
     stub_session_resolvers(monkeypatch)
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)
-    monkeypatch.setattr(session_manager, "_get_boot_id", lambda *args, **kwargs: "boot-x")
+    monkeypatch.setattr(
+        session_manager,
+        "_get_boot_id",
+        lambda *args, **kwargs: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    )
     monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *args, **kwargs: None)
     _template(monkeypatch)
 
@@ -92,6 +97,14 @@ def _capture_tmux(monkeypatch: pytest.MonkeyPatch, events: list[str], captured: 
         return ("/tmp/s1.sock", 4243)
 
     monkeypatch.setattr(tmux_mod, "create_session", capture)
+    monkeypatch.setattr(
+        tmux_mod,
+        "capture_tmux_server_fingerprint",
+        lambda **kwargs: FingerprintProbe(
+            ProbeStatus.PRESENT,
+            TmuxServerFingerprint(pid=4243, boot_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", start_ticks=1),
+        ),
+    )
 
 
 def test_create_persists_minted_uuid_and_launches_fresh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -169,7 +182,7 @@ def test_substitution_preserves_workload_values_and_substitutes_extra_args(
     db.close()
 
 
-def test_resume_reads_uuid_and_detects_after_killing_old_workload(
+def test_restart_reads_uuid_and_detects_after_killing_old_workload(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from agentworks.sessions import manager as session_manager
@@ -183,7 +196,13 @@ def test_resume_reads_uuid_and_detects_after_killing_old_workload(
         SessionMode.ADMIN,
         harness_integration_state={"grok-build": {"session_id": sid}},
     )
-    db.update_session_pid("s1", 4242, boot_id="boot-x")
+    db.update_session_runtime(
+        "s1",
+        socket_path="/tmp/s1.sock",
+        pid=4242,
+        boot_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        tmux_server_start_ticks=77,
+    )
 
     events: list[str] = []
     captured: dict[str, str] = {}
@@ -192,16 +211,14 @@ def test_resume_reads_uuid_and_detects_after_killing_old_workload(
     monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, **kwargs: session)
     monkeypatch.setattr(session_manager, "check_session_status", lambda *args, **kwargs: SessionStatus.OK)
 
-    def kill(name: str, **kwargs: object) -> bool:
+    def teardown(*args: object, **kwargs: object) -> None:
         events.append("kill")
-        return True
 
-    monkeypatch.setattr(session_manager, "_kill_session", kill)
-    session_manager.resume_session(
+    monkeypatch.setattr("agentworks.sessions.manager._lifecycle._teardown_session", teardown)
+    session_manager.restart_session(
         db,
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),  # type: ignore[arg-type]
         name="s1",
-        yes=True,
         interaction=TtyInteractionPolicy.REFUSE,
     )
 

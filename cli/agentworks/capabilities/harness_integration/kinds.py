@@ -65,9 +65,9 @@ class _HarnessIntegrationKind:
     prose: TopicProse = TopicProse(
         title="Harness integrations",
         overview="""
-        A harness-integration owns a session's workload: what starts in the pane, what a
-        resume does differently, and which commands have to exist on the target before
-        either is attempted.
+        A harness-integration owns a session's workload: what starts in the pane, how an
+        ordinary start continues existing harness state when possible, and which commands
+        have to exist on the target before launch.
 
         Integrations are code, and a session-template selects one by writing its name
         inside `spec.harness_integration`. The keys allowed beside that name are the
@@ -114,10 +114,10 @@ def _readiness(name: str, impl: Any) -> Readiness:
 
 HARNESS_INTEGRATION_DESCRIPTOR = CapabilityKindDescriptor(
     kind="harness-integration",
-    contract_version=2,
+    contract_version=1,
     implementation_contract=HarnessIntegration,
     registry=_registry,
-    required_operations=frozenset({"start", "resume"}),
+    required_operations=frozenset({"start"}),
     # Empty: HarnessIntegration supplies every non-operation member a
     # subclass needs.
     required_attributes=frozenset(),

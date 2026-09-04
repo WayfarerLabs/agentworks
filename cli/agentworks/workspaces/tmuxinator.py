@@ -15,7 +15,7 @@ import shlex
 from typing import TYPE_CHECKING
 
 from agentworks.sessions.multi_console import ADMIN_SHELL_WINDOW
-from agentworks.sessions.tmux import tmux_cmd
+from agentworks.sessions.tmux import exact_tmux_target, tmux_cmd
 
 if TYPE_CHECKING:
     from agentworks.db import SessionRow
@@ -70,10 +70,11 @@ def generate_config(
     paths = socket_paths or {}
     for session in sessions or []:
         q_session = shlex.quote(session.name)
+        q_exact_session = exact_tmux_target(session.name)
         sock = paths.get(session.name, session.socket_path)
         # Wrapper: unset TMUX for nesting, loop attach while session exists
-        has_cmd = tmux_cmd(f"has-session -t {q_session}", sock)
-        attach_cmd = tmux_cmd(f"attach -t {q_session}", sock)
+        has_cmd = tmux_cmd(f"has-session -t {q_exact_session}", sock)
+        attach_cmd = tmux_cmd(f"attach -t {q_exact_session}", sock)
         wrapper = (
             f"unset TMUX; "
             f"while {has_cmd} 2>/dev/null; do "

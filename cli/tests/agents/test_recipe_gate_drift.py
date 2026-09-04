@@ -18,8 +18,8 @@ from the descriptor table) and the harness-integration-factory-caller pattern:
    until its command entry is added here and gated.
 2. Each of the six COMMAND ENTRIES calls ``ensure_recipe_enabled``, and
    the two entries that call the realize/init function in-body gate BEFORE it.
-   ``resume_session`` is entry-only: its gate guards the restart/reattach
-   recipe merge and it sits on NO runner chain (restart re-runs no install
+   ``_launch_existing_session`` is entry-only: its gate guards start/restart/reattach
+   recipe merge and it sits on NO runner chain (replacement re-runs no install
    commands), so the caller-set walk cannot anchor it and gate PRESENCE is
    its whole pin.
 
@@ -69,7 +69,7 @@ _ENTRY_GATES: dict[str, str | None] = {
     "create_agent": "realize_agent",
     "reinit_agent": "create_agent_on_vm",
     "_build_session_graph": None,  # session create + --new-agent
-    "resume_session": None,  # session resume / reattach; no runner chain (see docstring)
+    "_launch_existing_session": None,  # session start/restart; no runner chain (see docstring)
 }
 
 _GATE = "ensure_recipe_enabled"

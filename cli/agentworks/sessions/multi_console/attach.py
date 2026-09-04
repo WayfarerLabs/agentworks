@@ -1,7 +1,6 @@
-"""Live-tmux probing, the attach loop, and the high-level attach/delete/list
-entrypoints for named consoles.
+"""Live-tmux probing and high-level lifecycle/list/describe entrypoints.
 
-``kill_session_windows``, ``_console_tmux_exists``, ``_prepare_vm_target_for_attach``,
+``kill_session_windows``, ``_console_tmux_presence``, ``_prepare_vm_target``,
 and ``_live_target`` are monkeypatched by tests directly on the
 ``agentworks.sessions.multi_console`` package object (they intercept, e.g., the
 live-sync path of ``crud.remove_sessions`` or ``restore.restore_session``
@@ -31,10 +30,10 @@ from agentworks.errors import (
 )
 from agentworks.name_filters import validate_name_filters
 from agentworks.resources.access import named_console_template
-from agentworks.sessions.tmux import tmux_cmd
+from agentworks.sessions.tmux import ProbeStatus, exact_tmux_target, tmux_cmd
 from agentworks.vms.manager import gated_vm_boundary
 
-from ._helpers import _require_console, _shell_summary, tmux_session_name
+from ._helpers import _require_console, _shell_summary, tmux_session_name, tmux_staging_name
 from .tmux_build import _build_console_tmux
 
 if TYPE_CHECKING:
@@ -150,7 +149,7 @@ def _attach_loop_wrapper(session_name: str, socket_path: str | None) -> str:
     console's kill-window binding. Names are validated to [a-z0-9_-]+, so
     embedding the raw session_name inside the single-quoted strings is safe.
     """
-    q = shlex.quote(session_name)
+    q = exact_tmux_target(session_name)
     has = tmux_cmd(f"has-session -t {q}", socket_path)
     att = tmux_cmd(f"attach -t {q}", socket_path)
     return f"""\
@@ -178,20 +177,106 @@ while true; do
     else
         echo "Session {session_name} exited (status $rc)."
     fi
-    echo 'Waiting for session to resume...'
+    echo 'Waiting for session to start again...'
     while ! {has} 2>/dev/null; do sleep 2; done
 done
 """
 
 
-def _console_tmux_exists(target: Transport, console_name: str) -> bool:
-    q = shlex.quote(tmux_session_name(console_name))
-    return target.run(f"tmux has-session -t {q} 2>/dev/null", check=False).ok
+def _tmux_session_presence(target: Transport, tmux_name: str) -> ProbeStatus:
+    """Probe an exact console tmux name without conflating failure and absence."""
+    from agentworks.sessions.tmux import _tmux_presence_from_result
+
+    q = exact_tmux_target(tmux_name)
+    return _tmux_presence_from_result(
+        target.run(f"tmux has-session -t {q}", check=False),
+        missing_target_is_absent=True,
+    )
 
 
-def _kill_console_tmux(target: Transport, console_name: str) -> None:
-    q = shlex.quote(tmux_session_name(console_name))
-    target.run(f"tmux kill-session -t {q}", check=False)
+def _console_tmux_presence(target: Transport, console_name: str) -> ProbeStatus:
+    return _tmux_session_presence(target, tmux_session_name(console_name))
+
+
+def _console_runtime_presence(target: Transport, console_name: str) -> tuple[ProbeStatus, ProbeStatus]:
+    """Return canonical and staging presence, refusing no state implicitly."""
+    return (
+        _console_tmux_presence(target, console_name),
+        _tmux_session_presence(target, tmux_staging_name(console_name)),
+    )
+
+
+def _teardown_console_tmux(target: Transport, console_name: str) -> None:
+    """Remove and verify the canonical and staging console runtimes."""
+    from agentworks.sessions.tmux import (
+        ProbeStatus,
+        _test_presence_from_result,
+        probe_tmux_session_after_teardown,
+    )
+
+    names = (tmux_session_name(console_name), tmux_staging_name(console_name))
+    initial = {name: _tmux_session_presence(target, name) for name in names}
+    if any(presence is ProbeStatus.UNKNOWN for presence in initial.values()):
+        raise StateError(
+            f"could not determine console '{console_name}' tmux state",
+            entity_kind="console",
+            entity_name=console_name,
+        )
+    for tmux_name, presence in initial.items():
+        if presence is ProbeStatus.ABSENT:
+            continue
+        q = exact_tmux_target(tmux_name)
+        killed = target.run(f"tmux kill-session -t {q}", check=False)
+        if _test_presence_from_result(killed) is ProbeStatus.UNKNOWN:
+            raise StateError(
+                f"could not remove console '{console_name}' tmux state",
+                entity_kind="console",
+                entity_name=console_name,
+            )
+    final = {name: probe_tmux_session_after_teardown(name, run_command=target.run, socket_path=None) for name in names}
+    if any(presence is not ProbeStatus.ABSENT for presence in final.values()):
+        raise StateError(
+            f"failed to verify removal of console '{console_name}' tmux state",
+            entity_kind="console",
+            entity_name=console_name,
+            hint="Inspect the canonical and staging tmux sessions before retrying.",
+        )
+
+
+def _teardown_console_staging(target: Transport, console_name: str) -> None:
+    from agentworks.sessions.tmux import (
+        ProbeStatus,
+        _test_presence_from_result,
+        probe_tmux_session_after_teardown,
+    )
+
+    staging_name = tmux_staging_name(console_name)
+    presence = _tmux_session_presence(target, staging_name)
+    if presence is ProbeStatus.UNKNOWN:
+        raise StateError(
+            f"could not determine staging tmux state for console '{console_name}'",
+            entity_kind="console",
+            entity_name=console_name,
+        )
+    if presence is ProbeStatus.ABSENT:
+        return
+    q = exact_tmux_target(staging_name)
+    killed = target.run(f"tmux kill-session -t {q}", check=False)
+    if _test_presence_from_result(killed) is ProbeStatus.UNKNOWN:
+        raise StateError(
+            f"could not remove staging tmux state for console '{console_name}'",
+            entity_kind="console",
+            entity_name=console_name,
+        )
+    if (
+        probe_tmux_session_after_teardown(staging_name, run_command=target.run, socket_path=None)
+        is not ProbeStatus.ABSENT
+    ):
+        raise StateError(
+            f"failed to remove staging tmux state for console '{console_name}'",
+            entity_kind="console",
+            entity_name=console_name,
+        )
 
 
 def kill_session_windows(
@@ -218,9 +303,16 @@ def kill_session_windows(
         by_console.setdefault(con, []).append(sess)
     try:
         for console_name, session_names in by_console.items():
-            if not _mc._console_tmux_exists(target, console_name):
+            presence = _mc._console_tmux_presence(target, console_name)
+            if presence is ProbeStatus.UNKNOWN:
+                raise StateError(
+                    f"could not determine console '{console_name}' tmux state",
+                    entity_kind="console",
+                    entity_name=console_name,
+                )
+            if presence is ProbeStatus.ABSENT:
                 continue
-            q_con = shlex.quote(tmux_session_name(console_name))
+            q_con = exact_tmux_target(tmux_session_name(console_name))
             for session_name in session_names:
                 target.run(
                     f"tmux kill-window -t {q_con}:{shlex.quote(session_name)}",
@@ -230,12 +322,12 @@ def kill_session_windows(
         raise
     except Exception as exc:
         affected = sorted({c for c, _ in pairs})
-        recovery = "; ".join(f"agw console attach {shlex.quote(c)} --recreate" for c in affected)
+        recovery = "; ".join(f"agw console restart {shlex.quote(c)}" for c in affected)
         output.warn(f"live console window cleanup failed: {exc}. Stale windows may persist; rebuild with: {recovery}")
 
 
 @contextlib.contextmanager
-def _prepare_vm_target_for_attach(
+def _prepare_vm_target(
     db: Database,
     config: Config,
     vm_name: str,
@@ -246,14 +338,14 @@ def _prepare_vm_target_for_attach(
     """Ensure the VM is running (starting it if needed) and yield
     ``(vm, target)`` inside the activation gate's held-active span.
 
-    Use this only for explicit user-driven attach flows where booting a
+    Use this for explicit user-driven console operations where booting a
     stopped VM is acceptable. Raises on failure. Orchestrated
     (``vms.manager.gated_vm_boundary``): the gate replaces the
     imperative ``bind_platform`` + ``ensure_active`` pair (opening
     BEFORE the preflight sweep), and the span it yields within is the
     ``vm_active`` hold the callers used to open themselves, covering
     their SSH-heavy bodies and interactive attaches. The console is
-    not a node: attaching provisions nothing, so the graph is the live
+    not a node: these operations provision nothing, so the graph is the live
     VM alone, and no env-chain target registers (console build panes
     resolve their own targets on the documented conditional-need
     path).
@@ -311,7 +403,7 @@ def _live_best_effort(action: str, *, console_name: str) -> Iterator[None]:
 
     The DB has already mutated by the time we reach here, so any partial
     live-tmux failure leaves DB and tmux out of sync until the operator
-    reattaches with --recreate. The warning includes the actual console name
+    runs ``console restart``. The warning includes the actual console name
     so the suggested recovery command can be copy/pasted as-is.
     """
     try:
@@ -322,7 +414,7 @@ def _live_best_effort(action: str, *, console_name: str) -> Iterator[None]:
         q_name = shlex.quote(console_name)
         output.warn(
             f"live console sync failed ({action}): {exc}. "
-            f"DB state was updated; run `agw console attach {q_name} --recreate` "
+            f"DB state was updated; run `agw console restart {q_name}` "
             f"to rebuild tmux from the new state."
         )
 
@@ -403,7 +495,7 @@ def console_description(db: Database, *, name: str) -> ConsoleDescription:
 
     Output describes the DB-declared target state; live tmux state may
     differ (panes can be killed, layouts changed in tmux, etc.). The next
-    `attach` / `attach --recreate` / `restore-session` reconciles live
+    `restart` / `restore-session` reconciles live
     state back to what's shown here.
     """
     console = _require_console(db, name)
@@ -470,20 +562,114 @@ def describe_console(db: Database, *, name: str) -> None:
 # -- High-level entrypoints ------------------------------------------------
 
 
-def attach_console(
+def _realize_console(
     db: Database,
     config: Config,
     *,
     name: str,
-    recreate: bool = False,
-    allow_nesting: bool = False,
+    replace_running: bool,
     interaction: TtyInteractionPolicy,
-) -> int:
-    """Attach to a named console, building or rebuilding tmux state as needed.
+) -> None:
+    """Start a console, replacing its runtime only when requested."""
+    from agentworks.bootstrap import load_request_registry
+    from agentworks.secrets import resolve_for_command
 
-    Returns the interactive attach's exit code; the CLI layer owns the
-    translation to process exit (check 9: no sys.exit in the service).
-    """
+    console = _require_console(db, name)
+    if not db.list_console_sessions(name) and not console.admin_shell:
+        raise StateError(
+            f"console '{name}' has no configured windows",
+            entity_kind="console",
+            entity_name=name,
+            hint="Add a session or enable the admin shell before starting it.",
+        )
+    registry = load_request_registry(config, live_database=db)
+    output.info(f"Checking console '{name}' runtime...")
+    with _mc._prepare_vm_target(
+        db,
+        config,
+        console.vm_name,
+        registry=registry,
+        interaction=interaction,
+    ) as (vm, target):
+        canonical, staging = _console_runtime_presence(target, name)
+        if ProbeStatus.UNKNOWN in {canonical, staging}:
+            raise StateError(
+                f"could not determine console '{name}' tmux state",
+                entity_kind="console",
+                entity_name=name,
+            )
+        if not replace_running:
+            if staging is ProbeStatus.PRESENT:
+                _teardown_console_staging(target, name)
+            if canonical is ProbeStatus.PRESENT:
+                output.result(f"Console '{name}' is already running")
+                return
+        secret_values = resolve_for_command(
+            _mc._console_build_secret_targets(db, registry, console=console, vm=vm),
+            config,
+            registry,
+            allow_transient_auto_declare=True,
+            interaction=interaction,
+        )
+        if replace_running:
+            _teardown_console_tmux(target, name)
+        _build_console_tmux(
+            target,
+            db,
+            registry,
+            console,
+            vm,
+            values=secret_values,
+            layout=named_console_template(registry).tmux_layout,
+        )
+    output.result(f"Console '{name}' {'restarted' if replace_running else 'started'}")
+
+
+def start_console(
+    db: Database,
+    config: Config,
+    *,
+    name: str,
+    interaction: TtyInteractionPolicy,
+) -> None:
+    _realize_console(db, config, name=name, replace_running=False, interaction=interaction)
+
+
+def restart_console(
+    db: Database,
+    config: Config,
+    *,
+    name: str,
+    interaction: TtyInteractionPolicy,
+) -> None:
+    _realize_console(db, config, name=name, replace_running=True, interaction=interaction)
+
+
+def stop_console(
+    db: Database,
+    config: Config,
+    *,
+    name: str,
+    interaction: TtyInteractionPolicy,
+) -> None:
+    from agentworks.bootstrap import load_request_registry
+
+    console = _require_console(db, name)
+    registry = load_request_registry(config, live_database=db)
+    output.info(f"Checking console '{name}' runtime...")
+    with _mc._prepare_vm_target(
+        db,
+        config,
+        console.vm_name,
+        registry=registry,
+        interaction=interaction,
+    ) as (_vm, target):
+        _teardown_console_tmux(target, name)
+    output.result(f"Console '{name}' stopped")
+
+
+def refuse_console_nesting(*, allow_nesting: bool) -> None:
+    """Refuse a nested console operation before any lifecycle mutation."""
     if os.environ.get("TMUX") and not allow_nesting:
         raise StateError(
             "already inside a tmux session. Nesting is not recommended "
@@ -491,72 +677,51 @@ def attach_console(
             hint="Pass --allow-nesting to override.",
         )
 
+
+def attach_console(
+    db: Database,
+    config: Config,
+    *,
+    name: str,
+    allow_nesting: bool = False,
+    interaction: TtyInteractionPolicy,
+) -> int:
+    """Attach to an already-running named console.
+
+    Returns the interactive attach's exit code; the CLI layer owns the
+    translation to process exit (check 9: no sys.exit in the service).
+    """
+    refuse_console_nesting(allow_nesting=allow_nesting)
+
     from agentworks.bootstrap import load_request_registry
 
     console = _require_console(db, name)
     registry = load_request_registry(config, live_database=db)
+    output.info(f"Checking console '{name}' runtime...")
     # The gate's held-active span covers the build and the interactive
     # attach (the hold this caller used to open itself).
-    with _mc._prepare_vm_target_for_attach(
+    with _mc._prepare_vm_target(
         db,
         config,
         console.vm_name,
         registry=registry,
         interaction=interaction,
-    ) as (vm, target):
-        exists = _mc._console_tmux_exists(target, name)
-        layout = named_console_template(registry).tmux_layout
-
-        # Eager-prompting orchestration: the
-        # build path opens new shells (admin shell + helper shell panes
-        # per session window). Resolve every referenced secret BEFORE
-        # _build_console_tmux issues the first tmux command. The plain
-        # attach path (tmux session already exists) opens no new shells
-        # so it skips eager-resolve: console attach joins existing
-        # shells and consumes no secrets.
-        # Conditional-need exception to the one-boundary-resolve
-        # contract: whether a build is needed is only knowable from live
-        # tmux state, post-boundary (the gate and its boundary resolve
-        # already ran inside _prepare_vm_target_for_attach above). The
-        # --recreate half of the guard IS knowable pre-boundary; it
-        # deliberately shares this late resolve so both build paths stay
-        # one code shape rather than forking the target computation
-        # across the boundary.
-        if recreate or not exists:
-            from agentworks.secrets import resolve_for_command
-
-            secret_values = resolve_for_command(
-                _mc._console_build_secret_targets(db, registry, console=console, vm=vm),
-                config,
-                registry,
-                allow_transient_auto_declare=True,
-                interaction=interaction,
+    ) as (_vm, target):
+        canonical, staging = _console_runtime_presence(target, name)
+        if ProbeStatus.UNKNOWN in {canonical, staging}:
+            raise StateError(
+                f"could not determine console '{name}' tmux state",
+                entity_kind="console",
+                entity_name=name,
+                hint="Retry after transport access is reliable.",
             )
-
-        if recreate and exists:
-            output.info(f"Rebuilding console '{name}' (--recreate)...")
-            _build_console_tmux(
-                target,
-                db,
-                registry,
-                console,
-                vm,
-                values=secret_values,
-                layout=layout,
+        if canonical is not ProbeStatus.PRESENT or staging is not ProbeStatus.ABSENT:
+            raise StateError(
+                f"console '{name}' is not ready to attach",
+                entity_kind="console",
+                entity_name=name,
+                hint=f"Run `agw console start {name}`.",
             )
-        elif not exists:
-            output.info(f"Building console '{name}' on first attach...")
-            _build_console_tmux(
-                target,
-                db,
-                registry,
-                console,
-                vm,
-                values=secret_values,
-                layout=layout,
-            )
-        else:
-            output.info(f"Attaching to running console '{name}'.")
 
         from agentworks.terminal import clear_screen_on_detach
 
@@ -564,7 +729,7 @@ def attach_console(
         # A console attach is a full-screen tmux; clear the local screen on
         # detach where we don't trust the terminal to restore cleanly.
         return target.interactive(
-            f"tmux attach -t {shlex.quote(tmux_name)}",
+            f"tmux attach -t {exact_tmux_target(tmux_name)}",
             clear_screen_on_exit=clear_screen_on_detach(config.terminal.clear_on_detach),
         )
 
@@ -587,9 +752,7 @@ def delete_console(
         live = _mc._live_target(db, config, console.vm_name)
         if live is not None:
             _vm, target = live
-            _kill_console_tmux(target, name)
-    except AgentworksError:
-        raise
+            _teardown_console_tmux(target, name)
     except Exception as exc:
         teardown_failed = True
         output.warn(f"failed to tear down tmux session for '{name}': {exc}")
@@ -597,8 +760,8 @@ def delete_console(
     db.delete_console(name)
     if teardown_failed:
         output.info(
-            f"Console '{name}' removed from database. Any stale tmux session on "
-            f"the VM will be replaced on next 'aw console attach'."
+            f"Console '{name}' removed from database. Inspect the VM for stale "
+            f"'{tmux_session_name(name)}' or '{tmux_staging_name(name)}' tmux sessions."
         )
     else:
         output.result(f"Console '{name}' deleted.")
@@ -614,8 +777,7 @@ def offer_delete_if_empty_consoles(
     """For each named console now left with no configured sessions, offer to
     delete it (interactive) or report-but-keep it (--yes / non-interactive).
 
-    An empty console is an operator dead end: ``console attach`` warns "has no
-    members; skipping tmux build". This is the shared "console is now empty"
+    An empty console cannot be started. This is the shared "console is now empty"
     treatment both ``session delete`` (via the FK cascade, issue #248/#261) and
     ``console remove-sessions`` (issue #265) reach after removing a session's
     console membership; both route here so the two paths stay byte-identical.

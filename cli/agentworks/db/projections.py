@@ -43,6 +43,7 @@ class SessionReportStatus(StrEnum):
     RUNNING = "running"
     STOPPED = "stopped"
     BROKEN = "broken"
+    RESIDUAL = "residual"
     UNKNOWN = "unknown"
     UNAVAILABLE = "unavailable"
 

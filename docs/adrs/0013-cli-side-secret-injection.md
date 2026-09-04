@@ -90,20 +90,21 @@ site.
    (which Kubernetes External Secrets Operator and similar systems need because they materialize
    values into long-lived stores). Operator rotates a secret in their vault → the next shell-open
    picks up the new value automatically. Existing shells retain the env they captured at create
-   time, consistent with FRD R5 "Attach inherits create-time env" and the broader "resume to pick up
-   new values" contract.
+   time, consistent with FRD R5 "Attach inherits create-time env" and the broader "start or restart
+   to pick up new values" contract.
 
 ### Negative
 
 1. **The CLI handles secrets on every invocation that opens a shell.** In the file model, the
    create-time command was the only place secrets had to be known; later commands that open new
-   shells (`session resume`, `console add-shell`, `agent exec`, `vm exec`, etc.) didn't need them.
-   With CLI injection, every such command needs the secret available through the active source
-   chain. (`session attach` is unaffected: it joins the existing tmux server's captured env, no
-   re-resolution.) Operators configure a suitable `secret-source`, including a vault-backed source
-   when appropriate, so credentials are available whenever `agw` runs. This is a real cost: the CLI
-   process handles secret material more often, on the presumed-trusted operator workstation rather
-   than the less-trusted VM. Net acceptable for agentworks's use case, but worth naming.
+   shells (`session start` / `session restart`, `console add-shell`, `agent exec`, `vm exec`, etc.)
+   didn't need them. With CLI injection, every such command needs the secret available through the
+   active source chain. (`session attach` is unaffected: it joins the existing tmux server's
+   captured env, no re-resolution.) Operators configure a suitable `secret-source`, including a
+   vault-backed source when appropriate, so credentials are available whenever `agw` runs. This is a
+   real cost: the CLI process handles secret material more often, on the presumed-trusted operator
+   workstation rather than the less-trusted VM. Net acceptable for agentworks's use case, but worth
+   naming.
 
 2. **SSH command line exposure window.** The `export KEY=val && cmd` prelude appears on the SSH
    command line, which is briefly visible via `ps` to any process that can read it during the start

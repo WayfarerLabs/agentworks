@@ -643,3 +643,9 @@ def set_suppress_deprecations(value: bool) -> None:
 def deprecations_suppressed() -> bool:
     """True iff --no-deprecations was passed for this invocation."""
     return _suppress_deprecations
+
+
+def deprecation(message: str) -> None:
+    """Emit one suppressible compatibility warning."""
+    if not deprecations_suppressed():
+        warn(message)

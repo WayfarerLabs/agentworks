@@ -7,9 +7,9 @@ the unit test cannot prove on its own.
   here is how a namesake would inherit a dead session's conversation),
   provisions the recorder, clears any stale recording, and persists an
   EMPTY ``codex`` namespace;
-- the binding round trip through a real resume: a session whose recorder
+- the binding round trip through a real restart: a session whose recorder
   file already holds a codex-reported thread id adopts it, resumes it, and
-  persists it to the row, and the NEXT resume reads the stored id back
+  persists it to the row, and the NEXT restart reads the stored id back
   without re-reading anything else;
 - the discovery fallback and the picker leaf through the same call site;
 - ``codex`` and ``claude-code`` state coexist in one row blob without
@@ -34,6 +34,7 @@ import pytest
 
 from agentworks.db import Database, SessionMode, SessionStatus
 from agentworks.secrets.policy import TtyInteractionPolicy
+from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 
 from ..conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
 
@@ -141,6 +142,14 @@ def _capture_pane_command(monkeypatch: pytest.MonkeyPatch, events: list[str], ca
         return ("/tmp/s1.sock", 4243)
 
     monkeypatch.setattr(tmux_mod, "create_session", _capture)
+    monkeypatch.setattr(
+        tmux_mod,
+        "capture_tmux_server_fingerprint",
+        lambda **kwargs: FingerprintProbe(
+            ProbeStatus.PRESENT,
+            TmuxServerFingerprint(pid=4243, boot_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", start_ticks=1),
+        ),
+    )
 
 
 def _common_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -150,11 +159,11 @@ def _common_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
     stub_vm_gates(monkeypatch)
     stub_session_resolvers(monkeypatch)
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *a, **k: None)
-    monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: "boot-x")
+    monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
     monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
 
 
-def _resume_stubs(
+def _restart_stubs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -166,7 +175,13 @@ def _resume_stubs(
 
     db = _seed_db(tmp_path)
     db.insert_session("s1", "ws1", "codex", SessionMode.ADMIN, harness_integration_state=stored_state)
-    db.update_session_pid("s1", 4242, boot_id="boot-x")
+    db.update_session_runtime(
+        "s1",
+        socket_path="/tmp/s1.sock",
+        pid=4242,
+        boot_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        tmux_server_start_ticks=77,
+    )
 
     captured: dict[str, str] = {}
     _patch_transport(monkeypatch, target)
@@ -177,22 +192,20 @@ def _resume_stubs(
     monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, **k: session)
     monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: SessionStatus.OK)
 
-    def _spy_kill(name: str, **kwargs: object) -> bool:
+    def _spy_teardown(*args: object, **kwargs: object) -> None:
         events.append("kill")
-        return True
 
-    monkeypatch.setattr(session_manager, "_kill_session", _spy_kill)
+    monkeypatch.setattr("agentworks.sessions.manager._lifecycle._teardown_session", _spy_teardown)
     return db, captured
 
 
-def _resume(db: Database) -> None:
-    from agentworks.sessions.manager import resume_session
+def _restart(db: Database) -> None:
+    from agentworks.sessions.manager import restart_session
 
-    resume_session(
+    restart_session(
         db,
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),
         name="s1",
-        yes=True,
         interaction=TtyInteractionPolicy.REFUSE,
     )  # type: ignore[arg-type]
 
@@ -204,11 +217,11 @@ def test_create_launches_fresh_without_probing_any_session_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``session create`` mints a brand-new row, which by definition owns no
-    codex conversation, so the op adopts nothing and probes nothing: this
+    codex conversation, so the op adopts nothing. This
     target would happily report a recording AND a discovery candidate, and
-    neither probe is even issued. Only readiness talks to the target. The
-    row's codex namespace stays empty, and the pane provisions the recorder
-    so the FOLLOWING resume has something to bind."""
+    rollout-discovery probe is not issued; the recorder is only fingerprinted
+    so a stale notification cannot undo ``--force-new``. The pane provisions
+    the recorder so the following start has something new to bind."""
     from agentworks.sessions.manager import create_session
 
     db = _seed_db(tmp_path)
@@ -228,12 +241,11 @@ def test_create_launches_fresh_without_probing_any_session_state(
         interaction=TtyInteractionPolicy.REFUSE,
     )
 
-    assert set(events) == {"probe", "tmux_create"}  # readiness only: no state probe
+    assert set(events) == {"probe", "read_recorder", "tmux_create"}
     session = db.get_session("s1")
     assert session is not None
-    assert session.harness_integration_state == {"codex": {}}  # no id adopted at create
+    assert session.harness_integration_state == {"codex": {"fresh_pending": _SID}}
     command = captured["command"]
-    assert "starting new session s1" in command
     assert 'chmod +x "$HOME"/.agentworks/codex/.record-thread-v1.sh."$$"' in command
     # No namesake's binding survives a create.
     assert 'rm -f "$HOME"/.agentworks/codex/s1.thread' in command
@@ -243,18 +255,18 @@ def test_create_launches_fresh_without_probing_any_session_state(
     db.close()
 
 
-# -- resume: the notify-binding round trip ------------------------------------
+# -- restart: the notify-binding round trip ------------------------------------
 
 
-def test_resume_adopts_the_recorded_thread_id_and_persists_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_restart_adopts_the_recorded_thread_id_and_persists_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The binding crux: codex reported this conversation's thread id to
     the recorder during the last launch, so the next op reads it, resumes
     it, and the id lands on the row in the namespaced shape."""
     events: list[str] = []
     target = _CodexTarget(events, recorded=_SID, rollout_present=True)
-    db, captured = _resume_stubs(tmp_path, monkeypatch, target=target, events=events, stored_state={"codex": {}})
+    db, captured = _restart_stubs(tmp_path, monkeypatch, target=target, events=events, stored_state={"codex": {}})
 
-    _resume(db)
+    _restart(db)
 
     assert f"resume {_SID}" in captured["command"]
     assert "resuming session s1" in captured["command"]
@@ -268,17 +280,17 @@ def test_resume_adopts_the_recorded_thread_id_and_persists_it(tmp_path: Path, mo
     db.close()
 
 
-def test_resume_resumes_the_stored_id_without_a_recording(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_restart_resumes_the_stored_id_without_a_recording(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The round trip's second half: with the id stored, a later op
     resumes it verbatim even though the recorder file is gone (the
     recording is a binding mechanism, not the system of record)."""
     events: list[str] = []
     target = _CodexTarget(events, rollout_present=True)
-    db, captured = _resume_stubs(
+    db, captured = _restart_stubs(
         tmp_path, monkeypatch, target=target, events=events, stored_state={"codex": {"session_id": _SID}}
     )
 
-    _resume(db)
+    _restart(db)
 
     assert f"resume {_SID}" in captured["command"]
     assert "resuming session s1" in captured["command"]
@@ -290,7 +302,7 @@ def test_resume_resumes_the_stored_id_without_a_recording(tmp_path: Path, monkey
     db.close()
 
 
-def test_resume_adopts_a_discovered_rollout_when_nothing_is_recorded(
+def test_restart_adopts_a_discovered_rollout_when_nothing_is_recorded(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The fallback through the real call site: no recording and no stored
@@ -298,9 +310,9 @@ def test_resume_adopts_a_discovered_rollout_when_nothing_is_recorded(
     uuid and persists it."""
     events: list[str] = []
     target = _CodexTarget(events, discovered=f"{_ROLLOUT}\n", rollout_present=True)
-    db, captured = _resume_stubs(tmp_path, monkeypatch, target=target, events=events, stored_state={"codex": {}})
+    db, captured = _restart_stubs(tmp_path, monkeypatch, target=target, events=events, stored_state={"codex": {}})
 
-    _resume(db)
+    _restart(db)
 
     assert f"resume {_SID}" in captured["command"]
     assert "identified this session" in captured["command"]
@@ -311,7 +323,7 @@ def test_resume_adopts_a_discovered_rollout_when_nothing_is_recorded(
     db.close()
 
 
-def test_resume_with_several_candidates_opens_the_picker_and_binds_nothing(
+def test_restart_with_several_candidates_opens_the_picker_and_binds_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Ambiguity reaches the operator as codex's own session picker in the
@@ -319,9 +331,9 @@ def test_resume_with_several_candidates_opens_the_picker_and_binds_nothing(
     turn binds whatever the human picked."""
     events: list[str] = []
     target = _CodexTarget(events, discovered=f"{_ROLLOUT}\n{_OTHER_ROLLOUT}\n")
-    db, captured = _resume_stubs(tmp_path, monkeypatch, target=target, events=events, stored_state={"codex": {}})
+    db, captured = _restart_stubs(tmp_path, monkeypatch, target=target, events=events, stored_state={"codex": {}})
 
-    _resume(db)
+    _restart(db)
 
     assert "exec codex resume -c tui.resume_cwd=current" in captured["command"]
     assert "could not identify this session" in captured["command"]
@@ -331,7 +343,7 @@ def test_resume_with_several_candidates_opens_the_picker_and_binds_nothing(
     db.close()
 
 
-def test_resume_with_a_gone_rollout_drops_the_id_and_launches_fresh(
+def test_restart_with_a_gone_rollout_drops_the_id_and_launches_fresh(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The pinned archived policy end to end: a bound id whose rollout is
@@ -339,11 +351,11 @@ def test_resume_with_a_gone_rollout_drops_the_id_and_launches_fresh(
     launches fresh with the stale-specific decision line."""
     events: list[str] = []
     target = _CodexTarget(events, rollout_present=False)
-    db, captured = _resume_stubs(
+    db, captured = _restart_stubs(
         tmp_path, monkeypatch, target=target, events=events, stored_state={"codex": {"session_id": _SID}}
     )
 
-    _resume(db)
+    _restart(db)
 
     assert "archived or gone; starting new session s1" in captured["command"]
     refreshed = db.get_session("s1")
@@ -352,13 +364,13 @@ def test_resume_with_a_gone_rollout_drops_the_id_and_launches_fresh(
     db.close()
 
 
-def test_resume_retires_a_marker_era_blob_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_restart_retires_a_marker_era_blob_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A row written by the marker-era integration (2026-08-01 through
     2026-08-04) still resumes: the retired ``discovery_marker`` key is
     dropped from the persisted blob and its file removed by the pane."""
     events: list[str] = []
     target = _CodexTarget(events, rollout_present=True)
-    db, captured = _resume_stubs(
+    db, captured = _restart_stubs(
         tmp_path,
         monkeypatch,
         target=target,
@@ -366,7 +378,7 @@ def test_resume_retires_a_marker_era_blob_key(tmp_path: Path, monkeypatch: pytes
         stored_state={"codex": {"session_id": _SID, "discovery_marker": _LEGACY_MARKER}},
     )
 
-    _resume(db)
+    _restart(db)
 
     assert f"resume {_SID}" in captured["command"]
     assert f'rm -f "$HOME"/{_LEGACY_MARKER}' in captured["command"]
@@ -387,7 +399,7 @@ def test_codex_and_claude_code_state_coexist_in_one_blob(tmp_path: Path, monkeyp
     ``session_id``) nor dropped on persist."""
     events: list[str] = []
     target = _CodexTarget(events, recorded=_SID, rollout_present=True)
-    db, captured = _resume_stubs(
+    db, captured = _restart_stubs(
         tmp_path,
         monkeypatch,
         target=target,
@@ -395,7 +407,7 @@ def test_codex_and_claude_code_state_coexist_in_one_blob(tmp_path: Path, monkeyp
         stored_state={"claude-code": {"session_id": _CLAUDE_SID}, "codex": {}},
     )
 
-    _resume(db)
+    _restart(db)
 
     # codex did NOT inherit the claude id; it bound the one codex reported.
     assert f"resume {_SID}" in captured["command"]

@@ -58,7 +58,7 @@ agw session attach my-session
 agw session attach my-session    # You'll pick up right where you left off
 agw session stop my-session      # Sessions can be stopped (or can exit on their own)
 agw session list
-agw session resume my-session
+agw session start my-session
 agw session attach my-session
 agw session delete my-session    # When you're done with it. Agent and workspace are preserved unless this was their last session (see below).
 
@@ -100,6 +100,9 @@ agw session delete s1                      # Reports that my-console still refer
 
 agw console delete my-console              # Extra shells are lost but sessions are preserved
 ```
+
+Automation upgrading from the former session-resume or console-create-on-attach grammar should
+follow [Upgrading to 0.19](../docs/guides/upgrading-to-0.19.md).
 
 ## Prerequisites
 
