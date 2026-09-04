@@ -45,7 +45,6 @@ from ._helpers import (
     _VmAdminEnvScopes,
     validate_slug,
 )
-from ._status import observe_vm_statuses, project_vm_status
 from .boundary import (
     _live_vm_boundary,
     gated_vm_boundary,
@@ -103,9 +102,7 @@ __all__ = [
     "gated_vm_boundary",
     "gated_vm_platform_recovery_boundary",
     "list_vms",
-    "observe_vm_statuses",
     "port_forward_vm",
-    "project_vm_status",
     "reinit_vm",
     "rejoin_tailscale",
     "rekey_vm",

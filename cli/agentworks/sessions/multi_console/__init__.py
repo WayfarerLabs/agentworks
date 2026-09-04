@@ -42,11 +42,7 @@ from ._helpers import (
     tmux_session_name,
     tmux_staging_name,
 )
-from ._status import (
-    ConsoleStatus,
-    classify_console_status,
-    observe_console_statuses,
-)
+from ._status import observe_console_statuses
 from .attach import (
     _attach_loop_wrapper,
     _console_runtime_presence,
@@ -102,7 +98,6 @@ from .tmux_build import (
 
 __all__ = [
     "ADMIN_SHELL_WINDOW",
-    "ConsoleStatus",
     "PreserveEnvMemo",
     "SessionSpec",
     "SessionWindowBuild",
@@ -134,7 +129,6 @@ __all__ = [
     "attach_console",
     "console_description",
     "console_listing",
-    "classify_console_status",
     "create_console",
     "default_shells",
     "delete_console",

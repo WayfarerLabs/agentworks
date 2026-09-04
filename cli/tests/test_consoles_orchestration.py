@@ -26,7 +26,6 @@ from agentworks.errors import (
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.manager._status import _encoded_probe_field
 from agentworks.sessions.multi_console import (
-    ConsoleStatus,
     add_sessions,
     add_shell,
     delete_console,
@@ -39,6 +38,7 @@ from agentworks.sessions.multi_console import (
 from agentworks.sessions.multi_console import (
     create_console as _real_create_console,
 )
+from agentworks.sessions.multi_console._status import ConsoleStatus
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
 from tests.conftest import _FakeResult, _FakeTarget
 from tests.console_helpers import create_console_record as create_console

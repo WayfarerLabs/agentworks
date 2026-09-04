@@ -33,6 +33,7 @@ from agentworks.capabilities.vm_platform.tailscale_join import TAILSCALE_JOIN_ST
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import ProvisioningError, StateError
+from agentworks.naming import NAME_RE
 from agentworks.schema import AgwModel, NonEmptyStr
 from agentworks.ssh import SSH_DEFAULT_RETRIES, SSHError, SSHTarget
 from agentworks.ssh import run as ssh_run
@@ -250,7 +251,20 @@ class LimaPlatform(VMPlatform):
                 entity_kind="vm",
                 entity_name=vm.name,
             )
-        return str(name)
+        # This value normally comes from create(), but backup/restore and
+        # legacy migration make the database a trust boundary. Every Lima
+        # command interpolates the instance name into a shell command (and
+        # remote placement adds another login-shell hop), so reject stored
+        # values outside the resource-name character grammar before any
+        # transport sees them. Length is not part of this shell-safety
+        # boundary; imposing today's cap here could reject historical rows.
+        if not isinstance(name, str) or NAME_RE.fullmatch(name) is None:
+            raise StateError(
+                f"VM '{vm.name}' has an invalid lima instance_name in its platform metadata",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+        return name
 
     def _run_lima(
         self,
@@ -770,7 +784,7 @@ class LimaPlatform(VMPlatform):
         output.info(f"Lima VM '{vm.name}' deleted")
 
     def display_backend_name(self, vm: VMRow) -> str:
-        instance = str(vm.platform_metadata.get("instance_name", vm.name))
+        instance = self._instance_name(vm)
         if self.is_remote:
             return f"{instance}@{self._remote_host}"
         return instance

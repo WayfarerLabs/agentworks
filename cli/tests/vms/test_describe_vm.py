@@ -14,6 +14,7 @@ import pytest
 
 from agentworks.config import load_config
 from agentworks.db import AppliedStateKey, VMStatus
+from agentworks.errors import StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from tests.conftest import stub_vm_ssh_identity
@@ -21,6 +22,7 @@ from tests.conftest import stub_vm_ssh_identity
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
+    from tests.conftest import CapturedOutput
 
 
 @pytest.fixture(autouse=True)
@@ -40,7 +42,7 @@ def config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Config:
 
 
 class _Platform:
-    def __init__(self, status: VMStatus, outside_snapshot=None) -> None:  # noqa: ANN001
+    def __init__(self, status: VMStatus | StateError, outside_snapshot=None) -> None:  # noqa: ANN001
         self._status = status
         self._outside_snapshot = outside_snapshot
 
@@ -58,6 +60,8 @@ class _Platform:
 
     def status(self, vm: VMRow, ctx: object) -> VMStatus:
         self._check_boundary("provider-status")
+        if isinstance(self._status, StateError):
+            raise self._status
         return self._status
 
 
@@ -66,7 +70,7 @@ def _describe(
     config: Config,
     monkeypatch: pytest.MonkeyPatch,
     *,
-    status: VMStatus,
+    status: VMStatus | StateError,
 ) -> list[str]:
     """Run describe against a stubbed platform; return the names the
     live-resource query was invoked for."""
@@ -108,6 +112,39 @@ def test_running_vm_still_reads_live_resources(
 ) -> None:
     calls = _describe(db, config, monkeypatch, status=VMStatus.RUNNING)
     assert calls == ["dvm"]
+
+
+def test_unknown_vm_status_emits_one_human_warning(
+    db: Database,
+    config: Config,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    _describe(db, config, monkeypatch, status=VMStatus.UNKNOWN)
+
+    assert len(captured_output.warnings) == 1
+
+
+def test_known_vm_status_emits_no_human_warning(
+    db: Database,
+    config: Config,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    _describe(db, config, monkeypatch, status=VMStatus.RUNNING)
+
+    assert captured_output.warnings == []
+
+
+def test_vm_status_diagnostic_is_not_followed_by_a_duplicate_generic_warning(
+    db: Database,
+    config: Config,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    _describe(db, config, monkeypatch, status=StateError("provider state unavailable"))
+
+    assert len(captured_output.warnings) == 1
 
 
 def test_vm_description_closes_structural_snapshot_before_external_reads(

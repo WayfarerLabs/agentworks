@@ -11,6 +11,7 @@ import pytest
 
 from agentworks.capabilities.base import RunContext
 from agentworks.db import VMStatus
+from agentworks.errors import StateError
 
 
 def _vm() -> object:
@@ -60,6 +61,49 @@ def test_lima_status_uses_bounded_provider_call(monkeypatch: pytest.MonkeyPatch)
 
     assert platform.status(_vm(), RunContext()) is VMStatus.RUNNING  # type: ignore[arg-type]
     assert calls == [{"check": False, "timeout": 10}]
+
+
+def test_remote_lima_status_rejects_corrupt_stored_instance_name_before_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.capabilities.vm_platform import lima as lima_mod
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    def refuse_transport(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("transport must not receive corrupt persisted state")
+
+    monkeypatch.setattr(lima_mod, "ssh_run", refuse_transport)
+    platform = LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "host.example"}})
+    vm = SimpleNamespace(name="v1", platform_metadata={"instance_name": "v1; touch /tmp/pwned"})
+
+    with pytest.raises(StateError) as exc_info:
+        platform.status(vm, RunContext())  # type: ignore[arg-type]
+
+    assert exc_info.value.entity_kind == "vm"
+    assert exc_info.value.entity_name == "v1"
+    with pytest.raises(StateError):
+        platform.display_backend_name(vm)  # type: ignore[arg-type]
+
+
+def test_remote_lima_status_accepts_valid_historical_instance_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.capabilities.vm_platform import lima as lima_mod
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    calls: list[str] = []
+
+    def run(_target: object, command: str, **_kwargs: object) -> SimpleNamespace:
+        calls.append(command)
+        return SimpleNamespace(stdout='{"status":"Running"}\n')
+
+    monkeypatch.setattr(lima_mod, "ssh_run", run)
+    platform = LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "host.example"}})
+    vm = SimpleNamespace(name="v1", platform_metadata={"instance_name": "legacy--team_vm"})
+
+    assert platform.status(vm, RunContext()) is VMStatus.RUNNING  # type: ignore[arg-type]
+    assert calls == ["limactl list --json legacy--team_vm"]
+    assert platform.display_backend_name(vm) == "legacy--team_vm@host.example"  # type: ignore[arg-type]
 
 
 def test_lima_status_launch_failure_is_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
