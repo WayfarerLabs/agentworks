@@ -35,14 +35,14 @@ def _set_env_value(args: list[str]) -> str | None:
 
 
 def test_base_args_no_env_omits_set_env_flag() -> None:
-    args = _target()._ssh_base_args()
+    args = _target()._ssh_base_args(close_stdin=True)
     assert _set_env_value(args) is None
     assert args[-1] == "agentworks@vm.tailnet"
 
 
 def test_base_args_empty_env_dict_omits_set_env_flag() -> None:
     """``env={}`` is treated the same as ``env=None``: no SetEnv arg."""
-    args = _target()._ssh_base_args(env={})
+    args = _target()._ssh_base_args(env={}, close_stdin=True)
     assert _set_env_value(args) is None
 
 
@@ -115,7 +115,7 @@ def test_set_env_args_handles_non_ascii() -> None:
 def test_base_args_set_env_precedes_host() -> None:
     """The SetEnv -o flag must appear before the user@host positional;
     otherwise OpenSSH parses it as part of the remote command."""
-    args = _target()._ssh_base_args(env={"K": "v"})
+    args = _target()._ssh_base_args(env={"K": "v"}, close_stdin=True)
     host_index = args.index("agentworks@vm.tailnet")
     o_index = next(i for i, a in enumerate(args) if a == "-o" and args[i + 1].startswith("SetEnv="))
     assert o_index < host_index
