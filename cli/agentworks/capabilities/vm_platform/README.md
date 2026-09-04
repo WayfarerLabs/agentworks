@@ -99,8 +99,8 @@ A vm-platform stands up a machine and hands Agentworks an administrative foothol
 - **MUST NOT** mutate another VM, site, or shared operator infrastructure.
 - A platform that manages public ingress **MUST NOT** configure standing inbound exposure. Any
   public ingress it opens **MUST** be narrowly scoped to an active Agentworks operation and it
-  **MUST** attempt removal on every exit path. An unconfirmed removal **MUST** report the exact
-  residual exposure and recovery action.
+  **MUST** attempt removal on every exit path. An unconfirmed removal **MUST** identify the
+  remaining rule or known scope and provide a recovery action.
 - **MUST NOT** alter operator-managed perimeter controls.
 - **MUST NOT** share host paths by default or log or persist resolved secrets.
 
