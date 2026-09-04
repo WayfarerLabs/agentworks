@@ -345,6 +345,8 @@ The implementation, review, CI, and live-evidence steps below apply to the compl
       its remote status check.
 - [x] Make every stateful built-in distinguish forced-fresh policy from an ordinary missing-state
       fallback in its operator-facing launch decision.
+- [x] Record the successful operator Windows pass for session status latency/classification and an
+      existing console's stop/start/restart/attach lifecycle before final readiness.
 
 ### Phase 6 Definition of Done
 

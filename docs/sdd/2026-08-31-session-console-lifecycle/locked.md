@@ -56,7 +56,7 @@ separate security effort tracked by issue #715.
 
 ## Verification and review
 
-The final production checkpoint is `b320e55e8f5232e9249dfd2f217bda4b452ea4cc`, based on
+The final production checkpoint is `564cde0c7c9d6aa560fcb7541dfdd789c834cbf5`, based on
 `origin/main` at `41022f4d680f7e831429229eedcc19acd0ee9c8d`. The complete pipeline and live
 validation ran at `1081470fa0ab315c3e0221da8142a87ad9b292a1`. Subsequent bounded corrections
 completed one runtime fixture fingerprint, added established entity metadata to three console
@@ -69,23 +69,23 @@ and console checks before they begin. A final feedback correction removed the no
 duplicate nesting refusal and made the harness ADR's superseded contract-version note unambiguous.
 The final review correction preserved elevated process-absence proof for agent-owned runtimes, made
 generated workspace wrappers use exact targets, and announced `--all-running` selection before its
-remote status check. Verification recorded:
+remote status check. The final operator-feedback correction made each stateful built-in distinguish
+forced-fresh policy from failure to find resumable state. Verification recorded:
 
-- 8,250 non-integration tests with one platform-specific skip at the final production checkpoint;
+- 8,253 non-integration tests with one platform-specific skip at the final production checkpoint;
 - focused session, console, harness, compatibility, completion, cascade, migration, and adversarial
   suites;
 - Ruff check and format plus strict mypy across 745 source files;
 - file lint, locked-SDD, Rulesync drift, Typer-isolation, package/install, and diff gates;
 - 160 Python and 103 Node website tests plus deterministic root and project builds; and
-- hosted CI on Python 3.12, 3.13, and 3.14 plus CodeQL and every non-website repository gate. That
-  full-validation checkpoint's Website job ran 160 Python tests; one browser test failed during
-  setup, before its assertions, when Chromium did not publish a DevTools endpoint. The identical
-  suite passed locally, and the final docs-only lock head must clear the complete aggregate gate
-  before merge.
+- hosted CI at `9fd36e0b` on Python 3.12, 3.13, and 3.14 plus CodeQL, Website, lint, Rulesync,
+  locked-SDD, Python checks, and the aggregate gate; the final docs-only lock head must clear the
+  complete aggregate gate before merge.
 
 The private project-values, Muntz, and cold correctness/security reviews must converge cleanly at
-the exact final production checkpoint. Final hosted CI and targeted operator Windows validation of
-the corrected artifact remain required before merge. Earlier correction rounds closed fail-open
+the exact final production checkpoint. Final hosted CI remains required before merge. Targeted
+operator Windows validation completed at `9fd36e0b`; the later production correction changes only
+harness decision notes and their documentation/tests. Earlier correction rounds closed fail-open
 transport and tmux probes, legacy and parent-cascade teardown gaps, malformed identity handling,
 ambiguous console state, post-launch cleanup, duplicated status classification, stale collateral,
 compatibility safety, process-global test isolation, invalid runtime-identity fixtures, and
@@ -107,6 +107,13 @@ tester-created repository change. Current writers cannot create the legacy null-
 tester did not corrupt live runtime identity; those migration, repair, and unresolved-state cases
 remain covered by behavioral and orchestration tests.
 
+The operator's Windows pass at `9fd36e0b` backed up and migrated a restored version-35 database,
+completed steady-state session listing in 10.8 seconds rather than the prior multi-minute repair
+storm, classified the existing sessions successfully, and drove an existing console through stop,
+start, restart, and interactive attach. The pass retained the established forced-TTY policy and
+reported no further lifecycle failure. It then exposed the misleading forced-fresh note corrected at
+the final production checkpoint.
+
 ## Permanent homes and accepted limits
 
 The operator contract lives in `cli/command-reference.md`, `cli/README.md`, the root `README.md`,
@@ -116,14 +123,11 @@ the management guide topic. The executable harness contract lives in
 migrations, completion projections, and behavioral tests carry the implementation contract. Nothing
 in this SDD directory is required to operate or maintain the feature.
 
-Interactive console attach was not driven live because the tester itself ran inside tmux; the
-nesting guard correctly refused it, while behavioral and orchestration tests cover attach-only and
-the explicit override. Force-new integration identities, Agentworks-minted UUIDs, Codex's
+The earlier tester could not drive interactive console attach because it ran inside tmux; the later
+operator Windows pass covered it. Force-new integration identities, Agentworks-minted UUIDs, Codex's
 tool-assigned identity path, malformed and indeterminate transport cases, and destructive cascade
 faults, plus incomplete `--all-running` presence-first classification and refusal, are covered by
-focused structural/orchestration tests rather than destructive live fault injection. The operator
-accepted the tester's earlier clean report with these stated limits; the Windows regression
-correction still requires the targeted live validation named above.
+focused structural/orchestration tests rather than destructive live fault injection.
 
 Issue #720 owns deletion of both hidden 0.19 compatibility spellings in 0.20. Issue #715 owns any
 future systemd/cgroup containment work. No other in-scope implementation, review, migration, or
