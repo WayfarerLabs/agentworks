@@ -95,8 +95,8 @@ A vm-platform stands up a machine and hands Agentworks an administrative foothol
   identifiers needed for deletion and report recovery guidance.
 - Delete **MUST NOT** succeed until the backend VM is confirmed gone; failure **MUST** retain the
   Agentworks row for retry.
-- Every VM-specific backend resource **MUST** belong to exactly one VM and be removed during that
-  VM's delete or create rollback.
+- Every VM-specific backend resource **MUST** belong to exactly one VM. That VM's delete and create
+  rollback **MUST** attempt to remove the resource.
 - **MUST NOT** mutate another VM, site, or shared operator infrastructure.
 - A platform that manages public ingress **MUST NOT** configure standing inbound exposure. Any
   public ingress it opens **MUST** be narrowly scoped to an active Agentworks operation and it
