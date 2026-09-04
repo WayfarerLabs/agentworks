@@ -791,9 +791,10 @@ class Database:
         workspace_name: str | list[str] | None = None,
         vm_name: str | list[str] | None = None,
         agent_name: str | list[str] | None = None,
+        console_name: str | list[str] | None = None,
         admin_only: bool = False,
     ) -> list[SessionRow]:
-        """List sessions, optionally filtered by workspace, VM, agent, or mode.
+        """List sessions, optionally filtered by workspace, VM, agent, console, or mode.
 
         Each name filter accepts a single string or a list of strings; list
         values are OR-ed together within a filter, and filters AND together
@@ -801,6 +802,7 @@ class Database:
         (sessions on workspaces that live on the given VM). `agent_name`
         matches the session's `agent_name` column directly; admin-mode
         sessions (NULL agent_name) are excluded when this filter is set.
+        `console_name` matches sessions through their named-console membership.
         `admin_only` restricts to admin-mode sessions (agent_name IS NULL);
         it is the inverse of `agent_name` and the two should not be passed
         together (the CLI layer enforces the mutex; this layer accepts the
@@ -821,6 +823,14 @@ class Database:
         if ag_clause:
             clauses.append(ag_clause)
             params.extend(ag_params)
+        console_clause, console_params = _eq_or_in("cs.console_name", console_name)
+        if console_clause:
+            # Correlated EXISTS keeps one result row when a session belongs to
+            # multiple selected consoles, avoiding duplicate batch operands.
+            clauses.append(
+                f"EXISTS (SELECT 1 FROM console_sessions cs WHERE cs.session_name = s.name AND {console_clause})"
+            )
+            params.extend(console_params)
         if admin_only:
             clauses.append("s.agent_name IS NULL")
 
