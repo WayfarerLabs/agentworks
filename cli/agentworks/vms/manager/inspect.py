@@ -464,31 +464,37 @@ def render_vm_listing(
         output.info("No VMs registered.")
         return
 
-    # Cap the NAME column at the VM-name cap (42) so a legacy / manually
-    # inserted over-cap row cannot push the other columns out of alignment;
-    # the column then sizes dynamically to the longest (truncated) name.
-    names = [output.truncate(vm.name, _NAME_CELL_WIDTH) for vm in vms]
-    name_w = max(len("NAME"), *(len(n) for n in names))
-
-    header = (
-        f"{'NAME':<{name_w}} {'SITE':<12} {'TEMPLATE':<12} {'PROV':<12} {'INIT':<12} "
-        f"{'WS/AG/SE':<10} {'DEBIAN':<10} {'TAILSCALE':<20} {'CREATED'}"
-    )
+    # Keep the VM-name cap so a legacy over-cap row cannot distort the table.
+    headers = ["NAME", "SITE", "TEMPLATE", "PROV", "INIT", "WS/AG/SE", "DEBIAN", "TAILSCALE", "CREATED"]
     if include_status:
-        header += " STATUS"
-    output.info(header)
-    output.info("-" * len(header))
-    for vm, name in zip(vms, names, strict=True):
+        headers.append("STATUS")
+    rows: list[tuple[str, ...]] = []
+    for vm in vms:
         counts = f"{vm.workspace_count}/{vm.agent_count}/{vm.session_count}"
-        line = (
-            f"{name:<{name_w}} {vm.site:<12} {vm.template or '-':<12} "
-            f"{vm.provisioning_status:<12} {vm.initialization_status:<12} "
-            f"{counts:<10} {vm.debian_release or '-':<10} {vm.tailscale_host or '-':<20} {vm.created_at}"
+        row = (
+            vm.name,
+            vm.site,
+            vm.template or "-",
+            vm.provisioning_status,
+            vm.initialization_status,
+            counts,
+            vm.debian_release or "-",
+            vm.tailscale_host or "-",
+            vm.created_at,
         )
         status = vm.observed_status or VMStatus.UNKNOWN.value
         if vm.status_disposition:
             status += f" ({vm.status_disposition})"
-        output.info(f"{line} {status}" if include_status else line)
+        rows.append((*row, status) if include_status else row)
+    for line in output.render_table(
+        headers,
+        rows,
+        max_col_width=None,
+        max_col_widths={0: _NAME_CELL_WIDTH},
+        min_col_widths={1: 12, 2: 12, 3: 12, 4: 12, 5: 10, 6: 10, 7: 20},
+        column_separator=" ",
+    ):
+        output.info(line)
     if include_status:
         unknown_by_site: dict[str, list[str]] = {}
         for vm in vms:

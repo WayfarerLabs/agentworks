@@ -223,3 +223,4 @@ def test_console_listing_status_column_follows_explicit_render_request(
     )
     render_console_listing(observed, include_status=True)
     assert "STATUS" in captured_output.info[0]
+    assert captured_output.info[2].index("running") == captured_output.info[0].index("STATUS")

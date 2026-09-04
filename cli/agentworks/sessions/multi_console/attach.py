@@ -510,29 +510,22 @@ def render_console_listing(
         output.info("No consoles found.")
         return
 
-    # Console names are freeform (cap 64) and display-only, but a very long one
-    # would balloon this dynamically-sized column, so cap the NAME cell at a
-    # bounded, table-friendly width and let short names size the column down.
+    # Keep the list-view name cap while the shared renderer sizes short rows down.
     rows = [
         (
-            output.truncate(console.name, _NAME_CELL_WIDTH),
+            console.name,
             console.vm_name,
             str(console.session_count),
             console.status,
         )
         for console in consoles
     ]
-    name_w = max(len("NAME"), max(len(r[0]) for r in rows))
-    vm_w = max(len("VM"), max(len(r[1]) for r in rows))
-
-    header = f"{'NAME':<{name_w}}  {'VM':<{vm_w}}  SESSIONS"
+    headers = ["NAME", "VM", "SESSIONS"]
     if include_status:
-        header += "  STATUS"
-    output.info(header)
-    output.info("-" * len(header))
-    for n, vm, count, status in rows:
-        line = f"{n:<{name_w}}  {vm:<{vm_w}}  {count}"
-        output.info(f"{line}  {status}" if include_status else line)
+        headers.append("STATUS")
+    projected_rows = [row if include_status else row[:-1] for row in rows]
+    for line in output.render_table(headers, projected_rows, max_col_width=_NAME_CELL_WIDTH):
+        output.info(line)
     if include_status:
         unknown_by_vm: dict[str, list[str]] = {}
         for console in consoles:

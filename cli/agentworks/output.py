@@ -443,33 +443,40 @@ def render_table(
     headers: list[str],
     rows: Sequence[Sequence[str]],
     *,
-    max_col_width: int = 20,
+    max_col_width: int | None = 20,
     max_col_widths: Mapping[int, int] | None = None,
+    min_col_widths: Mapping[int, int] | None = None,
+    column_separator: str = "  ",
 ) -> list[str]:
     """Render a left-justified table into a list of lines.
 
     Returns the header row, a dashed rule line matching its width, then
-    one line per row. Columns are separated by two spaces. Each column
-    sizes to its widest cell (header included) but is capped at
-    ``max_col_width``; a cell longer than the cap is truncated to
+    one line per row. Each column sizes to its widest cell (header included)
+    but is capped at ``max_col_width``; pass ``None`` to leave columns
+    uncapped. A cell longer than the cap is truncated to
     ``cell[: max_col_width - 3] + "..."`` (so a 21-char cell becomes 20
-    chars), while a cell of exactly the cap is left intact. Columns whose
+    chars), while a cell of exactly the cap is left intact. By default, columns
+    are separated by two spaces. Columns whose
     content all fits under the cap keep their natural, narrower width.
     ``max_col_widths`` can override the cap for selected zero-based column
     indexes without changing the default for the remaining columns.
+    ``min_col_widths`` preserves established minimum widths for selected
+    columns, and ``column_separator`` preserves a caller's established spacing.
 
     The caller emits each returned line via :func:`info`.
     """
     columns = list(zip(headers, *rows, strict=True))
     column_caps = max_col_widths if max_col_widths is not None else {}
-    widths = [
-        min(column_caps.get(index, max_col_width), max(len(cell) for cell in column))
-        for index, column in enumerate(columns)
-    ]
+    column_minimums = min_col_widths if min_col_widths is not None else {}
+    widths = []
+    for index, column in enumerate(columns):
+        natural_width = max(column_minimums.get(index, 0), max(len(cell) for cell in column))
+        cap = column_caps.get(index, max_col_width)
+        widths.append(natural_width if cap is None else min(cap, natural_width))
 
     def _line(cells: Sequence[str]) -> str:
         rendered = (truncate(cell, width).ljust(width) for cell, width in zip(cells, widths, strict=True))
-        return "  ".join(rendered).rstrip()
+        return column_separator.join(rendered).rstrip()
 
     header_line = _line(headers)
     lines = [header_line, "-" * len(header_line)]

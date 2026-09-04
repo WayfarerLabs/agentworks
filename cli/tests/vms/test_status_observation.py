@@ -93,6 +93,33 @@ def test_vm_listing_status_column_follows_explicit_render_request(
     observed = inspect.VMListing(vms=(replace(plain.vms[0], observed_status="running"),))
     inspect.render_vm_listing(observed, include_status=True)
     assert "STATUS" in captured_output.info[0]
+    assert captured_output.info[2].index("running") == captured_output.info[0].index("STATUS")
+
+
+def test_vm_listing_only_caps_name_column(
+    db,  # noqa: ANN001
+    captured_output,  # noqa: ANN001
+) -> None:
+    db.insert_vm("box", site="site", hostname="box")
+    plain = inspect.vm_listing(db)
+    long_site = "site-" + "s" * 59
+    long_template = "template-" + "t" * 55
+    long_host = "host-" + "h" * 59
+    row = replace(
+        plain.vms[0],
+        name="n" * (inspect._NAME_CELL_WIDTH + 1),
+        site=long_site,
+        template=long_template,
+        tailscale_host=long_host,
+    )
+
+    inspect.render_vm_listing(inspect.VMListing(vms=(row,)))
+
+    rendered = captured_output.info[2]
+    assert "n" * (inspect._NAME_CELL_WIDTH - 3) + "..." in rendered
+    assert long_site in rendered
+    assert long_template in rendered
+    assert long_host in rendered
 
 
 def test_vm_observer_isolates_dispatched_failure_and_serializes_shared_site(
