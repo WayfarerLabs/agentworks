@@ -184,26 +184,31 @@ that already requested the cheap path.
 Safeguard: introduce dedicated non-gated observers, delete list/describe references from activation
 boundaries, and instrument activation, platform start, repair, and DB-write seams in tests.
 
-### One unreachable VM stalls the fleet
+### One unreachable guest or dispatched provider stalls the fleet
 
 Safeguard: emit progress before dispatch, use a 10-second one-attempt guest probe, retain finite
 parallelism, initialize requested rows to unknown, and isolate failures by VM or provider site.
 
+Shared VM registry, preflight, and credential resolution remain one all-or-nothing setup boundary.
+Their expected failure leaves all selected VM observations unknown rather than introducing repeated
+prompt sessions. Inventory rows remain available.
+
 ### Provider clients are not thread-safe
 
 Safeguard: share one credential resolution but serialize status calls within each bound site;
-parallelize only independent site groups. Do not add a speculative batch capability.
+parallelize only independent site groups after setup. Do not add a speculative batch capability.
 
 ### Console absence is inferred from a transport error
 
-Safeguard: retain the existing tmux diagnostic classifier, exact targets, and encoded fact grammar.
-Only authoritative missing-target results become absent.
+Safeguard: retain the existing tmux diagnostic classifier, enumerate one complete session-name
+snapshot per VM, and compare validated canonical and staging names by exact equality. Only an
+authoritative server result establishes absence.
 
 ### JSON v1 silently changes meaning
 
-Safeguard: use existing session `unavailable` for skipped work, existing VM describe names and null
-carrier, additive console fields, and explicit requested-unknown semantics. Run exact projection and
-ordering tests.
+Safeguard: retain the broad JSON v1 consumer meaning of session `unavailable`, establish only a
+narrower 0.18 producer invariant, use existing VM describe names and null carrier, keep console
+fields additive, and test explicit requested-unknown projection and ordering.
 
 ### Release chronology drifts again
 

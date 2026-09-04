@@ -9,8 +9,9 @@
 
 Make runtime status a consistent, explicit inspection choice for Agentworks' three runnable resource
 families: VMs, sessions, and consoles. An ordinary list should answer what Agentworks has configured
-without contacting providers or guests. An operator who asks for live status should get a bounded,
-read-only observation with prompt progress and honest partial results.
+without contacting providers or guests. An operator who asks for live status should get a read-only
+observation with prompt progress, finite concurrency, hard guest-probe bounds, and honest partial
+results. Provider calls use provider-native bounds where their APIs support them.
 
 This effort also closes two inconsistencies exposed by the session and console lifecycle work:
 
@@ -71,8 +72,8 @@ authority that match its runtime.
   local state only. The service shall not contact a provider or guest, resolve a secret, open an
   activation gate, perform recovery, or update persisted runtime state.
 - **R3.** With `--status`, each list shall first select and validate its inventory rows, then
-  perform a bounded live observation only for those rows. Status shall not change which rows match a
-  filter or their ordering.
+  perform live observation only for those rows under the resource-specific execution policy in R9.
+  Status shall not change which rows match a filter or their ordering.
 - **R4.** `--status` combined with `--names-only` shall fail as a usage error before config,
   database, provider, secret, or transport work. Existing `--names-only` behavior remains a local
   one-name-per-line completion surface.
@@ -90,9 +91,13 @@ authority that match its runtime.
   number of distinct VM or provider boundaries when known.
 - **R8.** Machine output shall remain one clean JSON document on stdout. Presentation suppression
   shall prevent human progress and diagnostic prose from entering the JSON stream.
-- **R9.** List observation shall batch or parallelize at the natural authority boundary, with a
-  finite concurrency and per-call timeout where the underlying transport supports one. A failure at
-  one boundary shall mark only affected rows unknown and allow other boundaries to finish.
+- **R9.** List observation shall batch or parallelize at the natural authority boundary with finite
+  concurrency. Session and console guest calls shall have a 10-second, one-attempt bound. VM calls
+  shall use provider-native bounds where supported; a provider SDK without cancellable timeout
+  support may still block after progress has been shown. Once per-boundary dispatch begins, a
+  failure shall mark only that boundary's rows unknown and allow other boundaries to finish. A
+  shared VM registry, preflight, or credential-resolution failure before dispatch may mark every
+  selected VM row unknown.
 - **R10.** Expected operational failures, including unreachable guests, unavailable credentials,
   unsupported local backends, and provider lookup failures, shall produce unknown live status.
   Invalid CLI input, corrupt local invariants, and unexpected programming failures shall retain
@@ -108,7 +113,8 @@ authority that match its runtime.
   `running` means the exact managed tmux session is present. `residual` means its dedicated tmux
   server remains but the managed session does not. `broken` means stored same-boot process evidence
   remains live while tmux is unreachable. `unknown` means a requested observation could not prove
-  another state.
+  another state. Persisted `PID_STOPPED` evidence does not bypass requested live observation or
+  override observed tmux state; a row without a canonical runtime locator becomes `unknown`.
 - **R13.** Console live status shall use `running`, `stopped`, `residual`, or `unknown`. `running`
   means the exact canonical tmux session is present and its reserved staging session is absent.
   `stopped` means both managed names are absent. `residual` means the staging name is present,
@@ -135,9 +141,11 @@ authority that match its runtime.
 
 ### Machine output
 
-- **R19.** `session.list` JSON v1 shall retain its required `status` field. Without `--status`, its
-  value is `unavailable`; with `--status`, it is one of the five session live states. `unknown`
-  means requested but inconclusive. `unavailable` means not requested.
+- **R19.** `session.list` JSON v1 shall retain its required `status` field and its existing consumer
+  meaning for `unavailable`: live status was not available in that record. The 0.18 producer shall
+  emit `unavailable` when `--status` was not requested, one of the four conclusive live states when
+  it was, and `unknown` when a requested observation was inconclusive. This producer invariant
+  distinguishes the two cases without redefining the v1 consumer vocabulary.
 - **R20.** `console.list` JSON v1 shall add a `status` field with `unavailable` when live status was
   not requested and the console state vocabulary when it was. `console.describe` shall add the same
   field but never emit `unavailable`, because describe always requests observation.
@@ -169,8 +177,9 @@ authority that match its runtime.
   secret, transport, repair, and database-write seams for list without status and for requested
   read-only observation.
 - **Q2.** Session and console batch parsers shall treat transport failure, malformed facts, mixed
-  streams, and missing exact targets conservatively. Absence is reported only from an authoritative
-  tmux result.
+  streams, and missing exact names conservatively. Session probes use exact targets. Console probes
+  compare validated canonical and staging names by exact equality against one authoritative tmux
+  session enumeration. Absence is reported only from an authoritative tmux result.
 - **Q3.** Tests shall cover partial success across multiple VMs/providers, timeout behavior, Windows
   non-interactive probe transport, human and JSON projection, filters, empty results, and names-only
   conflicts.

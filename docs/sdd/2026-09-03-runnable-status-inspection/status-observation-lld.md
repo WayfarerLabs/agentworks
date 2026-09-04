@@ -58,28 +58,10 @@ except the bounded compatibility adapter and its retirement test.
 
 ## Observation request representation
 
-List aggregate records carry whether observation was requested because table shape cannot be
-inferred from row values or from an empty result:
-
-```python
-@dataclass(frozen=True)
-class VMListing:
-    vms: tuple[VMListRow, ...]
-    status_requested: bool
-
-@dataclass(frozen=True)
-class SessionListing:
-    sessions: tuple[SessionListRow, ...]
-    status_requested: bool
-
-@dataclass(frozen=True)
-class ConsoleListing:
-    consoles: tuple[ConsoleListRow, ...]
-    status_requested: bool
-```
-
-This is an internal presentation fact, not a JSON field. Machine projection derives its per-row
-carrier from the joined row.
+The existing listing rows carry projected status values. They do not also carry a presentation-only
+request boolean. CLI adapters pass `include_status` directly to human renderers so table shape is
+explicit even for an empty result. Machine projection derives its per-row carrier from the joined
+row.
 
 ## Status types and projections
 
@@ -151,14 +133,14 @@ class ConsoleStatus(Enum):
 The pure classifier receives canonical and staging `ProbeStatus`:
 
 ```text
-if either is UNKNOWN:       UNKNOWN
-else if staging is PRESENT: RESIDUAL
+if staging is PRESENT:      RESIDUAL
+else if either is UNKNOWN:  UNKNOWN
 else if canonical PRESENT:  RUNNING
 else:                       STOPPED
 ```
 
-Unknown dominates even when the other probe is present. A status inspection cannot safely claim a
-healthy or residual complete state while one managed name is inconclusive.
+Staging presence is sufficient evidence of residual managed state even if canonical presence is
+inconclusive. Otherwise unknown dominates a partial observation.
 
 `ConsoleListRow.status` is `unavailable` when not requested, otherwise the enum value.
 `ConsoleDescription.status` is always one console enum value projected to text.
@@ -173,8 +155,6 @@ def observe_session_status(
     config: Config,
     session: SessionRow,
 ) -> SessionStatus:
-    if session.pid == PID_STOPPED:
-        return SessionStatus.STOPPED
     vm = resolve_backing_vm(db, session)
     target = bounded_observation_transport(db, config, vm)
     return check_session_status(session, target=target)
@@ -182,17 +162,18 @@ def observe_session_status(
 
 Expected local identity, address, and transport failures are caught by the describe/list
 orchestrator and converted to unknown. `check_session_status` retains its pure classifier behavior,
-including typed legacy-state errors. Lifecycle callers that need those typed errors continue to call
-it inside their own boundary.
+including typed legacy-state errors for apparently live legacy rows. Its `PID_STOPPED` early return
+is removed: a row with a dedicated socket is probed regardless of stored PID, while a stopped legacy
+row without a canonical runtime locator becomes unknown. Lifecycle callers that need typed errors
+continue to call it inside their own boundary.
 
 ### Batch observer
 
 `observe_session_statuses` receives the selected rows and returns every requested name:
 
 ```text
-initialize result[name] = STOPPED for PID_STOPPED rows
-initialize result[name] = UNKNOWN for every other row
-group non-stopped rows by backing VM
+initialize result[name] = UNKNOWN for every row
+group every selected row by backing VM
 for each VM in an eight-worker pool:
     validate canonical SSH identity
     create canonical transport with default_timeout=10
@@ -200,6 +181,10 @@ for each VM in an eight-worker pool:
     overwrite only returned conclusive or explicit UNKNOWN results
 return result
 ```
+
+`batch_check_status` no longer excludes `PID_STOPPED` rows that have a dedicated socket, and the
+list join no longer substitutes stopped before consulting the observer. A requested row without a
+canonical socket remains unknown.
 
 The remote command stays one compound fact script per VM. `batch_check_status` takes explicit probe
 policy rather than relying on an unbounded transport default. It passes `tty=False` so Windows' old
@@ -215,23 +200,17 @@ list presentation policy.
 
 ## Console observation
 
-### Remote fact grammar
+### Remote session enumeration
 
-For each console, one remote script runs exact `tmux has-session` for the canonical and staging
-names. Each fact line contains only the validated Agentworks console name, return codes, and
-hex-encoded diagnostic streams:
+One remote command per VM runs `tmux list-sessions` with a format that emits only each session name,
+one per line. A successful response becomes a set of complete names. The existing tmux diagnostic
+classifier recognizes authoritative no-server absence; any other nonzero result, malformed stream,
+or unclassifiable diagnostic leaves every requested console on that VM unknown.
 
-```text
-C:<console>:<canonical_rc>:<canonical_diag_hex>:<staging_rc>:<staging_diag_hex>
-```
-
-The parser requires exactly six fields, a selected name present in the request mapping, integer
-return codes, valid UTF-8 hex diagnostics, and a complete canonical/staging pair. It delegates each
-pair to the existing tmux presence classifier with `missing_target_is_absent=True`. Missing,
-duplicate, malformed, or unclassifiable facts leave that console unknown.
-
-Exact targets use the existing quoted `=NAME` helper. The observer never parses `tmux list-sessions`
-or treats an unrelated user tmux session as Agentworks state.
+For an authoritative enumeration, the observer derives each validated console's canonical and
+staging names locally and compares them to the returned set with exact string equality. Unrelated
+user-created tmux sessions and prefix matches have no effect. This produces one coherent server
+snapshot and one tmux subprocess per VM rather than two subprocesses per console.
 
 ### Batch observer
 
@@ -243,8 +222,8 @@ group by vm_name
 for each VM in an eight-worker pool:
     validate row, SSH identity, and Tailscale address
     create canonical admin transport with default_timeout=10
-    run one compound fact script with tty=false, timeout=10, retries=1
-    classify each returned pair
+    run one formatted session enumeration with tty=false, timeout=10, retries=1
+    classify each canonical/staging pair by exact membership
 return complete mapping
 ```
 
@@ -266,9 +245,10 @@ fact builder. It takes the configured description snapshot even if observation r
 
 1. Initialize every selected name to `VMStatus.UNKNOWN`.
 2. Build one request registry including live database resources.
-3. Build one live VM node per selected row, reusing site-node memoization.
-4. Walk the union, register the declared secret union on one resolver, and run one preflight at
-   system scope.
+3. Build one live VM node per selected row, reusing site-node memoization. An expected row-local
+   site or platform construction failure leaves that row unknown and excludes it from later setup.
+4. Walk the remaining union, register the declared secret union on one resolver, and run one
+   preflight at system scope.
 5. Resolve the union once using the ordinary interaction policy.
 6. Build each node's scoped `RunContext` through the existing platform context helper.
 7. Group rows by bound site. Run independent sites in a finite worker pool and call
@@ -279,10 +259,11 @@ fact builder. It takes the configured description snapshot even if observation r
 There is no activation gate and no native or canonical guest transport. Provider status remains the
 sole authority.
 
-A failure building the shared registry, preflight, or credential union affects every selected VM
-that depends on that boundary. Site- or platform-specific construction and status failures affect
-only their rows where the dependency graph exposes that isolation. The implementation should reuse
-existing graph facts rather than add provider-specific batching APIs.
+An expected failure building the shared registry, running the all-or-nothing preflight, or resolving
+the all-or-nothing credential union leaves every selected VM at its unknown default. This matches
+the existing one-prompt orchestration contract. After setup succeeds and provider dispatch begins,
+site or platform status failures affect only their rows. The implementation does not add repeated
+per-site resolution passes or provider-specific batching APIs.
 
 ### Provider timeout reality
 
@@ -374,12 +355,15 @@ No call reaches console build planning, pane secret resolution, or `_prepare_vm_
 ### VM describe ordering
 
 VM describe retains its current rich assembly. The status/disposition mapper is shared with list,
-and human progress is emitted before provider preflight/status work. Its optional live-resource
-query remains a separate describe-only fact and does not enter VM list.
+and human progress is emitted before provider preflight/status work. It initializes requested status
+to `UNKNOWN`; an expected preflight, credential, or provider status failure preserves that value and
+adds only the existing closed safe issue projection. Its optional live-resource query remains a
+separate describe-only fact and does not enter VM list.
 
 ## Human rendering
 
-Renderers branch on `listing.status_requested`, not on row contents:
+Renderers branch on the explicit `include_status` argument from the CLI adapter, not on row
+contents:
 
 - false: preserve existing inventory columns, except session drops its old placeholder status
   column;
@@ -403,11 +387,16 @@ VM:      new observed_status = null | domain status
          new status_disposition = null | manual | idle
 ```
 
-Console describe adds required `status`. Session describe keeps required `status`. VM describe keeps
-its existing fields.
+The 0.18 console describe producer always emits `status`, and session describe keeps its established
+required `status`. VM describe keeps its existing fields. Because an additive JSON v1 field remains
+optional to consumers and may be absent from older v1 producers, the permanent schema documents that
+producer-versus-consumer distinction for new VM and console fields.
 
-Because console and VM list fields are additive and session's unavailable value already means
-skipped work, schema version stays 1. Collection order and pre-existing fields do not change.
+Because console and VM list fields are additive and session's field type and value vocabulary do not
+change, schema version stays 1. The existing v1 consumer meaning of session `unavailable` remains
+"status unavailable for this record." The 0.18 producer uses it only when live work was not
+requested and uses `unknown` for requested inconclusive work. Collection order and pre-existing
+fields do not change.
 
 ## Testing seams
 
@@ -419,7 +408,8 @@ Tests instrument these boundaries, not authored prose:
   stubs must remain untouched;
 - exact number of guest calls: one per distinct VM for each domain observer;
 - timeout policy: `tty=False`, `timeout=10`, `retries=1` reaches the transport call;
-- partial failure: one VM/provider unknown, unaffected rows keep their observed values;
+- partial failure after dispatch: one VM/provider unknown, unaffected rows keep their observed
+  values; shared VM setup failure leaves all selected VM observations unknown;
 - state matrices: every session and console branch, including malformed and mixed diagnostics;
 - default and enriched human table structures without pinning warning sentences;
 - JSON field types, enum values, null/unavailable distinction, and order;

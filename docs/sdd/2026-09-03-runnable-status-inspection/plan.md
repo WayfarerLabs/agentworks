@@ -116,10 +116,11 @@ assert behavior and structure, never authored prose.
       the global Windows TTY policy unchanged and selecting `tty=False` per observation call.
 - [ ] Refactor session singular and batch status observation to return a complete requested-name
       mapping, use a 10-second one-attempt transport budget, and preserve lifecycle callers.
-- [ ] Add the console domain enum, canonical/staging pure classifier, encoded exact-target batch
-      protocol, singular wrapper, and one-call-per-VM failure isolation in a focused module.
-- [ ] Add the non-gated VM multi-row observation composition with one registry/preflight/credential
-      union, site-local serial platform calls, and finite parallelism across independent sites.
+- [ ] Add the console domain enum, canonical/staging pure classifier, exact session-enumeration
+      observer, singular wrapper, and one-call-per-VM failure isolation in a focused module.
+- [ ] Add the non-gated VM multi-row observation composition with one all-or-nothing
+      registry/preflight/credential setup, site-local serial platform calls, and finite parallelism
+      across independent sites after setup.
 - [ ] Inventory each bundled provider status timeout and add safe provider-local bounds where the
       existing client supports them without a capability change; record honest residual limitations.
 

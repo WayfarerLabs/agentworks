@@ -20,8 +20,8 @@ local inventory plane                 explicit observation plane
 ---------------------                 --------------------------
 database rows                         VM platform status API
 local config/manifests                canonical SSH transport
-stored relationships                  exact tmux presence probes
-existing list filters                 finite time and concurrency budgets
+stored relationships                  exact tmux observations
+existing list filters                 guest time bounds and finite concurrency
           |                                      |
           +------------ result join -------------+
                               |
@@ -57,10 +57,10 @@ canonical `aw-console-NAME` and reserved `aw-console-build+NAME` tmux sessions, 
 entering `_prepare_vm_target`, which opens the activation gate.
 
 The target design extracts the presence-to-console-status classifier from lifecycle policy and adds
-a read-only batch observer. The observer groups consoles by VM, checks every canonical and staging
-name in one non-interactive SSH command per VM, and applies the same exact-target and conservative
-diagnostic parsing rules as the lifecycle probes. Lifecycle operations keep their gated boundary;
-inspection never uses it.
+a read-only batch observer. The observer groups consoles by VM, obtains one formatted tmux session
+enumeration per VM, and compares each validated canonical and staging name by exact string equality.
+Unrelated user sessions are ignored. Lifecycle operations keep their gated boundary; inspection
+never uses it.
 
 ### VM
 
@@ -70,10 +70,13 @@ best-effort live-resource query.
 
 The target VM list observer builds one request registry, walks the selected live VM nodes, runs one
 preflight over the union, resolves the declared provider credentials once, and calls each platform's
-existing read-only `status(vm, ctx)` operation. Independent site groups may run concurrently within
-a finite worker pool, while calls sharing one bound platform instance remain serial because several
-bundled platforms cache mutable clients and credentials. A platform failure is attached to the
-affected row as unknown. No new vm-platform method or contract version is needed.
+existing read-only `status(vm, ctx)` operation. Registry, preflight, and resolution retain their
+current all-or-nothing command boundary: an expected failure before provider dispatch leaves every
+selected VM unknown while preserving all inventory rows. Independent site groups may run
+concurrently within a finite worker pool after setup, while calls sharing one bound platform
+instance remain serial because several bundled platforms cache mutable clients and credentials. A
+provider-call failure is attached only to the affected row as unknown. No new vm-platform method or
+contract version is needed.
 
 VM describe retains its richer focused resource and issue reporting. Its status value continues to
 come from the same platform operation as list. The shared status projection is extracted so list and
@@ -152,10 +155,10 @@ validate filters and select local rows
 Filtering and ordering occur before observation. The observer receives no authority to alter them.
 Names-only remains a separate local fast path in CLI and service code.
 
-Human renderers receive whether status was requested so they can choose a table shape. Machine
-projectors use the row facts alone: session and console rows carry `unavailable` when skipped, while
-VM rows carry null observed status. This preserves session JSON v1 and matches the established VM
-describe carrier.
+CLI adapters pass `include_status` to human renderers so they can choose a table shape; listing
+records do not duplicate that presentation input. Machine projectors use the row facts alone:
+session and console rows carry `unavailable` when skipped, while VM rows carry null observed status.
+This preserves session JSON v1 and matches the established VM describe carrier.
 
 ### 5. Focused describe
 
@@ -167,7 +170,8 @@ read fails.
 - Console describe takes its configured membership snapshot and joins the singular console observer.
   It never computes pane build targets or resolves pane secrets.
 - VM describe continues its no-gate provider status flow and shares status/disposition projection
-  with VM list.
+  with VM list. It initializes a requested observation to unknown, preserves unknown on an expected
+  preflight, credential, or provider failure, and records only the existing safe issue facts.
 
 Human describe emits a progress line before the external read and a warning for an expected
 observation failure. JSON emits `unknown` without backend diagnostic prose. VM JSON retains its
@@ -194,21 +198,28 @@ The JSON v1 additions are:
 VM `status_disposition` is null except for supported stopped/deallocated observations. Describe
 never emits a not-requested state because it always observes.
 
-`unknown` has one meaning across these machine records: live observation was requested but could not
-reach a conclusive domain state. `unavailable` or null means the list did not request live work.
+For 0.18 producers, `unknown` has one meaning across these machine records: live observation was
+requested but could not reach a conclusive domain state. An emitted `unavailable` or null means the
+list did not request live work. The established JSON v1 consumer meaning of session `unavailable`
+remains broader, so older v1 producers may have used it for other unavailable observations.
 
 ## Failure model
 
 ### Expected operational failures
 
-An expected boundary failure degrades only affected rows:
+An expected dispatched boundary failure degrades only affected rows:
 
 - missing or refused canonical SSH identity;
 - missing Tailscale address;
 - transport timeout or connection failure;
 - malformed or mixed remote probe facts;
-- site lookup, readiness, credential, or provider status failure; and
+- row-local site/platform construction or dispatched provider status failure; and
 - exact tmux presence that cannot be classified as present or absent.
+
+VM registry construction, the one union preflight, and the one credential-resolution pass are shared
+setup boundaries. An expected failure there leaves every selected VM status unknown. This is an
+explicit current-mechanism tradeoff: the design does not split setup into repeated per-site prompt
+sessions merely to obtain finer preparation-failure isolation.
 
 Human list renders unknown and emits one compact summary grouped by boundary. It does not print one
 warning per stopped row. JSON carries closed status facts and no third-party diagnostics.

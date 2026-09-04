@@ -17,9 +17,9 @@ status crosses several independent providers or SSH boundaries and can fail part
 therefore adopts explicit enrichment, not the default-live behavior of systems with one cheap
 authoritative list endpoint.
 
-tmux's exact-target rules support the existing canonical/staging probe model. GitHub CLI's explicit
-JSON field selection reinforces keeping machine status carriers stable and making expensive
-enrichment an intentional command choice.
+tmux's target and formatted-list rules support exact session identity for both probe styles. GitHub
+CLI's explicit JSON field selection reinforces keeping machine status carriers stable and making
+expensive enrichment an intentional command choice.
 
 ## Findings and design consequences
 
@@ -64,9 +64,10 @@ Kubernetes' [`kubectl get`](https://kubernetes.io/docs/reference/kubectl/generat
 also treats list output as a collection result with selectable presentation, while wait and watch
 are separate explicit behaviors.
 
-Design consequence: an Agentworks live list should retain local rows and mark only affected
-observations unknown. It should not turn one unavailable VM into an empty or failed fleet view when
-the inventory itself is trustworthy.
+Design consequence: an Agentworks live list should retain local rows and, after boundary dispatch,
+mark only affected observations unknown. Shared VM preparation may leave all VM observations unknown
+under today's one-prompt contract, but it must not turn trustworthy inventory into an empty or
+failed fleet view.
 
 ### 5. Exact tmux targets are required for scripted observation
 
@@ -75,9 +76,10 @@ session target may match an exact name, a prefix, or a pattern. Prefixing a name
 an exact match. The upstream `has-session` implementation uses ordinary target resolution and
 reports failure when the target cannot be found.
 
-Design consequence: console and session observers keep exact `=NAME` targeting and the existing
-diagnostic classifier. Batch performance comes from placing many exact probes in one remote command,
-not from weakening target identity or interpreting every tmux session on the server.
+Design consequence: session observers keep exact `=NAME` targeting and the existing diagnostic
+classifier. Console observers take one formatted session-name snapshot per VM and compare only their
+validated canonical and staging names by exact equality. Batch performance does not weaken target
+identity or interpret unrelated tmux sessions as managed state.
 
 ### 6. Machine projections should make requested fields explicit and stable
 
