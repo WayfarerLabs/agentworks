@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 from agentworks.cli import app
 from agentworks.db import SessionMode
 from agentworks.errors import NotFoundError
+from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager as session_manager
 
 if TYPE_CHECKING:
@@ -68,6 +69,30 @@ def test_filter_sessions_accepts_defined_console_without_members(db: Database) -
     _seed_console_filters(db)
 
     assert session_manager.filter_sessions(db, console_name="console-empty") == []
+
+
+@pytest.mark.parametrize("manager_name", ("stop_all_sessions", "start_all_sessions"))
+def test_batch_lifecycle_passes_console_filter_to_shared_scope(
+    monkeypatch: pytest.MonkeyPatch,
+    manager_name: str,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def capture_filter(_db: object, **kwargs: Any) -> list[object]:
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(session_manager, "filter_sessions", capture_filter)
+    batch_operation = getattr(session_manager, manager_name)
+
+    batch_operation(
+        None,
+        None,
+        console_name=["console-a", "console-b"],
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+
+    assert captured["console_name"] == ["console-a", "console-b"]
 
 
 @pytest.mark.parametrize(
