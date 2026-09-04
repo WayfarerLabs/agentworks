@@ -79,8 +79,8 @@ class ProvisionRequest:
     system_slug: str | None
     admin_username: str
     ssh_public_key: str
-    # Path to the operator's SSH private key, for platforms whose
-    # native transport is plain SSH during create (azure, proxmox).
+    # Path to the operator's SSH private key when a platform's create path
+    # constructs an SSH transport.
     ssh_private_key: Path | None
     # Domain-owned operation input: the vm-template declares the secret name
     # and the VM manager resolves its value before platform dispatch. This is
@@ -184,9 +184,7 @@ class VMPlatform(Capability):
         """
         return None
 
-    # Operator guidance shown when a non-compliant platform returns None from
-    # native_transport (the factory embeds it in the StateError hint). This is
-    # compatibility for the current Proxmox gap, not a contract opt-out (#727).
+    # Operator guidance shown when native_transport returns None.
     no_native_transport_hint: ClassVar[str] = "This platform has no interactive native transport."
 
     # Operator guidance warned when every reachability probe of the
@@ -328,8 +326,8 @@ class VMPlatform(Capability):
         """
 
     def native_transport(self, vm: VMRow, ctx: RunContext, *, config: Config | None = None) -> Transport | None:
-        """Platform-native :class:`Transport` for bootstrap, Tailscale
-        recovery, and ``vm shell --platform``.
+        """Platform-native :class:`Transport` for Tailscale recovery and
+        ``vm shell --platform``.
 
         The contract requires this transport to work independently of the VM's
         Tailscale state. The optional return and default ``None`` temporarily

@@ -83,9 +83,9 @@ A vm-platform stands up a machine and hands Agentworks an administrative foothol
   ([#369](https://github.com/WayfarerLabs/agentworks/issues/369)).
 - **MUST** implement create, start, stop, delete, and status. Start, stop, and delete **MUST** be
   idempotent.
-- Create **MUST** collision-check its intended backend identity before mutation and either fail
-  clearly or select and persist a collision-free identity. Later operations **MUST** use the
-  persisted identity.
+- Before mutation, create **MUST** fail clearly if its planned backend name or identifier already
+  exists, or choose a collision-free one. Later operations **MUST** use the persisted backend
+  identity.
 - A platform **SHOULD** surface provider authorization failures clearly. Where a failure could leave
   unsafe exposure or leaked resources, it **SHOULD** use additional provider mechanisms to validate
   the resulting state.
@@ -95,11 +95,12 @@ A vm-platform stands up a machine and hands Agentworks an administrative foothol
   identifiers needed for deletion and report recovery guidance.
 - Delete **MUST NOT** succeed until the backend VM is confirmed gone; failure **MUST** retain the
   Agentworks row for retry.
-- Every VM-specific backend resource **MUST** belong to one VM and share that VM's lifecycle.
+- Every VM-specific backend resource **MUST** be attributable to exactly one VM.
 - **MUST NOT** mutate another VM, site, or shared operator infrastructure.
-- A platform that manages public ingress **MUST** leave no standing inbound exposure. Any public
-  ingress it opens **MUST** be narrowly scoped to an active Agentworks operation and removed on
-  success, failure, or interruption.
+- A platform that manages public ingress **MUST NOT** configure standing inbound exposure. Any
+  public ingress it opens **MUST** be narrowly scoped to an active Agentworks operation and it
+  **MUST** attempt removal on every exit path. An unconfirmed removal **MUST** report the exact
+  residual exposure and recovery action.
 - **MUST NOT** alter operator-managed perimeter controls.
 - **MUST NOT** share host paths by default or log or persist resolved secrets.
 
@@ -168,11 +169,15 @@ and DB migration.
 `RunContext` after `vm` (see the next section for what that is and how to read from it):
 
 - `create(request, ctx) -> ProvisionResult` is deliberately **not** `@idempotent_op`: it runs a
-  pre-flight collision check, then either raises `StateError` (all six in-tree platforms) or, for a
+  pre-flight collision check, then either raises `StateError` (all six bundled platforms) or, for a
   soft-name backend, selects a different collision-free backend name and records that identifier in
-  `platform_metadata`. A re-run must never target or replace an existing VM. A create that cannot
-  confirm rollback raises `RetainedProvisioningError` with addressable platform metadata; core
-  persists that metadata and retains the provisional row so `vm delete` can finish cleanup.
+  `platform_metadata`. A re-run must never target or replace an existing VM. Proxmox currently
+  treats a failed collision query as absence
+  ([#719](https://github.com/WayfarerLabs/agentworks/issues/719)). A create that cannot confirm
+  rollback raises `RetainedProvisioningError` with addressable platform metadata; core persists that
+  metadata and retains the provisional row so `vm delete` can finish cleanup. EC2 currently
+  implements this retained-cleanup handoff; the other platforms are tracked in
+  [#718](https://github.com/WayfarerLabs/agentworks/issues/718).
 - `start(vm, ctx)`, `stop(vm, ctx)`, `delete(vm, ctx)` are flagged `@idempotent_op` and must land in
   the same place run twice as run once. The marker is inherited through the MRO, so an override does
   not restate the decorator. `reinit` re-applies everything and failed commands are retried, so the
@@ -209,13 +214,11 @@ transports are local); Azure, EC2, and GCE use it:
   implementation ([#727](https://github.com/WayfarerLabs/agentworks/issues/727)); they do not make
   the transport optional. The `agentworks.transports.native_transport` factory wraps the call in
   `transient_route`, probes reachability with an `echo ok` retry loop, and raises a typed
-  `StateError` (using `no_native_transport_hint`) when the non-compliant platform returns `None`.
-  Lima returns a `limactl shell` transport, Azure, EC2, and GCE an `SSHTransport` against the VM's
-  current public IP (Azure reads its persistent address live off the NIC; EC2 reads its address live
-  off a fresh `describe_instances`, because EC2 reassigns the auto-assigned IP across stop/start;
-  GCE likewise reads its lifetime ephemeral access config live), WSL2 a `wsl.exe`-backed transport.
-  Proxmox currently returns `None` and points the operator at the Proxmox web-UI serial console.
-  That manual escape hatch does not satisfy the programmatic transport obligation.
+  `StateError` (using `no_native_transport_hint`) when a platform returns `None`. Lima returns a
+  `limactl shell` transport, Azure, EC2, and GCE an `SSHTransport` against the VM's current public
+  IP (Azure reads its persistent address live off the NIC; EC2 reads its address live off a fresh
+  `describe_instances`, because EC2 reassigns the auto-assigned IP across stop/start; GCE likewise
+  reads its lifetime ephemeral access config live), WSL2 a `wsl.exe`-backed transport.
 - `transient_route(vm, ctx, *, config=None) -> context manager` (default `nullcontext()`). Azure
   opens a scoped SSH route on enter (heals a missing public IP, converges the NSG onto the
   baseline-deny model, pokes this operation's own ephemeral allow rule scoped to the operator's
