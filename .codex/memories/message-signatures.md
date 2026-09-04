@@ -35,18 +35,17 @@ own rather than handing back does exactly that: it signs and trails as itself, n
 since the point is to say which worker produced the thing. A delegate inherits its lead's
 environment, so `AGENTWORKS_SESSION` names the lead and nothing in that environment names the
 delegate. The lead supplies one, in the charter: a complete identifier the delegate uses verbatim
-rather than a fragment it joins to something else. State it in the launch prompt; a harness able to
-set a variable for a delegate may deliver it as `AGENTWORKS_DELEGATE`, but none does today, so the
-charter is where it lives. A lead with a namespace for that delegate's scratch and fixtures has the
-obvious value to hand it. Nothing is invented and nothing is composed, because the lead assigns and
-the delegate reads.
+rather than a fragment it joins to something else. State it in the launch prompt. A lead with a
+namespace for that delegate's scratch and fixtures has the obvious value to hand it. Nothing is
+invented and nothing is composed, because the lead assigns and the delegate reads.
 
-A delegate acting on its own uses that identifier for both surfaces, its signature and its
-`Agentworks-Session` trailer; everything else uses `AGENTWORKS_SESSION`. A delegate given none says
-so in its hand-off and signs with an honest label for what it is, exactly as an unidentified
-workload does, rather than signing as the lead it is not. One value under the existing key keeps an
-effort's commits findable as a set while a delegate's stay distinguishable within it, which is why a
-lead composing that value usually builds it from its own session name:
+Which name a workload uses is one selection, and it decides both surfaces together, the signature
+and the `Agentworks-Session` trailer. A delegate acting on its own uses the identifier its charter
+gave it. Everything else uses `AGENTWORKS_SESSION`. A delegate given no identifier says so in its
+hand-off and uses an honest label for what it is on both surfaces, exactly as an unidentified
+workload does, rather than borrowing the lead's name it was never given. One value under the
+existing key keeps an effort's commits findable as a set while a delegate's stay distinguishable
+within it, which is why a lead composing that value usually builds it from its own session name:
 
 ```text
 Agentworks-Session: agw-ns-instance-model/dev-3
@@ -54,8 +53,8 @@ Agentworks-Session: agw-ns-instance-model/dev-3
 
 Most delegates never hit this, because most report back and the lead is what speaks outward. Git
 commits need no signature line, but an agent session's commits must carry a session trailer. In an
-Agentworks workload that trailer is `Agentworks-Session: <session name>` with the name read from
-`AGENTWORKS_SESSION`, mandatory whenever the variable is set; harness-added trailers (this history's
+Agentworks workload that trailer is `Agentworks-Session: <name>`, taking whichever name the
+selection above yields and mandatory whenever it yields one; harness-added trailers (this history's
 `Claude-Session: <url>`) may ride along but do not substitute for it. When `AGENTWORKS_SESSION` is
 absent, the environment's own stable harness or session trailer satisfies the requirement on its
 own; never invent a session name. Outside Agentworks, use the environment's own stable session
