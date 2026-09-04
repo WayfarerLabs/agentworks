@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -179,3 +180,74 @@ def test_vm_observer_shared_registry_failure_leaves_complete_unknown_mapping(
         "alpha": VMStatus.UNKNOWN,
         "beta": VMStatus.UNKNOWN,
     }
+
+
+def test_vm_observer_precomputes_database_context_before_worker_threads(
+    db,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A real SQLite connection never crosses the status executor boundary."""
+    db.insert_vm("alpha", site="one", hostname="alpha")
+    db.insert_vm("beta", site="two", hostname="beta")
+    rows = [db.get_vm("alpha"), db.get_vm("beta")]
+    assert all(row is not None for row in rows)
+    owner_thread = threading.get_ident()
+    provider_threads: list[int] = []
+
+    class _Platform:
+        def status(self, _row: object, _ctx: object) -> VMStatus:
+            provider_threads.append(threading.get_ident())
+            return VMStatus.RUNNING
+
+    def live_node(
+        _db: object,
+        _config: object,
+        _registry: object,
+        row: object,
+        *,
+        site_nodes: dict[str, object],
+    ) -> object:
+        site = SimpleNamespace(platform=_Platform())
+        site_nodes.setdefault(row.site, site)  # type: ignore[attr-defined]
+        return SimpleNamespace(row=row, site=site)
+
+    class _Resolver:
+        values: dict[str, str] = {}
+
+        def __init__(self, *_args: object, **_kwargs: object) -> None: ...
+
+        def register_name(self, _name: str) -> None: ...
+
+        def resolve(self) -> None: ...
+
+    def platform_context(*_args: object) -> object:
+        assert threading.get_ident() == owner_thread
+        return object()
+
+    monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr("agentworks.vms.nodes.live_vm_node", live_node)
+    monkeypatch.setattr("agentworks.orchestration.walk.walk", lambda *nodes: nodes)
+    monkeypatch.setattr("agentworks.orchestration.secrets.secret_union", lambda _nodes: ())
+    monkeypatch.setattr("agentworks.orchestration.readiness.preflight_all", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("agentworks.secrets.resolver.Resolver", _Resolver)
+    monkeypatch.setattr("agentworks.vms.manager._status._platform_ops_ctx", platform_context)
+    monkeypatch.setattr(
+        "agentworks.orchestration.activation.activation_gate",
+        lambda *_args, **_kwargs: pytest.fail("status observation activated a VM"),
+    )
+    monkeypatch.setattr(
+        "agentworks.transports.transport",
+        lambda *_args, **_kwargs: pytest.fail("VM status observation opened a guest transport"),
+    )
+    changes_before = db._conn.total_changes  # noqa: SLF001
+
+    result = observe_vm_statuses(
+        db,
+        object(),  # type: ignore[arg-type]
+        rows,  # type: ignore[arg-type]
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+
+    assert result == {"alpha": VMStatus.RUNNING, "beta": VMStatus.RUNNING}
+    assert provider_threads and all(thread != owner_thread for thread in provider_threads)
+    assert db._conn.total_changes == changes_before  # noqa: SLF001

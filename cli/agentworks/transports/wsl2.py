@@ -91,6 +91,10 @@ class WSL2Transport(Transport):
             )
         except subprocess.TimeoutExpired:
             timed_out = True
+        except OSError as err:
+            if input_text is not None:
+                raise SSHError(f"WSL2 stdin command could not be executed: {command}") from None
+            raise SSHError(f"WSL2 command could not be executed: {command}") from err
         except Exception:
             if input_text is None:
                 raise

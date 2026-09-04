@@ -57,6 +57,10 @@ class UnsupportedAppliedStateVersionError(StateError):
     """Applied evidence was written by a codec version this release cannot read."""
 
 
+class VMSSHIdentityPolicyError(StateError):
+    """A valid identity comparison fails the ordinary canonical SSH policy."""
+
+
 @dataclass(frozen=True, slots=True)
 class PreparedConfiguredSSHIdentity:
     """Validated public content and its configured private identity."""
@@ -262,14 +266,14 @@ def require_vm_ssh_identity(
             if entity_name is not None
             else "Run 'agw vm reinit' for this VM to establish SSH identity evidence."
         )
-        raise StateError(
+        raise VMSSHIdentityPolicyError(
             f"{vm_context} has no recorded SSH identity",
             entity_kind="vm",
             entity_name=entity_name,
             hint=reinit_hint,
         )
     vm_context, entity_name = _vm_context(comparison.vm_name)
-    raise StateError(
+    raise VMSSHIdentityPolicyError(
         f"configured SSH identity for {vm_context} does not match its recorded identity",
         entity_kind="vm",
         entity_name=entity_name,

@@ -17,7 +17,6 @@ from agentworks.db.projections import (
     project_vm_initialization_status,
     project_vm_provisioning_status,
 )
-from agentworks.secrets.policy import TtyInteractionPolicy
 from tests.instance_state_support import stub_instance_state
 
 if TYPE_CHECKING:
@@ -84,7 +83,6 @@ def test_invalid_database_enums_are_closed_in_shared_facts(
     session_fact = session_listing(
         db,
         config,
-        interaction=TtyInteractionPolicy.REFUSE,
     ).sessions[0]
     assert session_fact.mode == "unknown"
     assert session_fact.status == "unavailable"
@@ -103,7 +101,9 @@ def test_real_list_and_describe_clis_never_echo_invalid_persisted_enums(
     config = make_config()
     _wire_cli(monkeypatch, db, config)
 
-    monkeypatch.setattr(sessions, "observe_session_status", lambda *_args: SessionStatus.STOPPED)
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sessions, "check_session_status", lambda *_args, **_kwargs: SessionStatus.STOPPED)
+    monkeypatch.setattr(sessions, "transport", lambda *_args, **_kwargs: object())
     platform = SimpleNamespace(
         name="fixture-platform",
         display_backend_name=lambda _vm: "fixture-backend",

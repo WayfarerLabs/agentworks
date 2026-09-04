@@ -150,6 +150,11 @@ def test_ssh_run_translates_sensitive_native_failure_without_exception_link() ->
     assert secret not in repr(caught.value)
 
 
+def test_ssh_run_translates_process_launch_failure() -> None:
+    with patch("agentworks.ssh.subprocess.run", side_effect=FileNotFoundError("ssh")), pytest.raises(SSHError):
+        run(SSHTarget(host="vm-host"), "true")
+
+
 def test_ssh_run_sensitive_timeout_drops_partial_output_and_native_exception() -> None:
     secret = "ssh-timeout-swordfish"
     timeout = subprocess.TimeoutExpired(

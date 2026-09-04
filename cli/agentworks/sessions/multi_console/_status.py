@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from agentworks.errors import AgentworksError, NotFoundError, UserAbort
+from agentworks.errors import AgentworksError, ConfigError, ConnectivityError, NotFoundError, StateError, UserAbort
 from agentworks.sessions.tmux import ProbeStatus
 
 from ._helpers import tmux_session_name, tmux_staging_name
@@ -54,12 +54,14 @@ def _enumerate_tmux_sessions(target: Transport) -> set[str] | None:
         timeout=_OBSERVATION_TIMEOUT_SECONDS,
         retries=_OBSERVATION_ATTEMPTS,
     )
+    raw_stdout = getattr(result, "stdout", "") or ""
     stdout, stderr = _normalized_probe_streams(result)
     if result.returncode == 0:
-        if stderr:
+        if stderr or "\x00" in raw_stdout or "\r" in raw_stdout:
             return None
-        names = stdout.splitlines() if stdout else []
-        if any(not name or "\x00" in name or "\r" in name for name in names):
+        framed_stdout = raw_stdout[:-1] if raw_stdout.endswith("\n") else raw_stdout
+        names = framed_stdout.split("\n") if framed_stdout else []
+        if any(not name for name in names):
             return None
         return set(names)
     presence = _tmux_presence_from_result(result, missing_target_is_absent=False)
@@ -72,10 +74,12 @@ def observe_console_statuses(
     consoles: Sequence[ConsoleRow],
 ) -> dict[str, ConsoleStatus]:
     """Observe every selected console with one bounded guest call per VM."""
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    from contextvars import copy_context
+    from concurrent.futures import as_completed
+    from functools import partial
 
+    from agentworks.status_observation import cancelling_futures
     from agentworks.transports import transport
+    from agentworks.vms.applied_state import VMSSHIdentityPolicyError
     from agentworks.vms.manager import require_vm_ssh_boundary
 
     statuses = {console.name: ConsoleStatus.UNKNOWN for console in consoles}
@@ -94,10 +98,15 @@ def observe_console_statuses(
             )
         try:
             require_vm_ssh_boundary(db, config, vm)
+        except UserAbort:
+            raise
+        except (ConfigError, ConnectivityError, VMSSHIdentityPolicyError):
+            continue
+        try:
             targets[vm_name] = transport(vm, config, default_timeout=_OBSERVATION_TIMEOUT_SECONDS)
         except UserAbort:
             raise
-        except AgentworksError:
+        except (ConnectivityError, StateError):
             continue
 
     def observe_vm(vm_name: str) -> set[str] | None:
@@ -105,8 +114,8 @@ def observe_console_statuses(
 
     if not targets:
         return statuses
-    with ThreadPoolExecutor(max_workers=min(8, len(targets))) as executor:
-        futures = {executor.submit(copy_context().run, observe_vm, vm_name): vm_name for vm_name in targets}
+    tasks = {vm_name: partial(observe_vm, vm_name) for vm_name in targets}
+    with cancelling_futures(tasks) as futures:
         for future in as_completed(futures):
             vm_name = futures[future]
             try:
@@ -123,12 +132,3 @@ def observe_console_statuses(
                     staging_present=tmux_staging_name(console.name) in tmux_names,
                 )
     return statuses
-
-
-def observe_console_status(
-    db: Database,
-    config: Config,
-    console: ConsoleRow,
-) -> ConsoleStatus:
-    """Observe one console through the same bounded batch authority."""
-    return observe_console_statuses(db, config, [console])[console.name]

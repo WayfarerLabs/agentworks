@@ -62,6 +62,19 @@ def test_lima_status_uses_bounded_provider_call(monkeypatch: pytest.MonkeyPatch)
     assert calls == [{"check": False, "timeout": 10}]
 
 
+def test_lima_status_launch_failure_is_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    platform = LimaPlatform("lima", {"placement": {"mode": "local"}})
+    monkeypatch.setattr(
+        platform,
+        "_run_lima",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(FileNotFoundError("limactl")),
+    )
+
+    assert platform.status(_vm(), RunContext()) is VMStatus.UNKNOWN  # type: ignore[arg-type]
+
+
 def test_lima_start_proceeds_when_stopped(monkeypatch: pytest.MonkeyPatch, captured_output: object) -> None:
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
@@ -132,6 +145,19 @@ def test_wsl2_status_uses_bounded_provider_call(monkeypatch: pytest.MonkeyPatch)
 
     assert WSL2Platform("wsl2", {}).status(_vm(), RunContext()) is VMStatus.RUNNING  # type: ignore[arg-type]
     assert calls == [{"check": False, "timeout": 10}]
+
+
+def test_wsl2_status_launch_failure_is_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.capabilities.vm_platform import wsl2 as wsl2_mod
+    from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
+
+    monkeypatch.setattr(
+        wsl2_mod,
+        "_wsl",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(PermissionError("wsl")),
+    )
+
+    assert WSL2Platform("wsl2", {}).status(_vm(), RunContext()) is VMStatus.UNKNOWN  # type: ignore[arg-type]
 
 
 def test_wsl2_stop_skips_when_already_stopped(monkeypatch: pytest.MonkeyPatch, captured_output: object) -> None:

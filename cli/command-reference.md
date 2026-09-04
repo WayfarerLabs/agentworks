@@ -244,9 +244,10 @@ last matching live observation. VMs retain name order. Provisioning is `pending`
 `complete`, `failed`, or `unknown`; initialization additionally permits `partial`. These frozen JSON
 v1 vocabularies do not expand when domain enums gain members. In this VM list JSON projection,
 `unknown` is the stable sentinel for an invalid persisted value and never echoes that stored value.
-`observed_status` and `status_disposition` are additive nullable v1 fields. Plain list emits null
-for both. With `--status`, observed status is `running`, `stopped`, `deallocated`, or `unknown`;
-disposition is `manual` or `idle` only for stopped or deallocated VMs.
+The 0.18 producer always emits the additive nullable v1 fields `observed_status` and
+`status_disposition`; a v1 consumer must tolerate their absence from older producers. Plain list
+emits null for both. With `--status`, observed status is `running`, `stopped`, `deallocated`, or
+`unknown`; disposition is `manual` or `idle` only for stopped or deallocated VMs.
 
 The VM, workspace, agent, and session description records append the JSON v1 `instance_state`
 object. Current producers always include it; older JSON v1 producers may omit this additive field:
@@ -380,14 +381,16 @@ zero-based position. Current producers emit `[]` when the session has no console
 v1 producers may omit this additive field under the compatibility contract below.
 
 `agw console list --output json` uses `console.list` and
-`{consoles: [{name, vm_name, session_count, status}]}` in configured name order after filtering.
-Status is `unavailable` for plain list; with `--status` it is `running`, `stopped`, `residual`, or
-`unknown`. `agw console describe NAME --output json` uses `console.describe` and `{console}`.
-Console is `{name, vm_name, admin_shell, created_at, updated_at, status, sessions}`. Describe status
-uses the console live vocabulary and never `unavailable`. Members are
-`{position, session_name, shells}` in ascending position, and shells are `{cwd, admin}` in
-configured shell order. `cwd` is nullable and all booleans remain JSON booleans. Console inspection
-preserves configured database membership even when its non-activating live observation is unknown.
+`{consoles: [{name, vm_name, session_count, status}]}` in configured name order after filtering. The
+0.18 producer always emits the additive v1 console `status` field; a v1 consumer must tolerate its
+absence from older producers. Status is `unavailable` for plain list; with `--status` it is
+`running`, `stopped`, `residual`, or `unknown`. `agw console describe NAME --output json` uses
+`console.describe` and `{console}`. Console is
+`{name, vm_name, admin_shell, created_at, updated_at, status, sessions}`. Describe status uses the
+console live vocabulary and never `unavailable`. Members are `{position, session_name, shells}` in
+ascending position, and shells are `{cwd, admin}` in configured shell order. `cwd` is nullable and
+all booleans remain JSON booleans. Console inspection preserves configured database membership even
+when its non-activating live observation is unknown.
 
 #### Doctor JSON schema
 
@@ -879,7 +882,8 @@ panes you want preloaded into a session's window.
   running (using the same read-only observer as `agw session list --status`). Mutually exclusive
   with `--all`. Requires the VM to be reachable. Exact tmux presence includes a running session even
   when its persisted runtime fingerprint is incomplete; an indeterminate non-stopped row refuses the
-  operation rather than silently producing a partial console.
+  operation rather than silently producing a partial console. This creation path preserves its
+  lifecycle eligibility filter: rows with `pid == PID_STOPPED` are excluded before observation.
 - `--add-admin-shell`: include a top-level admin-shell window as window 0.
 
 `console reorder-sessions` moves the listed members in argument order while preserving the relative

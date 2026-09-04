@@ -125,10 +125,11 @@ def vm_list(
         from agentworks.vms.manager.inspect import vm_listing_data
 
         with output.suppress_presentation():
-            listing = (
-                vm_listing(get_db(), config, include_status=True, interaction=interaction)
-                if status
-                else vm_listing(get_db())
+            listing = vm_listing(
+                get_db(),
+                config,
+                include_status=status,
+                interaction=interaction,
             )
         write_json_envelope(
             MachineOutputCommand.VM_LIST,
@@ -136,13 +137,13 @@ def vm_list(
             get_binary_stream("stdout"),
         )
         return
-    listing = (
-        vm_listing(get_db(), config, include_status=True, interaction=interaction) if status else vm_listing(get_db())
+    listing = vm_listing(
+        get_db(),
+        config,
+        include_status=status,
+        interaction=interaction,
     )
-    if status:
-        render_vm_listing(listing, names_only=names_only, include_status=True)
-    else:
-        render_vm_listing(listing, names_only=names_only)
+    render_vm_listing(listing, names_only=names_only, include_status=status)
 
 
 @vm_app.command("backup")

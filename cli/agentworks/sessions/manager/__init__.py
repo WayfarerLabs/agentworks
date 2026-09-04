@@ -190,9 +190,6 @@ from ._status import (
     check_session_status as check_session_status,
 )
 from ._status import (
-    observe_session_status as observe_session_status,
-)
-from ._status import (
     observe_session_statuses as observe_session_statuses,
 )
 
@@ -214,7 +211,6 @@ __all__ = [
     "render_session_description",
     "check_session_status",
     "batch_check_status",
-    "observe_session_status",
     "observe_session_statuses",
     "ensure_pids_batch",
     "filter_sessions",

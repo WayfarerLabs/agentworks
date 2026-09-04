@@ -902,7 +902,7 @@ class WSL2Platform(VMPlatform):
         distro_name = self._distro_name(vm)
         try:
             listing = _wsl(["--list", "--verbose"], check=False, timeout=_STATUS_TIMEOUT_SECONDS)
-        except (RuntimeError, subprocess.TimeoutExpired):
+        except (OSError, RuntimeError, subprocess.TimeoutExpired):
             return VMStatus.UNKNOWN
 
         for line in listing.strip().splitlines():

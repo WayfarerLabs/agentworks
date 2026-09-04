@@ -13,6 +13,7 @@ from .boundary import _platform_ops_ctx
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.secrets.policy import TtyInteractionPolicy
@@ -35,8 +36,8 @@ def observe_vm_statuses(
     interaction: TtyInteractionPolicy,
 ) -> dict[str, VMStatus]:
     """Observe selected VMs without activation, repair, or persistence."""
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    from contextvars import copy_context
+    from concurrent.futures import as_completed
+    from functools import partial
 
     from agentworks.bootstrap import load_request_registry
     from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
@@ -44,6 +45,7 @@ def observe_vm_statuses(
     from agentworks.orchestration.secrets import secret_union
     from agentworks.orchestration.walk import walk
     from agentworks.secrets.resolver import Resolver
+    from agentworks.status_observation import cancelling_futures
     from agentworks.vms.nodes import VMSiteNode, live_vm_node
 
     statuses = {vm.name: VMStatus.UNKNOWN for vm in vms}
@@ -59,7 +61,6 @@ def observe_vm_statuses(
 
     site_nodes: dict[str, VMSiteNode] = {}
     vm_nodes: list[LiveVMNode] = []
-    rows_by_name = {vm.name: vm for vm in vms}
     for vm in vms:
         try:
             vm_nodes.append(live_vm_node(db, config, registry, vm, site_nodes=site_nodes))
@@ -92,16 +93,21 @@ def observe_vm_statuses(
     except AgentworksError:
         return statuses
 
-    by_site: dict[str, list[LiveVMNode]] = {}
+    by_site: dict[str, list[tuple[LiveVMNode, RunContext]]] = {}
     for node in vm_nodes:
-        by_site.setdefault(node.row.site, []).append(node)
+        try:
+            context = _platform_ops_ctx(config, _vm_scope(db, node.row.name), node, resolver)
+        except UserAbort:
+            raise
+        except AgentworksError:
+            continue
+        by_site.setdefault(node.row.site, []).append((node, context))
 
     def observe_site(site_name: str) -> dict[str, VMStatus]:
         observed: dict[str, VMStatus] = {}
-        for node in by_site[site_name]:
-            row = rows_by_name[node.row.name]
+        for node, context in by_site[site_name]:
+            row = node.row
             try:
-                context = _platform_ops_ctx(config, _vm_scope(db, row.name), node, resolver)
                 status = node.site.platform.status(row, context)
             except UserAbort:
                 raise
@@ -112,8 +118,8 @@ def observe_vm_statuses(
             observed[row.name] = status
         return observed
 
-    with ThreadPoolExecutor(max_workers=min(8, len(by_site))) as executor:
-        futures = [executor.submit(copy_context().run, observe_site, site_name) for site_name in by_site]
+    tasks = {site_name: partial(observe_site, site_name) for site_name in by_site}
+    with cancelling_futures(tasks) as futures:
         for future in as_completed(futures):
             statuses.update(future.result())
     return statuses

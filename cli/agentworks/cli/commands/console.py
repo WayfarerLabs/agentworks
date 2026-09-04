@@ -143,12 +143,10 @@ def console_list(
     from agentworks.sessions.multi_console import console_listing, render_console_listing
 
     config = None
-    interaction = None
     if status:
         from agentworks.config import load_config
 
         config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
-        interaction = ordinary_tty_interaction_policy()
     if output_format is OutputFormat.JSON:
         from click import get_binary_stream
 
@@ -164,7 +162,6 @@ def console_list(
                 workspace_name=parse_csv_filter(workspace),
                 agent_name=parse_csv_filter(agent),
                 include_status=status,
-                interaction=interaction,
             )
         write_json_envelope(
             MachineOutputCommand.CONSOLE_LIST,
@@ -179,12 +176,8 @@ def console_list(
         workspace_name=parse_csv_filter(workspace),
         agent_name=parse_csv_filter(agent),
         include_status=status,
-        interaction=interaction,
     )
-    if status:
-        render_console_listing(listing, names_only=names_only, include_status=True)
-    else:
-        render_console_listing(listing, names_only=names_only)
+    render_console_listing(listing, names_only=names_only, include_status=status)
 
 
 @console_app.command("describe")
@@ -196,7 +189,6 @@ def console_describe(
     ] = OutputFormat.HUMAN,
 ) -> None:
     """Show a console's membership and shell layout."""
-    interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config
     from agentworks.sessions.multi_console import console_description, render_console_description
 
@@ -209,14 +201,14 @@ def console_describe(
         from agentworks.sessions.multi_console.attach import console_description_data
 
         with output.suppress_presentation():
-            description = console_description(get_db(), config, name=name, interaction=interaction)
+            description = console_description(get_db(), config, name=name)
         write_json_envelope(
             MachineOutputCommand.CONSOLE_DESCRIBE,
             console_description_data(description),
             get_binary_stream("stdout"),
         )
         return
-    description = console_description(get_db(), config, name=name, interaction=interaction)
+    description = console_description(get_db(), config, name=name)
     render_console_description(description)
 
 

@@ -107,7 +107,6 @@ def session_describe(
     ] = OutputFormat.HUMAN,
 ) -> None:
     """Show session details."""
-    interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config
     from agentworks.sessions.manager import describe_session, session_description
 
@@ -120,14 +119,14 @@ def session_describe(
         from agentworks.sessions.manager._queries import session_description_data
 
         with output.suppress_presentation():
-            description = session_description(get_db(), config, name=name, interaction=interaction)
+            description = session_description(get_db(), config, name=name)
         write_json_envelope(
             MachineOutputCommand.SESSION_DESCRIBE,
             session_description_data(description),
             get_binary_stream("stdout"),
         )
         return
-    describe_session(get_db(), config, name=name, interaction=interaction)
+    describe_session(get_db(), config, name=name)
 
 
 @session_app.command("list")
@@ -166,7 +165,6 @@ def session_list(
 
         output.deprecation("`session list --no-status` is deprecated; use plain `session list`.")
 
-    interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config
     from agentworks.sessions.manager import list_sessions, session_listing
 
@@ -195,7 +193,6 @@ def session_list(
                 agent_name=parsed_agent,
                 admin_only=admin,
                 include_status=status,
-                interaction=interaction,
             )
         write_json_envelope(
             MachineOutputCommand.SESSION_LIST,
@@ -212,7 +209,6 @@ def session_list(
         admin_only=admin,
         include_status=status,
         names_only=names_only,
-        interaction=interaction,
     )
 
 

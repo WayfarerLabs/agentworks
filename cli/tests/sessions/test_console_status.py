@@ -8,7 +8,6 @@ import pytest
 
 from agentworks.db import ConsoleRow
 from agentworks.errors import ConnectivityError, NotFoundError
-from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.multi_console._status import (
     ConsoleStatus,
     _enumerate_tmux_sessions,
@@ -75,6 +74,11 @@ def test_console_enumeration_accepts_only_authoritative_absence() -> None:
     assert _enumerate_tmux_sessions(mixed) is None  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize("stdout", ["aw-console-alpha\n\n", "aw-console-alpha\x00tail\n", "aw-console-alpha\rjunk\n"])
+def test_console_success_stream_must_be_well_formed(stdout: str) -> None:
+    assert _enumerate_tmux_sessions(_Target(_Result(0, stdout=stdout))) is None  # type: ignore[arg-type]
+
+
 def test_console_observer_isolates_unreachable_vm_and_uses_exact_names(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -112,12 +116,68 @@ def test_console_observer_preserves_missing_vm_as_structural_failure() -> None:
         def get_vm(self, _name: str) -> None:
             return None
 
-    with pytest.raises(NotFoundError, match="VM 'missing' not found"):
+    with pytest.raises(NotFoundError) as caught:
         observe_console_statuses(
             _DB(),  # type: ignore[arg-type]
             object(),  # type: ignore[arg-type]
             [ConsoleRow("alpha", "missing", False, "", "")],
         )
+    assert caught.value.entity_kind == "vm"
+    assert caught.value.entity_name == "missing"
+
+
+def test_console_observer_preserves_corrupt_ssh_applied_state(
+    db,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.errors import StateError
+
+    db.insert_vm("box", site="site", hostname="box")
+    db.update_vm_tailscale("box", "100.64.0.9")
+    db.insert_console("alpha", "box")
+    console = db.get_console("alpha")
+    assert console is not None
+    structural = StateError("corrupt SSH applied state", entity_kind="vm", entity_name="box")
+    monkeypatch.setattr(
+        "agentworks.vms.manager.require_vm_ssh_boundary",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(structural),
+    )
+    monkeypatch.setattr(
+        "agentworks.transports.transport",
+        lambda *_args, **_kwargs: pytest.fail("transport constructed after structural failure"),
+    )
+
+    with pytest.raises(StateError) as caught:
+        observe_console_statuses(db, object(), [console])  # type: ignore[arg-type]
+
+    assert caught.value is structural
+
+
+def test_console_observer_uses_only_identity_and_transport_read_seams(
+    db,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db.insert_vm("box", site="site", hostname="box")
+    db.insert_console("alpha", "box")
+    console = db.get_console("alpha")
+    assert console is not None
+    target = _Target(_Result(0, stdout="aw-console-alpha\n"))
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("agentworks.transports.transport", lambda *_args, **_kwargs: target)
+    monkeypatch.setattr(
+        "agentworks.orchestration.activation.activation_gate",
+        lambda *_args, **_kwargs: pytest.fail("console observation activated a VM"),
+    )
+    monkeypatch.setattr(
+        "agentworks.secrets.resolver.Resolver.resolve",
+        lambda *_args, **_kwargs: pytest.fail("console observation resolved secrets"),
+    )
+    changes_before = db._conn.total_changes  # noqa: SLF001
+
+    result = observe_console_statuses(db, object(), [console])  # type: ignore[arg-type]
+
+    assert result == {"alpha": ConsoleStatus.RUNNING}
+    assert db._conn.total_changes == changes_before  # noqa: SLF001
 
 
 def test_console_listing_is_local_until_status_is_requested(
@@ -139,7 +199,6 @@ def test_console_listing_is_local_until_status_is_requested(
         db,
         object(),  # type: ignore[arg-type]
         include_status=True,
-        interaction=TtyInteractionPolicy.REFUSE,
     )
 
     assert plain.consoles[0].status == "unavailable"

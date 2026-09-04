@@ -26,6 +26,9 @@ observed result. An expected provider, credential, identity, or transport failur
 facts and reports status as `unknown`. One failed VM or provider boundary does not remove successful
 rows from a list.
 
+Corrupt or unsupported persisted applied-state is different from an unavailable or mismatched SSH
+identity: it remains a typed error because Agentworks cannot trust the structural record.
+
 ## Status meanings
 
 | Resource | States                                                | Authority                                                                  |
@@ -68,6 +71,10 @@ and console list records carry `"status":"unavailable"`; requested inconclusive 
 `"status":"unknown"`. Plain VM list records carry null `observed_status` and `status_disposition`;
 requested inconclusive observations carry `"observed_status":"unknown"`. Describe never uses a
 not-requested sentinel because it always observes.
+
+The 0.18 producer emits the VM and console status fields on every applicable record. They remain
+additive JSON v1 fields: consumers must tolerate their absence when reading output from an older v1
+producer.
 
 The exact JSON record shapes and ordering are documented in the
 [CLI command reference](../../cli/command-reference.md#machine-readable-output).

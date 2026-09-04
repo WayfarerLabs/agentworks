@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-import shlex
+import base64
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import agentworks.sessions.manager as _mgr
 from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
 from agentworks.errors import (
     AgentworksError,
+    ConfigError,
+    ConnectivityError,
     StateError,
     UserAbort,
 )
@@ -23,7 +25,17 @@ if TYPE_CHECKING:
 _PID_PRESENT_FACT = "present"
 _PID_ABSENT_FACT = "absent"
 _OBSERVATION_TIMEOUT_SECONDS = 10
-_OBSERVATION_ATTEMPTS = 1
+
+
+class _BoundedStatusTarget:
+    """Force singular inspection calls onto the batch probe's safe policy."""
+
+    def __init__(self, target: Transport) -> None:
+        self._target = target
+
+    def run(self, command: str, **kwargs: Any) -> Any:
+        kwargs.update(timeout=_OBSERVATION_TIMEOUT_SECONDS, retries=1, tty=False)
+        return self._target.run(command, **kwargs)
 
 
 def _pid_probe_script(pid: int) -> str:
@@ -63,7 +75,7 @@ def _get_boot_id(target: Transport) -> str | None:
 def check_session_status(
     session: SessionRow,
     *,
-    target: Transport,
+    target: Transport | None = None,
 ) -> SessionStatus:
     """Determine session status. Dispatches by session type.
 
@@ -78,6 +90,8 @@ def check_session_status(
     operator restart.
     """
     if session.socket_path is not None:
+        if target is None:
+            raise TypeError("dedicated session status requires a transport")
         return _check_dedicated_session(session, target=target)
     if session.pid is None or session.boot_id is None:
         return SessionStatus.UNKNOWN
@@ -147,9 +161,6 @@ def batch_check_status(
     sessions: list[SessionRow],
     *,
     target: Transport,
-    timeout: int = _OBSERVATION_TIMEOUT_SECONDS,
-    retries: int = _OBSERVATION_ATTEMPTS,
-    tty: bool = False,
 ) -> dict[str, SessionStatus]:
     """Check status for multiple sessions in one SSH call per VM.
 
@@ -159,69 +170,50 @@ def batch_check_status(
     identity can prove more. Persisted-stopped rows are still probed so a
     manually resurrected exact session cannot be hidden by stale evidence.
     """
-    from agentworks.sessions.tmux import canonical_boot_id, exact_tmux_target, tmux_cmd
+    from agentworks.sessions.tmux import canonical_boot_id
 
     checkable = [s for s in sessions if s.socket_path is not None]
     if not checkable:
         return {}
 
-    # Preserve one SSH round-trip while returning only hex-encoded probe facts.
-    # Python owns the tmux diagnostic vocabulary; the remote shell captures
-    # facts without interpreting or exposing third-party text.
-    encoder = "hex() { od -An -tx1 | tr -d ' \\n'; }; "
-    parts = []
-    for s in checkable:
-        if s.socket_path is None:
-            continue
-        q_session = exact_tmux_target(s.name)
-        name = s.name  # raw for output field (names are validated, no shell-special chars)
-        needs_sudo = s.mode == SessionMode.AGENT.value
-        has_cmd = tmux_cmd(f"has-session -t {q_session}", s.socket_path, sudo=needs_sudo)
-        server_cmd = tmux_cmd("list-sessions", s.socket_path, sudo=needs_sudo)
-        pid_probe = _pid_probe_script(s.pid) if s.pid is not None and s.pid > 0 else None
-        if pid_probe is None:
-            pid_cmd = "false"
-        elif needs_sudo:
-            pid_cmd = f"sudo -n sh -c {shlex.quote(pid_probe)}"
-        else:
-            pid_cmd = f"sh -c {shlex.quote(pid_probe)}"
-        parts.append(
-            f"HERR=$({has_cmd} 2>&1 >/dev/null); H=$?; "
-            'HHEX=$(printf %s "$HERR" | hex); '
-            f"SERR=$({server_cmd} 2>&1 >/dev/null); S=$?; "
-            'SHEX=$(printf %s "$SERR" | hex); '
-            f"BOOT=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null); B=$?; "
-            'BOOT_HEX=$(printf %s "$BOOT" | hex); '
-            f"PFACT=$({pid_cmd} 2>/dev/null); P=$?; "
-            'PHEX=$(printf %s "$PFACT" | hex); '
-            f'printf "S:{name}:%s:%s:%s:%s:%s:%s:%s:%s\\n" '
-            '"$H" "$HHEX" "$S" "$SHEX" "$B" "$BOOT_HEX" "$P" "$PHEX"'
-        )
-    if not parts:
-        return {}
-    cmd = encoder + "; ".join(parts)
-
-    result = target.run(cmd, check=False, timeout=timeout, retries=retries, tty=tty)
+    cmd = _batch_probe_command(checkable)
+    result = target.run(
+        cmd,
+        check=False,
+        timeout=_OBSERVATION_TIMEOUT_SECONDS,
+        retries=1,
+        tty=False,
+    )
     stdout = getattr(result, "stdout", "") or ""
+    stderr = getattr(result, "stderr", "") or ""
 
     status_map: dict[str, SessionStatus] = {
         session.name: SessionStatus.UNKNOWN for session in checkable if session.socket_path is not None
     }
-    sessions_by_name = {session.name: session for session in checkable}
+    sessions_by_key = {_encoded_probe_field(session.name): session for session in checkable}
 
-    if result.returncode not in {0, 1}:
+    if result.returncode != 0 or stderr or "\x00" in stdout or "\r" in stdout:
         return status_map
 
-    for line in stdout.strip().splitlines():
-        if not line.startswith("S:"):
-            continue
+    frames: dict[str, list[str]] = {}
+    framed_stdout = stdout[:-1] if stdout.endswith("\n") else stdout
+    lines = framed_stdout.split("\n") if framed_stdout else []
+    if any(not line for line in lines):
+        return status_map
+    for line in lines:
         fields = line.split(":")
         if len(fields) != 10:
-            continue
-        name = fields[1]
-        session = sessions_by_name.get(name)
-        if session is None or name not in status_map:
-            continue
+            return status_map
+        key = fields[1]
+        if fields[0] != "S" or key not in sessions_by_key or key in frames or not _valid_batch_frame(fields):
+            return status_map
+        frames[key] = fields
+    if set(frames) != set(sessions_by_key):
+        return status_map
+
+    for key, fields in frames.items():
+        session = sessions_by_key[key]
+        name = session.name
 
         has_presence = _batch_tmux_presence(fields[2], fields[3], missing_target_is_absent=True)
         if has_presence is ProbeStatus.PRESENT:
@@ -269,6 +261,75 @@ def batch_check_status(
     return status_map
 
 
+def _encoded_probe_field(value: str) -> str:
+    """Encode one row field without shell or frame delimiters."""
+    return base64.b64encode(value.encode()).decode("ascii")
+
+
+def _batch_probe_command(sessions: list[SessionRow]) -> str:
+    """Build one compact loop program for a VM's selected session rows."""
+    records = []
+    for session in sessions:
+        assert session.socket_path is not None
+        mode = "a" if session.mode == SessionMode.AGENT.value else "u"
+        pid = (
+            str(session.pid)
+            if isinstance(session.pid, int) and not isinstance(session.pid, bool) and session.pid > 0
+            else "-"
+        )
+        records.append(
+            " ".join(
+                (
+                    _encoded_probe_field(session.name),
+                    _encoded_probe_field(session.socket_path),
+                    mode,
+                    pid,
+                )
+            )
+        )
+    data = "\n".join(records)
+    return (
+        "hex() { od -An -tx1 | tr -d ' \\n'; }; "
+        'decode() { printf %s "$1" | base64 -d; }; '
+        "BOOT=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null); B=$?; "
+        'BOOT_HEX=$(printf %s "$BOOT" | hex); '
+        "while read -r N64 S64 M PID; do "
+        'N=$(decode "$N64") || exit 90; SOCK=$(decode "$S64") || exit 90; '
+        'run_tmux() { if [ "$M" = a ]; then sudo -n tmux -S "$SOCK" "$@"; '
+        'else tmux -S "$SOCK" "$@"; fi; }; '
+        'HERR=$(run_tmux has-session -t "=$N" 2>&1 >/dev/null); H=$?; '
+        'HHEX=$(printf %s "$HERR" | hex); '
+        "SERR=$(run_tmux list-sessions 2>&1 >/dev/null); S=$?; "
+        'SHEX=$(printf %s "$SERR" | hex); '
+        'if [ "$PID" = - ]; then PFACT=; P=1; '
+        'elif [ "$M" = a ]; then '
+        'PFACT=$(sudo -n sh -c "if test -d /proc/$PID; then printf present; '
+        'else printf absent; fi" 2>/dev/null); P=$?; '
+        'else PFACT=$(sh -c "if test -d /proc/$PID; then printf present; '
+        'else printf absent; fi" 2>/dev/null); P=$?; fi; '
+        'PHEX=$(printf %s "$PFACT" | hex); '
+        'printf "S:%s:%s:%s:%s:%s:%s:%s:%s\\n" '
+        '"$N64" "$H" "$HHEX" "$S" "$SHEX" "$B" "$BOOT_HEX" "$P" "$PHEX"; '
+        "done <<'AGW_STATUS_ROWS'\n"
+        f"{data}\n"
+        "AGW_STATUS_ROWS"
+    )
+
+
+def _valid_batch_frame(fields: list[str]) -> bool:
+    """Reject malformed framing before any requested row is trusted."""
+    try:
+        for index in (2, 4, 6, 8):
+            int(fields[index])
+        bytes.fromhex(fields[3]).decode("utf-8")
+        bytes.fromhex(fields[5]).decode("utf-8")
+        bytes.fromhex(fields[7]).decode("ascii")
+        bytes.fromhex(fields[9]).decode("ascii")
+    except (UnicodeDecodeError, ValueError):
+        return False
+    return True
+
+
 def _batch_tmux_presence(
     returncode: str,
     diagnostic_hex: str,
@@ -294,8 +355,11 @@ def observe_session_statuses(
     config: Config,
 ) -> dict[str, SessionStatus]:
     """Observe every selected session, grouped and bounded by backing VM."""
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    from contextvars import copy_context
+    from concurrent.futures import as_completed
+    from functools import partial
+
+    from agentworks.status_observation import cancelling_futures
+    from agentworks.vms.applied_state import VMSSHIdentityPolicyError
 
     # Resolve each session's VM and group
     by_vm: dict[str, list[SessionRow]] = {}
@@ -315,6 +379,12 @@ def observe_session_statuses(
                 from agentworks.vms.manager import require_vm_ssh_boundary
 
                 require_vm_ssh_boundary(db, config, vm)
+            except UserAbort:
+                raise
+            except (ConfigError, ConnectivityError, VMSSHIdentityPolicyError):
+                unavailable_vms.add(ws.vm_name)
+                continue
+            try:
                 vm_targets[ws.vm_name] = _mgr.transport(
                     vm,
                     config,
@@ -322,7 +392,7 @@ def observe_session_statuses(
                 )
             except UserAbort:
                 raise
-            except AgentworksError:
+            except (ConnectivityError, StateError):
                 unavailable_vms.add(ws.vm_name)
                 continue
         by_vm.setdefault(ws.vm_name, []).append(s)
@@ -331,16 +401,10 @@ def observe_session_statuses(
         return result_map
 
     def _check_vm(vm_name: str) -> dict[str, SessionStatus]:
-        return batch_check_status(
-            by_vm[vm_name],
-            target=vm_targets[vm_name],
-            timeout=_OBSERVATION_TIMEOUT_SECONDS,
-            retries=_OBSERVATION_ATTEMPTS,
-            tty=False,
-        )
+        return batch_check_status(by_vm[vm_name], target=vm_targets[vm_name])
 
-    with ThreadPoolExecutor(max_workers=min(8, len(by_vm))) as executor:
-        futures = [executor.submit(copy_context().run, _check_vm, name) for name in by_vm]
+    tasks = {vm_name: partial(_check_vm, vm_name) for vm_name in by_vm}
+    with cancelling_futures(tasks) as futures:
         for future in as_completed(futures):
             try:
                 result_map.update(future.result())
@@ -350,12 +414,3 @@ def observe_session_statuses(
                 continue
 
     return result_map
-
-
-def observe_session_status(
-    db: Database,
-    config: Config,
-    session: SessionRow,
-) -> SessionStatus:
-    """Observe one session without activating or repairing its VM."""
-    return observe_session_statuses([session], db=db, config=config)[session.name]

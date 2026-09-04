@@ -794,7 +794,7 @@ class LimaPlatform(VMPlatform):
                 check=False,
                 timeout=_STATUS_TIMEOUT_SECONDS,
             )
-        except (SSHError, subprocess.TimeoutExpired):
+        except (OSError, SSHError, subprocess.TimeoutExpired):
             return VMStatus.UNKNOWN
 
         for line in listing.strip().splitlines():

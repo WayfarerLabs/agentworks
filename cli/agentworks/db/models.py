@@ -49,7 +49,8 @@ class SessionStatus(Enum):
     UNKNOWN = "unknown"
 
 
-# Sentinel PID value: session is known to be stopped (no process to check).
+# Sentinel PID value: lifecycle last recorded the session stopped. Live
+# observation still checks its exact tmux runtime before trusting this evidence.
 # Distinct from NULL (never checked / pre-enhancement).
 PID_STOPPED = -1
 

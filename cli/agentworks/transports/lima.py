@@ -85,6 +85,10 @@ class LimaTransport(Transport):
             if input_text is not None:
                 raise SSHError(f"Lima stdin command timed out after {t}s: {command}") from None
             raise SSHError(f"Lima command timed out after {t}s: {command}") from err
+        except OSError as err:
+            if input_text is not None:
+                raise SSHError(f"Lima stdin command could not be executed: {command}") from None
+            raise SSHError(f"Lima command could not be executed: {command}") from err
         except Exception:
             if input_text is None:
                 raise

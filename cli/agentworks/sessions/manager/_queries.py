@@ -12,6 +12,8 @@ from agentworks.db.projections import project_session_mode, project_session_stat
 from agentworks.errors import (
     AgentworksError,
     BrokenStateError,
+    ConfigError,
+    ConnectivityError,
     StateError,
     UserAbort,
 )
@@ -26,6 +28,7 @@ if TYPE_CHECKING:
     from agentworks.resources.registry import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.sessions.template import SessionTemplate
+    from agentworks.transports import Transport
 
 
 @dataclass(frozen=True)
@@ -414,15 +417,45 @@ def session_description(
     config: Config,
     *,
     name: str,
-    interaction: TtyInteractionPolicy,
 ) -> SessionDescription:
     """Collect session detail facts with non-activating live status."""
     session = _mgr._require_session(db, name)
     workspace = _mgr._require_workspace(db, session.workspace_name)
-    _mgr._require_vm_for_workspace(db, workspace)
-    del interaction  # Session observation uses no provider or secret boundary.
+    vm = _mgr._require_vm_for_workspace(db, workspace)
     output.info(f"Checking session '{name}' runtime...")
-    status = _mgr.observe_session_status(db, config, session)
+    status = SessionStatus.UNKNOWN
+    if session.socket_path is None:
+        status = _mgr.check_session_status(session)
+    else:
+        from agentworks.vms.applied_state import VMSSHIdentityPolicyError
+
+        try:
+            from agentworks.vms.manager import require_vm_ssh_boundary
+
+            require_vm_ssh_boundary(db, config, vm)
+        except UserAbort:
+            raise
+        except (ConfigError, ConnectivityError, VMSSHIdentityPolicyError):
+            pass
+        else:
+            try:
+                target = _mgr.transport(vm, config, default_timeout=10)
+            except UserAbort:
+                raise
+            except (ConnectivityError, StateError):
+                pass
+            else:
+                from agentworks.sessions.manager._status import _BoundedStatusTarget
+
+                try:
+                    status = _mgr.check_session_status(
+                        session,
+                        target=cast("Transport", _BoundedStatusTarget(target)),
+                    )
+                except UserAbort:
+                    raise
+                except ConnectivityError:
+                    pass
     if status is SessionStatus.UNKNOWN:
         output.warn(f"Session '{name}' runtime status could not be determined.")
     return _session_structural_description(db, config, name, status)
@@ -543,10 +576,9 @@ def describe_session(
     config: Config,
     *,
     name: str,
-    interaction: TtyInteractionPolicy,
 ) -> None:
     """Show session details."""
-    render_session_description(session_description(db, config, name=name, interaction=interaction))
+    render_session_description(session_description(db, config, name=name))
 
 
 def list_sessions(
@@ -559,7 +591,6 @@ def list_sessions(
     admin_only: bool = False,
     include_status: bool = False,
     names_only: bool = False,
-    interaction: TtyInteractionPolicy,
 ) -> None:
     """List sessions, optionally observing live status by backing VM.
 
@@ -595,7 +626,6 @@ def list_sessions(
         agent_name=agent_name,
         admin_only=admin_only,
         include_status=include_status,
-        interaction=interaction,
     )
     if include_status:
         render_session_listing(listing, include_status=True)
@@ -612,7 +642,6 @@ def session_listing(
     agent_name: str | list[str] | None = None,
     admin_only: bool = False,
     include_status: bool = False,
-    interaction: TtyInteractionPolicy,
 ) -> SessionListing:
     """Collect local session inventory, optionally enriched by live status."""
     sessions = _mgr.filter_sessions(
@@ -638,8 +667,6 @@ def session_listing(
             f"across {output.count(len(selected_vms), 'VM')}..."
         )
         status_map = _mgr.observe_session_statuses(sessions, db=db, config=config)
-    del interaction  # Status observation resolves no secrets and never gates.
-
     registry = _mgr._display_registry(config)
     harness_by_template: dict[str, str] = {}
 

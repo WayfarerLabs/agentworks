@@ -39,6 +39,7 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager as session_manager
 from agentworks.sessions.manager._queries import session_listing_data
 from agentworks.vms import manager as vm_manager
+from agentworks.vms.applied_state import VMSSHIdentityPolicyError
 from tests.conftest import stub_vm_ssh_identity
 
 if TYPE_CHECKING:
@@ -192,7 +193,7 @@ def test_best_effort_status_and_pid_repair_skip_identity_refusal_before_transpor
     assert session is not None
 
     def refuse(*args: object, **kwargs: object) -> None:
-        raise StateError("SSH identity drift")
+        raise VMSSHIdentityPolicyError("SSH identity drift")
 
     monkeypatch.setattr(vm_manager, "require_vm_ssh_boundary", refuse)
     monkeypatch.setattr(
@@ -218,7 +219,7 @@ def test_list_status_reports_identity_refusal_as_unknown_without_transport(
     db.update_session_runtime("s-a", socket_path="/tmp/s-a.sock", pid=4321, boot_id=BOOT_ID, tmux_server_start_ticks=77)
 
     def refuse(*args: object, **kwargs: object) -> None:
-        raise StateError("SSH identity drift")
+        raise VMSSHIdentityPolicyError("SSH identity drift")
 
     monkeypatch.setattr(vm_manager, "require_vm_ssh_boundary", refuse)
     monkeypatch.setattr(
@@ -231,7 +232,6 @@ def test_list_status_reports_identity_refusal_as_unknown_without_transport(
         db,
         make_config(),
         include_status=True,
-        interaction=TtyInteractionPolicy.REFUSE,
     )
 
     assert listing.sessions[0].status == "unknown"
@@ -920,17 +920,17 @@ def test_describe_session_observes_without_a_vm_hold(
     events: list[str] = []
     _record_holds(monkeypatch, events)
 
-    def _probe(db_arg: object, config_arg: object, session: object) -> object:
-        del db_arg, config_arg, session
+    def _probe(session: object, *, target: object) -> object:
+        del session, target
         assert db._tx_depth == 0  # noqa: SLF001
         events.append("probe")
         from agentworks.db import SessionStatus
 
         return SessionStatus.STOPPED
 
-    monkeypatch.setattr(session_manager, "observe_session_status", _probe)
+    monkeypatch.setattr(session_manager, "check_session_status", _probe)
 
-    session_manager.describe_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
+    session_manager.describe_session(db, config, name="s1")
 
     assert events == ["probe"]
     assert resolve_counter == []
@@ -949,7 +949,8 @@ def test_describe_session_derives_vm_from_its_structural_snapshot(
     _seed_vm(db, "moved", "100.64.0.10")
     _reachable(monkeypatch, True)
 
-    def move_before_snapshot(*_args: object) -> object:
+    def move_before_snapshot(*_args: object, **_kwargs: object) -> object:
+        del _kwargs
         assert db._tx_depth == 0  # noqa: SLF001
         db._conn.execute("UPDATE workspaces SET vm_name = 'moved' WHERE name = 'ws-box'")  # noqa: SLF001
         db._conn.commit()  # noqa: SLF001
@@ -957,17 +958,78 @@ def test_describe_session_derives_vm_from_its_structural_snapshot(
 
         return SessionStatus.STOPPED
 
-    monkeypatch.setattr(session_manager, "observe_session_status", move_before_snapshot)
+    monkeypatch.setattr(session_manager, "check_session_status", move_before_snapshot)
 
     description = session_manager.session_description(
         db,
         config,
         name="s1",
-        interaction=TtyInteractionPolicy.REFUSE,
     )
 
     assert description.vm_name == "moved"
     assert resolve_counter == []
+
+
+def test_describe_session_preserves_live_legacy_structural_error(
+    db: Database,
+    make_config,  # noqa: ANN001
+) -> None:
+    config = make_config()
+    _seed_singular(db)
+    db.update_session_runtime(
+        "s1",
+        socket_path=None,
+        pid=42,
+        boot_id=BOOT_ID,
+        tmux_server_start_ticks=100,
+    )
+
+    with pytest.raises(StateError) as caught:
+        session_manager.session_description(db, config, name="s1")
+
+    assert caught.value.entity_kind == "session"
+    assert caught.value.entity_name == "s1"
+
+
+def test_describe_session_preserves_malformed_stored_boot_error(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config()
+    _seed_singular(db)
+    _reachable(monkeypatch, True)
+    db.update_session_runtime(
+        "s1",
+        socket_path="/tmp/s1.sock",
+        pid=42,
+        boot_id="malformed",
+        tmux_server_start_ticks=100,
+    )
+
+    class _AbsentTarget(_FakeTarget):
+        def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
+            del kwargs
+            if "has-session" in cmd:
+                return SimpleNamespace(ok=False, returncode=1, stdout="", stderr="can't find session: s1")
+            if "list-sessions" in cmd:
+                return SimpleNamespace(
+                    ok=False,
+                    returncode=1,
+                    stdout="",
+                    stderr="no server running on /tmp/s1.sock",
+                )
+            if "/proc/sys/kernel/random/boot_id" in cmd:
+                return SimpleNamespace(ok=True, returncode=0, stdout=f"{BOOT_ID}\n", stderr="")
+            raise AssertionError(cmd)
+
+    monkeypatch.setattr(session_manager, "transport", lambda *_args, **_kwargs: _AbsentTarget())
+
+    with pytest.raises(StateError) as caught:
+        session_manager.session_description(db, config, name="s1")
+
+    assert caught.value.entity_kind == "session"
+    assert caught.value.entity_name == "s1"
 
 
 def test_describe_session_shows_harness_integration_line(
@@ -987,11 +1049,11 @@ def test_describe_session_shows_harness_integration_line(
 
     monkeypatch.setattr(
         session_manager,
-        "observe_session_status",
-        lambda *_args: SessionStatus.STOPPED,
+        "check_session_status",
+        lambda *_args, **_kwargs: SessionStatus.STOPPED,
     )
 
-    session_manager.describe_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
+    session_manager.describe_session(db, config, name="s1")
 
     info = captured_output.info
     assert "Harness integration: shell" in info
@@ -1015,7 +1077,7 @@ def test_describe_session_stopped_vm_does_not_open_the_gate(
     events: list[str] = []
     _stop_the_vms(monkeypatch, events)
 
-    session_manager.describe_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
+    session_manager.describe_session(db, config, name="s1")
 
     assert events == []
     assert resolve_counter == []
@@ -1118,6 +1180,6 @@ def test_session_describe_does_not_reach_provider_readiness(
 
     monkeypatch.setattr(ProxmoxPlatform, "preflight", _recording)
 
-    session_manager.describe_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
+    session_manager.describe_session(db, config, name="s1")
 
     assert scopes == []

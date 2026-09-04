@@ -16,7 +16,6 @@ import re
 from typing import TYPE_CHECKING
 
 from agentworks.db import SessionMode
-from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager as session_manager
 from tests.conftest import ManifestDoc
 
@@ -70,7 +69,7 @@ def test_list_shows_harness_integration_column_between_template_and_mode(
     _seed_session(db, "s-shell", "ws-box", "default")
     _seed_session(db, "s-claude", "ws-box", "claude")
 
-    session_manager.list_sessions(db, config, interaction=TtyInteractionPolicy.REFUSE)
+    session_manager.list_sessions(db, config)
 
     _header, rows = _header_and_rows(captured_output.info)
     by_name = {row.split()[0]: row.split() for row in rows}
@@ -95,7 +94,6 @@ def test_listing_uses_the_live_session_overlay_harness_integration(
     listing = session_manager.session_listing(
         db,
         config,
-        interaction=TtyInteractionPolicy.REFUSE,
     )
 
     assert listing.sessions[0].harness_integration == "shell"
@@ -113,7 +111,7 @@ def test_list_unresolvable_template_shows_dash_and_still_renders(
     _seed_session(db, "s-good", "ws-box", "default")
     _seed_session(db, "s-bad", "ws-box", "ghost-template")
 
-    session_manager.list_sessions(db, config, interaction=TtyInteractionPolicy.REFUSE)
+    session_manager.list_sessions(db, config)
 
     _header, rows = _header_and_rows(captured_output.info)
     by_name = {row.split()[0]: row.split() for row in rows}
@@ -132,7 +130,7 @@ def test_list_truncates_over_cap_values_with_ellipsis(
     _seed_vm(db, "box", "ws-box")
     _seed_session(db, long_name, "ws-box", "default")
 
-    session_manager.list_sessions(db, config, interaction=TtyInteractionPolicy.REFUSE)
+    session_manager.list_sessions(db, config)
 
     _header, rows = _header_and_rows(captured_output.info)
     assert rows[0].startswith(long_name[:17] + "...")
@@ -157,7 +155,7 @@ def test_list_mode_column_uses_wider_cap(
         socket_path="/tmp/s1.sock",
     )
 
-    session_manager.list_sessions(db, config, interaction=TtyInteractionPolicy.REFUSE)
+    session_manager.list_sessions(db, config)
 
     _header, rows = _header_and_rows(captured_output.info)
     mode_cell = re.split(r" {2,}", rows[0])[5]
@@ -175,7 +173,7 @@ def test_plain_list_shows_harness_integration_without_status(
     _seed_vm(db, "box", "ws-box")
     _seed_session(db, "s1", "ws-box", "default")
 
-    session_manager.list_sessions(db, config, interaction=TtyInteractionPolicy.REFUSE)
+    session_manager.list_sessions(db, config)
 
     header, rows = _header_and_rows(captured_output.info)
     assert "HARNESS" in header
@@ -205,7 +203,7 @@ def test_list_resolves_each_distinct_template_at_most_once(
 
     monkeypatch.setattr(session_manager, "_display_harness_integration", _counting)
 
-    session_manager.list_sessions(db, config, interaction=TtyInteractionPolicy.REFUSE)
+    session_manager.list_sessions(db, config)
 
     assert seen == ["default"]
 
@@ -232,7 +230,7 @@ def test_list_bad_registry_degrades_harness_integration_to_dash_and_still_render
 
     monkeypatch.setattr(bootstrap, "build_registry", _boom)
 
-    session_manager.list_sessions(db, config, interaction=TtyInteractionPolicy.REFUSE)
+    session_manager.list_sessions(db, config)
 
     header, rows = _header_and_rows(captured_output.info)
     assert "HARNESS" in header
@@ -259,6 +257,6 @@ def test_names_only_stays_pure_and_pays_no_registry_cost(
 
     monkeypatch.setattr(bootstrap, "build_registry", _boom)
 
-    session_manager.list_sessions(db, config, names_only=True, interaction=TtyInteractionPolicy.REFUSE)
+    session_manager.list_sessions(db, config, names_only=True)
 
     assert captured_output.info == ["s1"]

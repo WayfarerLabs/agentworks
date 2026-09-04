@@ -59,7 +59,7 @@ class ConsoleListRow:
     name: str
     vm_name: str
     session_count: int
-    status: str = "unavailable"
+    status: str
 
 
 @dataclass(frozen=True)
@@ -88,7 +88,7 @@ class ConsoleDescription:
     created_at: str
     updated_at: str
     sessions: tuple[ConsoleMember, ...]
-    status: str = "unknown"
+    status: str
 
 
 def console_listing_data(listing: ConsoleListing) -> JsonObject:
@@ -439,7 +439,6 @@ def console_listing(
     workspace_name: str | list[str] | None = None,
     agent_name: str | list[str] | None = None,
     include_status: bool = False,
-    interaction: TtyInteractionPolicy | None = None,
 ) -> ConsoleListing:
     """Collect ordered console list facts, optionally filtered by DB relationships.
 
@@ -470,8 +469,8 @@ def console_listing(
             )
     statuses: dict[str, ConsoleStatus] = {}
     if include_status and consoles:
-        if config is None or interaction is None:
-            raise StateError("console status observation requires config and interaction policy")
+        if config is None:
+            raise StateError("console status observation requires config")
         output.info(
             f"Checking status for {output.count(len(consoles), 'console')} "
             f"across {output.count(len({console.vm_name for console, _count in consoles}), 'VM')}..."
@@ -550,7 +549,6 @@ def console_description(
     config: Config,
     *,
     name: str,
-    interaction: TtyInteractionPolicy,
 ) -> ConsoleDescription:
     """Collect configured console facts plus non-activating live status."""
     console = _require_console(db, name)
@@ -568,9 +566,8 @@ def console_description(
         )
         for member in db.list_console_sessions(name)
     )
-    del interaction  # Console observation resolves no secrets and never gates.
     output.info(f"Checking console '{name}' runtime...")
-    status = _mc.observe_console_status(db, config, console)
+    status = _mc.observe_console_statuses(db, config, [console])[console.name]
     if status is ConsoleStatus.UNKNOWN:
         output.warn(f"Console '{name}' runtime status could not be determined.")
     return ConsoleDescription(
@@ -617,7 +614,6 @@ def list_consoles(
     agent_name: str | list[str] | None = None,
     names_only: bool = False,
     include_status: bool = False,
-    interaction: TtyInteractionPolicy | None = None,
 ) -> None:
     """Print the legacy console list presentation."""
     render_console_listing(
@@ -628,7 +624,6 @@ def list_consoles(
             workspace_name=workspace_name,
             agent_name=agent_name,
             include_status=include_status,
-            interaction=interaction,
         ),
         names_only=names_only,
         include_status=include_status,
@@ -640,10 +635,9 @@ def describe_console(
     config: Config,
     *,
     name: str,
-    interaction: TtyInteractionPolicy,
 ) -> None:
     """Print the legacy console detail presentation."""
-    render_console_description(console_description(db, config, name=name, interaction=interaction))
+    render_console_description(console_description(db, config, name=name))
 
 
 # -- High-level entrypoints ------------------------------------------------

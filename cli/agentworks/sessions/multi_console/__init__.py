@@ -45,7 +45,6 @@ from ._helpers import (
 from ._status import (
     ConsoleStatus,
     classify_console_status,
-    observe_console_status,
     observe_console_statuses,
 )
 from .attach import (
@@ -145,7 +144,6 @@ __all__ = [
     "kill_session_windows",
     "list_consoles",
     "offer_delete_if_empty_consoles",
-    "observe_console_status",
     "observe_console_statuses",
     "parse_session_spec",
     "remove_sessions",

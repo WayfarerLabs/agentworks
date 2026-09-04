@@ -110,18 +110,19 @@ assert behavior and structure, never authored prose.
 
 ## Phase 1: Resource-owned observers
 
-- [ ] Rename `SessionStatus.OK` to `RUNNING` across production, tests, comments, help, and docs,
+- [x] Rename `SessionStatus.OK` to `RUNNING` across production, tests, comments, help, and docs,
       without an alias or persisted-state migration.
-- [ ] Add a bounded non-activating canonical transport construction path for status probes, keeping
+- [x] Add a bounded non-activating canonical transport construction path for status probes, keeping
       the global Windows TTY policy unchanged and selecting `tty=False` per observation call.
-- [ ] Refactor session singular and batch status observation to return a complete requested-name
-      mapping, use a 10-second one-attempt transport budget, and preserve lifecycle callers.
-- [ ] Add the console domain enum, canonical/staging pure classifier, exact session-enumeration
-      observer, singular wrapper, and one-call-per-VM failure isolation in a focused module.
-- [ ] Add the non-gated VM multi-row observation composition with one all-or-nothing
+- [x] Refactor the session singular classifier and batch status observer, make the batch return a
+      complete requested-name mapping, use a 10-second one-attempt transport budget, and preserve
+      lifecycle callers.
+- [x] Add the console domain enum, canonical/staging pure classifier, exact session-enumeration
+      observer, focused describe join, and one-call-per-VM failure isolation in a focused module.
+- [x] Add the non-gated VM multi-row observation composition with one all-or-nothing
       registry/preflight/credential setup, site-local serial platform calls, and finite parallelism
       across independent sites after setup.
-- [ ] Inventory each bundled provider status timeout and add safe provider-local bounds where the
+- [x] Inventory each bundled provider status timeout and add safe provider-local bounds where the
       existing client supports them without a capability change; record honest residual limitations.
 
 ### Phase 1 definition of done
@@ -134,18 +135,18 @@ assert behavior and structure, never authored prose.
 
 ## Phase 2: Standard list grammar and projections
 
-- [ ] Add `--status` to VM, session, and console list with positive `include_status` service
+- [x] Add `--status` to VM, session, and console list with positive `include_status` service
       parameters and early `--names-only` refusal.
-- [ ] Make plain session list skip live observation and remove the status column from its human
+- [x] Make plain session list skip live observation and remove the status column from its human
       default while preserving harness-integration local declaration resolution.
-- [ ] Join VM observations into optional human `STATUS` and additive JSON `observed_status` and
+- [x] Join VM observations into optional human `STATUS` and additive JSON `observed_status` and
       `status_disposition` fields.
-- [ ] Join session observations into optional human `STATUS` and the existing JSON status field,
+- [x] Join session observations into optional human `STATUS` and the existing JSON status field,
       with `unavailable` only when not requested.
-- [ ] Join console observations into optional human `STATUS` and the additive JSON status field.
-- [ ] Emit aggregate human progress before external dispatch and compact post-table summaries for
+- [x] Join console observations into optional human `STATUS` and the additive JSON status field.
+- [x] Emit aggregate human progress before external dispatch and compact post-table summaries for
       unknown observations, while preserving a clean suppressed JSON envelope.
-- [ ] Ensure empty and fully filtered lists perform no observation and preserve existing ordering
+- [x] Ensure empty and fully filtered lists perform no observation and preserve existing ordering
       and friendly human output.
 
 ### Phase 2 definition of done
@@ -158,15 +159,15 @@ assert behavior and structure, never authored prose.
 
 ## Phase 3: Focused describe
 
-- [ ] Move session describe from `_prepare_vm` to singular non-activating status observation and
+- [x] Move session describe from `_prepare_vm` to singular non-activating status observation and
       preserve its configured/instance-state facts on expected live failure.
-- [ ] Add console describe live status through the singular console observer, with no build-plan or
-      pane-secret work and configured membership preserved on unknown.
-- [ ] Reuse one VM status/disposition projector in list and describe without pulling describe-only
+- [x] Add console describe live status through a one-row selection from the console batch observer,
+      with no build-plan or pane-secret work and configured membership preserved on unknown.
+- [x] Reuse one VM status/disposition projector in list and describe without pulling describe-only
       live resource usage into list.
-- [ ] Add human pre-observation progress and safe expected-failure reporting; keep JSON
+- [x] Add human pre-observation progress and safe expected-failure reporting; keep JSON
       presentation-free and structurally closed.
-- [ ] Remove list/describe claims from activation-boundary docstrings and update nearby names and
+- [x] Remove list/describe claims from activation-boundary docstrings and update nearby names and
       comments to reflect lifecycle versus observation ownership.
 
 ### Phase 3 definition of done
@@ -179,20 +180,20 @@ assert behavior and structure, never authored prose.
 
 ## Phase 4: Compatibility, completion, and permanent collateral
 
-- [ ] Implement R23 at the CLI boundary and remove all manager-level negative flags.
-- [ ] Update completion metadata and Bash, zsh, and PowerShell behavior to offer `--status` on all
+- [x] Implement R23 at the CLI boundary and remove all manager-level negative flags.
+- [x] Update completion metadata and Bash, zsh, and PowerShell behavior to offer `--status` on all
       three lists, omit deprecated `--no-status`, and keep names-only sources status-free.
-- [ ] Update CLI README and command reference for list/describe grammar, progress, resource status
+- [x] Update CLI README and command reference for list/describe grammar, progress, resource status
       vocabularies, and JSON shapes.
-- [ ] Update the session-status and lifecycle guides, plus any VM or console guide that currently
+- [x] Update the session-status and lifecycle guides, plus any VM or console guide that currently
       makes an outdated status claim.
-- [ ] Create or update the 0.18 upgrade guide and release notes with the session automation example
+- [x] Create or update the 0.18 upgrade guide and release notes with the session automation example
       and the 0.19 removal schedule.
-- [ ] Update the permanent CLI-conventions source if its current session-list precedent becomes
+- [x] Update the permanent CLI-conventions source if its current session-list precedent becomes
       stale, then regenerate all Rulesync targets through the required workflow.
 - [ ] Create or reconcile the 0.19 removal tracker, without duplicating the lifecycle compatibility
       cleanup, and link it from closeout.
-- [ ] Run a residual scan proving canonical surfaces contain no old default-live instruction, public
+- [x] Run a residual scan proving canonical surfaces contain no old default-live instruction, public
       `--no-status`, Python `no_status`, `SessionStatus.OK`, 0.19 introduction, or 0.20 removal
       claim for this feature.
 

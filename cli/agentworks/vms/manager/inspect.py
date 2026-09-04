@@ -404,13 +404,17 @@ def vm_listing(
         )
         statuses = observe_vm_statuses(db, config, vm_rows, interaction=interaction)
 
-    projected_statuses = {
-        vm.name: project_vm_status(
-            statuses.get(vm.name, VMStatus.UNKNOWN),
-            operator_stopped=vm.operator_stopped,
-        )
-        for vm in vm_rows
-    }
+    projected_statuses = (
+        {
+            vm.name: project_vm_status(
+                statuses.get(vm.name, VMStatus.UNKNOWN),
+                operator_stopped=vm.operator_stopped,
+            )
+            for vm in vm_rows
+        }
+        if include_status
+        else {}
+    )
 
     return VMListing(
         vms=tuple(

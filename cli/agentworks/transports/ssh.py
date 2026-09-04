@@ -277,6 +277,8 @@ class SSHTransport(Transport):
                 if self.logger is not None:
                     self.logger.log_timeout(command, attempt + 1, attempts)
                 continue
+            except OSError as err:
+                raise SSHError(f"SSH command could not be executed: {command}") from err
             ssh_result = SSHResult(
                 returncode=result.returncode,
                 stdout="" if discard_output else result.stdout,

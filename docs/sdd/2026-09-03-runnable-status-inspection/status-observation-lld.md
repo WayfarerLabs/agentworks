@@ -156,23 +156,13 @@ when either fact is `UNKNOWN`; it converts both conclusive facts to booleans bef
 
 ### Singular observer
 
-```python
-def observe_session_status(
-    db: Database,
-    config: Config,
-    session: SessionRow,
-) -> SessionStatus:
-    vm = resolve_backing_vm(db, session)
-    target = bounded_observation_transport(db, config, vm)
-    return check_session_status(session, target=target)
-```
-
-Expected local identity, address, and transport failures are caught by the describe/list
-orchestrator and converted to unknown. `check_session_status` retains its pure classifier behavior,
-including typed legacy-state errors for apparently live legacy rows. Its `PID_STOPPED` early return
-is removed: a row with a dedicated socket is probed regardless of stored PID, while a stopped legacy
-row without a canonical runtime locator becomes unknown. Lifecycle callers that need typed errors
-continue to call it inside their own boundary.
+Session describe resolves the backing VM, creates the bounded canonical transport, and calls
+`check_session_status` directly. Expected identity, address, and transport failures become unknown.
+The singular classifier retains typed structural errors for apparently live legacy rows and
+malformed stored runtime evidence; those errors are not routed through the forgiving batch parser.
+Its `PID_STOPPED` early return is removed: a row with a dedicated socket is probed regardless of
+stored PID, while a stopped legacy row without a canonical runtime locator becomes unknown.
+Lifecycle callers continue to use the same classifier inside their own boundary.
 
 Both singular and batch classifiers use the same evidence order:
 
@@ -198,7 +188,7 @@ group every selected row by backing VM
 for each VM in an eight-worker pool:
     validate canonical SSH identity
     create canonical transport with default_timeout=10
-    batch_check_status(rows, target, timeout=10, retries=1, tty=false)
+    batch_check_status(rows, target)
     overwrite only returned conclusive or explicit UNKNOWN results
 return result
 ```
@@ -208,12 +198,15 @@ list join no longer substitutes stopped before consulting the observer. A reques
 canonical socket remains unknown. The batch parser applies the same post-absence `PID_STOPPED`
 branch as the singular classifier.
 
-The remote command stays one compound fact script per VM. `batch_check_status` takes explicit probe
-policy rather than relying on an unbounded transport default. It passes `tty=False` so Windows' old
-interactive-shell TTY workaround does not merge parseable probe streams. Tests cover inherited-TTY
-diagnostics as input to the parser because older transports and fixtures may still produce them. The
-transport's historical `retries` parameter counts total attempts, so `retries=1` means one attempt
-and zero retries.
+The remote command stays one compound fact script per VM. A compact fixed shell loop consumes
+base64-encoded row data, avoiding repeated per-row shell source and keeping a maximum-name fleet
+below Windows' 32,767-character process command-line limit. The parser accepts results only when the
+call succeeds without stderr and every requested row has exactly one valid, known frame; unframed,
+duplicate, unknown, missing, or malformed frames leave the entire VM unknown.
+
+`batch_check_status` bakes in the sole probe policy at its transport call: `tty=False`,
+`timeout=10`, and `retries=1`. The last value is the transport's spelling for one total attempt and
+zero retries. There are no public policy knobs for callers to vary.
 
 The function does not enter `_best_effort_batch_vm_boundary`. That boundary remains lifecycle-only
 and its docstring no longer names session list.
@@ -259,10 +252,11 @@ console attach module. Existing lifecycle `_console_runtime_presence` keeps its 
 checks raw unknown presence before classification, and then calls the same pure canonical/staging
 classifier for conclusive state decisions.
 
-### Singular observer
+### Focused describe
 
-Console describe calls the batch observer with one row or a singular wrapper over the same remote
-fact builder. It takes the configured description snapshot even if observation returns unknown.
+Console describe selects its one row directly from the batch observer's complete mapping. It takes
+the configured description snapshot even if observation returns unknown; no one-call wrapper adds a
+second policy surface.
 
 ## VM observation
 
@@ -277,7 +271,9 @@ fact builder. It takes the configured description snapshot even if observation r
 4. Walk the remaining union, register the declared secret union on one resolver, and run one
    preflight at system scope.
 5. Resolve the union once using the ordinary interaction policy.
-6. Build each node's scoped `RunContext` through the existing platform context helper.
+6. Build each node's scoped `RunContext` through the existing platform context helper on the owning
+   thread, while database access is still safe. Only immutable node rows and contexts cross the
+   executor boundary.
 7. Group rows by bound site. Run independent sites in a finite worker pool and call
    `node.site.platform.status(row, context)` serially within each site group, because bundled
    platform instances may lazily cache mutable clients or credentials.
@@ -327,7 +323,6 @@ def session_listing(
     *,
     ...,
     include_status: bool = False,
-    interaction: TtyInteractionPolicy,
 ) -> SessionListing:
 ```
 
@@ -344,12 +339,12 @@ def console_listing(
     *,
     ...,
     include_status: bool = False,
-    interaction: TtyInteractionPolicy | None = None,
 ) -> ConsoleListing:
 ```
 
-As with VM list, config and interaction are required only for observation. Default list remains its
-current database query.
+Config is required only for observation. Session and console inspection use fixed non-interactive
+probe policy rather than accepting an interaction parameter. Default list remains its current
+database query.
 
 ## Describe services
 
@@ -436,6 +431,11 @@ Tests instrument these boundaries, not authored prose:
 - exact number of guest calls: one per distinct VM for each domain observer;
 - timeout policy: `tty=False`, `timeout=10`, and the transport's one-total-attempt spelling
   `retries=1` reach the transport call;
+- cancellation policy: exceptional exit cancels queued work and does not wait for the whole fleet;
+- process-launch `OSError` values become typed transport/provider failures and degrade to unknown at
+  the observation boundary;
+- missing, drifted, or unavailable SSH identity degrades through its narrow policy errors, while
+  malformed or unsupported persisted applied-state remains a typed structural failure;
 - partial failure after dispatch: one VM/provider unknown, unaffected rows keep their observed
   values; shared VM setup failure leaves all selected VM observations unknown;
 - state matrices: every session and console branch, including malformed and mixed diagnostics;

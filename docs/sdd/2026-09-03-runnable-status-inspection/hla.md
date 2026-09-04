@@ -96,9 +96,10 @@ templates and desired overlays.
 The session adapter implements the R23 compatibility shim before dispatching the ordinary local
 list. No manager or renderer receives `no_status`.
 
-Describe adapters keep their existing public shape. Console describe gains config and interaction
-policy only because live observation needs the canonical transport. JSON mode continues to assemble
-facts under presentation suppression before writing its envelope.
+Describe adapters keep their existing public shape. Console describe gains config because live
+observation needs the canonical transport; session and console inspection do not accept an
+interaction policy. JSON mode continues to assemble facts under presentation suppression before
+writing its envelope.
 
 ### 2. Resource-owned observation services
 
@@ -165,10 +166,10 @@ This preserves session JSON v1 and matches the established VM describe carrier.
 Focused describe always asks for status, but still assembles locally available facts when the live
 read fails.
 
-- Session describe replaces `_prepare_vm` with the singular session observer, then takes its
-  existing structural snapshot.
-- Console describe takes its configured membership snapshot and joins the singular console observer.
-  It never computes pane build targets or resolves pane secrets.
+- Session describe replaces `_prepare_vm` with bounded transport construction plus the singular
+  session classifier, then takes its existing structural snapshot.
+- Console describe takes its configured membership snapshot and selects its row from the console
+  batch observer. It never computes pane build targets or resolves pane secrets.
 - VM describe continues its no-gate provider status flow and shares status/disposition projection
   with VM list. It initializes a requested observation to unknown, preserves unknown on an expected
   preflight, credential, or provider failure, and records only the existing safe issue facts.
@@ -227,16 +228,19 @@ warning per stopped row. JSON carries closed status facts and no third-party dia
 ### Structural failures
 
 Bad CLI combinations, unknown filters, missing referenced local rows, corrupt invariants that make
-the inventory itself untrustworthy, and unexpected exceptions remain typed failures. They are not
-converted to unknown merely because the operation is observational.
+the inventory itself untrustworthy, corrupt or unsupported persisted SSH applied-state, and
+unexpected exceptions remain typed failures. Expected missing, drifted, or unavailable identity has
+a narrower typed policy error and may degrade to unknown; structural decode errors do not. They are
+not converted to unknown merely because the operation is observational.
 
 ### Timeout and cancellation
 
 Guest probe calls use 10 seconds and one attempt. VM provider clients keep their existing
 provider-specific timeout controls; the worker pool limits concurrency but does not pretend Python
 can safely cancel a provider call that the provider library cannot cancel. Progress is emitted
-before dispatch so the operator understands the delay. Ctrl-C propagates and cancels outstanding
-future work where supported; it never persists partial observations.
+before dispatch so the operator understands the delay. Ctrl-C propagates, cancels queued futures,
+and shuts the executor down without waiting for the whole queued fleet. Already-running provider
+calls retain their provider-local cancellation behavior. Observation never persists partial results.
 
 ## Security and side effects
 

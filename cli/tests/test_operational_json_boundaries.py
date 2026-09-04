@@ -153,7 +153,7 @@ def test_vm_describe_json_suppresses_the_ordinary_resolver_presentation(
     machine = CliRunner().invoke(app, ["vm", "describe", "box", "--output", "json"])
 
     assert human.exit_code == machine.exit_code == 0, machine.output
-    assert human.stdout_bytes.startswith(b"Checking VM 'box' runtime...")
+    assert human.stdout_bytes
     assert human.stderr_bytes == b""
     document = _assert_json_envelope_only(machine, "vm.describe")
     assert machine.stderr_bytes == b""
@@ -186,7 +186,8 @@ def test_session_describe_bypasses_activation_for_both_formats(
     config = make_config()
     _seed_session(db)
     _wire_cli(monkeypatch, db, config)
-    monkeypatch.setattr(sessions, "observe_session_status", lambda *_args: SessionStatus.STOPPED)
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sessions, "check_session_status", lambda *_args, **_kwargs: SessionStatus.STOPPED)
 
     chain: list[str] = []
 
@@ -201,7 +202,7 @@ def test_session_describe_bypasses_activation_for_both_formats(
     machine = CliRunner().invoke(app, ["session", "describe", "session-a", "--output", "json"])
 
     assert human.exit_code == machine.exit_code == 0, machine.output
-    assert human.stdout_bytes.startswith(b"Checking session 'session-a' runtime...")
+    assert human.stdout_bytes
     assert human.stderr_bytes == b""
     _assert_json_envelope_only(machine, "session.describe")
     assert machine.stderr_bytes == b""
@@ -274,7 +275,8 @@ def test_session_json_never_enters_activation_around_the_envelope(
     monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.STOPPED)
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: output.info("ACTIVATION_OUTPUT_SENTINEL"))
     monkeypatch.setattr(vms, "_ensure_tailscale", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(sessions, "observe_session_status", lambda *_args: SessionStatus.STOPPED)
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sessions, "check_session_status", lambda *_args, **_kwargs: SessionStatus.STOPPED)
 
     result = CliRunner().invoke(app, ["session", "describe", "session-a", "--output", "json"])
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass
 from types import SimpleNamespace
 
@@ -17,6 +18,7 @@ from agentworks.sessions.manager import (
     check_session_status,
     observe_session_statuses,
 )
+from agentworks.sessions.manager._status import _batch_probe_command, _encoded_probe_field
 from agentworks.sessions.tmux import ProbeStatus, probe_tmux_server_pid
 
 
@@ -91,7 +93,7 @@ def _batch_row(
     pid_fact: str = "present",
 ) -> str:
     return (
-        f"S:{name}:{has_returncode}:{has_diagnostic.encode().hex()}:"
+        f"S:{_encoded_probe_field(name)}:{has_returncode}:{has_diagnostic.encode().hex()}:"
         f"{server_returncode}:{server_diagnostic.encode().hex()}:"
         f"{boot_returncode}:{boot_id.encode().hex()}:{pid_returncode}:{pid_fact.encode().hex()}"
     )
@@ -149,8 +151,36 @@ def test_session_observer_preserves_missing_workspace_as_structural_failure() ->
         def get_workspace(self, _name: str) -> None:
             return None
 
-    with pytest.raises(NotFoundError, match="workspace 'ws' not found"):
+    with pytest.raises(NotFoundError) as caught:
         observe_session_statuses([_session("s1", socket_path="/sock")], db=_DB(), config=object())  # type: ignore[arg-type]
+    assert caught.value.entity_kind == "workspace"
+    assert caught.value.entity_name == "ws"
+
+
+def test_session_observer_preserves_corrupt_ssh_applied_state(
+    db,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db.insert_vm("box", site="site", hostname="box")
+    db.update_vm_tailscale("box", "100.64.0.9")
+    db.insert_workspace("ws", "/srv/ws", "box", "ws-ws")
+    db.insert_session("alpha", "ws", "default", SessionMode.ADMIN, socket_path="/tmp/alpha.sock")
+    session = db.get_session("alpha")
+    assert session is not None
+    structural = StateError("corrupt SSH applied state", entity_kind="vm", entity_name="box")
+    monkeypatch.setattr(
+        "agentworks.vms.manager.require_vm_ssh_boundary",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(structural),
+    )
+    monkeypatch.setattr(
+        "agentworks.sessions.manager.transport",
+        lambda *_args, **_kwargs: pytest.fail("transport constructed after structural failure"),
+    )
+
+    with pytest.raises(StateError) as caught:
+        observe_session_statuses([session], db=db, config=object())
+
+    assert caught.value is structural
 
 
 def test_batch_builds_compound_command() -> None:
@@ -164,10 +194,35 @@ def test_batch_builds_compound_command() -> None:
     assert len(target.commands) == 1
     assert target.call_options == [(False, 10, 1)]
     assert "has-session" in target.commands[0]
-    assert "sudo -n tmux -S /sock has-session" in target.commands[0]
-    assert "sudo -n sh -c 'if test -d /proc/100; then printf present; else printf absent; fi'" in target.commands[0]
-    assert "sudo -n tmux -S /sock2" not in target.commands[0]
-    assert "sh -c 'if test -d /proc/200; then printf present; else printf absent; fi'" in target.commands[0]
+    assert 'if [ "$M" = a ]; then sudo -n tmux' in target.commands[0]
+    assert 'sudo -n sh -c "if test -d /proc/$PID' in target.commands[0]
+    assert target.commands[0].count("run_tmux has-session") == 1
+    assert target.commands[0].count("run_tmux list-sessions") == 1
+
+
+def test_batch_command_fits_windows_argv_limit_for_large_valid_fleet() -> None:
+    from agentworks.sessions.tmux import MAX_SESSION_NAME_LENGTH, SUN_PATH_MAX
+
+    sessions = []
+    for index in range(128):
+        suffix = f"{index:08x}"
+        name = ("s" * (MAX_SESSION_NAME_LENGTH - len(suffix))) + suffix
+        fixed = f"/{suffix}/{name}"
+        socket_path = "/" + ("p" * (SUN_PATH_MAX - 2 - len(fixed))) + fixed
+        assert len(socket_path) == SUN_PATH_MAX - 1
+        sessions.append(_session(name, pid=100_000 + index, socket_path=socket_path, mode="agent"))
+
+    command = _batch_probe_command(sessions)
+
+    assert len(command.encode()) < 32_767
+
+
+def test_batch_command_is_valid_shell_syntax() -> None:
+    command = _batch_probe_command([_session("alpha", pid=42, socket_path="/tmp/alpha.sock")])
+
+    result = subprocess.run(["bash", "-n", "-c", command], check=False, capture_output=True)
+
+    assert result.returncode == 0
 
 
 def test_agent_fingerprint_repair_uses_elevation_and_refuses_unknown(
@@ -668,6 +723,30 @@ def test_batch_malformed_stored_boot_id_does_not_drop_valid_sibling() -> None:
     assert result["invalid"] is SessionStatus.UNKNOWN
 
 
+@pytest.mark.parametrize(
+    "result",
+    [
+        _FakeResult(returncode=1, stdout=f"{_batch_row('alpha')}\n{_batch_row('beta')}\n"),
+        _FakeResult(stdout=f"{_batch_row('alpha')}\n{_batch_row('beta')}\n", stderr="transport noise"),
+        _FakeResult(stdout=f"unframed\n{_batch_row('alpha')}\n{_batch_row('beta')}\n"),
+        _FakeResult(stdout=f"{_batch_row('alpha')}\n"),
+        _FakeResult(stdout=f"{_batch_row('alpha')}\n{_batch_row('alpha')}\n"),
+        _FakeResult(stdout=f"{_batch_row('alpha')}\n{_batch_row('other')}\n"),
+        _FakeResult(stdout=f"{_batch_row('alpha')}\nS:{_encoded_probe_field('beta')}:0:not-hex:0::0::0:\n"),
+        _FakeResult(stdout=f"{_batch_row('alpha')}\n\n{_batch_row('beta')}\n"),
+        _FakeResult(stdout=f"{_batch_row('alpha')}\r\n{_batch_row('beta')}\n"),
+        _FakeResult(stdout=f"{_batch_row('alpha')}\n{_batch_row('beta')}\x00\n"),
+    ],
+)
+def test_batch_response_must_be_complete_authoritative_framing(result: _FakeResult) -> None:
+    sessions = [_session(name, socket_path=f"/{name}") for name in ("alpha", "beta")]
+
+    assert batch_check_status(sessions, target=_FakeTarget({"has-session": result})) == {
+        "alpha": SessionStatus.UNKNOWN,
+        "beta": SessionStatus.UNKNOWN,
+    }
+
+
 def test_session_observer_isolates_one_vm_transport_failure(
     db,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
@@ -692,6 +771,18 @@ def test_session_observer_isolates_one_vm_transport_failure(
 
     monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
+        "agentworks.orchestration.activation.activation_gate",
+        lambda *_args, **_kwargs: pytest.fail("session observation activated a VM"),
+    )
+    monkeypatch.setattr(
+        "agentworks.secrets.resolver.Resolver.resolve",
+        lambda *_args, **_kwargs: pytest.fail("session observation resolved provider secrets"),
+    )
+    monkeypatch.setattr(
+        "agentworks.sessions.manager.ensure_pids_batch",
+        lambda *_args, **_kwargs: pytest.fail("session observation repaired runtime identity"),
+    )
+    monkeypatch.setattr(
         "agentworks.sessions.manager.transport",
         lambda vm, _config, **_kwargs: SimpleNamespace(vm_name=vm.name),
     )
@@ -703,10 +794,12 @@ def test_session_observer_isolates_one_vm_transport_failure(
 
     monkeypatch.setattr("agentworks.sessions.manager._status.batch_check_status", batch)
 
+    changes_before = db._conn.total_changes  # noqa: SLF001
     assert observe_session_statuses(sessions, db=db, config=object()) == {
         "session-vm-a": SessionStatus.RUNNING,
         "session-vm-b": SessionStatus.UNKNOWN,
     }
+    assert db._conn.total_changes == changes_before  # noqa: SLF001
 
 
 # -- _ensure_pid strict gate ------------------------------------------------

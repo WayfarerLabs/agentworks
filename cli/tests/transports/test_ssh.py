@@ -37,6 +37,15 @@ def test_run_builds_ssh_argv_with_user_host() -> None:
         assert argv[-1] == "echo hi"
 
 
+def test_run_maps_process_launch_failure_to_transport_error() -> None:
+    t = SSHTransport(host="vm1", user="agentworks")
+    with (
+        patch("agentworks.transports.ssh.subprocess.run", side_effect=FileNotFoundError("ssh")),
+        pytest.raises(SSHError),
+    ):
+        t.run("echo hi")
+
+
 def test_run_sudo_wraps_with_bash_c() -> None:
     t = SSHTransport(host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.run") as mock_run:

@@ -24,6 +24,7 @@ from agentworks.errors import (
     ValidationError,
 )
 from agentworks.secrets.policy import TtyInteractionPolicy
+from agentworks.sessions.manager._status import _encoded_probe_field
 from agentworks.sessions.multi_console import (
     ConsoleStatus,
     add_sessions,
@@ -134,7 +135,7 @@ def test_running_session_names_includes_incomplete_live_identity_without_repair(
 
     def stub_run(command: str, **kwargs: object) -> _FakeResult:
         fake_target.commands.append(command)
-        return _FakeResult(returncode=0, stdout="S:alpha:0::0::1::1:\n")
+        return _FakeResult(returncode=0, stdout=f"S:{_encoded_probe_field('alpha')}:0::0::1::1:\n")
 
     fake_target.run = stub_run  # type: ignore[assignment]
 
@@ -183,7 +184,7 @@ def test_running_session_names_uses_live_status_check(db: Database, fake_target:
     # claims the session is gone.
     def stub_run(command: str, **kwargs: object) -> _FakeResult:
         fake_target.commands.append(command)
-        if "has-session -t '=alpha'" in command and "has-session -t '=beta'" in command:
+        if all(_encoded_probe_field(name) in command for name in ("alpha", "beta", "gamma")):
             missing_session = b"can't find session: gamma".hex()
             missing_server = b"no server running on /gamma".hex()
             boot_hex = BOOT_ID.encode().hex()
@@ -192,9 +193,10 @@ def test_running_session_names_uses_live_status_check(db: Database, fake_target:
             return _FakeResult(
                 returncode=0,
                 stdout=(
-                    f"S:alpha:0::0::0:{boot_hex}:0:{present_hex}\n"
-                    f"S:beta:0::0::0:{boot_hex}:0:{present_hex}\n"
-                    f"S:gamma:1:{missing_session}:1:{missing_server}:0:{boot_hex}:0:{absent_hex}\n"
+                    f"S:{_encoded_probe_field('alpha')}:0::0::0:{boot_hex}:0:{present_hex}\n"
+                    f"S:{_encoded_probe_field('beta')}:0::0::0:{boot_hex}:0:{present_hex}\n"
+                    f"S:{_encoded_probe_field('gamma')}:1:{missing_session}:1:{missing_server}:"
+                    f"0:{boot_hex}:0:{absent_hex}\n"
                 ),
             )
         return _FakeResult()
@@ -641,14 +643,13 @@ def test_describe_console_uses_iteration_index(
     create_console(db, name="con", vm_name="vm1", session_specs=["a", "b", "c"])
     remove_sessions(db, _StubConfig(), console_name="con", session_names=["a"])
     monkeypatch.setattr(
-        "agentworks.sessions.multi_console.observe_console_status",
-        lambda *_args, **_kwargs: ConsoleStatus.STOPPED,
+        "agentworks.sessions.multi_console.observe_console_statuses",
+        lambda _db, _config, consoles: {console.name: ConsoleStatus.STOPPED for console in consoles},
     )
     describe_console(
         db,
         _StubConfig(),
         name="con",
-        interaction=TtyInteractionPolicy.REFUSE,
     )
     member_lines = [m for m in captured_output.info if m.lstrip().startswith("[")]
     assert member_lines == [

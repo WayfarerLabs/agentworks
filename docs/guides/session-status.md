@@ -8,7 +8,8 @@ The persisted PID has three meanings:
 
 - `NULL`: runtime identity evidence is incomplete. Exact tmux presence can still prove the session
   `RUNNING`; absence stays `UNKNOWN` until a lifecycle operation can safely repair or replace it.
-- `-1` (`PID_STOPPED`): the session is known to be stopped.
+- `-1` (`PID_STOPPED`): supporting evidence for stopped after the exact session and its dedicated
+  server are authoritatively absent. It never overrides a resurrected live runtime.
 - A positive PID paired with a boot ID and process start time: the last observed tmux server
   identity. The start time prevents PID reuse from matching an older server.
 

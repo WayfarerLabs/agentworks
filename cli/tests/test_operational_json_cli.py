@@ -13,7 +13,6 @@ from agentworks.cli import app
 from agentworks.db import PID_STOPPED, SessionMode, SessionStatus, VMRow, WorkspaceRow
 from agentworks.debian import DebianRelease
 from agentworks.instance_description import instance_state_data
-from agentworks.secrets.policy import TtyInteractionPolicy
 from tests.conftest import stub_vm_ssh_identity
 from tests.instance_state_support import stub_instance_state
 
@@ -116,14 +115,14 @@ def test_nonempty_operational_lists_have_exact_ordered_json(monkeypatch: pytest.
         for index, status in enumerate(("running", "stopped", "broken", "unknown", "unavailable"))
     )
     console_rows = (
-        ConsoleListRow("console-a", "vm-a", 2),
-        ConsoleListRow("console-z", "vm-z", 0),
+        ConsoleListRow("console-a", "vm-a", 2, "unavailable"),
+        ConsoleListRow("console-z", "vm-z", 0, "unavailable"),
     )
 
     monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
     for module in (agent, console, session, vm, workspace):
         monkeypatch.setattr(module, "get_db", lambda: object())
-    monkeypatch.setattr(vms, "vm_listing", lambda _db: VMListing(vm_rows))
+    monkeypatch.setattr(vms, "vm_listing", lambda *_args, **_kwargs: VMListing(vm_rows))
     monkeypatch.setattr(workspaces, "workspace_listing", lambda _db, **_kwargs: WorkspaceListing(workspace_rows))
     monkeypatch.setattr(agents, "agent_listing", lambda _db, **_kwargs: AgentListing(agent_rows))
     monkeypatch.setattr(sessions, "session_listing", lambda _db, _config, **_kwargs: SessionListing(session_rows))
@@ -348,6 +347,7 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
             ConsoleMember(2, "worker", (ConsoleShell("/srv/a", False), ConsoleShell(None, True))),
             ConsoleMember(5, "admin", ()),
         ),
+        "running",
     )
 
     monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: {"unsafe": unsafe})
@@ -487,7 +487,7 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
             "admin_shell": True,
             "created_at": "2026-01-09",
             "updated_at": "2026-01-10",
-            "status": "unknown",
+            "status": "running",
             "sessions": [
                 {
                     "position": 2,
@@ -636,7 +636,8 @@ def test_session_describe_json_is_read_only_and_maps_stopped_pid_with_degraded_t
         "_ensure_pid",
         lambda *args, **kwargs: pytest.fail("session describe repaired durable runtime identity"),
     )
-    monkeypatch.setattr(manager, "observe_session_status", lambda *_args: SessionStatus.RUNNING)
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(manager, "check_session_status", lambda *_args, **_kwargs: SessionStatus.RUNNING)
 
     live = CliRunner().invoke(app, ["session", "describe", "live", "--output", "json"])
     assert live.exit_code == 0, live.output
@@ -659,7 +660,7 @@ def test_session_describe_json_is_read_only_and_maps_stopped_pid_with_degraded_t
         {"console_name": "zeta", "position": 1},
     ]
 
-    monkeypatch.setattr(manager, "observe_session_status", lambda *_args: SessionStatus.STOPPED)
+    monkeypatch.setattr(manager, "check_session_status", lambda *_args, **_kwargs: SessionStatus.STOPPED)
     stopped = CliRunner().invoke(app, ["session", "describe", "stopped", "--output", "json"])
     assert stopped.exit_code == 0, stopped.output
     stopped_record = json.loads(stopped.stdout_bytes)["data"]["session"]
@@ -691,7 +692,8 @@ def test_session_list_and_describe_degrade_harness_integration_without_error_tex
         db._conn.execute("UPDATE sessions SET template = 'missing-template'")
         db._conn.commit()
 
-    monkeypatch.setattr(manager, "observe_session_status", lambda *_args: SessionStatus.STOPPED)
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(manager, "check_session_status", lambda *_args, **_kwargs: SessionStatus.STOPPED)
 
     listing = CliRunner().invoke(app, ["session", "list", "--output", "json"])
     description = CliRunner().invoke(app, ["session", "describe", "stopped", "--output", "json"])
@@ -895,7 +897,6 @@ def test_session_human_listing_uses_one_fact_path_and_names_only_stays_lightweig
     _queries.list_sessions(
         cast("Database", object()),
         cast("Config", object()),
-        interaction=TtyInteractionPolicy.REFUSE,
     )
     assert calls == ["collect", "render"]
 
@@ -912,6 +913,5 @@ def test_session_human_listing_uses_one_fact_path_and_names_only_stays_lightweig
         cast("Database", object()),
         cast("Config", object()),
         names_only=True,
-        interaction=TtyInteractionPolicy.REFUSE,
     )
     assert emitted == ["first", "second"]

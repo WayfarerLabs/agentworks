@@ -395,7 +395,6 @@ def test_session_list_does_not_eager_resolve(
     session_manager.list_sessions(
         db,
         config,  # type: ignore[arg-type]
-        interaction=TtyInteractionPolicy.REFUSE,
     )
 
     assert resolve_called == [], "session list reads DB only; must not eager-resolve secrets"
@@ -462,7 +461,6 @@ def test_session_describe_does_not_eager_resolve(
         db,
         config,
         name="s1",  # type: ignore[arg-type]
-        interaction=TtyInteractionPolicy.REFUSE,
     )
 
     assert resolve_called == [], "session describe must not eager-resolve secrets"

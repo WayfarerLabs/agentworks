@@ -854,8 +854,9 @@ def stop_all_sessions(
         sessions = _mgr.ensure_pids_batch(sessions, db=db, config=config)
         status_map = _mgr.observe_session_statuses(sessions, db=db, config=config)
 
-        # Error if any sessions are still unknown after auto-repair.
-        # PID_STOPPED sessions are known-stopped (excluded from status_map by design).
+        # Error if any actionable sessions are still unknown after auto-repair.
+        # The observer reports PID_STOPPED rows too; lifecycle omits them from
+        # this refusal set because it does not need to act on them.
         legacy_names = {
             session.name
             for session in sessions
@@ -963,8 +964,9 @@ def _launch_all_sessions(
         sessions = _mgr.ensure_pids_batch(sessions, db=db, config=config)
         status_map = _mgr.observe_session_statuses(sessions, db=db, config=config)
 
-        # Error if any sessions are still unknown after auto-repair.
-        # PID_STOPPED sessions are known-stopped (excluded from status_map by design).
+        # Error if any actionable sessions are still unknown after auto-repair.
+        # The observer reports PID_STOPPED rows too; lifecycle omits them from
+        # this refusal set because it does not need to act on them.
         # Legacy sessions (``socket_path is None``) are also excluded from
         # status_map by ``batch_check_status``; the singular launch migrates them
         # to the new model, so don't treat them as "unknown" here.

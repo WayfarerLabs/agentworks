@@ -414,6 +414,11 @@ def run(
             if logger is not None:
                 logger.log_timeout(command, attempt + 1, retries)
             continue
+        except OSError as err:
+            if sensitive_input:
+                sensitive_execution_failure = True
+            else:
+                raise SSHError(f"SSH command could not be executed: {command}") from err
         except Exception:
             if not sensitive_input:
                 raise
