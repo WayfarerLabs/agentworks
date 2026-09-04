@@ -826,6 +826,8 @@ class Database:
             params.extend(ag_params)
         console_clause, console_params = _eq_or_in("cs.console_name", console_name)
         if console_clause:
+            # Correlated EXISTS keeps one result row when a session belongs to
+            # multiple selected consoles, avoiding duplicate batch operands.
             clauses.append(
                 f"EXISTS (SELECT 1 FROM console_sessions cs WHERE cs.session_name = s.name AND {console_clause})"
             )
