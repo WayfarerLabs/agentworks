@@ -145,8 +145,8 @@ class ClaudeCodeIntegration(HarnessIntegration):
         """,
     )
 
-    # Set by _resume_or_launch on each start/restart; drives the HarnessStart note.
-    # None until the op runs (nothing decided yet).
+    # Set by _resume_or_launch on each start/restart; drives the ordinary
+    # HarnessStart note. None until the op runs (nothing decided yet).
     _resumed: bool | None = None
 
     @property
@@ -194,11 +194,12 @@ class ClaudeCodeIntegration(HarnessIntegration):
     def start(self, ctx: RunContext, *, force_new: bool = False) -> HarnessStart:
         """Choose continuation when usable, or rotate the binding when forced."""
         command = self._resume_or_launch(ctx, force_new=force_new)
-        note = (
-            "Existing Claude Code session found. Resuming..."
-            if self._resumed
-            else "No existing Claude Code session. Starting a new one..."
-        )
+        if force_new:
+            note = "Fresh Claude Code session requested. Starting a new one without resuming prior state..."
+        elif self._resumed:
+            note = "Existing Claude Code session found. Resuming..."
+        else:
+            note = "No existing Claude Code session. Starting a new one..."
         return HarnessStart(command, note)
 
     def _resume_or_launch(self, ctx: RunContext, *, force_new: bool) -> str:

@@ -343,6 +343,8 @@ The implementation, review, CI, and live-evidence steps below apply to the compl
 - [x] Preserve the agent-owner privilege boundary through final process-absence verification, use
       exact matching in generated workspace wrappers, and announce `--all-running` selection before
       its remote status check.
+- [x] Make every stateful built-in distinguish forced-fresh policy from an ordinary missing-state
+      fallback in its operator-facing launch decision.
 
 ### Phase 6 Definition of Done
 

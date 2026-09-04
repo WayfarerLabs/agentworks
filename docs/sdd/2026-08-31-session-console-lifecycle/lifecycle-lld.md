@@ -236,6 +236,10 @@ It performs:
 7. persist socket path and the complete tmux server fingerprint;
 8. complete existing restricted-config and creation bookkeeping.
 
+Stateful integrations give forced-fresh launches a distinct note from the ordinary no-usable-state
+fallback. The note reports that continuation was intentionally bypassed rather than claiming no
+prior state existed.
+
 For create, step 5 is part of inserting the new row. If a later creation step fails, existing
 partial-state teardown removes the row, which is outside pending-binding retry stability. For an
 existing row, step 5 updates it before tmux mutation so ordinary retry reuses a known binding.

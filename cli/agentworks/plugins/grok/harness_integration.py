@@ -130,11 +130,12 @@ class GrokBuildIntegration(HarnessIntegration):
     def start(self, ctx: RunContext, *, force_new: bool = False) -> HarnessStart:
         """Choose continuation when usable, or rotate the binding when forced."""
         command = self._resume_or_launch(ctx, force_new=force_new)
-        note = (
-            "Existing Grok Build session found. Resuming..."
-            if self._resumed
-            else "No existing Grok Build session. Starting a new one..."
-        )
+        if force_new:
+            note = "Fresh Grok Build session requested. Starting a new one without resuming prior state..."
+        elif self._resumed:
+            note = "Existing Grok Build session found. Resuming..."
+        else:
+            note = "No existing Grok Build session. Starting a new one..."
         return HarnessStart(command, note)
 
     def _resume_or_launch(self, ctx: RunContext, *, force_new: bool) -> str:

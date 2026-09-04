@@ -144,7 +144,9 @@ class HarnessIntegration(Capability):
 
 `HarnessStart` replaces the mutable `launch_note()` side channel. It carries only the pane command
 and an optional truthful pre-launch note. It does not claim that the external tool successfully
-continued after the pane starts, and it does not introduce a typed decision taxonomy.
+continued after the pane starts, and it does not introduce a typed decision taxonomy. The note
+distinguishes forced-fresh policy from an ordinary fresh fallback, so bypassing prior state is never
+reported as failure to find it.
 
 The integration still owns only its namespaced portion of `harness_integration_state`. The session
 manager persists the complete blob so a template switch never discards another integration's

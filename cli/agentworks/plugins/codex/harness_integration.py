@@ -448,12 +448,13 @@ class CodexIntegration(HarnessIntegration):
         self._adopted_id = None
         self._dropped_stale = False
         command = self._force_new(ctx) if force_new else self._resume_or_launch(ctx)
-        return HarnessStart(command, self._decision_note())
+        return HarnessStart(command, self._decision_note(force_new=force_new))
 
-    def _decision_note(self) -> str | None:
-        """The console line for the op that just ran, one per decision
-        leaf (operator-decided 2026-08-04: the console must say what is
-        happening, in the same resume vocabulary as the pane echo).
+    def _decision_note(self, *, force_new: bool) -> str | None:
+        """The console line for the op that just ran, with a forced-fresh
+        policy line or one per ordinary decision leaf (operator-decided
+        2026-08-04: the console must say what is happening, in the same
+        resume vocabulary as the pane echo).
 
         A dropped stale binding is composed INTO the leaf it precedes
         rather than replacing it: an operator who ran ``codex archive``
@@ -464,6 +465,11 @@ class CodexIntegration(HarnessIntegration):
         """
         if self._decision is None:
             return None
+        if force_new:
+            note = "Fresh Codex session requested. Starting a new one without resuming prior state..."
+            if disclosure := self._fresh_setup_disclosure():
+                note = f"{note} {disclosure}"
+            return note
         dropped = "Previous Codex conversation is archived or gone. " if self._dropped_stale else ""
         if self._decision == "resumed":
             return "Existing Codex session found. Resuming..."

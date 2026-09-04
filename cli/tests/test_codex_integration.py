@@ -273,6 +273,18 @@ def test_create_is_always_fresh_even_with_a_recording_and_a_candidate() -> None:
     assert "resume" not in _sh_argv(result, home="/home/me")
 
 
+def test_forced_fresh_reports_a_distinct_decision_from_missing_state() -> None:
+    missing = _harness_integration(state={}).start(_op_ctx(_target()))
+    forced = _harness_integration(state={"session_id": _SID}).start(
+        _op_ctx(_target(recorded=_SID)),
+        force_new=True,
+    )
+
+    assert missing.note is not None
+    assert forced.note is not None
+    assert forced.note != missing.note
+
+
 def test_create_clears_a_stale_recording_and_retires_legacy_keys() -> None:
     """The second half of the namesake guarantee: create adopts nothing AND
     removes any leftover ``.thread`` file, so the resume that follows it
