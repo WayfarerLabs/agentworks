@@ -231,7 +231,7 @@ assert behavior and structure, never authored prose.
       when one complete batch produces no material changes.
 - [x] Rebase or merge the latest `main`, resolve conflicts semantically, rerun the full gates and
       reviews, and hand off the exact final head.
-- [ ] Promote every load-bearing status contract to permanent code/docs, check every truthful plan
+- [x] Promote every load-bearing status contract to permanent code/docs, check every truthful plan
       item, add `locked.md`, remove `review-requested`, mark the PR ready, and obtain operator
       disposition without self-merging.
 
