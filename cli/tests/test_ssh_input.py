@@ -31,8 +31,42 @@ def test_ssh_run_streams_input_without_logging_it() -> None:
     assert result.stderr == ""
     argv = process.call_args.args[0]
     assert secret not in repr(argv)
+    # An input_text write keeps stdin open (no -n) and never forces a pty
+    # (-tt corrupts the byte-exact payload); it uses neither flag.
+    assert "-n" not in argv
+    assert "-tt" not in argv
     # Byte-exact delivery: the payload crosses the pipe with no newline rewriting.
     assert process.call_args.kwargs["input"] == secret.encode()
+
+
+def test_ssh_run_plain_closes_stdin_with_dash_n_and_no_tt() -> None:
+    """A plain ``ssh_run`` (no ``input_text``, no forced TTY) closes stdin with
+    ssh's own ``-n``: a stdin-reading remote command then cannot hang and ssh
+    cannot pull from the operator's console. This mirrors ``SSHTransport.run``'s
+    default, extending it to the bare-target primitive (``_run_lima``'s remote
+    Lima hop). ``-tt`` is never forced by default."""
+    with patch("agentworks.ssh.subprocess.run") as process:
+        process.return_value = subprocess.CompletedProcess([], 0, stdout=b"", stderr=b"")
+        run(SSHTarget(host="vm-host"), "limactl list --json")
+
+    argv = process.call_args.args[0]
+    assert "-n" in argv
+    assert "-tt" not in argv
+    # -n closes stdin, so no payload is written.
+    assert process.call_args.kwargs["input"] is None
+
+
+def test_ssh_run_forced_tty_uses_tt_and_omits_dash_n() -> None:
+    """A forced TTY (``SSHTarget.force_tty=True``) allocates a pty with ``-tt``.
+    ``-n`` and ``-tt`` are mutually exclusive: ``-tt`` already attaches stdin to
+    the pty, so the stdin-closing ``-n`` must not appear."""
+    with patch("agentworks.ssh.subprocess.run") as process:
+        process.return_value = subprocess.CompletedProcess([], 0, stdout=b"", stderr=b"")
+        run(SSHTarget(host="vm-host", force_tty=True), "echo hi")
+
+    argv = process.call_args.args[0]
+    assert "-tt" in argv
+    assert "-n" not in argv
 
 
 def test_ssh_run_failure_diagnostic_omits_input() -> None:

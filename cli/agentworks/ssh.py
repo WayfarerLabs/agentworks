@@ -318,10 +318,23 @@ def _ssh_base_args(
     target: SSHTarget,
     *,
     env: dict[str, str] | None = None,
+    close_stdin: bool = False,
 ) -> list[str]:
+    """Build the base ``ssh`` argv with ``BatchMode=yes`` (no remote command yet).
+
+    ``target.force_tty`` forces a pty with ``-tt``. Otherwise, when
+    ``close_stdin`` is set, add ``-n`` so ssh closes stdin: a stdin-reading
+    remote command then cannot hang waiting on input, and ssh cannot pull from
+    the operator's console. ``-n`` and ``-tt`` are mutually exclusive (``-tt``
+    already attaches stdin to the pty), and ``-n`` must stay off while a
+    byte-exact ``input_text`` payload is written, so callers set ``close_stdin``
+    only for the no-stdin-payload, no-forced-TTY case (mirrors ``SSHTransport``).
+    """
     args = ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
     if target.force_tty:
         args.insert(1, "-tt")
+    elif close_stdin:
+        args.insert(1, "-n")
     if target.port is not None:
         args.extend(["-p", str(target.port)])
     if target.identity_file is not None:
@@ -384,7 +397,10 @@ def run(
         # promise above cannot hold. Refuse rather than corrupt a secret.
         raise ValueError("SSH stdin input cannot be combined with a forced TTY")
 
-    args = _ssh_base_args(target, env=env)
+    # Close stdin with ``-n`` only for a plain run: an ``input_text`` payload
+    # must keep stdin open for the byte-exact write, and a forced TTY takes
+    # ``-tt`` instead (both handled inside ``_ssh_base_args``).
+    args = _ssh_base_args(target, env=env, close_stdin=input_text is None)
     # Fence the remote command from ssh's option parser. See
     # ``SSHTransport.run`` in ``transports/ssh.py`` for the rationale.
     args.append("--")

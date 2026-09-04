@@ -229,35 +229,39 @@ def test_tmux_presence_classifier_distinguishes_absence_from_permission_failure(
         )
         assert _tmux_presence_from_result(missing_server, missing_target_is_absent=False) is ProbeStatus.ABSENT
 
-        windows_tty_missing_server = subprocess.CompletedProcess(
-            args=["ssh", "-tt"],
+        # An operator's ~/.ssh/config connection multiplexing (ControlMaster)
+        # can print "Shared connection to <host> closed." on stderr alongside a
+        # real tmux diagnostic on stdout. All transports fold CR to LF on
+        # capture, so the advisory arrives LF-terminated, not CRLF.
+        multiplexed_missing_server = subprocess.CompletedProcess(
+            args=["ssh"],
             returncode=1,
             stdout=missing_server.stderr,
-            stderr="Connection to 100.64.0.1 closed.\r\n",
+            stderr="Shared connection to 100.64.0.1 closed.\n",
         )
         assert (
-            _tmux_presence_from_result(windows_tty_missing_server, missing_target_is_absent=False) is ProbeStatus.ABSENT
+            _tmux_presence_from_result(multiplexed_missing_server, missing_target_is_absent=False) is ProbeStatus.ABSENT
         )
 
-        windows_tty_permission_failure = subprocess.CompletedProcess(
-            args=["ssh", "-tt"],
+        multiplexed_permission_failure = subprocess.CompletedProcess(
+            args=["ssh"],
             returncode=1,
-            stdout="error connecting to /run/agentworks/s.sock (Permission denied)\r\n",
-            stderr="Connection to 100.64.0.1 closed.\r\n",
+            stdout="error connecting to /run/agentworks/s.sock (Permission denied)\n",
+            stderr="Shared connection to 100.64.0.1 closed.\n",
         )
         assert (
-            _tmux_presence_from_result(windows_tty_permission_failure, missing_target_is_absent=False)
+            _tmux_presence_from_result(multiplexed_permission_failure, missing_target_is_absent=False)
             is ProbeStatus.UNKNOWN
         )
 
-        remote_close_shaped_output = subprocess.CompletedProcess(
-            args=["ssh", "-tt"],
+        multiplex_close_shaped_stdout = subprocess.CompletedProcess(
+            args=["ssh"],
             returncode=1,
-            stdout="Connection to 100.64.0.1 closed.\r\n",
+            stdout="Shared connection to 100.64.0.1 closed.\n",
             stderr=missing_server.stderr,
         )
         assert (
-            _tmux_presence_from_result(remote_close_shaped_output, missing_target_is_absent=False)
+            _tmux_presence_from_result(multiplex_close_shaped_stdout, missing_target_is_absent=False)
             is ProbeStatus.UNKNOWN
         )
 

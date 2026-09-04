@@ -133,14 +133,21 @@ _TMUX_SERVER_ABSENCE_DIAGNOSTICS = (
     re.compile(r"error connecting to .+ \((?:No such file or directory|Connection refused)\)", re.ASCII),
 )
 _TMUX_TARGET_ABSENCE_DIAGNOSTIC = re.compile(r"can't find session: .+", re.ASCII)
-_SSH_TTY_CLOSE_DIAGNOSTIC = re.compile(r"(?:Shared connection|Connection) to .+ closed\.", re.ASCII)
+_SSH_MULTIPLEX_CLOSE_DIAGNOSTIC = re.compile(r"Shared connection to .+ closed\.", re.ASCII)
 
 
 def _normalized_probe_streams(result: object) -> tuple[str, str]:
-    """Strip only the local forced-TTY close advisory from probe output."""
+    """Strip only the SSH connection-multiplexing close advisory from probe output.
+
+    OpenSSH prints ``Shared connection to <host> closed.`` on stderr when a
+    multiplexed (ControlMaster) session ends. Agentworks configures no
+    multiplexing, but an operator's ``~/.ssh/config`` can, so the advisory can
+    still ride alongside a real tmux diagnostic on stdout; drop it so the
+    classifier sees the diagnostic alone.
+    """
     stdout = (getattr(result, "stdout", "") or "").strip()
     stderr = (getattr(result, "stderr", "") or "").strip()
-    if stdout and _SSH_TTY_CLOSE_DIAGNOSTIC.fullmatch(stderr):
+    if stdout and _SSH_MULTIPLEX_CLOSE_DIAGNOSTIC.fullmatch(stderr):
         stderr = ""
     return stdout, stderr
 
@@ -157,7 +164,11 @@ def _tmux_presence_from_result(result: object, *, missing_target_is_absent: bool
 
     stdout, stderr = _normalized_probe_streams(result)
     streams = [value for value in (stdout, stderr) if value]
-    if len(streams) != 1 or "\n" in streams[0] or "\r" in streams[0]:
+    # A canonical tmux diagnostic is a single line on exactly one stream. Every
+    # probe-feeding transport folds CR to LF on capture (SSH via ``text=True``,
+    # Lima/WSL2 via ``decode_stream``), so an internal line break can only be
+    # ``\n``; reject anything carrying one, or more than one non-empty stream.
+    if len(streams) != 1 or "\n" in streams[0]:
         return ProbeStatus.UNKNOWN
     diagnostic = streams[0]
     if any(pattern.fullmatch(diagnostic) for pattern in _TMUX_SERVER_ABSENCE_DIAGNOSTICS):
