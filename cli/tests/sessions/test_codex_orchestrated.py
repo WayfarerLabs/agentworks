@@ -220,7 +220,7 @@ def test_create_launches_fresh_without_probing_any_session_state(
     codex conversation, so the op adopts nothing. This
     target would happily report a recording AND a discovery candidate, and
     rollout-discovery probe is not issued; the recorder is only fingerprinted
-    so a stale notification cannot undo ``--force-new``. The pane provisions
+    so a stale notification cannot bind the new session to prior state. The pane provisions
     the recorder so the following start has something new to bind."""
     from agentworks.sessions.manager import create_session
 

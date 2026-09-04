@@ -64,8 +64,8 @@ file is ``<session-name>.thread``, and discovery matches the workspace
 directory), so at create time either would hand a brand-new session the
 conversation of a deleted predecessor that shared its name or its workspace. A
 create means a brand-new session row, which by definition owns no codex
-conversation yet, so forced-fresh start reads only the recorder identity it
-must reject and clears that recording in the launch command. That closes the recorder channel outright: a recreated
+conversation yet, so a fresh launch reads only the recorder identity it must
+reject and clears that recording in the launch command. That closes the recorder channel outright: a recreated
 namesake can never resume the dead conversation as a BOUND id. It NARROWS but
 does not close layer 2, whose candidate set is the workspace: if the dead
 session's rollout is the only interactive one there, the first later start can still
@@ -457,8 +457,8 @@ class CodexIntegration(HarnessIntegration):
         return HarnessStart(command, self._decision_note(intent=intent))
 
     def _decision_note(self, *, intent: HarnessLaunchIntent) -> str | None:
-        """The console line for the op that just ran, with a forced-fresh
-        policy line or one per ordinary decision leaf (operator-decided
+        """The console line for the op that just ran, with a create or
+        forced-fresh policy line or one per continuation decision leaf (operator-decided
         2026-08-04: the console must say what is happening, in the same
         resume vocabulary as the pane echo).
 
@@ -562,8 +562,8 @@ class CodexIntegration(HarnessIntegration):
             # Unlike claude-code (which keeps its minted id either way, so
             # guessing "fresh" is lossless), a codex fresh launch drops the
             # bound id; guessing here could orphan a resumable
-            # conversation, so raise. Create needs no target at all, since
-            # it decides nothing (see start()).
+            # conversation, so raise. Fresh launch intents are handled by
+            # _start_fresh before reaching this continuation-only path.
             raise StateError(
                 f"session '{self._session_name}': the op context carries no "
                 f"launch target to probe codex session state on; refusing "
