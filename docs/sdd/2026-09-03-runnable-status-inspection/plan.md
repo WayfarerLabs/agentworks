@@ -2,7 +2,7 @@
 
 <!-- cspell:ignore sdds -->
 
-- Status: Design
+- Status: Complete; locked on merge of PR #736
 - Date: 2026-09-03
 - Requirements: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
@@ -197,7 +197,7 @@ assert behavior and structure, never authored prose.
       and the 0.19 removal schedule.
 - [x] Update the permanent CLI-conventions source if its current session-list precedent becomes
       stale, then regenerate all Rulesync targets through the required workflow.
-- [ ] Create or reconcile the 0.19 removal tracker, without duplicating the lifecycle compatibility
+- [x] Create or reconcile the 0.19 removal tracker, without duplicating the lifecycle compatibility
       cleanup, and link it from closeout.
 - [x] Run a residual scan proving canonical surfaces contain no old default-live instruction, public
       `--no-status`, Python `no_status`, `SessionStatus.OK`, 0.19 introduction, or 0.20 removal
@@ -214,22 +214,22 @@ assert behavior and structure, never authored prose.
 
 ## Phase 5: Verification, feedback, and closeout
 
-- [ ] Add focused structural, side-effect, timeout, parser, failure-isolation, CLI, completion,
+- [x] Add focused structural, side-effect, timeout, parser, failure-isolation, CLI, completion,
       projection, and describe tests from the LLD testing-seams section.
-- [ ] Run focused tests throughout implementation, then the complete Python and repository gate set.
-- [ ] Build and install the wheel in an isolated environment; smoke plain/status/names-only/JSON
+- [x] Run focused tests throughout implementation, then the complete Python and repository gate set.
+- [x] Build and install the wheel in an isolated environment; smoke plain/status/names-only/JSON
       commands and generated Bash, zsh, and PowerShell completion.
-- [ ] Load the integration-testing and agw-test-env skills, prepare an operator-reviewed live
+- [x] Load the integration-testing and agw-test-env skills, prepare an operator-reviewed live
       charter, and test representative VM providers plus session/console status on Windows canonical
       SSH.
-- [ ] Exercise partial failure with one intentionally unreachable target and confirm other rows
+- [x] Exercise partial failure with one intentionally unreachable target and confirm other rows
       complete inside the documented bound without activation or repair.
-- [ ] Obtain clean private agentworks-reviewer, Muntz, and cold correctness/security passes on one
+- [x] Obtain clean private agentworks-reviewer, Muntz, and cold correctness/security passes on one
       exact implementation head; apply every material authorized correction and rerun affected
       gates.
-- [ ] Complete up to three authorized published implementation feedback/fix rounds, or stop sooner
+- [x] Complete up to three authorized published implementation feedback/fix rounds, or stop sooner
       when one complete batch produces no material changes.
-- [ ] Rebase or merge the latest `main`, resolve conflicts semantically, rerun the full gates and
+- [x] Rebase or merge the latest `main`, resolve conflicts semantically, rerun the full gates and
       reviews, and hand off the exact final head.
 - [ ] Promote every load-bearing status contract to permanent code/docs, check every truthful plan
       item, add `locked.md`, remove `review-requested`, mark the PR ready, and obtain operator
