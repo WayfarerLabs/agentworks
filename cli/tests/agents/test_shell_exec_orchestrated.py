@@ -309,10 +309,10 @@ def test_exec_stopped_vm_gate_burst_then_boundary_burst(
 
 
 def _no_gate(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _no_status(self: ProxmoxPlatform, row: object) -> VMStatus:
+    def _status_must_not_run(self: ProxmoxPlatform, row: object) -> VMStatus:
         raise AssertionError("the gate ran for a command that must fail pre-gate")
 
-    monkeypatch.setattr(ProxmoxPlatform, "status", _no_status)
+    monkeypatch.setattr(ProxmoxPlatform, "status", _status_must_not_run)
     _reachable(monkeypatch, False)
 
 

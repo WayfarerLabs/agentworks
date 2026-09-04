@@ -1,6 +1,6 @@
-"""Validation for the list/batch commands' name filters (issue #304).
+"""Validation for list and batch command name filters.
 
-The name-filter options (``--vm``, ``--workspace``, ``--agent``) narrow a
+The name-filter options (``--vm``, ``--workspace``, ``--agent``, ``--console``) narrow a
 list or batch command's result set by entity name. A mistyped name would
 otherwise produce an empty result that is indistinguishable from "nothing
 matched", so the service-layer functions that accept name filters call
@@ -57,13 +57,14 @@ def validate_name_filters(
     vm_name: str | list[str] | None = None,
     workspace_name: str | list[str] | None = None,
     agent_name: str | list[str] | None = None,
+    console_name: str | list[str] | None = None,
 ) -> None:
     """Raise ``NotFoundError`` for any filter name with no matching entity.
 
     Each filter takes the same single-name-or-list shape as the
     ``Database.list_*`` query filters; every element is checked, and one
     error reports all unknown names of the first failing kind (checked in
-    vm, workspace, agent order). ``None`` filters are skipped, so a call
+    VM, workspace, agent, console order). ``None`` filters are skipped, so a call
     with no filters set is a no-op and a valid filter that simply matches
     nothing stays an empty result, not an error.
     """
@@ -90,4 +91,12 @@ def validate_name_filters(
             label="agent",
             defined={agent.name for agent in db.list_agents()},
             list_command="agent list",
+        )
+    if console_name is not None:
+        _check_filter(
+            console_name,
+            kind="console",
+            label="console",
+            defined={console.name for console in db.list_consoles()},
+            list_command="console list",
         )

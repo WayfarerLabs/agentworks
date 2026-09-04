@@ -25,15 +25,18 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.capabilities.base import RunContext
+from agentworks.capabilities.vm_platform.base import RetainedProvisioningError
 from agentworks.config import validate_admin_username
 from agentworks.db import SYSTEM_SLUG_KEY, InitStatus, ProvisioningStatus
 from agentworks.debian import CURRENT_DEBIAN_RELEASE, DebianRelease, probe_debian_release
 from agentworks.errors import (
     AlreadyExistsError,
+    AuthorizationError,
     ConfigError,
     ExternalError,
     ProvisioningError,
     StateError,
+    TokenRejectedError,
     UserAbort,
 )
 from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
@@ -502,6 +505,20 @@ def create_vm(
                 raise
             try:
                 result = platform_obj.create(request, platform_ctx)
+            except RetainedProvisioningError as e:
+                # Rollback could not prove the backend clean. Persist the
+                # platform's exact identifiers and keep the provisional row so
+                # an explicit delete can finish cleanup instead of orphaning
+                # resources when this command exits.
+                with db.transaction():
+                    db.update_vm_platform_metadata(vm_name, e.platform_metadata)
+                    db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
+                from agentworks.instance_specs import render_overlay_outcome
+
+                render_overlay_outcome(overlay_outcome)
+                output.warn(f"VM '{vm_name}' is retained in failed state because backend cleanup was not confirmed.")
+                output.warn(f"Log: {logger.display_path}")
+                raise
             except KeyboardInterrupt:
                 # The platform's create owns rolling back its own partial
                 # backend resources before this interrupt propagates (the
@@ -522,9 +539,9 @@ def create_vm(
                 log.unwind()
                 output.warn(f"Log: {logger.display_path}")
                 raise
-            except (ConfigError, StateError):
-                # Release-map misses and live-release verification failures
-                # are already typed with their owning platform's remediation.
+            except (AuthorizationError, ConfigError, StateError, TokenRejectedError):
+                # These failures are already typed with their owning
+                # platform's remediation.
                 # A compliant platform has not mutated, or has rolled back,
                 # so only the provisional row remains to unwind.
                 log.unwind()

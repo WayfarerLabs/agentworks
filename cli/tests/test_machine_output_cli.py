@@ -47,7 +47,7 @@ def test_operational_list_json_commands_are_closed_parseable_envelopes(monkeypat
     monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
     for module in (agent, console, session, vm, workspace):
         monkeypatch.setattr(module, "get_db", lambda: object())
-    monkeypatch.setattr(vms, "vm_listing", lambda _db: VMListing(vms=()))
+    monkeypatch.setattr(vms, "vm_listing", lambda *_args, **_kwargs: VMListing(vms=()))
     monkeypatch.setattr(workspaces, "workspace_listing", lambda _db, **_kwargs: WorkspaceListing(workspaces=()))
     monkeypatch.setattr(agents, "agent_listing", lambda _db, **_kwargs: AgentListing(agents=()))
     monkeypatch.setattr(sessions, "session_listing", lambda _db, _config, **_kwargs: SessionListing(sessions=()))
@@ -57,7 +57,7 @@ def test_operational_list_json_commands_are_closed_parseable_envelopes(monkeypat
         (["vm", "list", "--output", "json"], "vm.list", "vms"),
         (["workspace", "list", "--output", "json"], "workspace.list", "workspaces"),
         (["agent", "list", "--output", "json"], "agent.list", "agents"),
-        (["session", "list", "--output", "json", "--no-status"], "session.list", "sessions"),
+        (["session", "list", "--output", "json"], "session.list", "sessions"),
         (["console", "list", "--output", "json"], "console.list", "consoles"),
     ):
         result = CliRunner().invoke(app, argv)
@@ -81,10 +81,14 @@ def test_operational_json_usage_errors_have_empty_stdout_before_work(monkeypatch
     for argv in (
         ["vm", "list", "--output", "yaml"],
         ["vm", "list", "--names-only", "--output", "json"],
+        ["vm", "list", "--names-only", "--status"],
         ["workspace", "list", "--names-only", "--output", "json"],
         ["agent", "list", "--names-only", "--output", "json"],
         ["session", "list", "--names-only", "--output", "json"],
+        ["session", "list", "--names-only", "--status"],
+        ["session", "list", "--status", "--no-status"],
         ["console", "list", "--names-only", "--output", "json"],
+        ["console", "list", "--names-only", "--status"],
     ):
         result = CliRunner().invoke(app, argv)
         assert result.exit_code != 0
@@ -199,7 +203,13 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
         multi_console,
         "console_description",
         lambda *_args, **_kwargs: ConsoleDescription(
-            "c", "box", False, "2026-01-01", "2026-01-02", (ConsoleMember(0, "s", (ConsoleShell(None, False),)),)
+            "c",
+            "box",
+            False,
+            "2026-01-01",
+            "2026-01-02",
+            (ConsoleMember(0, "s", (ConsoleShell(None, False),)),),
+            "unknown",
         ),
     )
 
@@ -283,7 +293,7 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
             ["console", "describe", "c", "--output", "json"],
             "console.describe",
             "console",
-            ["name", "vm_name", "admin_shell", "created_at", "updated_at", "sessions"],
+            ["name", "vm_name", "admin_shell", "created_at", "updated_at", "status", "sessions"],
         ),
     ):
         first = CliRunner().invoke(app, argv)
@@ -483,7 +493,7 @@ def test_operational_human_describe_commands_keep_literal_no_color_bytes(monkeyp
     monkeypatch.setattr(
         multi_console,
         "console_description",
-        lambda *_args, **_kwargs: ConsoleDescription("c", "box", False, "2026-01-01", "2026-01-02", ()),
+        lambda *_args, **_kwargs: ConsoleDescription("c", "box", False, "2026-01-01", "2026-01-02", (), "unknown"),
     )
     monkeypatch.setattr(
         vms,
@@ -524,7 +534,7 @@ def test_operational_human_list_commands_keep_literal_empty_bytes(monkeypatch) -
     monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
     for module in (agent, console, session, vm, workspace):
         monkeypatch.setattr(module, "get_db", lambda: object())
-    monkeypatch.setattr(vms, "vm_listing", lambda _db: VMListing(()))
+    monkeypatch.setattr(vms, "vm_listing", lambda *_args, **_kwargs: VMListing(()))
     monkeypatch.setattr(workspaces, "workspace_listing", lambda _db, **_kwargs: WorkspaceListing(()))
     monkeypatch.setattr(agents, "agent_listing", lambda _db, **_kwargs: AgentListing(()))
     monkeypatch.setattr(sessions, "session_listing", lambda _db, _config, **_kwargs: SessionListing(()))

@@ -627,13 +627,26 @@ class TestOptionFlagsInSpec:
         for shell in ("bash", "zsh", "powershell"):
             assert "--output" in generate(shell)
 
+    def test_runnable_status_option_reaches_every_shell_completion(self) -> None:
+        commands = _walk_commands(build_spec(app))
+        for path in ("agentworks.vm.list", "agentworks.session.list", "agentworks.console.list"):
+            options = {option for parameter in commands[path].params for option in parameter.opts}
+            assert "--status" in options
+        session_options = {
+            option for parameter in commands["agentworks.session.list"].params for option in parameter.opts
+        }
+        assert "--no-status" not in session_options
+        for shell in ("bash", "zsh", "powershell"):
+            script = generate(shell)
+            assert "--status" in script
+
     def test_canonical_lifecycle_is_discoverable_and_compatibility_is_hidden(self) -> None:
         spec = build_spec(app)
         commands = _walk_commands(spec)
         session = commands["agentworks.session"]
         assert {"start", "restart"} <= session.subcommands.keys()
         assert "resume" not in session.subcommands
-        for parameter in ("name", "vm", "workspace", "agent"):
+        for parameter in ("name", "vm", "workspace", "agent", "console"):
             assert ("session.start", parameter) in DYNAMIC_COMPLETIONS
             assert ("session.restart", parameter) in DYNAMIC_COMPLETIONS
             assert ("session.resume", parameter) not in DYNAMIC_COMPLETIONS
@@ -1035,10 +1048,10 @@ class TestVariadicPositionalCompletion:
 
     def test_bash_uses_ge_for_variadic(self) -> None:
         output = generate("bash")
-        # Look for the console-create block specifically: 'sessions' completer
-        # snippet is `agentworks session list --no-status ...`, guarded by a
-        # -ge positional-count check (matches every position from the
-        # variadic's offset on while ignoring recognized options).
+        # Look for the console-create block specifically: the sessions
+        # names-only completer is guarded by a -ge positional-count check
+        # (matches every position from the variadic's offset on while
+        # ignoring recognized options).
         assert "positional_count -ge" in output
         # And the standard -eq for non-variadic positionals still works.
         assert "positional_count -eq" in output

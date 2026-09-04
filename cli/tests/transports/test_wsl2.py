@@ -40,6 +40,15 @@ def test_run_invokes_wsl_with_distro_and_user() -> None:
         assert argv[8] == "echo hi"
 
 
+def test_run_maps_process_launch_failure_to_transport_error() -> None:
+    t = WSL2Transport(distro_name="my-distro")
+    with (
+        patch("agentworks.transports.wsl2.subprocess.run", side_effect=PermissionError("wsl")),
+        pytest.raises(SSHError),
+    ):
+        t.run("echo hi")
+
+
 def test_run_env_injected_as_bash_assignment_prefix() -> None:
     t = WSL2Transport(distro_name="my-distro")
     with patch("agentworks.transports.wsl2.subprocess.run") as mock_run:

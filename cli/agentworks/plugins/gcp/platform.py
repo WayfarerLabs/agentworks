@@ -552,7 +552,7 @@ class GCEPlatform(VMPlatform):
         identity = _VMIdentity.from_row(vm)
         instances = self._clients.client("instances", ctx)
         try:
-            current = self._owned_instance(instances, identity)
+            current = self._owned_instance(instances, identity, timeout=10)
         except (ConnectivityError, GCEError):
             return VMStatus.UNKNOWN
         if current is None:
@@ -647,13 +647,20 @@ class GCEPlatform(VMPlatform):
                     f"'{result.observed_resource_id or 'unknown'}' and do not delete a mismatched rule by name"
                 )
 
-    def _owned_instance(self, instances: Any, identity: _VMIdentity) -> Any | None:
+    def _owned_instance(
+        self,
+        instances: Any,
+        identity: _VMIdentity,
+        *,
+        timeout: float | None = None,
+    ) -> Any | None:
         return read_owned_instance(
             instances,
             project_id=identity.project_id,
             zone=identity.zone,
             instance_name=identity.instance_name,
             resource_id=identity.instance_id,
+            timeout=timeout,
         )
 
     def _power(self, instances: Any, identity: _VMIdentity, *, action: str) -> None:

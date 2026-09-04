@@ -107,7 +107,6 @@ def session_describe(
     ] = OutputFormat.HUMAN,
 ) -> None:
     """Show session details."""
-    interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config
     from agentworks.sessions.manager import describe_session, session_description
 
@@ -120,14 +119,14 @@ def session_describe(
         from agentworks.sessions.manager._queries import session_description_data
 
         with output.suppress_presentation():
-            description = session_description(get_db(), config, name=name, interaction=interaction)
+            description = session_description(get_db(), config, name=name)
         write_json_envelope(
             MachineOutputCommand.SESSION_DESCRIBE,
             session_description_data(description),
             get_binary_stream("stdout"),
         )
         return
-    describe_session(get_db(), config, name=name, interaction=interaction)
+    describe_session(get_db(), config, name=name)
 
 
 @session_app.command("list")
@@ -139,7 +138,8 @@ def session_list(
         typer.Option("--agent", help="Filter by agent (agent-mode sessions only)"),
     ] = None,
     admin: Annotated[bool, typer.Option("--admin", help="Only admin-mode sessions (no agent)")] = False,
-    no_status: Annotated[bool, typer.Option("--no-status", help="Skip SSH status check (faster)")] = False,
+    status: Annotated[bool, typer.Option("--status", help="Include live runtime status")] = False,
+    no_status: Annotated[bool, typer.Option("--no-status", hidden=True)] = False,
     names_only: Annotated[
         bool,
         typer.Option(
@@ -154,9 +154,17 @@ def session_list(
     ] = OutputFormat.HUMAN,
 ) -> None:
     """List sessions. Filters compose with AND; name filters accept comma-separated values for OR-within-filter."""
-    interaction = ordinary_tty_interaction_policy()
     if names_only and output_format is OutputFormat.JSON:
         raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
+    if status and names_only:
+        raise typer.BadParameter("cannot be used with --names-only", param_hint="--status")
+    if status and no_status:
+        raise typer.BadParameter("cannot be used with --no-status", param_hint="--status")
+    if no_status:
+        from agentworks import output
+
+        output.deprecation("`session list --no-status` is deprecated; use plain `session list`.")
+
     from agentworks.config import load_config
     from agentworks.sessions.manager import list_sessions, session_listing
 
@@ -184,8 +192,7 @@ def session_list(
                 vm_name=parse_csv_filter(vm),
                 agent_name=parsed_agent,
                 admin_only=admin,
-                no_status=no_status,
-                interaction=interaction,
+                include_status=status,
             )
         write_json_envelope(
             MachineOutputCommand.SESSION_LIST,
@@ -200,9 +207,8 @@ def session_list(
         vm_name=parse_csv_filter(vm),
         agent_name=parsed_agent,
         admin_only=admin,
-        no_status=no_status,
+        include_status=status,
         names_only=names_only,
-        interaction=interaction,
     )
 
 
@@ -213,18 +219,14 @@ def session_stop(
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM (with --all)")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace (with --all)")] = None,
     agent: Annotated[str | None, typer.Option("--agent", help="Filter by agent (with --all)")] = None,
+    console: Annotated[str | None, typer.Option("--console", help="Filter by console (with --all)")] = None,
     admin: Annotated[
         bool,
         typer.Option("--admin", help="Only admin-mode sessions (with --all)"),
     ] = False,
     force: Annotated[bool, typer.Option("--force", help="Recover broken session state before stopping")] = False,
 ) -> None:
-    """Stop a running session, or all running sessions with --all.
-
-    Filters compose with AND. ``--vm``, ``--workspace``, and ``--agent``
-    accept a single value or a comma-separated list (e.g.
-    ``--vm vm1,vm2``); commas within a filter are OR-ed together.
-    """
+    """Stop a running session, or all running sessions with --all."""
     interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config
     from agentworks.sessions.manager import stop_all_sessions, stop_session
@@ -232,13 +234,14 @@ def session_stop(
     parsed_vm = parse_csv_filter(vm)
     parsed_workspace = parse_csv_filter(workspace)
     parsed_agent = parse_csv_filter(agent)
+    parsed_console = parse_csv_filter(console)
 
     if name and all_sessions:
         raise typer.BadParameter("provide a session name or --all, not both")
     if admin and parsed_agent is not None:
         raise typer.BadParameter("--admin and --agent are mutually exclusive")
-    if (parsed_vm or parsed_workspace or parsed_agent or admin) and not all_sessions:
-        raise typer.BadParameter("--vm, --workspace, --agent, and --admin require --all")
+    if (parsed_vm or parsed_workspace or parsed_agent or parsed_console or admin) and not all_sessions:
+        raise typer.BadParameter("--vm, --workspace, --agent, --console, and --admin require --all")
     if all_sessions:
         stop_all_sessions(
             get_db(),
@@ -246,6 +249,7 @@ def session_stop(
             vm_name=parsed_vm,
             workspace_name=parsed_workspace,
             agent_name=parsed_agent,
+            console_name=parsed_console,
             admin_only=admin,
             force=force,
             interaction=interaction,
@@ -269,6 +273,7 @@ def _launch_sessions(
     vm: str | None,
     workspace: str | None,
     agent: str | None,
+    console: str | None,
     admin: bool,
     force: bool,
     force_new: bool,
@@ -289,13 +294,14 @@ def _launch_sessions(
     parsed_vm = parse_csv_filter(vm)
     parsed_workspace = parse_csv_filter(workspace)
     parsed_agent = parse_csv_filter(agent)
+    parsed_console = parse_csv_filter(console)
 
     if name and all_sessions:
         raise typer.BadParameter("provide a session name or --all, not both")
     if admin and parsed_agent is not None:
         raise typer.BadParameter("--admin and --agent are mutually exclusive")
-    if (parsed_vm or parsed_workspace or parsed_agent or admin) and not all_sessions:
-        raise typer.BadParameter("--vm, --workspace, --agent, and --admin require --all")
+    if (parsed_vm or parsed_workspace or parsed_agent or parsed_console or admin) and not all_sessions:
+        raise typer.BadParameter("--vm, --workspace, --agent, --console, and --admin require --all")
     if all_sessions:
         db = db or get_db()
         config = config or load_config()
@@ -306,6 +312,7 @@ def _launch_sessions(
             vm_name=parsed_vm,
             workspace_name=parsed_workspace,
             agent_name=parsed_agent,
+            console_name=parsed_console,
             admin_only=admin,
             force=force,
             force_new=force_new,
@@ -334,6 +341,7 @@ def _canonical_launch_options(
     vm: str | None,
     workspace: str | None,
     agent: str | None,
+    console: str | None,
     admin: bool,
     force: bool,
     force_new: bool,
@@ -345,6 +353,7 @@ def _canonical_launch_options(
         vm=vm,
         workspace=workspace,
         agent=agent,
+        console=console,
         admin=admin,
         force=force,
         force_new=force_new,
@@ -363,13 +372,13 @@ def _confirm_legacy_resume_replacement(
     agent_name: str | list[str] | None,
     admin_only: bool,
 ) -> None:
-    """Preserve the 0.18 running-session confirmation at the CLI shim."""
+    """Preserve the 0.17 running-session confirmation at the CLI shim."""
     from agentworks import output
     from agentworks.db import PID_STOPPED, SessionStatus
     from agentworks.errors import UserAbort
     from agentworks.sessions.manager import (
-        batch_check_all_sessions,
         filter_sessions,
+        observe_session_statuses,
     )
 
     if name is not None:
@@ -384,11 +393,11 @@ def _confirm_legacy_resume_replacement(
             admin_only=admin_only,
         )
 
-    status_map = batch_check_all_sessions(sessions, db=db, config=config)
+    status_map = observe_session_statuses(sessions, db=db, config=config)
     running: list[str] = []
     for session in sessions:
         status = status_map.get(session.name)
-        if status is SessionStatus.OK:
+        if status is SessionStatus.RUNNING:
             running.append(session.name)
             continue
         if (
@@ -429,6 +438,7 @@ def session_start(
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM (with --all)")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace (with --all)")] = None,
     agent: Annotated[str | None, typer.Option("--agent", help="Filter by agent (with --all)")] = None,
+    console: Annotated[str | None, typer.Option("--console", help="Filter by console (with --all)")] = None,
     admin: Annotated[bool, typer.Option("--admin", help="Only admin-mode sessions (with --all)")] = False,
     force: Annotated[bool, typer.Option("--force", help="Recover broken session state")] = False,
     force_new: Annotated[bool, typer.Option("--force-new", help="Launch a fresh harness conversation")] = False,
@@ -440,6 +450,7 @@ def session_start(
         vm=vm,
         workspace=workspace,
         agent=agent,
+        console=console,
         admin=admin,
         force=force,
         force_new=force_new,
@@ -454,6 +465,7 @@ def session_restart(
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM (with --all)")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace (with --all)")] = None,
     agent: Annotated[str | None, typer.Option("--agent", help="Filter by agent (with --all)")] = None,
+    console: Annotated[str | None, typer.Option("--console", help="Filter by console (with --all)")] = None,
     admin: Annotated[bool, typer.Option("--admin", help="Only admin-mode sessions (with --all)")] = False,
     force: Annotated[bool, typer.Option("--force", help="Recover broken session state")] = False,
     force_new: Annotated[bool, typer.Option("--force-new", help="Launch a fresh harness conversation")] = False,
@@ -465,6 +477,7 @@ def session_restart(
         vm=vm,
         workspace=workspace,
         agent=agent,
+        console=console,
         admin=admin,
         force=force,
         force_new=force_new,
@@ -484,9 +497,9 @@ def session_resume(
     force: Annotated[bool, typer.Option("--force")] = False,
     yes: Annotated[bool, typer.Option("--yes", "-y")] = False,
 ) -> None:
-    """Compatibility wrapper for the 0.18 session resume grammar.
+    """Compatibility wrapper for the 0.17 session resume grammar.
 
-    Removed in 0.20.
+    Removed in 0.19.
     """
     from agentworks import output
     from agentworks.config import load_config
@@ -532,6 +545,7 @@ def session_resume(
         vm=vm,
         workspace=workspace,
         agent=agent,
+        console=None,
         admin=admin,
         force=force,
         force_new=False,

@@ -16,11 +16,13 @@ from agentworks.db.projections import (
 from agentworks.debian import classify_release
 from agentworks.errors import (
     AgentworksError,
+    StateError,
     UserAbort,
 )
 from agentworks.naming import MAX_VM_NAME_LENGTH
 
 from ._helpers import _require_vm, _vm_scope
+from ._status import observe_vm_statuses, project_vm_status
 from .boundary import _platform_ops_ctx, _warn_legacy_release
 
 if TYPE_CHECKING:
@@ -52,6 +54,8 @@ class VMListRow:
     created_at: str
     debian_release: str | None = None
     debian_release_observed_at: str | None = None
+    observed_status: str | None = None
+    status_disposition: str | None = None
 
 
 @dataclass(frozen=True)
@@ -259,6 +263,8 @@ def vm_listing_data(listing: VMListing) -> JsonObject:
                 "created_at": vm.created_at,
                 "debian_release": vm.debian_release,
                 "debian_release_observed_at": vm.debian_release_observed_at,
+                "observed_status": vm.observed_status,
+                "status_disposition": vm.status_disposition,
             }
             for vm in listing.vms
         ],
@@ -379,8 +385,37 @@ def _project_vm_issue(issue: VMIssue) -> JsonObject:
 # at call time instead.
 
 
-def vm_listing(db: Database) -> VMListing:
-    """Collect ordered VM list facts without presentation."""
+def vm_listing(
+    db: Database,
+    config: Config | None = None,
+    *,
+    include_status: bool = False,
+    interaction: TtyInteractionPolicy | None = None,
+) -> VMListing:
+    """Collect local VM inventory, optionally enriched by provider status."""
+    vm_rows = db.list_vms()
+    statuses: dict[str, VMStatus] = {}
+    if include_status and vm_rows:
+        if config is None or interaction is None:
+            raise StateError("VM status observation requires config and interaction policy")
+        output.info(
+            f"Checking status for {output.count(len(vm_rows), 'VM')} "
+            f"across {output.count(len({vm.site for vm in vm_rows}), 'provider site')}..."
+        )
+        statuses = observe_vm_statuses(db, config, vm_rows, interaction=interaction)
+
+    projected_statuses = (
+        {
+            vm.name: project_vm_status(
+                statuses.get(vm.name, VMStatus.UNKNOWN),
+                operator_stopped=vm.operator_stopped,
+            )
+            for vm in vm_rows
+        }
+        if include_status
+        else {}
+    )
+
     return VMListing(
         vms=tuple(
             VMListRow(
@@ -396,13 +431,20 @@ def vm_listing(db: Database) -> VMListing:
                 created_at=vm.created_at,
                 debian_release=vm.debian_release.value if vm.debian_release is not None else None,
                 debian_release_observed_at=vm.debian_release_observed_at,
+                observed_status=projected_statuses[vm.name][0] if include_status else None,
+                status_disposition=projected_statuses[vm.name][1] if include_status else None,
             )
-            for vm in db.list_vms()
+            for vm in vm_rows
         )
     )
 
 
-def render_vm_listing(listing: VMListing, *, names_only: bool = False) -> None:
+def render_vm_listing(
+    listing: VMListing,
+    *,
+    names_only: bool = False,
+    include_status: bool = False,
+) -> None:
     """Render VM list facts with the legacy human layout.
 
     With ``names_only=True``, emit one VM name per line and skip the
@@ -422,29 +464,49 @@ def render_vm_listing(listing: VMListing, *, names_only: bool = False) -> None:
         output.info("No VMs registered.")
         return
 
-    # Cap the NAME column at the VM-name cap (42) so a legacy / manually
-    # inserted over-cap row cannot push the other columns out of alignment;
-    # the column then sizes dynamically to the longest (truncated) name.
-    names = [output.truncate(vm.name, _NAME_CELL_WIDTH) for vm in vms]
-    name_w = max(len("NAME"), *(len(n) for n in names))
-
-    header = (
-        f"{'NAME':<{name_w}} {'SITE':<12} {'TEMPLATE':<12} {'PROV':<12} {'INIT':<12} "
-        f"{'WS/AG/SE':<10} {'DEBIAN':<10} {'TAILSCALE':<20} {'CREATED'}"
-    )
-    output.info(header)
-    output.info("-" * len(header))
-    for vm, name in zip(vms, names, strict=True):
+    # Keep the VM-name cap so a legacy over-cap row cannot distort the table.
+    headers = ["NAME", "SITE", "TEMPLATE", "PROV", "INIT", "WS/AG/SE", "DEBIAN", "TAILSCALE", "CREATED"]
+    if include_status:
+        headers.append("STATUS")
+    rows: list[tuple[str, ...]] = []
+    for vm in vms:
         counts = f"{vm.workspace_count}/{vm.agent_count}/{vm.session_count}"
-        output.info(
-            f"{name:<{name_w}} {vm.site:<12} {vm.template or '-':<12} "
-            f"{vm.provisioning_status:<12} {vm.initialization_status:<12} "
-            f"{counts:<10} {vm.debian_release or '-':<10} {vm.tailscale_host or '-':<20} {vm.created_at}"
+        row = (
+            vm.name,
+            vm.site,
+            vm.template or "-",
+            vm.provisioning_status,
+            vm.initialization_status,
+            counts,
+            vm.debian_release or "-",
+            vm.tailscale_host or "-",
+            vm.created_at,
         )
+        status = vm.observed_status or VMStatus.UNKNOWN.value
+        if vm.status_disposition:
+            status += f" ({vm.status_disposition})"
+        rows.append((*row, status) if include_status else row)
+    uncapped_width = max(len(cell) for row in [headers, *rows] for cell in row)
+    for line in output.render_table(
+        headers,
+        rows,
+        max_col_width=uncapped_width,
+        max_col_widths={0: _NAME_CELL_WIDTH},
+    ):
+        output.info(line)
+    if include_status:
+        unknown_by_site: dict[str, list[str]] = {}
+        for vm in vms:
+            if vm.observed_status == VMStatus.UNKNOWN.value:
+                unknown_by_site.setdefault(vm.site, []).append(vm.name)
+        if unknown_by_site:
+            output.info("")
+            groups = "; ".join(f"{site}: {', '.join(names)}" for site, names in unknown_by_site.items())
+            output.warn(f"VM status is unknown by provider site: {groups}.")
 
 
 def list_vms(db: Database, *, names_only: bool = False) -> None:
-    """List all VMs with their init and runtime status."""
+    """List all VMs from local inventory."""
     if names_only:
         for vm in db.list_vms():
             output.info(vm.name)
@@ -473,7 +535,7 @@ def vm_description(
     diagnostics: list[VMDiagnostic] = []
     platform_name: str | None = None
     backend: str | None = None
-    observed_status: str | None = None
+    observed_status: str | None = VMStatus.UNKNOWN.value
     status_disposition: str | None = None
     live_resources: VMLiveResources | None = None
 
@@ -534,6 +596,7 @@ def vm_description(
         config,
         applied_ssh,
     )
+    output.info(f"Checking VM '{name}' runtime...")
     try:
         site_decl = lookup_site(vm.site, registry)
         platform_name = site_decl.platform.name
@@ -586,9 +649,10 @@ def vm_description(
                     try:
                         backend = platform.display_backend_name(vm)
                         observed = platform.status(vm, ops_ctx)
-                        observed_status = observed.value
-                        if observed in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
-                            status_disposition = "manual" if vm.operator_stopped else "idle"
+                        observed_status, status_disposition = project_vm_status(
+                            observed,
+                            operator_stopped=vm.operator_stopped,
+                        )
                     except UserAbort:
                         raise
                     except AgentworksError as exc:

@@ -116,7 +116,8 @@ def test_transport_stdin_allocates_no_tty_and_leaves_stdin_open() -> None:
     tailnet auth key over stdin with no ``tty`` override, so the stdin
     branch must neither force a TTY (``-tt`` would corrupt the byte-exact
     payload) nor close stdin (``-n`` would starve the remote reader). It
-    goes through ``ssh.run``, which builds argv without either flag.
+    uses ``-T`` (no pty, also defeating operator ``RequestTTY force``) and
+    leaves stdin open for the write.
     """
     from agentworks.transports.ssh import SSHTransport
 
@@ -128,6 +129,7 @@ def test_transport_stdin_allocates_no_tty_and_leaves_stdin_open() -> None:
 
     argv = process.call_args.args[0]
     assert "-tt" not in argv
+    assert "-T" in argv
     assert "-n" not in argv
     assert process.call_args.kwargs["input"] == secret.encode()
 
@@ -157,6 +159,11 @@ def test_ssh_run_translates_sensitive_native_failure_without_exception_link() ->
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
     assert secret not in repr(caught.value)
+
+
+def test_ssh_run_translates_process_launch_failure() -> None:
+    with patch("agentworks.ssh.subprocess.run", side_effect=FileNotFoundError("ssh")), pytest.raises(SSHError):
+        run(SSHTarget(host="vm-host"), "true")
 
 
 def test_ssh_run_sensitive_timeout_drops_partial_output_and_native_exception() -> None:

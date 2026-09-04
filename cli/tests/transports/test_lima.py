@@ -29,6 +29,15 @@ def test_run_invokes_limactl_shell_with_bash_lc() -> None:
         assert argv[5] == "echo hi"
 
 
+def test_run_maps_process_launch_failure_to_transport_error() -> None:
+    t = LimaTransport(vm_name="my-vm")
+    with (
+        patch("agentworks.transports.lima.subprocess.run", side_effect=FileNotFoundError("limactl")),
+        pytest.raises(SSHError),
+    ):
+        t.run("echo hi")
+
+
 def test_run_env_injected_as_bash_assignment_prefix() -> None:
     """limactl shell doesn't carry env; we embed as scoped bash
     assignments at the head of the payload."""

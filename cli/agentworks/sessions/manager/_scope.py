@@ -172,9 +172,10 @@ def filter_sessions(
     workspace_name: str | list[str] | None = None,
     vm_name: str | list[str] | None = None,
     agent_name: str | list[str] | None = None,
+    console_name: str | list[str] | None = None,
     admin_only: bool = False,
 ) -> list[SessionRow]:
-    """Load sessions with optional workspace, VM, agent, and/or admin filters.
+    """Load sessions with optional workspace, VM, agent, console, and/or admin filters.
 
     Each name filter accepts a single name or a list of names; lists
     OR within a filter, filters AND across the call. ``admin_only``
@@ -183,7 +184,7 @@ def filter_sessions(
     ``Database.list_sessions``.
 
     An unknown name in any filter raises ``NotFoundError`` rather than
-    matching nothing (issue #304); every element of a list filter is
+    matching nothing; every element of a list filter is
     checked. Because every batch session op (``list_sessions``,
     ``stop_all_sessions``, ``start_all_sessions``) funnels its filters
     through here, this is the single validation point for the session
@@ -194,11 +195,13 @@ def filter_sessions(
         vm_name=vm_name,
         workspace_name=workspace_name,
         agent_name=agent_name,
+        console_name=console_name,
     )
     return db.list_sessions(
         workspace_name=workspace_name,
         vm_name=vm_name,
         agent_name=agent_name,
+        console_name=console_name,
         admin_only=admin_only,
     )
 
@@ -206,8 +209,8 @@ def filter_sessions(
 def _distinct_vms_for_sessions(db: Database, sessions: list[SessionRow]) -> list[VMRow]:
     """Resolve the distinct set of VMs that host the given sessions.
 
-    Used by the batch session operations (stop_all_sessions, start_all_sessions,
-    list_sessions) to feed `_batch_vm_boundary` with exactly the VMs whose SSH
+    Used by the batch session operations (stop_all_sessions and start_all_sessions)
+    to feed `_batch_vm_boundary` with exactly the VMs whose SSH
     transports will be touched. Order is insertion order keyed by VM name so
     gate and keepalive entry messages render in a stable order.
     """
@@ -234,7 +237,7 @@ def _batch_vm_boundary_impl(
     interaction: TtyInteractionPolicy,
 ) -> Iterator[None]:
     """The batch session ops' composition root (stop_all_sessions,
-    start_all_sessions, list_sessions' status pass): ONE boundary
+    start_all_sessions): ONE boundary
     over the distinct VMs, then each VM's activation gate and
     held-active span.
 
@@ -267,8 +270,8 @@ def _batch_vm_boundary_impl(
     VM.
 
     An empty VM set stays a complete no-op (no registry, no resolver,
-    no gate), the imperative lazy-bind property: ``session list
-    --no-status`` and empty filter results must cost nothing here.
+    no gate), preserving the imperative lifecycle path's lazy-bind
+    property for empty selections.
     """
     if not vms:
         yield

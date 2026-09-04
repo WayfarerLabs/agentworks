@@ -344,7 +344,7 @@ def stop_session(
     ):
         legacy = session.socket_path is None and session.pid is not None and session.pid > 0
         if legacy:
-            status = SessionStatus.OK
+            status = SessionStatus.RUNNING
         else:
             session = _mgr._ensure_pid(session, target=admin_target, db=db)
             status = _mgr.check_session_status(session, target=admin_target)
@@ -375,7 +375,7 @@ def stop_session(
                 hint="Use --force only after the prior server has exited.",
             )
 
-        # OK: delegate to shared stop logic. target_owns_session=True
+        # Running: delegate to shared stop logic. target_owns_session=True
         # because _build_session_target returned a same-uid target. The
         # anchor gives _execute_stop's internal detail lines a parent (the
         # batch caller emits its own "Stopping N session(s)..." anchor).
@@ -589,7 +589,7 @@ def _launch_existing_session(
                     entity_name=name,
                     hint="Retry after transport access is reliable; no runtime was changed.",
                 )
-            if status == SessionStatus.OK and not replace_running:
+            if status == SessionStatus.RUNNING and not replace_running:
                 if force_new:
                     raise StateError(
                         f"session '{name}' is already running",
@@ -691,7 +691,7 @@ def _launch_existing_session(
         with output.section("Starting Session"):
             output.info(f"{operation.title()}ing session '{name}'...")
 
-            if is_legacy or status in {SessionStatus.OK, SessionStatus.RESIDUAL, SessionStatus.BROKEN}:
+            if is_legacy or status in {SessionStatus.RUNNING, SessionStatus.RESIDUAL, SessionStatus.BROKEN}:
                 _teardown_session(
                     session,
                     target=session_target,
@@ -824,11 +824,12 @@ def stop_all_sessions(
     vm_name: str | list[str] | None = None,
     workspace_name: str | list[str] | None = None,
     agent_name: str | list[str] | None = None,
+    console_name: str | list[str] | None = None,
     admin_only: bool = False,
     force: bool = False,
     interaction: TtyInteractionPolicy,
 ) -> None:
-    """Stop all running sessions, optionally filtered by VM, workspace, agent, and/or mode.
+    """Stop all running sessions, optionally filtered by VM, workspace, agent, console, or mode.
 
     Each name filter accepts a single name or a list of names; lists
     OR within a filter, filters AND across the call. ``agent_name``
@@ -840,22 +841,24 @@ def stop_all_sessions(
         workspace_name=workspace_name,
         vm_name=vm_name,
         agent_name=agent_name,
+        console_name=console_name,
         admin_only=admin_only,
     )
 
     # Resolve distinct VMs from the filtered session set and open the
     # batch boundary + per-VM gates BEFORE the SSH probes. The probes
-    # (ensure_pids_batch, batch_check_all_sessions) issue per-VM
+    # (ensure_pids_batch, observe_session_statuses) issue per-VM
     # round-trips; on WSL2 they would race the idle timer without the
     # held-active anchor (a no-op hold on other platforms).
     distinct_vms = _mgr._distinct_vms_for_sessions(db, sessions)
     with _mgr._batch_vm_boundary(db, config, distinct_vms, interaction=interaction):
         # Auto-repair NULL-PID sessions, then batch check
         sessions = _mgr.ensure_pids_batch(sessions, db=db, config=config)
-        status_map = _mgr.batch_check_all_sessions(sessions, db=db, config=config)
+        status_map = _mgr.observe_session_statuses(sessions, db=db, config=config)
 
-        # Error if any sessions are still unknown after auto-repair.
-        # PID_STOPPED sessions are known-stopped (excluded from status_map by design).
+        # Error if any actionable sessions are still unknown after auto-repair.
+        # The observer reports PID_STOPPED rows too; lifecycle omits them from
+        # this refusal set because it does not need to act on them.
         legacy_names = {
             session.name
             for session in sessions
@@ -884,10 +887,10 @@ def stop_all_sessions(
             names = ", ".join(s.name for s in broken)
             output.warn(f"Skipping {len(broken)} broken session(s) ({names}). Use --force to kill.")
 
-        ok_statuses = {SessionStatus.OK, SessionStatus.RESIDUAL}
+        active_statuses = {SessionStatus.RUNNING, SessionStatus.RESIDUAL}
         if force:
-            ok_statuses.add(SessionStatus.BROKEN)
-        alive_sessions = [s for s in sessions if s.name in legacy_names or status_map.get(s.name) in ok_statuses]
+            active_statuses.add(SessionStatus.BROKEN)
+        alive_sessions = [s for s in sessions if s.name in legacy_names or status_map.get(s.name) in active_statuses]
 
         if not alive_sessions:
             output.info("No running sessions to stop.")
@@ -927,6 +930,7 @@ def _launch_all_sessions(
     vm_name: str | list[str] | None = None,
     workspace_name: str | list[str] | None = None,
     agent_name: str | list[str] | None = None,
+    console_name: str | list[str] | None = None,
     admin_only: bool = False,
     replace_running: bool,
     force: bool = False,
@@ -948,6 +952,7 @@ def _launch_all_sessions(
         workspace_name=workspace_name,
         vm_name=vm_name,
         agent_name=agent_name,
+        console_name=console_name,
         admin_only=admin_only,
     )
 
@@ -961,13 +966,14 @@ def _launch_all_sessions(
     with _mgr._batch_vm_boundary(db, config, distinct_vms, interaction=interaction):
         # Auto-repair NULL-PID sessions, then batch check
         sessions = _mgr.ensure_pids_batch(sessions, db=db, config=config)
-        status_map = _mgr.batch_check_all_sessions(sessions, db=db, config=config)
+        status_map = _mgr.observe_session_statuses(sessions, db=db, config=config)
 
-        # Error if any sessions are still unknown after auto-repair.
-        # PID_STOPPED sessions are known-stopped (excluded from status_map by design).
-        # Legacy sessions (``socket_path is None``) are also excluded from
-        # status_map by ``batch_check_status``; the singular launch migrates them
-        # to the new model, so don't treat them as "unknown" here.
+        # Error if any actionable sessions are still unknown after auto-repair.
+        # The observer reports PID_STOPPED rows too; lifecycle omits them from
+        # this refusal set because it does not need to act on them.
+        # Legacy sessions remain UNKNOWN in the observer status map; the
+        # singular launch migrates them to the new model, so lifecycle alone
+        # excludes them from this refusal set.
         unknown = [
             s
             for s in sessions

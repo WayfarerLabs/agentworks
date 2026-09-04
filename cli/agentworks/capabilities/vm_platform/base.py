@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 from agentworks.capabilities.base import Capability, idempotent_op
+from agentworks.errors import ProvisioningError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -78,8 +79,8 @@ class ProvisionRequest:
     system_slug: str | None
     admin_username: str
     ssh_public_key: str
-    # Path to the operator's SSH private key, for platforms whose
-    # native transport is plain SSH during create (azure, proxmox).
+    # Path to the operator's SSH private key when a platform's create path
+    # constructs an SSH transport.
     ssh_private_key: Path | None
     # Domain-owned operation input: the vm-template declares the secret name
     # and the VM manager resolves its value before platform dispatch. This is
@@ -107,6 +108,26 @@ class ProvisionResult:
     native_transport: Transport
     platform_metadata: dict[str, str] = field(default_factory=dict)
     tailscale_ip: str | None = None
+
+
+class RetainedProvisioningError(ProvisioningError):
+    """Create failed after backend resources became unsafe to forget.
+
+    The manager persists ``platform_metadata`` on the provisional VM row and
+    leaves that row in failed state so the owning platform can target the
+    surviving resources through an explicit ``vm delete`` retry.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        platform_metadata: dict[str, str],
+        entity_name: str,
+        hint: str,
+    ) -> None:
+        super().__init__(message, entity_kind="vm", entity_name=entity_name, hint=hint)
+        self.platform_metadata = dict(platform_metadata)
 
 
 class VMPlatform(Capability):
@@ -163,10 +184,7 @@ class VMPlatform(Capability):
         """
         return None
 
-    # Operator guidance shown when native_transport returns None (the
-    # transports factory embeds it in the StateError hint). Platforms
-    # that opt out of a native transport override with prose naming
-    # their actual escape hatch.
+    # Operator guidance shown when native_transport returns None.
     no_native_transport_hint: ClassVar[str] = "This platform has no interactive native transport."
 
     # Operator guidance warned when every reachability probe of the
@@ -244,6 +262,9 @@ class VMPlatform(Capability):
           resource left behind is orphaned with nothing to target it.
           All in-tree platforms implement both arms: Azure (#338),
           proxmox (#343), lima and wsl2 (#340/#344), and EC2.
+          If a platform cannot confirm that rollback completed, it raises
+          ``RetainedProvisioningError`` with the identifiers needed by its
+          ``delete`` op. Core persists them and retains the failed VM row.
         - Return ``ProvisionResult`` with ``platform_metadata``
           capturing whatever identifiers subsequent ops need, without
           relying on live configuration (e.g. proxmox records the node
@@ -285,9 +306,9 @@ class VMPlatform(Capability):
         caller (``delete_vm``) deletes the DB row only after this op
         returns, so a swallowed backend failure orphans a surviving VM
         with nothing left to target it; a raise keeps the row for a
-        retry. Best-effort warn-and-continue is acceptable only for
-        auxiliary resources an operator can still find and remove
-        (azure's NIC/IP/NSG/disk sweep); the VM itself is the gate,
+        retry. Best-effort warn-and-continue is acceptable only for auxiliary
+        resources an operator can still find and remove (azure's NIC/IP/NSG/disk
+        sweep); the VM itself is the gate,
         which azure enforces with a post-teardown existence probe."""
 
     @abstractmethod
@@ -305,10 +326,13 @@ class VMPlatform(Capability):
         """
 
     def native_transport(self, vm: VMRow, ctx: RunContext, *, config: Config | None = None) -> Transport | None:
-        """Platform-native :class:`Transport` for bootstrap and
-        ``vm shell --platform``, or ``None`` when the platform has no
-        interactive native transport (proxmox: one-shot QEMU guest-agent
-        exec can't host a shell).
+        """Platform-native :class:`Transport` for Tailscale recovery and
+        ``vm shell --platform``.
+
+        The contract requires this transport to work independently of the VM's
+        Tailscale state. The optional return and default ``None`` temporarily
+        preserve the current non-compliant Proxmox behavior (#727); they do not
+        make the transport optional for an implementation.
 
         Callers reach this through the
         :func:`agentworks.transports.native_transport` factory, which

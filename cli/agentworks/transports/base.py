@@ -70,6 +70,7 @@ class Transport(abc.ABC):
         timeout: int | None = None,
         env: dict[str, str] | None = None,
         input_text: str | None = None,
+        input_data: str | None = None,
         discard_output: bool = False,
         retries: int | None = None,
         on_retry: Callable[[int, int], None] | None = None,
@@ -87,6 +88,11 @@ class Transport(abc.ABC):
         so a guest ``read -r`` binds exactly the value that was sent. A
         forced TTY would break that promise, so SSH refuses the pairing
         rather than delivering a corrupted value.
+
+        ``input_data`` streams non-sensitive protocol data on stdin while
+        preserving captured output and ordinary diagnostics. It remains out
+        of argv, but unlike ``input_text`` its command output may be logged
+        and returned. The two stdin modes are mutually exclusive.
 
         ``discard_output=True`` sends stdout and stderr directly to the null
         device and returns/logs empty streams while preserving the normal TTY

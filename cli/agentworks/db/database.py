@@ -144,9 +144,8 @@ class Database:
     def transaction(self) -> Iterator[None]:
         """Compose transaction-aware operations, committing or rolling back together.
 
-        Nested blocks join the outer transaction. Methods that call
-        ``_commit_unless_in_tx`` defer to it; older CRUD methods that commit
-        directly do not participate in this composition contract.
+        Nested blocks join the outer transaction. Database write methods defer
+        their standalone commits to the outer transaction.
         """
         if self._read_only:
             from agentworks.errors import StateError
@@ -368,7 +367,7 @@ class Database:
 
     def update_vm_provisioning_status(self, name: str, status: ProvisioningStatus) -> None:
         self._conn.execute("UPDATE vms SET provisioning_status = ? WHERE name = ?", (status.value, name))
-        self._conn.commit()
+        self._commit_unless_in_tx()
 
     def update_vm_init_status(self, name: str, status: InitStatus) -> None:
         self._conn.execute("UPDATE vms SET init_status = ? WHERE name = ?", (status.value, name))
@@ -376,7 +375,7 @@ class Database:
 
     def update_vm_tailscale(self, name: str, tailscale_host: str) -> None:
         self._conn.execute("UPDATE vms SET tailscale_host = ? WHERE name = ?", (tailscale_host, name))
-        self._conn.commit()
+        self._commit_unless_in_tx()
 
     def update_vm_debian_release(
         self,
@@ -394,7 +393,7 @@ class Database:
 
     def clear_vm_tailscale(self, name: str) -> None:
         self._conn.execute("UPDATE vms SET tailscale_host = NULL WHERE name = ?", (name,))
-        self._conn.commit()
+        self._commit_unless_in_tx()
 
     def update_vm_platform_metadata(self, name: str, metadata: dict[str, str]) -> None:
         """Replace the VM's platform_metadata wholesale (the owning
@@ -403,7 +402,7 @@ class Database:
             "UPDATE vms SET platform_metadata = ? WHERE name = ?",
             (json.dumps(metadata), name),
         )
-        self._conn.commit()
+        self._commit_unless_in_tx()
 
     def set_operator_stopped(self, name: str, stopped: bool) -> None:
         """Record operator stop/start intent (gates the activation gate's auto-start)."""
@@ -411,14 +410,14 @@ class Database:
             "UPDATE vms SET operator_stopped = ? WHERE name = ?",
             (1 if stopped else 0, name),
         )
-        self._conn.commit()
+        self._commit_unless_in_tx()
 
     def update_vm_last_seen(self, name: str) -> None:
         self._conn.execute(
             "UPDATE vms SET last_seen_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE name = ?",
             (name,),
         )
-        self._conn.commit()
+        self._commit_unless_in_tx()
 
     def delete_vm(self, name: str) -> None:
         with self.transaction():
@@ -474,7 +473,7 @@ class Database:
             "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (key, value),
         )
-        self._conn.commit()
+        self._commit_unless_in_tx()
 
     # -- Workspaces --------------------------------------------------------
 
@@ -515,7 +514,7 @@ class Database:
             "UPDATE workspaces SET workspace_path = ? WHERE name = ?",
             (workspace_path, name),
         )
-        self._conn.commit()
+        self._commit_unless_in_tx()
 
     def delete_workspace(self, name: str) -> None:
         with self.transaction():
@@ -624,7 +623,7 @@ class Database:
             "VALUES (?, ?, ?, ?)",
             (agent_name, workspace_name, grant_type, session_name),
         )
-        self._conn.commit()
+        self._commit_unless_in_tx()
 
     def delete_agent_grant(
         self,
@@ -645,7 +644,7 @@ class Database:
                 "WHERE agent_name = ? AND workspace_name = ? AND grant_type = ? AND session_name IS NULL",
                 (agent_name, workspace_name, grant_type),
             )
-        self._conn.commit()
+        self._commit_unless_in_tx()
 
     def delete_explicit_grants(self, agent_name: str) -> None:
         """Remove all explicit grants for an agent."""
@@ -653,7 +652,7 @@ class Database:
             "DELETE FROM agent_workspace_grants WHERE agent_name = ? AND grant_type = 'explicit'",
             (agent_name,),
         )
-        self._conn.commit()
+        self._commit_unless_in_tx()
 
     def has_any_grant(self, agent_name: str, workspace_name: str) -> bool:
         """Check if an agent has any grant (explicit or implicit) for a workspace."""
@@ -736,7 +735,7 @@ class Database:
             "UPDATE agents SET grant_all = ? WHERE name = ?",
             (int(grant_all), name),
         )
-        self._conn.commit()
+        self._commit_unless_in_tx()
 
     # -- Sessions ----------------------------------------------------------
 
@@ -792,9 +791,10 @@ class Database:
         workspace_name: str | list[str] | None = None,
         vm_name: str | list[str] | None = None,
         agent_name: str | list[str] | None = None,
+        console_name: str | list[str] | None = None,
         admin_only: bool = False,
     ) -> list[SessionRow]:
-        """List sessions, optionally filtered by workspace, VM, agent, or mode.
+        """List sessions, optionally filtered by workspace, VM, agent, console, or mode.
 
         Each name filter accepts a single string or a list of strings; list
         values are OR-ed together within a filter, and filters AND together
@@ -802,6 +802,7 @@ class Database:
         (sessions on workspaces that live on the given VM). `agent_name`
         matches the session's `agent_name` column directly; admin-mode
         sessions (NULL agent_name) are excluded when this filter is set.
+        `console_name` matches sessions through their named-console membership.
         `admin_only` restricts to admin-mode sessions (agent_name IS NULL);
         it is the inverse of `agent_name` and the two should not be passed
         together (the CLI layer enforces the mutex; this layer accepts the
@@ -822,6 +823,14 @@ class Database:
         if ag_clause:
             clauses.append(ag_clause)
             params.extend(ag_params)
+        console_clause, console_params = _eq_or_in("cs.console_name", console_name)
+        if console_clause:
+            # Correlated EXISTS keeps one result row when a session belongs to
+            # multiple selected consoles, avoiding duplicate batch operands.
+            clauses.append(
+                f"EXISTS (SELECT 1 FROM console_sessions cs WHERE cs.session_name = s.name AND {console_clause})"
+            )
+            params.extend(console_params)
         if admin_only:
             clauses.append("s.agent_name IS NULL")
 
@@ -873,7 +882,7 @@ class Database:
             "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE name = ?",
             (json.dumps(harness_integration_state), name),
         )
-        self._conn.commit()
+        self._commit_unless_in_tx()
 
     def delete_session(self, name: str) -> None:
         with self.transaction():

@@ -29,6 +29,7 @@ from agentworks.ssh import (
 from agentworks.ssh import (
     run as ssh_run,
 )
+from agentworks.subprocess_io import decode_stream, stdin_bytes
 from agentworks.transports.base import Transport
 
 if TYPE_CHECKING:
@@ -36,6 +37,11 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from agentworks.ssh import SSHLogger
+
+
+def _decoded_output(value: str | bytes) -> str:
+    """Normalize text- and byte-mode subprocess output to transport text."""
+    return value if isinstance(value, str) else decode_stream(value)
 
 
 def keepalive_args() -> list[str]:
@@ -117,11 +123,12 @@ class SSHTransport(Transport):
     ``$SHELL -lc <command>`` so the operator's per-shell PATH
     additions (e.g. Homebrew on macOS) resolve.
 
-    Non-interactive ``run()`` never allocates a TTY: it closes stdin
+    Non-interactive ``run()`` does not request a pty and closes stdin
     with ssh's ``-n`` so a stdin-reading remote command cannot hang and
-    ssh cannot steal the operator's console input. A caller that
-    genuinely needs a remote pty asks for it per-call with
-    ``run(tty=True)``, which uses ``-tt`` instead.
+    ssh cannot steal the operator's console input. ``tty=False``
+    additionally passes ``-T`` to refuse a pty even under an operator's
+    ``RequestTTY force`` (whose CRLF and teardown advisory would corrupt
+    captured output); ``tty=True`` asks for one with ``-tt``.
     """
 
     def __init__(
@@ -152,26 +159,31 @@ class SSHTransport(Transport):
     def _ssh_base_args(
         self,
         *,
-        force_tty: bool | None = None,
+        tty: bool | None = None,
+        close_stdin: bool,
         env: dict[str, str] | None = None,
     ) -> list[str]:
         """Build the base ``ssh`` argv with ``BatchMode=yes`` (no remote
         command yet).
 
-        ``force_tty`` selects TTY allocation for this call; ``None`` or
-        ``False`` means no forced TTY, which is the default for
-        non-interactive ``run()``. Without a forced TTY we add ``-n`` so
-        ssh closes stdin: a stdin-reading remote command then cannot hang
-        waiting on input, and ssh cannot pull from the operator's console.
-        A forced TTY (``force_tty=True``, from an explicit
-        ``run(tty=True)``) uses ``-tt`` instead. The two are mutually
-        exclusive, since ``-tt`` already attaches stdin to the pty.
+        ``tty=True`` forces a pty with ``-tt`` (the only way ``run()`` gets
+        one). ``tty=False`` explicitly suppresses one with ``-T``, which also
+        defeats an operator's ``RequestTTY force`` (a pty would inject CRLF and
+        a teardown advisory into captured output); ``tty=None`` leaves pty
+        selection to the operator's ssh config. Independently, ``-n`` is added
+        when ``close_stdin`` is set so a stdin-reading remote command cannot
+        hang and ssh cannot pull from the operator's console. Callers writing
+        an ``input_text`` or ``input_data`` payload leave ``close_stdin`` false
+        so stdin stays open for the write.
         """
         args = ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
-        if force_tty:
+        if tty:
             args.insert(1, "-tt")
         else:
-            args.insert(1, "-n")
+            if tty is False:
+                args.insert(1, "-T")
+            if close_stdin:
+                args.insert(1, "-n")
         if self.port is not None:
             args.extend(["-p", str(self.port)])
         if self.identity_file is not None:
@@ -199,6 +211,7 @@ class SSHTransport(Transport):
         timeout: int | None = None,
         env: dict[str, str] | None = None,
         input_text: str | None = None,
+        input_data: str | None = None,
         discard_output: bool = False,
         retries: int | None = None,
         on_retry: Callable[[int, int], None] | None = None,
@@ -219,6 +232,8 @@ class SSHTransport(Transport):
         ``discard_output`` retains ordinary TTY selection while sending both
         process streams directly to the null device.
         """
+        if input_text is not None and input_data is not None:
+            raise ValueError("SSH input_text and input_data are mutually exclusive")
         if input_text is not None and discard_output:
             raise ValueError("SSH input_text cannot be combined with discard_output")
         if input_text is not None and tty:
@@ -249,12 +264,17 @@ class SSHTransport(Transport):
                 on_retry=on_retry,
                 env=env,
                 input_text=input_text,
+                # Sensitive stdin always needs a byte-exact non-TTY channel;
+                # explicit false also defeats RequestTTY force in ssh_config.
+                tty=False if tty is None else tty,
             )
             if self.logger is not None:
                 self.logger.log_command(command, stdin_result)
             return stdin_result
 
-        args = self._ssh_base_args(force_tty=tty, env=env)
+        # An ``input_data`` payload keeps stdin open for the write; every
+        # other non-payload call closes stdin with ``-n``.
+        args = self._ssh_base_args(tty=tty, close_stdin=input_data is None, env=env)
         # Fence the remote command from ssh's option parser. Some
         # glibc-getopt platforms permute non-options to the end, so an
         # argv element starting with `-` (e.g. `--workspace` flowing
@@ -272,24 +292,36 @@ class SSHTransport(Transport):
             if attempt > 0 and on_retry is not None:
                 on_retry(attempt, attempts)
             try:
-                result = subprocess.run(
-                    args,
-                    stdout=subprocess.DEVNULL if discard_output else subprocess.PIPE,
-                    stderr=subprocess.DEVNULL if discard_output else subprocess.PIPE,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=t,
-                )
+                result: subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]
+                if input_data is None:
+                    result = subprocess.run(
+                        args,
+                        stdout=subprocess.DEVNULL if discard_output else subprocess.PIPE,
+                        stderr=subprocess.DEVNULL if discard_output else subprocess.PIPE,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        timeout=t,
+                    )
+                else:
+                    result = subprocess.run(
+                        args,
+                        input=stdin_bytes(input_data),
+                        stdout=subprocess.DEVNULL if discard_output else subprocess.PIPE,
+                        stderr=subprocess.DEVNULL if discard_output else subprocess.PIPE,
+                        timeout=t,
+                    )
             except subprocess.TimeoutExpired as err:
                 last_err = err
                 if self.logger is not None:
                     self.logger.log_timeout(command, attempt + 1, attempts)
                 continue
+            except OSError as err:
+                raise SSHError(f"SSH command could not be executed: {command}") from err
             ssh_result = SSHResult(
                 returncode=result.returncode,
-                stdout="" if discard_output else result.stdout,
-                stderr="" if discard_output else result.stderr,
+                stdout="" if discard_output else _decoded_output(result.stdout),
+                stderr="" if discard_output else _decoded_output(result.stderr),
             )
             if self.logger is not None:
                 self.logger.log_command(command, ssh_result)

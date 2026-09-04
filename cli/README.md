@@ -57,7 +57,8 @@ agw session attach my-session
 # leaving everything running on the VM.
 agw session attach my-session    # You'll pick up right where you left off
 agw session stop my-session      # Sessions can be stopped (or can exit on their own)
-agw session list
+agw session list                 # Fast local inventory
+agw session list --status        # Add bounded, non-activating live status
 agw session start my-session
 agw session attach my-session
 agw session delete my-session    # When you're done with it. Agent and workspace are preserved unless this was their last session (see below).
@@ -102,7 +103,7 @@ agw console delete my-console              # Extra shells are lost but sessions 
 ```
 
 Automation upgrading from the former session-resume or console-create-on-attach grammar should
-follow [Upgrading to 0.19](../docs/guides/upgrading-to-0.19.md).
+follow [Upgrading to 0.18](../docs/guides/upgrading-to-0.18.md).
 
 ## Prerequisites
 
@@ -169,7 +170,11 @@ details live in the focused [CLI command reference](command-reference.md). The V
 session list and describe paths project persisted provisioning, initialization, and session-mode
 values through frozen JSON v1 vocabularies owned by the output contract. On those operational
 surfaces, valid values retain their existing human bytes and corrupt values render as the stable
-`unknown` sentinel without echoing their stored text. Doctor diagnostics are a separate surface.
+`unknown` sentinel without echoing their stored text. Doctor diagnostics are a separate surface. VM,
+session, and console lists are local inventory reads by default; add `--status` to any of those
+three lists for live observation. Their describe commands include the same non-activating live
+status by default. See [Runnable status inspection](../docs/guides/runnable-status.md) for the
+resource-specific states, time bounds, and failure behavior.
 
 ## Configuration
 
@@ -477,9 +482,10 @@ group listing every installed plugin, its description, and whether it is enabled
 
 See [docs/guides/resources.md](../docs/guides/resources.md#system-plugins) for the full model
 (origins, the disabled-resource semantics, config-error deferral) and the upgrade note for configs
-that relied on Azure, Proxmox, 1Password, or Claude Code before they became opt-in. Google Compute
-Engine setup, firewall prerequisites, whole-document JSON-secret setup, and provider-ID-safe
-recovery are covered in [Using Google Compute Engine](../docs/guides/gcp.md).
+that relied on Azure, Proxmox, 1Password, or Claude Code before they became opt-in. Cloud platform
+permissions, credentials, and safe cleanup are covered in [Using Amazon EC2](../docs/guides/aws.md),
+[Using Azure Virtual Machines](../docs/guides/azure.md), and
+[Using Google Compute Engine](../docs/guides/gcp.md).
 
 ### Mise (Polyglot Tool Manager)
 

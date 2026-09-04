@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.db import VMStatus
 
 if TYPE_CHECKING:
     from agentworks.vms.manager.inspect import VMDescription
@@ -16,6 +17,8 @@ def render_vm_description(description: VMDescription) -> None:
     for diagnostic in description.diagnostics:
         error = diagnostic.error
         output.warn(f"{error}" + (f"\n{error.hint}" if error.hint else ""))
+    if description.observed_status == VMStatus.UNKNOWN.value and not description.diagnostics:
+        output.warn(f"VM '{vm.name}' runtime status could not be determined.")
 
     site_platform = description.platform or "-"
     backend_label = description.backend or "-"

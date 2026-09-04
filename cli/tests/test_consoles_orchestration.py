@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import Database
+from agentworks.db import PID_STOPPED, Database, SessionStatus
 from agentworks.errors import (
     AlreadyExistsError,
     ConnectivityError,
@@ -24,6 +24,7 @@ from agentworks.errors import (
     ValidationError,
 )
 from agentworks.secrets.policy import TtyInteractionPolicy
+from agentworks.sessions.manager._status import _encoded_probe_field
 from agentworks.sessions.multi_console import (
     add_sessions,
     add_shell,
@@ -37,6 +38,7 @@ from agentworks.sessions.multi_console import (
 from agentworks.sessions.multi_console import (
     create_console as _real_create_console,
 )
+from agentworks.sessions.multi_console._status import ConsoleStatus
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
 from tests.conftest import _FakeResult, _FakeTarget
 from tests.console_helpers import create_console_record as create_console
@@ -133,7 +135,7 @@ def test_running_session_names_includes_incomplete_live_identity_without_repair(
 
     def stub_run(command: str, **kwargs: object) -> _FakeResult:
         fake_target.commands.append(command)
-        return _FakeResult(returncode=0, stdout="S:alpha:0::0::1::1:\n")
+        return _FakeResult(returncode=0, stdout=f"S:{_encoded_probe_field('alpha')}:0::0::1::1:\n")
 
     fake_target.run = stub_run  # type: ignore[assignment]
 
@@ -165,8 +167,8 @@ def test_running_session_names_refuses_unresolved_incomplete_identity(
 
 
 def test_running_session_names_uses_live_status_check(db: Database, fake_target: _FakeTarget) -> None:
-    """running_session_names SSH-probes via batch_check_all_sessions and
-    returns only sessions whose live tmux state is OK."""
+    """running_session_names SSH-probes via observe_session_statuses and
+    returns only sessions whose live tmux state is running."""
     from agentworks.sessions.multi_console import running_session_names
 
     _seed_vm(db, with_tailscale=True)
@@ -177,12 +179,15 @@ def test_running_session_names_uses_live_status_check(db: Database, fake_target:
     db._conn.execute("UPDATE sessions SET pid = 300, boot_id = ? WHERE name = 'gamma'", (BOOT_ID,))
     db._conn.commit()
 
-    # batch_check_all_sessions emits one compound shell command per VM. We
+    # observe_session_statuses emits one compound shell command per VM. We
     # reply with status lines for alpha (alive) + beta (alive); gamma's line
     # claims the session is gone.
     def stub_run(command: str, **kwargs: object) -> _FakeResult:
         fake_target.commands.append(command)
-        if "has-session -t '=alpha'" in command and "has-session -t '=beta'" in command:
+        input_data = kwargs.get("input_data")
+        if isinstance(input_data, str) and all(
+            _encoded_probe_field(name) in input_data for name in ("alpha", "beta", "gamma")
+        ):
             missing_session = b"can't find session: gamma".hex()
             missing_server = b"no server running on /gamma".hex()
             boot_hex = BOOT_ID.encode().hex()
@@ -191,9 +196,10 @@ def test_running_session_names_uses_live_status_check(db: Database, fake_target:
             return _FakeResult(
                 returncode=0,
                 stdout=(
-                    f"S:alpha:0::0::0:{boot_hex}:0:{present_hex}\n"
-                    f"S:beta:0::0::0:{boot_hex}:0:{present_hex}\n"
-                    f"S:gamma:1:{missing_session}:1:{missing_server}:0:{boot_hex}:0:{absent_hex}\n"
+                    f"S:{_encoded_probe_field('alpha')}:0::0::0:{boot_hex}:0:{present_hex}\n"
+                    f"S:{_encoded_probe_field('beta')}:0::0::0:{boot_hex}:0:{present_hex}\n"
+                    f"S:{_encoded_probe_field('gamma')}:1:{missing_session}:1:{missing_server}:"
+                    f"0:{boot_hex}:0:{absent_hex}\n"
                 ),
             )
         return _FakeResult()
@@ -202,6 +208,29 @@ def test_running_session_names_uses_live_status_check(db: Database, fake_target:
 
     names = running_session_names(db, _StubConfig(), "vm1")
     assert names == ["alpha", "beta"]
+
+
+def test_running_session_names_keeps_persisted_stopped_rows_ineligible(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.sessions import multi_console
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["stopped", "eligible"])
+    db._conn.execute("UPDATE sessions SET pid = ? WHERE name = 'stopped'", (PID_STOPPED,))
+    db._conn.execute("UPDATE sessions SET pid = 100 WHERE name = 'eligible'")
+    db._conn.commit()
+    observed: list[str] = []
+
+    def observe(sessions, *, db, config):  # noqa: ANN001
+        observed.extend(session.name for session in sessions)
+        return {session.name: SessionStatus.RUNNING for session in sessions}
+
+    monkeypatch.setattr("agentworks.sessions.manager.observe_session_statuses", observe)
+
+    assert multi_console.running_session_names(db, _StubConfig(), "vm1") == ["eligible"]
+    assert observed == ["eligible"]
 
 
 def test_console_create_all_running_reuses_one_loaded_config(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -605,14 +634,26 @@ def test_delete_console_db_only_when_vm_unreachable(
 # -- describe_console / list_consoles output -------------------------------
 
 
-def test_describe_console_uses_iteration_index(db: Database, captured_output: CapturedOutput) -> None:
+def test_describe_console_uses_iteration_index(
+    db: Database,
+    captured_output: CapturedOutput,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """After a remove, members keep their position gap in the DB but describe
     renders 0..N-1 line numbers."""
     _seed_vm(db)
     _seed_sessions(db, ["a", "b", "c"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a", "b", "c"])
     remove_sessions(db, _StubConfig(), console_name="con", session_names=["a"])
-    describe_console(db, name="con")
+    monkeypatch.setattr(
+        "agentworks.sessions.multi_console.observe_console_statuses",
+        lambda _db, _config, consoles: {console.name: ConsoleStatus.STOPPED for console in consoles},
+    )
+    describe_console(
+        db,
+        _StubConfig(),
+        name="con",
+    )
     member_lines = [m for m in captured_output.info if m.lstrip().startswith("[")]
     assert member_lines == [
         "[0] b  (no extra shells)",

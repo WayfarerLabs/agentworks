@@ -559,7 +559,7 @@ def install_fake_target(monkeypatch: pytest.MonkeyPatch, target: _FakeTarget) ->
     """
     # ``agentworks.transports.transport`` is the canonical admin-transport
     # factory; ``agentworks.sessions.manager.transport`` covers manager's
-    # eager top-level import (used by batch_check_all_sessions and friends).
+    # eager top-level import (used by observe_session_statuses and friends).
     fake_factory = lambda vm, config, **kwargs: target  # noqa: E731
     monkeypatch.setattr("agentworks.transports.transport", fake_factory)
     # ``sessions.manager`` and the agents modules import ``transport`` at

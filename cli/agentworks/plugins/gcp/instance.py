@@ -235,10 +235,17 @@ def read_owned_instance(
     zone: str,
     instance_name: str,
     resource_id: str,
+    timeout: float | None = None,
 ) -> Any | None:
     """Read an instance only when the persisted provider incarnation matches."""
+    request_options = {} if timeout is None else {"retry": None, "timeout": timeout}
     instance = call_google_optional(
-        lambda: client.get(project=project_id, zone=zone, instance=instance_name),
+        lambda: client.get(
+            project=project_id,
+            zone=zone,
+            instance=instance_name,
+            **request_options,
+        ),
         operation="reading an owned instance",
         resource=f"instance {project_id}/{zone}/{instance_name}",
     )

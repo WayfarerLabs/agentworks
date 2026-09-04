@@ -1,7 +1,8 @@
 """The sessions machinery through the orchestrated node model: the
-batch ops' coalesced composition (``_batch_vm_boundary`` under
-``stop_all_sessions`` / ``start_all_sessions`` / ``restart_all_sessions`` / ``list_sessions``'
-status pass) and the singular ops' ``_prepare_vm`` gate span.
+lifecycle batch ops' coalesced composition (``_batch_vm_boundary``
+under ``stop_all_sessions`` / ``start_all_sessions`` /
+``restart_all_sessions``) and the singular lifecycle ops'
+``_prepare_vm`` gate span.
 
 Batch pins: the multi-root walk with ONE shared site-node object per
 site (the ``live_vm_node`` ``site_nodes`` memo), boundary-then-gates
@@ -11,11 +12,11 @@ the boundary's cached values), the empty-set complete no-op, and the
 operator-stopped abort propagating exactly as the imperative per-VM
 gate loop did.
 
-Singular pins: per-command one-burst parity, the gate-seeded
-stopped-VM shape, describe's hold SUPERSET (it held nothing at HEAD),
-the pre-gate refusals with zero resolves and zero gate events
-(including the hoisted no-Tailscale row guard), and the SESSION-level
-scope reaching node readiness.
+Singular lifecycle pins: per-command one-burst parity, the gate-seeded
+stopped-VM shape, pre-gate refusals with zero resolves and zero gate
+events (including the hoisted no-Tailscale row guard), and the
+SESSION-level scope reaching node readiness. List and describe status
+observation bypasses these activation boundaries.
 
 Real config, registry, resolver, and backend loop (env-var backend);
 the platform's backend power ops, the reachability probe, and the SSH
@@ -30,7 +31,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
-from agentworks.db import PID_STOPPED, SessionMode, VMStatus
+from agentworks.db import PID_STOPPED, SessionMode, SessionStatus, VMStatus
 from agentworks.errors import NotFoundError, StateError
 from agentworks.output import Role
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
@@ -38,6 +39,7 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager as session_manager
 from agentworks.sessions.manager._queries import session_listing_data
 from agentworks.vms import manager as vm_manager
+from agentworks.vms.applied_state import VMSSHIdentityPolicyError
 from tests.conftest import stub_vm_ssh_identity
 
 if TYPE_CHECKING:
@@ -191,7 +193,7 @@ def test_best_effort_status_and_pid_repair_skip_identity_refusal_before_transpor
     assert session is not None
 
     def refuse(*args: object, **kwargs: object) -> None:
-        raise StateError("SSH identity drift")
+        raise VMSSHIdentityPolicyError("SSH identity drift")
 
     monkeypatch.setattr(vm_manager, "require_vm_ssh_boundary", refuse)
     monkeypatch.setattr(
@@ -200,7 +202,9 @@ def test_best_effort_status_and_pid_repair_skip_identity_refusal_before_transpor
         lambda *args, **kwargs: pytest.fail("transport constructed after identity refusal"),
     )
 
-    assert session_manager.batch_check_all_sessions([session], db=db, config=SimpleNamespace()) == {}
+    assert session_manager.observe_session_statuses([session], db=db, config=SimpleNamespace()) == {
+        "s-a": SessionStatus.UNKNOWN
+    }
     assert session_manager.ensure_pids_batch([session], db=db, config=SimpleNamespace()) == [session]
 
 
@@ -215,7 +219,7 @@ def test_list_status_reports_identity_refusal_as_unknown_without_transport(
     db.update_session_runtime("s-a", socket_path="/tmp/s-a.sock", pid=4321, boot_id=BOOT_ID, tmux_server_start_ticks=77)
 
     def refuse(*args: object, **kwargs: object) -> None:
-        raise StateError("SSH identity drift")
+        raise VMSSHIdentityPolicyError("SSH identity drift")
 
     monkeypatch.setattr(vm_manager, "require_vm_ssh_boundary", refuse)
     monkeypatch.setattr(
@@ -227,14 +231,14 @@ def test_list_status_reports_identity_refusal_as_unknown_without_transport(
     listing = session_manager.session_listing(
         db,
         make_config(),
-        interaction=TtyInteractionPolicy.REFUSE,
+        include_status=True,
     )
 
     assert listing.sessions[0].status == "unknown"
     json_rows = cast("list[dict[str, object]]", session_listing_data(listing)["sessions"])
     assert json_rows[0]["status"] == "unknown"
 
-    session_manager.render_session_listing(listing)
+    session_manager.render_session_listing(listing, include_status=True)
     assert sum(role is Role.WARNING for role, _level, _message in captured_output.lines) == 1
 
 
@@ -579,10 +583,10 @@ def test_batch_gate_refuses_an_undeclared_outside_union_name(
     _reachable(monkeypatch, False)
     monkeypatch.setattr(LiveVMNode, "gate_secret_refs", lambda self: ("rogue-secret",))
 
-    def _no_status(self: ProxmoxPlatform, row: object) -> VMStatus:
+    def _status_must_not_run(self: ProxmoxPlatform, row: object) -> VMStatus:
         raise AssertionError("observe must not run after the refused resolve")
 
-    monkeypatch.setattr(ProxmoxPlatform, "status", _no_status)
+    monkeypatch.setattr(ProxmoxPlatform, "status", _status_must_not_run)
 
     with pytest.raises(StateError, match="repair_secret_refs"):
         session_manager.stop_all_sessions(db, config, interaction=TtyInteractionPolicy.REFUSE)
@@ -612,6 +616,7 @@ def test_stop_session_reachable_vm_is_one_boundary_burst(
     config = make_config()
     _seed_singular(db)
     _reachable(monkeypatch, True)
+    monkeypatch.setattr(session_manager, "check_session_status", lambda *_args, **_kwargs: SessionStatus.STOPPED)
 
     session_manager.stop_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
 
@@ -649,7 +654,7 @@ def test_single_stop_ends_on_a_result_terminal_without_duplication(
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
-    """A single OK-status stop ends on a column-0 result() (parity with the
+    """A single running-status stop ends on a column-0 result() (parity with the
     force-stop sibling), and the shared _execute_stop helper's per-session
     'stopped' body line is suppressed so the terminal is not doubled."""
     from agentworks.db import SessionStatus
@@ -663,7 +668,7 @@ def test_single_stop_ends_on_a_result_terminal_without_duplication(
     monkeypatch.setattr(
         session_manager,
         "check_session_status",
-        lambda session, *, target: SessionStatus.OK,
+        lambda session, *, target: SessionStatus.RUNNING,
     )
     monkeypatch.setattr(
         session_manager,
@@ -673,7 +678,7 @@ def test_single_stop_ends_on_a_result_terminal_without_duplication(
     monkeypatch.setattr(
         session_manager,
         "batch_check_status",
-        lambda sessions, *, target: {s.name: SessionStatus.OK for s in sessions},
+        lambda sessions, *, target: {s.name: SessionStatus.RUNNING for s in sessions},
     )
     monkeypatch.setattr("agentworks.sessions.manager._lifecycle._teardown_session", lambda *a, **k: None)
 
@@ -696,6 +701,7 @@ def test_delete_session_reachable_vm_is_one_boundary_burst(
     config = make_config()
     _seed_singular(db)
     _reachable(monkeypatch, True)
+    monkeypatch.setattr(session_manager, "check_session_status", lambda *_args, **_kwargs: SessionStatus.STOPPED)
 
     session_manager.delete_session(db, config, name="s1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
@@ -713,6 +719,7 @@ def test_attach_session_reachable_vm_is_one_boundary_burst(
     config = make_config()
     _seed_singular(db)
     _reachable(monkeypatch, True)
+    monkeypatch.setattr(session_manager, "check_session_status", lambda *_args, **_kwargs: SessionStatus.STOPPED)
 
     with pytest.raises(StateError):
         session_manager.attach_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
@@ -730,6 +737,7 @@ def test_session_logs_reachable_vm_is_one_boundary_burst(
     config = make_config()
     _seed_singular(db)
     _reachable(monkeypatch, True)
+    monkeypatch.setattr(session_manager, "check_session_status", lambda *_args, **_kwargs: SessionStatus.STOPPED)
 
     with pytest.raises(StateError):
         session_manager.session_logs(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
@@ -820,7 +828,7 @@ def test_session_logs_writes_exact_utf8_bytes_on_a_legacy_console(
     monkeypatch.setattr(
         session_manager,
         "check_session_status",
-        lambda session, *, target: SessionStatus.OK,
+        lambda session, *, target: SessionStatus.RUNNING,
     )
     payload = "result=雪\n"
     monkeypatch.setattr("agentworks.sessions.tmux.capture_output", lambda *a, **k: payload)
@@ -884,7 +892,7 @@ def test_session_logs_writes_the_whole_capture_through_a_short_writing_pipe(
     monkeypatch.setattr(
         session_manager,
         "check_session_status",
-        lambda session, *, target: SessionStatus.OK,
+        lambda session, *, target: SessionStatus.RUNNING,
     )
     payload = ("line=雪\n" * 500)[:-1] + "\n"
     monkeypatch.setattr("agentworks.sessions.tmux.capture_output", lambda *a, **k: payload)
@@ -897,7 +905,7 @@ def test_session_logs_writes_the_whole_capture_through_a_short_writing_pipe(
     assert bytes(pipe.raw) == payload.encode("utf-8")
 
 
-def test_describe_session_holds_across_the_probe(
+def test_describe_session_observes_without_a_vm_hold(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
@@ -905,11 +913,7 @@ def test_describe_session_holds_across_the_probe(
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
-    """Describe's hold SUPERSET, explicitly: the imperative body gated
-    and DISCARDED the platform (no hold); the gate span now holds
-    across the status probe (a no-op everywhere but WSL2, where it
-    anchors the probe). Pinned as hold-open, probe, hold-close, with
-    the one boundary burst."""
+    """Describe observes outside the activation gate and any VM hold."""
     config = make_config()
     _seed_singular(db)
     _reachable(monkeypatch, True)
@@ -917,6 +921,7 @@ def test_describe_session_holds_across_the_probe(
     _record_holds(monkeypatch, events)
 
     def _probe(session: object, *, target: object) -> object:
+        del session, target
         assert db._tx_depth == 0  # noqa: SLF001
         events.append("probe")
         from agentworks.db import SessionStatus
@@ -925,10 +930,10 @@ def test_describe_session_holds_across_the_probe(
 
     monkeypatch.setattr(session_manager, "check_session_status", _probe)
 
-    session_manager.describe_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
+    session_manager.describe_session(db, config, name="s1")
 
-    assert events == ["hold-open:box", "probe", "hold-close:box"]
-    assert resolve_counter == [["proxmox-token"]]
+    assert events == ["probe"]
+    assert resolve_counter == []
     assert any("Status:     stopped" in m for m in captured_output.info)
 
 
@@ -944,7 +949,8 @@ def test_describe_session_derives_vm_from_its_structural_snapshot(
     _seed_vm(db, "moved", "100.64.0.10")
     _reachable(monkeypatch, True)
 
-    def move_before_snapshot(session: object, *, target: object) -> object:
+    def move_before_snapshot(*_args: object, **_kwargs: object) -> object:
+        del _kwargs
         assert db._tx_depth == 0  # noqa: SLF001
         db._conn.execute("UPDATE workspaces SET vm_name = 'moved' WHERE name = 'ws-box'")  # noqa: SLF001
         db._conn.commit()  # noqa: SLF001
@@ -958,11 +964,72 @@ def test_describe_session_derives_vm_from_its_structural_snapshot(
         db,
         config,
         name="s1",
-        interaction=TtyInteractionPolicy.REFUSE,
     )
 
     assert description.vm_name == "moved"
-    assert resolve_counter == [["proxmox-token"]]
+    assert resolve_counter == []
+
+
+def test_describe_session_preserves_live_legacy_structural_error(
+    db: Database,
+    make_config,  # noqa: ANN001
+) -> None:
+    config = make_config()
+    _seed_singular(db)
+    db.update_session_runtime(
+        "s1",
+        socket_path=None,
+        pid=42,
+        boot_id=BOOT_ID,
+        tmux_server_start_ticks=100,
+    )
+
+    with pytest.raises(StateError) as caught:
+        session_manager.session_description(db, config, name="s1")
+
+    assert caught.value.entity_kind == "session"
+    assert caught.value.entity_name == "s1"
+
+
+def test_describe_session_preserves_malformed_stored_boot_error(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config()
+    _seed_singular(db)
+    _reachable(monkeypatch, True)
+    db.update_session_runtime(
+        "s1",
+        socket_path="/tmp/s1.sock",
+        pid=42,
+        boot_id="malformed",
+        tmux_server_start_ticks=100,
+    )
+
+    class _AbsentTarget(_FakeTarget):
+        def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
+            del kwargs
+            if "has-session" in cmd:
+                return SimpleNamespace(ok=False, returncode=1, stdout="", stderr="can't find session: s1")
+            if "list-sessions" in cmd:
+                return SimpleNamespace(
+                    ok=False,
+                    returncode=1,
+                    stdout="",
+                    stderr="no server running on /tmp/s1.sock",
+                )
+            if "/proc/sys/kernel/random/boot_id" in cmd:
+                return SimpleNamespace(ok=True, returncode=0, stdout=f"{BOOT_ID}\n", stderr="")
+            raise AssertionError(cmd)
+
+    monkeypatch.setattr(session_manager, "transport", lambda *_args, **_kwargs: _AbsentTarget())
+
+    with pytest.raises(StateError) as caught:
+        session_manager.session_description(db, config, name="s1")
+
+    assert caught.value.entity_kind == "session"
+    assert caught.value.entity_name == "s1"
 
 
 def test_describe_session_shows_harness_integration_line(
@@ -983,10 +1050,10 @@ def test_describe_session_shows_harness_integration_line(
     monkeypatch.setattr(
         session_manager,
         "check_session_status",
-        lambda session, *, target: SessionStatus.STOPPED,
+        lambda *_args, **_kwargs: SessionStatus.STOPPED,
     )
 
-    session_manager.describe_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
+    session_manager.describe_session(db, config, name="s1")
 
     info = captured_output.info
     assert "Harness integration: shell" in info
@@ -997,7 +1064,7 @@ def test_describe_session_shows_harness_integration_line(
     assert template_idx < harness_integration_idx < mode_idx
 
 
-def test_describe_session_stopped_vm_gate_burst_seeds_the_boundary(
+def test_describe_session_stopped_vm_does_not_open_the_gate(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
@@ -1010,10 +1077,10 @@ def test_describe_session_stopped_vm_gate_burst_seeds_the_boundary(
     events: list[str] = []
     _stop_the_vms(monkeypatch, events)
 
-    session_manager.describe_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
+    session_manager.describe_session(db, config, name="s1")
 
-    assert events == ["status:box", "start:box", "tailscale:box"]
-    assert resolve_counter == [["proxmox-token"]]
+    assert events == []
+    assert resolve_counter == []
 
 
 def test_unknown_session_refuses_with_zero_resolves_and_zero_gate(
@@ -1026,10 +1093,10 @@ def test_unknown_session_refuses_with_zero_resolves_and_zero_gate(
     _seed_vm(db, "box", "100.64.0.9")
     _reachable(monkeypatch, False)
 
-    def _no_status(self: ProxmoxPlatform, row: object) -> VMStatus:
+    def _status_must_not_run(self: ProxmoxPlatform, row: object) -> VMStatus:
         raise AssertionError("the gate ran for an unknown session")
 
-    monkeypatch.setattr(ProxmoxPlatform, "status", _no_status)
+    monkeypatch.setattr(ProxmoxPlatform, "status", _status_must_not_run)
 
     with pytest.raises(NotFoundError, match="session 'ghost' not found"):
         session_manager.stop_session(db, config, name="ghost", interaction=TtyInteractionPolicy.REFUSE)
@@ -1055,10 +1122,10 @@ def test_unknown_workspace_refuses_with_zero_resolves_and_zero_gate(
     db._conn.execute("PRAGMA foreign_keys = ON")
     _reachable(monkeypatch, False)
 
-    def _no_status(self: ProxmoxPlatform, row: object) -> VMStatus:
+    def _status_must_not_run(self: ProxmoxPlatform, row: object) -> VMStatus:
         raise AssertionError("the gate ran for an unknown workspace")
 
-    monkeypatch.setattr(ProxmoxPlatform, "status", _no_status)
+    monkeypatch.setattr(ProxmoxPlatform, "status", _status_must_not_run)
 
     with pytest.raises(NotFoundError, match="workspace 'ghost-ws' not found"):
         session_manager.stop_session(db, config, name="orphan", interaction=TtyInteractionPolicy.REFUSE)
@@ -1081,10 +1148,10 @@ def test_no_tailscale_vm_fails_pre_gate_with_zero_resolves(
     _seed_session(db, "s1", "ws-box")
     _reachable(monkeypatch, False)
 
-    def _no_status(self: ProxmoxPlatform, row: object) -> VMStatus:
+    def _status_must_not_run(self: ProxmoxPlatform, row: object) -> VMStatus:
         raise AssertionError("the gate ran for a VM with no address")
 
-    monkeypatch.setattr(ProxmoxPlatform, "status", _no_status)
+    monkeypatch.setattr(ProxmoxPlatform, "status", _status_must_not_run)
 
     with pytest.raises(StateError, match="no Tailscale address"):
         session_manager.stop_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
@@ -1092,17 +1159,14 @@ def test_no_tailscale_vm_fails_pre_gate_with_zero_resolves(
     assert resolve_counter == []
 
 
-def test_session_scope_reaches_node_readiness(
+def test_session_describe_does_not_reach_provider_readiness(
     db: Database,
     make_config,  # noqa: ANN001
     target: _FakeTarget,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
-    """The singular ops run at SESSION level (the recorded
-    pass-the-level-of-the-entity rule): the scope carries the session's
-    full identity chain to every node preflight."""
-    from agentworks.capabilities.base import ScopeLevel
+    """Session status observation does not construct a provider scope."""
 
     config = make_config()
     _seed_singular(db, agent="a1")
@@ -1116,13 +1180,6 @@ def test_session_scope_reaches_node_readiness(
 
     monkeypatch.setattr(ProxmoxPlatform, "preflight", _recording)
 
-    session_manager.describe_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
+    session_manager.describe_session(db, config, name="s1")
 
-    (scope,) = scopes
-    assert scope is not None
-    assert scope.level is ScopeLevel.SESSION
-    assert scope.vm == "box"
-    assert scope.workspace == "ws-box"
-    assert scope.session == "s1"
-    assert scope.agent == "a1"
-    assert scope.admin is False
+    assert scopes == []

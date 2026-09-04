@@ -48,10 +48,9 @@ and kept healthy. The same Agentworks commands apply across local, cloud, and da
 infrastructure: `lima` and `wsl2` provide local VMs on macOS and Windows, while `azure-vm`,
 `proxmox`, `aws-ec2`, and `gcp-gce` target cloud or datacenter capacity. Whatever the backend, each
 delivers the same foundation: a Debian VM with a passwordless-sudo admin login reachable over
-Tailscale, whose whole lifecycle (create, start, a cost-saving stop that resumes with state intact,
-delete) Agentworks drives through that one admin foothold. See
-[`vm_platform/README.md`](vm_platform/README.md) for what a platform must provide and the specifics
-of each.
+Tailscale and a lifecycle (create, start, a cost-saving stop that resumes with state intact, delete)
+that Agentworks drives through the platform. See [`vm_platform/README.md`](vm_platform/README.md)
+for what a platform must provide and the specifics of each.
 
 ### Harness Integration
 

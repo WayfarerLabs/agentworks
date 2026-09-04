@@ -244,13 +244,13 @@ def test_session_restart_eager_resolve_fires_before_teardown(
     )
     db._conn.commit()
 
-    # Status probes -> OK so the restart path would try to tear down.
+    # Status probes report running so the restart path would try to tear down.
     monkeypatch.setattr(
         session_manager,
         "_ensure_pid",
         lambda session, **kwargs: session,
     )
-    monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: SessionStatus.OK)
+    monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: SessionStatus.RUNNING)
     monkeypatch.setattr(
         session_manager,
         "_build_session_target",
@@ -350,7 +350,7 @@ def test_session_attach_does_not_eager_resolve(
     monkeypatch.setattr(
         session_manager,
         "check_session_status",
-        lambda *a, **k: SessionStatus.OK,
+        lambda *a, **k: SessionStatus.RUNNING,
     )
 
     config = SimpleNamespace(
@@ -395,8 +395,6 @@ def test_session_list_does_not_eager_resolve(
     session_manager.list_sessions(
         db,
         config,  # type: ignore[arg-type]
-        no_status=True,  # avoid SSH liveness probes
-        interaction=TtyInteractionPolicy.REFUSE,
     )
 
     assert resolve_called == [], "session list reads DB only; must not eager-resolve secrets"
@@ -463,7 +461,6 @@ def test_session_describe_does_not_eager_resolve(
         db,
         config,
         name="s1",  # type: ignore[arg-type]
-        interaction=TtyInteractionPolicy.REFUSE,
     )
 
     assert resolve_called == [], "session describe must not eager-resolve secrets"

@@ -1,4 +1,4 @@
-"""CLI routing for canonical session lifecycle and the 0.19 wrapper."""
+"""CLI routing for canonical session lifecycle and the 0.18 wrapper."""
 
 from __future__ import annotations
 
@@ -96,7 +96,7 @@ def _stub_resume_status(
     monkeypatch.setattr(session_manager, "filter_sessions", lambda *args, **kwargs: sessions)
     monkeypatch.setattr(
         session_manager,
-        "batch_check_all_sessions",
+        "observe_session_statuses",
         lambda *args, **kwargs: {} if status is None else {"coding": status},
     )
 
@@ -110,7 +110,7 @@ def test_resume_wrapper_requires_consent_before_replacing_running_sessions(
     from agentworks import output
     from agentworks.db import SessionStatus
 
-    _stub_resume_status(monkeypatch, SessionStatus.OK)
+    _stub_resume_status(monkeypatch, SessionStatus.RUNNING)
     monkeypatch.setattr(output, "is_interactive", lambda: True)
     monkeypatch.setattr(output, "confirm", lambda *args, **kwargs: False)
 
@@ -129,7 +129,7 @@ def test_resume_wrapper_routes_after_running_session_consent(
     from agentworks import output
     from agentworks.db import SessionStatus
 
-    _stub_resume_status(monkeypatch, SessionStatus.OK)
+    _stub_resume_status(monkeypatch, SessionStatus.RUNNING)
     monkeypatch.setattr(output, "is_interactive", lambda: True)
     monkeypatch.setattr(output, "confirm", lambda *args, **kwargs: True)
 
@@ -164,7 +164,7 @@ def test_resume_wrapper_requires_yes_for_noninteractive_running_replacement(
     from agentworks import output
     from agentworks.db import SessionStatus
 
-    _stub_resume_status(monkeypatch, SessionStatus.OK)
+    _stub_resume_status(monkeypatch, SessionStatus.RUNNING)
     monkeypatch.setattr(output, "confirm", lambda *args, **kwargs: pytest.fail("unexpected confirmation"))
 
     result = CliRunner().invoke(

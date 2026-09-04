@@ -24,6 +24,7 @@ from agentworks.capabilities.vm_platform.base import (
     BootstrapProgress,
     ProvisionRequest,
     ProvisionResult,
+    RetainedProvisioningError,
     VMPlatform,
 )
 from agentworks.capabilities.vm_platform.lima import LimaPlatform
@@ -38,6 +39,7 @@ __all__ = [
     "LimaPlatform",
     "ProvisionRequest",
     "ProvisionResult",
+    "RetainedProvisioningError",
     "VMPlatform",
     "VMPlatformEntry",
     "WSL2Platform",

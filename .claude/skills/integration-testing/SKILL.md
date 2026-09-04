@@ -33,6 +33,12 @@ they find.
 - **Drive the real thing.** Exercise the shipped `agw` CLI and the real code paths behind it, not
   test files standing in for them. A finding is only real if it was observed against the actual
   system, not inferred from reading source.
+- **Cover the surface, not just the headline.** Enumerate every command and subcommand the change
+  touches, then drive as many of them as you can reach, not only the verbs the PR description leads
+  with. Breadth is the cheapest thing to skip on a large change and the most expensive to have
+  skipped: composition and repair subcommands are where defects survive, precisely because nobody
+  demonstrates them. Record which paths you could not reach and why, so a gap is visible rather than
+  implied by silence.
 - **Measurement-gated verdicts.** Every pass or fail is conditioned on an observed value: a count
   you read, a state you queried, an output you captured. A hardcoded "OK" that is not gated on a
   captured measurement is a false result, whether it comes from a script or from a reviewer's
@@ -155,6 +161,13 @@ contracts govern the PR.
   Never background or pause a `create`: a paused create leaks a live VM that nothing is watching.
 - Always tear down what you created, then independently verify residue-clean at every layer the
   platform touches, not just through the tool that created the resource.
+- A no-op is not coverage. A repair, restore, or reconcile command run against healthy state reports
+  success and proves nothing about whether it works. Induce the condition the command exists to
+  handle (kill the window, delete the resource, drift the state), then verify it repaired what it
+  claims to have repaired. The same holds for any command whose interesting behavior is conditional.
+- Track the command surface you drove. List the subcommands in scope before the run; afterwards
+  record which were driven live, which were blocked and by what, and which were simply not reached.
+  A pass that exercised six of thirteen subcommands is an honest result only when it says so.
 - Calibrate timeouts to reality, not to impatience. Cloud and VM operations take minutes as a matter
   of course; a timeout set for a fast unit test manufactures a false "broken" verdict on an
   operation that was simply still running. See `agw-test-env` for platform-specific timeout

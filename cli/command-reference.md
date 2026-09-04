@@ -234,7 +234,8 @@ omit static non-candidates. The default preview permits no backend-classified op
 ```text
 {vms: [{name, site, template, provisioning_status, initialization_status,
         workspace_count, agent_count, session_count, tailscale_host, created_at,
-        debian_release, debian_release_observed_at}]}
+        debian_release, debian_release_observed_at, observed_status,
+        status_disposition}]}
 ```
 
 `template`, `tailscale_host`, `debian_release`, and `debian_release_observed_at` are nullable. A
@@ -243,6 +244,10 @@ last matching live observation. VMs retain name order. Provisioning is `pending`
 `complete`, `failed`, or `unknown`; initialization additionally permits `partial`. These frozen JSON
 v1 vocabularies do not expand when domain enums gain members. In this VM list JSON projection,
 `unknown` is the stable sentinel for an invalid persisted value and never echoes that stored value.
+The 0.18 producer always emits the additive nullable v1 fields `observed_status` and
+`status_disposition`; a v1 consumer must tolerate their absence from older producers. Plain list
+emits null for both. With `--status`, observed status is `running`, `stopped`, `deallocated`, or
+`unknown`; disposition is `manual` or `idle` only for stopped or deallocated VMs.
 
 The VM, workspace, agent, and session description records append the JSON v1 `instance_state`
 object. Current producers always include it; older JSON v1 producers may omit this additive field:
@@ -286,12 +291,13 @@ this ordered shape:
  workspaces, events, instance_state}
 ```
 
-`platform`, `backend`, `observed_status`, `status_disposition`, `system_slug`, `template`,
-`admin_template`, `tailscale_host`, `last_seen_at`, `debian_release`, `debian_release_observed_at`,
-and `live_resources` are nullable. Non-null release observations have the same recognized-codename
-and timestamp semantics as VM list. `observed_status` is `running`, `stopped`, `deallocated`, or
-`unknown`; `status_disposition` is `manual` or `idle` only for stopped or deallocated VMs; and
-`system_slug_state` is `set`, `declined`, or `unset`. `provisioned_resources` is
+`platform`, `backend`, `status_disposition`, `system_slug`, `template`, `admin_template`,
+`tailscale_host`, `last_seen_at`, `debian_release`, `debian_release_observed_at`, and
+`live_resources` are nullable. Older JSON v1 producers may also emit a null `observed_status`; the
+0.18 producer always emits `running`, `stopped`, `deallocated`, or `unknown` because describe
+requests observation. Non-null release observations have the same recognized-codename and timestamp
+semantics as VM list. `status_disposition` is `manual` or `idle` only for stopped or deallocated
+VMs; and `system_slug_state` is `set`, `declined`, or `unset`. `provisioned_resources` is
 `{cpus, memory_gib, disk_gib, swap_gib}` with nullable integers. It is the provisioning request
 recorded by Agentworks, not provider-observed realized hardware. Human VM describe labels these
 persisted values `Requested`. `live_resources` is null or this record:
@@ -355,12 +361,13 @@ programming or infrastructure failures still fail the command.
 `agw session list --output json` uses `session.list` and `{sessions}`. Each session is
 `{name, workspace_name, vm_name, template, harness_integration, mode, agent_name, status}`.
 `harness_integration` and `agent_name` are nullable; mode is `admin`, `agent`, or `unknown`; status
-is exactly `running`, `stopped`, `broken`, `unknown`, or `unavailable`. A bad persisted mode maps to
-`unknown` without exposing its raw value in these session JSON projections. The frozen output mode
-vocabulary does not expand when the domain enum gains a member. `unavailable` is reserved for
-skipped or inconclusive live status work, not invalid persisted state or a human display sentinel.
-Rows retain workspace then session name order. `agw session describe NAME --output json` uses
-`session.describe` and `{session}`. Session is this record:
+is exactly `running`, `stopped`, `residual`, `broken`, `unknown`, or `unavailable`. Plain list emits
+`unavailable`; `list --status` emits a live state and uses `unknown` when observation is
+inconclusive. Older JSON v1 producers may have used `unavailable` for other unavailable
+observations. A bad persisted mode maps to `unknown` without exposing its raw value in these session
+JSON projections. The frozen output mode vocabulary does not expand when the domain enum gains a
+member. Rows retain workspace then session name order. `agw session describe NAME --output json`
+uses `session.describe` and `{session}`. Session is this record:
 
 ```text
 {name, workspace_name, vm_name, template, harness_integration, mode, agent_name,
@@ -374,12 +381,16 @@ zero-based position. Current producers emit `[]` when the session has no console
 v1 producers may omit this additive field under the compatibility contract below.
 
 `agw console list --output json` uses `console.list` and
-`{consoles: [{name, vm_name, session_count}]}` in configured name order after filtering.
-`agw console describe NAME --output json` uses `console.describe` and `{console}`. Console is
-`{name, vm_name, admin_shell, created_at, updated_at, sessions}`. Members are
-`{position, session_name, shells}` in ascending position, and shells are `{cwd, admin}` in
-configured shell order. `cwd` is nullable and all booleans remain JSON booleans. Console inspection
-is configured database state, never live tmux state.
+`{consoles: [{name, vm_name, session_count, status}]}` in configured name order after filtering. The
+0.18 producer always emits the additive v1 console `status` field; a v1 consumer must tolerate its
+absence from older producers. Status is `unavailable` for plain list; with `--status` it is
+`running`, `stopped`, `residual`, or `unknown`. `agw console describe NAME --output json` uses
+`console.describe` and `{console}`. Console is
+`{name, vm_name, admin_shell, created_at, updated_at, status, sessions}`. Describe status uses the
+console live vocabulary and never `unavailable`. Members are `{position, session_name, shells}` in
+ascending position, and shells are `{cwd, admin}` in configured shell order. `cwd` is nullable and
+all booleans remain JSON booleans. Console inspection preserves configured database membership even
+when its non-activating live observation is unknown.
 
 #### Doctor JSON schema
 
@@ -554,7 +565,7 @@ just a vm-site.
 | Command                                             | Description                                                   |
 | --------------------------------------------------- | ------------------------------------------------------------- |
 | `agw vm create <name>`                              | Create a new VM (provision + initialize)                      |
-| `agw vm list`                                       | List VMs with status and resources                            |
+| `agw vm list`                                       | List configured VMs                                           |
 | `agw vm describe <name>`                            | Show VM details, workspaces, and event log                    |
 | `agw vm verify-connection <name>`                   | Test the canonical admin connection without starting the VM   |
 | `agw vm shell <name> [--workspace <ws>]`            | Admin shell on a VM (optionally rooted in a workspace)        |
@@ -574,6 +585,11 @@ automatically, on demand, by any command that needs it live. A VM stopped with `
 different: that records your intent, so it stays down and commands that would need it refuse with a
 hint until you run `agw vm start`, which clears the intent. `agw vm describe` shows which case a
 stopped VM is in: its status reads `stopped (manual)` versus `stopped (idle)`.
+
+Plain `vm list` is a local inventory read. Add `--status` to query each selected VM platform for
+current power state; this never starts a VM. The human table adds `STATUS` only for that request,
+and the command reports progress before provider work. `--status` cannot be combined with
+`--names-only`.
 
 `vm create <name>` takes the VM name as a required positional. Optional flags: `--template` (a
 declared vm-template), `--admin-template` (a declared admin-template; defaults to the reserved
@@ -773,7 +789,7 @@ Manage sessions (persistent tmux sessions running in workspaces). Session names 
 | ----------------------------- | ------------------------------ |
 | `agw session create <name>`   | Create and start a session     |
 | `agw session describe <name>` | Show session details           |
-| `agw session list`            | List sessions with status      |
+| `agw session list`            | List configured sessions       |
 | `agw session attach <name>`   | Attach to a running session    |
 | `agw session stop <name>`     | Stop a running session         |
 | `agw session start <name>`    | Start a stopped session        |
@@ -787,16 +803,21 @@ or a comma-separated list (`--vm vm1,vm2`); commas within a filter are OR-ed tog
 name in a filter is an error, not an empty result. `--agent <name>` matches agent-mode sessions
 only; `--admin` matches admin-mode sessions only (the two are mutually exclusive).
 
+Plain `session list` reads local inventory and omits `STATUS`. Add `--status` for bounded,
+non-activating live observation of the selected sessions; the human table then uses `running`,
+`stopped`, `residual`, `broken`, or `unknown`. `--status` cannot be combined with `--names-only`.
+
 `session stop`, `session start`, and `session restart` operate on a single session by default. Pass
 `--all` to batch over matching sessions. The batch form accepts `--vm <vm>`, `--workspace <ws>`,
-`--agent <agent>`, and `--admin` to narrow the set; filters compose with AND and require one of the
-batch flags. The name filters accept a single value or a comma-separated list (`--vm vm1,vm2`);
-commas within a filter are OR-ed together, and an unknown name in a filter is an error, not an empty
-result. `--agent` matches agent-mode sessions only; `--admin` matches admin-mode sessions only (the
-two are mutually exclusive). Pass `--force` only to recover broken state after Agentworks proves the
-prior managed tmux server is absent; Agentworks never signals a stored numeric PID. Start and
-restart continue the harness conversation when possible; `--force-new` requires a fresh conversation
-when the operation launches a runtime. A running `session start --force-new` is refused rather than
+`--agent <agent>`, `--console <console>`, and `--admin` to narrow the set; filters compose with AND
+and require `--all`. The name filters accept a single value or a comma-separated list
+(`--vm vm1,vm2`); commas within a filter are OR-ed together, and an unknown name in a filter is an
+error, not an empty result. `--console` selects sessions belonging to any of the given consoles.
+`--agent` matches agent-mode sessions only; `--admin` matches admin-mode sessions only (the two are
+mutually exclusive). Pass `--force` only to recover broken state after Agentworks proves the prior
+managed tmux server is absent; Agentworks never signals a stored numeric PID. Start and restart
+continue the harness conversation when possible; `--force-new` requires a fresh conversation when
+the operation launches a runtime. A running `session start --force-new` is refused rather than
 silently replacing the runtime.
 
 Maintainers: [Session status internals](../docs/guides/session-status.md) documents the persisted
@@ -856,11 +877,12 @@ panes you want preloaded into a session's window.
   standard prompt (auto-picked if you have a single VM, prompted otherwise).
 - `--all` -- include every session on the VM with 0 shells, appended after the explicit specs
   (alphabetical).
-- `--all-running` -- like `--all` but restricted to sessions whose live tmux state on the VM is OK
-  (using the same read-only batched status check as `agw session list`). Mutually exclusive with
-  `--all`. Requires the VM to be reachable. Exact tmux presence includes a running session even when
-  its persisted runtime fingerprint is incomplete; an indeterminate non-stopped row refuses the
-  operation rather than silently producing a partial console.
+- `--all-running` -- like `--all` but restricted to sessions whose live tmux state on the VM is
+  running (using the same read-only observer as `agw session list --status`). Mutually exclusive
+  with `--all`. Requires the VM to be reachable. Exact tmux presence includes a running session even
+  when its persisted runtime fingerprint is incomplete; an indeterminate non-stopped row refuses the
+  operation rather than silently producing a partial console. This creation path preserves its
+  lifecycle eligibility filter: rows with `pid == PID_STOPPED` are excluded before observation.
 - `--add-admin-shell`: include a top-level admin-shell window as window 0.
 
 `console reorder-sessions` moves the listed members in argument order while preserving the relative
@@ -881,6 +903,15 @@ and `--agent` filters use "any session matches" semantics: a console is listed i
 its member sessions belongs to the given workspace / runs as the given agent. When `--workspace` and
 `--agent` are both passed, the SAME session must satisfy both predicates. The session count
 displayed is the total membership, not the count of matching sessions. Filters compose with AND.
+
+Plain `console list` is a local inventory read and omits `STATUS`. Add `--status` to enumerate the
+selected VMs' canonical and staging tmux session names without starting a VM or rebuilding a
+console. Status is `running`, `stopped`, `residual`, or `unknown`; `--status` cannot be combined
+with `--names-only`. `console describe` performs the same non-activating observation by default
+while preserving configured membership when live state is unknown.
+
+The shared inventory-versus-observation rules, status meanings, bounds, and failure behavior are
+documented in [Runnable status inspection](../docs/guides/runnable-status.md).
 
 Session specs use `name` or `name+N` shorthand, where `N` is the number of default shell panes to
 pre-open in that session's window (running as the session's agent user, cwd = workspace root):

@@ -317,20 +317,28 @@ def _ssh_base_args(
     target: SSHTarget,
     *,
     env: dict[str, str] | None = None,
+    tty: bool | None = None,
     close_stdin: bool,
 ) -> list[str]:
     """Build the base ``ssh`` argv with ``BatchMode=yes`` (no remote command yet).
 
-    When ``close_stdin`` is set, add ``-n`` so ssh closes stdin: a stdin-reading
-    remote command then cannot hang waiting on input, and ssh cannot pull from
-    the operator's console. ``-n`` must stay off while a byte-exact
-    ``input_text`` payload is written, so callers set ``close_stdin`` only for
-    the no-stdin-payload case (mirrors ``SSHTransport``). This primitive never
-    allocates a pty; a caller needing one uses ``SSHTransport.run(tty=True)``.
+    ``tty=True`` forces a pty with ``-tt`` (the only way this primitive allocates
+    one). ``tty=False`` explicitly suppresses one with ``-T``, which also defeats
+    an operator's ``RequestTTY force`` (a pty would inject CRLF and a teardown
+    advisory); ``tty=None`` leaves pty selection to the operator's ssh config.
+    Independently, ``-n`` is added when ``close_stdin`` is set so a stdin-reading
+    remote command cannot hang and ssh cannot pull from the operator's console;
+    it must stay off while a byte-exact ``input_text`` payload is written, so
+    callers set ``close_stdin`` only for the no-stdin-payload case.
     """
     args = ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
-    if close_stdin:
-        args.insert(1, "-n")
+    if tty:
+        args.insert(1, "-tt")
+    else:
+        if tty is False:
+            args.insert(1, "-T")
+        if close_stdin:
+            args.insert(1, "-n")
     if target.port is not None:
         args.extend(["-p", str(target.port)])
     if target.identity_file is not None:
@@ -356,6 +364,7 @@ def run(
     logger: SSHLogger | None = None,
     env: dict[str, str] | None = None,
     input_text: str | None = None,
+    tty: bool | None = None,
 ) -> SSHResult:
     """Execute a command on a remote host via SSH.
 
@@ -387,10 +396,15 @@ def run(
     """
     if input_text is not None and logger is not None:
         raise ValueError("SSH stdin input cannot be combined with command logging")
+    if input_text is not None and tty:
+        # A forced TTY puts a line discipline between the pipe and the remote
+        # command, which echoes input and rewrites CR, so the byte-exact
+        # promise above cannot hold. Refuse rather than corrupt a secret.
+        raise ValueError("SSH stdin input cannot be combined with a forced TTY")
 
-    # Close stdin with ``-n`` only for a plain run: an ``input_text`` payload
-    # must keep stdin open for the byte-exact write.
-    args = _ssh_base_args(target, env=env, close_stdin=input_text is None)
+    # An ``input_text`` payload keeps stdin open for the byte-exact write;
+    # every other call closes stdin with ``-n``.
+    args = _ssh_base_args(target, env=env, tty=tty, close_stdin=input_text is None)
     # Fence the remote command from ssh's option parser. See
     # ``SSHTransport.run`` in ``transports/ssh.py`` for the rationale.
     args.append("--")
@@ -420,6 +434,11 @@ def run(
             if logger is not None:
                 logger.log_timeout(command, attempt + 1, retries)
             continue
+        except OSError as err:
+            if sensitive_input:
+                sensitive_execution_failure = True
+            else:
+                raise SSHError(f"SSH command could not be executed: {command}") from err
         except Exception:
             if not sensitive_input:
                 raise

@@ -33,8 +33,9 @@ from agentworks.capabilities.vm_platform.tailscale_join import TAILSCALE_JOIN_ST
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import ProvisioningError, StateError
+from agentworks.naming import NAME_RE
 from agentworks.schema import AgwModel, NonEmptyStr
-from agentworks.ssh import SSHError, SSHTarget
+from agentworks.ssh import SSH_DEFAULT_RETRIES, SSHError, SSHTarget
 from agentworks.ssh import run as ssh_run
 from agentworks.subprocess_io import decode_stream, stdin_bytes
 from agentworks.topics import TopicProse
@@ -56,6 +57,7 @@ _REBOOT_CLEAR_MARKER = "AGW_REBOOT_CLEAR"
 _REMOTE_TEMPLATE_ROOT = "/tmp"
 _REMOTE_TEMPLATE_PREFIX = "agentworks-lima-template."
 _REMOTE_TEMPLATE_RANDOM_LENGTH = 10
+_STATUS_TIMEOUT_SECONDS = 10
 
 # Lima template for Debian cloud VMs (values substituted at create time).
 # The provision block runs the non-secret bootstrap script (user, packages,
@@ -249,20 +251,48 @@ class LimaPlatform(VMPlatform):
                 entity_kind="vm",
                 entity_name=vm.name,
             )
-        return str(name)
+        # This value normally comes from create(), but backup/restore and
+        # legacy migration make the database a trust boundary. Every Lima
+        # command interpolates the instance name into a shell command (and
+        # remote placement adds another login-shell hop), so reject stored
+        # values outside the resource-name character grammar before any
+        # transport sees them. Length is not part of this shell-safety
+        # boundary; imposing today's cap here could reject historical rows.
+        if not isinstance(name, str) or NAME_RE.fullmatch(name) is None:
+            raise StateError(
+                f"VM '{vm.name}' has an invalid lima instance_name in its platform metadata",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+        return name
 
-    def _run_lima(self, command: str, *, check: bool = True, input_text: str | None = None) -> str:
+    def _run_lima(
+        self,
+        command: str,
+        *,
+        check: bool = True,
+        input_text: str | None = None,
+        timeout: int | None = None,
+    ) -> str:
         """Run a limactl command, locally or on the site's placement host."""
         if self.is_remote:
             assert self._remote_host is not None
             target = SSHTarget(host=self._remote_host, user=None, login_shell=True)
-            return ssh_run(target, command, check=check, input_text=input_text).stdout
+            return ssh_run(
+                target,
+                command,
+                check=check,
+                input_text=input_text,
+                timeout=timeout,
+                retries=1 if timeout is not None else SSH_DEFAULT_RETRIES,
+            ).stdout
         else:
             proc = subprocess.run(
                 shlex.split(command),
                 # Byte-mode stdin: text mode rewrites LF to CRLF on Windows (see agentworks.subprocess_io).
                 input=stdin_bytes(input_text),
                 capture_output=True,
+                timeout=timeout,
             )
             if check and proc.returncode != 0:
                 if input_text is not None:
@@ -754,7 +784,7 @@ class LimaPlatform(VMPlatform):
         output.info(f"Lima VM '{vm.name}' deleted")
 
     def display_backend_name(self, vm: VMRow) -> str:
-        instance = str(vm.platform_metadata.get("instance_name", vm.name))
+        instance = self._instance_name(vm)
         if self.is_remote:
             return f"{instance}@{self._remote_host}"
         return instance
@@ -773,8 +803,12 @@ class LimaPlatform(VMPlatform):
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
         instance_name = self._instance_name(vm)
         try:
-            listing = self._run_lima(f"limactl list --json {instance_name}", check=False)
-        except SSHError:
+            listing = self._run_lima(
+                f"limactl list --json {instance_name}",
+                check=False,
+                timeout=_STATUS_TIMEOUT_SECONDS,
+            )
+        except (OSError, SSHError, subprocess.TimeoutExpired):
             return VMStatus.UNKNOWN
 
         for line in listing.strip().splitlines():

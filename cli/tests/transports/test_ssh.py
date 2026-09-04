@@ -37,6 +37,15 @@ def test_run_builds_ssh_argv_with_user_host() -> None:
         assert argv[-1] == "echo hi"
 
 
+def test_run_maps_process_launch_failure_to_transport_error() -> None:
+    t = SSHTransport(host="vm1", user="agentworks")
+    with (
+        patch("agentworks.transports.ssh.subprocess.run", side_effect=FileNotFoundError("ssh")),
+        pytest.raises(SSHError),
+    ):
+        t.run("echo hi")
+
+
 def test_run_sudo_wraps_with_bash_c() -> None:
     t = SSHTransport(host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
@@ -106,6 +115,17 @@ def test_run_tty_false_still_closes_stdin_with_dash_n() -> None:
         t.run("echo hi", tty=False)
         argv = mock_run.call_args[0][0]
         assert "-n" in argv
+        assert "-tt" not in argv
+        assert "-T" in argv
+
+
+def test_run_default_tty_does_not_override_operator_ssh_config() -> None:
+    t = SSHTransport(host="vm1", user="agentworks")
+    with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
+        mock_run.return_value = _ok_completed()
+        t.run("echo hi")
+        argv = mock_run.call_args[0][0]
+        assert "-T" not in argv
         assert "-tt" not in argv
 
 
