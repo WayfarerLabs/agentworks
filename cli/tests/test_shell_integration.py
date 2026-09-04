@@ -16,7 +16,12 @@ import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
 from agentworks.capabilities.config import capability_config_references, validate_capability_config
-from agentworks.capabilities.harness_integration import HarnessIntegration, ShellIntegration, quote_literal_argv
+from agentworks.capabilities.harness_integration import (
+    HarnessIntegration,
+    HarnessLaunchIntent,
+    ShellIntegration,
+    quote_literal_argv,
+)
 from agentworks.capabilities.harness_integration.shell import ShellConfig
 from agentworks.errors import ConfigError, StateError
 from agentworks.schema import RefOwner, merge_model
@@ -246,12 +251,12 @@ def test_merge_default_shape_when_neither_declares_required() -> None:
 
 
 def test_start_returns_the_command() -> None:
-    result = _harness_integration({"command": "claude"}).start(RunContext(), force_new=True)
+    result = _harness_integration({"command": "claude"}).start(RunContext(), intent=HarnessLaunchIntent.CREATE)
     assert result.command == "claude"
 
 
 def test_start_empty_config_is_a_login_shell() -> None:
-    assert _harness_integration({}).start(RunContext(), force_new=True).command == ""
+    assert _harness_integration({}).start(RunContext(), intent=HarnessLaunchIntent.CREATE).command == ""
 
 
 def test_start_prefers_resume_command() -> None:

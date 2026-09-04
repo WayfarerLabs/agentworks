@@ -100,11 +100,12 @@ session to resume, so the integration simply starts a new workload.
 A harness integration knows how to run one harness as a session's workload and bring it back, and
 nothing about the machinery around it. It:
 
-- **MUST** implement `start(ctx, *, force_new=False)` and return a `HarnessStart` containing the
-  command that launches its tool for a given session, to run as the target user (an agent, or admin)
-  in the session's workspace.
-- **SHOULD** continue an existing tool conversation when `force_new` is false, and **MUST** honor
-  `force_new` by launching a fresh conversation when the tool can distinguish the two.
+- **MUST** implement `start(ctx, *, intent=HarnessLaunchIntent.CONTINUE)` and return a
+  `HarnessStart` containing the command that launches its tool for a given session, to run as the
+  target user (an agent, or admin) in the session's workspace.
+- **SHOULD** continue an existing tool conversation for `CONTINUE`, and **MUST** launch a fresh
+  conversation for `CREATE` and `FORCE_NEW` when the tool can distinguish the two. Only `FORCE_NEW`
+  means the operator explicitly asked to bypass prior state.
 - **MUST** declare the executables its tool needs on the launch target, so Agentworks can verify
   their presence before starting and surface a missing tool as an actionable error.
 - **MUST**, for a stateful tool, own a durable session identity and refuse to guess it: mint or
@@ -214,7 +215,7 @@ missing any of them, naming the plugin:
 - `contract_version`: the capability contract version this implementation is written against.
   Registration requires an exact match with the version its kind's descriptor declares supported, so
   a contract change is a hard cutover rather than a silent re-certification. The current contract is
-  version 1, and every shipped integration declares 1. The version number identifies this current
+  version 2, and every shipped integration declares 2. The version number identifies this current
   start-only contract; it does not imply compatibility with the earlier version-1 shape that shipped
   before 0.17.
 - `config_model`: what the config IS (see below). A capability that accepts none declares a model
@@ -315,9 +316,9 @@ which only the op-time probe does).
   command (template-var substitution, then the tmux pane's
   `$SHELL -lic 'cd <dir> && exec <command>'`) and runs it. Empty string means "just the login
   shell".
-- Core calls `start(..., force_new=True)` for `session create` and explicit `--force-new`; ordinary
-  `session start` and `session restart` pass false. On restart, core tears down the old tmux server
-  before asking the integration for the next launch decision.
+- Core passes a `HarnessLaunchIntent`: `CREATE` for `session create`, `FORCE_NEW` for an explicit
+  `--force-new`, and `CONTINUE` for an ordinary `session start` or `session restart`. On restart,
+  core tears down the old tmux server before asking the integration for the next launch decision.
 - A stateful integration owns the continuation decision. `claude-code` and `grok-build` use durable
   integration-owned identifiers. `codex` fingerprints its recorder before a forced-fresh launch so a
   stale notification cannot immediately rebind the new conversation, while ordinary launches may
@@ -526,7 +527,7 @@ No real tool binary anywhere. The layers, with the shipped tests as templates:
   probe (keyed on the stored id) in a single test. Cover: config vocabulary (accepts, unknown-field
   raises, wrong-type raises), both detection directions (probe hit resumes, miss launches fresh,
   other exit raises), flag mapping and `extra_args` quoting, the visible-decision line, state
-  minting, and the integration's ordinary versus `force_new` behavior.
+  minting, and the integration's create, continue, and force-new behavior.
 - **Generated shell text, executed:** `cli/tests/test_codex_integration.py`. An exit-code stub
   proves how a probe's ANSWER is classified; it cannot prove the probe asks the right question, and
   the interesting logic in a stateful integration often lives in the shell text itself (codex's

@@ -11,7 +11,7 @@ import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
 from agentworks.capabilities.config import capability_config_references, validate_capability_config
-from agentworks.capabilities.harness_integration import HarnessStart
+from agentworks.capabilities.harness_integration import HarnessLaunchIntent, HarnessStart
 from agentworks.errors import ConfigError, StateError
 from agentworks.plugins.grok.harness_integration import GrokBuildConfig, GrokBuildIntegration
 from agentworks.schema import RefOwner, merge_model
@@ -168,14 +168,14 @@ def test_absent_summary_starts_fresh() -> None:
     assert _grok_argv(command)[:2] == ["--session-id", _SID]
 
 
-def test_forced_fresh_reports_a_distinct_decision_from_missing_state() -> None:
+def test_launch_intents_report_distinct_decisions() -> None:
     target = _FakeTarget({"summary.json": _FakeResult(1)})
     missing = _integration().start(_op_ctx(target))
-    forced = _integration().start(_op_ctx(target), force_new=True)
+    created = _integration().start(_op_ctx(target), intent=HarnessLaunchIntent.CREATE)
+    forced = _integration().start(_op_ctx(target), intent=HarnessLaunchIntent.FORCE_NEW)
 
-    assert missing.note is not None
-    assert forced.note is not None
-    assert forced.note != missing.note
+    assert None not in {missing.note, created.note, forced.note}
+    assert len({missing.note, created.note, forced.note}) == 3
 
 
 def test_repeated_start_uses_the_same_state_based_decision() -> None:

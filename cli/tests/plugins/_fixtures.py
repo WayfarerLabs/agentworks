@@ -30,7 +30,7 @@ from agentworks.capabilities.git_credential.base import (
     GitCredentialProvider,
     HttpsCredentialScope,
 )
-from agentworks.capabilities.harness_integration.base import HarnessIntegration, HarnessStart
+from agentworks.capabilities.harness_integration.base import HarnessIntegration, HarnessLaunchIntent, HarnessStart
 from agentworks.capabilities.secret_backend import (
     BackendPreview,
     BackendResolution,
@@ -124,13 +124,18 @@ class ConformingHarnessIntegration(HarnessIntegration):
     """A concrete ``HarnessIntegration``. Subclasses add ``name`` /
     ``description``."""
 
-    contract_version = 1
+    contract_version = 2
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)
         _declare_fixture_config(cls, "harness-integration")
 
-    def start(self, ctx: RunContext, *, force_new: bool = False) -> HarnessStart:
+    def start(
+        self,
+        ctx: RunContext,
+        *,
+        intent: HarnessLaunchIntent = HarnessLaunchIntent.CONTINUE,
+    ) -> HarnessStart:
         raise NotImplementedError
 
     def _probe_target(self, transport: Transport) -> None:

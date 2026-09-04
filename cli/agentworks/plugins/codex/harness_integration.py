@@ -111,6 +111,7 @@ from pydantic import Field
 
 from agentworks.capabilities.harness_integration.base import (
     HarnessIntegration,
+    HarnessLaunchIntent,
     HarnessStart,
     quote_literal_argv,
     require_commands,
@@ -368,7 +369,7 @@ class _Layer2(NamedTuple):
 class CodexIntegration(HarnessIntegration):
     """Runs Codex, resuming or launching fresh per on-disk state."""
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 2
     name: ClassVar[str] = "codex"
     description: ClassVar[str] = "Run Codex, resuming its session when one exists"
     config_model: ClassVar[type[CodexConfig]] = CodexConfig
@@ -408,7 +409,12 @@ class CodexIntegration(HarnessIntegration):
         """This session's validated codex config."""
         return self._config_as(CodexConfig)
 
-    def start(self, ctx: RunContext, *, force_new: bool = False) -> HarnessStart:
+    def start(
+        self,
+        ctx: RunContext,
+        *,
+        intent: HarnessLaunchIntent = HarnessLaunchIntent.CONTINUE,
+    ) -> HarnessStart:
         """Choose an ordinary continuation or a deliberately fresh launch.
 
         ``session create`` mints a brand-new session row, so by definition
@@ -447,10 +453,10 @@ class CodexIntegration(HarnessIntegration):
         self._decision = None
         self._adopted_id = None
         self._dropped_stale = False
-        command = self._force_new(ctx) if force_new else self._resume_or_launch(ctx)
-        return HarnessStart(command, self._decision_note(force_new=force_new))
+        command = self._start_fresh(ctx) if intent.starts_fresh else self._resume_or_launch(ctx)
+        return HarnessStart(command, self._decision_note(intent=intent))
 
-    def _decision_note(self, *, force_new: bool) -> str | None:
+    def _decision_note(self, *, intent: HarnessLaunchIntent) -> str | None:
         """The console line for the op that just ran, with a forced-fresh
         policy line or one per ordinary decision leaf (operator-decided
         2026-08-04: the console must say what is happening, in the same
@@ -465,8 +471,13 @@ class CodexIntegration(HarnessIntegration):
         """
         if self._decision is None:
             return None
-        if force_new:
+        if intent is HarnessLaunchIntent.FORCE_NEW:
             note = "Fresh Codex session requested. Starting a new one without resuming prior state..."
+            if disclosure := self._fresh_setup_disclosure():
+                note = f"{note} {disclosure}"
+            return note
+        if intent is HarnessLaunchIntent.CREATE:
+            note = "Starting a new Codex session..."
             if disclosure := self._fresh_setup_disclosure():
                 note = f"{note} {disclosure}"
             return note
@@ -495,12 +506,12 @@ class CodexIntegration(HarnessIntegration):
             note = f"{note} {disclosure}"
         return note
 
-    def _force_new(self, ctx: RunContext) -> str:
+    def _start_fresh(self, ctx: RunContext) -> str:
         """Reject the visible recorder binding and launch bare Codex."""
         launch_target = ctx.admin_target() if self._admin else ctx.agent_target()
         if launch_target is None:
             raise StateError(
-                "codex forced-fresh start requires its owning launch target",
+                "codex fresh start requires its owning launch target",
                 entity_kind="session",
                 entity_name=self._session_name,
             )
@@ -515,7 +526,7 @@ class CodexIntegration(HarnessIntegration):
 
     def _resume_or_launch(self, ctx: RunContext) -> str:
         """The RESUME decision, from codex's own durable state on the launch
-        target (:meth:`start` never runs this: create is always fresh).
+        target (:meth:`start` runs this only for a continuation intent).
         Five leaves:
 
         - a BOUND id (recorded by the notify recorder, or stored by an

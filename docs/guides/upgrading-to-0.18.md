@@ -71,19 +71,25 @@ activate a stopped VM or repair runtime state. Expected live failures preserve l
 Harness integrations now expose one core-facing lifecycle method:
 
 ```python
-def start(self, ctx: RunContext, *, force_new: bool = False) -> HarnessStart:
+def start(
+    self,
+    ctx: RunContext,
+    *,
+    intent: HarnessLaunchIntent = HarnessLaunchIntent.CONTINUE,
+) -> HarnessStart:
     ...
 ```
 
 Return the pane command and optional operator note together as `HarnessStart`. Remove the old
 `resume()` method and mutable `launch_note()` side channel. An ordinary start should continue the
-harness conversation when possible; `force_new=True` must request a fresh conversation without
-deleting external history.
+harness conversation when possible. `CREATE` starts the first conversation for a new Agentworks
+session, while `FORCE_NEW` requests a fresh conversation without deleting external history. Keep
+those intents distinct in operator notes even when they share launch mechanics.
 
-All in-repository implementations move together to contract version 1. Agentworks matches contract
-versions exactly, so an external version-2 implementation is refused rather than adapted. The
+All in-repository implementations move together to contract version 2. Agentworks matches contract
+versions exactly, so an external version-1 implementation is refused rather than adapted. The
 version number identifies the complete current shape; it does not restore compatibility with the
-different version-1 contract that existed before 0.17.
+other version-1 shapes that existed before 0.17 or during 0.18 development.
 
 Core now owns runtime replacement and teardown. Integrations produce launch behavior; they do not
 implement session restart, stop, or process signaling.

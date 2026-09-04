@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
 from agentworks import output
+from agentworks.capabilities.harness_integration import HarnessLaunchIntent
 from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
 from agentworks.errors import (
     BrokenStateError,
@@ -717,7 +718,8 @@ def _launch_existing_session(
                 agent_target=None if is_admin else session_target,
                 secrets=ScopedSecrets(graph_secret_values, session_node.secret_refs()),
             )
-            harness_start = session_node.harness_integration.start(start_ctx, force_new=force_new)
+            intent = HarnessLaunchIntent.FORCE_NEW if force_new else HarnessLaunchIntent.CONTINUE
+            harness_start = session_node.harness_integration.start(start_ctx, intent=intent)
             command = _mgr._substitute_template_vars(
                 harness_start.command,
                 {"session_name": name, "workspace_name": session.workspace_name},

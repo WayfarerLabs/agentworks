@@ -26,6 +26,7 @@ from pydantic import Field
 
 from agentworks.capabilities.harness_integration.base import (
     HarnessIntegration,
+    HarnessLaunchIntent,
     HarnessStart,
     quote_literal_argv,
     require_commands,
@@ -104,7 +105,7 @@ _SESSIONS_DIR = "${GROK_HOME:-$HOME/.grok}/sessions"
 class GrokBuildIntegration(HarnessIntegration):
     """Run Grok Build, resuming its persisted session when one exists."""
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 2
     name: ClassVar[str] = "grok-build"
     description: ClassVar[str] = "Run Grok Build, resuming its session when one exists"
     config_model: ClassVar[type[GrokBuildConfig]] = GrokBuildConfig
@@ -127,21 +128,28 @@ class GrokBuildIntegration(HarnessIntegration):
         """This session's validated Grok Build config."""
         return self._config_as(GrokBuildConfig)
 
-    def start(self, ctx: RunContext, *, force_new: bool = False) -> HarnessStart:
-        """Choose continuation when usable, or rotate the binding when forced."""
-        command = self._resume_or_launch(ctx, force_new=force_new)
-        if force_new:
+    def start(
+        self,
+        ctx: RunContext,
+        *,
+        intent: HarnessLaunchIntent = HarnessLaunchIntent.CONTINUE,
+    ) -> HarnessStart:
+        """Choose continuation when usable, or start a fresh conversation."""
+        command = self._resume_or_launch(ctx, fresh=intent.starts_fresh)
+        if intent is HarnessLaunchIntent.FORCE_NEW:
             note = "Fresh Grok Build session requested. Starting a new one without resuming prior state..."
+        elif intent is HarnessLaunchIntent.CREATE:
+            note = "Starting a new Grok Build session..."
         elif self._resumed:
             note = "Existing Grok Build session found. Resuming..."
         else:
             note = "No existing Grok Build session. Starting a new one..."
         return HarnessStart(command, note)
 
-    def _resume_or_launch(self, ctx: RunContext, *, force_new: bool) -> str:
-        sid = self._session_id(force_new=force_new)
+    def _resume_or_launch(self, ctx: RunContext, *, fresh: bool) -> str:
+        sid = self._session_id(fresh=fresh)
         launch_target = ctx.admin_target() if self._admin else ctx.agent_target()
-        resume = not force_new and launch_target is not None and self._session_exists(launch_target, sid)
+        resume = not fresh and launch_target is not None and self._session_exists(launch_target, sid)
         self._resumed = resume
 
         if resume:
@@ -163,7 +171,7 @@ class GrokBuildIntegration(HarnessIntegration):
         inner = f"echo {shlex.quote(message)}; exec grok {argv}"
         return f"sh -c {shlex.quote(inner)}"
 
-    def _session_id(self, *, force_new: bool = False) -> str:
+    def _session_id(self, *, fresh: bool = False) -> str:
         """Read or mint the UUID persisted in this integration's namespace.
 
         The state blob crosses executions and is therefore a validation
@@ -171,7 +179,7 @@ class GrokBuildIntegration(HarnessIntegration):
         owned by Agentworks, so malformed persisted strings fail before they
         can influence the filesystem probe or die opaquely in the pane.
         """
-        sid = None if force_new else self._state.get("session_id")
+        sid = None if fresh else self._state.get("session_id")
         if not isinstance(sid, str):
             sid = str(uuid.uuid4())
             self._state["session_id"] = sid

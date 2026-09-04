@@ -5,7 +5,7 @@ the shape of its own config block as a model
 (``config_model``, which the core validates against), owns the
 session's launch-target readiness (the required-commands probe and the
 skip/defer/probe/error fork), and produces the tmux pane command string
-that runs the workload as its single op (``start(force_new=...)``). Unlike the
+that runs the workload as its single op (``start(intent=...)``). Unlike the
 thin-wrapper git-credential capability, a harness integration is HELD by a rich
 consuming node (the session node), which composes its readiness rather
 than walking it (``capabilities/README.md``: "Rich (session over
@@ -23,6 +23,7 @@ from __future__ import annotations
 import shlex
 from abc import abstractmethod
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, ClassVar, Literal, Protocol
 
 from agentworks.capabilities.base import Capability, ScopeLevel
@@ -57,6 +58,25 @@ class HarnessStart:
 
     command: str
     note: str | None = None
+
+
+class HarnessLaunchIntent(StrEnum):
+    """Why core is asking an integration to choose a launch.
+
+    A new session and an operator-forced fresh conversation both start fresh,
+    but only the latter bypasses prior state by request. Keeping those cases
+    distinct lets integrations explain the decision truthfully while sharing
+    their fresh-launch mechanics.
+    """
+
+    CREATE = "create"
+    CONTINUE = "continue"
+    FORCE_NEW = "force-new"
+
+    @property
+    def starts_fresh(self) -> bool:
+        """Whether this launch must avoid continuing prior harness state."""
+        return self is not HarnessLaunchIntent.CONTINUE
 
 
 def require_commands(
@@ -250,11 +270,18 @@ class HarnessIntegration(Capability):
         """
 
     @abstractmethod
-    def start(self, ctx: RunContext, *, force_new: bool = False) -> HarnessStart:
+    def start(
+        self,
+        ctx: RunContext,
+        *,
+        intent: HarnessLaunchIntent = HarnessLaunchIntent.CONTINUE,
+    ) -> HarnessStart:
         """Choose the raw pane command for a session launch.
 
         Empty ``command`` means a login shell. Core owns lifecycle and asks for
-        a fresh harness conversation only when ``force_new`` is true.
+        a fresh harness conversation for :attr:`HarnessLaunchIntent.CREATE`
+        and :attr:`HarnessLaunchIntent.FORCE_NEW`. Only ``FORCE_NEW`` represents
+        an operator request to bypass prior state.
         """
 
     @abstractmethod
