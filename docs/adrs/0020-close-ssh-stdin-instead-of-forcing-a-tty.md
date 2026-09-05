@@ -100,7 +100,8 @@ Remove the forced-TTY default and close stdin with `ssh -n` instead:
 - This ADR neutralizes only the pty-forcing config directive. Other operator ssh-config options can
   still alter a programmatic call, notably `ControlMaster` (ADR 15 abandoned agentworks _using_
   multiplexing but does not defend against an operator _enabling_ it) and `RemoteCommand`. Hardening
-  those with explicit `-o` overrides is a coherent follow-up, not done here.
+  those with explicit `-o` overrides is tracked as a coherent follow-up in issue #745 (which also
+  asks for a full audit of config directives that affect a programmatic call), not done here.
 - The runnable-status SDD's finite-stdin fix (an empty `input_data` payload) is superseded by the
   `-n` default; that SDD's `locked.md` records the supersession.
 - Interactive paths are unaffected. Attach and streamed-exec (`interactive` / `call_streaming`)
