@@ -478,7 +478,9 @@ def test_machine_presentation_suppression_keeps_prompts_interactive_on_stderr(
 
     assert human.exit_code == machine.exit_code == 0, machine.output
     assert answers == ["human-answer", "json-answer"]
-    assert human.stderr_bytes == b"Warning: REGISTRY_WARNING_SENTINEL\n"
+    # Warnings print() to stderr, so the line ending is platform-native (CRLF
+    # on Windows); normalize to LF for the byte compare.
+    assert human.stderr_bytes.replace(b"\r\n", b"\n") == b"Warning: REGISTRY_WARNING_SENTINEL\n"
     for marker in (
         b"SECTION_SENTINEL",
         b"INFO_SENTINEL",

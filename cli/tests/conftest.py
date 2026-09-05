@@ -55,6 +55,16 @@ requires_symlinks = pytest.mark.skipif(
 )
 
 
+# Tests that drive a real POSIX login shell by absolute path (``/bin/sh``),
+# modeling the Unix target a probe runs against. Windows has no ``/bin/sh``
+# (git-bash installs it elsewhere and cannot honor the POSIX chmod/exec the
+# scripts use), so these skip there rather than fail on a host without it.
+requires_posix_shell = pytest.mark.skipif(
+    not Path("/bin/sh").exists(),
+    reason="requires a POSIX /bin/sh login shell",
+)
+
+
 @pytest.fixture
 def verified_debian_release(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make offline manager creates observe the release they requested."""

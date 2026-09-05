@@ -306,7 +306,9 @@ def test_generate_bootstrap_script_passes_bash_syntax_check() -> None:
     """End-to-end: the generated script must syntactically parse as
     bash. Catches any future template change that leaks an unescaped
     brace, an unterminated heredoc, etc."""
+    import os
     import subprocess
+    import tempfile
 
     script = generate_bootstrap_script(
         admin_username="testuser",
@@ -316,12 +318,20 @@ def test_generate_bootstrap_script_passes_bash_syntax_check() -> None:
         hostname="lima--myvm",
         swap=2,
     )
-    result = subprocess.run(
-        ["bash", "-n", "/dev/stdin"],
-        input=script,
-        text=True,
-        capture_output=True,
-    )
+    # Pass the script as a real file rather than /dev/stdin, which does not
+    # resolve under the git-bash used on Windows. newline="\n" keeps it LF so
+    # bash never sees a stray carriage return.
+    with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False, newline="\n") as handle:
+        handle.write(script)
+        script_path = handle.name
+    try:
+        result = subprocess.run(
+            ["bash", "-n", script_path],
+            text=True,
+            capture_output=True,
+        )
+    finally:
+        os.unlink(script_path)
     assert result.returncode == 0, result.stderr
 
 

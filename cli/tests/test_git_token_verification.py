@@ -25,6 +25,7 @@ from agentworks.orchestration.secrets import ScopedSecrets
 from agentworks.plugins.azure.azdo import _AZ_AUTH_CHECK, AzDOCredentialProvider
 from agentworks.schema import AgwModel, NonEmptyStr, SecretRef
 from agentworks.ssh import SSHError, SSHResult
+from tests.conftest import requires_posix_shell
 
 if TYPE_CHECKING:
     from agentworks.git_credentials.nodes import GitCredentialNode
@@ -159,6 +160,7 @@ def _stub_unsupported_gh(bin_dir: Path) -> None:
     ("installed", "status", "role"),
     [(False, 0, "warning"), (True, 1, "warning"), (True, 0, "detail")],
 )
+@requires_posix_shell
 def test_cli_runup_checks_current_target_without_forwarding_process_output(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -219,6 +221,7 @@ def test_cli_runup_suppresses_transport_diagnostics(
     assert "untrusted" not in warnings[0]
 
 
+@requires_posix_shell
 def test_github_cli_checks_active_status_support_before_authentication(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -249,6 +252,7 @@ def test_github_cli_checks_active_status_support_before_authentication(
     ("auth_check", "command_name"),
     [(_GH_AUTH_CHECK, "gh"), (_AZ_AUTH_CHECK, "az")],
 )
+@requires_posix_shell
 def test_cli_auth_probe_does_not_treat_native_status_21_as_auth_failure(
     tmp_path: Path,
     auth_check: str,
@@ -262,6 +266,7 @@ def test_cli_auth_probe_does_not_treat_native_status_21_as_auth_failure(
     assert run_user_shell_command(auth_check, target, timeout=10).returncode == 22
 
 
+@requires_posix_shell
 def test_cli_runup_warning_keeps_managed_helper(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
