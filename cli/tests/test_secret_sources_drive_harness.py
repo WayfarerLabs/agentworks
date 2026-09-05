@@ -58,7 +58,7 @@ def test_unsupported_windows_refuses_before_environment_or_provider_work(
 
 @pytest.mark.skipif(
     sys.platform == "win32",
-    reason="the Secret Sources drive is unsupported on Windows by design (POSIX .venv/bin layout and shebang executables)",
+    reason="Secret Sources drive is unsupported on Windows by design (POSIX .venv/bin layout)",
 )
 def test_cli_dir_override_selects_only_that_reviewed_tree(monkeypatch: pytest.MonkeyPatch) -> None:
     cli_dir = Path(__file__).parents[1].resolve()
@@ -111,7 +111,7 @@ def test_child_environment_drops_inherited_home_credentials_and_import_paths(
 
 @pytest.mark.skipif(
     sys.platform == "win32",
-    reason="the Secret Sources drive is unsupported on Windows by design (shebang + chmod fake executables do not resolve on PATH)",
+    reason="Secret Sources drive is unsupported on Windows by design (shebang + chmod fake executables)",
 )
 def test_fake_provider_path_is_closed_and_cannot_fall_through(
     tmp_path: Path,

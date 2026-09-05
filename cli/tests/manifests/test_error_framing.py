@@ -225,6 +225,4 @@ def test_the_duplicate_error_frames_both_locations(home: Path) -> None:
 
     framed_a = format_host_path(root / "a.yaml")
     framed_b = format_host_path(root / "b.yaml")
-    assert str(caught.value) == (
-        f'{framed_b}:2: duplicate secret "dup" (also declared at {framed_a}:2)'
-    )
+    assert str(caught.value) == (f'{framed_b}:2: duplicate secret "dup" (also declared at {framed_a}:2)')

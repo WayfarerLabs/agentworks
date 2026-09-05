@@ -16,9 +16,9 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.bootstrap import build_registry
-from agentworks.path_rendering import format_host_path
 from agentworks.config import load_config
 from agentworks.errors import NotFoundError, ValidationError
+from agentworks.path_rendering import format_host_path
 from agentworks.resources.inspect import edit_location
 from tests.conftest import ManifestDoc, write_manifests
 

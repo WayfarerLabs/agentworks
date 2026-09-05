@@ -40,6 +40,18 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
+from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
+from agentworks.capabilities.config import capability_config_references, validate_capability_config
+from agentworks.capabilities.harness_integration import HarnessStart
+from agentworks.errors import ConfigError, StateError
+from agentworks.plugins.codex.harness_integration import CodexConfig, CodexIntegration
+from agentworks.schema import RefOwner, merge_model
+from tests.conftest import _FakeResult, _FakeTarget
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+    from pathlib import Path
+
 
 def _skip_without_posix_paths() -> None:
     """Skip a test that drives codex's target-side shell with host paths.
@@ -56,17 +68,6 @@ def _skip_without_posix_paths() -> None:
     if sys.platform == "win32":
         pytest.skip("codex target-side shell mechanics need POSIX paths; msys mangles Windows host paths")
 
-from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
-from agentworks.capabilities.config import capability_config_references, validate_capability_config
-from agentworks.capabilities.harness_integration import HarnessStart
-from agentworks.errors import ConfigError, StateError
-from agentworks.plugins.codex.harness_integration import CodexConfig, CodexIntegration
-from agentworks.schema import RefOwner, merge_model
-from tests.conftest import _FakeResult, _FakeTarget
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping
-    from pathlib import Path
 
 _SID = "939b1597-7c61-4ace-80f4-14617b7b4257"  # a fixed bound uuid
 _OTHER_SID = "11111111-2222-4333-8444-555555555555"
