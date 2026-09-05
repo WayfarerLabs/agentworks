@@ -49,9 +49,10 @@ Remove the forced-TTY default and close stdin with `ssh -n` instead:
 - Every no-stdin-payload SSH call passes `-n`, on all platforms, so a stdin-reading remote command
   cannot hang and ssh cannot pull from the operator's console. A call streaming a byte-exact
   `input_text` or `input_data` payload keeps stdin open for the write.
-- `tty=True` remains the per-call way to force a pty (`-tt`). `tty=False` adds `-T` (no pty), which
-  also defeats an operator's `RequestTTY force`. `tty=None` (the default) leaves pty selection to
-  the operator's ssh config.
+- `tty=True` remains the per-call way to force a pty (`-tt`). Any other value forces `-T` (no pty)
+  unconditionally, so a captured programmatic call is deterministic and an operator's
+  `RequestTTY force` cannot inject a pty into it. Only interactive paths, which do not use `run()`,
+  allocate a pty without an explicit `tty=True`.
 
 ## Positives
 
@@ -62,9 +63,11 @@ Remove the forced-TTY default and close stdin with `ssh -n` instead:
   argv. `-n` is a mild hardening everywhere (ssh can no longer read the operator's console for a
   stdin-reading remote command), not a Windows patch (echoes ADR 15's cross-platform
   simplification).
-- **Retires downstream scar tissue.** With probes passing `-T` (no pty), OpenSSH emits no
-  "connection closed" teardown advisory, so the tmux presence classifier's advisory stripper is
-  removed rather than maintained.
+- **Retires downstream scar tissue.** With no pty, OpenSSH emits no "connection closed" teardown
+  advisory, so the tmux presence classifier's advisory stripper is removed rather than maintained.
+- **Programmatic ssh is deterministic.** `run()` forces `-T` regardless of the operator's ssh
+  config, so `RequestTTY force` (or any pty-forcing directive) cannot corrupt a captured call. TTY
+  state is decided by the call, not by the environment.
 
 ## Negatives
 
@@ -72,10 +75,11 @@ Remove the forced-TTY default and close stdin with `ssh -n` instead:
   stdin," as any ssh flag relies on client behavior. Validated empirically on the current Windows
   client (75/75 across three triggers); a future client regression would be observable as the hang
   returning.
-- **A default call still respects operator `RequestTTY force`.** `tty=None` does not add `-T`, so an
-  operator who forces a pty in their ssh config gets one on ordinary calls (and its CRLF/fake-TTY
-  effects). This is deliberate, the default respects operator intent, and only explicit `tty=False`
-  probes override it.
+- **`run()` overrides an operator ssh-config directive.** Forcing `-T` means a `run()` call ignores
+  the operator's `RequestTTY` preference. That is intentional: a captured programmatic call has one
+  correct pty state (none), and an operator who genuinely needs a pty for one command uses
+  `tty=True`. It does leave other pty-affecting config (e.g. an operator `ControlMaster`)
+  unaddressed here; see Consequences.
 
 ## Alternatives considered
 
@@ -92,7 +96,11 @@ Remove the forced-TTY default and close stdin with `ssh -n` instead:
 ## Consequences
 
 - Every canonical transport and the `ssh_run` primitive build argv from one model: `tty=True` gives
-  `-tt`; otherwise `-T` when `tty is False`, plus `-n` when no stdin payload is written.
+  `-tt`; any other value gives `-T`, plus `-n` when no stdin payload is written.
+- This ADR neutralizes only the pty-forcing config directive. Other operator ssh-config options can
+  still alter a programmatic call, notably `ControlMaster` (ADR 15 abandoned agentworks _using_
+  multiplexing but does not defend against an operator _enabling_ it) and `RemoteCommand`. Hardening
+  those with explicit `-o` overrides is a coherent follow-up, not done here.
 - The runnable-status SDD's finite-stdin fix (an empty `input_data` payload) is superseded by the
   `-n` default; that SDD's `locked.md` records the supersession.
 - Interactive paths are unaffected. Attach and streamed-exec (`interactive` / `call_streaming`)

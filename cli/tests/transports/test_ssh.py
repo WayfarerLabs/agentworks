@@ -119,13 +119,18 @@ def test_run_tty_false_still_closes_stdin_with_dash_n() -> None:
         assert "-T" in argv
 
 
-def test_run_default_tty_does_not_override_operator_ssh_config() -> None:
+def test_run_default_forces_no_tty_over_operator_ssh_config() -> None:
+    """A captured programmatic call never wants a pty, so the default forces
+    ``-T`` rather than leaving pty allocation to the operator's ssh config: an
+    operator's ``RequestTTY force`` cannot inject a pty (and its CRLF, merged
+    streams, fake ``isatty``) into our output. Only an explicit ``tty=True``
+    allocates one."""
     t = SSHTransport(host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
         mock_run.return_value = _ok_completed()
         t.run("echo hi")
         argv = mock_run.call_args[0][0]
-        assert "-T" not in argv
+        assert "-T" in argv
         assert "-tt" not in argv
 
 

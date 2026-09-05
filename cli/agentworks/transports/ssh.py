@@ -123,12 +123,14 @@ class SSHTransport(Transport):
     ``$SHELL -lc <command>`` so the operator's per-shell PATH
     additions (e.g. Homebrew on macOS) resolve.
 
-    Non-interactive ``run()`` does not request a pty and closes stdin
+    Non-interactive ``run()`` refuses a pty with ``-T`` and closes stdin
     with ssh's ``-n`` so a stdin-reading remote command cannot hang and
-    ssh cannot steal the operator's console input. ``tty=False``
-    additionally passes ``-T`` to refuse a pty even under an operator's
-    ``RequestTTY force`` (whose CRLF and teardown advisory would corrupt
-    captured output); ``tty=True`` asks for one with ``-tt``.
+    ssh cannot steal the operator's console input. ``-T`` is
+    unconditional (not left to the operator's ssh config), so an
+    operator's ``RequestTTY force`` cannot inject a pty (whose CRLF,
+    merged streams, and fake ``isatty`` would corrupt captured output)
+    into a programmatic call; only an explicit ``run(tty=True)`` asks for
+    a pty, with ``-tt``.
     """
 
     def __init__(
@@ -167,12 +169,13 @@ class SSHTransport(Transport):
         command yet).
 
         ``tty=True`` forces a pty with ``-tt`` (the only way ``run()`` gets
-        one). ``tty=False`` explicitly suppresses one with ``-T``, which also
-        defeats an operator's ``RequestTTY force`` (a pty would inject CRLF and
-        a teardown advisory into captured output); ``tty=None`` leaves pty
-        selection to the operator's ssh config. Independently, ``-n`` is added
-        when ``close_stdin`` is set so a stdin-reading remote command cannot
-        hang and ssh cannot pull from the operator's console. On Windows ``-n``
+        one). Any other value suppresses the pty with ``-T``: a captured
+        programmatic call never wants one, and ``-T`` makes that deterministic
+        so an operator's ``RequestTTY force`` cannot inject a pty (and its CRLF,
+        merged streams, and fake ``isatty``) into our output. Independently,
+        ``-n`` is added when ``close_stdin`` is set so a stdin-reading remote
+        command cannot hang and ssh cannot pull from the operator's console. On
+        Windows ``-n``
         also averts the Win32-OpenSSH short-connection stdin race
         (PowerShell/Win32-OpenSSH#1338), where a brief remote command leaves the
         client blocked on inherited console stdin; dropping the pty without
@@ -184,8 +187,7 @@ class SSHTransport(Transport):
         if tty:
             args.insert(1, "-tt")
         else:
-            if tty is False:
-                args.insert(1, "-T")
+            args.insert(1, "-T")
             if close_stdin:
                 args.insert(1, "-n")
         if self.port is not None:

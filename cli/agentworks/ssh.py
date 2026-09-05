@@ -323,20 +323,20 @@ def _ssh_base_args(
     """Build the base ``ssh`` argv with ``BatchMode=yes`` (no remote command yet).
 
     ``tty=True`` forces a pty with ``-tt`` (the only way this primitive allocates
-    one). ``tty=False`` explicitly suppresses one with ``-T``, which also defeats
-    an operator's ``RequestTTY force`` (a pty would inject CRLF and a teardown
-    advisory); ``tty=None`` leaves pty selection to the operator's ssh config.
-    Independently, ``-n`` is added when ``close_stdin`` is set so a stdin-reading
-    remote command cannot hang and ssh cannot pull from the operator's console;
-    it must stay off while a byte-exact ``input_text`` payload is written, so
-    callers set ``close_stdin`` only for the no-stdin-payload case.
+    one). Any other value suppresses the pty with ``-T``: a captured programmatic
+    call never wants one, and ``-T`` makes that deterministic so an operator's
+    ``RequestTTY force`` cannot inject a pty (and its CRLF, merged streams, and
+    fake ``isatty``) into our output. Independently, ``-n`` is added when
+    ``close_stdin`` is set so a stdin-reading remote command cannot hang and ssh
+    cannot pull from the operator's console; it must stay off while a byte-exact
+    ``input_text`` payload is written, so callers set ``close_stdin`` only for
+    the no-stdin-payload case.
     """
     args = ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
     if tty:
         args.insert(1, "-tt")
     else:
-        if tty is False:
-            args.insert(1, "-T")
+        args.insert(1, "-T")
         if close_stdin:
             args.insert(1, "-n")
     if target.port is not None:
@@ -400,13 +400,9 @@ def run(
         # A forced TTY puts a line discipline between the pipe and the remote
         # command, which echoes input and rewrites CR, so the byte-exact
         # promise above cannot hold. Refuse rather than corrupt a secret.
+        # Any non-forced tty emits -T below, so a byte-exact write is never
+        # behind a pty even under an operator's RequestTTY force.
         raise ValueError("SSH stdin input cannot be combined with a forced TTY")
-    if input_text is not None:
-        # A byte-exact write must never sit behind a pty. tty=True is refused
-        # above; coerce the no-opinion default to an explicit -T so an
-        # operator's ``RequestTTY force`` cannot slip a pty in behind the write
-        # (which echoes the payload and hangs, or rewrites CR).
-        tty = False
 
     # An ``input_text`` payload keeps stdin open for the byte-exact write;
     # every other call closes stdin with ``-n``.
