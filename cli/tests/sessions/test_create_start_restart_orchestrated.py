@@ -17,6 +17,7 @@ are driven for real.
 
 from __future__ import annotations
 
+import contextlib
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -29,7 +30,7 @@ from agentworks.bootstrap import build_registry as _real_build_registry
 from agentworks.bootstrap import load_request_registry as _real_load_request_registry
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, HarnessStart, ShellIntegration
 from agentworks.db import Database, InitStatus, SessionMode, SessionStatus
-from agentworks.errors import NotFoundError, StateError, ValidationError
+from agentworks.errors import ExternalError, NotFoundError, StateError, ValidationError
 from agentworks.secrets.orchestration import (
     resolve_for_command as _real_resolve_for_command,
 )
@@ -306,6 +307,125 @@ def test_unsupported_resume_only_refuses_before_restart_teardown(
         )  # type: ignore[arg-type]
 
     assert caught.value.entity_name == "s1"
+    assert "kill" not in events
+    assert "tmux_create" not in events
+    db.close()
+
+
+def test_unsupported_resume_only_preserves_an_incomplete_runtime_row(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.sessions import manager as session_manager
+    from agentworks.sessions.manager import restart_session
+    from agentworks.sessions.manager._pids import _ensure_pid
+
+    db, events = _restart_fixture(tmp_path, monkeypatch)
+    db.update_session_runtime(
+        "s1",
+        socket_path="/tmp/s1.sock",
+        pid=None,
+        boot_id=None,
+        tmux_server_start_ticks=None,
+    )
+    before = db.get_session("s1")
+    assert before is not None
+    monkeypatch.setattr(session_manager, "_ensure_pid", _ensure_pid)
+
+    with pytest.raises(StateError):
+        restart_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+            name="s1",
+            resume_only=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )  # type: ignore[arg-type]
+
+    assert db.get_session("s1") == before
+    assert "kill" not in events
+    assert "tmux_create" not in events
+    db.close()
+
+
+def test_running_resume_only_start_noop_persists_an_observed_runtime_repair(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.sessions import manager as session_manager
+    from agentworks.sessions.manager import start_session
+    from agentworks.sessions.manager._pids import _ensure_pid
+
+    db, events = _restart_fixture(tmp_path, monkeypatch)
+    db.update_session_runtime(
+        "s1",
+        socket_path="/tmp/s1.sock",
+        pid=None,
+        boot_id=None,
+        tmux_server_start_ticks=None,
+    )
+    monkeypatch.setattr(session_manager, "_ensure_pid", _ensure_pid)
+
+    start_session(
+        db,
+        SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+        name="s1",
+        resume_only=True,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )  # type: ignore[arg-type]
+
+    repaired = db.get_session("s1")
+    assert repaired is not None
+    assert (repaired.pid, repaired.boot_id, repaired.tmux_server_start_ticks) == (4243, BOOT_ID, 1)
+    assert "kill" not in events
+    assert "tmux_create" not in events
+    db.close()
+
+
+def test_batch_resume_only_refusal_preserves_incomplete_runtime_rows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.sessions import manager as session_manager
+    from agentworks.sessions.manager import _pids as pids_module
+    from agentworks.sessions.manager import restart_all_sessions
+
+    db, events = _restart_fixture(tmp_path, monkeypatch)
+    db.update_session_runtime(
+        "s1",
+        socket_path="/tmp/s1.sock",
+        pid=None,
+        boot_id=None,
+        tmux_server_start_ticks=None,
+    )
+    before = db.get_session("s1")
+    assert before is not None
+
+    real_repair = pids_module._repair_session_pid
+    persist_values: list[bool] = []
+
+    def recording_repair(*args: object, persist: bool = True, **kwargs: object) -> bool:
+        persist_values.append(persist)
+        return real_repair(*args, persist=persist, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(pids_module, "_repair_session_pid", recording_repair)
+    monkeypatch.setattr(session_manager, "_ensure_pid", pids_module._ensure_pid)
+    monkeypatch.setattr(session_manager, "_batch_vm_boundary", lambda *args, **kwargs: contextlib.nullcontext())
+    monkeypatch.setattr(
+        session_manager,
+        "observe_session_statuses",
+        lambda sessions, **kwargs: {session.name: SessionStatus.RUNNING for session in sessions},
+    )
+
+    with pytest.raises(ExternalError):
+        restart_all_sessions(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+            resume_only=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )  # type: ignore[arg-type]
+
+    assert persist_values == [False, False]
+    assert db.get_session("s1") == before
     assert "kill" not in events
     assert "tmux_create" not in events
     db.close()

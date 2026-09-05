@@ -816,9 +816,14 @@ error, not an empty result. `--console` selects sessions belonging to any of the
 `--agent` matches agent-mode sessions only; `--admin` matches admin-mode sessions only (the two are
 mutually exclusive). Pass `--force` only to recover broken state after Agentworks proves the prior
 managed tmux server is absent; Agentworks never signals a stored numeric PID. Start and restart
-continue the harness conversation when possible; `--force-new` requires a fresh conversation when
-the operation launches a runtime. A running `session start --force-new` is refused rather than
-silently replacing the runtime.
+resume the harness conversation when possible. `--resume-only` refuses unless the integration can
+resume existing state; `--force-new` requires a fresh conversation when the operation launches a
+runtime. The two options are mutually exclusive. A running `session start` remains a no-op under the
+default or resume-only policy; a running `session start --force-new` is refused rather than silently
+replacing the runtime. A restart obtains the integration's launch decision before teardown, so an
+unsupported policy or unavailable strict resume leaves the old runtime intact. The built-in `shell`
+integration does not implement `--resume-only` because an arbitrary shell command cannot prove that
+it resumed harness state.
 
 Maintainers: [Session status internals](../docs/guides/session-status.md) documents the persisted
 PID and boot-ID model, read-only live status derivation, lifecycle repair, and the safety boundary

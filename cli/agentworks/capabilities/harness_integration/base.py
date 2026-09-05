@@ -97,12 +97,20 @@ def require_implemented_start(
     """Return an implemented launch or raise core's unsupported-intent error."""
     if isinstance(result, HarnessStart):
         return result
+    if isinstance(result, HarnessStartNotImplemented):
+        raise StateError(
+            f"session '{session_name}': harness integration '{harness_integration_name}' "
+            f"does not implement launch intent '{intent.value}'",
+            entity_kind="session",
+            entity_name=session_name,
+            hint="Choose a harness integration that implements this intent, or request a different launch policy.",
+        )
     raise StateError(
-        f"session '{session_name}': harness integration '{harness_integration_name}' "
-        f"does not implement launch intent '{intent.value}'",
+        f"session '{session_name}': harness integration '{harness_integration_name}' returned "
+        f"invalid result type '{type(result).__name__}' for launch intent '{intent.value}'",
         entity_kind="session",
         entity_name=session_name,
-        hint="Choose a harness integration that implements this intent, or request a different launch policy.",
+        hint="Update the harness integration to implement contract version 3.",
     )
 
 

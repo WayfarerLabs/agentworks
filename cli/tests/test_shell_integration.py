@@ -296,6 +296,19 @@ def test_core_rejects_not_implemented_for_every_launch_intent(intent: HarnessLau
     assert intent.value in str(caught.value)
 
 
+def test_core_distinguishes_an_invalid_launch_result_from_not_implemented() -> None:
+    with pytest.raises(StateError) as caught:
+        require_implemented_start(  # type: ignore[arg-type]
+            None,
+            intent=HarnessLaunchIntent.CREATE,
+            harness_integration_name="broken",
+            session_name="work",
+        )
+
+    assert "broken" in str(caught.value)
+    assert "NoneType" in str(caught.value)
+
+
 def test_start_falls_back_to_command() -> None:
     result = _harness_integration({"command": "claude"}).start(RunContext())
     assert isinstance(result, HarnessStart)

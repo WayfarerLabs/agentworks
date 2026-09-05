@@ -321,7 +321,8 @@ failure or unsupported intent leaves the existing runtime intact.
   implemented result: the session manager wraps the command (template-var substitution, then the
   tmux pane's `$SHELL -lic 'cd <dir> && exec <command>'`) and runs it. Empty string means "just the
   login shell". `HarnessStartNotImplemented` reports that the integration does not implement that
-  intent; every intent may produce it.
+  intent; every intent may produce it. Any other return shape is a contract error, not an
+  unsupported intent.
 - Core passes a `HarnessLaunchIntent`: `CREATE` for `session create`, `RESUME_ONLY` for an explicit
   `--resume-only`, `FORCE_NEW` for an explicit `--force-new`, and `RESUME_OR_NEW` for an ordinary
   `session start` or `session restart`. Core obtains and validates the result before teardown.
@@ -424,8 +425,9 @@ sessions. Five rules, each earned:
 2. **Decide resume-vs-launch at op time, on the launch target, from the tool's own durable state.**
    Probe for the stored id's artifact (for Claude, the transcript `<sid>.jsonl` under the projects
    dir) over the transport, with the same `$SHELL -lic` environment the pane will get. Do it per op,
-   not cached: the world changes between ops, and restart calls `start` with the old process dead so
-   this probe sees settled state.
+   not cached: the world changes between ops. Restart calls `start` before teardown so an
+   unsupported intent or strict-resume failure leaves the existing runtime intact; the decision
+   therefore has to rely on durable tool state rather than process liveness.
 3. **Verify empirically that the probe boundary equals the tool's resume boundary.** The claude work
    ran a controlled experiment (sessions abandoned at every stage) to confirm transcript presence
    and Claude's own resume boundary are the SAME line, which is what makes both failure modes (blind

@@ -574,8 +574,19 @@ def _launch_existing_session(
 
         with output.section("Preflight"):
             is_legacy = session.socket_path is None and session.pid is not None and session.pid > 0
+            deferred_runtime_repair = False
             if not is_legacy:
-                session = _mgr._ensure_pid(session, target=admin_target, db=db)
+                deferred_runtime_repair = (
+                    intent is HarnessLaunchIntent.RESUME_ONLY
+                    and session.pid != PID_STOPPED
+                    and (session.pid is None or session.boot_id is None)
+                )
+                session = _mgr._ensure_pid(
+                    session,
+                    target=admin_target,
+                    db=db,
+                    persist=not deferred_runtime_repair,
+                )
 
             # Legacy migration: sessions predating the per-session-socket model
             # have ``socket_path=None`` (they lived on the admin's default tmux
@@ -609,6 +620,14 @@ def _launch_existing_session(
                         entity_kind="session",
                         entity_name=name,
                         hint=f"Run `agw session restart {name} --force-new` to replace it.",
+                    )
+                if deferred_runtime_repair:
+                    db.update_session_runtime(
+                        session.name,
+                        socket_path=session.socket_path,
+                        pid=session.pid,
+                        boot_id=session.boot_id,
+                        tmux_server_start_ticks=session.tmux_server_start_ticks,
                     )
                 output.result(f"Session '{name}' is already running")
                 return
@@ -983,7 +1002,13 @@ def _launch_all_sessions(
     failed: list[tuple[str, str]] = []
     with _mgr._batch_vm_boundary(db, config, distinct_vms, interaction=interaction):
         # Auto-repair NULL-PID sessions, then batch check
-        sessions = _mgr.ensure_pids_batch(sessions, db=db, config=config)
+        sessions = _mgr.ensure_pids_batch(
+            sessions,
+            db=db,
+            config=config,
+            announce=intent is not HarnessLaunchIntent.RESUME_ONLY,
+            persist=intent is not HarnessLaunchIntent.RESUME_ONLY,
+        )
         status_map = _mgr.observe_session_statuses(sessions, db=db, config=config)
 
         # Error if any actionable sessions are still unknown after auto-repair.
