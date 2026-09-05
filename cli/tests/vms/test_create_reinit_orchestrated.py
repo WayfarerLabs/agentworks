@@ -692,7 +692,7 @@ def test_create_phase_a_sync_failure_is_non_fatal(
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
     from agentworks.db import ProvisioningStatus
 
-    config = make_config(f'ssh_config = "{tmp_path / "ssh_config"}"\n')
+    config = make_config(f'ssh_config = "{(tmp_path / "ssh_config").as_posix()}"\n')
 
     def _fake_create(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
         return ProvisionResult(
@@ -747,7 +747,7 @@ def test_create_provisioning_section_has_explicit_closing_body_line(
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
     # Contain the real SSH-config write inside the test's tmp dir.
-    config = make_config(f'ssh_config = "{tmp_path / "ssh_config"}"\n')
+    config = make_config(f'ssh_config = "{(tmp_path / "ssh_config").as_posix()}"\n')
 
     def _fake_create(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
         return ProvisionResult(

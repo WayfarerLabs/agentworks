@@ -66,7 +66,7 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN20
     from tests.orchestrated_fixtures import PLUGINS_ENABLED, proxmox_site, write_operator_config
 
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
-    paths_section = f'[paths]\nvscode_workspaces = "{tmp_path / "vscode"}"\n'
+    paths_section = f'[paths]\nvscode_workspaces = "{(tmp_path / "vscode").as_posix()}"\n'
 
     def _make(extra: str = "", *, manifests: Sequence[ManifestDoc | str] = ()):  # noqa: ANN202
         return write_operator_config(
