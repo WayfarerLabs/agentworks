@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.bootstrap import build_registry
+from agentworks.path_rendering import format_host_path
 from agentworks.config import load_config
 from agentworks.errors import NotFoundError, ValidationError
 from agentworks.resources.inspect import edit_location
@@ -225,7 +226,10 @@ def test_cli_edit_names_the_manifest_home_relative(tmp_path: Path, monkeypatch) 
     result = CliRunner().invoke(app, ["resource", "edit", "secret/npm-token"])
 
     assert result.exit_code == 0, result.output
-    assert "Editing secret/npm-token (~/.config/agentworks/resources/secrets.yaml:1)" in result.output
+    # Framed by the shared helper, so home-relative with the host-native
+    # separator (``~/`` on POSIX, ``~\`` on Windows).
+    framed = format_host_path(resources / "secrets.yaml")
+    assert f"Editing secret/npm-token ({framed}:1)" in result.output
     assert str(home) not in result.output
 
 
