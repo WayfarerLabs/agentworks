@@ -94,7 +94,7 @@ capability-appropriate live validation under the integration-testing process.
 - [x] Run artifact gates, manual scans, link review, and cross-file consistency review.
 - [x] Obtain clean private agentworks-reviewer and Muntz passes on one exact artifact head and apply
       every material correction authorized by the SDD charter.
-- [ ] Commit and push the coherent artifact head, open the draft PR, apply
+- [x] Commit and push the coherent artifact head, open the draft PR, apply
       `sdd:native-exec-transport` and `review-requested`, and publish the exact handoff.
 - [ ] Complete up to three authorized published feedback/fix rounds, or stop sooner when one full
       batch produces no material changes.
