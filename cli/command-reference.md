@@ -821,10 +821,10 @@ resume existing state; `--force-new` requires a fresh conversation when the oper
 runtime. The two options are mutually exclusive. A running `session start` remains a no-op under the
 default or resume-only policy; a running `session start --force-new` is refused rather than silently
 replacing the runtime. A restart obtains the integration's launch decision before teardown, so an
-unsupported policy or unavailable strict resume leaves the managed tmux runtime and integration-owned
-state intact. Normal lifecycle preparation may already have persisted observed PID, boot, or stopped
-facts. The built-in `shell` integration does not implement `--resume-only` because an arbitrary shell
-command cannot prove that it resumed harness state.
+unsupported policy or unavailable strict resume leaves the managed tmux runtime and
+integration-owned state intact. Normal lifecycle preparation may already have persisted observed
+PID, boot, or stopped facts. The built-in `shell` integration does not implement `--resume-only`
+because an arbitrary shell command cannot prove that it resumed harness state.
 
 Maintainers: [Session status internals](../docs/guides/session-status.md) documents the persisted
 PID and boot-ID model, read-only live status derivation, lifecycle repair, and the safety boundary
