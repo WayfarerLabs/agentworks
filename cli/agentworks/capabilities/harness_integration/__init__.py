@@ -26,8 +26,11 @@ from agentworks.capabilities.harness_integration.base import (
     HarnessIntegration,
     HarnessLaunchIntent,
     HarnessStart,
+    HarnessStartNotImplemented,
+    HarnessStartResult,
     quote_literal_argv,
     require_commands,
+    require_implemented_start,
 )
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
 
@@ -39,11 +42,14 @@ __all__ = [
     "HarnessIntegration",
     "HarnessLaunchIntent",
     "HarnessStart",
+    "HarnessStartNotImplemented",
+    "HarnessStartResult",
     "ShellIntegration",
     "ensure_harness_integration_enabled",
     "harness_integration_for",
     "quote_literal_argv",
     "require_commands",
+    "require_implemented_start",
 ]
 
 

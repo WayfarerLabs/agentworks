@@ -51,8 +51,11 @@ contract it relies on (validate / construct / preflight / runup / ops) is docume
 >
 > Note (2026-09-04): the launch contract is now version 3 and replaces the overloaded `force_new`
 > boolean with `HarnessLaunchIntent`. `CREATE` identifies the first launch of a new Agentworks
-> session, `CONTINUE` permits harness-state continuation, and `FORCE_NEW` records the operator's
-> explicit request to bypass prior harness state. Core still owns session lifecycle and teardown.
+> session, `RESUME_ONLY` requires existing resumable state, `RESUME_OR_NEW` resumes when possible
+> and otherwise launches fresh, and `FORCE_NEW` records the operator's explicit request to bypass
+> prior harness state. Integrations return `HarnessStart` or may report any intent as
+> `HarnessStartNotImplemented`; core resolves that result before teardown and still owns the
+> lifecycle.
 
 ## Context
 

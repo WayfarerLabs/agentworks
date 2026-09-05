@@ -270,9 +270,9 @@ def test_restart_adopts_the_recorded_thread_id_and_persists_it(tmp_path: Path, m
 
     assert f"resume {_SID}" in captured["command"]
     assert "resuming session s1" in captured["command"]
-    # Resume ordering: the probes run AFTER the kill (the old process is
-    # dead before the decision), and the tmux recreate follows.
-    assert events.index("kill") < events.index("read_recorder") < events.index("tmux_create")
+    # Core obtains the launch decision before the destructive boundary so a
+    # strict-resume refusal could leave the old runtime intact.
+    assert events.index("read_recorder") < events.index("kill") < events.index("tmux_create")
     assert "discover" not in events  # a bound id needs no fallback
     refreshed = db.get_session("s1")
     assert refreshed is not None
@@ -295,7 +295,7 @@ def test_restart_resumes_the_stored_id_without_a_recording(tmp_path: Path, monke
     assert f"resume {_SID}" in captured["command"]
     assert "resuming session s1" in captured["command"]
     assert "discover" not in events
-    assert events.index("kill") < events.index("detect") < events.index("tmux_create")
+    assert events.index("detect") < events.index("kill") < events.index("tmux_create")
     refreshed = db.get_session("s1")
     assert refreshed is not None
     assert refreshed.harness_integration_state == {"codex": {"session_id": _SID}}  # unchanged

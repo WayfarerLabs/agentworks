@@ -66,7 +66,7 @@ class _HarnessIntegrationKind:
         title="Harness integrations",
         overview="""
         A harness-integration owns a session's workload: what starts in the pane, how an
-        ordinary start continues existing harness state when possible, and which commands
+        ordinary start resumes existing harness state when possible, and which commands
         have to exist on the target before launch.
 
         Integrations are code, and a session-template selects one by writing its name

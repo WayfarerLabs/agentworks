@@ -173,6 +173,41 @@ def test_absent_transcript_launches_fresh() -> None:
     assert "starting new session s1" in command
 
 
+def test_resume_only_resumes_an_existing_transcript() -> None:
+    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})
+    result = _harness_integration(state={"session_id": _SID}).start(
+        _op_ctx(target), intent=HarnessLaunchIntent.RESUME_ONLY
+    )
+    assert _claude_argv(result)[:2] == ["--resume", _SID]
+
+
+@pytest.mark.parametrize(
+    ("state", "target", "expected_probe_count"),
+    [
+        pytest.param({}, _FakeTarget(), 0, id="no-stored-id"),
+        pytest.param({"session_id": _SID}, _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)}), 1, id="no-transcript"),
+        pytest.param({"session_id": _SID}, _FakeTarget({f"{_SID}.jsonl": _FakeResult(255)}), 1, id="probe-failed"),
+    ],
+)
+def test_resume_only_refuses_without_resumable_state_and_preserves_integration_state(
+    state: dict[str, object],
+    target: _FakeTarget,
+    expected_probe_count: int,
+) -> None:
+    before = state.copy()
+    with pytest.raises(StateError):
+        _harness_integration(state=state).start(_op_ctx(target), intent=HarnessLaunchIntent.RESUME_ONLY)
+    assert state == before
+    assert len(target.commands) == expected_probe_count
+
+
+def test_resume_only_refuses_a_missing_target_without_state_mutation() -> None:
+    state: dict[str, object] = {"session_id": _SID}
+    with pytest.raises(StateError):
+        _harness_integration(state=state).start(RunContext(), intent=HarnessLaunchIntent.RESUME_ONLY)
+    assert state == {"session_id": _SID}
+
+
 def test_launch_intents_report_distinct_decisions() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
     missing = _harness_integration().start(_op_ctx(target))

@@ -413,9 +413,9 @@ class CodexIntegration(HarnessIntegration):
         self,
         ctx: RunContext,
         *,
-        intent: HarnessLaunchIntent = HarnessLaunchIntent.CONTINUE,
+        intent: HarnessLaunchIntent = HarnessLaunchIntent.RESUME_OR_NEW,
     ) -> HarnessStart:
-        """Choose an ordinary continuation or a deliberately fresh launch.
+        """Choose the requested fresh, strict-resume, or fallback policy.
 
         ``session create`` mints a brand-new session row, so by definition
         no codex conversation belongs to this session yet: there is nothing
@@ -453,12 +453,23 @@ class CodexIntegration(HarnessIntegration):
         self._decision = None
         self._adopted_id = None
         self._dropped_stale = False
-        command = self._start_fresh(ctx) if intent.starts_fresh else self._resume_or_launch(ctx)
+        prior_state = self._state.copy() if intent is HarnessLaunchIntent.RESUME_ONLY else None
+        try:
+            command = (
+                self._start_fresh(ctx)
+                if intent.starts_fresh
+                else self._resume_or_launch(ctx, resume_only=intent is HarnessLaunchIntent.RESUME_ONLY)
+            )
+        except StateError:
+            if prior_state is not None:
+                self._state.clear()
+                self._state.update(prior_state)
+            raise
         return HarnessStart(command, self._decision_note(intent=intent))
 
     def _decision_note(self, *, intent: HarnessLaunchIntent) -> str | None:
         """The console line for the op that just ran, with a create or
-        forced-fresh policy line or one per continuation decision leaf (operator-decided
+        forced-fresh policy line or one per resume decision leaf (operator-decided
         2026-08-04: the console must say what is happening, in the same
         resume vocabulary as the pane echo).
 
@@ -523,9 +534,9 @@ class CodexIntegration(HarnessIntegration):
             legacy_marker=self._take_legacy_marker(),
         )
 
-    def _resume_or_launch(self, ctx: RunContext) -> str:
+    def _resume_or_launch(self, ctx: RunContext, *, resume_only: bool) -> str:
         """The RESUME decision, from codex's own durable state on the launch
-        target (:meth:`start` runs this only for a continuation intent).
+        target (:meth:`start` runs this for either resume intent).
         Five leaves:
 
         - a BOUND id (recorded by the notify recorder, or stored by an
@@ -562,7 +573,7 @@ class CodexIntegration(HarnessIntegration):
             # guessing "fresh" is lossless), a codex fresh launch drops the
             # bound id; guessing here could orphan a resumable
             # conversation, so raise. Fresh launch intents are handled by
-            # _start_fresh before reaching this continuation-only path.
+            # _start_fresh before reaching this resume-policy path.
             raise StateError(
                 f"session '{self._session_name}': the op context carries no "
                 f"launch target to probe codex session state on; refusing "
@@ -577,6 +588,8 @@ class CodexIntegration(HarnessIntegration):
             valid_pending = pending is None or (isinstance(pending, str) and _RECORDED_ID_RE.fullmatch(pending))
             recorded = self._recorded_thread_id(launch_target)
             if not valid_pending:
+                if resume_only:
+                    raise self._resume_only_error()
                 from agentworks import output
 
                 output.warn(
@@ -591,6 +604,8 @@ class CodexIntegration(HarnessIntegration):
                     legacy_marker=legacy_marker,
                 )
             if recorded is None or recorded == pending:
+                if resume_only:
+                    raise self._resume_only_error()
                 self._state.pop("session_id", None)
                 self._decision = "fresh"
                 return self._fresh_command(
@@ -634,6 +649,8 @@ class CodexIntegration(HarnessIntegration):
                 legacy_marker=legacy_marker,
             )
         if found.ids or found.unnamed:
+            if resume_only:
+                raise self._resume_only_error()
             self._decision = "picker"
             picker_disclosure = self._picker_workload_disclosure()
             warning = f" {picker_disclosure}" if picker_disclosure is not None else ""
@@ -644,6 +661,8 @@ class CodexIntegration(HarnessIntegration):
                 f"esc to start a fresh conversation.{warning}",
                 legacy_marker=legacy_marker,
             )
+        if resume_only:
+            raise self._resume_only_error()
         if self._dropped_stale:
             self._decision = "stale"
             return self._fresh_command(
@@ -655,6 +674,14 @@ class CodexIntegration(HarnessIntegration):
         return self._fresh_command(
             msg=f"agentworks harness integration (codex): starting new session {self._session_name}",
             legacy_marker=legacy_marker,
+        )
+
+    def _resume_only_error(self) -> StateError:
+        return StateError(
+            f"session '{self._session_name}': Codex has no unambiguous resumable conversation on its launch target",
+            entity_kind="session",
+            entity_name=self._session_name,
+            hint="Retry without --resume-only to allow Codex to start or offer a new conversation.",
         )
 
     def _take_legacy_marker(self) -> str | None:

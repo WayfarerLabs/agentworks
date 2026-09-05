@@ -134,7 +134,7 @@ class ConformingHarnessIntegration(HarnessIntegration):
         self,
         ctx: RunContext,
         *,
-        intent: HarnessLaunchIntent = HarnessLaunchIntent.CONTINUE,
+        intent: HarnessLaunchIntent = HarnessLaunchIntent.RESUME_OR_NEW,
     ) -> HarnessStart:
         raise NotImplementedError
 

@@ -235,28 +235,29 @@ def _restart_fixture(
 
 def _record_launch_intents(monkeypatch: pytest.MonkeyPatch) -> list[HarnessLaunchIntent]:
     intents: list[HarnessLaunchIntent] = []
-    real_start = ShellIntegration.start
 
     def recording_start(
         self: ShellIntegration,
         ctx: RunContext,
         *,
-        intent: HarnessLaunchIntent = HarnessLaunchIntent.CONTINUE,
+        intent: HarnessLaunchIntent = HarnessLaunchIntent.RESUME_OR_NEW,
     ) -> HarnessStart:
         intents.append(intent)
-        return real_start(self, ctx, intent=intent)
+        return HarnessStart("")
 
     monkeypatch.setattr(ShellIntegration, "start", recording_start)
     return intents
 
 
 @pytest.mark.parametrize(
-    ("operation_name", "status", "force_new", "expected_intent"),
+    ("operation_name", "status", "force_new", "resume_only", "expected_intent"),
     [
-        ("start_session", SessionStatus.STOPPED, False, HarnessLaunchIntent.CONTINUE),
-        ("start_session", SessionStatus.STOPPED, True, HarnessLaunchIntent.FORCE_NEW),
-        ("restart_session", SessionStatus.RUNNING, False, HarnessLaunchIntent.CONTINUE),
-        ("restart_session", SessionStatus.RUNNING, True, HarnessLaunchIntent.FORCE_NEW),
+        ("start_session", SessionStatus.STOPPED, False, False, HarnessLaunchIntent.RESUME_OR_NEW),
+        ("start_session", SessionStatus.STOPPED, True, False, HarnessLaunchIntent.FORCE_NEW),
+        ("start_session", SessionStatus.STOPPED, False, True, HarnessLaunchIntent.RESUME_ONLY),
+        ("restart_session", SessionStatus.RUNNING, False, False, HarnessLaunchIntent.RESUME_OR_NEW),
+        ("restart_session", SessionStatus.RUNNING, True, False, HarnessLaunchIntent.FORCE_NEW),
+        ("restart_session", SessionStatus.RUNNING, False, True, HarnessLaunchIntent.RESUME_ONLY),
     ],
 )
 def test_existing_session_launch_passes_operator_intent_to_the_harness_integration(
@@ -265,6 +266,7 @@ def test_existing_session_launch_passes_operator_intent_to_the_harness_integrati
     operation_name: str,
     status: SessionStatus,
     force_new: bool,
+    resume_only: bool,
     expected_intent: HarnessLaunchIntent,
 ) -> None:
     from agentworks.sessions import manager as session_manager
@@ -278,11 +280,85 @@ def test_existing_session_launch_passes_operator_intent_to_the_harness_integrati
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),
         name="s1",
         force_new=force_new,
+        resume_only=resume_only,
         interaction=TtyInteractionPolicy.REFUSE,
     )
 
     assert intents == [expected_intent]
     db.close()
+
+
+def test_unsupported_resume_only_refuses_before_restart_teardown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.sessions.manager import restart_session
+
+    db, events = _restart_fixture(tmp_path, monkeypatch)
+
+    with pytest.raises(StateError) as caught:
+        restart_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+            name="s1",
+            resume_only=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )  # type: ignore[arg-type]
+
+    assert caught.value.entity_name == "s1"
+    assert "kill" not in events
+    assert "tmux_create" not in events
+    db.close()
+
+
+def test_unavailable_resume_only_refuses_before_restart_teardown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.sessions.manager import restart_session
+
+    db, events = _restart_fixture(tmp_path, monkeypatch)
+
+    def unavailable_start(
+        self: ShellIntegration,
+        ctx: RunContext,
+        *,
+        intent: HarnessLaunchIntent = HarnessLaunchIntent.RESUME_OR_NEW,
+    ) -> HarnessStart:
+        assert intent is HarnessLaunchIntent.RESUME_ONLY
+        raise StateError("no resumable session")
+
+    monkeypatch.setattr(ShellIntegration, "start", unavailable_start)
+
+    with pytest.raises(StateError):
+        restart_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+            name="s1",
+            resume_only=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )  # type: ignore[arg-type]
+
+    assert "kill" not in events
+    assert "tmux_create" not in events
+    db.close()
+
+
+@pytest.mark.parametrize("operation_name", ["start_session", "restart_session"])
+def test_service_rejects_conflicting_launch_policies_before_database_access(operation_name: str) -> None:
+    from agentworks.errors import ValidationError
+    from agentworks.sessions import manager as session_manager
+
+    operation = getattr(session_manager, operation_name)
+    with pytest.raises(ValidationError):
+        operation(
+            object(),
+            object(),
+            name="s1",
+            force_new=True,
+            resume_only=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
 
 
 @pytest.mark.parametrize("operation_name", ["start_session", "restart_session"])
@@ -1140,7 +1216,7 @@ def test_restart_pane_command_uses_resume_command_and_session_workspace(
     """restart: the pane command is the integration's start() output (the
     template's ``resume_command``, preferred over ``command``) with
     ``workspace_name`` sourced from the SESSION ROW, matching the interim
-    path's continuation-command substitution."""
+    path's resume-command substitution."""
     from agentworks.sessions.manager import restart_session
 
     db, _events = _restart_fixture(tmp_path, monkeypatch)

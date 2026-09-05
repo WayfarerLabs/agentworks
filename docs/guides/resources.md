@@ -374,10 +374,10 @@ spec:
 The `claude-code` integration runs Claude Code as the session. It ships as the opt-in `claude`
 system plugin (see "System plugins" below), so a `session-template` naming it still lists ready, but
 creating a session on it is refused with an "enable plugin `claude`" hint until you set
-`[plugins] system = ["claude"]`. It selects the launch-and-continuation conventions in one table
-instead of restating command strings: `session create` starts a new Claude conversation, while
-`session start` and `session restart` continue the bound conversation when its transcript still
-exists (and launch fresh when Claude never wrote one):
+`[plugins] system = ["claude"]`. It selects the launch-and-resume conventions in one table instead
+of restating command strings: `session create` starts a new Claude conversation, while
+`session start` and `session restart` resume the bound conversation when its transcript still exists
+(and launch fresh when Claude never wrote one):
 
 ```yaml
 apiVersion: agentworks/v1
@@ -447,7 +447,8 @@ brand-new conversation, while the adoption and picker outcomes belong to ordinar
 and an adoption names the Codex conversation id it chose, so you can see it happen and fix it (pick
 the right conversation from the picker, or archive the stale one) rather than discovering it later.
 Overriding `notify` yourself through `extra_args` turns the recording off (yours wins, because
-`extra_args` follows generated options), which leaves later continuation relying on that fallback.
+`extra_args` follows generated options), which leaves later resume attempts relying on that
+fallback.
 
 Its config is all optional, and `agw resource explain harness-integration/codex` documents every
 field. The field reference omits these details because they describe Codex behavior rather than the
@@ -492,14 +493,14 @@ fields themselves:
   other settings. Native config parsing and the positional `--` boundary were checked locally with
   Codex CLI 0.149.1.
 - **Fresh prompt setup is never replayed when a conversation resumes.** Goal, initial prompt, and
-  prompt-mediated primary-thread agent setup apply on `session create`, `--force-new`, and on an
-  ordinary start decision that finds no resumable Codex conversation, including the archived-or-gone
-  fallback. The ambiguity picker is different: choosing an existing conversation must not receive
-  fresh prompt setup, so Codex's own Esc path cannot receive it conditionally either. Native
-  `developer_instructions` still configure the picker process and its Esc-created conversation. If
-  you want the declared fresh prompt setup after seeing the picker, exit it, remove or archive the
-  unwanted candidates, and run `agw session restart` again so Agentworks can make the fresh
-  decision.
+  prompt-mediated primary-thread agent setup apply on `session create`, `--force-new`, and on a
+  `RESUME_OR_NEW` decision that finds no resumable Codex conversation, including the
+  archived-or-gone fallback. The ambiguity picker is different: choosing an existing conversation
+  must not receive fresh prompt setup, so Codex's own Esc path cannot receive it conditionally
+  either. Native `developer_instructions` still configure the picker process and its Esc-created
+  conversation. If you want the declared fresh prompt setup after seeing the picker, exit it, remove
+  or archive the unwanted candidates, and run `agw session restart` again so Agentworks can make the
+  fresh decision.
 
 The only launch-target requirement is that `codex` is installed:
 

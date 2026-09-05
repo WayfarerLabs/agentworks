@@ -66,7 +66,7 @@ class _FakeHarnessIntegration(HarnessIntegration):
         self,
         ctx,
         *,
-        intent=HarnessLaunchIntent.CONTINUE,
+        intent=HarnessLaunchIntent.RESUME_OR_NEW,
     ):
         return HarnessStart("")
 

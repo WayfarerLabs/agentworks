@@ -20,9 +20,9 @@ launching their desired tooling.
 
 However, Agentworks also supports deeper tooling support through a **harness integration**. An
 Agentworks harness integration knows how to run a specific harness as the session's workload,
-including checking dependencies, configuring it, and choosing whether to continue existing tool
-state. This allows tight integration with harnesses such as Claude Code or Codex without confusing
-the Agentworks integration layer with the harness it drives.
+including checking dependencies, configuring it, and choosing whether to resume existing tool state.
+This allows tight integration with harnesses such as Claude Code or Codex without confusing the
+Agentworks integration layer with the harness it drives.
 
 The current integration contract covers session-scoped configuration and one launch operation.
 Broader user- and workspace-scoped tooling behavior remains outside that contract, as described
@@ -86,26 +86,31 @@ definitive config for one.
   conversation can also receive Grok's native goal and initial prompt. The agent and rules configure
   every launched Grok process, including a real resume.
 
-## Conversation Continuation
+## Conversation Resume Policy
 
-By default, `session start` and `session restart` ask the integration to continue existing tool
-state where possible. `--force-new` asks for a fresh tool conversation. The exact mechanism differs
-by tool, but an ordinary relaunch should preserve useful work when the tool supports it.
+By default, `session start` and `session restart` ask the integration to resume existing tool state
+where possible and start fresh otherwise. `--resume-only` requires a resume and refuses before
+replacing the runtime when none is available. `--force-new` asks for a fresh tool conversation.
+`--resume-only` and `--force-new` are mutually exclusive.
 
-Of course, this is not always possible. Some tools, like a plain shell, do not have any concept of a
-session to resume, so the integration simply starts a new workload.
+Some integrations do not implement every policy. The plain `shell` integration, for example, has no
+way to prove that its arbitrary configured command resumes tool state, so it reports `RESUME_ONLY`
+as unsupported instead of silently starting a workload.
 
 ## Integration Obligations
 
 A harness integration knows how to run one harness as a session's workload and bring it back, and
 nothing about the machinery around it. It:
 
-- **MUST** implement `start(ctx, *, intent=HarnessLaunchIntent.CONTINUE)` and return a
-  `HarnessStart` containing the command that launches its tool for a given session, to run as the
-  target user (an agent, or admin) in the session's workspace.
-- **SHOULD** continue an existing tool conversation for `CONTINUE`, and **MUST** launch a fresh
-  conversation for `CREATE` and `FORCE_NEW` when the tool can distinguish the two. Only `FORCE_NEW`
-  means the operator explicitly asked to bypass prior state.
+- **MUST** implement `start(ctx, *, intent=HarnessLaunchIntent.RESUME_OR_NEW)` and return a
+  `HarnessStartResult`. `HarnessStart` contains the command that launches its tool for a given
+  session, to run as the target user (an agent, or admin) in the session's workspace. An integration
+  may instead return `HarnessStartNotImplemented` for any intent it does not implement; core turns
+  that result into an intent- and integration-specific error before changing the runtime.
+- **MUST** resume or launch fresh for `RESUME_OR_NEW`, **MUST** resume or fail without launching for
+  `RESUME_ONLY`, and **MUST** launch a fresh conversation for `CREATE` and `FORCE_NEW` when the
+  integration implements those intents. Only `FORCE_NEW` means the operator explicitly asked to
+  bypass prior state.
 - **MUST** declare the executables its tool needs on the launch target, so Agentworks can verify
   their presence before starting and surface a missing tool as an actionable error.
 - **MUST**, for a stateful tool, own a durable session identity and refuse to guess it: mint or
@@ -146,9 +151,9 @@ those; the integration only decides what runs in the pane.
 
 ## Technical Overview
 
-The preceding sections describe the operator-facing model. The remaining sections cover where a
+The preceding sections describe the operator-facing model. The remaining sections cover where an
 integration sits in the capability model, its implementation contract, how the session machinery
-consumes it, and the practices that make the shipped integrations robust, especially continuation.
+consumes it, and the practices that make the shipped integrations robust, especially resume policy.
 
 A **harness integration** is a harness's runtime adapter: it knows how a session workload (a plain
 shell, Claude Code, Codex, ...) is configured and launched, and what the launch target must provide
@@ -307,19 +312,20 @@ the shared `require_commands` helper with the executables the launch target must
 
 Keep readiness to tool PRESENCE. Session state (is there something to resume?) is an op-time
 concern: readiness is read-only and re-runnable by contract, and it runs at command start against a
-world the op changes (on restart, the continuation decision must see the old process already dead,
-which only the op-time probe does).
+world the op changes. On restart, core asks for the decision before teardown so a strict-resume
+failure or unsupported intent leaves the existing runtime intact.
 
 #### Operation: Returning the Launch Decision
 
-- The return value is `HarnessStart(command, note)`, not an execution: the session manager wraps the
-  command (template-var substitution, then the tmux pane's
-  `$SHELL -lic 'cd <dir> && exec <command>'`) and runs it. Empty string means "just the login
-  shell".
-- Core passes a `HarnessLaunchIntent`: `CREATE` for `session create`, `FORCE_NEW` for an explicit
-  `--force-new`, and `CONTINUE` for an ordinary `session start` or `session restart`. On restart,
-  core tears down the old tmux server before asking the integration for the next launch decision.
-- A stateful integration owns the continuation decision. `claude-code` and `grok-build` use durable
+- The return value is a `HarnessStartResult`, not an execution. `HarnessStart(command, note)` is the
+  implemented result: the session manager wraps the command (template-var substitution, then the
+  tmux pane's `$SHELL -lic 'cd <dir> && exec <command>'`) and runs it. Empty string means "just the
+  login shell". `HarnessStartNotImplemented` reports that the integration does not implement that
+  intent; every intent may produce it.
+- Core passes a `HarnessLaunchIntent`: `CREATE` for `session create`, `RESUME_ONLY` for an explicit
+  `--resume-only`, `FORCE_NEW` for an explicit `--force-new`, and `RESUME_OR_NEW` for an ordinary
+  `session start` or `session restart`. Core obtains and validates the result before teardown.
+- A stateful integration owns the resume decision. `claude-code` and `grok-build` use durable
   integration-owned identifiers. `codex` fingerprints its recorder before a forced-fresh launch so a
   stale notification cannot immediately rebind the new conversation, while ordinary launches may
   adopt only the candidates its documented decision tree considers safe.
@@ -328,9 +334,9 @@ which only the op-time probe does).
 
 `HarnessStart.note` carries an optional one-line note about what the operation decided and the
 session manager prints it in the CLI op output. Stateful integrations distinguish a new session's
-first launch, a continuation, a fresh launch after finding no usable state, and a forced-fresh
-launch that intentionally bypasses prior state. Default `None` keeps `shell` silent. Pair it with a
-pane-visible echo (below) so the decision is visible in both places the operator looks.
+first launch, a resume, a fresh launch after finding no usable state, and a forced-fresh launch that
+intentionally bypasses prior state. Default `None` keeps `shell` silent. Pair it with a pane-visible
+echo (below) so the decision is visible in both places the operator looks.
 
 #### Per-Session State: The Persisted Blob
 
@@ -415,11 +421,11 @@ sessions. Five rules, each earned:
    resume. The manager's persistence contract makes any of these survive restarts. Derivation
    schemes (from session name, cwd, or the tool's own directory layout) are brittle against renames
    and tool-version drift; a stored opaque value the tool itself reported is not.
-2. **Decide continuation-vs-launch at op time, on the launch target, from the tool's own durable
-   state.** Probe for the stored id's artifact (for Claude, the transcript `<sid>.jsonl` under the
-   projects dir) over the transport, with the same `$SHELL -lic` environment the pane will get. Do
-   it per op, not cached: the world changes between ops, and restart calls `start` with the old
-   process dead so this probe sees settled state.
+2. **Decide resume-vs-launch at op time, on the launch target, from the tool's own durable state.**
+   Probe for the stored id's artifact (for Claude, the transcript `<sid>.jsonl` under the projects
+   dir) over the transport, with the same `$SHELL -lic` environment the pane will get. Do it per op,
+   not cached: the world changes between ops, and restart calls `start` with the old process dead so
+   this probe sees settled state.
 3. **Verify empirically that the probe boundary equals the tool's resume boundary.** The claude work
    ran a controlled experiment (sessions abandoned at every stage) to confirm transcript presence
    and Claude's own resume boundary are the SAME line, which is what makes both failure modes (blind
@@ -527,7 +533,7 @@ No real tool binary anywhere. The layers, with the shipped tests as templates:
   probe (keyed on the stored id) in a single test. Cover: config vocabulary (accepts, unknown-field
   raises, wrong-type raises), both detection directions (probe hit resumes, miss launches fresh,
   other exit raises), flag mapping and `extra_args` quoting, the visible-decision line, state
-  minting, and the integration's create, continue, and force-new behavior.
+  minting, and the integration's create, resume-only, resume-or-new, and force-new behavior.
 - **Generated shell text, executed:** `cli/tests/test_codex_integration.py`. An exit-code stub
   proves how a probe's ANSWER is classified; it cannot prove the probe asks the right question, and
   the interesting logic in a stateful integration often lives in the shell text itself (codex's

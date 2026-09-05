@@ -331,7 +331,7 @@ class _SecretHarnessIntegration(HarnessIntegration):
         self,
         ctx,
         *,
-        intent=HarnessLaunchIntent.CONTINUE,
+        intent=HarnessLaunchIntent.RESUME_OR_NEW,
     ):
         return HarnessStart("")
 
@@ -898,7 +898,7 @@ def _toy_harness_integration(harness_integration_name: str) -> type:
             self,
             ctx: RunContext,
             *,
-            intent: HarnessLaunchIntent = HarnessLaunchIntent.CONTINUE,
+            intent: HarnessLaunchIntent = HarnessLaunchIntent.RESUME_OR_NEW,
         ) -> HarnessStart:
             del intent
             self._state["session_id"] = f"{harness_integration_name}-id"

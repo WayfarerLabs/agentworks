@@ -196,10 +196,10 @@ class ClaudeCodeIntegration(HarnessIntegration):
         self,
         ctx: RunContext,
         *,
-        intent: HarnessLaunchIntent = HarnessLaunchIntent.CONTINUE,
+        intent: HarnessLaunchIntent = HarnessLaunchIntent.RESUME_OR_NEW,
     ) -> HarnessStart:
-        """Choose continuation when usable, or start a fresh conversation."""
-        command = self._resume_or_launch(ctx, fresh=intent.starts_fresh)
+        """Choose the requested fresh, strict-resume, or fallback policy."""
+        command = self._resume_or_launch(ctx, intent=intent)
         if intent is HarnessLaunchIntent.FORCE_NEW:
             note = "Fresh Claude Code session requested. Starting a new one without resuming prior state..."
         elif intent is HarnessLaunchIntent.CREATE:
@@ -210,13 +210,22 @@ class ClaudeCodeIntegration(HarnessIntegration):
             note = "No existing Claude Code session. Starting a new one..."
         return HarnessStart(command, note)
 
-    def _resume_or_launch(self, ctx: RunContext, *, fresh: bool) -> str:
+    def _resume_or_launch(self, ctx: RunContext, *, intent: HarnessLaunchIntent) -> str:
         """Read (or mint) the stored session id, probe the launch target
         for its transcript, and return the single ``sh -c`` pane command
         that echoes the visible decision and ``exec``s ``claude``."""
+        fresh = intent.starts_fresh
+        resume_only = intent is HarnessLaunchIntent.RESUME_ONLY
+        stored_sid = self._state.get("session_id")
+        if resume_only and not (isinstance(stored_sid, str) and stored_sid):
+            raise self._resume_only_error()
         sid = self._session_id(fresh=fresh)
         launch_target = ctx.admin_target() if self._admin else ctx.agent_target()
+        if resume_only and launch_target is None:
+            raise self._resume_only_error()
         resume = not fresh and launch_target is not None and self._transcript_exists(launch_target, sid)
+        if resume_only and not resume:
+            raise self._resume_only_error()
         self._resumed = resume
 
         if resume:
@@ -242,6 +251,14 @@ class ClaudeCodeIntegration(HarnessIntegration):
         # template-var substitution does not mangle them.
         inner = f"echo {shlex.quote(msg)}; exec claude {argv}"
         return f"sh -c {shlex.quote(inner)}"
+
+    def _resume_only_error(self) -> StateError:
+        return StateError(
+            f"session '{self._session_name}': Claude Code has no resumable conversation on its launch target",
+            entity_kind="session",
+            entity_name=self._session_name,
+            hint="Retry without --resume-only to allow a new Claude Code conversation.",
+        )
 
     def _session_id(self, *, fresh: bool = False) -> str:
         """The stored Claude session id, minted (and recorded in the state

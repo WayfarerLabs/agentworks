@@ -4,7 +4,7 @@ override on every launch form, the source-filtered discovery fallback, the
 recorder script itself, the flag mapping and ``extra_args`` passthrough, the
 visible decision, and that readiness probes ``codex``.
 
-Note which launch intent each test drives. Only ``CONTINUE`` runs the decision
+Note which launch intent each test drives. Only resume intents run the decision
 tree, so that is what the fork tests call; ``CREATE`` is unconditionally
 fresh, and the tests that pass it exist to pin exactly that (nothing probed,
 nothing adopted), including the recreated-namesake scenario end to end.
@@ -283,6 +283,54 @@ def test_launch_intents_report_distinct_decisions() -> None:
 
     assert None not in {missing.note, created.note, forced.note}
     assert len({missing.note, created.note, forced.note}) == 3
+
+
+def test_resume_only_resumes_a_bound_rollout() -> None:
+    state: dict[str, object] = {"session_id": _SID}
+    result = _harness_integration(state=state).start(
+        _op_ctx(_target(rollout=0)), intent=HarnessLaunchIntent.RESUME_ONLY
+    )
+    assert _raw_codex_argv(result)[:2] == ["resume", _SID]
+    assert state == {"session_id": _SID}
+
+
+def test_resume_only_adopts_one_unambiguous_candidate() -> None:
+    state: dict[str, object] = {}
+    result = _harness_integration(state=state).start(
+        _op_ctx(_target(discovered=f"{_ROLLOUT}\n")), intent=HarnessLaunchIntent.RESUME_ONLY
+    )
+    assert _raw_codex_argv(result)[:2] == ["resume", _SID]
+    assert state == {"session_id": _SID}
+
+
+@pytest.mark.parametrize(
+    ("state", "target"),
+    [
+        pytest.param({}, _target(), id="no-state"),
+        pytest.param({"session_id": _SID}, _target(rollout=1), id="stale-bound-state"),
+        pytest.param({}, _target(discovered=f"{_ROLLOUT}\n{_OTHER_ROLLOUT}\n"), id="ambiguous-candidates"),
+        pytest.param({"fresh_pending": _SID}, _target(recorded=_SID), id="unchanged-fresh-recording"),
+        pytest.param({"fresh_pending": 7}, _target(recorded=_SID), id="malformed-fresh-state"),
+        pytest.param({}, _target(recorder_exit=6), id="recorder-probe-failed"),
+        pytest.param({"session_id": _SID}, _target(rollout=255), id="bound-rollout-probe-failed"),
+        pytest.param({}, _target(discovery_exit=5), id="discovery-probe-failed"),
+    ],
+)
+def test_resume_only_refuses_non_resumable_paths_without_state_mutation(
+    state: dict[str, object],
+    target: _FakeTarget,
+) -> None:
+    before = state.copy()
+    with pytest.raises(StateError):
+        _harness_integration(state=state).start(_op_ctx(target), intent=HarnessLaunchIntent.RESUME_ONLY)
+    assert state == before
+
+
+def test_resume_only_refuses_a_missing_target_without_state_mutation() -> None:
+    state: dict[str, object] = {"session_id": _SID}
+    with pytest.raises(StateError):
+        _harness_integration(state=state).start(RunContext(), intent=HarnessLaunchIntent.RESUME_ONLY)
+    assert state == {"session_id": _SID}
 
 
 def test_create_clears_a_stale_recording_and_retires_legacy_keys() -> None:

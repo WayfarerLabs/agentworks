@@ -54,29 +54,56 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class HarnessStart:
-    """A harness integration's pre-launch decision."""
+    """An implemented harness launch decision."""
 
     command: str
     note: str | None = None
 
 
+@dataclass(frozen=True)
+class HarnessStartNotImplemented:
+    """The integration does not implement the requested launch intent."""
+
+
+type HarnessStartResult = HarnessStart | HarnessStartNotImplemented
+
+
 class HarnessLaunchIntent(StrEnum):
     """Why core is asking an integration to choose a launch.
 
-    A new session and an operator-forced fresh conversation both start fresh,
-    but only the latter bypasses prior state by request. Keeping those cases
-    distinct lets integrations explain the decision truthfully while sharing
-    their fresh-launch mechanics.
+    Create and force-new both require a fresh conversation. Resume-only
+    requires existing resumable state. Resume-or-new prefers that state but
+    may start fresh when none exists.
     """
 
     CREATE = "create"
-    CONTINUE = "continue"
+    RESUME_ONLY = "resume-only"
+    RESUME_OR_NEW = "resume-or-new"
     FORCE_NEW = "force-new"
 
     @property
     def starts_fresh(self) -> bool:
-        """Whether this launch must avoid continuing prior harness state."""
-        return self is not HarnessLaunchIntent.CONTINUE
+        """Whether this launch must avoid resuming prior harness state."""
+        return self in {HarnessLaunchIntent.CREATE, HarnessLaunchIntent.FORCE_NEW}
+
+
+def require_implemented_start(
+    result: HarnessStartResult,
+    *,
+    intent: HarnessLaunchIntent,
+    harness_integration_name: str,
+    session_name: str,
+) -> HarnessStart:
+    """Return an implemented launch or raise core's unsupported-intent error."""
+    if isinstance(result, HarnessStart):
+        return result
+    raise StateError(
+        f"session '{session_name}': harness integration '{harness_integration_name}' "
+        f"does not implement launch intent '{intent.value}'",
+        entity_kind="session",
+        entity_name=session_name,
+        hint="Choose a harness integration that implements this intent, or request a different launch policy.",
+    )
 
 
 def require_commands(
@@ -274,14 +301,14 @@ class HarnessIntegration(Capability):
         self,
         ctx: RunContext,
         *,
-        intent: HarnessLaunchIntent = HarnessLaunchIntent.CONTINUE,
-    ) -> HarnessStart:
+        intent: HarnessLaunchIntent = HarnessLaunchIntent.RESUME_OR_NEW,
+    ) -> HarnessStartResult:
         """Choose the raw pane command for a session launch.
 
-        Empty ``command`` means a login shell. Core owns lifecycle and asks for
-        a fresh harness conversation for :attr:`HarnessLaunchIntent.CREATE`
-        and :attr:`HarnessLaunchIntent.FORCE_NEW`. Only ``FORCE_NEW`` represents
-        an operator request to bypass prior state.
+        Return :class:`HarnessStart` when the intent is implemented, or
+        :class:`HarnessStartNotImplemented` when this integration does not
+        implement that intent. An empty implemented ``command`` means a login
+        shell. Core owns lifecycle and the policy represented by the intent.
         """
 
     @abstractmethod

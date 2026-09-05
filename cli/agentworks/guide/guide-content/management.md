@@ -39,8 +39,10 @@ the current operations. Read the result after a change rather than assuming it s
 
 Sessions and consoles have explicit runtime lifecycle. `start` realizes a stopped runtime and is a
 no-op when it is already running; `restart` replaces it; `stop` removes it; and `attach` only
-connects to a running runtime. Session start and restart continue the harness conversation when
-possible. For sessions, add `--force-new` when a new conversation is required.
+connects to a running runtime. Session start and restart resume the harness conversation when
+possible. For sessions, add `--resume-only` to refuse unless a resume is possible, or `--force-new`
+when a new conversation is required. These options are mutually exclusive. An integration that does
+not implement the requested policy reports that explicitly before an existing runtime is replaced.
 
 For setup, return to `agw guide show concept-onboarding`. For failures, use
 `agw guide show concept-troubleshooting`. Exceptional conversion from retired configuration belongs

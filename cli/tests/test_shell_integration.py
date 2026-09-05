@@ -19,8 +19,11 @@ from agentworks.capabilities.config import capability_config_references, validat
 from agentworks.capabilities.harness_integration import (
     HarnessIntegration,
     HarnessLaunchIntent,
+    HarnessStart,
+    HarnessStartNotImplemented,
     ShellIntegration,
     quote_literal_argv,
+    require_implemented_start,
 )
 from agentworks.capabilities.harness_integration.shell import ShellConfig
 from agentworks.errors import ConfigError, StateError
@@ -254,24 +257,55 @@ def test_create_uses_command_when_resume_command_exists() -> None:
     result = _harness_integration({"command": "claude", "resume_command": "claude --resume"}).start(
         RunContext(), intent=HarnessLaunchIntent.CREATE
     )
+    assert isinstance(result, HarnessStart)
     assert result.command == "claude"
 
 
 def test_start_empty_config_is_a_login_shell() -> None:
-    assert _harness_integration({}).start(RunContext(), intent=HarnessLaunchIntent.CREATE).command == ""
+    result = _harness_integration({}).start(RunContext(), intent=HarnessLaunchIntent.CREATE)
+    assert isinstance(result, HarnessStart)
+    assert result.command == ""
 
 
 def test_start_prefers_resume_command() -> None:
     harness_integration = _harness_integration({"command": "claude", "resume_command": "claude --resume"})
-    assert harness_integration.start(RunContext()).command == "claude --resume"
+    result = harness_integration.start(RunContext())
+    assert isinstance(result, HarnessStart)
+    assert result.command == "claude --resume"
+
+
+def test_resume_only_is_not_implemented() -> None:
+    result = _harness_integration({"command": "claude", "resume_command": "claude --resume"}).start(
+        RunContext(), intent=HarnessLaunchIntent.RESUME_ONLY
+    )
+    assert type(result) is HarnessStartNotImplemented
+
+
+@pytest.mark.parametrize("intent", list(HarnessLaunchIntent))
+def test_core_rejects_not_implemented_for_every_launch_intent(intent: HarnessLaunchIntent) -> None:
+    with pytest.raises(StateError) as caught:
+        require_implemented_start(
+            HarnessStartNotImplemented(),
+            intent=intent,
+            harness_integration_name="shell",
+            session_name="work",
+        )
+
+    assert caught.value.entity_name == "work"
+    assert "shell" in str(caught.value)
+    assert intent.value in str(caught.value)
 
 
 def test_start_falls_back_to_command() -> None:
-    assert _harness_integration({"command": "claude"}).start(RunContext()).command == "claude"
+    result = _harness_integration({"command": "claude"}).start(RunContext())
+    assert isinstance(result, HarnessStart)
+    assert result.command == "claude"
 
 
 def test_start_empty_config_is_a_login_shell_when_resume_is_enabled() -> None:
-    assert _harness_integration({}).start(RunContext()).command == ""
+    result = _harness_integration({}).start(RunContext())
+    assert isinstance(result, HarnessStart)
+    assert result.command == ""
 
 
 def test_shell_leaves_the_state_blob_untouched() -> None:

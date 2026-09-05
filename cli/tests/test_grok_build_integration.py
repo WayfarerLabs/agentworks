@@ -168,6 +168,39 @@ def test_absent_summary_starts_fresh() -> None:
     assert _grok_argv(command)[:2] == ["--session-id", _SID]
 
 
+def test_resume_only_resumes_an_existing_summary() -> None:
+    target = _FakeTarget({"summary.json": _FakeResult(0)})
+    result = _integration(state={"session_id": _SID}).start(_op_ctx(target), intent=HarnessLaunchIntent.RESUME_ONLY)
+    assert _grok_argv(result)[:2] == ["--resume", _SID]
+
+
+@pytest.mark.parametrize(
+    ("state", "target", "expected_probe_count"),
+    [
+        pytest.param({}, _FakeTarget(), 0, id="no-stored-id"),
+        pytest.param({"session_id": _SID}, _FakeTarget({"summary.json": _FakeResult(1)}), 1, id="no-summary"),
+        pytest.param({"session_id": _SID}, _FakeTarget({"summary.json": _FakeResult(255)}), 1, id="probe-failed"),
+    ],
+)
+def test_resume_only_refuses_without_resumable_state_and_preserves_integration_state(
+    state: dict[str, object],
+    target: _FakeTarget,
+    expected_probe_count: int,
+) -> None:
+    before = state.copy()
+    with pytest.raises(StateError):
+        _integration(state=state).start(_op_ctx(target), intent=HarnessLaunchIntent.RESUME_ONLY)
+    assert state == before
+    assert len(target.commands) == expected_probe_count
+
+
+def test_resume_only_refuses_a_missing_target_without_state_mutation() -> None:
+    state: dict[str, object] = {"session_id": _SID}
+    with pytest.raises(StateError):
+        _integration(state=state).start(RunContext(), intent=HarnessLaunchIntent.RESUME_ONLY)
+    assert state == {"session_id": _SID}
+
+
 def test_create_rotates_the_id_without_probing_resumable_state(monkeypatch: pytest.MonkeyPatch) -> None:
     replacement_sid = "0a18a04b-d083-4dc8-961a-07f2151c9b35"
     monkeypatch.setattr(uuid, "uuid4", lambda: uuid.UUID(replacement_sid))
