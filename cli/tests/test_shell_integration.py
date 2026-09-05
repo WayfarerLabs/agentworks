@@ -250,8 +250,10 @@ def test_merge_default_shape_when_neither_declares_required() -> None:
 # -- the op: start pane strings ----------------------------------------------
 
 
-def test_start_returns_the_command() -> None:
-    result = _harness_integration({"command": "claude"}).start(RunContext(), intent=HarnessLaunchIntent.CREATE)
+def test_create_uses_command_when_resume_command_exists() -> None:
+    result = _harness_integration({"command": "claude", "resume_command": "claude --resume"}).start(
+        RunContext(), intent=HarnessLaunchIntent.CREATE
+    )
     assert result.command == "claude"
 
 

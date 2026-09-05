@@ -471,16 +471,15 @@ class CodexIntegration(HarnessIntegration):
         """
         if self._decision is None:
             return None
+        policy_note = None
         if intent is HarnessLaunchIntent.FORCE_NEW:
-            note = "Fresh Codex session requested. Starting a new one without resuming prior state..."
+            policy_note = "Fresh Codex session requested. Starting a new one without resuming prior state..."
+        elif intent is HarnessLaunchIntent.CREATE:
+            policy_note = "Starting a new Codex session..."
+        if policy_note is not None:
             if disclosure := self._fresh_setup_disclosure():
-                note = f"{note} {disclosure}"
-            return note
-        if intent is HarnessLaunchIntent.CREATE:
-            note = "Starting a new Codex session..."
-            if disclosure := self._fresh_setup_disclosure():
-                note = f"{note} {disclosure}"
-            return note
+                policy_note = f"{policy_note} {disclosure}"
+            return policy_note
         dropped = "Previous Codex conversation is archived or gone. " if self._dropped_stale else ""
         if self._decision == "resumed":
             return "Existing Codex session found. Resuming..."

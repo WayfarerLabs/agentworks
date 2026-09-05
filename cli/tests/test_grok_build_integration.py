@@ -168,6 +168,19 @@ def test_absent_summary_starts_fresh() -> None:
     assert _grok_argv(command)[:2] == ["--session-id", _SID]
 
 
+def test_create_rotates_the_id_without_probing_resumable_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    replacement_sid = "0a18a04b-d083-4dc8-961a-07f2151c9b35"
+    monkeypatch.setattr(uuid, "uuid4", lambda: uuid.UUID(replacement_sid))
+    state: dict[str, object] = {"session_id": _SID}
+    target = _FakeTarget({"summary.json": _FakeResult(0)})
+
+    command = _integration(state=state).start(_op_ctx(target), intent=HarnessLaunchIntent.CREATE)
+
+    assert _grok_argv(command)[:2] == ["--session-id", replacement_sid]
+    assert state == {"session_id": replacement_sid}
+    assert target.commands == []
+
+
 def test_launch_intents_report_distinct_decisions() -> None:
     target = _FakeTarget({"summary.json": _FakeResult(1)})
     missing = _integration().start(_op_ctx(target))
