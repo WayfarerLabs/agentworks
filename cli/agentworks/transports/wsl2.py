@@ -83,7 +83,11 @@ class WSL2Transport(Transport):
         t = self._resolve_timeout(timeout)
         timed_out = False
         suppress_output = input_text is not None or discard_output
-        stdin = input_text if input_text is not None else input_data
+        # No payload means the command sees a closed stdin (EOF), never the
+        # caller's console, so a stdin-reading probe cannot hang. SSH does this
+        # with -n; a local subprocess needs an explicit empty pipe. See the
+        # Transport.run stdin contract.
+        stdin = input_text if input_text is not None else (input_data if input_data is not None else "")
         try:
             result = subprocess.run(
                 args,
