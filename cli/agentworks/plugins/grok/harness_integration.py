@@ -154,8 +154,6 @@ class GrokBuildIntegration(HarnessIntegration):
             raise self._resume_only_error()
         sid = self._session_id(fresh=fresh)
         launch_target = ctx.admin_target() if self._admin else ctx.agent_target()
-        if resume_only and launch_target is None:
-            raise self._resume_only_error()
         resume = not fresh and launch_target is not None and self._session_exists(launch_target, sid)
         if resume_only and not resume:
             raise self._resume_only_error()

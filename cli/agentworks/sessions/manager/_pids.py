@@ -90,9 +90,8 @@ def _repair_session_pid(
     target: Transport,
     db: Database,
     announce: bool = True,
-    persist: bool = True,
 ) -> bool:
-    """Resolve a single session's runtime identity, optionally persisting it.
+    """Core repair logic for a single session. Returns True if the DB was updated.
 
     Raises StateError if the session is alive but PID/boot_id can't be recovered,
     or ConnectivityError if the VM is unreachable.
@@ -139,10 +138,8 @@ def _repair_session_pid(
                 and (stored_boot_id is None or stored_boot_id == observed_boot_id)
                 and (stored_ticks is None or stored_ticks == fingerprint.start_ticks)
             ):
-                _apply_repaired_runtime(
-                    session,
-                    db=db,
-                    persist=persist,
+                db.update_session_runtime(
+                    session.name,
                     socket_path=sock,
                     pid=fingerprint.pid,
                     boot_id=observed_boot_id,
@@ -172,10 +169,8 @@ def _repair_session_pid(
                 hint="Investigate the tmux server manually.",
             )
 
-    _apply_repaired_runtime(
-        session,
-        db=db,
-        persist=persist,
+    db.update_session_runtime(
+        session.name,
         socket_path=sock,
         pid=PID_STOPPED,
         boot_id=None,
@@ -184,31 +179,6 @@ def _repair_session_pid(
     if announce:
         output.info(f"Session '{session.name}' is not running; marked stopped")
     return True
-
-
-def _apply_repaired_runtime(
-    session: SessionRow,
-    *,
-    db: Database,
-    persist: bool,
-    socket_path: str | None,
-    pid: int | None,
-    boot_id: str | None,
-    tmux_server_start_ticks: int | None,
-) -> None:
-    """Apply an observed repair in memory and optionally persist it."""
-    if persist:
-        db.update_session_runtime(
-            session.name,
-            socket_path=socket_path,
-            pid=pid,
-            boot_id=boot_id,
-            tmux_server_start_ticks=tmux_server_start_ticks,
-        )
-    session.socket_path = socket_path
-    session.pid = pid
-    session.boot_id = boot_id
-    session.tmux_server_start_ticks = tmux_server_start_ticks
 
 
 def _validated_stored_start_ticks(session: SessionRow) -> int | None:
@@ -313,13 +283,7 @@ def _needs_repair(session: SessionRow) -> bool:
     return session.pid is None or session.boot_id is None
 
 
-def _ensure_pid(
-    session: SessionRow,
-    *,
-    target: Transport,
-    db: Database,
-    persist: bool = True,
-) -> SessionRow:
+def _ensure_pid(session: SessionRow, *, target: Transport, db: Database) -> SessionRow:
     """Auto-recover PID + boot ID for a session missing either.
 
     Strict gate: after this returns, the session is guaranteed to be either
@@ -328,9 +292,7 @@ def _ensure_pid(
     """
     if not _needs_repair(session):
         return session
-    _repair_session_pid(session, target=target, db=db, announce=persist, persist=persist)  # raises on failure
-    if not persist:
-        return session
+    _repair_session_pid(session, target=target, db=db)  # raises on failure
     result = db.get_session(session.name)
     assert result is not None
     return result
@@ -342,7 +304,6 @@ def ensure_pids_batch(
     db: Database,
     config: Config,
     announce: bool = True,
-    persist: bool = True,
 ) -> list[SessionRow]:
     """Auto-recover PID + boot ID for sessions missing either. Returns updated list."""
     need_repair = [s for s in sessions if _needs_repair(s)]
@@ -376,7 +337,7 @@ def ensure_pids_batch(
         target = vm_cache[vm_name]
         for session in vm_sessions:
             try:
-                if _repair_session_pid(session, target=target, db=db, announce=announce, persist=persist):
+                if _repair_session_pid(session, target=target, db=db, announce=announce):
                     repaired_names.add(session.name)
             except (ConnectivityError, StateError) as exc:
                 if announce:
@@ -386,7 +347,7 @@ def ensure_pids_batch(
                     output.warn(f"Failed to repair session '{session.name}': {exc}")
 
     # Return original list with repaired sessions refreshed from DB
-    if not repaired_names or not persist:
+    if not repaired_names:
         return sessions
     result = []
     for s in sessions:

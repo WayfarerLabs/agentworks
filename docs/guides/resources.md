@@ -494,7 +494,7 @@ fields themselves:
   Codex CLI 0.149.1.
 - **Fresh prompt setup is never replayed when a conversation resumes.** Goal, initial prompt, and
   prompt-mediated primary-thread agent setup apply on `session create`, `--force-new`, and on a
-  `RESUME_OR_NEW` decision that finds no resumable Codex conversation, including the
+  ordinary start or restart that finds no resumable Codex conversation, including the
   archived-or-gone fallback. The ambiguity picker is different: choosing an existing conversation
   must not receive fresh prompt setup, so Codex's own Esc path cannot receive it conditionally
   either. Native `developer_instructions` still configure the picker process and its Esc-created

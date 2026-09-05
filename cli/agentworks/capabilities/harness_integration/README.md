@@ -312,8 +312,9 @@ the shared `require_commands` helper with the executables the launch target must
 
 Keep readiness to tool PRESENCE. Session state (is there something to resume?) is an op-time
 concern: readiness is read-only and re-runnable by contract, and it runs at command start against a
-world the op changes. On restart, core asks for the decision before teardown so a strict-resume
-failure or unsupported intent leaves the existing runtime intact.
+world the op changes. Normal lifecycle preparation may first persist observed PID, boot, or stopped
+facts. On restart, core then asks for the decision before teardown so a strict-resume failure or
+unsupported intent leaves the managed tmux runtime and integration-owned state intact.
 
 #### Operation: Returning the Launch Decision
 
@@ -426,8 +427,9 @@ sessions. Five rules, each earned:
    Probe for the stored id's artifact (for Claude, the transcript `<sid>.jsonl` under the projects
    dir) over the transport, with the same `$SHELL -lic` environment the pane will get. Do it per op,
    not cached: the world changes between ops. Restart calls `start` before teardown so an
-   unsupported intent or strict-resume failure leaves the existing runtime intact; the decision
-   therefore has to rely on durable tool state rather than process liveness.
+   unsupported intent or strict-resume failure leaves the managed tmux runtime and integration-owned
+   state intact; ordinary lifecycle runtime-identity repair can already have persisted observed
+   facts. The decision therefore has to rely on durable tool state rather than process liveness.
 3. **Verify empirically that the probe boundary equals the tool's resume boundary.** The claude work
    ran a controlled experiment (sessions abandoned at every stage) to confirm transcript presence
    and Claude's own resume boundary are the SAME line, which is what makes both failure modes (blind
