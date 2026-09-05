@@ -55,8 +55,13 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     write_test_ssh_keypair(key)
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "tskey-test")
     # Deterministic platform preflights: lima checks for limactl
-    # locally; pretend the tool exists regardless of the host.
+    # locally; pretend the tool exists regardless of the host. wsl2 is
+    # host-ready on a Windows test host but not on Linux, so pin it
+    # unsupported to keep exactly one site (lima-local) ready on any host.
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
+
+    monkeypatch.setattr(WSL2Platform, "unsupported_reason", classmethod(lambda c: "not this host"))
 
     def _make(extra: str = "", *, manifests: Sequence[ManifestDoc | str] = ()):
         path = tmp_path / "config.toml"

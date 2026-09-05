@@ -60,6 +60,11 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GH", "ghtok")
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    # wsl2 is host-ready on a Windows test host but not on Linux; pin it
+    # unsupported so exactly one site (lima-local) resolves on any host.
+    from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
+
+    monkeypatch.setattr(WSL2Platform, "unsupported_reason", classmethod(lambda c: "not this host"))
 
     def _make(extra: str = "", *, manifests: Sequence[ManifestDoc | str] = ()):
         path = tmp_path / "config.toml"
