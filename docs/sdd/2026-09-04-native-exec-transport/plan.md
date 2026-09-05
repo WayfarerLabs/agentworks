@@ -92,7 +92,7 @@ capability-appropriate live validation under the integration-testing process.
 - [x] Draft the FRD, HLA, execution LLD, migration strategy, prior-art research, and this plan as
       one coherent artifact set.
 - [x] Run artifact gates, manual scans, link review, and cross-file consistency review.
-- [ ] Obtain clean private agentworks-reviewer and Muntz passes on one exact artifact head and apply
+- [x] Obtain clean private agentworks-reviewer and Muntz passes on one exact artifact head and apply
       every material correction authorized by the SDD charter.
 - [ ] Commit and push the coherent artifact head, open the draft PR, apply
       `sdd:native-exec-transport` and `review-requested`, and publish the exact handoff.
