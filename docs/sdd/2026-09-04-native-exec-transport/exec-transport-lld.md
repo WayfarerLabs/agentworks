@@ -79,10 +79,10 @@ options into the new base. Full `Transport` retains its existing wider override,
 implementations change only their declared parent and imports. The concrete interactive terminal
 guard and file helpers remain on `Transport`.
 
-Current native callers use the default `check=True`. The option remains because #727 explicitly
-requires checked and unchecked exit handling: it determines whether a nonzero guest exit becomes a
-result carrying the real status or a typed failure. No existing native workflow depends on the
-unchecked branch.
+Start-time Tailscale repair already uses `check=False` for its best-effort installation command. A
+nonzero exit therefore becomes a result carrying the real status instead of a typed failure; the
+subsequent checked Tailscale join remains the decisive operation. Other native callers keep the
+checked default.
 
 `SSHResult`, `SSHError`, and `SSHLogger` stay where they are. Their names predate polymorphic
 transports and already serve Lima, WSL2, and remote Lima. This effort documents the compatibility
