@@ -74,8 +74,6 @@ exception and old claim that native transport always supports interaction.
   with more accurate reasoning.
 - **Runtime:** implementation begins only after 0.18.0. It does not enter the 0.18 release branch or
   release candidate.
-- **Provider support:** VE 8 remains the declared Proxmox target. VE 9 permission changes are not
-  silently folded into this migration.
 
 ## Delivery ordering
 

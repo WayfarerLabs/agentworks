@@ -213,19 +213,8 @@ There is no database, config, CLI grammar, machine-output, or completion change.
 scheduled after 0.18.0. Its implementation branch must start from the post-0.18 release baseline or
 otherwise be explicitly excluded from that release before merge intent.
 
-The repository currently promises Proxmox VE 8, whose QGA exec operations use the already-granted
-`VM.Monitor` permission. Current Proxmox VE documentation describes newer guest-agent permissions.
-This effort preserves the declared VE 8 scope rather than silently expanding provider support.
-
-## pyinfra direction
-
-pyinfra confirms that command execution is a useful lower seam, but its connector is coupled to
-pyinfra host, state, inventory, argument, fact, and operation models. Adopting it here would not
-replace the QGA carrier and would force a much larger architecture decision into a recovery fix.
-
-Agentworks therefore keeps `ExecTransport` small and owned. A later SDD may evaluate pyinfra for
-Phase B initialization and choose its integration shape from that effort's requirements. It should
-not change #727's required native recovery contract.
+Provider-version compatibility remains within R22. The evidence and rejected alternatives for that
+boundary and for pyinfra are centralized in [prior-art-research.md](./prior-art-research.md).
 
 ## Risks and safeguards
 
@@ -254,11 +243,6 @@ execution may continue. The only caller-owned repetition is the side-effect-free
 Safeguard: place it only in the required provider request field, discard result streams, sanitize
 provider failures without unsafe exception chaining, and inspect logs, results, and exceptions in
 tests.
-
-### A provider change expands the permission scope
-
-Safeguard: implement and document the currently promised VE 8 contract only. Treat VE 9 permission
-setup as its own compatibility change with provider-version validation.
 
 ## Rollback
 

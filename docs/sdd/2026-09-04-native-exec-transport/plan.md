@@ -106,9 +106,7 @@ capability-appropriate live validation under the integration-testing process.
   disposition, implementation phase, and objective proof.
 - Required exec-only behavior and optional rich native behavior are separated without a second hook
   or factory.
-- Proxmox identity, stdin, result, timeout, ambiguity, secret, and provider-version behavior is
-  explicit.
-- pyinfra adoption is bounded to a future evaluation and adds no dependency or framework surface.
+- Proxmox identity, stdin, result, timeout, ambiguity, and secret behavior is explicit.
 - No runtime implementation, lock file, 0.18 release claim, or material review finding remains.
 
 ## Phase 1: Build the narrow type and Proxmox carrier
@@ -167,11 +165,14 @@ capability-appropriate live validation under the integration-testing process.
 
 - [ ] Update root and vm-platform capability requirements with required native execution and
       optional full interaction, while retaining contract version 1.
-- [ ] Update the Proxmox guide and capability description for QGA recovery, VE 8 permissions, and
-      unavailable platform shell.
+- [ ] Update the Proxmox guide and capability description for QGA recovery, the declared provider
+      scope, and unavailable platform shell.
 - [ ] Update nearby code contracts and delete the temporary Proxmox non-compliance language.
+- [ ] Run `rg -n '727|non-compliant|noncompliant' cli/agentworks docs/guides scripts` and remove or
+      disposition every residual temporary tracking statement.
 - [ ] Confirm no config, sample config, completion, command reference, JSON schema, database
       migration, or release-upgrade guide changed without a new requirement.
+- [ ] Confirm dependency manifests contain no new pyinfra package.
 - [ ] Run focused tests throughout, then the complete Python and repository gate set.
 - [ ] Build and install the wheel in an isolated environment and smoke the affected CLI paths.
 
@@ -180,7 +181,6 @@ capability-appropriate live validation under the integration-testing process.
 - Permanent capability and operator docs match implemented behavior and provider support.
 - All static, unit, integration-mark-excluded, packaging, and repository gates pass.
 - Residual scans find no optional native hook or claim that Proxmox lacks recovery execution.
-- The runtime diff contains no pyinfra dependency or speculative framework layer.
 
 ## Phase 4: Review, live validation, and closeout
 

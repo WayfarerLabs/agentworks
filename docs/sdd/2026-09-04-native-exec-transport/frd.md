@@ -165,10 +165,7 @@ shell support optional and honestly reported.
 - Automatic fallback from canonical Tailscale transport to native execution.
 - A second native execution hook, transport selection registry, or operator-selectable recovery
   strategy.
-- pyinfra dependency, vendored pyinfra code, connector adapter, inventory, facts cache, deploy
-  engine, or operation DSL.
 - Rewriting the existing Proxmox bootstrap staging path without an independent need.
-- Proxmox VE 9 support or a version-aware Proxmox permission setup change.
 - Renaming the established `SSHResult`, `SSHError`, or `SSHLogger` compatibility shapes across the
   codebase.
 - Database, configuration, schema, command, or completion changes.
@@ -178,5 +175,3 @@ shell support optional and honestly reported.
 - 2026-09-04: The operator chose an SDD before implementation and authorized up to three published
   feedback/fix rounds for the SDD PR.
 - 2026-09-04: The operator excluded runtime implementation from 0.18.0.
-- 2026-09-04: pyinfra may inform this design and a later configuration-management direction, but
-  #727 remains the lower transport-layer correction.

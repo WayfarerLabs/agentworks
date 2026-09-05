@@ -79,6 +79,11 @@ options into the new base. Full `Transport` retains its existing wider override,
 implementations change only their declared parent and imports. The concrete interactive terminal
 guard and file helpers remain on `Transport`.
 
+Current native callers use the default `check=True`. The option remains because #727 explicitly
+requires checked and unchecked exit handling: it determines whether a nonzero guest exit becomes a
+result carrying the real status or a typed failure. No existing native workflow depends on the
+unchecked branch.
+
 `SSHResult`, `SSHError`, and `SSHLogger` stay where they are. Their names predate polymorphic
 transports and already serve Lima, WSL2, and remote Lima. This effort documents the compatibility
 debt instead of multiplying the diff with aliases or a global rename.
@@ -88,10 +93,10 @@ debt instead of multiplying the diff with aliases or a global rename.
 Conceptual version-1 contract:
 
 ```python
-@dataclass(frozen=True)
+@dataclass
 class ProvisionResult:
-    platform_metadata: dict[str, str]
     native_transport: ExecTransport
+    platform_metadata: dict[str, str] = field(default_factory=dict)
     tailscale_ip: str | None = None
 
 
@@ -313,7 +318,7 @@ provider data, truncation, or transport failure into a successful result.
 Implementation updates:
 
 - `capabilities/README.md`, for the required native administrative execution principle;
-- `capabilities/vm-platform/README.md`, for exact version-1 obligations and optional rich behavior;
+- `capabilities/vm_platform/README.md`, for exact version-1 obligations and optional rich behavior;
 - the published vm-platform capability description;
 - `docs/guides/proxmox.md`, for QGA recovery and the interactive console limitation;
 - nearby transport and platform docstrings; and
