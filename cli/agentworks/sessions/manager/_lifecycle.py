@@ -576,11 +576,7 @@ def _launch_existing_session(
             is_legacy = session.socket_path is None and session.pid is not None and session.pid > 0
             deferred_runtime_repair = False
             if not is_legacy:
-                deferred_runtime_repair = (
-                    intent is HarnessLaunchIntent.RESUME_ONLY
-                    and session.pid != PID_STOPPED
-                    and (session.pid is None or session.boot_id is None)
-                )
+                deferred_runtime_repair = intent is HarnessLaunchIntent.RESUME_ONLY and _mgr._needs_repair(session)
                 session = _mgr._ensure_pid(
                     session,
                     target=admin_target,

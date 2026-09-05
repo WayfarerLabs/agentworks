@@ -386,8 +386,8 @@ def test_batch_resume_only_refusal_preserves_incomplete_runtime_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agentworks.sessions import manager as session_manager
-    from agentworks.sessions.manager import _pids as pids_module
     from agentworks.sessions.manager import restart_all_sessions
+    from agentworks.sessions.manager._pids import _ensure_pid
 
     db, events = _restart_fixture(tmp_path, monkeypatch)
     db.update_session_runtime(
@@ -400,15 +400,12 @@ def test_batch_resume_only_refusal_preserves_incomplete_runtime_rows(
     before = db.get_session("s1")
     assert before is not None
 
-    real_repair = pids_module._repair_session_pid
-    persist_values: list[bool] = []
-
-    def recording_repair(*args: object, persist: bool = True, **kwargs: object) -> bool:
-        persist_values.append(persist)
-        return real_repair(*args, persist=persist, **kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(pids_module, "_repair_session_pid", recording_repair)
-    monkeypatch.setattr(session_manager, "_ensure_pid", pids_module._ensure_pid)
+    monkeypatch.setattr(
+        db,
+        "update_session_runtime",
+        lambda *args, **kwargs: pytest.fail("strict-resume refusal persisted runtime state"),
+    )
+    monkeypatch.setattr(session_manager, "_ensure_pid", _ensure_pid)
     monkeypatch.setattr(session_manager, "_batch_vm_boundary", lambda *args, **kwargs: contextlib.nullcontext())
     monkeypatch.setattr(
         session_manager,
@@ -424,7 +421,6 @@ def test_batch_resume_only_refusal_preserves_incomplete_runtime_rows(
             interaction=TtyInteractionPolicy.REFUSE,
         )  # type: ignore[arg-type]
 
-    assert persist_values == [False, False]
     assert db.get_session("s1") == before
     assert "kill" not in events
     assert "tmux_create" not in events
