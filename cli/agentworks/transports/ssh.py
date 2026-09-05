@@ -268,9 +268,12 @@ class SSHTransport(Transport):
                 on_retry=on_retry,
                 env=env,
                 input_text=input_text,
-                # Sensitive stdin always needs a byte-exact non-TTY channel;
-                # explicit false also defeats RequestTTY force in ssh_config.
-                tty=False if tty is None else tty,
+                # ``ssh_run`` forces a non-TTY channel for any ``input_text``
+                # (it coerces the no-opinion default to ``-T``), so a byte-exact
+                # write is never behind a pty even under operator RequestTTY
+                # force. Forward the caller's ``tty`` as-is; ``tty=True`` is
+                # already refused above.
+                tty=tty,
             )
             if self.logger is not None:
                 self.logger.log_command(command, stdin_result)

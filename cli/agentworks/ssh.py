@@ -401,6 +401,12 @@ def run(
         # command, which echoes input and rewrites CR, so the byte-exact
         # promise above cannot hold. Refuse rather than corrupt a secret.
         raise ValueError("SSH stdin input cannot be combined with a forced TTY")
+    if input_text is not None:
+        # A byte-exact write must never sit behind a pty. tty=True is refused
+        # above; coerce the no-opinion default to an explicit -T so an
+        # operator's ``RequestTTY force`` cannot slip a pty in behind the write
+        # (which echoes the payload and hangs, or rewrites CR).
+        tty = False
 
     # An ``input_text`` payload keeps stdin open for the byte-exact write;
     # every other call closes stdin with ``-n``.

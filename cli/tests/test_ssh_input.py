@@ -56,6 +56,23 @@ def test_ssh_run_plain_closes_stdin_with_dash_n_and_no_tt() -> None:
     assert process.call_args.kwargs["input"] is None
 
 
+def test_ssh_run_input_text_forces_no_tty_even_with_omitted_tty() -> None:
+    """A byte-exact stdin write must never sit behind a pty. With no explicit
+    ``tty`` the bare helper still emits ``-T``, so an operator's
+    ``RequestTTY force`` cannot put a line discipline in front of the write (the
+    #684 regression, reachable through ssh_config rather than a caller)."""
+    with patch("agentworks.ssh.subprocess.run") as process:
+        process.return_value = subprocess.CompletedProcess([], 0, stdout=b"", stderr=b"")
+        run(SSHTarget(host="vm-host"), "cat > /tmp/template.yaml", input_text="payload")
+
+    argv = process.call_args.args[0]
+    assert "-T" in argv
+    assert "-tt" not in argv
+    # Stdin stays open for the byte-exact write, so no -n.
+    assert "-n" not in argv
+    assert process.call_args.kwargs["input"] == b"payload"
+
+
 def test_ssh_run_failure_diagnostic_omits_input() -> None:
     secret = "ssh-stdin-swordfish"
 
