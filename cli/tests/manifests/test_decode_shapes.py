@@ -36,7 +36,8 @@ ssh_private_key = "{priv}"
 
 def _config(tmp_path: Path, body: str = "") -> Any:
     cfg = tmp_path / "config.toml"
-    cfg.write_text(_BASE_TOML.format(pub=tmp_path / "k.pub", priv=tmp_path / "k") + dedent(body))
+    operator = _BASE_TOML.format(pub=(tmp_path / "k.pub").as_posix(), priv=(tmp_path / "k").as_posix())
+    cfg.write_text(operator + dedent(body))
     (tmp_path / "k.pub").write_text("ssh-ed25519 AAAA test")
     (tmp_path / "k").write_text("key")
     return load_config(cfg, warn_issues=False)

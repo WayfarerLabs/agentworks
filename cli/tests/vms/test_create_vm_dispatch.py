@@ -60,7 +60,9 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     def _make(extra: str = "", *, manifests: Sequence[ManifestDoc | str] = ()):
         path = tmp_path / "config.toml"
-        path.write_text(f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n' + extra)
+        path.write_text(
+            f'[operator]\nssh_public_key = "{key.as_posix()}.pub"\nssh_private_key = "{key.as_posix()}"\n' + extra
+        )
         if manifests:
             write_manifests(tmp_path, *manifests)
         return load_config(path, warn_issues=False, warn_deprecations=False)

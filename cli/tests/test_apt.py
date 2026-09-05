@@ -123,7 +123,7 @@ def _write_operator_config(tmp_path: Path, *, manifests: Sequence[ManifestDoc | 
     pub.write_text("ssh-ed25519 X")
     priv.write_text("-----BEGIN-----")
     cfg = tmp_path / "config.toml"
-    cfg.write_text(f'[operator]\nssh_public_key = "{pub}"\nssh_private_key = "{priv}"\n')
+    cfg.write_text(f'[operator]\nssh_public_key = "{pub.as_posix()}"\nssh_private_key = "{priv.as_posix()}"\n')
     if manifests:
         write_manifests(tmp_path, *manifests)
     return cfg
