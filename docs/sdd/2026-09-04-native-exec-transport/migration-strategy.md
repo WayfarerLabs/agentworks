@@ -38,28 +38,25 @@ The implementation refreshes this inventory against its post-0.18 baseline befor
 
 ### 1. Extract the narrow base
 
-Add `ExecTransport` and move only `describe`, execution attributes, timeout resolution, and the
-existing `run` signature to it. Make `Transport` extend it. Keep established concrete full
-implementations behaviorally unchanged.
+Add `ExecTransport` and move only `describe`, execution attributes, timeout resolution, and the four
+native run options to it. Make `Transport` extend it and retain the wider existing run surface. Keep
+established concrete full implementations behaviorally unchanged.
 
-### 2. Narrow core types
+### 2. Build the Proxmox carrier
 
-Change `ProvisionResult.native_transport`, the platform hook, the native factory, initialization,
-Debian release, and Tailscale helpers to `ExecTransport`. Delete the platform hook's `None` default
-and the factory's `None` branch. Update version-1 conformance fixtures atomically.
+Split QGA dispatch and status polling at the API seam and add the execution-only adapter with
+focused tests. Preserve the specialized bootstrap staging flow. The adapter exists before the
+platform API requires it.
 
-### 3. Make rich behavior explicit
+### 3. Cut over the contract atomically
 
-Add one full-type check to `vm shell --platform` and make its hint responsibility shell-specific.
-Keep canonical shell unchanged.
+Change `ProvisionResult.native_transport`, the platform hook, the native factory, Phase A
+provisioning, Debian release, and Tailscale helpers to `ExecTransport`. Make the hook required,
+implement it on Proxmox, return the adapter from Proxmox create, and update version-1 conformance
+fixtures together. Delete the `None` path. Add one early shell-availability declaration and one full
+type check to `vm shell --platform`; keep canonical shell unchanged.
 
-### 4. Add Proxmox QGA execution
-
-Split QGA dispatch and status polling at the API seam, add the execution-only adapter, implement the
-required platform hook, and return the adapter from create. Preserve the specialized bootstrap
-staging flow.
-
-### 5. Update permanent collateral and proofs
+### 4. Update permanent collateral and proofs
 
 Update root and vm-platform capability obligations, the Proxmox guide, platform descriptions,
 fixtures, and tests in the same implementation. Run a residual scan for the optional Proxmox

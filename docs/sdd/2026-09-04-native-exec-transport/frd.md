@@ -63,7 +63,7 @@ shell support optional and honestly reported.
   transport for an existing VM. The transport shall not depend on the managed VM's Tailscale node,
   Tailscale DNS, or Tailscale SSH.
 - **R2.** VM creation shall return a native execution transport that core can use for live Debian
-  release attestation and initialization work before switching to the canonical transport.
+  release attestation and Phase A provisioning before Phase B switches to the canonical transport.
 - **R3.** Start-time Tailscale repair, Tailscale rekey, Tailscale logout, release attestation, and
   every other core native-channel consumer shall type against the execution-only surface.
 - **R4.** Native transport construction shall retain the existing transient-route lifetime. A
@@ -76,29 +76,28 @@ shell support optional and honestly reported.
 ### Execution behavior
 
 - **R6.** The execution-only surface shall provide a stable endpoint description, mutable command
-  logger, default timeout, timeout override, root selection, environment values, checked and
-  unchecked exit handling, captured output, output discard, retry arguments, and a result containing
-  exit status, stdout, and stderr.
+  logger, default timeout, timeout override, root selection, checked and unchecked exit handling,
+  sensitive stdin, captured output, and a result containing exit status, stdout, and stderr.
 - **R7.** `sudo=False` shall execute with the configured VM admin user's authority. `sudo=True`
   shall execute as root. A provider transport that starts with root authority shall deliberately
   demote the ordinary case.
-- **R8.** With neither stdin payload supplied, execution shall present immediate EOF to the guest
-  command. `input_text` and `input_data` remain mutually exclusive. `input_data` is ordinary
-  protocol input; `input_text` is sensitive input with suppressed output and diagnostics.
-- **R9.** Sensitive stdin shall be byte-exact and absent from argv, logs, returned output, provider
-  error text, Agentworks diagnostics, exception text, and chained causes. A transport shall reject a
-  requested TTY when that would weaken this contract.
-- **R10.** Retry parameters shall remain accepted by every execution transport. An implementation
-  shall not redispatch a command after an ambiguous provider response unless it can prove the first
-  dispatch did not begin.
+- **R8.** Without sensitive stdin, execution shall present immediate EOF to the guest command.
+  `input_text` shall remain byte-exact sensitive input with suppressed output and diagnostics.
+- **R9.** Sensitive stdin shall be absent from argv, logs, returned output, provider error text,
+  Agentworks diagnostics, exception text, and chained causes. Its one allowed carrier is the
+  provider request field that delivers it to guest stdin.
+- **R10.** A provider adapter shall not internally redispatch an operational command after an
+  ambiguous response unless it can prove the first dispatch did not begin. The native factory may
+  repeat its deliberately idempotent reachability probe under the existing bounded policy.
 
 ### Optional full transport
 
-- **R11.** The existing full `Transport` shall extend the required execution surface and retain
-  interactive shell, streaming, copy, and file helper behavior.
-- **R12.** `vm shell --platform` shall require a full native `Transport`. When the platform returns
-  an execution-only transport, the command shall fail before attempting interaction and provide the
-  platform's native-console guidance.
+- **R11.** The existing full `Transport` shall extend the required execution surface and retain its
+  wider run options, interactive shell, streaming, copy, and file helper behavior.
+- **R12.** `vm shell --platform` shall reject a platform-declared lack of native interaction before
+  native route, credential, transport, or reachability work. Otherwise it shall require a full
+  native `Transport` before interaction. Refusal shall provide the platform's native-console
+  guidance.
 - **R13.** Lima, remote Lima, WSL2, Azure, EC2, and GCE shall continue returning their existing full
   transports. Their operator-visible behavior shall not change except where type names or
   documentation become more accurate.
@@ -107,17 +106,17 @@ shell support optional and honestly reported.
 
 - **R14.** Proxmox shall implement the required transport through the existing authenticated QGA
   exec and exec-status endpoints, using the persisted node, VMID, and admin username.
-- **R15.** Proxmox shall deliver stdin through QGA's `input-data` facility and reject payloads over
-  the provider's 65,536-character API-field limit before dispatch. Existing bootstrap file staging
-  remains a separate create-time mechanism.
+- **R15.** Proxmox shall deliver sensitive stdin through QGA's `input-data` facility and reject
+  payloads over the provider's 65,536-character API-field limit before dispatch. Existing bootstrap
+  file staging remains a separate create-time mechanism.
 - **R16.** Proxmox shall map normal exit, nonzero exit, abnormal signal, malformed response, QGA
   unavailability, and truncated captured output into explicit transport results or typed failures.
   It shall never silently accept incomplete output.
 - **R17.** A Proxmox timeout shall stop Agentworks polling and explain that the guest process may
   still be running, because the provider exposes no cancellation operation. Agentworks shall not
   claim that the command was stopped.
-- **R18.** Proxmox creation shall return the QGA execution transport for core attestation and
-  initialization. Normal post-initialization commands continue to use canonical Tailscale SSH.
+- **R18.** Proxmox creation shall return the QGA execution transport for core attestation and Phase
+  A provisioning. Repeatable Phase B initialization continues to use canonical Tailscale SSH.
 
 ### Compatibility and collateral
 
@@ -138,9 +137,10 @@ shell support optional and honestly reported.
   interactive, streaming, or file-transfer methods.
 - **Q2.** Tests shall prove admin-versus-root rendering, finite stdin, provider payload limits,
   timeouts, ambiguous dispatch, signals, truncation, malformed responses, checked exits, and
-  sensitive-input non-disclosure.
-- **Q3.** Tests shall prove that `vm shell --platform` accepts a full native transport and refuses
-  an execution-only transport without invoking an interactive method.
+  sensitive-input non-disclosure outside its required provider request field.
+- **Q3.** Tests shall prove that `vm shell --platform` accepts a full native transport and rejects a
+  declared execution-only platform before resolving credentials, constructing or probing a native
+  transport, or invoking an interactive method.
 - **Q4.** Existing full transport contract tests shall continue to pass. The refactor shall not
   duplicate their implementation or introduce a second native-route factory.
 - **Q5.** Tests assert behavior, structure, values, and side effects. They shall not pin authored

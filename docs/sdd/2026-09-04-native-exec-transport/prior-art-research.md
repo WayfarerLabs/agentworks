@@ -40,7 +40,7 @@ dependencies.
 pyinfra represents commands as values and provides hidden command fragments so logs can differ from
 executed argv. It also centralizes shell, environment, privilege, and directory wrapping.
 
-Adopted lesson: keep QGA identity and environment rendering in one pure helper, and keep sensitive
+Adopted lesson: keep QGA identity and privilege rendering in one pure helper, and keep sensitive
 stdin outside command argv and diagnostics.
 
 Rejected conclusion: import or copy pyinfra's command object graph. Agentworks already has a stable
@@ -52,8 +52,9 @@ redacting logs. A second command model would widen every caller for no #727 requ
 pyinfra facts cache observed host information, while operations express convergent desired state.
 Both depend on pyinfra inventory, host, and state lifecycles and on its prepare and execute phases.
 
-Potential later use: evaluate pyinfra behind a full canonical Agentworks transport for Phase B
-initialization, where idempotent operations and reusable facts might replace bespoke scripts.
+Potential later use: a separate SDD may evaluate pyinfra for Phase B initialization, where
+idempotent operations and reusable facts might replace bespoke scripts. That effort must choose its
+own integration boundary from its requirements.
 
 Boundary for #727: native recovery must remain usable before canonical Tailscale connectivity and
 must not depend on a configuration-management engine. No pyinfra dependency, vendoring, adapter, or

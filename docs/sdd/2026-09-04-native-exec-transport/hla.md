@@ -34,7 +34,7 @@ hook, database state, or configuration switch.
 ## Current architecture and correction
 
 The current `Transport` requires `run`, interaction, streaming, and copy behavior. Most native
-consumers call only `run`: Debian release attestation, Phase A initialization, start-time Tailscale
+consumers call only `run`: Debian release attestation, Phase A provisioning, start-time Tailscale
 repair, rekey, logout, and the native reachability probe. Only `vm shell --platform` calls
 `interactive` on a native transport.
 
@@ -74,28 +74,27 @@ omitted native implementation is a registration-time contract failure.
 ### Full native transport
 
 A platform may return a full `Transport` from the same covariant hook. Existing platforms keep doing
-so. `vm shell --platform` checks whether the returned object implements the full class and fails
-with platform guidance if it does not. A second method would make every full platform repeat the
-same native transport construction and route lifetime for one caller, so this design does not add
+so. A nullable `native_shell_unavailable_hint` class attribute declares that a platform does not
+provide native interaction. `vm shell --platform` checks it before native credential, route,
+transport, or probe work. For platforms that declare support, the command also verifies that the
+returned object is a full `Transport` before interaction. A second hook would make every full
+platform repeat native construction and route ownership for one caller, so this design does not add
 one.
 
 ## Execution contract
 
-`ExecTransport` lifts the existing noninteractive contract unchanged:
+`ExecTransport` carries only the noninteractive options native Agentworks callers use:
 
 - `default_timeout` and mutable `logger` attributes;
 - `_resolve_timeout` and `describe`;
-- `run(command, ...)` with the existing `sudo`, `tty`, `check`, `timeout`, environment, stdin,
-  discard, retry, and callback parameters; and
+- `run(command, ...)` with `sudo`, `check`, `timeout`, and sensitive `input_text`; and
 - the existing result with return code, stdout, stderr, and `ok`.
 
-Keeping `tty` on `run` preserves substitutability for existing full transports. An execution-only
-implementation rejects `tty=True`; `None` and `False` both mean noninteractive execution. The
-sensitive-input contract already forbids a forced TTY.
-
-`Transport` retains `interactive`, `_interactive`, `call_streaming`, `copy_to`, `copy_from`,
-`copy_dir_to`, and `write_file`. The two concrete file helpers stay on the full type because they
-compose copy behavior that `ExecTransport` does not promise.
+`Transport` overrides `run` with its current wider keyword surface and retains `interactive`,
+`_interactive`, `call_streaming`, `copy_to`, `copy_from`, `copy_dir_to`, and `write_file`. The
+additional environment, ordinary stdin, output-discard, TTY, and retry controls remain available to
+full transport callers without becoming QGA obligations. The concrete file helpers stay on the full
+type because they compose copy behavior that `ExecTransport` does not promise.
 
 The current generic-in-practice `SSHResult`, `SSHError`, and `SSHLogger` names are preserved. A
 cross-codebase naming migration does not improve the capability boundary and would dominate the
@@ -117,11 +116,11 @@ The following paths narrow to `ExecTransport` without behavioral redesign:
 
 | Path                        | Native operation                                      |
 | --------------------------- | ----------------------------------------------------- |
-| VM create                   | release attestation and Phase A initialization        |
+| VM create                   | release attestation and Phase A provisioning          |
 | VM start                    | Tailscale reachability probe and repair               |
 | Tailscale rekey             | authenticate through sensitive stdin                  |
 | VM delete                   | best-effort Tailscale logout before provider deletion |
-| `vm shell --platform`       | narrow to full `Transport`, then interact             |
+| `vm shell --platform`       | reject declared absence, then require full transport  |
 | native reachability factory | bounded `echo ok`                                     |
 
 This inventory is also a permanent testing seam: an execution-only fake must cross every row except
@@ -148,20 +147,18 @@ sudo=false: runuser to <admin username>, then bash -lc <command>
 sudo=true:  bash -lc <command> as root
 ```
 
-Environment values are scoped inside that shell invocation using the same quoting policy as the
-other local native transports. The admin username comes from the validated VM row and remains an
-argument, not interpolated shell syntax. One shared renderer produces the argv and has focused tests
-for identity, environment, and quoting.
+The admin username comes from the validated VM row and remains an argument, not interpolated shell
+syntax. One shared renderer produces the argv and has focused tests for identity and quoting.
 
 ### Input and output
 
-QGA's REST operation accepts an `input-data` string with a 65,536-character API-field limit. Both
-Agentworks stdin modes use that field. The adapter rejects a larger request before dispatch. No
-payload omits the field, which gives the guest command EOF.
+QGA's REST operation accepts an `input-data` string with a 65,536-character API-field limit.
+`input_text` uses that field. The adapter rejects a larger request before dispatch. No payload omits
+the field, which gives the guest command EOF.
 
-`input_data` preserves ordinary stdout and stderr. `input_text` uses the established sensitive mode:
-captured output is discarded, logger output contains no command result, and any provider exception
-is replaced without retaining an unsafe cause. The input is never placed in the command array.
+Sensitive mode discards captured output, writes no result stream to the logger, and replaces any
+unsafe provider exception without retaining its cause or context. The input is never placed in the
+command array. The outbound `input-data` field is its sole allowed observable carrier.
 
 Status polling yields exit code, optional signal, stdout, stderr, and truncation flags. Complete
 normal output maps into the existing result. A signal maps to a subprocess-style negative return
@@ -176,10 +173,11 @@ Agentworks polls until exit or deadline. Proxmox exposes no cancellation endpoin
 adapter stops polling, includes the provider PID in safe diagnostic context, and states that the
 guest command may still be running.
 
-The transport does not redispatch after an ambiguous dispatch failure or timeout. Doing so could
-apply a mutation twice. The shared `retries` argument remains accepted, but Proxmox performs one
-dispatch and does not call `on_retry`. Core callers that need idempotent convergence already own it
-at the operation level.
+The Proxmox adapter does not internally redispatch after an ambiguous dispatch failure or timeout.
+Doing so could apply a mutation twice. Core callers that need idempotent convergence already own it
+at the operation level. The native factory may repeat its own `echo ok` probe because that command
+is deliberately side-effect free and the retry budget belongs to the factory rather than the
+adapter.
 
 ### Existing bootstrap staging
 
@@ -200,9 +198,10 @@ The new boundary reuses existing typed transport errors. It distinguishes:
 - output truncation; and
 - interactive native shell unsupported.
 
-`vm shell --platform` reports that Proxmox supports native administrative execution but not an
-interactive native shell, then points to the Proxmox console. It does not mention a fallback or
-present recovery execution as an operator-selectable shell.
+Before any Proxmox credential or QGA work, `vm shell --platform` reports that Proxmox supports
+native administrative execution but not an interactive native shell, then points to the Proxmox
+console. It does not mention a fallback or present recovery execution as an operator-selectable
+shell.
 
 ## Capability and release compatibility
 
@@ -224,10 +223,9 @@ pyinfra confirms that command execution is a useful lower seam, but its connecto
 pyinfra host, state, inventory, argument, fact, and operation models. Adopting it here would not
 replace the QGA carrier and would force a much larger architecture decision into a recovery fix.
 
-Agentworks therefore keeps `ExecTransport` small and owned. If a later effort evaluates pyinfra for
-Phase B initialization, it should adapt a full canonical `Transport` behind a disposable connector
-prototype and measure the value of operations and facts. It should not change #727's required native
-recovery contract.
+Agentworks therefore keeps `ExecTransport` small and owned. A later SDD may evaluate pyinfra for
+Phase B initialization and choose its integration shape from that effort's requirements. It should
+not change #727's required native recovery contract.
 
 ## Risks and safeguards
 
@@ -248,12 +246,14 @@ identities.
 
 ### A timeout is mistaken for cancellation
 
-Safeguard: preserve the PID, never redispatch ambiguously, and report that execution may continue.
+Safeguard: preserve the PID, prevent adapter-internal ambiguous redispatch, and report that
+execution may continue. The only caller-owned repetition is the side-effect-free probe.
 
 ### Sensitive input leaks through provider diagnostics
 
-Safeguard: never place it in argv, discard result streams, sanitize provider failures without unsafe
-exception chaining, and inspect logs, results, exceptions, and mocked HTTP traces in tests.
+Safeguard: place it only in the required provider request field, discard result streams, sanitize
+provider failures without unsafe exception chaining, and inspect logs, results, and exceptions in
+tests.
 
 ### A provider change expands the permission scope
 

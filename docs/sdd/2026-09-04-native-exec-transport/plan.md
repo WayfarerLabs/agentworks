@@ -111,62 +111,59 @@ capability-appropriate live validation under the integration-testing process.
 - pyinfra adoption is bounded to a future evaluation and adds no dependency or framework surface.
 - No runtime implementation, lock file, 0.18 release claim, or material review finding remains.
 
-## Phase 1: Extract the execution boundary
+## Phase 1: Build the narrow type and Proxmox carrier
 
 - [ ] Refresh the baseline after 0.18.0 and confirm the SDD inventory before editing.
-- [ ] Add `ExecTransport` with the exact existing buffered `run` contract and make `Transport`
-      extend it, leaving terminal guards and file helpers on the full type.
+- [ ] Add `ExecTransport` with only `sudo`, `check`, `timeout`, and sensitive `input_text`; make
+      `Transport` extend it and retain its existing wider `run`, terminal, streaming, and file
+      surface.
 - [ ] Keep existing result, error, and logger compatibility types; update only imports and type
       annotations required by the split.
-- [ ] Narrow `ProvisionResult.native_transport`, `VMPlatform.native_transport`, and the native
-      factory; make the platform hook abstract and nonoptional.
-- [ ] Update every bundled platform and version-1 conformance fixture atomically.
-- [ ] Add an execution-only fake and prove all core native consumers except platform shell use only
-      the narrow contract.
+- [ ] Split Proxmox guest exec dispatch from status polling with response validation and injected
+      time controls.
+- [ ] Implement the QGA execution transport with admin/root rendering, checked exits, finite stdin,
+      payload-size enforcement, and logging.
+- [ ] Implement remaining-deadline polling, explicit signal and truncation handling, safe timeout
+      context, and no adapter redispatch after ambiguity.
+- [ ] Prove that sensitive stdin appears only in the outgoing provider `input-data` field and is
+      absent from argv, logs, results, diagnostics, exceptions, causes, and contexts.
+- [ ] Preserve the existing private bootstrap staging, cleanup, and interrupt behavior.
 
 ### Phase 1 definition of done
 
-- Every bundled platform registers with one required native execution implementation.
 - Existing full transports retain behavior and satisfy both types.
-- No native recovery caller needs interactive, streaming, or copy behavior.
-- The capability remains version 1 with no compatibility adapter.
-
-## Phase 2: Make full native behavior explicit
-
-- [ ] Narrow `vm shell --platform` to full `Transport` before interaction and preserve canonical
-      shell behavior.
-- [ ] Make the platform hint describe unavailable interactive native shell rather than absent
-      administrative execution.
-- [ ] Delete the optional-return error path and scan for any other broad native caller.
-- [ ] Add shell acceptance and refusal tests without asserting authored prose.
-
-### Phase 2 definition of done
-
-- Only the explicit platform shell path requires the full subtype.
-- Proxmox refusal is typed, early, and points to a usable provider console.
-- Canonical commands still fail on canonical transport failure and never fall back.
-
-## Phase 3: Implement Proxmox QGA execution
-
-- [ ] Split Proxmox guest exec dispatch from status polling with response validation and injected
-      time controls.
-- [ ] Implement the QGA execution transport with admin/root rendering, environment, checked exits,
-      finite stdin, payload-size enforcement, output discard, and logging.
-- [ ] Implement remaining-deadline polling, explicit signal and truncation handling, safe timeout
-      context, and no ambiguous redispatch.
-- [ ] Prove sensitive stdin absence from argv, mocked provider traces, logs, results, diagnostics,
-      exceptions, causes, and contexts.
-- [ ] Implement the required Proxmox hook and return the QGA transport from create.
-- [ ] Preserve the existing private bootstrap staging, cleanup, and interrupt behavior.
-
-### Phase 3 definition of done
-
-- Proxmox satisfies every generic execution contract test.
-- Release attestation, initialization, repair, rekey, logout, and probe paths accept the adapter.
+- The isolated Proxmox adapter satisfies the narrow execution contract before it becomes required by
+  the platform API.
 - Failure modes are explicit and no test assumes timeout cancellation.
 - No token, sensitive stdin, or private bootstrap value reaches an unsafe diagnostic surface.
 
-## Phase 4: Permanent collateral and static verification
+## Phase 2: Cut over the version-1 contract atomically
+
+- [ ] Narrow `ProvisionResult.native_transport`, `VMPlatform.native_transport`, and the native
+      factory; make the platform hook abstract and nonoptional.
+- [ ] Update every bundled platform and version-1 conformance fixture, implement the Proxmox hook,
+      and return the QGA transport from Proxmox create in the same transition.
+- [ ] Narrow Debian attestation, Phase A provisioning, Tailscale repair, rekey, and logout to the
+      execution type.
+- [ ] Add an execution-only fake and prove all core native consumers except platform shell use only
+      the narrow contract.
+- [ ] Rename the shell guidance to `native_shell_unavailable_hint`, let Proxmox declare it, and
+      reject `vm shell --platform` before credential, route, transport, or probe work.
+- [ ] For platforms declaring native shell support, require a full `Transport` before interaction
+      and preserve canonical shell behavior.
+- [ ] Delete the optional-return error path and scan for any other broad native caller.
+
+### Phase 2 definition of done
+
+- Every bundled platform registers with one required native execution implementation.
+- Proxmox release attestation, Phase A provisioning, repair, rekey, logout, and probe paths accept
+  the adapter.
+- Only the explicit platform shell path requires the full subtype, and Proxmox refuses it before
+  provider work.
+- Canonical commands still fail on canonical transport failure and never fall back.
+- The capability remains version 1 with no compatibility adapter or broken intermediate handoff.
+
+## Phase 3: Permanent collateral and static verification
 
 - [ ] Update root and vm-platform capability requirements with required native execution and
       optional full interaction, while retaining contract version 1.
@@ -178,14 +175,14 @@ capability-appropriate live validation under the integration-testing process.
 - [ ] Run focused tests throughout, then the complete Python and repository gate set.
 - [ ] Build and install the wheel in an isolated environment and smoke the affected CLI paths.
 
-### Phase 4 definition of done
+### Phase 3 definition of done
 
 - Permanent capability and operator docs match implemented behavior and provider support.
 - All static, unit, integration-mark-excluded, packaging, and repository gates pass.
 - Residual scans find no optional native hook or claim that Proxmox lacks recovery execution.
 - The runtime diff contains no pyinfra dependency or speculative framework layer.
 
-## Phase 5: Review, live validation, and closeout
+## Phase 4: Review, live validation, and closeout
 
 - [ ] Obtain clean private agentworks-reviewer, Muntz, and cold correctness/security passes on one
       exact runtime head; apply every material authorized correction and rerun affected gates.
@@ -202,7 +199,7 @@ capability-appropriate live validation under the integration-testing process.
       `locked.md`, remove `review-requested`, mark ready, and obtain operator disposition without
       self-merging.
 
-### Phase 5 definition of done
+### Phase 4 definition of done
 
 - Exact pushed-head automated, private-review, CI, packaging, and authorized live evidence is green.
 - No material correctness, complexity, security, capability, collateral, release, or migration
