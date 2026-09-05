@@ -30,7 +30,7 @@ from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from tests._azure_platform_support import _RESOURCE_ID, _authorization_denied, _install_fakes
-from tests.conftest import ManifestDoc
+from tests.conftest import ManifestDoc, requires_symlinks
 from tests.orchestrated_fixtures import write_operator_config
 
 if TYPE_CHECKING:
@@ -277,6 +277,7 @@ def test_delete_skips_workspace_artifacts_outside_the_managed_directory(
     assert db.get_vm("dvm") is None
 
 
+@requires_symlinks
 def test_delete_unlinks_an_in_directory_symlink_without_touching_its_referent(
     db: Database,
     tmp_path: Path,
@@ -303,6 +304,7 @@ def test_delete_unlinks_an_in_directory_symlink_without_touching_its_referent(
     assert db.get_vm("dvm") is None
 
 
+@requires_symlinks
 def test_delete_skips_a_trailing_separator_through_a_directory_symlink(
     db: Database,
     tmp_path: Path,

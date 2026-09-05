@@ -2,6 +2,21 @@
 
 from __future__ import annotations
 
+import sys
+
+import pytest
+
+if sys.platform == "win32":  # pragma: no cover - platform guard
+    # The managed git-credential runtime under test is POSIX-only: it drives
+    # bash launch/reconcile scripts, fcntl advisory locks, process-group
+    # signals (os.killpg/setsid), and symlink activation paths. None of that
+    # exists on Windows, and the module cannot even import (no fcntl), so skip
+    # the whole file here rather than collect it.
+    pytest.skip(
+        "POSIX-only git-credential runtime (bash scripts, fcntl, process groups, symlinks)",
+        allow_module_level=True,
+    )
+
 import fcntl
 import os
 import shlex
@@ -11,8 +26,6 @@ import stat
 import subprocess
 import time
 from pathlib import Path
-
-import pytest
 
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.git_credential.base import (

@@ -28,6 +28,33 @@ from tests.ssh_fixtures import write_test_ssh_keypair
 pytest_plugins = ["tests.orchestrated_fixtures"]
 
 
+def _os_symlinks_available() -> bool:
+    """Probe whether this host can create OS symlinks.
+
+    Windows without Developer Mode (or the SeCreateSymbolicLink privilege)
+    raises OSError (WinError 1314) from os.symlink, and some environments lack
+    the call entirely. Tests that exercise real symlink behavior skip where it
+    is unavailable rather than fail on a host limitation.
+    """
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "target"
+        target.write_text("probe")
+        link = Path(tmp) / "link"
+        try:
+            link.symlink_to(target)
+        except (OSError, NotImplementedError):
+            return False
+        return True
+
+
+requires_symlinks = pytest.mark.skipif(
+    not _os_symlinks_available(),
+    reason="requires OS symlink support (Windows needs Developer Mode)",
+)
+
+
 @pytest.fixture
 def verified_debian_release(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make offline manager creates observe the release they requested."""
