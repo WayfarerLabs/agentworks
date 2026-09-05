@@ -405,10 +405,14 @@ def test_an_append_keeps_the_permission_bits_the_operator_chose(tmp_path: Path) 
     manifest = resources / "mine.yaml"
     manifest.write_text("apiVersion: agentworks/v1\nkind: secret\n", encoding="utf-8")
     manifest.chmod(0o640)
+    # The invariant is that the append preserves whatever mode the file
+    # already had, so pin the observed mode rather than a literal 0o640:
+    # Windows has no Unix mode bits and reads the file back as 0o666.
+    mode_before = stat.S_IMODE(manifest.stat().st_mode)
 
     write_sample(resources, "mine.yaml", "secret")
 
-    assert stat.S_IMODE(manifest.stat().st_mode) == 0o640
+    assert stat.S_IMODE(manifest.stat().st_mode) == mode_before
 
 
 def test_writing_into_a_file_that_exists_and_is_blank_emits_no_separator(tmp_path: Path) -> None:
