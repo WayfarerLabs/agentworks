@@ -330,10 +330,10 @@ class ClaudeCodeIntegration(HarnessIntegration):
         glob reaches the shell). Runs through ``$SHELL -lic`` like the
         readiness probe.
 
-        On restart the orchestrator has already killed the old session, but
-        no flush wait is needed: Claude writes transcript turns to the
-        ``.jsonl`` incrementally as work happens (not flushed on exit), so a
-        killed session's history is already on disk when this probe runs.
+        On restart this probe runs before the orchestrator tears down the old
+        runtime, which may still be live. No flush wait is needed: Claude
+        writes transcript turns to the ``.jsonl`` incrementally as work
+        happens rather than flushing them only on exit.
 
         The exit code is read, not just ``.ok``, to keep a probe that could
         not EXECUTE from masquerading as "no transcript". The inner command
