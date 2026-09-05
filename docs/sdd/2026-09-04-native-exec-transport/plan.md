@@ -96,9 +96,9 @@ capability-appropriate live validation under the integration-testing process.
       every material correction authorized by the SDD charter.
 - [x] Commit and push the coherent artifact head, open the draft PR, apply
       `sdd:native-exec-transport` and `review-requested`, and publish the exact handoff.
-- [ ] Complete up to three authorized published feedback/fix rounds, or stop sooner when one full
+- [x] Complete up to three authorized published feedback/fix rounds, or stop sooner when one full
       batch produces no material changes.
-- [ ] Remove `review-requested` and promote the artifact PR to ready when design converges.
+- [x] Remove `review-requested` and promote the artifact PR to ready when design converges.
 
 ### Phase 0 definition of done
 
