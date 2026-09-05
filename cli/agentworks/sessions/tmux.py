@@ -133,15 +133,12 @@ _TMUX_SERVER_ABSENCE_DIAGNOSTICS = (
     re.compile(r"error connecting to .+ \((?:No such file or directory|Connection refused)\)", re.ASCII),
 )
 _TMUX_TARGET_ABSENCE_DIAGNOSTIC = re.compile(r"can't find session: .+", re.ASCII)
-_SSH_TTY_CLOSE_DIAGNOSTIC = re.compile(r"(?:Shared connection|Connection) to .+ closed\.", re.ASCII)
 
 
 def _normalized_probe_streams(result: object) -> tuple[str, str]:
-    """Strip only the local forced-TTY close advisory from probe output."""
+    """Return probe stdout and stderr with surrounding whitespace removed."""
     stdout = (getattr(result, "stdout", "") or "").strip()
     stderr = (getattr(result, "stderr", "") or "").strip()
-    if stdout and _SSH_TTY_CLOSE_DIAGNOSTIC.fullmatch(stderr):
-        stderr = ""
     return stdout, stderr
 
 
@@ -157,6 +154,14 @@ def _tmux_presence_from_result(result: object, *, missing_target_is_absent: bool
 
     stdout, stderr = _normalized_probe_streams(result)
     streams = [value for value in (stdout, stderr) if value]
+    # A canonical tmux diagnostic is a single line on exactly one stream. The
+    # direct probe transports fold CR to LF on capture (SSH via ``text=True``,
+    # Lima/WSL2 via ``decode_stream``), but the batch presence path hex-encodes
+    # the diagnostic in-guest and reconstitutes it with ``bytes.fromhex`` (see
+    # ``sessions/manager/_status.py``), so those inner bytes never pass through
+    # that folding and a raw CR can survive. Reject either newline form, since
+    # regex ``.`` matches ``\r`` and would otherwise misclassify ``a\rb`` as a
+    # diagnostic; also reject more than one non-empty stream.
     if len(streams) != 1 or "\n" in streams[0] or "\r" in streams[0]:
         return ProbeStatus.UNKNOWN
     diagnostic = streams[0]

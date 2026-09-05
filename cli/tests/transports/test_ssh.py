@@ -79,33 +79,58 @@ def test_run_env_coalesces_into_one_set_env_arg() -> None:
         assert 'B="two words"' in set_env_args[0]
 
 
-def test_run_force_tty_inserts_tt_flag() -> None:
-    t = SSHTransport(host="vm1", user="agentworks", force_tty=True)
-    with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
-        mock_run.return_value = _ok_completed()
-        t.run("echo hi")
-        argv = mock_run.call_args[0][0]
-        assert "-tt" in argv
-
-
-def test_run_tty_override_suppresses_force_tty() -> None:
-    """Per-call ``tty=False`` wins over constructor ``force_tty=True``."""
-    t = SSHTransport(host="vm1", user="agentworks", force_tty=True)
-    with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
-        mock_run.return_value = _ok_completed()
-        t.run("echo hi", tty=False)
-        argv = mock_run.call_args[0][0]
-        assert "-tt" not in argv
-        assert "-T" in argv
-
-
-def test_run_default_tty_does_not_override_operator_ssh_config() -> None:
+def test_run_default_closes_stdin_with_dash_n_and_no_tt() -> None:
+    """Non-interactive ``run()`` allocates no TTY and closes stdin with
+    ssh's own ``-n``: a stdin-reading remote command then cannot hang and
+    ssh cannot pull from the operator's console. ``-tt`` (which corrupts
+    output and fakes a remote TTY) is never forced by default."""
     t = SSHTransport(host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
         mock_run.return_value = _ok_completed()
         t.run("echo hi")
         argv = mock_run.call_args[0][0]
-        assert "-T" not in argv
+        assert "-n" in argv
+        assert "-tt" not in argv
+
+
+def test_run_tty_true_forces_tt_and_omits_dash_n() -> None:
+    """An explicit ``run(tty=True)`` allocates a pty with ``-tt``. ``-n``
+    and ``-tt`` are mutually exclusive: ``-tt`` already attaches stdin to
+    the pty, so the stdin-closing ``-n`` must not appear."""
+    t = SSHTransport(host="vm1", user="agentworks")
+    with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
+        mock_run.return_value = _ok_completed()
+        t.run("echo hi", tty=True)
+        argv = mock_run.call_args[0][0]
+        assert "-tt" in argv
+        assert "-n" not in argv
+
+
+def test_run_tty_false_still_closes_stdin_with_dash_n() -> None:
+    """``tty=False`` is "no forced TTY", the same as the default, so it
+    still gets ``-n`` and no ``-tt``."""
+    t = SSHTransport(host="vm1", user="agentworks")
+    with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
+        mock_run.return_value = _ok_completed()
+        t.run("echo hi", tty=False)
+        argv = mock_run.call_args[0][0]
+        assert "-n" in argv
+        assert "-tt" not in argv
+        assert "-T" in argv
+
+
+def test_run_default_forces_no_tty_over_operator_ssh_config() -> None:
+    """A captured programmatic call never wants a pty, so the default forces
+    ``-T`` rather than leaving pty allocation to the operator's ssh config: an
+    operator's ``RequestTTY force`` cannot inject a pty (and its CRLF, merged
+    streams, fake ``isatty``) into our output. Only an explicit ``tty=True``
+    allocates one."""
+    t = SSHTransport(host="vm1", user="agentworks")
+    with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
+        mock_run.return_value = _ok_completed()
+        t.run("echo hi")
+        argv = mock_run.call_args[0][0]
+        assert "-T" in argv
         assert "-tt" not in argv
 
 
@@ -197,6 +222,8 @@ def test_interactive_uses_minus_t_flag() -> None:
         argv = mock_call.call_args[0][0]
         assert "-t" in argv
         assert "BatchMode=yes" not in argv  # interactive must not BatchMode
+        # An interactive shell reads the operator's stdin; -n would close it.
+        assert "-n" not in argv
 
 
 def test_interactive_sets_client_keepalives() -> None:
@@ -270,6 +297,10 @@ def test_call_streaming_uses_minus_T_no_batchmode_violation() -> None:
         argv = mock_call.call_args[0][0]
         assert "-T" in argv
         assert "BatchMode=yes" in argv
+        # call_streaming may legitimately forward the operator's stdin
+        # (e.g. ``vm exec``/``agent exec``), so it must not close it with -n.
+        assert "-n" not in argv
+        assert "-tt" not in argv
         assert argv[-1] == "echo hi"
 
 

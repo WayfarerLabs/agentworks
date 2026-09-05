@@ -209,7 +209,9 @@ def test_batch_builds_compound_command() -> None:
     assert 'sudo -n sh -c "if test -d /proc/$PID' in target.commands[0]
 
 
-def test_bounded_singular_status_target_closes_stdin() -> None:
+def test_bounded_singular_status_target_forces_safe_policy() -> None:
+    # The wrapper forces the bounded, non-pty observation policy; stdin closing
+    # is the transport's job (``-n`` on any no-payload call), not this wrapper's.
     calls: list[tuple[str, dict[str, object]]] = []
 
     class Target:
@@ -226,7 +228,6 @@ def test_bounded_singular_status_target_closes_stdin() -> None:
                 "timeout": 10,
                 "retries": 1,
                 "tty": False,
-                "input_data": "",
             },
         )
     ]
@@ -397,20 +398,6 @@ def test_batch_probe_executes_only_read_only_guest_operations(tmp_path: Path) ->
         "sh\t-c\tif test -d /proc/20202; then printf present; else printf absent; fi",
     ]
     assert snapshot() == before
-
-
-def test_batch_accepts_exact_ssh_close_advisory_after_complete_frames() -> None:
-    session = _session("alpha", pid=42, socket_path="/tmp/alpha.sock")
-    target = _FakeTarget(
-        {
-            "has-session": _FakeResult(
-                stdout=f"{_batch_row('alpha')}\n",
-                stderr="Shared connection to vm.example closed.\n",
-            )
-        }
-    )
-
-    assert batch_check_status([session], target=target) == {"alpha": SessionStatus.RUNNING}
 
 
 def test_agent_fingerprint_repair_uses_elevation_and_refuses_unknown(

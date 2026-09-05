@@ -49,7 +49,6 @@ class SSHTarget:
     identity_file: Path | None = None
     proxy_jump: str | None = None
     login_shell: bool = False
-    force_tty: bool = False
 
 
 # SSH transport failure exit code (connection refused, host unreachable, etc.)
@@ -319,13 +318,27 @@ def _ssh_base_args(
     *,
     env: dict[str, str] | None = None,
     tty: bool | None = None,
+    close_stdin: bool,
 ) -> list[str]:
+    """Build the base ``ssh`` argv with ``BatchMode=yes`` (no remote command yet).
+
+    ``tty=True`` forces a pty with ``-tt`` (the only way this primitive allocates
+    one). Any other value suppresses the pty with ``-T``: a captured programmatic
+    call never wants one, and ``-T`` makes that deterministic so an operator's
+    ``RequestTTY force`` cannot inject a pty (and its CRLF, merged streams, and
+    fake ``isatty``) into our output. Independently, ``-n`` is added when
+    ``close_stdin`` is set so a stdin-reading remote command cannot hang and ssh
+    cannot pull from the operator's console; it must stay off while a byte-exact
+    ``input_text`` payload is written, so callers set ``close_stdin`` only for
+    the no-stdin-payload case.
+    """
     args = ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
-    effective_tty = target.force_tty if tty is None else tty
-    if effective_tty:
+    if tty:
         args.insert(1, "-tt")
-    elif tty is False:
+    else:
         args.insert(1, "-T")
+        if close_stdin:
+            args.insert(1, "-n")
     if target.port is not None:
         args.extend(["-p", str(target.port)])
     if target.identity_file is not None:
@@ -383,14 +396,17 @@ def run(
     """
     if input_text is not None and logger is not None:
         raise ValueError("SSH stdin input cannot be combined with command logging")
-    effective_tty = target.force_tty if tty is None else tty
-    if input_text is not None and effective_tty:
+    if input_text is not None and tty:
         # A forced TTY puts a line discipline between the pipe and the remote
         # command, which echoes input and rewrites CR, so the byte-exact
         # promise above cannot hold. Refuse rather than corrupt a secret.
+        # Any non-forced tty emits -T below, so a byte-exact write is never
+        # behind a pty even under an operator's RequestTTY force.
         raise ValueError("SSH stdin input cannot be combined with a forced TTY")
 
-    args = _ssh_base_args(target, env=env, tty=tty)
+    # An ``input_text`` payload keeps stdin open for the byte-exact write;
+    # every other call closes stdin with ``-n``.
+    args = _ssh_base_args(target, env=env, tty=tty, close_stdin=input_text is None)
     # Fence the remote command from ssh's option parser. See
     # ``SSHTransport.run`` in ``transports/ssh.py`` for the rationale.
     args.append("--")

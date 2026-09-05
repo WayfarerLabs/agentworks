@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import ipaddress
-import sys
 import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -412,7 +411,6 @@ class GCEPlatform(VMPlatform):
                 host=external_ip,
                 user=request.admin_username,
                 identity_file=request.ssh_private_key,
-                force_tty=sys.platform == "win32",
             )
 
             request.progress.step("Wait for GCE startup marker and join Tailscale through fixed stdin")
@@ -590,7 +588,6 @@ class GCEPlatform(VMPlatform):
             host=live_external_ipv4(current, access_config_name=identity.access_config_name),
             user=vm.admin_username,
             identity_file=identity_file,
-            force_tty=sys.platform == "win32",
         )
 
     def post_tailscale_ready(self, vm: VMRow, ctx: RunContext) -> None:

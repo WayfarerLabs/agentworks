@@ -347,10 +347,10 @@ def test_run_detached_as_root(mock_time: MagicMock) -> None:
 
 
 @patch("agentworks.remote_exec.time")
-def test_run_detached_disables_force_tty_for_nohup_launch(mock_time: MagicMock) -> None:
-    """When the target's SSH has force_tty=True (Windows), the nohup launch
-    must pass tty=False to run so the PTY is not allocated. Otherwise
-    SIGHUP from the closing SSH PTY kills the detached process.
+def test_run_detached_disables_tty_for_nohup_launch(mock_time: MagicMock) -> None:
+    """The nohup launch must pass tty=False so no PTY is allocated for the
+    detached process. Otherwise SIGHUP from a closing SSH PTY kills it.
+    tty=False is the primary protection (no PTY, no SIGHUP).
     """
     mock_time.monotonic.return_value = 0
     mock_time.sleep = MagicMock()

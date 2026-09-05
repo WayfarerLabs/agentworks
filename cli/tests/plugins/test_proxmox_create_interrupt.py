@@ -25,7 +25,6 @@ the pin on the returned transport lives here too.
 
 from __future__ import annotations
 
-import sys
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import MagicMock
@@ -658,18 +657,14 @@ class TestPlainFailure:
 
 
 class TestProvisionResultTransport:
-    """The transport a successful ``create`` hands back (#345): every
-    guest-facing ``SSHTransport`` construction passes
-    ``force_tty=sys.platform.name == "win32"`` (the Windows-zsh workaround
-    documented on the class); Proxmox's provisioning transport omitted
-    it, so interactive use from a Windows host misbehaved."""
+    """The transport a successful ``create`` hands back (#345): a
+    guest-facing ``SSHTransport`` aimed at the VM's Tailscale endpoint.
+    Proxmox's provisioning transport was once missing entirely, so
+    ``create`` returning a well-formed one for the right guest is the
+    invariant worth pinning."""
 
-    @pytest.mark.parametrize(("host_platform", "expected"), [("win32", True), ("linux", False)])
-    def test_provisioning_transport_forces_tty_on_windows_hosts_only(
-        self, monkeypatch: pytest.MonkeyPatch, host_platform: str, expected: bool
-    ) -> None:
+    def test_provisioning_transport_targets_the_guest(self, monkeypatch: pytest.MonkeyPatch) -> None:
         platform, _fake = _platform_with_fake(monkeypatch)
-        monkeypatch.setattr(sys, "platform", host_platform)
 
         result = platform.create(_request(tailscale=False), RunContext())
 
@@ -677,7 +672,6 @@ class TestProvisionResultTransport:
         assert isinstance(target, SSHTransport)
         assert target.host == "100.64.0.7"
         assert target.user == "agentworks"
-        assert target.force_tty is expected
 
 
 class TestDeleteOpUnchanged:

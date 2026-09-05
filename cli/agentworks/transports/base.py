@@ -94,6 +94,14 @@ class Transport(abc.ABC):
         of argv, but unlike ``input_text`` its command output may be logged
         and returned. The two stdin modes are mutually exclusive.
 
+        With neither payload, ``run`` closes the stdin of the process it
+        spawns (immediate EOF) rather than leaving it the caller's console:
+        SSH with ``-n``, the local transports with an empty stdin pipe. A
+        stdin-reading command then sees EOF, which is what stops a probe from
+        hanging on inherited input. A nested transport (remote Lima) closes its
+        outer ssh hop the same way and forwards that EOF inward; a guest command
+        reading stdin depends on the inner ``limactl`` hop passing EOF through.
+
         ``discard_output=True`` sends stdout and stderr directly to the null
         device and returns/logs empty streams while preserving the normal TTY
         choice and exit status. It cannot be combined with ``input_text``;

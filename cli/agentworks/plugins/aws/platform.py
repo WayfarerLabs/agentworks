@@ -569,13 +569,10 @@ class EC2Platform(VMPlatform):
             public_ip = self._public_ip(ec2, instance_id)
             output.detail(f"EC2 instance '{backend_name}' provisioned (IP: {public_ip})")
 
-            import sys
-
             prov_transport = SSHTransport(
                 host=public_ip,
                 user=request.admin_username,
                 identity_file=request.ssh_private_key,
-                force_tty=sys.platform == "win32",
             )
 
             # The provider-retained bootstrap installed Tailscale without a
@@ -713,7 +710,6 @@ class EC2Platform(VMPlatform):
         # around this call; a stopped instance has no public IP, which
         # propagates to SSHTransport(host="") and the factory's typed StateError.
         public_ip = first_instance_public_ip(result)
-        import sys
 
         identity_file = None
         if config is not None:
@@ -723,7 +719,6 @@ class EC2Platform(VMPlatform):
             host=public_ip,
             user=vm.admin_username,
             identity_file=identity_file,
-            force_tty=sys.platform == "win32",
         )
 
     def post_tailscale_ready(self, vm: VMRow, ctx: RunContext) -> None:

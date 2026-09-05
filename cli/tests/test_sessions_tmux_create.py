@@ -229,37 +229,16 @@ def test_tmux_presence_classifier_distinguishes_absence_from_permission_failure(
         )
         assert _tmux_presence_from_result(missing_server, missing_target_is_absent=False) is ProbeStatus.ABSENT
 
-        windows_tty_missing_server = subprocess.CompletedProcess(
-            args=["ssh", "-tt"],
+        # A canonical tmux diagnostic occupies exactly one stream. Output on
+        # both stdout and stderr is not one, so classify UNKNOWN rather than
+        # guess which stream carries the diagnostic.
+        two_stream_result = subprocess.CompletedProcess(
+            args=["tmux"],
             returncode=1,
-            stdout=missing_server.stderr,
-            stderr="Connection to 100.64.0.1 closed.\r\n",
+            stdout="error connecting to /run/agentworks/s.sock (Permission denied)\n",
+            stderr="some unexpected chatter\n",
         )
-        assert (
-            _tmux_presence_from_result(windows_tty_missing_server, missing_target_is_absent=False) is ProbeStatus.ABSENT
-        )
-
-        windows_tty_permission_failure = subprocess.CompletedProcess(
-            args=["ssh", "-tt"],
-            returncode=1,
-            stdout="error connecting to /run/agentworks/s.sock (Permission denied)\r\n",
-            stderr="Connection to 100.64.0.1 closed.\r\n",
-        )
-        assert (
-            _tmux_presence_from_result(windows_tty_permission_failure, missing_target_is_absent=False)
-            is ProbeStatus.UNKNOWN
-        )
-
-        remote_close_shaped_output = subprocess.CompletedProcess(
-            args=["ssh", "-tt"],
-            returncode=1,
-            stdout="Connection to 100.64.0.1 closed.\r\n",
-            stderr=missing_server.stderr,
-        )
-        assert (
-            _tmux_presence_from_result(remote_close_shaped_output, missing_target_is_absent=False)
-            is ProbeStatus.UNKNOWN
-        )
+        assert _tmux_presence_from_result(two_stream_result, missing_target_is_absent=False) is ProbeStatus.UNKNOWN
 
         transition = subprocess.CompletedProcess(
             args=["tmux"],
@@ -268,6 +247,22 @@ def test_tmux_presence_classifier_distinguishes_absence_from_permission_failure(
             stderr="server exited unexpectedly\n",
         )
         assert _tmux_presence_from_result(transition, missing_target_is_absent=False) is ProbeStatus.UNKNOWN
+
+        # The batch presence path reconstitutes the diagnostic from in-guest hex
+        # without the transport's CR-to-LF folding, so a raw CR can reach the
+        # classifier. A canonical diagnostic is single-line, so a CR-bearing
+        # stream is not one: it must degrade to UNKNOWN, never a false ABSENT
+        # (regex ``.`` matches ``\r``, so an absence pattern would otherwise
+        # fullmatch it).
+        carriage_return_diagnostic = subprocess.CompletedProcess(
+            args=["tmux"],
+            returncode=1,
+            stdout="",
+            stderr="can't find session: a\rb\n",
+        )
+        assert (
+            _tmux_presence_from_result(carriage_return_diagnostic, missing_target_is_absent=True) is ProbeStatus.UNKNOWN
+        )
 
         socket_path = socket_dir / "server.sock"
         subprocess.run(

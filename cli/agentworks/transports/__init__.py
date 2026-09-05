@@ -21,7 +21,6 @@ to the native transport.
 
 from __future__ import annotations
 
-import sys
 import time
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -94,7 +93,6 @@ def transport_for_user(
         host=vm.tailscale_host,
         user=user,
         identity_file=config.operator.ssh_private_key,
-        force_tty=sys.platform == "win32",
         default_timeout=default_timeout,
         logger=logger,
     )

@@ -38,7 +38,6 @@ class _BoundedStatusTarget:
             timeout=_OBSERVATION_TIMEOUT_SECONDS,
             retries=1,
             tty=False,
-            input_data="",
         )
         return self._target.run(command, **kwargs)
 

@@ -121,9 +121,16 @@ class SSHTransport(Transport):
     Explicit ``user`` is set for VM connections where we control the
     username. Set ``login_shell=True`` to wrap the remote command in
     ``$SHELL -lc <command>`` so the operator's per-shell PATH
-    additions (e.g. Homebrew on macOS) resolve. Set ``force_tty=True``
-    to default-allocate a TTY (Windows-zsh workaround); the per-call
-    ``tty=`` parameter on ``run()`` overrides.
+    additions (e.g. Homebrew on macOS) resolve.
+
+    Non-interactive ``run()`` refuses a pty with ``-T`` and closes stdin
+    with ssh's ``-n`` so a stdin-reading remote command cannot hang and
+    ssh cannot steal the operator's console input. ``-T`` is
+    unconditional (not left to the operator's ssh config), so an
+    operator's ``RequestTTY force`` cannot inject a pty (whose CRLF,
+    merged streams, and fake ``isatty`` would corrupt captured output)
+    into a programmatic call; only an explicit ``run(tty=True)`` asks for
+    a pty, with ``-tt``.
     """
 
     def __init__(
@@ -134,7 +141,6 @@ class SSHTransport(Transport):
         port: int | None = None,
         identity_file: Path | None = None,
         proxy_jump: str | None = None,
-        force_tty: bool = False,
         login_shell: bool = False,
         default_timeout: int | None = None,
         logger: SSHLogger | None = None,
@@ -145,7 +151,6 @@ class SSHTransport(Transport):
         self.port = port
         self.identity_file = identity_file
         self.proxy_jump = proxy_jump
-        self.force_tty = force_tty
         self.login_shell = login_shell
         self.default_timeout = default_timeout
         self.logger = logger
@@ -156,20 +161,35 @@ class SSHTransport(Transport):
     def _ssh_base_args(
         self,
         *,
-        force_tty: bool | None = None,
+        tty: bool | None = None,
+        close_stdin: bool,
         env: dict[str, str] | None = None,
     ) -> list[str]:
         """Build the base ``ssh`` argv with ``BatchMode=yes`` (no remote
-        command yet). ``force_tty`` overrides ``self.force_tty`` for this
-        call; ``None`` uses the constructor default.
+        command yet).
+
+        ``tty=True`` forces a pty with ``-tt`` (the only way ``run()`` gets
+        one). Any other value suppresses the pty with ``-T``: a captured
+        programmatic call never wants one, and ``-T`` makes that deterministic
+        so an operator's ``RequestTTY force`` cannot inject a pty (and its CRLF,
+        merged streams, and fake ``isatty``) into our output. Independently,
+        ``-n`` is added when ``close_stdin`` is set so a stdin-reading remote
+        command cannot hang and ssh cannot pull from the operator's console. On
+        Windows ``-n``
+        also averts the Win32-OpenSSH short-connection stdin race
+        (PowerShell/Win32-OpenSSH#1338), where a brief remote command leaves the
+        client blocked on inherited console stdin; dropping the pty without
+        closing stdin does not fix it. Callers writing an ``input_text`` or
+        ``input_data`` payload leave ``close_stdin`` false so stdin stays open
+        for the write.
         """
         args = ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
-        effective_tty = self.force_tty if force_tty is None else force_tty
-        if effective_tty:
+        if tty:
             args.insert(1, "-tt")
-        elif force_tty is False:
-            # Override RequestTTY force from operator SSH configuration.
+        else:
             args.insert(1, "-T")
+            if close_stdin:
+                args.insert(1, "-n")
         if self.port is not None:
             args.extend(["-p", str(self.port)])
         if self.identity_file is not None:
@@ -222,6 +242,12 @@ class SSHTransport(Transport):
             raise ValueError("SSH input_text and input_data are mutually exclusive")
         if input_text is not None and discard_output:
             raise ValueError("SSH input_text cannot be combined with discard_output")
+        if input_text is not None and tty:
+            # A forced TTY puts a line discipline between the pipe and the
+            # remote command, which echoes input and rewrites CR, so the
+            # byte-exact stdin delivery below cannot hold. Refuse a caller
+            # asking for both rather than corrupt the payload.
+            raise ValueError("SSH input_text cannot be combined with a forced TTY")
         if sudo:
             command = f"sudo -n bash -c {shlex.quote(command)}"
 
@@ -236,14 +262,6 @@ class SSHTransport(Transport):
                     identity_file=self.identity_file,
                     proxy_jump=self.proxy_jump,
                     login_shell=self.login_shell,
-                    # The constructor's ``force_tty`` is a Windows-zsh
-                    # workaround for interactive shells, which a
-                    # non-interactive stdin write is not; forwarding it here
-                    # would put a line discipline in front of a payload this
-                    # branch promises to deliver byte-exact. An explicit
-                    # ``tty=True`` still reaches ``ssh.run``'s refusal, since
-                    # a caller asking for both is asking for a contradiction.
-                    force_tty=tty if tty is not None else False,
                 ),
                 command,
                 check=check,
@@ -252,15 +270,20 @@ class SSHTransport(Transport):
                 on_retry=on_retry,
                 env=env,
                 input_text=input_text,
-                # Sensitive stdin always needs a byte-exact non-TTY channel;
-                # explicit false also defeats RequestTTY force in ssh_config.
-                tty=False if tty is None else tty,
+                # ``ssh_run`` forces a non-TTY channel for any ``input_text``
+                # (it coerces the no-opinion default to ``-T``), so a byte-exact
+                # write is never behind a pty even under operator RequestTTY
+                # force. Forward the caller's ``tty`` as-is; ``tty=True`` is
+                # already refused above.
+                tty=tty,
             )
             if self.logger is not None:
                 self.logger.log_command(command, stdin_result)
             return stdin_result
 
-        args = self._ssh_base_args(force_tty=tty, env=env)
+        # An ``input_data`` payload keeps stdin open for the write; every
+        # other non-payload call closes stdin with ``-n``.
+        args = self._ssh_base_args(tty=tty, close_stdin=input_data is None, env=env)
         # Fence the remote command from ssh's option parser. Some
         # glibc-getopt platforms permute non-options to the end, so an
         # argv element starting with `-` (e.g. `--workspace` flowing
