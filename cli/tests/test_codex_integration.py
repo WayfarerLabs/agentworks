@@ -35,9 +35,26 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 from typing import TYPE_CHECKING, cast
 
 import pytest
+
+
+def _skip_without_posix_paths() -> None:
+    """Skip a test that drives codex's target-side shell with host paths.
+
+    The recorder script and the rollout probe are POSIX ``sh`` text that codex
+    runs on the (Unix) launch target, where their arguments are POSIX paths.
+    The sibling ``_sh_argv`` helpers stay portable because they only word-split
+    string tokens against a fictional ``/home/me``, but the tests here pass the
+    real host path into the shell and read the file it writes (or match a cwd
+    embedded in a rollout). On Windows those paths carry backslashes and a
+    drive, which msys mangles on the way through ``mv``/redirection and cwd
+    comparison, so the shell's real behavior cannot be exercised there.
+    """
+    if sys.platform == "win32":
+        pytest.skip("codex target-side shell mechanics need POSIX paths; msys mangles Windows host paths")
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
 from agentworks.capabilities.config import capability_config_references, validate_capability_config
@@ -1160,6 +1177,7 @@ def _sh_harness_integration(tmp_path: Path, state: dict[str, object]) -> CodexIn
 
 
 def _sh_resume(tmp_path: Path, home: Path, state: dict[str, object]) -> str:
+    _skip_without_posix_paths()
     return _sh_harness_integration(tmp_path, state).start(_op_ctx(_ShellTarget(home))).command  # type: ignore[arg-type]
 
 
@@ -1275,6 +1293,7 @@ def _provision(home: Path) -> Path:
 
 
 def _record(recorder: Path, dest: Path, payload: str) -> int:
+    _skip_without_posix_paths()
     proc = subprocess.run([str(recorder), str(dest), payload], capture_output=True, text=True, check=False)
     return proc.returncode
 
