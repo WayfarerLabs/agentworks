@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, cast
 import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
-from agentworks.capabilities.harness_integration import HarnessIntegration, HarnessStart
+from agentworks.capabilities.harness_integration import HarnessIntegration, HarnessLaunchIntent, HarnessStart
 from agentworks.errors import ConfigError, StateError
 from agentworks.schema import AgwModel, NonEmptyStr, SecretRef
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -324,10 +324,15 @@ class _SecretHarnessIntegration(HarnessIntegration):
 
     name = "scanner"
     description = "test double harness that declares a config secret"
-    contract_version = 1
+    contract_version = 3
     config_model = _ScannerConfig
 
-    def start(self, ctx, *, force_new=False):  # type: ignore[no-untyped-def]
+    def start(  # type: ignore[no-untyped-def]
+        self,
+        ctx,
+        *,
+        intent=HarnessLaunchIntent.RESUME_OR_NEW,
+    ):
         return HarnessStart("")
 
     def _probe_target(self, transport):  # type: ignore[no-untyped-def]
@@ -886,11 +891,16 @@ def _toy_harness_integration(harness_integration_name: str) -> type:
     class _ToyIntegration(HarnessIntegration):
         name: ClassVar[str] = harness_integration_name
         description: ClassVar[str] = "toy"
-        contract_version: ClassVar[int] = 1
+        contract_version: ClassVar[int] = 3
         config_model: ClassVar[type[AgwModel]] = _ToyConfig
 
-        def start(self, ctx: RunContext, *, force_new: bool = False) -> HarnessStart:
-            del force_new
+        def start(
+            self,
+            ctx: RunContext,
+            *,
+            intent: HarnessLaunchIntent = HarnessLaunchIntent.RESUME_OR_NEW,
+        ) -> HarnessStart:
+            del intent
             self._state["session_id"] = f"{harness_integration_name}-id"
             return HarnessStart("")
 

@@ -4,10 +4,10 @@ override on every launch form, the source-filtered discovery fallback, the
 recorder script itself, the flag mapping and ``extra_args`` passthrough, the
 visible decision, and that readiness probes ``codex``.
 
-Note which op each test drives. Only ``resume`` runs the decision tree, so
-that is what the fork tests call; ``start`` is unconditionally fresh, and the
-tests that call it exist to pin exactly that (nothing probed, nothing
-adopted), including the recreated-namesake scenario end to end.
+Note which launch intent each test drives. Only resume intents run the decision
+tree, so that is what the fork tests call; ``CREATE`` is unconditionally
+fresh, and the tests that pass it exist to pin exactly that (nothing probed,
+nothing adopted), including the recreated-namesake scenario end to end.
 
 Three stub layers, per what each behavior actually lives in:
 
@@ -41,7 +41,7 @@ import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
 from agentworks.capabilities.config import capability_config_references, validate_capability_config
-from agentworks.capabilities.harness_integration import HarnessStart
+from agentworks.capabilities.harness_integration import HarnessLaunchIntent, HarnessStart
 from agentworks.errors import ConfigError, StateError
 from agentworks.plugins.codex.harness_integration import CodexConfig, CodexIntegration
 from agentworks.schema import RefOwner, merge_model
@@ -267,22 +267,70 @@ def test_create_is_always_fresh_even_with_a_recording_and_a_candidate() -> None:
     state: dict[str, object] = {}
     target = _target(recorded=_SID, rollout=0, discovered=f"{_ROLLOUT}\n")
     harness_integration = _harness_integration(state=state)
-    result = harness_integration.start(_op_ctx(target), force_new=True)
+    result = harness_integration.start(_op_ctx(target), intent=HarnessLaunchIntent.CREATE)
     assert len(target.commands) == 1  # the recorder is fingerprinted, but no rollout discovery runs
     assert state == {"fresh_pending": _SID}
     assert "resume" not in _sh_argv(result, home="/home/me")
 
 
-def test_forced_fresh_reports_a_distinct_decision_from_missing_state() -> None:
+def test_launch_intents_report_distinct_decisions() -> None:
     missing = _harness_integration(state={}).start(_op_ctx(_target()))
+    created = _harness_integration(state={}).start(_op_ctx(_target()), intent=HarnessLaunchIntent.CREATE)
     forced = _harness_integration(state={"session_id": _SID}).start(
         _op_ctx(_target(recorded=_SID)),
-        force_new=True,
+        intent=HarnessLaunchIntent.FORCE_NEW,
     )
 
-    assert missing.note is not None
-    assert forced.note is not None
-    assert forced.note != missing.note
+    assert None not in {missing.note, created.note, forced.note}
+    assert len({missing.note, created.note, forced.note}) == 3
+
+
+def test_resume_only_resumes_a_bound_rollout() -> None:
+    state: dict[str, object] = {"session_id": _SID}
+    result = _harness_integration(state=state).start(
+        _op_ctx(_target(rollout=0)), intent=HarnessLaunchIntent.RESUME_ONLY
+    )
+    assert _raw_codex_argv(result)[:2] == ["resume", _SID]
+    assert state == {"session_id": _SID}
+
+
+def test_resume_only_adopts_one_unambiguous_candidate() -> None:
+    state: dict[str, object] = {}
+    result = _harness_integration(state=state).start(
+        _op_ctx(_target(discovered=f"{_ROLLOUT}\n")), intent=HarnessLaunchIntent.RESUME_ONLY
+    )
+    assert _raw_codex_argv(result)[:2] == ["resume", _SID]
+    assert state == {"session_id": _SID}
+
+
+@pytest.mark.parametrize(
+    ("state", "target"),
+    [
+        pytest.param({}, _target(), id="no-state"),
+        pytest.param({"session_id": _SID}, _target(rollout=1), id="stale-bound-state"),
+        pytest.param({}, _target(discovered=f"{_ROLLOUT}\n{_OTHER_ROLLOUT}\n"), id="ambiguous-candidates"),
+        pytest.param({"fresh_pending": _SID}, _target(recorded=_SID), id="unchanged-fresh-recording"),
+        pytest.param({"fresh_pending": 7}, _target(recorded=_SID), id="malformed-fresh-state"),
+        pytest.param({}, _target(recorder_exit=6), id="recorder-probe-failed"),
+        pytest.param({"session_id": _SID}, _target(rollout=255), id="bound-rollout-probe-failed"),
+        pytest.param({}, _target(discovery_exit=5), id="discovery-probe-failed"),
+    ],
+)
+def test_resume_only_refuses_non_resumable_paths_without_state_mutation(
+    state: dict[str, object],
+    target: _FakeTarget,
+) -> None:
+    before = state.copy()
+    with pytest.raises(StateError):
+        _harness_integration(state=state).start(_op_ctx(target), intent=HarnessLaunchIntent.RESUME_ONLY)
+    assert state == before
+
+
+def test_resume_only_refuses_a_missing_target_without_state_mutation() -> None:
+    state: dict[str, object] = {"session_id": _SID}
+    with pytest.raises(StateError):
+        _harness_integration(state=state).start(RunContext(), intent=HarnessLaunchIntent.RESUME_ONLY)
+    assert state == {"session_id": _SID}
 
 
 def test_create_clears_a_stale_recording_and_retires_legacy_keys() -> None:
@@ -291,7 +339,9 @@ def test_create_clears_a_stale_recording_and_retires_legacy_keys() -> None:
     cannot adopt the dead namesake's id either. Marker-era blob keys go the
     same way."""
     state: dict[str, object] = {"discovery_marker": _LEGACY_MARKER}
-    inner = _inner(_harness_integration(state=state).start(_op_ctx(_target(recorded=_SID)), force_new=True))
+    inner = _inner(
+        _harness_integration(state=state).start(_op_ctx(_target(recorded=_SID)), intent=HarnessLaunchIntent.CREATE)
+    )
     assert state == {"fresh_pending": _SID}
     assert 'rm -f "$HOME"/.agentworks/codex/s1.thread' in inner
     assert f'rm -f "$HOME"/{_LEGACY_MARKER}' in inner
@@ -310,7 +360,7 @@ def test_fresh_workload_setup_precedes_the_operator_prompt_and_extra_args() -> N
             "extra_args": ["--future-flag"],
         },
         state={},
-    ).start(_op_ctx(_target()), force_new=True)
+    ).start(_op_ctx(_target()), intent=HarnessLaunchIntent.CREATE)
     argv = _raw_codex_argv(command)
 
     developer_override = f'developer_instructions="{developer}"'
@@ -329,7 +379,9 @@ def test_fresh_workload_setup_precedes_the_operator_prompt_and_extra_args() -> N
 
 def test_initial_prompt_alone_is_forwarded_without_generated_setup() -> None:
     initial = "Inspect first; printf 'safe'"
-    command = _harness_integration({"initial_prompt": initial}, state={}).start(_op_ctx(_target()), force_new=True)
+    command = _harness_integration({"initial_prompt": initial}, state={}).start(
+        _op_ctx(_target()), intent=HarnessLaunchIntent.CREATE
+    )
     argv = _raw_codex_argv(command)
     assert argv[-2:] == ["--", initial]
 
@@ -338,7 +390,7 @@ def test_initial_prompt_alone_is_forwarded_without_generated_setup() -> None:
 def test_fresh_initial_prompt_cannot_be_parsed_as_a_command_or_option(initial_prompt: str) -> None:
     command = _harness_integration(
         {"initial_prompt": initial_prompt, "extra_args": ["-c", 'model="gpt-5"']}, state={}
-    ).start(_op_ctx(_target()), force_new=True)
+    ).start(_op_ctx(_target()), intent=HarnessLaunchIntent.CREATE)
     argv = _raw_codex_argv(command)
 
     assert argv[-2:] == ["--", initial_prompt]
@@ -1459,7 +1511,7 @@ def test_recreated_namesake_never_inherits_the_dead_binding(tmp_path: Path) -> N
     # generated pane command really removes the stale recording.
     state: dict[str, object] = {}
     create = _sh_harness_integration(tmp_path, state).start(  # type: ignore[arg-type]
-        _op_ctx(_ShellTarget(home)), force_new=True
+        _op_ctx(_ShellTarget(home)), intent=HarnessLaunchIntent.CREATE
     )
     assert state == {"fresh_pending": _SID}
     assert "starting new session s1" in _echo(create)

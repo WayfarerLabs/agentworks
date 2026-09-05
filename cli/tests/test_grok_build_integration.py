@@ -11,7 +11,7 @@ import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
 from agentworks.capabilities.config import capability_config_references, validate_capability_config
-from agentworks.capabilities.harness_integration import HarnessStart
+from agentworks.capabilities.harness_integration import HarnessLaunchIntent, HarnessStart
 from agentworks.errors import ConfigError, StateError
 from agentworks.plugins.grok.harness_integration import GrokBuildConfig, GrokBuildIntegration
 from agentworks.schema import RefOwner, merge_model
@@ -168,14 +168,60 @@ def test_absent_summary_starts_fresh() -> None:
     assert _grok_argv(command)[:2] == ["--session-id", _SID]
 
 
-def test_forced_fresh_reports_a_distinct_decision_from_missing_state() -> None:
+def test_resume_only_resumes_an_existing_summary() -> None:
+    target = _FakeTarget({"summary.json": _FakeResult(0)})
+    result = _integration(state={"session_id": _SID}).start(_op_ctx(target), intent=HarnessLaunchIntent.RESUME_ONLY)
+    assert _grok_argv(result)[:2] == ["--resume", _SID]
+
+
+@pytest.mark.parametrize(
+    ("state", "target", "expected_probe_count"),
+    [
+        pytest.param({}, _FakeTarget(), 0, id="no-stored-id"),
+        pytest.param({"session_id": _SID}, _FakeTarget({"summary.json": _FakeResult(1)}), 1, id="no-summary"),
+        pytest.param({"session_id": _SID}, _FakeTarget({"summary.json": _FakeResult(255)}), 1, id="probe-failed"),
+    ],
+)
+def test_resume_only_refuses_without_resumable_state_and_preserves_integration_state(
+    state: dict[str, object],
+    target: _FakeTarget,
+    expected_probe_count: int,
+) -> None:
+    before = state.copy()
+    with pytest.raises(StateError):
+        _integration(state=state).start(_op_ctx(target), intent=HarnessLaunchIntent.RESUME_ONLY)
+    assert state == before
+    assert len(target.commands) == expected_probe_count
+
+
+def test_resume_only_refuses_a_missing_target_without_state_mutation() -> None:
+    state: dict[str, object] = {"session_id": _SID}
+    with pytest.raises(StateError):
+        _integration(state=state).start(RunContext(), intent=HarnessLaunchIntent.RESUME_ONLY)
+    assert state == {"session_id": _SID}
+
+
+def test_create_rotates_the_id_without_probing_resumable_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    replacement_sid = "0a18a04b-d083-4dc8-961a-07f2151c9b35"
+    monkeypatch.setattr(uuid, "uuid4", lambda: uuid.UUID(replacement_sid))
+    state: dict[str, object] = {"session_id": _SID}
+    target = _FakeTarget({"summary.json": _FakeResult(0)})
+
+    command = _integration(state=state).start(_op_ctx(target), intent=HarnessLaunchIntent.CREATE)
+
+    assert _grok_argv(command)[:2] == ["--session-id", replacement_sid]
+    assert state == {"session_id": replacement_sid}
+    assert target.commands == []
+
+
+def test_launch_intents_report_distinct_decisions() -> None:
     target = _FakeTarget({"summary.json": _FakeResult(1)})
     missing = _integration().start(_op_ctx(target))
-    forced = _integration().start(_op_ctx(target), force_new=True)
+    created = _integration().start(_op_ctx(target), intent=HarnessLaunchIntent.CREATE)
+    forced = _integration().start(_op_ctx(target), intent=HarnessLaunchIntent.FORCE_NEW)
 
-    assert missing.note is not None
-    assert forced.note is not None
-    assert forced.note != missing.note
+    assert None not in {missing.note, created.note, forced.note}
+    assert len({missing.note, created.note, forced.note}) == 3
 
 
 def test_repeated_start_uses_the_same_state_based_decision() -> None:

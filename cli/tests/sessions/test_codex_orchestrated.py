@@ -220,7 +220,7 @@ def test_create_launches_fresh_without_probing_any_session_state(
     codex conversation, so the op adopts nothing. This
     target would happily report a recording AND a discovery candidate, and
     rollout-discovery probe is not issued; the recorder is only fingerprinted
-    so a stale notification cannot undo ``--force-new``. The pane provisions
+    so a stale notification cannot bind the new session to prior state. The pane provisions
     the recorder so the following start has something new to bind."""
     from agentworks.sessions.manager import create_session
 
@@ -270,9 +270,9 @@ def test_restart_adopts_the_recorded_thread_id_and_persists_it(tmp_path: Path, m
 
     assert f"resume {_SID}" in captured["command"]
     assert "resuming session s1" in captured["command"]
-    # Resume ordering: the probes run AFTER the kill (the old process is
-    # dead before the decision), and the tmux recreate follows.
-    assert events.index("kill") < events.index("read_recorder") < events.index("tmux_create")
+    # Core obtains the launch decision before the destructive boundary so a
+    # strict-resume refusal could leave the old runtime intact.
+    assert events.index("read_recorder") < events.index("kill") < events.index("tmux_create")
     assert "discover" not in events  # a bound id needs no fallback
     refreshed = db.get_session("s1")
     assert refreshed is not None
@@ -295,7 +295,7 @@ def test_restart_resumes_the_stored_id_without_a_recording(tmp_path: Path, monke
     assert f"resume {_SID}" in captured["command"]
     assert "resuming session s1" in captured["command"]
     assert "discover" not in events
-    assert events.index("kill") < events.index("detect") < events.index("tmux_create")
+    assert events.index("detect") < events.index("kill") < events.index("tmux_create")
     refreshed = db.get_session("s1")
     assert refreshed is not None
     assert refreshed.harness_integration_state == {"codex": {"session_id": _SID}}  # unchanged

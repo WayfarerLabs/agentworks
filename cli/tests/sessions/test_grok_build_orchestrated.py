@@ -182,7 +182,7 @@ def test_substitution_preserves_workload_values_and_substitutes_extra_args(
     db.close()
 
 
-def test_restart_reads_uuid_and_detects_after_killing_old_workload(
+def test_restart_reads_uuid_and_detects_before_killing_old_workload(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from agentworks.sessions import manager as session_manager
@@ -223,7 +223,7 @@ def test_restart_reads_uuid_and_detects_after_killing_old_workload(
     )
 
     assert f"--resume {sid}" in captured["command"]
-    assert events.index("kill") < events.index("detect") < events.index("tmux_create")
+    assert events.index("detect") < events.index("kill") < events.index("tmux_create")
     assert db.get_session("s1").harness_integration_state == {  # type: ignore[union-attr]
         "grok-build": {"session_id": sid}
     }

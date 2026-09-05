@@ -36,6 +36,7 @@ from pydantic import Field
 
 from agentworks.capabilities.harness_integration.base import (
     HarnessIntegration,
+    HarnessLaunchIntent,
     HarnessStart,
     quote_literal_argv,
     require_commands,
@@ -128,7 +129,7 @@ _PROJECTS_DIR = "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"
 class ClaudeCodeIntegration(HarnessIntegration):
     """Runs Claude Code, resuming or launching fresh per on-disk state."""
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 3
     name: ClassVar[str] = "claude-code"
     description: ClassVar[str] = "Run Claude Code, resuming its session when one exists"
     config_model: ClassVar[type[ClaudeCodeConfig]] = ClaudeCodeConfig
@@ -191,24 +192,38 @@ class ClaudeCodeIntegration(HarnessIntegration):
         if not (isinstance(namespaced, str) and namespaced):
             namespace["session_id"] = legacy
 
-    def start(self, ctx: RunContext, *, force_new: bool = False) -> HarnessStart:
-        """Choose continuation when usable, or rotate the binding when forced."""
-        command = self._resume_or_launch(ctx, force_new=force_new)
-        if force_new:
+    def start(
+        self,
+        ctx: RunContext,
+        *,
+        intent: HarnessLaunchIntent = HarnessLaunchIntent.RESUME_OR_NEW,
+    ) -> HarnessStart:
+        """Choose the requested fresh, strict-resume, or fallback policy."""
+        command = self._resume_or_launch(ctx, intent=intent)
+        if intent is HarnessLaunchIntent.FORCE_NEW:
             note = "Fresh Claude Code session requested. Starting a new one without resuming prior state..."
+        elif intent is HarnessLaunchIntent.CREATE:
+            note = "Starting a new Claude Code session..."
         elif self._resumed:
             note = "Existing Claude Code session found. Resuming..."
         else:
             note = "No existing Claude Code session. Starting a new one..."
         return HarnessStart(command, note)
 
-    def _resume_or_launch(self, ctx: RunContext, *, force_new: bool) -> str:
+    def _resume_or_launch(self, ctx: RunContext, *, intent: HarnessLaunchIntent) -> str:
         """Read (or mint) the stored session id, probe the launch target
         for its transcript, and return the single ``sh -c`` pane command
         that echoes the visible decision and ``exec``s ``claude``."""
-        sid = self._session_id(force_new=force_new)
+        fresh = intent.starts_fresh
+        resume_only = intent is HarnessLaunchIntent.RESUME_ONLY
+        stored_sid = self._state.get("session_id")
+        if resume_only and not (isinstance(stored_sid, str) and stored_sid):
+            raise self._resume_only_error()
+        sid = self._session_id(fresh=fresh)
         launch_target = ctx.admin_target() if self._admin else ctx.agent_target()
-        resume = not force_new and launch_target is not None and self._transcript_exists(launch_target, sid)
+        resume = not fresh and launch_target is not None and self._transcript_exists(launch_target, sid)
+        if resume_only and not resume:
+            raise self._resume_only_error()
         self._resumed = resume
 
         if resume:
@@ -235,14 +250,22 @@ class ClaudeCodeIntegration(HarnessIntegration):
         inner = f"echo {shlex.quote(msg)}; exec claude {argv}"
         return f"sh -c {shlex.quote(inner)}"
 
-    def _session_id(self, *, force_new: bool = False) -> str:
+    def _resume_only_error(self) -> StateError:
+        return StateError(
+            f"session '{self._session_name}': Claude Code has no resumable conversation on its launch target",
+            entity_kind="session",
+            entity_name=self._session_name,
+            hint="Retry without --resume-only to allow a new Claude Code conversation.",
+        )
+
+    def _session_id(self, *, fresh: bool = False) -> str:
         """The stored Claude session id, minted (and recorded in the state
         blob) on first use. A v4 uuid: Claude accepts any valid uuid at
         ``--session-id``, and global uniqueness keeps the transcript probe
         slug-independent. ``self._state`` rides inside the session node's
         full namespaced blob, which the manager persists after the op, so
         a minted id survives to the next restart."""
-        sid = None if force_new else self._state.get("session_id")
+        sid = None if fresh else self._state.get("session_id")
         if not isinstance(sid, str):
             # If the op raises after this mint but before the manager
             # persists the blob, the id is lost. That window is benign: it
@@ -307,10 +330,10 @@ class ClaudeCodeIntegration(HarnessIntegration):
         glob reaches the shell). Runs through ``$SHELL -lic`` like the
         readiness probe.
 
-        On restart the orchestrator has already killed the old session, but
-        no flush wait is needed: Claude writes transcript turns to the
-        ``.jsonl`` incrementally as work happens (not flushed on exit), so a
-        killed session's history is already on disk when this probe runs.
+        On restart this probe runs before the orchestrator tears down the old
+        runtime, which may still be live. No flush wait is needed: Claude
+        writes transcript turns to the ``.jsonl`` incrementally as work
+        happens rather than flushing them only on exit.
 
         The exit code is read, not just ``.ok``, to keep a probe that could
         not EXECUTE from masquerading as "no transcript". The inner command
