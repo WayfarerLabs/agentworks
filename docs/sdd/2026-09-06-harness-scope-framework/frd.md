@@ -14,12 +14,15 @@
 Agentworks has five scopes (vm, admin, agent, workspace, session) and exactly one participant that
 straddles them: the harness integration. Today that participant only exists at the session scope.
 `HarnessIntegration` (`cli/agentworks/capabilities/harness_integration/base.py:202`) declares one
-abstract operation, `start` (`base.py:307`), and the kind descriptor requires only that operation
-(`cli/agentworks/capabilities/harness_integration/kinds.py:119`). Everything a harness needs at a
-broader scope is therefore either absent or smuggled in through a core-owned surface that names the
-harness directly. The standing example is the pair of Claude-specific fields on VM and agent
-templates: core carries `claude_marketplaces` and `claude_plugins` because there is nowhere else to
-put them.
+abstract _operation_, `start` (`base.py:308`), which is the only entry in the kind descriptor's
+`required_operations` (`cli/agentworks/capabilities/harness_integration/kinds.py:119`). It declares
+one other abstract method, `_probe_target` (`base.py:322`), which is internal machinery rather than
+an operation; a subclass must still supply it. Everything a harness needs at a broader scope is
+therefore either absent or smuggled in through a core-owned surface that names the harness directly.
+The standing example is the pair of Claude-specific fields on admin config
+(`cli/agentworks/vms/admin.py:142`) and agent templates (`cli/agentworks/agents/templates.py:42`):
+core carries `claude_marketplaces` and `claude_plugins` because there is nowhere else to put them,
+and installs them from a VM-init step (`cli/agentworks/vms/initializer/driver.py:741`).
 
 The result is that harness knowledge leaks into core at every scope except the one where the
 framework exists. This effort makes the scope-participation contract real so that harness-specific
@@ -34,21 +37,26 @@ before any requirement uses it.
 A **scope** is where a lifecycle lives. Scopes belong to core. There are five, and the set is fixed:
 vm, admin, agent, workspace, session. Each names a resource core sets up and the operation that sets
 it up, which is why admin and agent are separate: admin identity work rides the VM lifecycle
-(`agw vm reinit NAME`) while an agent has its own (`agw agent reinit NAME`), and the admin
-attachment is spelled on the vm-template while agent attachments are spelled on agent templates.
+(`agw vm reinit NAME`) while an agent has its own (`agw agent reinit NAME`), and the admin's
+configuration is spelled on the admin template (`cli/agentworks/vms/admin.py:66`) while agent
+configuration is spelled on agent templates. How the admin _attachment_ is spelled is open question
+3 below, and this paragraph says nothing about it.
 
 A **facet** is the level a capability is driven at: the pairing of one level's API methods and its
 config, nothing more. Facets belong to capabilities. There are four: vm, user, workspace, session.
 
 Core owns the mapping between them, and it is fixed:
 
-| Scope     | Facet     | Init method      | Driven by                 |
-| --------- | --------- | ---------------- | ------------------------- |
-| vm        | vm        | `vm_init`        | VM init and reinit        |
-| admin     | user      | `user_init`      | VM init and reinit        |
-| agent     | user      | `user_init`      | Agent init and reinit     |
-| workspace | workspace | `workspace_init` | Workspace create          |
-| session   | session   | `start`          | Session start and restart |
+| Scope     | Facet     | Init method      | Driven by                          |
+| --------- | --------- | ---------------- | ---------------------------------- |
+| vm        | vm        | `vm_init`        | VM init and reinit                 |
+| admin     | user      | `user_init`      | VM init and reinit                 |
+| agent     | user      | `user_init`      | Agent init and reinit              |
+| workspace | workspace | `workspace_init` | Workspace create                   |
+| session   | session   | `start`          | Session create, start, and restart |
+
+Only `start` is a name that exists today. The three init-method names are indicative, exactly as R2
+says; final naming is the effort lead's.
 
 Admin and agent collapse into one facet because a harness does the same thing for both: set up a
 user. They stay separate scopes because their lifecycles and owning resources differ. The
@@ -90,11 +98,13 @@ absence-means-unsupported rule: review and testing catch a mistyped override.
 
 **R4. Integrations declare config per facet.** Config follows the same four facets the methods do,
 for the same reason: a capability declares a fixed set of facet configs exactly as it declares a
-fixed set of API methods, and consumers choose which facet they drive. Core asks `config_for(facet)`
-(name indicative), so producers never need to know their consumers. A capability with a single
-config declares it without naming any facet, so the ordinary case stays invisible. The association
-is introspectable at finalize, before any method runs. Validation consumes exactly one facet's
-schema per blob; offering no config for a facet means there is nothing to validate there.
+fixed set of API methods, and consumers choose which facet they drive. Core asks through
+`config_for`, which already exists (`cli/agentworks/capabilities/base.py:339`); what this effort
+adds is the facet argument and a capability that offers more than one config. Producers never need
+to know their consumers. A capability with a single config declares it without naming any facet, so
+the ordinary case stays invisible. The association is introspectable at finalize, before any method
+runs. Validation consumes exactly one facet's schema per blob; offering no config for a facet means
+there is nothing to validate there.
 
 **R5. Integration config is ordinary capability config.** It belongs to the consuming resource (the
 vm, agent, workspace, or session template that selects the integration) and is validated the way all
@@ -163,8 +173,11 @@ through the saga lead.
 
 ## What changed since the scope-participation contract was written
 
-The contract is dated 2026-08-05. Three of its statements are now stale against `main` at
-`f1937456`, and the effort lead should build on the code, not on the contract's snapshot.
+The contract is dated 2026-08-05. Three of its statements are stale against `main`, and a fourth
+correction below belongs to a sibling artifact rather than to the contract. Build on the code rather
+than on any of their snapshots. Item 4 matters most, so read it first: **part of what the contract
+describes as future work has already shipped.** The contract itself now carries these corrections
+inline.
 
 1. **The instance-state store landed, so the interim-state-home question is closed.** The contract
    left the pre-store home to this effort's judgement. It no longer needs one:
@@ -180,12 +193,27 @@ The contract is dated 2026-08-05. Three of its statements are now stale against 
    resume is expressed by `HarnessLaunchIntent` (`base.py:71`), whose members are `CREATE`,
    `RESUME_ONLY`, `RESUME_OR_NEW`, and `FORCE_NEW`, with a `starts_fresh` property. The session
    facet is therefore one method taking an intent.
-3. **The harness-integration contract is at version 3, not 1.** `kinds.py:117` reads
-   `contract_version=3`, matching all four in-tree integrations. Adding per-scope methods changes
-   the contract and needs a version bump; whether the new methods join `required_operations` (today
-   `frozenset({"start"})`, `kinds.py:119`) is an R3 question, and the no-op-default rule argues they
-   should not. Note that these versions are internal: every implementation is first-party, so the
-   bump is a mechanical sweep, not an ecosystem event.
+3. **The kind's contract version is 3.** The scope-participation contract is silent on this; the
+   claim being corrected is in a sibling artifact,
+   `docs/sdd/2026-08-31-session-console-lifecycle/locked.md`, which states the harness-integration
+   contract "remains version 1". That artifact is locked and belongs to another effort, so it is
+   flagged here rather than edited. `kinds.py:117` reads `contract_version=3`, matching all four
+   in-tree integrations. Adding per-scope methods changes the contract and needs a version bump;
+   whether the new methods join `required_operations` (today `frozenset({"start"})`, `kinds.py:119`)
+   is an R3 question, and the no-op-default rule argues they should not. Note that these versions
+   are internal: every implementation is first-party, so the bump is a mechanical sweep, not an
+   ecosystem event.
+4. **The facet vocabulary and `config_for` are already in the code, so do not reintroduce them.**
+   `Capability.config_for` is a shipped classmethod (`cli/agentworks/capabilities/base.py:339`)
+   whose docstring already defines a facet as the level a capability is driven at (vm, user,
+   workspace, session), already states that facets are deliberately not scopes and that core owns
+   the mapping, and already records why the signature takes no facet argument: because no capability
+   offers more than one config yet. `cli/agentworks/capabilities/README.md` carries the same
+   contract, including the admin-and-agent-to-user mapping. This effort therefore extends a declared
+   hook rather than inventing one, and the `config_at(level)` spelling sketched in
+   `message-2026-08-16-capability-config-shape.md` is superseded by the shipped name. That message
+   is still worth reading for its other three contributions; it is not the authority on the hook's
+   name.
 
 ## Open questions this effort owns
 

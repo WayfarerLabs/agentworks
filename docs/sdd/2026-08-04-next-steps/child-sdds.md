@@ -1,7 +1,7 @@
 # Child SDDs
 
 - Status: Active ledger
-- Last updated: 2026-08-25
+- Last updated: 2026-09-06
 
 This is the saga's tracking document, the analog of an ordinary SDD's `plan.md`. Completed
 checkboxes are immutable records, per the standard rule. The saga SDD locks when every entry here is
@@ -278,11 +278,11 @@ item shrinks to a verification sweep.
       area's trim-to-standard as definition-of-done rather than leaving it to trail behind. The
       disjoint groups proceed on their own merits, and the R4 reassessment inherits the re-scope as
       the dated answer to its scope question
-- [ ] Corrective inventory prepared in PRs #625 and #626 (stacked, both awaiting merge): three lanes
-      independently re-derived the rebuilt map (1,215 rows, the 664-site estate owned once with none
-      unowned or double-owned, and the 117-row subtraction reconciling in both directions), the
-      post-#573 charter items are discharged, and a screen script that dies with the SDD now backs
-      the accounting. Group 1 unblocks at merge
+- [ ] Corrective inventory prepared in PRs #625 and #626 (**#626 closed 2026-08-25; #625 remains
+      open and untouched since 2026-08-24**): three lanes independently re-derived the rebuilt map
+      (1,215 rows, the 664-site estate owned once with none unowned or double-owned, and the 117-row
+      subtraction reconciling in both directions), the post-#573 charter items are discharged, and a
+      screen script that dies with the SDD now backs the accounting. Group 1 unblocks at merge
 - [ ] **Both PRs are stalled on live blockers, and this entry previously recorded the first as
       fixed. It is not.** The saga lead reproduced it on 2026-08-24 at #625's head `88343757`, four
       days after it was raised: `sweep-screen.py` adds a function to `seen` keyed on identity before
@@ -539,10 +539,10 @@ tracked by the open boxes below until each has a delivered recipient-side artifa
 - [x] Implementation phases delivered; the store shipped in 0.16.0 as
       `cli/agentworks/db/instance_state.py` with the closed `AppliedStateKey` roster and the
       per-owner-kind matrix enforced on writes and on persisted reads
-- [x] Locked 2026-08-30 (`docs/sdd/2026-08-19-instance-model/locked.md`). The store contract is now
-      wave 4's applied-state home rather than a promise, and `agent`, `workspace`, and `session`
-      already exist as kinds owning no keys (`instance_state.py:62`), so wave 4 registers keys
-      without a table change
+- [x] Locked. `locked.md` is dated 2026-08-30 as a lock candidate; the lock took effect when the
+      closeout PR #707 merged on 2026-08-31. The store contract is now wave 4's applied-state home
+      rather than a promise, and `agent`, `workspace`, and `session` already exist as kinds owning
+      no keys (`instance_state.py:62`), so wave 4 registers keys without a table change
 
 ### Child SDD (from the non-TTY restart): 2026-08-18-secret-preview-contract
 
@@ -924,5 +924,11 @@ open-ended research placeholder.
     operator ruling 2026-08-25). Waves 5 through 8 and the closeout wave are untouched, and the
     closeout wave is what gates the lock, so the saga is roughly half built by wave count with the
     heavier half ahead. Open operator-facing items carried into this round: the published 0.18.0
-    body correction (issue #741), the 0.19 removal promise and its effect on issue #720's sequencing
-    (see `phasing.md`'s release map), and the three undispositioned findings from #736 (issue #742).
+    body correction (issue #741, whose own counts are understated: eleven withdrawn entries and six
+    duplicated subjects, not eleven and one) and the three undispositioned findings from #736 (issue
+    #742), now addressed by PR #756. The 0.19 removal promise resolved itself while this round was
+    being written: PR #752 merged 2026-09-06, closed issue #720, and release PR #748 regenerated to
+    carry the break, so the sequencing concern recorded in `phasing.md` is history rather than an
+    open item. A note on that: the saga lead recommended holding #748 for work that had already
+    merged an hour earlier, because issue state captured at the start of a session was reused later
+    as though still current.

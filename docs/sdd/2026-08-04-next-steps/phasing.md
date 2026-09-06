@@ -200,15 +200,14 @@ off whenever bandwidth allows, on its own merits and its own schedule.
   cut until the `2026-08-19-instance-model` child's instance-spec overlays (PR #670, **merged
   2026-08-28**) and the harness integration config knobs
   ([issue #674](https://github.com/WayfarerLabs/agentworks/issues/674), per-session workload inputs
-  across the Claude Code, Codex, and Grok Build integrations) are both on `main`. The first gate is
-  satisfied; the knobs are the only one left. Instance specs and the knobs that configure them ship
-  together, because a release carrying the spec mechanism without the settings it exists to carry
-  teaches half a feature. The mechanics matter here: the release PR accumulates whatever is on
-  `main` when it merges, so cutting early does not delay those entries to a later release, it
-  silently ships 0.16.0 without them and pushes them to 0.17.0. Everything already accumulated (the
-  two Azure SDK migrations and their raised floors, the cloud-identifier and name-grammar validation
-  work, the terminal-restore fix, the guide and plugin documentation corrections) rides the same
-  cut.
+  across the Claude Code, Codex, and Grok Build integrations) are both on `main`. Both gates were
+  satisfied before the cut. Instance specs and the knobs that configure them ship together, because
+  a release carrying the spec mechanism without the settings it exists to carry teaches half a
+  feature. The mechanics matter here: the release PR accumulates whatever is on `main` when it
+  merges, so cutting early does not delay those entries to a later release, it silently ships 0.16.0
+  without them and pushes them to 0.17.0. Everything already accumulated (the two Azure SDK
+  migrations and their raised floors, the cloud-identifier and name-grammar validation work, the
+  terminal-restore fix, the guide and plugin documentation corrections) rides the same cut.
 
 - **0.16.0 shipped 2026-08-28.** Both gates were satisfied: the instance-spec overlays (PR #670) and
   the harness integration config knobs (issue #674) merged, so the release carries the spec
@@ -224,11 +223,15 @@ off whenever bandwidth allows, on its own merits and its own schedule.
   status inspection are the operator-visible content; the Debian Trixie transition, the AWS
   indeterminate-outcome reconciliation, and the SSH pty and stdin corrections ride with them. Its
   published release body is inaccurate and needs a manual correction (issue #741); see
-  `current-state.md`. **0.19 carries a removal promise**: the guide states in three places that the
-  `session resume` forms, `console attach --recreate`, and `session list --no-status` are removed in
-  0.19. That promise binds the release numbered 0.19.0, so the removal (issue #720) lands before the
-  cut, not after it. Reading "once 0.19 development begins" as "once `main` declares 0.19.0" makes
-  the promise unsatisfiable and is the reason that issue stalled.
+  `current-state.md`.
+
+- **0.19.0 is open as release PR #748, and its removal promise is already kept.** The 0.18 guide
+  states in three places that the `session resume` forms, `console attach --recreate`, and
+  `session list --no-status` are removed in 0.19. That promise binds the release _numbered_ 0.19.0,
+  so the removal had to land before the cut rather than after it, and it did: PR #752 merged
+  2026-09-06 and closed issue #720, and release-please regenerated #748 to carry the break. Recorded
+  because the sequencing generalizes: a removal promised for version N is unsatisfiable if the work
+  waits for `main` to declare N, since the release PR is cut from what is already on `main`.
 
 - **Later:** remaining waves map to releases as they prove out; no need to pin numbers now.
 
