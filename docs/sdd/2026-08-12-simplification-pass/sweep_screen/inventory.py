@@ -56,7 +56,12 @@ FENCE = re.compile(r"^\s*(```|~~~)")
 #: one of its rows: a backticked path in the first cell. It is checked against
 #: the estate rather than read, so both are needed here.
 NO_ROW_HEADING = "### Files with no row, and why"
-ACCOUNTED = re.compile(r"^\| `([^`]+)` \|")
+
+#: The section recording rows that left the map. An id is never reused, so a
+#: retired one still resolves a citation even though it addresses nothing.
+RETIRED_HEADING = "### Rows this cut retired"
+RETIRED_ROW = re.compile(r"^\| ([A-Z0-9-]+) *\|")
+ACCOUNTED = re.compile(r"^\| `([^`]+)` *\|")
 
 #: The one section whose rows `generate` emits. Everything else in group 1 is a
 #: claim against the estate that the generated batch must leave alone.
@@ -414,6 +419,7 @@ def read_rows(path: str, snapshot: Snapshot) -> list[Row]:
     """
     rows: list[Row] = []
     group = section = ""
+    retired = False
     fence = ""
     fence_line = 0
     for number, line in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), start=1):
@@ -432,8 +438,12 @@ def read_rows(path: str, snapshot: Snapshot) -> list[Row]:
                 group, section = heading.split(":")[0], ""
             else:
                 section = heading
+            # The retired list is keyed by row id and shaped like a table, so it
+            # would parse as a run of two-cell rows. It records ids that are no
+            # longer rows, which is the opposite of what this loop collects.
+            retired = line == RETIRED_HEADING
             continue
-        if not line.startswith("|"):
+        if retired or not line.startswith("|"):
             continue
         where = f"{path}:{number}"
         try:

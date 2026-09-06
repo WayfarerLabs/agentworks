@@ -25,6 +25,8 @@ from .inventory import (
     INVENTORY,
     MECHANICAL_BATCH,
     NO_ROW_HEADING,
+    RETIRED_HEADING,
+    RETIRED_ROW,
     LineAnchor,
     Row,
     SiteAnchor,
@@ -34,6 +36,8 @@ from .inventory import (
 from .screens import screen_verdicts
 
 if TYPE_CHECKING:
+    import re
+
     from .estate import Site, Snapshot
 
 #: How the map titles its groups, so a `totals` run pastes into it unedited.
@@ -71,7 +75,21 @@ def unresolved_claims(rows: list[Row], snapshot: Snapshot) -> list[tuple[str, st
     ]
 
 
-def check_map(rows: list[Row]) -> list[str]:
+def section_ids(map_path: str, heading: str, pattern: re.Pattern[str]) -> set[str]:
+    """The first cell of every table row under `heading`, up to the next one."""
+    lines = Path(map_path).read_text(encoding="utf-8").splitlines()
+    if heading not in lines:
+        return set()
+    found = set()
+    for line in lines[lines.index(heading) + 1 :]:
+        if line.startswith("#"):
+            break
+        if match := pattern.match(line):
+            found.add(match.group(1))
+    return found
+
+
+def check_map(rows: list[Row], retired: set[str]) -> list[str]:
     """Structural faults in the map itself, as a list of complaints.
 
     These are the properties the map's prose used to promise a reader and
@@ -82,7 +100,7 @@ def check_map(rows: list[Row]) -> list[str]:
     """
     faults: list[str] = []
     ids = [r.id for r in rows]
-    known = set(ids)
+    known = set(ids) | retired
     for row_id in sorted({i for i in ids if ids.count(i) > 1}):
         faults.append(f"duplicate row id {row_id}")
     for row in rows:
@@ -112,15 +130,9 @@ def check_accounting(map_path: str, missing: list[str]) -> list[str]:
     drifted the moment two of its files gained rows, because nothing compared
     the two. The table is found by its heading and read to the next one.
     """
-    lines = Path(map_path).read_text(encoding="utf-8").splitlines()
-    if NO_ROW_HEADING not in lines:
+    listed = section_ids(map_path, NO_ROW_HEADING, ACCOUNTED)
+    if not listed:
         return [f"the map has no {NO_ROW_HEADING!r} section, so nothing accounts for the files no row names"]
-    listed = set()
-    for line in lines[lines.index(NO_ROW_HEADING) + 1 :]:
-        if line.startswith("#"):
-            break
-        if match := ACCOUNTED.match(line):
-            listed.add(match.group(1))
     return [f"the files-with-no-row table names {p}, which a row addresses" for p in sorted(listed - set(missing))] + [
         f"no row names {p}, and the files-with-no-row table omits it" for p in sorted(set(missing) - listed)
     ]
@@ -371,7 +383,8 @@ def totals(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
         f"| {ledger['deferred']} | {ledger['ledger']} |"
     )
     missing = unrowed(rows, snapshot)
-    faults = check_map(rows) + check_accounting(map_path, missing)
+    retired = section_ids(map_path, RETIRED_HEADING, RETIRED_ROW)
+    faults = check_map(rows, retired) + check_accounting(map_path, missing)
     print(f"\n# structural faults: {len(faults)}", file=sys.stderr)
     for fault in faults:
         print(f"#   {fault}", file=sys.stderr)
