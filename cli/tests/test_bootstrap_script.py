@@ -10,6 +10,7 @@ from agentworks.capabilities.vm_platform.bootstrap_script import (
     parse_bootstrap_output,
 )
 from agentworks.errors import ValidationError
+from tests.conftest import requires_posix_shell
 
 
 def test_generate_bootstrap_script_all_steps() -> None:
@@ -302,10 +303,15 @@ def test_swap_fstab_append_is_guarded_against_re_execution() -> None:
     assert "echo '/swapfile none swap sw 0 0' >> /etc/fstab" in script
 
 
+@requires_posix_shell
 def test_generate_bootstrap_script_passes_bash_syntax_check() -> None:
     """End-to-end: the generated script must syntactically parse as
     bash. Catches any future template change that leaks an unescaped
-    brace, an unterminated heredoc, etc."""
+    brace, an unterminated heredoc, etc.
+
+    Skips on Windows: the script targets the Linux VM guest, and the
+    Git-for-Windows ``bash -n`` used on the Windows controller parses these
+    heredocs differently from the guest's bash. Linux CI covers this."""
     import os
     import subprocess
     import tempfile

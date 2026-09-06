@@ -80,6 +80,52 @@ jobs:
         env:
           AGENTWORKS_PACKAGE_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
 
+  # agentworks is operated from Windows, and some behavior (SSH TTY/stdin,
+  # path rendering, machine-output stream purity) is host-specific and cannot
+  # be caught on Linux. This job runs the same suite on Windows so those
+  # regressions surface in CI rather than as live operator pain.
+  test-windows:
+    name: Test (Windows, Python 3.13)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Several kept tests shell out to the POSIX toolchain to check the shell
+      # text agentworks generates, and Git for Windows (shipped on the runner)
+      # provides it once the right directories are on PATH. `sh`/`bash` from
+      # `Git\bin` back the shell-wrapping tests (e.g. the codex/lima `sh -c`
+      # word-split and portable-quoting tests, some of which run on every host);
+      # coreutils (`grep`, `sed`, `awk`) from `Git\usr\bin` back tests that
+      # invoke a tool directly rather than through a shell (e.g. test_sve_gate,
+      # which runs `grep` on the generated script). Without these on PATH those
+      # tests error with FileNotFoundError. Tests that need Linux-guest shell
+      # semantics git-bash cannot reproduce skip on Windows via the shared
+      # `requires_posix_shell` marker (which gates on `/bin/sh`, absent on
+      # Windows); Linux CI still covers those.
+      - name: Put the Git for Windows POSIX toolchain on PATH
+        shell: pwsh
+        run: |
+          Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files\Git\bin'
+          Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files\Git\usr\bin'
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Pytest
+        run: uv run pytest tests/ -m 'not integration'
+        env:
+          AGENTWORKS_PACKAGE_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+
   # File-quality linters and the rulesync drift check both run via the same
   # scripts contributors use locally (./scripts/lint-files.sh, ./scripts/rulesync-upgen.sh
   # --check). That keeps CI and local behavior in lockstep; the version pins,
@@ -169,7 +215,7 @@ jobs:
   # rather than in GitHub settings that can drift silently.
   ci-success:
     if: always()
-    needs: [python-checks, test, lint-files, rulesync-drift, locked-sdds, website]
+    needs: [python-checks, test, test-windows, lint-files, rulesync-drift, locked-sdds, website]
     runs-on: ubuntu-latest
     steps:
       - name: Verify all required jobs passed
@@ -177,8 +223,8 @@ jobs:
           REQUIRED_RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
           read -r -a results <<< "$REQUIRED_RESULTS"
-          if [[ "${#results[@]}" -ne 6 ]]; then
-            echo "::error::Expected six required CI job results."
+          if [[ "${#results[@]}" -ne 7 ]]; then
+            echo "::error::Expected seven required CI job results."
             exit 1
           fi
           for result in "${results[@]}"; do

@@ -277,7 +277,10 @@ def test_batch_fleet_uses_constant_argv_and_unbounded_stdin_data(
     assert status_map == {session.name: SessionStatus.RUNNING for session in sessions}
 
 
+@requires_posix_shell
 def test_batch_command_is_valid_shell_syntax() -> None:
+    # Skips on Windows: this checks the guest-target batch probe with ``bash -n``,
+    # which Git-for-Windows' bash parses differently. Linux CI covers it.
     command = _batch_probe_command()
 
     result = subprocess.run(["bash", "-n", "-c", command], check=False, capture_output=True)
