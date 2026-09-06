@@ -181,7 +181,11 @@ handling. Secrets never enter persisted state or resolved configuration.
 integration checks its own upstream prerequisites during readiness using persisted applied state and
 inexpensive probes, and reports gaps through core's standard error framing with remediation pointing
 at the owning operation (`agw agent reinit NAME`). Gaps carry severity: a required prerequisite
-fails the operation, a recommended one warns and permits degraded operation.
+fails the operation, a recommended one warns and permits degraded operation. A prerequisite may
+require or recommend successful setup of a particular facet for its bound resource. In particular, a
+session integration can require its user facet for the session's actual user; setup for another user
+cannot satisfy that prerequisite. A facet with no prerequisite remains optional. These are the
+consuming integration's readiness requirements, not global required/optional flags on facet schemas.
 
 **R11. The Claude-specific template fields migrate into the Claude integration's config.**
 `claude_marketplaces` and `claude_plugins` leave the VM admin config and agent templates and become

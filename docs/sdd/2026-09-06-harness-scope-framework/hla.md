@@ -151,6 +151,107 @@ separate contract, not residue to fold into this migration. Do not combine this 
 capability cleanup. The hook's public caller boundary remains real even while implementations are
 first-party.
 
+## First-party facet config and worked examples
+
+These are the proposed facet assignments for all four shipped integrations. Existing session models
+keep their fields, types, defaults, merge behavior, and launch semantics. Each block still carries
+its integration's literal `name`; the hosting resource chooses the facet, so config never nests
+under a `facets` key. "No fields" below means a name-only attachment, not a claim that the facet
+cannot perform work. In particular, Claude's workspace method consumes artifacts without needing
+workspace-specific config knobs.
+
+| Integration name | VM config | User config                                               | Workspace config | Session config fields beyond `name`                                                                                                                                                                                                                  |
+| ---------------- | --------- | --------------------------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `claude-code`    | No fields | `marketplaces: list[str] = []`, `plugins: list[str] = []` | No fields        | `permission_mode`, `model`, `reasoning_effort`, `goal`, `initial_prompt`, `agent`, `append_system_prompt`, `remote_control`, `vim_mode`, `terminal_bell`, `extra_args`                                                                               |
+| `codex`          | No fields | No fields                                                 | No fields        | `model`, `sandbox`, `approval_policy`, `profile`, `network`, `approvals_reviewer`, `reasoning_effort`, `goal`, `initial_prompt`, `agent`, `developer_instructions`, `vim_mode`, `writable_dirs`, `web_search`, `disable_strict_config`, `extra_args` |
+| `grok-build`     | No fields | No fields                                                 | No fields        | `permission_mode`, `model`, `reasoning_effort`, `sandbox`, `goal`, `initial_prompt`, `agent`, `rules`, `extra_args`                                                                                                                                  |
+| `shell`          | No fields | No fields                                                 | No fields        | `command`, `resume_command`, `required_commands`                                                                                                                                                                                                     |
+
+Session defaults remain concrete: shell uses empty strings and an empty command list; the three AI
+integrations default nullable options to `None`, boolean switches to `False`, and lists to `[]`.
+Codex's `network` and `disable_strict_config` are nullable booleans; `web_search` remains
+`bool | str | None`. Its `web_search: false` leaves the native setting alone, while `"disabled"`
+explicitly disables search. Existing model definitions are the field-level contract:
+`plugins/claude/harness_integration.py:53`, `plugins/codex/harness_integration.py:129`,
+`plugins/grok/harness_integration.py:43`, and `capabilities/harness_integration/shell.py:53` under
+`cli/agentworks/`. The LLD must carry these complete schemas into reference and validation fixtures,
+preserving their defaults and their existing distinction between fresh and resumed launches.
+
+The only config moved to a setup facet here is Claude's existing marketplace/plugin configuration,
+renamed from `claude_marketplaces`/`claude_plugins`. Do not copy session knobs into user config just
+because a harness can also store them in a native user file. CLI installation still uses the
+existing `user_install_commands` surface. Codex's `profile` remains a session selection of native
+config; it does not implicitly attach or run a user facet.
+
+For example, these proposed manifests put Claude plugin setup on the user, artifact materialization
+on the workspace, and workload policy on the session. The marketplace and plugin names are
+illustrative operator-owned values; plugin enablement and the ordinary VM/workspace selection still
+apply. These new setup attachment fields become valid when this effort implements them.
+
+```yaml
+apiVersion: agentworks/v1
+kind: agent-template
+metadata:
+  name: team-claude
+spec:
+  user_install_commands: [claude]
+  harness_integrations:
+    - name: claude-code
+      marketplaces: [example-org/team-plugins]
+      plugins: [reviewer@team-plugins]
+---
+apiVersion: agentworks/v1
+kind: workspace-template
+metadata:
+  name: team-project
+spec:
+  harness_integrations:
+    - name: claude-code
+---
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: team-review
+spec:
+  harness_integration:
+    name: claude-code
+    permission_mode: default
+    initial_prompt: Review the pending changes.
+```
+
+Creating a user from `team-claude` installs its CLI through core setup, runs user-features, then
+invokes Claude's user facet with the marketplace/plugin lists and emitted artifacts. Creating a
+workspace from `team-project` runs Claude's workspace facet with its own artifact inputs and no
+extra config fields. A `team-review` session using those resources gets only session config,
+applicable env, deferred artifacts, and upstream readiness facts; it does not receive the user
+config as launch flags. The same user block is valid on the proposed admin-template attachment
+surface. Putting `permission_mode` in the user block or `plugins` in the session block is a
+facet-specific validation error. Omitting the workspace attachment selects no workspace integration;
+an explicit empty attachment list also removes inherited selection.
+
+The other shipped integrations retain ordinary session-only use. These are alternative
+`session-template.spec.harness_integration` blocks, each paired with its existing CLI-installing
+agent template where needed:
+
+```yaml
+# With example-codex; existing session settings remain here.
+name: codex
+sandbox: read-only
+approval_policy: on-request
+---
+# With example-grok; existing session settings remain here.
+name: grok-build
+permission_mode: default
+---
+# Core shell needs no plugin or setup attachment; defaults launch a login shell.
+name: shell
+```
+
+Absent setup attachments do not by themselves prevent those sessions from launching. Each still
+checks its required executable and any upstream prerequisite its integration declares. A name-only
+Codex, Grok, or shell setup attachment uses the no-op default and defers artifacts; it does not make
+unsupported rule/skill delivery successful. Nonempty final deferrals still fail before launch.
+
 ## Invocation API and execution
 
 Retain `vm_init`, `user_init`, and `workspace_init` as the method names. Each receives a typed
@@ -403,10 +504,43 @@ state machine. Once creation commits, later session failure follows the existing
 completed-resource retention or teardown policy. No integration may write outside the new workspace
 as part of workspace setup and expect that rollback to cover it.
 
-Session readiness asks the selected integration to check upstream facts and inexpensive probes for
-its own prerequisites. Core supplies applicable ancestor records and owner remediation references;
-the integration need not invent an admin-versus-agent command. Required gaps raise the existing
-typed error with the owning repair operation. Recommended gaps warn and allow degraded operation.
+**Required and recommended facets are prerequisites of the consuming invocation.** The session
+integration declares them through its readiness check, using its selected config and the actual
+session resource bindings. This is not a global required/optional flag on a facet schema, nor an
+inference from an override's presence. Core supplies applicable ancestor records, including the
+user-facet record for this integration and the session's actual user, plus owner remediation
+references. A successful admin setup or another agent's setup cannot satisfy this user's
+prerequisite.
+
+Add an upstream-prerequisite check at the existing session readiness boundary, alongside the
+existing command/target probes. Its default returns no gaps, preserving session-only integrations.
+The integration receives the applicable setup facts and may perform inexpensive probes; it returns
+typed gaps containing the needed facet, core-supplied owner reference, reason, and severity
+(`required` or `recommended`). This result and warning path are new: shipped harness probes return
+nothing on success and raise on failure. They are not a static facet-support or dependency graph.
+Keep the existing pending-target/preflight deferral: when this operation explicitly creates the
+user, assess its setup after the prerequisite nodes run, before launch. The check is read-only and
+must not turn a session start into an implicit user initialization. Readiness caching remains bound
+to the same session operation and evaluated setup generation.
+
+The check names the needed condition and evaluates completed applied state and inexpensive probes. A
+selected attachment or the existence of `user_init` alone is not proof of completed setup. Missing,
+incomplete, stale, or failed setup cannot satisfy a prerequisite for successful current setup.
+
+| Session readiness policy           | User-facet state for the session's user            | Result                                                                                                          |
+| ---------------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Required user setup                | Missing or not successfully current                | Block launch; identify this integration/user and the owning setup or reinit operation.                          |
+| Recommended user setup             | Missing or not successfully current                | Warn with the same owner-specific remediation; permit launch if other prerequisites and artifact delivery pass. |
+| No user setup prerequisite         | Absent                                             | Permit launch without a user-setup warning if other prerequisites and artifact delivery pass.                   |
+| Required or recommended user setup | Successfully current, with required probes passing | The prerequisite is satisfied.                                                                                  |
+
+For example, an integration that needs a profile generated by its user facet reports a required gap
+when that profile/setup is absent for the session's user. An integration that merely benefits from
+its user defaults reports a recommended gap and can launch without them. These illustrate policies
+an integration can implement; they do not add a generic template `required_facets` switch. Core
+frames required gaps as typed errors and recommended gaps as warnings, preserving the integration's
+reason and the owning remediation. Session operations never execute the missing setup automatically.
+
 Missing optional broader attachments are not automatically required: a session-only integration with
 no artifact inputs keeps working. No supported-scopes report is introduced; schema output describes
 config, and doctor reports actual readiness rather than inferring support from overrides or model
@@ -481,7 +615,7 @@ where setup changes the guest:
 | R3, R4, R5, R8 | A session-only integration remains compatible; different facet schemas validate on the proper resource, invalid public plugin hooks fail at registration, and setup never carries session identity/cache/state.                                                                     |
 | R7, R12        | Hints, rules, and skill bundles retain semantics and origin through grouping and delivery; handled payloads do not reach session, deferral is integration-specific across both ancestor branches and creation orders, and any final deferral blocks launch with its reason.         |
 | R9             | Repeated VM/admin and agent setup is unchanged; desired changes/removals converge; edited/unowned files cause drift/conflict reports; failed same-input reinit invalidates completion; interrupted work, unknown versions, and concurrent reinit do not overwrite or lose evidence. |
-| R10            | Required and recommended upstream gaps produce different outcomes with the correct owning remediation and no upstream mutation from session start/restart.                                                                                                                          |
+| R10            | Required, recommended, and absent user-facet prerequisites block, warn, or proceed respectively for the bound user; another user's setup cannot satisfy them; missing/stale/failed setup, correct owner remediation, and no upstream mutation are covered.                          |
 | R11, R13       | Fresh and existing Claude admin/agent config migrates; marketplace/plugin changes reconcile; core has no Claude-specific knowledge (the existing generic shell fallback remains); workspace create materializes real content, failure cleans partial output, and retry succeeds.    |
 
 Schema/reference checks cover manifest, config, instance overlay, explain/reference, and secret
