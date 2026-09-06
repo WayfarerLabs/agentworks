@@ -90,9 +90,9 @@ query the guest agent, and allocate disk space on the specified storage.
 backups, migrate VMs, access the console, or manage users/nodes/cluster config.
 
 The `AgentworksVM` role uses `VM.Monitor` for QEMU Guest Agent access on Proxmox VE 8. On Proxmox VE
-9 it uses `VM.GuestAgent.Audit`, `VM.GuestAgent.FileWrite`, and `VM.GuestAgent.Unrestricted`
-instead. The setup script selects the matching role from the installed Proxmox VE major version and
-refuses unknown major versions.
+9 it uses `VM.GuestAgent.Unrestricted`, which is required for guest exec and also authorizes the
+network inspection and file-write endpoints Agentworks uses. The setup script selects the matching
+role from the installed Proxmox VE major version and refuses unknown major versions.
 
 ### Manual setup
 

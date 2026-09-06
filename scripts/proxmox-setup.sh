@@ -51,7 +51,7 @@ case "$PVE_MAJOR" in
         VM_GUEST_AGENT_PRIVS="VM.Monitor"
         ;;
     9)
-        VM_GUEST_AGENT_PRIVS="VM.GuestAgent.Audit VM.GuestAgent.FileWrite VM.GuestAgent.Unrestricted"
+        VM_GUEST_AGENT_PRIVS="VM.GuestAgent.Unrestricted"
         ;;
     *)
         echo "Error: Agentworks supports Proxmox VE major versions 8 and 9; found '${PVE_VERSION:-unknown}'." >&2

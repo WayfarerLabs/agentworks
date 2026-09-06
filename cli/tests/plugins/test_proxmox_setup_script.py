@@ -12,7 +12,10 @@ from textwrap import dedent
 
 import pytest
 
+from tests.conftest import requires_posix_shell
+
 _SCRIPT = Path(__file__).parents[3] / "scripts" / "proxmox-setup.sh"
+pytestmark = requires_posix_shell
 _LIFECYCLE_PRIVILEGES = {
     "VM.Allocate",
     "VM.Audit",
@@ -142,7 +145,7 @@ def _run_setup(
         (
             "9",
             "local-lvm:vm-9001-disk-0",
-            {"VM.GuestAgent.Audit", "VM.GuestAgent.FileWrite", "VM.GuestAgent.Unrestricted"},
+            {"VM.GuestAgent.Unrestricted"},
         ),
     ],
 )

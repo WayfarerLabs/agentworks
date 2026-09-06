@@ -100,10 +100,9 @@ must deliberately run ordinary commands as the configured admin user and reserve
 `sudo=True`.
 
 Proxmox VE 8 guest-agent endpoints use `VM.Monitor`. VE 9 removed that privilege and split its QGA
-permissions: Agentworks needs `VM.GuestAgent.Audit` for network inspection,
-`VM.GuestAgent.FileWrite` for bootstrap staging, and `VM.GuestAgent.Unrestricted` for exec and
-status. A single unversioned role cannot support both majors, so setup must select the role from the
-installed supported major.
+permissions. Guest exec requires `VM.GuestAgent.Unrestricted`; that privilege also satisfies the
+network inspection and file-write endpoints Agentworks uses. A single unversioned role cannot
+support both majors, so setup must select the role from the installed supported major.
 
 Live VE 9 validation also showed two provider-owned shapes that setup must respect. `qm importdisk`
 records the actual imported volume under `unused0`; directory storage and block storage do not share

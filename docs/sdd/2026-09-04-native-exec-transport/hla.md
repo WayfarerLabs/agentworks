@@ -198,9 +198,9 @@ the small stdin payloads required by ordinary `run` calls.
 
 The supported Proxmox majors use different privilege names. The setup script reads the installed
 `pve-manager` major and chooses one complete role: VE 8 uses `VM.Monitor`; VE 9 uses
-`VM.GuestAgent.Audit` for network inspection, `VM.GuestAgent.FileWrite` for bootstrap staging, and
-`VM.GuestAgent.Unrestricted` for exec and status. An unknown major is refused rather than receiving
-an unverified role.
+`VM.GuestAgent.Unrestricted`, which is required for exec and status and also authorizes the network
+inspection and file-write endpoints Agentworks uses. An unknown major is refused rather than
+receiving an unverified role.
 
 Disk import is storage-dependent, so setup reads the imported `unused0` volume ID from VM config and
 attaches that exact value. It does not derive a block-volume name from the storage identifier. If
