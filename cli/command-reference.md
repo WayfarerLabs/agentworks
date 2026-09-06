@@ -244,7 +244,7 @@ last matching live observation. VMs retain name order. Provisioning is `pending`
 `complete`, `failed`, or `unknown`; initialization additionally permits `partial`. These frozen JSON
 v1 vocabularies do not expand when domain enums gain members. In this VM list JSON projection,
 `unknown` is the stable sentinel for an invalid persisted value and never echoes that stored value.
-The 0.18 producer always emits the additive nullable v1 fields `observed_status` and
+The current producer always emits the additive nullable v1 fields `observed_status` and
 `status_disposition`; a v1 consumer must tolerate their absence from older producers. Plain list
 emits null for both. With `--status`, observed status is `running`, `stopped`, `deallocated`, or
 `unknown`; disposition is `manual` or `idle` only for stopped or deallocated VMs.
@@ -294,7 +294,7 @@ this ordered shape:
 `platform`, `backend`, `status_disposition`, `system_slug`, `template`, `admin_template`,
 `tailscale_host`, `last_seen_at`, `debian_release`, `debian_release_observed_at`, and
 `live_resources` are nullable. Older JSON v1 producers may also emit a null `observed_status`; the
-0.18 producer always emits `running`, `stopped`, `deallocated`, or `unknown` because describe
+current producer always emits `running`, `stopped`, `deallocated`, or `unknown` because describe
 requests observation. Non-null release observations have the same recognized-codename and timestamp
 semantics as VM list. `status_disposition` is `manual` or `idle` only for stopped or deallocated
 VMs; and `system_slug_state` is `set`, `declined`, or `unset`. `provisioned_resources` is
@@ -381,9 +381,9 @@ zero-based position. Current producers emit `[]` when the session has no console
 v1 producers may omit this additive field under the compatibility contract below.
 
 `agw console list --output json` uses `console.list` and
-`{consoles: [{name, vm_name, session_count, status}]}` in configured name order after filtering. The
-0.18 producer always emits the additive v1 console `status` field; a v1 consumer must tolerate its
-absence from older producers. Status is `unavailable` for plain list; with `--status` it is
+`{consoles: [{name, vm_name, session_count, status}]}` in configured name order after filtering.
+Current producers always emit the additive v1 console `status` field; a v1 consumer must tolerate
+its absence from older producers. Status is `unavailable` for plain list; with `--status` it is
 `running`, `stopped`, `residual`, or `unknown`. `agw console describe NAME --output json` uses
 `console.describe` and `{console}`. Console is
 `{name, vm_name, admin_shell, created_at, updated_at, status, sessions}`. Describe status uses the
@@ -816,9 +816,15 @@ error, not an empty result. `--console` selects sessions belonging to any of the
 `--agent` matches agent-mode sessions only; `--admin` matches admin-mode sessions only (the two are
 mutually exclusive). Pass `--force` only to recover broken state after Agentworks proves the prior
 managed tmux server is absent; Agentworks never signals a stored numeric PID. Start and restart
-continue the harness conversation when possible; `--force-new` requires a fresh conversation when
-the operation launches a runtime. A running `session start --force-new` is refused rather than
-silently replacing the runtime.
+resume the harness conversation when possible. `--resume-only` refuses unless the integration can
+resume existing state; `--force-new` requires a fresh conversation when the operation launches a
+runtime. The two options are mutually exclusive. A running `session start` remains a no-op under the
+default or resume-only policy; a running `session start --force-new` is refused rather than silently
+replacing the runtime. A restart obtains the integration's launch decision before teardown, so an
+unsupported policy or unavailable strict resume leaves the managed tmux runtime and
+integration-owned state intact. Normal lifecycle preparation may already have persisted observed
+PID, boot, or stopped facts. The built-in `shell` integration does not implement `--resume-only`
+because an arbitrary shell command cannot prove that it resumed harness state.
 
 Maintainers: [Session status internals](../docs/guides/session-status.md) documents the persisted
 PID and boot-ID model, read-only live status derivation, lifecycle repair, and the safety boundary

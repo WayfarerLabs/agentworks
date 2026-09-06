@@ -771,7 +771,7 @@ sibling-base question.
 - **Each capability kind has a detailed companion README** with more depth on that specific kind:
   [`vm_platform/README.md`](vm_platform/README.md) (running VMs: exposure, credentials, rollback,
   and the bring-up pitfalls), [`harness_integration/README.md`](harness_integration/README.md)
-  (harness integrations: the contract, how the session machinery consumes one, continuation), and
+  (harness integrations: the contract, how the session machinery consumes one, resume policy), and
   [`git_credential/README.md`](git_credential/README.md) (sourcing and provisioning git credentials:
   the provider contract, the github and azdo providers, the credential-helper path), and
   [`secret_backend/README.md`](secret_backend/README.md) (source configuration, backend mappings,

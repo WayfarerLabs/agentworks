@@ -15,7 +15,14 @@ from typing import TYPE_CHECKING, ClassVar, Literal
 
 from pydantic import Field
 
-from agentworks.capabilities.harness_integration.base import HarnessIntegration, HarnessStart, require_commands
+from agentworks.capabilities.harness_integration.base import (
+    HarnessIntegration,
+    HarnessLaunchIntent,
+    HarnessStart,
+    HarnessStartNotImplemented,
+    HarnessStartResult,
+    require_commands,
+)
 from agentworks.schema import AgwModel
 from agentworks.topics import TopicProse
 
@@ -62,7 +69,7 @@ class ShellConfig(AgwModel):
 class ShellIntegration(HarnessIntegration):
     """Runs an operator command (or a login shell) as the session."""
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 3
     name: ClassVar[str] = "shell"
     description: ClassVar[str] = "Run an operator command or a login shell"
     prose: ClassVar[TopicProse | None] = TopicProse(
@@ -90,14 +97,21 @@ class ShellIntegration(HarnessIntegration):
         """This session's validated shell config."""
         return self._config_as(ShellConfig)
 
-    def start(self, ctx: RunContext, *, force_new: bool = False) -> HarnessStart:
-        """Select continuation by default and ``command`` for forced fresh.
+    def start(
+        self,
+        ctx: RunContext,
+        *,
+        intent: HarnessLaunchIntent = HarnessLaunchIntent.RESUME_OR_NEW,
+    ) -> HarnessStartResult:
+        """Select the configured launch command for a supported intent.
 
         The remaining ``or`` is the cross-field derivation the model's
         own description states, not a fallback to a literal: an empty
         ``resume_command`` means "rerun ``command``", and ``command`` is
         already resolved by the time it is read."""
-        command = self.config.command if force_new else self.config.resume_command or self.config.command
+        if intent is HarnessLaunchIntent.RESUME_ONLY:
+            return HarnessStartNotImplemented()
+        command = self.config.command if intent.starts_fresh else self.config.resume_command or self.config.command
         return HarnessStart(command)
 
     def _probe_target(self, transport: Transport) -> None:

@@ -48,6 +48,14 @@ contract it relies on (validate / construct / preflight / runup / ops) is docume
 > again and exposes only `start(ctx, force_new=False) -> HarnessStart`; core owns session start,
 > restart, and teardown. Schema-directed config merging remains unchanged. Version 1 identifies the
 > current contract exactly and is not an adapter for the earlier version-1 shape.
+>
+> Note (2026-09-04): the launch contract is now version 3 and replaces the overloaded `force_new`
+> boolean with `HarnessLaunchIntent`. `CREATE` identifies the first launch of a new Agentworks
+> session, `RESUME_ONLY` requires existing resumable state, `RESUME_OR_NEW` resumes when possible
+> and otherwise launches fresh, and `FORCE_NEW` records the operator's explicit request to bypass
+> prior harness state. Integrations return `HarnessStart` or may report any intent as
+> `HarnessStartNotImplemented`; core resolves that result before teardown and still owns the
+> lifecycle.
 
 ## Context
 

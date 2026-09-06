@@ -161,13 +161,13 @@ def test_named_console_attach_holds_across_the_interactive_attach(
     assert target.interactive_calls == ["tmux attach -t '=aw-console-c1'"]
 
 
-def test_console_recreate_multiline_environment_secret_refuses_before_rebuild(
+def test_console_restart_multiline_environment_secret_refuses_before_rebuild(
     db: Database,
     make_config,  # noqa: ANN001
     target: _FakeTarget,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    environment_value = "console-recreate-sentinel\nsecond\n"
+    environment_value = "console-restart-sentinel\nsecond\n"
     monkeypatch.setenv("AW_SECRET_CONSOLE_ENV", environment_value)
     config = make_config(
         manifests=[
@@ -200,7 +200,7 @@ def test_console_recreate_multiline_environment_secret_refuses_before_rebuild(
     assert rebuilds == []
     assert target.interactive_calls == []
     assert db.get_console("c1") is not None
-    assert "console-recreate-sentinel" not in repr((caught.value.args, vars(caught.value)))
+    assert "console-restart-sentinel" not in repr((caught.value.args, vars(caught.value)))
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
 

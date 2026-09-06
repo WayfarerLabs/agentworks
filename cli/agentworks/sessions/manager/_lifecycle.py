@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
 from agentworks import output
+from agentworks.capabilities.harness_integration import HarnessLaunchIntent, require_implemented_start
 from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
 from agentworks.errors import (
     BrokenStateError,
@@ -15,6 +16,7 @@ from agentworks.errors import (
     NotFoundError,
     StateError,
     UserAbort,
+    ValidationError,
 )
 from agentworks.sessions.tmux import ADMIN_SOCKET_ROOT, AGENT_SOCKET_ROOT
 
@@ -28,6 +30,17 @@ if TYPE_CHECKING:
     from agentworks.sessions.template import SessionTemplate
     from agentworks.sessions.tmux import RunCommand
     from agentworks.transports import Transport
+
+
+def _requested_launch_intent(*, force_new: bool, resume_only: bool) -> HarnessLaunchIntent:
+    """Translate the service flags into one mutually exclusive launch policy."""
+    if force_new and resume_only:
+        raise ValidationError("--resume-only and --force-new are mutually exclusive")
+    if force_new:
+        return HarnessLaunchIntent.FORCE_NEW
+    if resume_only:
+        return HarnessLaunchIntent.RESUME_ONLY
+    return HarnessLaunchIntent.RESUME_OR_NEW
 
 
 def _validated_socket_path(db: Database, session: SessionRow) -> str:
@@ -400,7 +413,7 @@ def _launch_existing_session(
     name: str,
     replace_running: bool,
     force: bool = False,
-    force_new: bool = False,
+    intent: HarnessLaunchIntent = HarnessLaunchIntent.RESUME_OR_NEW,
     interaction: TtyInteractionPolicy,
 ) -> None:
     """Start a stopped session, optionally replacing a running runtime.
@@ -590,7 +603,7 @@ def _launch_existing_session(
                     hint="Retry after transport access is reliable; no runtime was changed.",
                 )
             if status == SessionStatus.RUNNING and not replace_running:
-                if force_new:
+                if intent is HarnessLaunchIntent.FORCE_NEW:
                     raise StateError(
                         f"session '{name}' is already running",
                         entity_kind="session",
@@ -601,7 +614,8 @@ def _launch_existing_session(
                 return
 
             # Only a launch path needs the owning transport. In particular, an
-            # ordinary start no-op and running --force-new refusal return above
+            # resume-or-new or resume-only start no-op and the running
+            # --force-new refusal return above
             # without probing direct agent SSH.
             session_target = _mgr._build_session_target(
                 session,
@@ -688,6 +702,28 @@ def _launch_existing_session(
                 interaction=interaction,
             )
 
+        # Ask the harness for its launch decision before any teardown. A
+        # strict resume failure or an unsupported intent therefore leaves an
+        # existing runtime intact. Stateful integrations decide from their
+        # durable target state, not from whether the old tmux process is live.
+        start_ctx = RunContext(
+            config=config,
+            operation_scope=scope,
+            admin_target=admin_target,
+            agent_target=None if is_admin else session_target,
+            secrets=ScopedSecrets(graph_secret_values, session_node.secret_refs()),
+        )
+        harness_start = require_implemented_start(
+            session_node.harness_integration.start(start_ctx, intent=intent),
+            intent=intent,
+            harness_integration_name=template.harness_integration,
+            session_name=name,
+        )
+        command = _mgr._substitute_template_vars(
+            harness_start.command,
+            {"session_name": name, "workspace_name": session.workspace_name},
+        )
+
         with output.section("Starting Session"):
             output.info(f"{operation.title()}ing session '{name}'...")
 
@@ -702,26 +738,6 @@ def _launch_existing_session(
 
             deploy_restricted_config(run_command, history_limit=config.session.history_limit)
 
-            # Op-start RunContext for the harness integration, assembled
-            # AFTER teardown (a state-aware harness integration decides continuation-vs-fresh
-            # with the old process already dead). Mirrors the preflight
-            # readiness context above (this path builds no runup context), plus
-            # the scoped graph secrets (empty for the built-in shell harness_integration).
-            # Template-var substitution wraps the returned string; launch
-            # sources ``workspace_name`` from the session row, as the interim
-            # path did.
-            start_ctx = RunContext(
-                config=config,
-                operation_scope=scope,
-                admin_target=admin_target,
-                agent_target=None if is_admin else session_target,
-                secrets=ScopedSecrets(graph_secret_values, session_node.secret_refs()),
-            )
-            harness_start = session_node.harness_integration.start(start_ctx, force_new=force_new)
-            command = _mgr._substitute_template_vars(
-                harness_start.command,
-                {"session_name": name, "workspace_name": session.workspace_name},
-            )
             if harness_start.note is not None:
                 output.detail(harness_start.note)
             # Persist the node's FULL namespaced harness_integration_state blob after the
@@ -935,6 +951,7 @@ def _launch_all_sessions(
     replace_running: bool,
     force: bool = False,
     force_new: bool = False,
+    resume_only: bool = False,
     interaction: TtyInteractionPolicy,
 ) -> None:
     """Start sessions, optionally replacing running runtimes.
@@ -947,6 +964,7 @@ def _launch_all_sessions(
     and ``admin_only`` are mutually exclusive; the caller enforces
     the mutex.
     """
+    intent = _requested_launch_intent(force_new=force_new, resume_only=resume_only)
     sessions = _mgr.filter_sessions(
         db,
         workspace_name=workspace_name,
@@ -1007,7 +1025,7 @@ def _launch_all_sessions(
                     name=session.name,
                     replace_running=replace_running,
                     force=force,
-                    force_new=force_new,
+                    intent=intent,
                     interaction=interaction,
                 )
             except UserAbort:
@@ -1039,6 +1057,7 @@ def start_session(
     name: str,
     force: bool = False,
     force_new: bool = False,
+    resume_only: bool = False,
     interaction: TtyInteractionPolicy,
 ) -> None:
     _launch_existing_session(
@@ -1047,7 +1066,7 @@ def start_session(
         name=name,
         replace_running=False,
         force=force,
-        force_new=force_new,
+        intent=_requested_launch_intent(force_new=force_new, resume_only=resume_only),
         interaction=interaction,
     )
 
@@ -1059,6 +1078,7 @@ def restart_session(
     name: str,
     force: bool = False,
     force_new: bool = False,
+    resume_only: bool = False,
     interaction: TtyInteractionPolicy,
 ) -> None:
     _launch_existing_session(
@@ -1067,7 +1087,7 @@ def restart_session(
         name=name,
         replace_running=True,
         force=force,
-        force_new=force_new,
+        intent=_requested_launch_intent(force_new=force_new, resume_only=resume_only),
         interaction=interaction,
     )
 

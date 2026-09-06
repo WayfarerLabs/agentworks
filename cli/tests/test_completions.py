@@ -632,27 +632,18 @@ class TestOptionFlagsInSpec:
         for path in ("agentworks.vm.list", "agentworks.session.list", "agentworks.console.list"):
             options = {option for parameter in commands[path].params for option in parameter.opts}
             assert "--status" in options
-        session_options = {
-            option for parameter in commands["agentworks.session.list"].params for option in parameter.opts
-        }
-        assert "--no-status" not in session_options
         for shell in ("bash", "zsh", "powershell"):
             script = generate(shell)
             assert "--status" in script
 
-    def test_canonical_lifecycle_is_discoverable_and_compatibility_is_hidden(self) -> None:
+    def test_canonical_lifecycle_is_discoverable(self) -> None:
         spec = build_spec(app)
         commands = _walk_commands(spec)
         session = commands["agentworks.session"]
         assert {"start", "restart"} <= session.subcommands.keys()
-        assert "resume" not in session.subcommands
         for parameter in ("name", "vm", "workspace", "agent", "console"):
             assert ("session.start", parameter) in DYNAMIC_COMPLETIONS
             assert ("session.restart", parameter) in DYNAMIC_COMPLETIONS
-            assert ("session.resume", parameter) not in DYNAMIC_COMPLETIONS
-
-        console_attach = commands["agentworks.console.attach"]
-        assert "recreate" not in {parameter.name for parameter in console_attach.params}
 
 
 class TestGeneration:
@@ -1175,7 +1166,7 @@ def test_legacy_database_completion_recognizes_every_inventory_path(command_path
     "argv",
     [
         ["workspace", "list", "--vm", "alpha", "--names-only"],
-        ["session", "list", "--names-only", "--no-status", "--workspace=alpha"],
+        ["session", "list", "--names-only", "--admin", "--workspace=alpha"],
         ["agent", "list", "--vm=alpha", "--names-only"],
         ["console", "list", "--agent", "alpha", "--names-only"],
     ],

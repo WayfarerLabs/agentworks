@@ -4,7 +4,7 @@
 Each harness integration implementation is a ``Capability`` (see
 ``capabilities/README.md``): it declares its own config block, owns the
 session's launch-target readiness, and produces the tmux pane command as its
-op (``start(force_new=...)``). The consuming resource is the ``session`` node,
+op (``start(intent=...)``). The consuming resource is the ``session`` node,
 which HOLDS a harness integration instance and composes its readiness; that node lives in
 the ``sessions`` domain, not here. Capabilities depend only on the framework,
 never on their consuming domain (FRD R1): this package imports neither
@@ -24,9 +24,13 @@ from typing import TYPE_CHECKING
 
 from agentworks.capabilities.harness_integration.base import (
     HarnessIntegration,
+    HarnessLaunchIntent,
     HarnessStart,
+    HarnessStartNotImplemented,
+    HarnessStartResult,
     quote_literal_argv,
     require_commands,
+    require_implemented_start,
 )
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
 
@@ -36,12 +40,16 @@ if TYPE_CHECKING:
 __all__ = [
     "HARNESS_INTEGRATION_REGISTRY",
     "HarnessIntegration",
+    "HarnessLaunchIntent",
     "HarnessStart",
+    "HarnessStartNotImplemented",
+    "HarnessStartResult",
     "ShellIntegration",
     "ensure_harness_integration_enabled",
     "harness_integration_for",
     "quote_literal_argv",
     "require_commands",
+    "require_implemented_start",
 ]
 
 

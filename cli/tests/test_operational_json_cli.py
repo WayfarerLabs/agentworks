@@ -578,35 +578,6 @@ def test_session_json_status_is_explicit_and_plain_list_is_local(
     assert unrepaired is not None and unrepaired.pid is None
 
 
-def test_session_no_status_compatibility_is_hidden_local_noop(
-    db: Database,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from agentworks.cli.commands import session as command
-    from agentworks.sessions import manager
-
-    _seed_session_rows(db)
-    monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
-    monkeypatch.setattr(command, "get_db", lambda: db)
-    monkeypatch.setattr(manager, "_display_registry", lambda _config: None)
-    monkeypatch.setattr(manager, "_display_harness_integration", lambda _registry, _template: "-")
-    monkeypatch.setattr(
-        manager,
-        "observe_session_statuses",
-        lambda *_args, **_kwargs: pytest.fail("compatibility no-op reached live observation"),
-    )
-
-    result = CliRunner().invoke(app, ["session", "list", "--no-status", "--output", "json"])
-
-    assert result.exit_code == 0
-    assert result.stderr_bytes
-    rows = json.loads(result.stdout_bytes)["data"]["sessions"]
-    assert [row["status"] for row in rows] == ["unavailable", "unavailable"]
-    help_result = CliRunner().invoke(app, ["session", "list", "--help"])
-    assert help_result.exit_code == 0
-    assert b"--no-status" not in help_result.stdout_bytes
-
-
 def test_session_describe_json_is_read_only_and_maps_stopped_pid_with_degraded_template(
     db: Database,
     make_config,  # noqa: ANN001

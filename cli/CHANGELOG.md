@@ -1,5 +1,111 @@
 # Changelog
 
+## [0.18.0](https://github.com/WayfarerLabs/agentworks/compare/v0.17.0...v0.18.0) (2026-09-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **cli:** plain session list becomes local; automation must add --status for live state. The hidden --no-status compatibility option remains in 0.18 and is removed in 0.19.
+* **cli:** session resume is replaced by session start/restart, console attach no longer creates runtimes, and in-tree harness integrations use HarnessStart from their version-1 start method.
+
+### Features
+
+* **aws:** guard composite EC2 mutations ([4eb04fd](https://github.com/WayfarerLabs/agentworks/commit/4eb04fd4a86f5f23bae648f1aab82e885dbaef6c))
+* **azure:** preflight VM create permissions ([8295499](https://github.com/WayfarerLabs/agentworks/commit/8295499e5e419b22cce3f7f20c332181369246e9))
+* **cli:** clarify session and console lifecycle ([99caf47](https://github.com/WayfarerLabs/agentworks/commit/99caf47d89674ad7791d521a4303a436c31f16d1))
+* **cli:** standardize runnable status inspection ([c212c25](https://github.com/WayfarerLabs/agentworks/commit/c212c25371f9da9a55f9bbe680e8dd953d8b8798))
+* filter batch sessions by console ([42e19d3](https://github.com/WayfarerLabs/agentworks/commit/42e19d33cf303bb1d3177eda4ca828bce8147e5a))
+* filter batch sessions by console ([0e56db4](https://github.com/WayfarerLabs/agentworks/commit/0e56db431a62b491c3b4cd1b88e408da664c71a1))
+* standardize runnable status inspection ([5bc692b](https://github.com/WayfarerLabs/agentworks/commit/5bc692b9aa20749490493ac7f102ebfdcf9ec43c))
+* **vm:** improve cloud permission failure handling ([3f97ea3](https://github.com/WayfarerLabs/agentworks/commit/3f97ea3cd357582ceb71c2c065ad23db8d08379d))
+* **vm:** manage Debian upgrade checkpoints ([43ce4f7](https://github.com/WayfarerLabs/agentworks/commit/43ce4f7b57dc9755e187e90e76ae1328cfd738be))
+* **vm:** support Debian Trixie release transitions ([4887284](https://github.com/WayfarerLabs/agentworks/commit/4887284e534bda2e61bd6aa5d6f9b14c7a4b32ca))
+
+
+### Bug Fixes
+
+* **aws:** bind VM deletion to account ownership ([de3ce0b](https://github.com/WayfarerLabs/agentworks/commit/de3ce0b39d608d48135dfab9af3e48b258b2e370))
+* **aws:** persist reconciled delete identity ([c25222e](https://github.com/WayfarerLabs/agentworks/commit/c25222ec9aa38975be619e80821f0765f92634de))
+* **aws:** persist termination acceptance ([48dd5d1](https://github.com/WayfarerLabs/agentworks/commit/48dd5d15e2f2954e4179a06ffc10e1fb31e157c9))
+* **aws:** reconcile lost launch responses ([40c4263](https://github.com/WayfarerLabs/agentworks/commit/40c4263299b210ca1b9b8fe1c5a9deda44f96045))
+* **aws:** require consecutive absence evidence ([e7f3c94](https://github.com/WayfarerLabs/agentworks/commit/e7f3c9445bcde64c196e73cb476e41e7ae4ac5b6))
+* **aws:** require positive cleanup authorization ([99b9527](https://github.com/WayfarerLabs/agentworks/commit/99b95277fcc613dc8f1ae557bed1de8d14bb0466))
+* **aws:** retain observed launch outcomes ([750a942](https://github.com/WayfarerLabs/agentworks/commit/750a9422e31efa72737f6460aa74488004953981))
+* **aws:** retain unconfirmed create cleanup ([a09994a](https://github.com/WayfarerLabs/agentworks/commit/a09994a29954faf953f12ac70190cdb840242163))
+* **aws:** simplify permission safety checks ([28deb14](https://github.com/WayfarerLabs/agentworks/commit/28deb14da3aa3c276c85a4a613d2a8661cdaa3f1))
+* **checkpoints:** resume persisted provider recovery ([8d206a3](https://github.com/WayfarerLabs/agentworks/commit/8d206a335fa060a09309f2cd5f47b1768b4abf99))
+* **cli:** align runnable status tables ([3e21f77](https://github.com/WayfarerLabs/agentworks/commit/3e21f77a24ad8eed6783f75b9d8836aa9b5f11b7))
+* **cli:** bound session status transport payload ([3edd3f8](https://github.com/WayfarerLabs/agentworks/commit/3edd3f8d168e17227d91ea0e90160a22be06b477))
+* **cli:** close remaining lifecycle probe gaps ([b320e55](https://github.com/WayfarerLabs/agentworks/commit/b320e55e8f5232e9249dfd2f217bda4b452ea4cc))
+* **cli:** close status probe stdin ([c666b61](https://github.com/WayfarerLabs/agentworks/commit/c666b6184783c0abd0bce81cd49d4de2f780e091))
+* **cli:** complete lifecycle review cleanup ([a654a69](https://github.com/WayfarerLabs/agentworks/commit/a654a694a0854bba0afbc9da6b872c58a21d8924))
+* **cli:** distinguish forced fresh harness starts ([564cde0](https://github.com/WayfarerLabs/agentworks/commit/564cde0c7c9d6aa560fcb7541dfdd789c834cbf5))
+* **cli:** distinguish tmux absence from probe failure ([d99835d](https://github.com/WayfarerLabs/agentworks/commit/d99835dacb4219d1f61533b6abce448a9cb8e064))
+* **cli:** emit complete session status frames ([1c63956](https://github.com/WayfarerLabs/agentworks/commit/1c639563f6cda966c521a5e51f21873b60d62bde))
+* **cli:** fail closed during session repair ([8efcc98](https://github.com/WayfarerLabs/agentworks/commit/8efcc98f6fbee2b796736c5c265eeb92aa1ac89d))
+* **cli:** fail closed on lifecycle probes ([d193e48](https://github.com/WayfarerLabs/agentworks/commit/d193e48fd10a0fceef96219865e85768965f5203))
+* **cli:** harden runnable status observation ([66895c1](https://github.com/WayfarerLabs/agentworks/commit/66895c103059ea5ea9b2c2f148dbbaa62462c4c4))
+* **cli:** harden status inspection boundaries ([d35c7c3](https://github.com/WayfarerLabs/agentworks/commit/d35c7c3b9adfe7de615f16df102700c258e6f75f))
+* **cli:** isolate remote Lima guest commands ([638fa01](https://github.com/WayfarerLabs/agentworks/commit/638fa0185983786eedc50f513fad20b602e0748c))
+* **cli:** keep console nesting policy in one owner ([9c388fc](https://github.com/WayfarerLabs/agentworks/commit/9c388fc3f8783b0635cced0b4358643d21707ebc))
+* **cli:** preserve durable lifecycle state ([4f7d70b](https://github.com/WayfarerLabs/agentworks/commit/4f7d70b1fb3097e54c437db686addf10046742cf))
+* **cli:** preserve resume confirmation ([715d6d4](https://github.com/WayfarerLabs/agentworks/commit/715d6d445cda42867589f26070c4390945a58dd1))
+* **cli:** quote exact tmux targets for zsh ([211edd0](https://github.com/WayfarerLabs/agentworks/commit/211edd0b2074d8517930172a23d1f6b8ceba5123))
+* **cli:** recook the console before interactive prompts ([41022f4](https://github.com/WayfarerLabs/agentworks/commit/41022f4d680f7e831429229eedcc19acd0ee9c8d))
+* **cli:** recook the console before interactive prompts ([1f2cf71](https://github.com/WayfarerLabs/agentworks/commit/1f2cf717645d96c326a5ca76fb88471ceaadc34e))
+* **cli:** repair identity before console selection ([1081470](https://github.com/WayfarerLabs/agentworks/commit/1081470fa0ab315c3e0221da8142a87ad9b292a1))
+* **cli:** sanitize lifecycle recovery output ([6565bd5](https://github.com/WayfarerLabs/agentworks/commit/6565bd58958052eedc0d0f628b044853554642b6))
+* **cloud:** simplify permission diagnostics ([3468074](https://github.com/WayfarerLabs/agentworks/commit/3468074ff78cf2d674619e881ab5327e2b77717f))
+* **console:** handle legacy running selection ([8ee85e0](https://github.com/WayfarerLabs/agentworks/commit/8ee85e03e9455aeffbf8078a2b4b5ed22d5cb95e))
+* **db:** finish transaction-aware CRUD migration ([023c6d6](https://github.com/WayfarerLabs/agentworks/commit/023c6d62a9d63eeddd191f8052a8431b97bacc03))
+* **db:** finish transaction-aware CRUD migration ([1873468](https://github.com/WayfarerLabs/agentworks/commit/18734687c574371948c5725a8b51e5b14dfe9540))
+* **db:** preserve session runtime transaction atomicity ([41d0fea](https://github.com/WayfarerLabs/agentworks/commit/41d0fead9ce79d3e7c1fdc1e77921fd0bac51605))
+* **lima:** bound VZ recovery to local placement ([8145c66](https://github.com/WayfarerLabs/agentworks/commit/8145c6620c4b238860b54270ce6b2277a06a7811))
+* **lima:** harden VZ checkpoint recovery ([ce14938](https://github.com/WayfarerLabs/agentworks/commit/ce149385505080ab6def3b93cc395f277a038b54))
+* **lima:** make VZ restore interruption safe ([1d0dced](https://github.com/WayfarerLabs/agentworks/commit/1d0dced3be09b4eb40f6f2e76b5298a4613d8444))
+* **lima:** support VZ recovery checkpoints ([58c3f24](https://github.com/WayfarerLabs/agentworks/commit/58c3f24e720ca10d99accf609df182c5c781d444))
+* **ssh:** drop forced -tt on Windows, close stdin with ssh -n ([c962f52](https://github.com/WayfarerLabs/agentworks/commit/c962f52043e9ea239197ad96d5a383f98db9164d))
+* **ssh:** drop the Windows forced-tt default, close stdin with ssh -n ([9e6420a](https://github.com/WayfarerLabs/agentworks/commit/9e6420ac1329a678ad95f42d030a10f8e00d0b45)), closes [#361](https://github.com/WayfarerLabs/agentworks/issues/361)
+* **ssh:** force -T for byte-exact stdin regardless of ssh config ([e9eb956](https://github.com/WayfarerLabs/agentworks/commit/e9eb9565a31eb17e40531029ac33988a754c38b6))
+* **ssh:** force -T on every non-tty=True run() so config cannot inject a pty ([584ac5f](https://github.com/WayfarerLabs/agentworks/commit/584ac5f6e6a9731bca3e43aa8b8bf4c85f11f6a2))
+* **tests:** isolate CLI request flags ([2f9c336](https://github.com/WayfarerLabs/agentworks/commit/2f9c3360b5eb0e543688330d3d0a5df85fa01d0a))
+* **transport:** quote remote copy paths ([656fe44](https://github.com/WayfarerLabs/agentworks/commit/656fe4470dbf0b7d2a2efed82415ec3c7126c5ca))
+* **transports:** close stdin on no-payload run across all transports ([3b8a736](https://github.com/WayfarerLabs/agentworks/commit/3b8a736243edc14acecb4dcab4cfa37c6369bc35))
+* **vm:** address release feedback ([c73066b](https://github.com/WayfarerLabs/agentworks/commit/c73066ba13b2b86e31dc25febdbb07e740c7ae15))
+* **vm:** bound retained delete handoffs ([1e8b278](https://github.com/WayfarerLabs/agentworks/commit/1e8b27820d12732492b04c64b68e0457236005d1))
+* **vm:** fail closed across checkpoint providers ([b652a89](https://github.com/WayfarerLabs/agentworks/commit/b652a89bb87125d0bcdb4e1174085fb1f2151401))
+* **vm:** fail closed at checkpoint shell boundaries ([8e095b1](https://github.com/WayfarerLabs/agentworks/commit/8e095b17c13448cbee9ad51f9f72af5bf0dbec2c))
+* **vm:** harden managed checkpoint recovery ([c122c6b](https://github.com/WayfarerLabs/agentworks/commit/c122c6b3b6d715fea5fe6d5b83e7c45b410b38f7))
+* **vm:** harden release-transition correction ([75b77e0](https://github.com/WayfarerLabs/agentworks/commit/75b77e0ac1bcf64a92c772b1f300b538a4eb0d57))
+* **vm:** preserve checkpoint failure recovery ([951d061](https://github.com/WayfarerLabs/agentworks/commit/951d061be4090d6074adc8d98662dd98fdadb8da))
+* **vm:** preserve provider authorization failures ([335df06](https://github.com/WayfarerLabs/agentworks/commit/335df06662a151aceaa9fb9430c47eae14b83853))
+* **vm:** preserve retained state atomically ([1cf9148](https://github.com/WayfarerLabs/agentworks/commit/1cf91480752ac54b3ce55d240891166d647044fb))
+
+
+### Documentation
+
+* **apt:** explain ngrok Trixie suite mapping ([df56670](https://github.com/WayfarerLabs/agentworks/commit/df56670eceec6744cad2916b142396429cd6347f))
+* **aws:** clarify manual recovery boundary ([ab41d33](https://github.com/WayfarerLabs/agentworks/commit/ab41d33965a93952a17b94cc45c56caaae928f96))
+* **aws:** make manual launch recovery exact ([6b12d1e](https://github.com/WayfarerLabs/agentworks/commit/6b12d1e2bf386024af7e554a982c66c3a072ae8b))
+* clarify console filter behavior ([12908cc](https://github.com/WayfarerLabs/agentworks/commit/12908cc0603459588c876daa3d95a50dc88857e2))
+* correct lifecycle release sequencing ([986552b](https://github.com/WayfarerLabs/agentworks/commit/986552b591e703baa32d0bf5d83c6e1c9dccfb42))
+* correct lifecycle release sequencing ([3863be0](https://github.com/WayfarerLabs/agentworks/commit/3863be06f1596c798dfe2e93e0ca7d5f0933a5ee))
+* **gcp:** complete firewall permissions ([7edb041](https://github.com/WayfarerLabs/agentworks/commit/7edb041007548b4a308b80e6801670790b27d443))
+* **ssh:** name the Win32-OpenSSH [#1338](https://github.com/WayfarerLabs/agentworks/issues/1338) race in the argv builder ([618ffbb](https://github.com/WayfarerLabs/agentworks/commit/618ffbb64992b4d4bb5d9f48cb0ff932a65cf45f))
+* **vm-platform:** align detailed resource lifecycle ([a163afe](https://github.com/WayfarerLabs/agentworks/commit/a163afe0da962903a8b23eda6cae0ce5cb3ee832))
+* **vm-platform:** clarify platform obligations ([3e211e0](https://github.com/WayfarerLabs/agentworks/commit/3e211e0a68927f70edd04033568dc5a79d2df498))
+* **vm-platform:** keep obligations implementable ([6a59d86](https://github.com/WayfarerLabs/agentworks/commit/6a59d86c7d23ea6d03c765ee6ce0b00745d66a4a))
+* **vm-platform:** qualify ingress recovery detail ([d78cdc0](https://github.com/WayfarerLabs/agentworks/commit/d78cdc01f45bda0165ec43badf76eb45d7212e54))
+* **vm-platform:** qualify resource cleanup ([5f32bca](https://github.com/WayfarerLabs/agentworks/commit/5f32bcaf3750d7d840cf18fc87223d0605dde295))
+* **vm-platform:** restore resource lifecycle obligation ([c0248e4](https://github.com/WayfarerLabs/agentworks/commit/c0248e4fc9400cc1867ae826073ebed94c72f2aa))
+* **vm-platform:** restore resource lifecycle obligation ([3f15538](https://github.com/WayfarerLabs/agentworks/commit/3f155381ca4f20361c9f03f902f2432e9bd490ba))
+* **vm-platform:** scope managed resource cleanup ([ba6b797](https://github.com/WayfarerLabs/agentworks/commit/ba6b797cca557b905358c4cd1aedb9ad385111bb))
+* **vm-platform:** sharpen resource ownership terms ([f89c9d5](https://github.com/WayfarerLabs/agentworks/commit/f89c9d51b58cdd626f88d7481c1755850396af34))
+* **vm-platform:** update capability obligations ([2e00526](https://github.com/WayfarerLabs/agentworks/commit/2e00526e58673f5c1be1c684833b954409037121))
+* **vm:** align checkpoint JSON order ([16729c3](https://github.com/WayfarerLabs/agentworks/commit/16729c349b051586dfdf2d303c1c4ec17494ff8a))
+* **vm:** align provider operation contracts ([2b69d9b](https://github.com/WayfarerLabs/agentworks/commit/2b69d9b566417ed768e6e925735a79a96ab6a018))
+* **vm:** document cloud platform permissions ([54dc307](https://github.com/WayfarerLabs/agentworks/commit/54dc3077757ad0034c14760f47a664989a4c9e06))
+
 ## [0.17.0](https://github.com/WayfarerLabs/agentworks/compare/v0.16.0...v0.17.0) (2026-08-31)
 
 

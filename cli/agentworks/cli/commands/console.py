@@ -215,7 +215,6 @@ def console_describe(
 @console_app.command("attach")
 def console_attach(
     name: Annotated[str, typer.Argument(help="Console name")],
-    recreate: Annotated[bool, typer.Option("--recreate", hidden=True)] = False,
     allow_nesting: Annotated[
         bool, typer.Option("--allow-nesting", help="Allow attaching from inside an existing tmux")
     ] = False,
@@ -223,18 +222,10 @@ def console_attach(
     """Attach to a running named console."""
     interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config
-    from agentworks.sessions.multi_console import attach_console, refuse_console_nesting, restart_console
+    from agentworks.sessions.multi_console import attach_console
 
-    if recreate:
-        refuse_console_nesting(allow_nesting=allow_nesting)
     db = get_db()
     config = load_config()
-    if recreate:
-        from agentworks import output
-
-        output.deprecation("`console attach --recreate` is deprecated; use `console restart` then `console attach`.")
-        restart_console(db, config, name=name, interaction=interaction)
-
     raise typer.Exit(
         attach_console(
             db,

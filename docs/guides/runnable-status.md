@@ -73,7 +73,7 @@ and console list records carry `"status":"unavailable"`; requested inconclusive 
 requested inconclusive observations carry `"observed_status":"unknown"`. Describe never uses a
 not-requested sentinel because it always observes.
 
-The 0.18 producer emits the VM and console status fields on every applicable record. They remain
+The current producer emits the VM and console status fields on every applicable record. They remain
 additive JSON v1 fields: consumers must tolerate their absence when reading output from an older v1
 producer.
 
