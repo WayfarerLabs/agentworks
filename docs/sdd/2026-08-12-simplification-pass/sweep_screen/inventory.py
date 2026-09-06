@@ -316,7 +316,7 @@ def _lift(path: str, spans: list[tuple[int, int]], snapshot: Snapshot, *, sites_
 
     Every other group's rows address assertions the estate scan cannot see, so
     the enclosing function is always emitted, with any cited sites alongside it.
-    Dropping the span there narrowed 36 rows onto `match=` sites they were never
+    Dropping the span there narrowed 39 rows onto `match=` sites they were never
     about.
 
     Lines inside no function stay literal, because inventing a name for them

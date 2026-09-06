@@ -29,16 +29,54 @@ one of its rows now resolves at HEAD; rows in other groups were re-derived only 
 re-baseline touched them, so a line number elsewhere may still be a `c686cd6d` anchor.
 
 **Re-anchored on 2026-09-06**, mechanically, at `426cccae`. Every row now keys what it addresses by
-identity rather than by line, per the grammar below, and nothing but column 2 moved: no disposition,
-shape, justification or id changed and no site was reclassified. The rows' own basis is what limits
-this. Group 1's line numbers were `426cccae` readings, so its anchors are exact; the other groups'
-were re-derived only where the re-baseline touched them, so some of their span anchors were derived
-from a number that was a `c686cd6d` reading. **`sweep-screen.py bases` is that question**, and it
-answers it by lifting the same map at both commits and comparing what each names: 987 rows agree,
-144 disagree, and 84 are not applicable because the file is absent at a base or is not Python. The
-144 may name the test next to the one the row meant, and that is a loud failure rather than a quiet
-one: `resolve` reports a name that is not there, where a wrong line number would have landed on
-something and said nothing.
+identity rather than by line, per the grammar below, and nothing but column 2 and the line-anchored
+markers moved: no disposition, justification or id changed and no site was reclassified.
+
+**The rows' own basis is what limits this, and the fresh cut owes work because of it.** Group 1's
+line numbers were `426cccae` readings, so its anchors are exact. The other groups were re-derived
+only where the 2026-08-19 re-baseline touched them, so some of their span anchors were lifted from a
+number that had been read at `c686cd6d`, and a number read at one tree and lifted at another names
+whatever function now sits there.
+
+**Measured 2026-09-06**, by lifting the pre-rewrite map (the `96aa6617` cells, with B-116 corrected
+by hand because no parser could read its two-file cell) at `c686cd6d` and at `426cccae` and
+comparing what each named: **987 rows agree, 144 disagree, 84 are not applicable** because the file
+is absent at a base or is not Python. That measurement is history, not a live check; the command
+that produced it was deleted with this round, because it answers a question about a map that is
+about to be replaced.
+
+**Do not read the 144 as loud failures.** Of them, 125 resolve cleanly at HEAD, which is exactly the
+quiet case: the anchor names a real test, so nothing reports anything, and whether it names the
+RIGHT test is not a question any tree can answer. 11 resolve nothing and 8 are mixed. Group 1 is not
+at risk, because its basis is known; the exposure is the non-group-1 rows.
+
+**The recourse is re-derivation, not repair.** The fresh cut re-derives from scratch every
+non-group-1 row in the 20 files below, rather than carrying their anchors forward, so the mixed
+basis dies with the cut instead of being audited row by row. Eight of these files disagree on every
+row asked, and four of them hold 93 of the 144.
+
+| File                                                     | Rows asked | Disagreeing |
+| -------------------------------------------------------- | ---------: | ----------: |
+| `cli/tests/test_completions.py`                          |         36 |          34 |
+| `website/tests/test_site_templates.py`                   |         26 |          24 |
+| `website/tests/test_site_documents.py`                   |         24 |          20 |
+| `website/tests/test_site_content.py`                     |         16 |          15 |
+| `cli/tests/test_doctor_env_and_secrets.py`               |          6 |           6 |
+| `cli/tests/test_config.py`                               |          7 |           5 |
+| `cli/tests/test_secret_describe.py`                      |          8 |           5 |
+| `cli/tests/test_resource_edit.py`                        |          8 |           5 |
+| `cli/tests/test_codex_integration.py`                    |          7 |           4 |
+| `cli/tests/manifests/test_samples.py`                    |          8 |           4 |
+| `cli/tests/secrets/test_resolution_lifecycle.py`         |          3 |           3 |
+| `cli/tests/sessions/test_singular_batch_orchestrated.py` |          5 |           3 |
+| `cli/tests/test_doctor.py`                               |          7 |           3 |
+| `cli/tests/test_claude_code_integration.py`              |          2 |           2 |
+| `website/tests/test_lander_phase4j_browser.py`           |          2 |           2 |
+| `website/tests/test_lander_phase4k_browser_cleanup.py`   |          2 |           2 |
+| `cli/tests/test_resource_list.py`                        |          4 |           2 |
+| `cli/tests/test_resource_kinds.py`                       |          1 |           1 |
+| `cli/tests/test_list_truncation.py`                      |          1 |           1 |
+| `cli/tests/manifests/test_schema_command.py`             |          1 |           1 |
 
 ### Reading this file mechanically
 
@@ -103,25 +141,20 @@ needle against the same type twice. `sweep-screen.py estate` prints them, and `S
 build unless the groups cover every site exactly once.
 
 **The states an anchor resolves to.** `resolved` is what the row was cut against, at whatever line
-it now sits. `grown` and `shrunk` are a site group that changed size. `retargeted` is the same test
-asserting the same type against a different needle, which is what a reworded message leaves behind.
-`gone` is the file present and the anchor not in it, `file-gone` is the file itself, and
-`line-anchored` is a line anchor, which resolves to nothing by construction. `carry` adds two,
-because it holds two trees: `found` is resolved at the same line as at the source commit, `moved` is
-resolved at a different one.
-
-**And the four verdicts `carry` gives a row.** `carries` when every anchor that can settle is found
-or moved; `partial` when some are and some are not, which includes a group that grew or shrank,
-because the row's evidence was written against a different number of assertions; `lost` when none
-are; `no-anchor` when the row addresses nothing the parser can read.
+it now sits. `grown` and `shrunk` are a site group that changed size, with both counts. `retargeted`
+is the same test asserting the same type against a different needle, which is what a reworded
+message leaves behind. `gone` is the file present and the anchor not in it, `file-gone` is the file
+itself, and `line-anchored` is a line anchor, which resolves to nothing by construction. `carry`
+holds two trees and so adds its own labels on top of these; its docstring is where those live,
+because they describe a comparison between commits rather than what a row says.
 
 **A site anchor beats a span anchor in the same function, in group 1 only.** Group 1's rows address
 `match=` sites, so where a function holds sites such a row cited, those sites are the whole claim: a
 span anchor beside them would claim every other site in the same test for the same row, and that is
 what keeps "every `match=` site is claimed by exactly one group-1 row" checkable. Every other
 group's rows address assertions the estate scan cannot see, so their enclosing function is always
-anchored, with any cited sites alongside it. Dropping the span there narrowed 36 rows onto sites
-they were never about.
+anchored, with any cited sites alongside it. Dropping the span there narrowed 39 rows onto sites
+they were never about: 22 in group 5, 12 deferred and 5 in group 4.
 
 **A span anchor is deliberately coarser than the row.** It names the test, not the assertion inside
 it, so several rows can share one span anchor and column 3 is what tells them apart. That is the
@@ -133,8 +166,10 @@ on such a row says the test is still here, not that the assertion is.
 `[line-anchored: <cause>]` marker `reanchor` writes into column 3. Four causes, and this map holds
 93 line anchors across them:
 
-- **file gone** (66): the file did not exist at the tree the anchors were derived from, which is
-  group 2's whole estate, deleted by the guide rework.
+- **file gone** (66): the file did not exist at the tree the anchors were derived from. 50 of these
+  are group 2's whole estate, deleted by the guide rework, and the other 16 sit in live groups
+  (group 1: 2, group 3: 1, group 4: 6, group 5: 6, group 6: 1), so this cause is not group 2's alone
+  and a reader counting dead rows by it will over-count.
 - **not Python** (14): no AST to read, which is the `.mjs` rows that cite lines; the other three
   `.mjs` rows name their file and no lines, so they are file anchors.
 - **between functions** (10, and one row that is both): a stale number landing on a blank line, a
@@ -368,12 +403,12 @@ Group 1's site counts are derived exactly, because that estate is scanned rather
 `sweep-screen.py estate` run at `426cccae` is where the 664 comes from, one site per line, and it is
 what to re-run when the tree moves; `sweep-screen.py attribute` is what checks the claim below
 against the rows, and it now exits non-zero when the claim is false. **All 664 `match=` sites under
-`cli/tests` at HEAD are claimed by exactly one group-1 row**, and `attribute` reports zero sites
-claimed by no row and zero claimed by more than one. Of the suite's 49 `assertRaisesRegex` sites
-under `website/tests`, group 1 claims 37 and the deferred L-402 claims the other twelve. The other
-groups were read rather than scanned, and one row there covers an assertion group of one to a dozen
-lines, so no site total is claimed for them. Do not add these numbers to the absorbed survey's: that
-survey counted test FUNCTIONS.
+`cli/tests` at `426cccae` are claimed by exactly one group-1 row**, and `attribute` reports zero
+sites claimed by no row and zero claimed by more than one. Of the suite's 49 `assertRaisesRegex`
+sites under `website/tests`, group 1 claims 37 and the deferred L-402 claims the other twelve. The
+other groups were read rather than scanned, and one row there covers an assertion group of one to a
+dozen lines, so no site total is claimed for them. Do not add these numbers to the absorbed
+survey's: that survey counted test FUNCTIONS.
 
 **That claim is about `426cccae`, and the tree has moved since.** The counts in this section are the
 2026-08-19 cut's and are not re-derived here; the fresh cut is what re-derives them. Measured at
@@ -436,13 +471,18 @@ Three markers take a row OUT of the executable set:
   always out of the executable set; before 2026-08-19 that was carried by the heading they sat under
   rather than by the row.
 
-Two annotate a row that stays in it:
+Three annotate a row that stays in it:
 
 - **`[1-raise]`**: the callee-side raise screen verified every site this row claims as
   single-raise-path, per the screen's section above. It is carried on delete rows, which are the
   ones the screen decides; a keep row keeps its `match=` either way.
 - **`[unverified]`**: the row's disposition turns on a coverage claim that was reasoned rather than
   executed, and its justification names which claim.
+- **`[line-anchored: <cause>]`**: the row keeps literal lines, and this is why. Unlike the other
+  five it is DERIVED rather than judged: `sweep-screen.py reanchor` writes every one of them and
+  nothing else does, so it is regenerated rather than maintained and a hand edit to one is a defect
+  the parser refuses. It annotates and does not gate: a line-anchored row is live or dead by its
+  other markers, and this one leaves the executable set exactly as it found it.
 
 Ids say where a row came from. `RB-` marks the twelve rows the 2026-08-19 re-baseline added, and
 `G1-C`, `G1-M` and `G1-I` the rows its three screens pulled out of the mechanical batch (the callee
@@ -868,8 +908,28 @@ Each row's cell lists the sites that row owns, generated from the estate minus t
 judgment and keep rows above claim. Read it as the row's claim; there is no range to over-apply, and
 `sweep-screen.py attribute` fails loudly if a site ends up owned by two rows or by none.
 **`sweep-screen.py generate` is that derivation**, so a batch cut at a later tree is emitted rather
-than assembled by hand: it prints these rows in the row grammar, ready to paste, and refuses if its
-sites plus the claimed ones do not add up to the estate.
+than assembled by hand: it prints these rows in the row grammar, with the header and the
+prettier-ignore line, ready to paste. Then it runs three checks over the claims plus what it just
+generated, none of them a count comparison, because the generated set is the complement of the
+claims and adds up by construction whatever the claims are:
+
+1. **Ownership.** Every `match=` site owned by exactly one row, which is what catches two claim rows
+   reaching the same site.
+2. **Widened claims.** A group-1 claim that reaches a site through a span or a line anchor, which
+   covers every assertion its test gains after the row was written rather than the one it was
+   written about.
+3. **Stale claims.** A group-1 claim anchor that does not resolve at this tree, because its sites
+   fall into the batch as ordinary deletes and the judgment that pulled them out goes with no word
+   said. A `[dead]` row is not a claim and is not checked; its file is gone, so it can neither own a
+   site nor lose one. `[subtracted]` and `[deferred]` rows are still claims, because their sites are
+   real and must not fall into the batch.
+
+**At `a64b1b9c` the third check refuses, on 12 anchors over 9 rows, and that is work the fresh cut
+owes**: L-013, L-018 (3), L-026, G1-M03, G1-M04, G1-K04 (2), G1-K14, G1-I02 and G1-I06. Each is a
+judgment row whose evidence no longer reaches an assertion that exists, so the cut has to re-decide
+it rather than carry it. `generate` also reports 8 group-1 span claims that resolve and cover no
+site; those do not refuse, because one tree cannot tell a test that lost its sites from one that
+never had any.
 
 **Corrected 2026-08-19 by the callee-side raise screen.** This paragraph used to say that no test
 function in the set raises the same type twice, and conclude from that that each site is `hla.md`
