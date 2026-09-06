@@ -41,13 +41,13 @@ class _SessionTemplateKind:
 
     kind: str = "session-template"
     model: type[DeclaredResource] = SessionTemplate
-    description: str = "The workload a session runs and how it continues"
+    description: str = "The workload a session runs and how it resumes"
     prose: TopicProse = TopicProse(
         title="Session templates",
         overview="""
         A session is a workload running as an agent (or as the admin) in a workspace on
         a VM, and a session-template says which workload. `spec.harness_integration`
-        selects the integration that owns starting it and continuing prior state; a template that
+        selects the integration that owns starting it and resuming prior state; a template that
         selects none gets `shell`, a plain login shell, so a field-less template is
         still useful.
 

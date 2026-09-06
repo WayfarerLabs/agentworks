@@ -21,7 +21,12 @@ import pytest
 from pydantic import Field
 
 from agentworks.bootstrap import build_registry
-from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY, HarnessIntegration, HarnessStart
+from agentworks.capabilities.harness_integration import (
+    HARNESS_INTEGRATION_REGISTRY,
+    HarnessIntegration,
+    HarnessLaunchIntent,
+    HarnessStart,
+)
 from agentworks.config import load_config
 from agentworks.env.entry import EnvEntry
 from agentworks.errors import ConfigError
@@ -54,10 +59,15 @@ class _FakeHarnessIntegration(HarnessIntegration):
 
     name = "fake"
     description = "test double harness"
-    contract_version = 1
+    contract_version = 3
     config_model = _FakeConfig
 
-    def start(self, ctx, *, force_new=False):  # type: ignore[no-untyped-def]
+    def start(  # type: ignore[no-untyped-def]
+        self,
+        ctx,
+        *,
+        intent=HarnessLaunchIntent.RESUME_OR_NEW,
+    ):
         return HarnessStart("")
 
     def _probe_target(self, transport):  # type: ignore[no-untyped-def]

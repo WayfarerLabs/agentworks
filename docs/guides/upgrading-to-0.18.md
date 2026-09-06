@@ -14,8 +14,9 @@ Choose the operation that matches the intended runtime change:
 
 - `agw session start NAME` starts a stopped session and leaves a running session alone.
 - `agw session restart NAME` replaces the runtime whether it is stopped or running.
-- Both operations continue the harness conversation when possible. Add `--force-new` to require a
-  new conversation when a launch occurs.
+- Both operations resume the harness conversation when possible. Add `--resume-only` to refuse
+  unless a resume is possible, or `--force-new` to require a new conversation when a launch occurs.
+  Those two options are mutually exclusive.
 
 For batch automation, replace `session resume --all-stopped` with `session start --all`, and replace
 `session resume --all` with `session restart --all`. Existing VM, workspace, agent, admin, and force
@@ -71,19 +72,31 @@ activate a stopped VM or repair runtime state. Expected live failures preserve l
 Harness integrations now expose one core-facing lifecycle method:
 
 ```python
-def start(self, ctx: RunContext, *, force_new: bool = False) -> HarnessStart:
+def start(
+    self,
+    ctx: RunContext,
+    *,
+    intent: HarnessLaunchIntent = HarnessLaunchIntent.RESUME_OR_NEW,
+) -> HarnessStartResult:
     ...
 ```
 
-Return the pane command and optional operator note together as `HarnessStart`. Remove the old
-`resume()` method and mutable `launch_note()` side channel. An ordinary start should continue the
-harness conversation when possible; `force_new=True` must request a fresh conversation without
-deleting external history.
+Return the pane command and optional operator note together as `HarnessStart`. An integration may
+instead return `HarnessStartNotImplemented` for any intent it does not implement; core reports an
+intent- and integration-specific error before replacing the runtime. Remove the old `resume()`
+method and mutable `launch_note()` side channel.
 
-All in-repository implementations move together to contract version 1. Agentworks matches contract
-versions exactly, so an external version-2 implementation is refused rather than adapted. The
-version number identifies the complete current shape; it does not restore compatibility with the
-different version-1 contract that existed before 0.17.
+The four intents are `CREATE`, `RESUME_ONLY`, `RESUME_OR_NEW`, and `FORCE_NEW`. An ordinary start or
+restart uses `RESUME_OR_NEW`. `RESUME_ONLY` must resume or fail without launching fresh, `CREATE`
+starts the first conversation for a new Agentworks session, and `FORCE_NEW` requests a fresh
+conversation without deleting external history. Keep create and force-new distinct in operator notes
+even when they share launch mechanics. The `shell` integration reports `RESUME_ONLY` as not
+implemented because an arbitrary shell command cannot prove that it resumed tool state.
+
+All in-repository implementations move together to contract version 3. Agentworks matches contract
+versions exactly, so an external version-1 or version-2 implementation is refused rather than
+adapted. The version number identifies the complete current shape; it does not restore compatibility
+with the older contracts that shipped before 0.18.
 
 Core now owns runtime replacement and teardown. Integrations produce launch behavior; they do not
 implement session restart, stop, or process signaling.

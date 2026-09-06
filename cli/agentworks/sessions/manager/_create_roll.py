@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
 from agentworks import output
+from agentworks.capabilities.harness_integration import HarnessLaunchIntent, require_implemented_start
 from agentworks.db import SessionMode
 from agentworks.errors import ExternalError, NotFoundError, ValidationError
 
@@ -270,7 +271,12 @@ def _start_session_slice(
                 agent_target=agent_target,
                 secrets=ScopedSecrets(secret_values, session_node.secret_refs()),
             )
-            harness_start = session_node.harness_integration.start(start_ctx, force_new=True)
+            harness_start = require_implemented_start(
+                session_node.harness_integration.start(start_ctx, intent=HarnessLaunchIntent.CREATE),
+                intent=HarnessLaunchIntent.CREATE,
+                harness_integration_name=template.harness_integration,
+                session_name=name,
+            )
             command = _mgr._substitute_template_vars(
                 harness_start.command,
                 {"session_name": name, "workspace_name": workspace_name},

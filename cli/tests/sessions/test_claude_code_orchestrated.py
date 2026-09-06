@@ -216,7 +216,7 @@ def test_create_forces_a_fresh_conversation_when_a_transcript_exists(
     db.close()
 
 
-# -- restart: reads the stored id, continues, post-kill end state --------------
+# -- restart: reads the stored id, resumes, post-kill end state ----------------
 
 
 def _restart_stubs(
@@ -256,7 +256,7 @@ def _restart_stubs(
     return db, events, captured
 
 
-def test_restart_reads_stored_id_and_resumes_after_the_kill(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_restart_reads_stored_id_before_the_kill_and_resumes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks.sessions.manager import restart_session
 
     db, events, captured = _restart_stubs(
@@ -276,10 +276,9 @@ def test_restart_reads_stored_id_and_resumes_after_the_kill(tmp_path: Path, monk
     # The stored id is read back verbatim and resumed.
     assert "--resume 939b1597-7c61-5ace-80f4-14617b7b4257" in captured["command"]
     assert "resuming session s1" in captured["command"]
-    # Restart ordering (R7): the detect probe runs AFTER the kill (the old
-    # process is dead before the resume-vs-launch decision), and the tmux
-    # recreate follows. The row survives.
-    assert events.index("kill") < events.index("detect") < events.index("tmux_create")
+    # Core obtains the launch decision before the destructive boundary so a
+    # strict-resume refusal could leave the old runtime intact.
+    assert events.index("detect") < events.index("kill") < events.index("tmux_create")
     refreshed = db.get_session("s1")
     assert refreshed is not None
     assert refreshed.harness_integration_state == {

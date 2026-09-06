@@ -494,7 +494,12 @@ def test_registration_rejects_mismatched_vm_platform_contract_without_writing() 
     assert _snapshot_registries() == before
 
 
-def test_registration_rejects_unsupported_harness_integration_contract_without_writing() -> None:
+@pytest.mark.parametrize("contract_version", [1, 2])
+def test_registration_rejects_unsupported_harness_integration_contract_without_writing(
+    monkeypatch: pytest.MonkeyPatch,
+    contract_version: int,
+) -> None:
+    monkeypatch.setattr(_HarnessOnAnUnsupportedContract, "contract_version", contract_version)
     before = _snapshot_registries()
     plugin = Plugin(
         name="p",

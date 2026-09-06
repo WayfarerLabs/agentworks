@@ -30,6 +30,7 @@ def command_calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, 
     ("arguments", "operation", "selected"),
     [
         (["start", "coding", "--force-new"], "start_session", {"name": "coding", "force_new": True}),
+        (["start", "coding", "--resume-only"], "start_session", {"name": "coding", "resume_only": True}),
         (["restart", "coding", "--force"], "restart_session", {"name": "coding", "force": True}),
         (
             ["start", "--all", "--vm", "vm1", "--workspace", "ws1"],
@@ -37,6 +38,7 @@ def command_calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, 
             {"vm_name": "vm1", "workspace_name": "ws1"},
         ),
         (["restart", "--all", "--agent", "agent1"], "restart_all_sessions", {"agent_name": "agent1"}),
+        (["restart", "--all", "--resume-only"], "restart_all_sessions", {"resume_only": True}),
     ],
 )
 def test_canonical_launch_commands_route_to_matching_service(
@@ -51,6 +53,20 @@ def test_canonical_launch_commands_route_to_matching_service(
     actual_operation, kwargs = command_calls[0]
     assert actual_operation == operation
     assert kwargs.items() >= selected.items()
+
+
+@pytest.mark.parametrize("operation", ["start", "restart"])
+def test_resume_only_and_force_new_are_mutually_exclusive(
+    operation: str,
+    command_calls: list[tuple[str, dict[str, Any]]],
+) -> None:
+    result = CliRunner().invoke(
+        app,
+        ["session", operation, "coding", "--resume-only", "--force-new"],
+    )
+
+    assert result.exit_code != 0
+    assert command_calls == []
 
 
 @pytest.mark.parametrize(

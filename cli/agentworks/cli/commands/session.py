@@ -277,6 +277,7 @@ def _launch_sessions(
     admin: bool,
     force: bool,
     force_new: bool,
+    resume_only: bool,
     replace_running: bool,
     interaction: TtyInteractionPolicy,
     db: Database | None = None,
@@ -296,6 +297,8 @@ def _launch_sessions(
     parsed_agent = parse_csv_filter(agent)
     parsed_console = parse_csv_filter(console)
 
+    if force_new and resume_only:
+        raise typer.BadParameter("--resume-only and --force-new are mutually exclusive")
     if name and all_sessions:
         raise typer.BadParameter("provide a session name or --all, not both")
     if admin and parsed_agent is not None:
@@ -316,6 +319,7 @@ def _launch_sessions(
             admin_only=admin,
             force=force,
             force_new=force_new,
+            resume_only=resume_only,
             interaction=interaction,
         )
     elif name:
@@ -328,6 +332,7 @@ def _launch_sessions(
             name=name,
             force=force,
             force_new=force_new,
+            resume_only=resume_only,
             interaction=interaction,
         )
     else:
@@ -345,6 +350,7 @@ def _canonical_launch_options(
     admin: bool,
     force: bool,
     force_new: bool,
+    resume_only: bool,
     replace_running: bool,
 ) -> None:
     _launch_sessions(
@@ -357,6 +363,7 @@ def _canonical_launch_options(
         admin=admin,
         force=force,
         force_new=force_new,
+        resume_only=resume_only,
         replace_running=replace_running,
         interaction=ordinary_tty_interaction_policy(),
     )
@@ -442,6 +449,10 @@ def session_start(
     admin: Annotated[bool, typer.Option("--admin", help="Only admin-mode sessions (with --all)")] = False,
     force: Annotated[bool, typer.Option("--force", help="Recover broken session state")] = False,
     force_new: Annotated[bool, typer.Option("--force-new", help="Launch a fresh harness conversation")] = False,
+    resume_only: Annotated[
+        bool,
+        typer.Option("--resume-only", help="Fail unless the existing harness conversation can be resumed"),
+    ] = False,
 ) -> None:
     """Start a session, or all sessions with --all."""
     _canonical_launch_options(
@@ -454,6 +465,7 @@ def session_start(
         admin=admin,
         force=force,
         force_new=force_new,
+        resume_only=resume_only,
         replace_running=False,
     )
 
@@ -469,6 +481,10 @@ def session_restart(
     admin: Annotated[bool, typer.Option("--admin", help="Only admin-mode sessions (with --all)")] = False,
     force: Annotated[bool, typer.Option("--force", help="Recover broken session state")] = False,
     force_new: Annotated[bool, typer.Option("--force-new", help="Launch a fresh harness conversation")] = False,
+    resume_only: Annotated[
+        bool,
+        typer.Option("--resume-only", help="Fail unless the existing harness conversation can be resumed"),
+    ] = False,
 ) -> None:
     """Restart a session, or all sessions with --all."""
     _canonical_launch_options(
@@ -481,6 +497,7 @@ def session_restart(
         admin=admin,
         force=force,
         force_new=force_new,
+        resume_only=resume_only,
         replace_running=True,
     )
 
@@ -549,6 +566,7 @@ def session_resume(
         admin=admin,
         force=force,
         force_new=False,
+        resume_only=False,
         replace_running=not all_stopped,
         interaction=ordinary_tty_interaction_policy(),
         db=db,
