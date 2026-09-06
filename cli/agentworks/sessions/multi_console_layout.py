@@ -387,18 +387,15 @@ def _reorder_session_windows(
     if not res.ok:
         return _SessionWindowOrderOutcome.FAILED
     pairs: list[tuple[int, str]] = []
-    malformed = False
     for line in res.stdout.strip().splitlines():
         parts = line.split("|", 1)
         if len(parts) != 2:
-            malformed = True
-            continue
+            return _SessionWindowOrderOutcome.FAILED
         try:
             pairs.append((int(parts[0]), parts[1]))
         except ValueError:
-            malformed = True
-            continue
-    if malformed or not pairs:
+            return _SessionWindowOrderOutcome.FAILED
+    if not pairs:
         return _SessionWindowOrderOutcome.FAILED
     pairs.sort(key=lambda p: p[0])
     if len({idx for idx, _name in pairs}) != len(pairs):
@@ -439,15 +436,7 @@ def _reorder_session_windows(
 
     changed = False
     failed = False
-    for k, desired_name in enumerate(present_desired):
-        if k >= len(session_slots):
-            # Defensive: session_slots and present_desired should be the
-            # same length by construction (both filter on desired_set ∩
-            # live-names). If they ever diverge, stop rather than risk a
-            # bad swap. A console restart will reconcile.
-            failed = True
-            break
-        target_idx = session_slots[k]
+    for target_idx, desired_name in zip(session_slots, present_desired, strict=True):
         src_idx = widx_by_name[desired_name]
         if src_idx == target_idx:
             continue
