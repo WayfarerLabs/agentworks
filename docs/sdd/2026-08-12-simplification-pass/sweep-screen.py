@@ -16,7 +16,6 @@ serves rather than under `cli/` or `scripts/`. The implementation is the
     carry      an older map's rows onto the current estate, by identity
     generate   the group-1 mechanical batch as the estate minus the claims
     totals     the row markup, counted, which the Totals section reports
-    bases      which rows two candidate bases disagree about
     reanchor   rewrite a map's line anchors into identities, in place
 
 Run from the repository root with Python 3.12 or newer, which this enforces
@@ -60,10 +59,6 @@ MIN_PYTHON = (3, 12)
 #: wrong names into every row.
 CARRY_BASIS = "426cccae"
 
-#: The map's other candidate basis. Rows the re-baseline did not re-derive were
-#: read here, which is what `bases` compares.
-EARLIER_BASIS = "c686cd6d"
-
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -76,10 +71,6 @@ def build_parser() -> argparse.ArgumentParser:
     two = sub.add_parser("reanchor")
     two.add_argument("map", help="the map to rewrite in place")
     two.add_argument("--at", required=True, help="the commit that map's line numbers were read at")
-    three = sub.add_parser("bases")
-    three.add_argument("map", nargs="?", default=INVENTORY)
-    three.add_argument("--first", default=EARLIER_BASIS)
-    three.add_argument("--second", default=CARRY_BASIS)
     return parser
 
 
@@ -95,10 +86,6 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "reanchor":
         reports.reanchor(args.map, args.at)
         return
-    if args.command == "bases":
-        reports.bases(args.map, args.first, args.second)
-        return
-
     here = Snapshot(Tree())
     if args.command == "estate":
         for site in here.sites:
