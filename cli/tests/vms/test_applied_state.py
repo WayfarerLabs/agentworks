@@ -122,7 +122,9 @@ def test_prepare_configured_identity_retains_public_text_and_refuses_verified_mi
     prepared = applied_state.prepare_configured_ssh_identity(public_path, private_path)
 
     assert prepared.public_text == "ssh-ed25519 AAAA comment"
-    assert prepared.private_key_ref == "/keys/id"
+    # The ref is the host-side key path stringified (str(private_key_path)),
+    # so it carries the host-native separator (backslashes on Windows).
+    assert prepared.private_key_ref == str(private_path)
     assert prepared.identity == VerifiedSSHIdentity(_FINGERPRINT)
 
     monkeypatch.setattr(

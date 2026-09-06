@@ -20,6 +20,7 @@ from agentworks.errors import (
     UserAbort,
 )
 from agentworks.naming import MAX_VM_NAME_LENGTH
+from agentworks.runtime_time import derive_uptime_seconds
 
 from ._helpers import _require_vm, _vm_scope
 from ._status import observe_vm_statuses, project_vm_status
@@ -244,6 +245,8 @@ class VMDescription:
     issues: tuple[VMIssue, ...]
     diagnostics: tuple[VMDiagnostic, ...]
     instance_state: InstanceStateDescription
+    last_started_at: str | None = None
+    uptime_seconds: int | None = None
 
 
 def vm_listing_data(listing: VMListing) -> JsonObject:
@@ -279,6 +282,8 @@ def vm_description_data(description: VMDescription) -> JsonObject:
         "vm": {
             "name": vm.name,
             "created_at": vm.created_at,
+            "last_started_at": description.last_started_at,
+            "uptime_seconds": description.uptime_seconds,
             "site": vm.site,
             "platform": description.platform,
             "backend": description.backend,
@@ -683,6 +688,13 @@ def vm_description(
         issues=tuple(issues),
         diagnostics=tuple(diagnostics),
         instance_state=instance_state,
+        last_started_at=vm.last_started_at,
+        uptime_seconds=derive_uptime_seconds(
+            vm.last_started_at,
+            running=observed_status == VMStatus.RUNNING.value,
+            entity_kind="vm",
+            entity_name=vm.name,
+        ),
     )
 
 

@@ -259,6 +259,8 @@ class _FakeRestoreTarget:
 
     def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
         self.commands.append(cmd)
+        if "window_index" in cmd and "window_name" in cmd:
+            return SimpleNamespace(ok=True, returncode=0, stdout="0|s1\n", stderr="")
         if "list-windows" in cmd:
             return SimpleNamespace(ok=True, returncode=0, stdout="s1\n", stderr="")
         if "list-panes" in cmd:

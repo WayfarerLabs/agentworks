@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import stat
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -619,7 +620,15 @@ def test_remote_template_uses_private_random_directory_not_predictable_path(
         log_vm_name="myvm",
     )
 
-    assert staged_snapshots == [(0o700, 0o600, _PROVIDER_YAML)]
+    if sys.platform == "win32":
+        # The product issues mkdir -m 700 / install -m 600, but this fake runs
+        # those commands through the local (git-bash) shell, and Windows has no
+        # Unix mode bits for them to land on (they read back 0o777/0o666). The
+        # 0o700/0o600 privacy is a real remote (Unix) property, verified on
+        # POSIX CI; here only the staged content is portable.
+        assert [content for _, _, content in staged_snapshots] == [_PROVIDER_YAML]
+    else:
+        assert staged_snapshots == [(0o700, 0o600, _PROVIDER_YAML)]
     assert predictable_path.read_text() == "legacy provider data\n"
     assert list(remote_root.glob("agentworks-lima-template.*")) == []
 

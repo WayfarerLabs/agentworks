@@ -27,6 +27,7 @@ from agentworks.secrets.inspect import (
 )
 from agentworks.secrets.preview import ResolutionPreview, SourcePreviewAttempt
 from agentworks.secrets.sources import SourceProvenance
+from tests.conftest import normalize_lf
 from tests.instance_state_support import stub_instance_state
 
 
@@ -220,6 +221,8 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
             [
                 "name",
                 "created_at",
+                "last_started_at",
+                "uptime_seconds",
                 "site",
                 "platform",
                 "backend",
@@ -283,6 +286,8 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
                 "status",
                 "pid",
                 "created_at",
+                "last_started_at",
+                "uptime_seconds",
                 "updated_at",
                 "consoles",
                 "instance_state",
@@ -292,7 +297,17 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
             ["console", "describe", "c", "--output", "json"],
             "console.describe",
             "console",
-            ["name", "vm_name", "admin_shell", "created_at", "updated_at", "status", "sessions"],
+            [
+                "name",
+                "vm_name",
+                "admin_shell",
+                "created_at",
+                "last_started_at",
+                "uptime_seconds",
+                "updated_at",
+                "status",
+                "sessions",
+            ],
         ),
     ):
         first = CliRunner().invoke(app, argv)
@@ -417,7 +432,9 @@ def test_session_describe_default_and_explicit_human_match_without_styling(monke
     assert default.stderr_bytes == explicit.stderr_bytes == b""
     assert b"\x1b" not in default.stdout_bytes
     assert b"\x7f" not in default.stdout_bytes
-    assert not any(byte < 0x20 and byte != 0x0A for byte in default.stdout_bytes)
+    # No control bytes beyond the line ending: allow CR too, since human output
+    # goes through print() and carries the platform-native CRLF on Windows.
+    assert not any(byte < 0x20 and byte not in (0x0A, 0x0D) for byte in default.stdout_bytes)
 
 
 def test_operational_human_describe_commands_keep_literal_no_color_bytes(monkeypatch) -> None:
@@ -549,7 +566,7 @@ def test_operational_human_list_commands_keep_literal_empty_bytes(monkeypatch) -
         default = CliRunner().invoke(app, ["--non-interactive", *command])
         explicit = CliRunner().invoke(app, ["--non-interactive", *command, "--output", "human"])
         assert default.exit_code == explicit.exit_code == 0
-        assert default.stdout_bytes == explicit.stdout_bytes == expected_stdout
+        assert normalize_lf(default.stdout_bytes) == normalize_lf(explicit.stdout_bytes) == expected_stdout
         assert default.stderr_bytes == explicit.stderr_bytes == b""
 
 
@@ -567,8 +584,8 @@ def _assert_human_baseline(command: list[str], expected_stdout: bytes, *, exit_c
     explicit_human = CliRunner().invoke(app, ["--non-interactive", *command, "--output", "human"])
 
     assert default.exit_code == explicit_human.exit_code == exit_code
-    assert default.stdout_bytes == expected_stdout
-    assert explicit_human.stdout_bytes == expected_stdout
+    assert normalize_lf(default.stdout_bytes) == expected_stdout
+    assert normalize_lf(explicit_human.stdout_bytes) == expected_stdout
     assert default.stderr_bytes == explicit_human.stderr_bytes == b""
 
 

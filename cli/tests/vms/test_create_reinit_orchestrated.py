@@ -27,7 +27,7 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.templates import ResolvedVMTemplate
-from tests.conftest import ManifestDoc, write_manifests
+from tests.conftest import ManifestDoc, pin_wsl2_unsupported, write_manifests
 from tests.orchestrated_fixtures import proxmox_site
 from tests.ssh_fixtures import write_test_ssh_keypair
 
@@ -60,10 +60,13 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GH", "ghtok")
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    pin_wsl2_unsupported(monkeypatch)
 
     def _make(extra: str = "", *, manifests: Sequence[ManifestDoc | str] = ()):
         path = tmp_path / "config.toml"
-        path.write_text(f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n' + extra)
+        path.write_text(
+            f'[operator]\nssh_public_key = "{key.as_posix()}.pub"\nssh_private_key = "{key.as_posix()}"\n' + extra
+        )
         if manifests:
             write_manifests(tmp_path, *manifests)
         return load_config(path, warn_issues=False, warn_deprecations=False)
@@ -685,7 +688,7 @@ def test_create_phase_a_sync_failure_is_non_fatal(
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
     from agentworks.db import ProvisioningStatus
 
-    config = make_config(f'ssh_config = "{tmp_path / "ssh_config"}"\n')
+    config = make_config(f'ssh_config = "{(tmp_path / "ssh_config").as_posix()}"\n')
 
     def _fake_create(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
         return ProvisionResult(
@@ -740,7 +743,7 @@ def test_create_provisioning_section_has_explicit_closing_body_line(
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
     # Contain the real SSH-config write inside the test's tmp dir.
-    config = make_config(f'ssh_config = "{tmp_path / "ssh_config"}"\n')
+    config = make_config(f'ssh_config = "{(tmp_path / "ssh_config").as_posix()}"\n')
 
     def _fake_create(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
         return ProvisionResult(

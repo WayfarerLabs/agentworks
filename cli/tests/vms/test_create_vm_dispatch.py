@@ -28,7 +28,7 @@ from agentworks.errors import (
 )
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
-from tests.conftest import CapturedOutput, ManifestDoc, write_manifests
+from tests.conftest import CapturedOutput, ManifestDoc, pin_wsl2_unsupported, write_manifests
 from tests.orchestrated_fixtures import proxmox_site
 from tests.ssh_fixtures import TEST_SSH_PUBLIC_KEY, write_test_ssh_keypair
 
@@ -55,12 +55,17 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     write_test_ssh_keypair(key)
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "tskey-test")
     # Deterministic platform preflights: lima checks for limactl
-    # locally; pretend the tool exists regardless of the host.
+    # locally; pretend the tool exists regardless of the host. wsl2 is
+    # host-ready on a Windows test host but not on Linux, so pin it
+    # unsupported to keep exactly one site (lima-local) ready on any host.
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    pin_wsl2_unsupported(monkeypatch)
 
     def _make(extra: str = "", *, manifests: Sequence[ManifestDoc | str] = ()):
         path = tmp_path / "config.toml"
-        path.write_text(f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n' + extra)
+        path.write_text(
+            f'[operator]\nssh_public_key = "{key.as_posix()}.pub"\nssh_private_key = "{key.as_posix()}"\n' + extra
+        )
         if manifests:
             write_manifests(tmp_path, *manifests)
         return load_config(path, warn_issues=False, warn_deprecations=False)
@@ -92,11 +97,13 @@ def test_create_vm_request_shape_and_row(
     initialized_release: list[DebianRelease] = []
     attested_release: list[DebianRelease] = []
     outcomes: list[OverlayOutcome] = []
+    start_events: list[str] = []
     native_transport = SimpleNamespace()
     monkeypatch.setattr("agentworks.instance_specs.render_overlay_outcome", outcomes.append)
 
     def _verify_release(transport: object, *, expected: DebianRelease) -> DebianRelease:
         assert transport is native_transport
+        start_events.append("attest")
         attested_release.append(expected)
         return expected
 
@@ -106,6 +113,7 @@ def test_create_vm_request_shape_and_row(
     )
 
     def _fake_create(self: LimaPlatform, request: ProvisionRequest, ctx: object) -> ProvisionResult:
+        start_events.append("provider-create")
         captured_platform.append(self)
         captured_request.append(request)
         return ProvisionResult(
@@ -115,6 +123,13 @@ def test_create_vm_request_shape_and_row(
         )
 
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)
+    record_vm_started = db.record_vm_started
+
+    def _record_started(name: str) -> None:
+        start_events.append("record-start")
+        record_vm_started(name)
+
+    monkeypatch.setattr(db, "record_vm_started", _record_started)
     # Phase A / Phase B are faked here: this suite pins the create()
     # request shape and the persisted row, not the init sequence.
     monkeypatch.setattr(
@@ -160,8 +175,10 @@ def test_create_vm_request_shape_and_row(
     assert vm.debian_release is DebianRelease.TRIXIE
     assert vm.debian_release_observed_at is not None
     assert vm.operator_stopped is False
+    assert vm.last_started_at is not None
     assert attested_release == [DebianRelease.TRIXIE]
     assert initialized_release == [DebianRelease.TRIXIE]
+    assert start_events == ["provider-create", "record-start", "attest"]
     stored = db.instance_state.get_desired_overlay("vm", "dvm")
     assert stored is not None and stored.payload.value == {
         "vm": {"cpus": 6},

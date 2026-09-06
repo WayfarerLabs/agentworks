@@ -11,6 +11,7 @@ import pytest
 
 from agentworks.command_checks import check_required_commands
 from agentworks.ssh import SSHError, SSHResult
+from tests.conftest import requires_posix_shell
 
 if TYPE_CHECKING:
     from agentworks.transports import Transport
@@ -53,6 +54,7 @@ class _LoginShellTarget:
         return ssh_result
 
 
+@requires_posix_shell
 def test_required_command_uses_target_user_login_environment(tmp_path: Path) -> None:
     target = _LoginShellTarget(tmp_path)
     command = target.bin_dir / "login-only-command"
@@ -79,6 +81,7 @@ def test_required_command_check_fails_value_safely_when_indeterminate() -> None:
     assert "hostile" not in str(exc_info.value)
 
 
+@requires_posix_shell
 def test_required_command_does_not_confuse_shell_startup_status_with_absence(tmp_path: Path) -> None:
     target = cast("Transport", _LoginShellTarget(tmp_path, startup_status=20))
 
