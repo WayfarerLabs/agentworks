@@ -33,19 +33,33 @@ class Tree:
         self.ref = ref
         self._parsed: dict[str, ast.Module] = {}
         self._listed: dict[tuple[str, ...], list[str]] = {}
+        if ref is not None:
+            done = subprocess.run(["git", "rev-parse", "--verify", f"{ref}^{{commit}}"], capture_output=True, text=True)
+            if done.returncode != 0:
+                raise SystemExit(f"{ref!r} is not a commit in this repository")
 
     def __str__(self) -> str:
         return self.ref or "the working tree"
 
     def files(self, *roots: str) -> list[str]:
-        """Every tracked `.py` file under `roots`, in git's order."""
+        """Every `.py` file under `roots` in this snapshot, in git's order.
+
+        The working tree includes files git does not track yet, because a test
+        file added but not staged holds real sites and an estate that cannot see
+        it reports the same "every site is claimed" as a complete one. Ignored
+        files stay out. Paths come back NUL-separated, so a path containing
+        whitespace cannot split into two.
+        """
         if roots not in self._listed:
             if self.ref is None:
-                command = ["git", "ls-files", *roots]
+                command = ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *roots]
             else:
-                command = ["git", "ls-tree", "-r", "--name-only", self.ref, "--", *roots]
-            out = subprocess.run(command, capture_output=True, text=True, check=True).stdout
-            self._listed[roots] = [f for f in out.split() if f.endswith(".py")]
+                command = ["git", "ls-tree", "-r", "-z", "--name-only", self.ref, "--", *roots]
+            done = subprocess.run(command, capture_output=True, text=True)
+            if done.returncode != 0:
+                raise SystemExit(f"cannot list {', '.join(roots)} at {self}: {done.stderr.strip()}")
+            names = sorted({f for f in done.stdout.split("\0") if f.endswith(".py")})
+            self._listed[roots] = names
         return self._listed[roots]
 
     def read(self, path: str) -> str | None:

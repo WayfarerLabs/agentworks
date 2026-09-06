@@ -1,33 +1,9 @@
 """The sweep's estate, and the identity that survives a line number moving.
 
-A `match=` assertion is identified here by what it asserts, never by where it
-sits. The map died twice from line drift, both times the same way: every row
-carried a line number, an unrelated edit above it moved every number in the
-file, and the map went on claiming sites it no longer pointed at. An identity
-derived from content cannot drift, because nothing above the site is part of
-it.
-
-The identity is five fields:
-
-    <path>::<qualname>::<type>::<digest>#<ordinal>
-
-* **path** is the test file.
-* **qualname** is the innermost enclosing function, dotted through any class
-  or nesting, exactly as pytest spells a node id.
-* **type** is the asserted exception or warning name as written, or the
-  assertion method's own name where the call takes no type (`assertRegex`,
-  `assertNotRegex`).
-* **digest** is the first six hex of sha256 over the extracted match template,
-  which is the needle with its interpolations blanked, so a site is keyed on
-  what it matches rather than on how the file is laid out.
-* **ordinal** is 1-based source order among the sites of one file that tie on
-  all four fields above. It is always written, so a second identical site
-  appearing later never changes the identity of the first.
-
-Ties are rare and real: 8 keys over 17 sites at `a64b1b9c`, all of them a test
-asserting the same needle against the same type twice in one function. The
-ordinal is the only field here that a nearby edit can shift, and it shifts only
-within that population.
+The map owns the grammar; its "Reading this file mechanically" section is where
+a reader goes for what a row means. What the code needs is only this: an
+identity is five fields, `path::qualname::Type::digest#ordinal`, and only the
+last is a position, among the sites of one test that tie on the other four.
 """
 
 from __future__ import annotations
@@ -47,8 +23,9 @@ UNTYPED_REGEX_METHODS = frozenset({"assertRegex", "assertNotRegex"})
 
 REGEX_METHODS = TYPED_REGEX_METHODS | UNTYPED_REGEX_METHODS
 
-#: Six hex separates every distinct needle in this estate with room to spare;
-#: four already did. The margin is for a tree that keeps moving.
+#: Six hex is the shortest prefix that separates every distinct needle in this
+#: estate: five collides once, over two needles, and four collides twice, over
+#: four. The margin above six is for a tree that keeps moving.
 DIGEST_LENGTH = 6
 
 
@@ -58,7 +35,12 @@ def digest_of(needle: str) -> str:
 
 @dataclass(frozen=True, order=True)
 class Identity:
-    """What a site is, independent of where it sits."""
+    """What a site is, independent of where it sits.
+
+    `qualname` is the enclosing function dotted through any class or nesting.
+    That is a dotted path, not pytest's `::` node-id spelling, which the map's
+    grammar section says out loud so nobody pastes one into the other.
+    """
 
     path: str
     qualname: str
@@ -123,21 +105,32 @@ def functions_in(tree: Tree, path: str) -> list[Function]:
     return sorted(found)
 
 
-def _asserted(node: ast.Call) -> tuple[str, str] | None:
-    """The (type, needle) a regex-family assertion carries, or None."""
+def _asserted(node: ast.Call, path: str) -> tuple[str, str] | None:
+    """The (type, needle) a regex-family assertion carries, or None.
+
+    A call that splats its arguments is refused rather than skipped, for the
+    same reason an unparsed file is: a site nobody can see is a site that can
+    never be reported unowned, and the estate would look complete while being
+    short by it.
+    """
     name = call_name(node)
+    if name != "raises" and name not in REGEX_METHODS:
+        return None
+    if any(k.arg is None for k in node.keywords) or any(isinstance(a, ast.Starred) for a in node.args):
+        raise SystemExit(
+            f"{path}:{node.lineno}: `{name}` splats its arguments, so its match text cannot be read;"
+            " the estate would be short by this site"
+        )
     if name == "raises":
         keyword = next((k for k in node.keywords if k.arg == "match"), None)
         if keyword is None:
             return None
-        return exc_name(node.args[0]) or "<expr>" if node.args else "<expr>", template(keyword.value) or "<expr>"
-    if name in REGEX_METHODS:
-        if len(node.args) < 2:
-            return None
-        if name in UNTYPED_REGEX_METHODS:
-            return name, template(node.args[1]) or "<expr>"
-        return exc_name(node.args[0]) or "<expr>", template(node.args[1]) or "<expr>"
-    return None
+        return (exc_name(node.args[0]) or "<expr>") if node.args else "<expr>", template(keyword.value) or "<expr>"
+    if len(node.args) < 2:
+        return None
+    if name in UNTYPED_REGEX_METHODS:
+        return name, template(node.args[1]) or "<expr>"
+    return exc_name(node.args[0]) or "<expr>", template(node.args[1]) or "<expr>"
 
 
 def sites_in(tree: Tree, path: str) -> list[Site]:
@@ -153,7 +146,7 @@ def sites_in(tree: Tree, path: str) -> list[Site]:
                 walk(child, f"{qualname}{child.name}.")
                 continue
             if isinstance(child, ast.Call):
-                found = _asserted(child)
+                found = _asserted(child, path)
                 if found is not None:
                     type_name, needle = found
                     kind = "match=" if call_name(child) == "raises" else call_name(child)
@@ -161,7 +154,6 @@ def sites_in(tree: Tree, path: str) -> list[Site]:
             walk(child, qualname)
 
     walk(tree.parse(path), "")
-
     seen: dict[tuple[str, str, str], int] = {}
     sites: list[Site] = []
     for line, col, qualname, type_name, needle, kind in sorted(raw):
@@ -186,14 +178,12 @@ class Snapshot:
         for path in tree.files(WEB_ROOT):
             self.sites.extend(s for s in sites_in(tree, path) if s.kind != "match=")
         self.sites.sort(key=lambda s: (s.path, s.line, s.col))
+
         self.by_identity = {s.identity: s for s in self.sites}
         # Every anchor in the map keys on this being one-to-one, so it is
-        # checked here rather than asserted in the map's prose. A collision
-        # would silently make one row address two sites, which is the failure
-        # the identity grammar exists to retire.
+        # checked here rather than asserted in the map's prose.
         if len(self.by_identity) != len(self.sites):
-            collisions = {i for i in self.by_identity if sum(s.identity == i for s in self.sites) > 1}
-            raise SystemExit(f"identity is not unique at {tree}: {sorted(str(c) for c in collisions)}")
+            raise SystemExit(f"identity is not unique at {tree}")
         self._functions: dict[str, list[Function] | None] = {}
 
     def functions(self, path: str) -> list[Function] | None:
@@ -219,16 +209,9 @@ class Snapshot:
     def site_at(self, path: str, line: int) -> Site | None:
         return next((s for s in self.sites if s.path == path and s.line == line), None)
 
-    def sites_under(self, path: str, function: Function) -> list[Site]:
-        return [s for s in self.sites if s.path == path and function.holds(s.line)]
-
-    def sites_of(self, path: str) -> list[Site]:
-        return [s for s in self.sites if s.path == path]
-
     def near(self, identity: Identity) -> list[Site]:
-        """Sites sharing everything but the needle, which is what a reworded
-        message leaves behind: the assertion is still there, matching something
-        else."""
+        """Sites in the same test asserting the same type, which is where a
+        reworded message leaves its assertion."""
         return [
             s
             for s in self.sites
