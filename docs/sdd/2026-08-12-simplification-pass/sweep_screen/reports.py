@@ -15,13 +15,16 @@ from __future__ import annotations
 
 import sys
 from collections import Counter, defaultdict
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .inventory import (
+    ACCOUNTED,
     CITED_ID,
     GROUP_1,
     INVENTORY,
     MECHANICAL_BATCH,
+    NO_ROW_HEADING,
     LineAnchor,
     Row,
     SiteAnchor,
@@ -99,6 +102,28 @@ def unrowed(rows: list[Row], snapshot: Snapshot) -> list[str]:
     """
     named = {anchor.path for row in rows for anchor in row.anchors}
     return [path for path in snapshot.tree.test_files() if path not in named]
+
+
+def check_accounting(map_path: str, missing: list[str]) -> list[str]:
+    """The files-with-no-row table names exactly the files no row names.
+
+    Its reasons are authored and reviewed like any other prose here. Its
+    membership is not prose: it is a set the tooling already computes, and it
+    drifted the moment two of its files gained rows, because nothing compared
+    the two. The table is found by its heading and read to the next one.
+    """
+    lines = Path(map_path).read_text(encoding="utf-8").splitlines()
+    if NO_ROW_HEADING not in lines:
+        return [f"the map has no {NO_ROW_HEADING!r} section, so nothing accounts for the files no row names"]
+    listed = set()
+    for line in lines[lines.index(NO_ROW_HEADING) + 1 :]:
+        if line.startswith("#"):
+            break
+        if match := ACCOUNTED.match(line):
+            listed.add(match.group(1))
+    return [f"the files-with-no-row table names {p}, which a row addresses" for p in sorted(listed - set(missing))] + [
+        f"no row names {p}, and the files-with-no-row table omits it" for p in sorted(set(missing) - listed)
+    ]
 
 
 def _ownership(rows: list[Row], sites: list[Site]) -> tuple[list[Site], list[Site], dict[Site, list[str]]]:
@@ -345,14 +370,16 @@ def totals(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
         f"| **All** | {ledger['live']} | {ledger['delete']} | {ledger['convert']} | {ledger['keep']} "
         f"| {ledger['deferred']} | {ledger['ledger']} |"
     )
-    faults = check_map(rows)
+    missing = unrowed(rows, snapshot)
+    faults = check_map(rows) + check_accounting(map_path, missing)
     print(f"\n# structural faults: {len(faults)}", file=sys.stderr)
     for fault in faults:
         print(f"#   {fault}", file=sys.stderr)
     print(f"# executable set: {ledger['live']} rows; ledger: {ledger['ledger']} rows", file=sys.stderr)
-    missing = unrowed(rows, snapshot)
-    population = snapshot.tree.test_files()
-    print(f"# test files: {len(population)}, of which no row names: {len(missing)}", file=sys.stderr)
+    print(
+        f"# test files: {len(snapshot.tree.test_files())}, of which no row names: {len(missing)}",
+        file=sys.stderr,
+    )
     for path in missing:
         print(f"#   {path}", file=sys.stderr)
     if faults:

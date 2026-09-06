@@ -466,23 +466,109 @@ and git history is where they live.
 
 ### Files with no row, and why
 
-**Sixty-nine test files at `426cccae` carry no row**, measured this way so a second auditor lands on
-the same number: take every `git ls-files` path under `cli/tests` and `website/tests` whose basename
-starts with `test_` and ends `.py`, or which ends `.test.mjs` (362 files); a file counts as rowed if
-any row's file cell names it, resolving a bare basename against the NEAREST PRECEDING directory in
-the same cell and expanding a `*` glob, and dead and subtracted rows count as rowed. Skipping the
-basename resolution answers 82 instead of 69, because D-154, D-157 and F-128 between them name
-sixteen files that way.
+**`sweep-screen.py totals` names every test file the map leaves alone.** The population is a
+`test_*.py` module under `cli/tests` or `website/tests`, or a `*.test.mjs` suite under the
+website's, and a file is addressed when any row's anchor names it. An anchor names its file
+outright, so this is a subtraction the command performs rather than a recipe a reader re-executes,
+and the command refuses if this table's membership and its own answer disagree.
 
-Of the sixty-nine, fifty-four have zero derivable in-scope operands: no `match=`, no
-`assertRaisesRegex` family member, and no multi-word string literal in an assertion operand
-position. The remaining fifteen were read individually and are excluded for one of three reasons.
+Each of these files was read. Every one is out of scope for one of four reasons: it has no in-scope
+operand at all (no `match=`, no `assertRaisesRegex` family member, and no multi-word string literal
+in an assertion operand position); its literals are text the code emits to another system, which is
+behavior at a boundary; its literals are values the test itself seeded; or its assertions are
+derivation parity over a fixture the test authors. A file whose estate was subtracted to another
+effort says which one.
 
-| Reason                                                                                                                                                                   | Files                                                                                                                                                                                                                                                                               |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Emitted command text, not prose we display.** The assertion holds what the code sends to a shell, a transport or a completion script, which is behavior at a boundary. | `agents/test_install_commands.py`, `plugins/test_grok.py`, `test_initializer_apt.py`, `test_resource_show.py`, `test_ssh_set_env.py`, `transports/test_remote_lima.py`, `transports/test_sensitive_stdin.py`, `workspaces/test_acls.py`, `sessions/test_grok_build_orchestrated.py` |
-| **Value identity on the test's own input.** The literal equals a value the test seeded, so it pins nothing authored.                                                     | `resources/test_show.py` (`:192` against the description seeded at `:88`)                                                                                                                                                                                                           |
-| **Derivation parity over a fixture the test authors.** Markdown in, rendered markdown out.                                                                               | `guide/test_shell_catalog.py`, `guide/test_shell_render.py`, `guide/test_shell_service.py`, `website/tests/lander-phase4j.test.mjs`, `website/tests/lander-phase4t.test.mjs`                                                                                                        |
+<!-- prettier-ignore -->
+| File | Why no row |
+| --- | --- |
+| `cli/tests/agents/test_install_commands.py` | Emitted command text, not prose we display: the assertion holds what the code sends to a shell, a transport, a completion script or a browser, which is behavior at a boundary. |
+| `cli/tests/capabilities/test_secret_backend_client.py` | Boundary validation at the secret-backend contract plus a redaction defense. In the secrets-preview estate, and hands over nothing. |
+| `cli/tests/capabilities/test_secret_backend_relocation.py` | No in-scope operand: no `match=`, no regex-family member, and no multi-word string literal in an assertion operand position. |
+| `cli/tests/db/test_read_transaction.py` | Subtracted to instance-model. Snapshot isolation, nesting refusal and post-close behavior; the only strings are `entity_kind == "database"`. |
+| `cli/tests/guide/test_release_history.py` | Topic-identifier mapping, unsafe-payload refusal, and size bounds. The topic strings are a route identifier, not prose. |
+| `cli/tests/guide/test_shell_catalog.py` | Derivation parity over a fixture the test authors. Markdown in, rendered markdown out. |
+| `cli/tests/guide/test_shell_commands.py` | Derivation parity between authored guide markdown and the live CLI spec. It asserts that documented commands exist, never how they are worded. |
+| `cli/tests/manifests/test_decode_fill.py` | The one string needle is the value the test's own fixture template renders, so it pins nothing authored. |
+| `cli/tests/manifests/test_editor_association.py` | The modeline expectations are built from `MODELINE_PREFIX`, `SCHEMA_DIRNAME` and `ENVELOPE_SCHEMA_FILENAME`, and the end-to-end test validates each written sample against the schema its own modeline names. Derivation parity, not a form pin. |
+| `cli/tests/manifests/test_inherited_capability_config.py` | Schema-versus-loader divergence driven by a fixture plugin; the one quantified assertion (`required == ["name"]` per registered arm) is computed over the live capability registry. |
+| `cli/tests/orchestration/test_secrets.py` | No in-scope operand, by the same scan. |
+| `cli/tests/plugins/gcp/test_names.py` | Golden vectors for a collision-safe cloud naming formula. The names address real provider resources, so they are a contract, not a spelling. |
+| `cli/tests/plugins/test_azure_logging.py` | Logger level and `isEnabledFor` behavior; no strings asserted. |
+| `cli/tests/plugins/test_cloud_bootstrap_secret_boundaries.py` | Secret-redaction and single-ephemeral-join defenses; the cloud-init needle is a blank key slot, which is structure. |
+| `cli/tests/plugins/test_grok.py` | Emitted command text, not prose we display: the assertion holds what the code sends to a shell, a transport, a completion script or a browser, which is behavior at a boundary. |
+| `cli/tests/plugins/test_onepassword.py` | No in-scope operand, by the same scan. |
+| `cli/tests/plugins/test_provider_config_strings.py` | Blank rejection at the operator-manifest boundary, plus model-to-JSON-schema parity. R2.1 keeps both. |
+| `cli/tests/resources/test_declared_resource.py` | Field defaults, required-ness, and which fields reach the emitted schema for a model the test declares. |
+| `cli/tests/resources/test_inheritance_merge.py` | Every value compared is one the test's own `declared` fixture supplied, and the suite carries its own non-vacuity guard. |
+| `cli/tests/resources/test_live_publication.py` | Registry finalization, live graph edges, and snapshot semantics. The two CLI needles are machine-readable names-only lines, which is the contract. |
+| `cli/tests/resources/test_reference.py` | Frozen-dataclass and subclass invariants; no assertion touches authored form. |
+| `cli/tests/resources/test_schema_directed_domain_merge.py` | Merge semantics and provenance over test-authored inputs. |
+| `cli/tests/resources/test_show.py` | Value identity on the test's own input: `:192` reads back the description seeded at `:88`. |
+| `cli/tests/resources/test_singleton_publishing.py` | Registry structure and provenance (`variant`, `ALWAYS_MATERIALIZE_SOURCE`, one row per singleton kind) over manifests the test wrote. |
+| `cli/tests/schema/test_extract.py` | Fixture models in, extracted references out. The one verbatim usage pin (`== "the Proxmox API token"`) reads back the string `_fixture_models.py:72` declares. |
+| `cli/tests/schema/test_extract_completeness.py` | An oracle built from the validated object is compared against the walker; both sides are the test's own fixtures. |
+| `cli/tests/schema/test_extract_totality.py` | Totality over an adversarial corpus and a seeded generator, with per-model non-vacuity; the hand-written `_EDGELESS_BY_DESIGN` map is asserted in both directions, so it cannot go stale silently. |
+| `cli/tests/schema/test_fill.py` | Fill behavior over models the test declares; every rendered value comes from a `default_template` the test wrote. |
+| `cli/tests/schema/test_merge.py` | Merge behavior and contract-violation detection asserted as `merge_contract_error(...) is not None`, which pins no message. |
+| `cli/tests/schema/test_owner_templates.py` | Emitted-schema structure for fixture models (required, nullable, marker placement), plus the validation-and-extraction agreement. |
+| `cli/tests/secrets/test_batch_completion.py` | Batch dooming and typed block reasons. In the secrets-preview estate, and hands over nothing. |
+| `cli/tests/secrets/test_line_safety.py` | Subtracted to secrets-preview. A structured refusal plus the injected-sentinel leak defense named in the preamble. |
+| `cli/tests/secrets/test_outcomes.py` | The rendered needle is the outcome's own status value, so it is derivation rather than a pin. Secrets-preview estate, nothing to hand over. |
+| `cli/tests/secrets/test_result_precedence.py` | Subtracted to secrets-preview. Precedence matrices over production enum members; every expected reason is `SomeEnum.MEMBER` or `.value`. |
+| `cli/tests/sessions/test_grok_build_orchestrated.py` | Emitted command text, not prose we display: the assertion holds what the code sends to a shell, a transport, a completion script or a browser, which is behavior at a boundary. |
+| `cli/tests/test_apt_declared_at.py` | Source-location provenance for manifest-loaded entries. |
+| `cli/tests/test_azure_collision.py` | Fail-closed probe behavior at the provider SDK boundary, with the cause chain as the assertion. |
+| `cli/tests/test_cli_helpers.py` | `parse_csv_filter` behavior over the test's own input. |
+| `cli/tests/test_command_checks.py` | Login-shell resolution and a redaction defense. Platform-conditional through `requires_posix_shell`, which is CI coverage. |
+| `cli/tests/test_config_line_capture.py` | `declared_at` file and line capture over manifests the test wrote. |
+| `cli/tests/test_config_section_line_scanner.py` | Parser behavior over inputs the test authors. |
+| `cli/tests/test_console_lifecycle.py` | Tmux model state plus emitted command text, per the preamble. |
+| `cli/tests/test_console_streams.py` | Legacy-console encoding and newline behavior, byte-exact. Platform-conditional and CI coverage. |
+| `cli/tests/test_consoles_attach.py` | Emitted command text: the three literals are the `tmux` invocations the console sends, socket and target included. |
+| `cli/tests/test_consoles_reorder.py` | Database order, forwarded kwargs and exit codes. |
+| `cli/tests/test_db_migration_harness_state.py` | Historical migration v29 column and backfill facts. Instance-model estate, nothing to hand over. |
+| `cli/tests/test_debian.py` | Release parsing and registry-order classification, discriminated on `entity_kind`. |
+| `cli/tests/test_debug_signal.py` | `debug_enabled()` and the `AGW_DEBUG` mirror; the only literal is the env var's own `"1"`. |
+| `cli/tests/test_env_identity.py` | The `AGENTWORKS_*` variable names are the shipped on-VM contract, asserted as closed sets. |
+| `cli/tests/test_git_config.py` | Assertions read `git config --get-all` output over values the test wrote. |
+| `cli/tests/test_git_credential_contexts.py` | Secret scoping, per-declaration context identity, and out-of-scope refusal. |
+| `cli/tests/test_git_credential_scoping.py` | Emitted text and seeded values at the git credential-helper boundary: the `username=`/`password=` payloads are git's own wire format, `timeout --signal=TERM --kill-after=1s 10s` is the dispatcher script's emitted command, and the two `failure` strings are what each test's own `ManagedHelper` was constructed with. |
+| `cli/tests/test_git_credentials_subgraph_walk.py` | Transitive requirement walk and auto-declaration provenance. The secret names are what the owner template renders, so they pin nothing authored. |
+| `cli/tests/test_git_token_verification.py` | Value identity on the test's own input: `:304` asserts the `Bearer` header built from the credential the test supplied. |
+| `cli/tests/test_initializer_apt.py` | Emitted command text, not prose we display: the assertion holds what the code sends to a shell, a transport, a completion script or a browser, which is behavior at a boundary. |
+| `cli/tests/test_initializer_workspaces_dir.py` | Emitted command text and the order the transport received it in, which is the observational form `hla.md` prefers. |
+| `cli/tests/test_instance_descriptions.py` | Status and reason vocabularies, issue codes, and terminal-safety defenses asserted by Unicode category rather than by wording. |
+| `cli/tests/test_instance_spec_cli.py` | Which lifecycle commands accept `--spec`, read off the real Typer command tree. That is the shipped CLI surface, not a second copy of it. |
+| `cli/tests/test_list_names_only.py` | Machine-readable one-name-per-line output that the three completion scripts parse; the names are the test's own seeds. |
+| `cli/tests/test_operational_json_persisted_enums.py` | Persisted-enum to JSON v1 parity, the `unknown` sentinel, and proof that raw persisted text never reaches any surface. |
+| `cli/tests/test_path_rendering.py` | The three branches of the host-path spelling rule, with the expectation built the way the function builds it. Platform-conditional. |
+| `cli/tests/test_resource_show.py` | Emitted command text, not prose we display: the assertion holds what the code sends to a shell, a transport, a completion script or a browser, which is behavior at a boundary. |
+| `cli/tests/test_runnable_list_safety.py` | Consent confinement: which seams a plain and a status-enriched list may reach, and that neither writes. |
+| `cli/tests/test_secret_verify.py` | No in-scope operand, by the same scan. |
+| `cli/tests/test_secrets_env_var.py` | No in-scope operand, by the same scan. |
+| `cli/tests/test_secrets_prompt.py` | No in-scope operand, by the same scan. |
+| `cli/tests/test_secrets_resolve.py` | Subtracted to secrets-preview. A backend-boundary conformance and defense suite: enum reasons, call lists, exception identity, and injected-sentinel non-leakage. The backend is third-party code, so none of its validation is interior. |
+| `cli/tests/test_session_console_filter.py` | Filter results, forwarded kwargs, exit codes and `entity_kind`/`entity_name` over seeded rows. |
+| `cli/tests/test_session_create_ephemeral_secret_target_parity.py` | One equality between two builders' outputs (`pre == post`) and the same over `compute_needed_secrets`. |
+| `cli/tests/test_ssh_identity.py` | Parsing at an operator-file boundary: `error.kind` classifications, a fingerprint checked against real `ssh-keygen`, a detail-length threshold, and the leak defense from the preamble. |
+| `cli/tests/test_ssh_set_env.py` | Emitted command text, not prose we display: the assertion holds what the code sends to a shell, a transport, a completion script or a browser, which is behavior at a boundary. |
+| `cli/tests/test_status_observation.py` | Future cancellation and the shutdown call shape. |
+| `cli/tests/test_subprocess_io.py` | Byte-exact stdin delivery and a secret-redaction defense. Platform-conditional and CI coverage. |
+| `cli/tests/test_tmux_model_conformance.py` | A differential oracle: the same operations against the hand model and a real tmux server, compared on structure with ids stripped. |
+| `cli/tests/test_value_provenance.py` | Layer-fold provenance behavior and a single re-export identity assertion. |
+| `cli/tests/transports/test_remote_lima.py` | Emitted command text, not prose we display: the assertion holds what the code sends to a shell, a transport, a completion script or a browser, which is behavior at a boundary. |
+| `cli/tests/transports/test_sensitive_stdin.py` | Emitted command text, not prose we display: the assertion holds what the code sends to a shell, a transport, a completion script or a browser, which is behavior at a boundary. |
+| `cli/tests/vms/test_applied_state_checkpoint.py` | Applied-state atomicity, rollback, and persisted event sequences. |
+| `cli/tests/vms/test_describe_vm.py` | Call avoidance and warning counts. No assertion reads warning text. |
+| `cli/tests/vms/test_live_vm_boundary.py` | Resolve counts, call order and values the test put in the environment. |
+| `cli/tests/workspaces/test_acls.py` | Emitted command text, not prose we display: the assertion holds what the code sends to a shell, a transport, a completion script or a browser, which is behavior at a boundary. |
+| `cli/tests/workspaces/test_backend_git_identity.py` | Emitted `git config` text, including the repo-local rather than global scope. |
+| `website/tests/lander-phase4j.test.mjs` | Derivation parity over a fixture the test authors. Markdown in, rendered markdown out. |
+| `website/tests/lander-phase4t.test.mjs` | Derivation parity over a fixture the test authors. Markdown in, rendered markdown out. |
+| `website/tests/test_chromium_transport.py` | No in-scope operand, by the same scan. |
+| `website/tests/test_lander_phase4m_browser.py` | Emitted command text: `:151` builds the JavaScript expression the browser is asked to evaluate. |
+| `website/tests/test_lander_phase4q_browser.py` | Emitted command text: `:574` is a fragment of the script under evaluation. |
 
 ## Group 1: mechanical `match=` narrowing
 

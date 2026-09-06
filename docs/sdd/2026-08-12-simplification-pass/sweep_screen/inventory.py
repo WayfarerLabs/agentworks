@@ -52,6 +52,12 @@ CAUSES = frozenset({"not Python", "between functions", "module level"})
 BACKTICKED = re.compile(r"`([^`]+)`")
 FENCE = re.compile(r"^\s*(```|~~~)")
 
+#: The section that accounts for what the map leaves alone, and the shape of
+#: one of its rows: a backticked path in the first cell. It is checked against
+#: the estate rather than read, so both are needed here.
+NO_ROW_HEADING = "### Files with no row, and why"
+ACCOUNTED = re.compile(r"^\| `([^`]+)` \|")
+
 #: The one section whose rows `generate` emits. Everything else in group 1 is a
 #: claim against the estate that the generated batch must leave alone.
 MECHANICAL_BATCH = "The mechanical batch"
