@@ -49,6 +49,30 @@ MECHANICAL_BATCH = "The mechanical batch"
 GROUP_1 = "Group 1"
 
 
+def outside_code_spans(text: str) -> str:
+    """`text` with every code span blanked, so a quoted marker is not one.
+
+    A row that writes `` `[dead]` `` in its justification is quoting the
+    vocabulary, not using it. Reading such a quote as a live marker took a keep
+    row out of the executable set and handed its site to the mechanical batch as
+    a delete, with every command still reporting success, which is the quietest
+    failure this parser has had.
+    """
+    out: list[str] = []
+    index = 0
+    while index < len(text):
+        if text[index] == "`":
+            run = len(text[index:]) - len(text[index:].lstrip("`"))
+            closing = text.find("`" * run, index + run)
+            if closing != -1:
+                out.append(" " * (closing + run - index))
+                index = closing + run
+                continue
+        out.append(text[index])
+        index += 1
+    return "".join(out)
+
+
 class RowError(SystemExit):
     """A row this parser cannot read, named so it can be found and fixed."""
 
@@ -209,7 +233,7 @@ class Row:
 
     @property
     def markers(self) -> set[str]:
-        return {m.split(":")[0] for m in MARKER_RE.findall(self.shape)}
+        return {m.split(":")[0] for m in MARKER_RE.findall(outside_code_spans(self.shape))}
 
     @property
     def live(self) -> bool:
@@ -458,7 +482,13 @@ def read_rows(path: str, snapshot: Snapshot) -> list[Row]:
         try:
             cells = split_cells(line)
         except ValueError as exc:
-            raise RowError(where, str(exc)) from exc
+            # A prose line with an unclosed span is not this parser's business;
+            # only a row's cells have to be split correctly. Whether it is a row
+            # is decided on the naive split, since the careful one just failed.
+            first = line.strip().strip("|").split("|")[0].strip()
+            if not ROW_ID.fullmatch(first):
+                continue
+            raise RowError(f"{where} row {first}", str(exc)) from exc
         if not cells or not ROW_ID.fullmatch(cells[0]):
             continue
         where = f"{where} row {cells[0]}"
@@ -492,14 +522,20 @@ def _check_markers(cells: list[str], where: str) -> None:
     for index, cell in enumerate(cells):
         if index == 2:
             continue
-        stray = ANY_MARKER.search(cell)
+        stray = ANY_MARKER.search(outside_code_spans(cell))
         if stray is not None:
             raise RowError(where, f"marker {stray.group(0)!r} is in column {index + 1}; markers live in the shape cell")
-    shape = cells[2]
+    shape = outside_code_spans(cells[2])
     found = MARKER_RE.findall(shape)
     for marker in found:
         if found.count(marker) > 1:
             raise RowError(where, f"marker [{marker}] appears more than once")
+    # A marker the vocabulary recognises but the reader cannot parse is worse
+    # than an unknown one: `[subtracted]` without an owner and `[line-anchored]`
+    # without a cause both look like row state and carry none.
+    for hit in ANY_MARKER.findall(shape):
+        if hit not in (f"[{m}]" for m in found):
+            raise RowError(where, f"marker {hit!r} is incomplete; it needs the value after its colon")
     causes = CAUSE_RE.findall(shape)
     if len(causes) > 1:
         raise RowError(where, "more than one line-anchored marker")

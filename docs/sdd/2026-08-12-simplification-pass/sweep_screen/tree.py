@@ -105,35 +105,43 @@ def exc_name(node: ast.AST | None) -> str | None:
 
 
 def template(node: ast.AST | None, *, wildcard: str | None = None) -> str | None:
-    """A string expression, with its interpolations rendered.
+    """A string expression's fixed skeleton, with its variable parts blanked.
 
-    By default an interpolation becomes its own source text in braces, so
-    `f"no {kind} named {name}"` reads back as `no {kind} named {name}`. That
-    keeps two different skeletons apart, which matters because the identity
-    digest is taken over this: blanking every interpolation to one placeholder
-    gives `f"a{x}b"` and `f"a{y}b"` the same digest and hands two unrelated
-    assertions one identity.
+    An interpolation renders as `{}` by default, so `f"no {kind} named {name}"`
+    reads back as `no {} named {}`. The skeleton is deliberately blind to WHAT
+    is interpolated. Keying the identity digest on the interpolated expression
+    instead would make a local variable rename orphan the row that names the
+    site, which is the drift the identity exists to retire; two sites in one
+    test that differ only in what they interpolate are one identity with a
+    multiplicity of two, and that is right, because their disposition is the
+    same and a row addresses both alike.
 
-    `wildcard` replaces every interpolation with a single marker instead, which
-    is what the callee screen wants: there the question is whether a `match=`
-    needle can select a raise's message, and the interpolated part is anything
-    at all rather than a thing to compare.
+    `%` formatting and `str.format` are read the same way, from the literal
+    they are applied to, whose own `%s` and `{}` are already the blanks.
+
+    `wildcard` replaces each interpolation with one marker instead, which is
+    what the callee screen wants: there the question is whether a `match=`
+    needle can select a raise's message, so the interpolated part is anything
+    at all rather than a thing to compare. That mode declines `%` and
+    `str.format` rather than guessing, because their blanks sit inside the
+    literal where nothing can mark them.
     """
-
-    def rendered(value: ast.AST) -> str:
-        # `ast.unparse` of a FormattedValue already carries its braces, its
-        # conversion and its format spec, so it is the source text verbatim.
-        return wildcard if wildcard is not None else ast.unparse(value)
-
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
     if isinstance(node, ast.JoinedStr):
+        blank = wildcard if wildcard is not None else "{}"
         return "".join(
-            v.value if isinstance(v, ast.Constant) and isinstance(v.value, str) else rendered(v) for v in node.values
+            v.value if isinstance(v, ast.Constant) and isinstance(v.value, str) else blank for v in node.values
         )
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
         left, right = template(node.left, wildcard=wildcard), template(node.right, wildcard=wildcard)
         return None if left is None or right is None else left + right
+    if wildcard is not None:
+        return None
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mod):
+        return template(node.left)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "format":
+        return template(node.func.value)
     return None
 
 

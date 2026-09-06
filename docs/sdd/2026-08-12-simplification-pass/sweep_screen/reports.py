@@ -48,6 +48,30 @@ GROUP_TITLES = {
 SHIFTED = frozenset({"grown", "shrunk"})
 
 
+def claim_rows(rows: list[Row]) -> list[Row]:
+    """Group 1's judgment and keep rows: everything it holds outside the batch.
+
+    A `[dead]` row is not a claim. Its file is gone, so it can neither own a
+    site nor lose one, and gating on it would refuse forever over a row the map
+    already records as dead.
+    """
+    return [r for r in rows if r.group == GROUP_1 and r.section != MECHANICAL_BATCH and "dead" not in r.markers]
+
+
+def unresolved_claims(rows: list[Row], snapshot: Snapshot) -> list[tuple[str, str, str]]:
+    """Claim anchors that reach nothing at this tree.
+
+    The same join `attribute` and `generate` both need: one says the map is not
+    true here, the other refuses to cut a batch against it.
+    """
+    return [
+        (row.id, anchor.render(), outcome.state)
+        for row in rows
+        for anchor in row.anchors
+        if (outcome := anchor.resolve(snapshot)).state not in ("resolved", "line-anchored")
+    ]
+
+
 def _ownership(rows: list[Row], sites: list[Site]) -> tuple[list[Site], list[Site], dict[Site, list[str]]]:
     """Sites owned by no row and by more than one, plus the owner ids."""
     owners = {s: [r.id for r in rows if r.claims(s)] for s in sites}
@@ -104,12 +128,19 @@ def attribute(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
             if outcome.state not in ("resolved", "line-anchored"):
                 print(f"  {row.id} ({anchor.path}): {outcome.state} {anchor.render()} {outcome.detail}")
 
-    # A resized group is an ownership fault too: the row claims a number of
-    # assertions it was never written against, and nothing else would say so.
-    if unowned or twice or resized:
+    # Two more ownership faults, neither of which the counts above can see. A
+    # resized group means the row claims a different number of assertions than
+    # it was written against. A claim anchor that reaches nothing means the row
+    # shields no site at all, and a group that vanished entirely reads as `gone`
+    # rather than `shrunk`, so the resized check alone would let it past.
+    stale = unresolved_claims(claim_rows(rows), snapshot)
+    print(f"\ngroup-1 claim anchors that reach nothing here: {len(stale)}")
+    for row_id, rendered, state in stale:
+        print(f"  {row_id} {state} {rendered}")
+    if unowned or twice or resized or stale:
         raise SystemExit(
             f"\nownership is not exactly-once: {len(unowned)} unowned, {len(twice)} owned twice,"
-            f" {len(resized)} site groups resized"
+            f" {len(resized)} site groups resized, {len(stale)} claim anchors reaching nothing"
         )
 
 
@@ -196,12 +227,14 @@ def carry(snapshot: Snapshot, map_path: str, at: str) -> None:
             state = after.state
             if state == "resolved":
                 if before.state != "resolved":
-                    # Nothing to have moved from: this anchor did not resolve at
-                    # the source commit and does here, which is a fact about the
-                    # source map rather than about the tree since.
-                    state = "appeared"
-                else:
-                    state = "found" if before.where == after.where else "moved"
+                    # A map lifted at `at` resolves at `at` by construction, so
+                    # this says the ref is not the tree those lines were read
+                    # from, and every "moved" in the run would be a guess.
+                    raise SystemExit(
+                        f"{row.id}: {anchor.path}::{anchor.render()} does not resolve at {at}"
+                        f" but does at {snapshot.tree}; {at} is not the tree this map's lines were read from"
+                    )
+                state = "found" if before.where == after.where else "moved"
             outcomes.append(state)
             states[state] += 1
             per_group[row.group][state] += 1
@@ -260,11 +293,9 @@ def generate(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
       resolves and covers no site is reported beside it and does not refuse; the
       comment on `barren` says why.
 
-    A `[dead]` row is not a claim and is not checked. Its file is gone, so it
-    can neither own a site nor lose one, and holding the batch back over a row
-    the map already records as dead would refuse forever. `[subtracted]` and
-    `[deferred]` rows are still claims, because their sites are real and must
-    not fall into the batch.
+    `claim_rows` says which rows are claims and why. `[subtracted]` and
+    `[deferred]` rows are among them, because their sites are real and must not
+    fall into the batch.
     """
     rows = read_rows(map_path, snapshot)
     claims = [r for r in rows if r.group == GROUP_1 and r.section != MECHANICAL_BATCH and "dead" not in r.markers]
@@ -300,12 +331,7 @@ def generate(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
         for anchor in row.anchors
         if isinstance(anchor, (SpanAnchor, LineAnchor)) and any(anchor.claims(s) for s in estate)
     ]
-    stale = [
-        (row.id, anchor.render(), outcome.state)
-        for row in claims
-        for anchor in row.anchors
-        if (outcome := anchor.resolve(snapshot)).state not in ("resolved", "line-anchored")
-    ]
+    stale = unresolved_claims(claims, snapshot)
     # A group-1 span claim that resolves and covers no site shields nothing from
     # the batch. It is reported and does not refuse, because one tree cannot
     # tell a test that LOST its sites from a test that never had any, and
@@ -396,9 +422,9 @@ def _with_cause(row: Row, shape: str, causes: Counter[str]) -> str:
 def reanchor(map_path: str, at: str) -> None:
     """Rewrite a map's line anchors into identity anchors, in place.
 
-    One job: it reproduces the rewrite commit `c5b94404` made, so that rewrite
-    is reproducible rather than taken on trust, and it retires with the fresh
-    cut, when no line anchors remain to lift. `at` is the commit the map's line
+    One job: it reproduces the map's anchor cells from the legacy line-anchored
+    map, so every rewrite of them is reproducible rather than taken on trust,
+    and it retires with the fresh cut, when no line anchors remain to lift. `at` is the commit the map's line
     numbers were measured against and is required, because reading them at any
     other tree would name whatever function happens to sit at that line now,
     which is the drift this grammar exists to retire.
@@ -414,8 +440,6 @@ def reanchor(map_path: str, at: str) -> None:
             out.append(line)
             continue
         cells = split_cells(line)
-        if cells and cells[-1] == "":
-            cells = cells[:-1]
         cells[1] = row.render_cell()
         cells[2] = _with_cause(row, cells[2], causes)
         out.append(join_cells(cells))
