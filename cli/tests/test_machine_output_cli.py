@@ -27,6 +27,7 @@ from agentworks.secrets.inspect import (
 )
 from agentworks.secrets.preview import ResolutionPreview, SourcePreviewAttempt
 from agentworks.secrets.sources import SourceProvenance
+from tests.conftest import normalize_lf
 from tests.instance_state_support import stub_instance_state
 
 
@@ -552,18 +553,8 @@ def test_operational_human_list_commands_keep_literal_empty_bytes(monkeypatch) -
         default = CliRunner().invoke(app, ["--non-interactive", *command])
         explicit = CliRunner().invoke(app, ["--non-interactive", *command, "--output", "human"])
         assert default.exit_code == explicit.exit_code == 0
-        assert _lf(default.stdout_bytes) == _lf(explicit.stdout_bytes) == expected_stdout
+        assert normalize_lf(default.stdout_bytes) == normalize_lf(explicit.stdout_bytes) == expected_stdout
         assert default.stderr_bytes == explicit.stderr_bytes == b""
-
-
-def _lf(data: bytes) -> bytes:
-    """Normalize the platform newline to LF for a human-output byte compare.
-
-    Human output goes through print(), so on Windows it carries CRLF while the
-    authored expectations are written with LF. The machine (JSON) path is
-    unaffected: it writes LF straight to stdout's binary buffer.
-    """
-    return data.replace(b"\r\n", b"\n")
 
 
 def _json_document(result: Result) -> dict[str, object]:
@@ -580,8 +571,8 @@ def _assert_human_baseline(command: list[str], expected_stdout: bytes, *, exit_c
     explicit_human = CliRunner().invoke(app, ["--non-interactive", *command, "--output", "human"])
 
     assert default.exit_code == explicit_human.exit_code == exit_code
-    assert _lf(default.stdout_bytes) == expected_stdout
-    assert _lf(explicit_human.stdout_bytes) == expected_stdout
+    assert normalize_lf(default.stdout_bytes) == expected_stdout
+    assert normalize_lf(explicit_human.stdout_bytes) == expected_stdout
     assert default.stderr_bytes == explicit_human.stderr_bytes == b""
 
 

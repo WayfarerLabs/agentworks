@@ -18,7 +18,7 @@ from agentworks.db import PID_STOPPED, SessionMode, SessionStatus, VMStatus
 from agentworks.resources.graph import Readiness
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolve import ActiveSource, ResolutionBatch
-from tests.conftest import stub_vm_ssh_identity
+from tests.conftest import normalize_lf, stub_vm_ssh_identity
 from tests.instance_state_support import stub_instance_state
 
 if TYPE_CHECKING:
@@ -480,7 +480,7 @@ def test_machine_presentation_suppression_keeps_prompts_interactive_on_stderr(
     assert answers == ["human-answer", "json-answer"]
     # Warnings print() to stderr, so the line ending is platform-native (CRLF
     # on Windows); normalize to LF for the byte compare.
-    assert human.stderr_bytes.replace(b"\r\n", b"\n") == b"Warning: REGISTRY_WARNING_SENTINEL\n"
+    assert normalize_lf(human.stderr_bytes) == b"Warning: REGISTRY_WARNING_SENTINEL\n"
     for marker in (
         b"SECTION_SENTINEL",
         b"INFO_SENTINEL",

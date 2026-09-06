@@ -558,6 +558,35 @@ def stub_platform_support(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(cls, "not_ready", classmethod(lambda c, config: Readiness.ready()))
 
 
+def pin_wsl2_unsupported(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the wsl2 platform unsupported so orchestrated site resolution is
+    host-independent. wsl2 is genuinely host-ready on a Windows test host but
+    not on Linux, so a test resolving a single site otherwise sees "multiple
+    sites are ready (lima-local, wsl2)" on Windows only."""
+    from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
+
+    monkeypatch.setattr(WSL2Platform, "unsupported_reason", classmethod(lambda c: "not this host"))
+
+
+def windows_home_env(home: Path) -> dict[str, str]:
+    """Env pairs that point ``Path.home()`` / ``expanduser`` at ``home`` on
+    every platform: ``HOME`` governs POSIX; ``USERPROFILE`` and
+    ``HOMEDRIVE`` + ``HOMEPATH`` govern Windows. Returned as pairs so a caller
+    applies them however it needs (``monkeypatch.setenv`` or a subprocess env
+    dict)."""
+    drive, tail = os.path.splitdrive(str(home))
+    return {"HOME": str(home), "USERPROFILE": str(home), "HOMEDRIVE": drive, "HOMEPATH": tail}
+
+
+def normalize_lf(data: bytes) -> bytes:
+    """Normalize the platform newline to LF for a human-output byte compare.
+
+    Human output goes through ``print()``, so on Windows it carries CRLF while
+    the authored expectations are written with LF. The machine (JSON) path is
+    unaffected: it writes LF straight to stdout's binary buffer."""
+    return data.replace(b"\r\n", b"\n")
+
+
 def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
     """Stub the orchestrated activation gate so tests that exercise
     transport / rollback / env plumbing neither construct real platforms

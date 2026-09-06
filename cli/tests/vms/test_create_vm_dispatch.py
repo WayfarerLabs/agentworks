@@ -28,7 +28,7 @@ from agentworks.errors import (
 )
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
-from tests.conftest import CapturedOutput, ManifestDoc, write_manifests
+from tests.conftest import CapturedOutput, ManifestDoc, pin_wsl2_unsupported, write_manifests
 from tests.orchestrated_fixtures import proxmox_site
 from tests.ssh_fixtures import TEST_SSH_PUBLIC_KEY, write_test_ssh_keypair
 
@@ -59,9 +59,7 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # host-ready on a Windows test host but not on Linux, so pin it
     # unsupported to keep exactly one site (lima-local) ready on any host.
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
-    from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
-
-    monkeypatch.setattr(WSL2Platform, "unsupported_reason", classmethod(lambda c: "not this host"))
+    pin_wsl2_unsupported(monkeypatch)
 
     def _make(extra: str = "", *, manifests: Sequence[ManifestDoc | str] = ()):
         path = tmp_path / "config.toml"

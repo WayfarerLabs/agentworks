@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.secret_backend import TtyInteractionAccess
+from tests.conftest import windows_home_env
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -90,14 +91,11 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     )
     (resources / "vm-templates.yaml").write_text(_BAD_MANIFEST)
 
-    monkeypatch.setenv("HOME", str(root))
     # Path.expanduser reads HOME on POSIX but USERPROFILE (and
-    # HOMEDRIVE/HOMEPATH) on Windows, so redirect those too or ``~`` in
+    # HOMEDRIVE/HOMEPATH) on Windows, so redirect all of them or ``~`` in
     # config.toml would expand to the developer's real home there.
-    monkeypatch.setenv("USERPROFILE", str(root))
-    drive, tail = os.path.splitdrive(str(root))
-    monkeypatch.setenv("HOMEDRIVE", drive)
-    monkeypatch.setenv("HOMEPATH", tail)
+    for _name, _value in windows_home_env(root).items():
+        monkeypatch.setenv(_name, _value)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: root))
     monkeypatch.setattr(agentworks.config, "CONFIG_DIR", config_dir)
     monkeypatch.setattr(agentworks.config, "CONFIG_PATH", config_dir / "config.toml")
