@@ -26,7 +26,41 @@ framework exists. This effort makes the scope-participation contract real so tha
 behavior lives in the harness integration at every level it operates, and core owns only the
 pipeline that invokes it.
 
-## Users
+## Scopes and facets
+
+These two words are not synonyms and the difference is load-bearing, so it is defined here once
+before any requirement uses it.
+
+A **scope** is where a lifecycle lives. Scopes belong to core. There are five, and the set is fixed:
+vm, admin, agent, workspace, session. Each names a resource core sets up and the operation that sets
+it up, which is why admin and agent are separate: admin identity work rides the VM lifecycle
+(`agw vm reinit NAME`) while an agent has its own (`agw agent reinit NAME`), and the admin
+attachment is spelled on the vm-template while agent attachments are spelled on agent templates.
+
+A **facet** is the level a capability is driven at: the pairing of one level's API methods and its
+config, nothing more. Facets belong to capabilities. There are four: vm, user, workspace, session.
+
+Core owns the mapping between them, and it is fixed:
+
+| Scope     | Facet     | Init method      | Driven by                 |
+| --------- | --------- | ---------------- | ------------------------- |
+| vm        | vm        | `vm_init`        | VM init and reinit        |
+| admin     | user      | `user_init`      | VM init and reinit        |
+| agent     | user      | `user_init`      | Agent init and reinit     |
+| workspace | workspace | `workspace_init` | Workspace create          |
+| session   | session   | `start`          | Session start and restart |
+
+Admin and agent collapse into one facet because a harness does the same thing for both: set up a
+user. They stay separate scopes because their lifecycles and owning resources differ. The
+consequence to hold onto is that **an integration author never writes the word admin or agent**:
+they implement `user_init` and read the invocation context to learn which user they were called for.
+Only core knows a scope.
+
+The practical test: if the question is _when_ something runs, it is a scope question and the answer
+is core's. If the question is _what an integration implements or configures_, it is a facet question
+and the answer is the capability's.
+
+## Who this is for
 
 - **Operators**, who select integrations on the template that owns each resource and attach
   configuration there, and who expect VM, agent, and workspace setup to converge on reinit rather
@@ -44,7 +78,7 @@ each able to emit env and agent artifacts alongside its own side effects. Enable
 integrations run last, receiving all env and agent artifacts for the scope. Reinit reruns the same
 pipeline idempotently.
 
-**R2. The integration API carries per-scope init methods.** `vm_init`, `user_init`, and
+**R2. The integration API carries one init method per facet.** `vm_init`, `user_init`, and
 `workspace_init` (names indicative) join the existing session surface on the one registered
 integration API. `user_init` is a single surface invoked for the admin user during VM init and
 reinit, and for each agent during agent init and reinit; the invocation context says which user, and
@@ -54,13 +88,13 @@ one method body serves both.
 integration implements only what it supports. This supersedes the originating perspective's
 absence-means-unsupported rule: review and testing catch a mistyped override.
 
-**R4. Integrations declare config per facet, and core owns the scope-to-facet mapping.** A facet is
-the level a capability is driven at (vm, user, workspace, session): the pairing of one level's API
-methods and its config, nothing more. Admin and agent scopes both map to the user facet. Core asks
-`config_for(facet)` (name indicative), so producers never need to know their consumers. A capability
-with a single config declares it without naming any facet, so the ordinary case stays invisible. The
-association is introspectable at finalize, before any method runs. Validation consumes exactly one
-facet's schema per blob; offering no config for a facet means there is nothing to validate there.
+**R4. Integrations declare config per facet.** Config follows the same four facets the methods do,
+for the same reason: a capability declares a fixed set of facet configs exactly as it declares a
+fixed set of API methods, and consumers choose which facet they drive. Core asks `config_for(facet)`
+(name indicative), so producers never need to know their consumers. A capability with a single
+config declares it without naming any facet, so the ordinary case stays invisible. The association
+is introspectable at finalize, before any method runs. Validation consumes exactly one facet's
+schema per blob; offering no config for a facet means there is nothing to validate there.
 
 **R5. Integration config is ordinary capability config.** It belongs to the consuming resource (the
 vm, agent, workspace, or session template that selects the integration) and is validated the way all
