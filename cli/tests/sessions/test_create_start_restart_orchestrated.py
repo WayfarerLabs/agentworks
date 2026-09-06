@@ -365,17 +365,17 @@ def test_session_start_cleans_up_if_start_observation_cannot_be_recorded(
     db, _events = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
     cleaned: list[str] = []
 
-    def _fail_record(_name: str) -> None:
-        raise StateError("session row disappeared", entity_kind="session", entity_name="s1")
+    def _interrupt_record(_name: str) -> None:
+        raise KeyboardInterrupt
 
-    monkeypatch.setattr(db, "record_session_started", _fail_record)
+    monkeypatch.setattr(db, "record_session_started", _interrupt_record)
     monkeypatch.setattr(
         tmux_mod,
         "kill_server_and_probe",
         lambda **kwargs: cleaned.append(kwargs["socket_path"]) or ProbeStatus.ABSENT,
     )
 
-    with pytest.raises(StateError):
+    with pytest.raises(KeyboardInterrupt):
         session_manager.start_session(
             db,
             SimpleNamespace(session=SimpleNamespace(history_limit=1)),
@@ -666,6 +666,39 @@ def _create_stubs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, events: list[
     monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: BOOT_ID)
     monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
     return db
+
+
+def test_create_retains_unknown_runtime_if_start_observation_write_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.sessions import tmux as tmux_mod
+    from agentworks.sessions.manager import create_session
+
+    db = _create_stubs(tmp_path, monkeypatch, [])
+    db.insert_agent("a1", "vm1", "agt-a1")
+
+    def _fail_record(_name: str) -> None:
+        raise StateError("session row disappeared", entity_kind="session", entity_name="s1")
+
+    monkeypatch.setattr(db, "record_session_started", _fail_record)
+    monkeypatch.setattr(tmux_mod, "kill_server_and_probe", lambda **kwargs: ProbeStatus.UNKNOWN)
+
+    with pytest.raises(StateError):
+        create_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),  # type: ignore[arg-type]
+            name="s1",
+            workspace="ws1",
+            agent="a1",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    session = db.get_session("s1")
+    assert session is not None
+    assert session.socket_path == "/run/agentworks/agent-tmux-sockets/agt-s1/s1.sock"
+    assert session.pid is None and session.boot_id is None
+    db.close()
 
 
 @pytest.mark.parametrize(

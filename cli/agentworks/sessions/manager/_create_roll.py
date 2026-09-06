@@ -351,8 +351,18 @@ def _start_session_slice(
 
             try:
                 db.record_session_started(name)
-            except Exception:
-                kill_server_and_probe(run_command=session_run_command, socket_path=sock)
+            except (KeyboardInterrupt, Exception):
+                cleanup = kill_server_and_probe(run_command=session_run_command, socket_path=sock)
+                if cleanup is not ProbeStatus.ABSENT:
+                    db.update_session_runtime(
+                        name,
+                        socket_path=sock,
+                        pid=None,
+                        boot_id=None,
+                        tmux_server_start_ticks=None,
+                    )
+                    retain_unknown_runtime = True
+                    output.warn(f"session '{name}' may still have a runtime at socket {sock}")
                 raise
 
             fingerprint_target = agent_target if mode == SessionMode.AGENT else target

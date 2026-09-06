@@ -112,6 +112,29 @@ def test_console_start_records_publication_without_refreshing_running_noop(
     assert restarted is not None and restarted.last_started_at != original
 
 
+def test_console_start_interrupt_after_publication_tears_down_runtime(
+    db: Database,
+    console_target_factory,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tests._tmux_model import TmuxModel
+
+    _seed_vm(db, with_tailscale=True)
+    db.insert_console("work", "vm1", admin_shell=True)
+    model = TmuxModel()
+    console_target_factory(model)
+
+    def _interrupt(_name: str) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(db, "record_console_started", _interrupt)
+
+    with pytest.raises(KeyboardInterrupt):
+        start_console(db, _StubConfig(), name="work", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert not model.has_session("aw-console-work")
+
+
 def test_running_session_names_raises_on_unreachable(db: Database, fake_target: _FakeTarget) -> None:
     """If sessions exist with valid pid+boot_id but the probe returns nothing,
     treat that as a transport failure and raise instead of silently reporting

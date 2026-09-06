@@ -723,6 +723,7 @@ def test_runnable_start_observation_requires_an_existing_row(
 
     assert raised.value.entity_kind == entity_kind
     assert raised.value.entity_name == "missing"
+    assert not db._conn.in_transaction
 
 
 def test_migration_21_adds_boot_id(tmp_path: Path) -> None:

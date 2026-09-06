@@ -426,6 +426,8 @@ class Database:
             (name,),
         )
         if result.rowcount != 1:
+            if self._tx_depth == 0:
+                self._conn.rollback()
             from agentworks.errors import StateError
 
             raise StateError(f"VM '{name}' no longer exists", entity_kind="vm", entity_name=name)
@@ -888,6 +890,8 @@ class Database:
             (name,),
         )
         if result.rowcount != 1:
+            if self._tx_depth == 0:
+                self._conn.rollback()
             from agentworks.errors import StateError
 
             raise StateError(f"session '{name}' no longer exists", entity_kind="session", entity_name=name)
@@ -1164,6 +1168,8 @@ class Database:
             (name,),
         )
         if result.rowcount != 1:
+            if self._tx_depth == 0:
+                self._conn.rollback()
             from agentworks.errors import StateError
 
             raise StateError(f"console '{name}' no longer exists", entity_kind="console", entity_name=name)

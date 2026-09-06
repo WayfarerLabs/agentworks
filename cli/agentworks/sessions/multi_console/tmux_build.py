@@ -594,6 +594,6 @@ def _build_console_tmux(
                 entity_name=console.name,
             )
         db.record_console_started(console.name)
-    except Exception:
+    except (KeyboardInterrupt, Exception):
         _teardown_console_tmux(target, console.name)
         raise

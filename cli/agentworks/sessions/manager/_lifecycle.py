@@ -795,8 +795,11 @@ def _launch_existing_session(
 
             try:
                 db.record_session_started(name)
-            except Exception:
-                kill_server_and_probe(run_command=session_run_command, socket_path=new_sock)
+            except (KeyboardInterrupt, Exception):
+                cleanup = kill_server_and_probe(run_command=session_run_command, socket_path=new_sock)
+                if cleanup is not ProbeStatus.ABSENT:
+                    _mark_runtime_unknown(db, session, socket_path=new_sock)
+                    output.warn(f"session '{name}' may still have a runtime at socket {new_sock}")
                 raise
 
             fingerprint_probe = capture_tmux_server_fingerprint(
