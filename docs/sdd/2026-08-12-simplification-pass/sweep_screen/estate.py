@@ -1,0 +1,238 @@
+"""The sweep's estate, and the identity that survives a line number moving.
+
+A `match=` assertion is identified here by what it asserts, never by where it
+sits. The map died twice from line drift, both times the same way: every row
+carried a line number, an unrelated edit above it moved every number in the
+file, and the map went on claiming sites it no longer pointed at. An identity
+derived from content cannot drift, because nothing above the site is part of
+it.
+
+The identity is five fields:
+
+    <path>::<qualname>::<type>::<digest>#<ordinal>
+
+* **path** is the test file.
+* **qualname** is the innermost enclosing function, dotted through any class
+  or nesting, exactly as pytest spells a node id.
+* **type** is the asserted exception or warning name as written, or the
+  assertion method's own name where the call takes no type (`assertRegex`,
+  `assertNotRegex`).
+* **digest** is the first six hex of sha256 over the extracted match template,
+  which is the needle with its interpolations blanked, so a site is keyed on
+  what it matches rather than on how the file is laid out.
+* **ordinal** is 1-based source order among the sites of one file that tie on
+  all four fields above. It is always written, so a second identical site
+  appearing later never changes the identity of the first.
+
+Ties are rare and real: 8 keys over 17 sites at `a64b1b9c`, all of them a test
+asserting the same needle against the same type twice in one function. The
+ordinal is the only field here that a nearby edit can shift, and it shifts only
+within that population.
+"""
+
+from __future__ import annotations
+
+import ast
+import hashlib
+from dataclasses import dataclass
+
+from .tree import TEST_ROOT, WEB_ROOT, Tree, call_name, exc_name, template
+
+#: Assertion helpers that take the asserted type first and the regex second.
+TYPED_REGEX_METHODS = frozenset({"assertRaisesRegex", "assertRaisesRegexp", "assertWarnsRegex"})
+
+#: Assertion helpers that take a subject first and the regex second, so the
+#: method name is the closest thing to a type the identity can carry.
+UNTYPED_REGEX_METHODS = frozenset({"assertRegex", "assertNotRegex"})
+
+REGEX_METHODS = TYPED_REGEX_METHODS | UNTYPED_REGEX_METHODS
+
+#: Six hex separates every distinct needle in this estate with room to spare;
+#: four already did. The margin is for a tree that keeps moving.
+DIGEST_LENGTH = 6
+
+
+def digest_of(needle: str) -> str:
+    return hashlib.sha256(needle.encode("utf-8")).hexdigest()[:DIGEST_LENGTH]
+
+
+@dataclass(frozen=True, order=True)
+class Identity:
+    """What a site is, independent of where it sits."""
+
+    path: str
+    qualname: str
+    type_name: str
+    digest: str
+    ordinal: int
+
+    @property
+    def tail(self) -> str:
+        """The identity without its path, as a row cell writes it."""
+        return f"{self.qualname}::{self.type_name}::{self.digest}#{self.ordinal}"
+
+    def __str__(self) -> str:
+        return f"{self.path}::{self.tail}"
+
+
+@dataclass(frozen=True, order=True)
+class Site:
+    """One `match=` or regex-family assertion, at one point in history."""
+
+    identity: Identity
+    line: int
+    col: int
+    kind: str
+    needle: str
+
+    @property
+    def path(self) -> str:
+        return self.identity.path
+
+    @property
+    def where(self) -> str:
+        return f"{self.identity.path}:{self.line}"
+
+
+@dataclass(frozen=True, order=True)
+class Function:
+    """One function definition, from its first decorator to its last line."""
+
+    qualname: str
+    start: int
+    end: int
+
+    def holds(self, line: int) -> bool:
+        return self.start <= line <= self.end
+
+
+def functions_in(tree: Tree, path: str) -> list[Function]:
+    """Every function in one module, innermost last within a nest."""
+    found: list[Function] = []
+
+    def walk(node: ast.AST, prefix: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.ClassDef):
+                walk(child, f"{prefix}{child.name}.")
+            elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                start = min([child.lineno] + [d.lineno for d in child.decorator_list])
+                found.append(Function(f"{prefix}{child.name}", start, child.end_lineno or child.lineno))
+                walk(child, f"{prefix}{child.name}.")
+
+    walk(tree.parse(path), "")
+    return sorted(found)
+
+
+def _asserted(node: ast.Call) -> tuple[str, str] | None:
+    """The (type, needle) a regex-family assertion carries, or None."""
+    name = call_name(node)
+    if name == "raises":
+        keyword = next((k for k in node.keywords if k.arg == "match"), None)
+        if keyword is None:
+            return None
+        return exc_name(node.args[0]) or "<expr>" if node.args else "<expr>", template(keyword.value) or "<expr>"
+    if name in REGEX_METHODS:
+        if len(node.args) < 2:
+            return None
+        if name in UNTYPED_REGEX_METHODS:
+            return name, template(node.args[1]) or "<expr>"
+        return exc_name(node.args[0]) or "<expr>", template(node.args[1]) or "<expr>"
+    return None
+
+
+def sites_in(tree: Tree, path: str) -> list[Site]:
+    """`match=` and regex-family sites in one test module, in source order."""
+    raw: list[tuple[int, int, str, str, str, str]] = []
+
+    def walk(node: ast.AST, qualname: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.ClassDef):
+                walk(child, f"{qualname}{child.name}.")
+                continue
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                walk(child, f"{qualname}{child.name}.")
+                continue
+            if isinstance(child, ast.Call):
+                found = _asserted(child)
+                if found is not None:
+                    type_name, needle = found
+                    kind = "match=" if call_name(child) == "raises" else call_name(child)
+                    raw.append((child.lineno, child.col_offset, qualname.rstrip("."), type_name, needle, kind))
+            walk(child, qualname)
+
+    walk(tree.parse(path), "")
+
+    seen: dict[tuple[str, str, str], int] = {}
+    sites: list[Site] = []
+    for line, col, qualname, type_name, needle, kind in sorted(raw):
+        key = (qualname, type_name, digest_of(needle))
+        seen[key] = seen.get(key, 0) + 1
+        sites.append(Site(Identity(path, *key, seen[key]), line, col, kind, needle))
+    return sites
+
+
+class Snapshot:
+    """The estate and the function index of one tree, both derived once.
+
+    Identity resolution needs both: a site anchor resolves against the estate,
+    and a span anchor against the function index.
+    """
+
+    def __init__(self, tree: Tree) -> None:
+        self.tree = tree
+        self.sites: list[Site] = []
+        for path in tree.files(TEST_ROOT):
+            self.sites.extend(s for s in sites_in(tree, path) if s.kind == "match=")
+        for path in tree.files(WEB_ROOT):
+            self.sites.extend(s for s in sites_in(tree, path) if s.kind != "match=")
+        self.sites.sort(key=lambda s: (s.path, s.line, s.col))
+        self.by_identity = {s.identity: s for s in self.sites}
+        # Every anchor in the map keys on this being one-to-one, so it is
+        # checked here rather than asserted in the map's prose. A collision
+        # would silently make one row address two sites, which is the failure
+        # the identity grammar exists to retire.
+        if len(self.by_identity) != len(self.sites):
+            collisions = {i for i in self.by_identity if sum(s.identity == i for s in self.sites) > 1}
+            raise SystemExit(f"identity is not unique at {tree}: {sorted(str(c) for c in collisions)}")
+        self._functions: dict[str, list[Function] | None] = {}
+
+    def functions(self, path: str) -> list[Function] | None:
+        """The function index of one file, or None when the file is gone."""
+        if path not in self._functions:
+            if not path.endswith(".py") or not self.tree.exists(path):
+                self._functions[path] = None
+            else:
+                self._functions[path] = functions_in(self.tree, path)
+        return self._functions[path]
+
+    def function(self, path: str, qualname: str) -> Function | None:
+        for candidate in self.functions(path) or []:
+            if candidate.qualname == qualname:
+                return candidate
+        return None
+
+    def enclosing(self, path: str, line: int) -> Function | None:
+        """The innermost function holding `line`, or None."""
+        holders = [f for f in self.functions(path) or [] if f.holds(line)]
+        return max(holders, key=lambda f: (f.start, -f.end)) if holders else None
+
+    def site_at(self, path: str, line: int) -> Site | None:
+        return next((s for s in self.sites if s.path == path and s.line == line), None)
+
+    def sites_under(self, path: str, function: Function) -> list[Site]:
+        return [s for s in self.sites if s.path == path and function.holds(s.line)]
+
+    def sites_of(self, path: str) -> list[Site]:
+        return [s for s in self.sites if s.path == path]
+
+    def near(self, identity: Identity) -> list[Site]:
+        """Sites sharing everything but the needle, which is what a reworded
+        message leaves behind: the assertion is still there, matching something
+        else."""
+        return [
+            s
+            for s in self.sites
+            if s.identity.path == identity.path
+            and s.identity.qualname == identity.qualname
+            and s.identity.type_name == identity.type_name
+        ]
