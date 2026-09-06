@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError
+from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError, _InvalidQGAExecStatus
 
 
 @pytest.fixture()
@@ -203,7 +203,7 @@ class TestResponseParsing:
         status[field] = value
         mock_urlopen.return_value = _mock_response(status)
 
-        with pytest.raises(ProxmoxAPIError):
+        with pytest.raises(_InvalidQGAExecStatus):
             api.guest_agent_exec_status("pve", 100, pid=42)
 
     @patch("urllib.request.urlopen")
@@ -228,12 +228,25 @@ class TestResponseParsing:
     @pytest.mark.parametrize(
         "status",
         [
+            {},
+            {"exited": "yes"},
             {"exited": 0, "exitcode": 0},
+            {"exited": 0, "signal": 9},
+            {"exited": 0, "out-data": ""},
+            {"exited": 0, "err-data": ""},
+            {"exited": 0, "out-truncated": 0},
+            {"exited": 0, "err-truncated": 0},
+            {"exited": 1},
             {"exited": 1, "exitcode": 0, "signal": 9},
+            {"exited": 1, "exitcode": 0, "signal": None},
             {"exited": 1, "exitcode": 0, "out-truncated": 1},
+            {"exited": 1, "exitcode": 0, "err-truncated": 1},
             {"exited": 1, "signal": 0},
+            {"exited": 1, "signal": -1},
             {"exited": 1, "exitcode": -1},
+            {"exited": 1, "exitcode": "0"},
             {"exited": 1, "exitcode": 0, "out-data": 1},
+            {"exited": 1, "exitcode": 0, "err-data": 1},
         ],
     )
     @patch("urllib.request.urlopen")
@@ -245,9 +258,12 @@ class TestResponseParsing:
     ) -> None:
         mock_urlopen.side_effect = [_mock_response({"pid": 42}), _mock_response(status)]
 
-        with pytest.raises(ProxmoxAPIError):
+        with pytest.raises(_InvalidQGAExecStatus) as caught:
             api.guest_agent_exec_wait("pve", 100, "/bin/true")
 
+        assert "pve" in str(caught.value)
+        assert "100" in str(caught.value)
+        assert "42" in str(caught.value)
         assert mock_urlopen.call_count == 2
 
     @pytest.mark.parametrize("response", [None, [], "invalid"])
@@ -260,8 +276,12 @@ class TestResponseParsing:
     ) -> None:
         mock_urlopen.return_value = _mock_response(response)
 
-        with pytest.raises(ProxmoxAPIError):
+        with pytest.raises(_InvalidQGAExecStatus) as caught:
             api.guest_agent_exec_status("pve", 100, pid=42)
+
+        assert "pve" in str(caught.value)
+        assert "100" in str(caught.value)
+        assert "42" in str(caught.value)
 
     @pytest.mark.parametrize("response", [None, {}, {"pid": None}, {"pid": "42"}, {"pid": True}])
     @patch("urllib.request.urlopen")

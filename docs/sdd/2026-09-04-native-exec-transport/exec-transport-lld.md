@@ -232,8 +232,10 @@ itself is not redesigned. Every response is shape-checked:
 - output fields are strings when present; and
 - truncation flags are boolean when present after the same exact `0`/`1` normalization.
 
-Unexpected or contradictory data raises `ProxmoxAPIError` at the API boundary. The adapter converts
-that into a typed transport error with node, VMID, and PID but no request body or token.
+Unexpected or contradictory data raises a dedicated `ProxmoxAPIError` subtype with node, VMID, and
+PID at the API boundary. The adapter maps that safe diagnostic without suggesting that a completed
+command may still be running. A provider failure while fetching status keeps that separate ambiguity
+warning. Neither error includes a request body or token.
 
 ### Input policy
 

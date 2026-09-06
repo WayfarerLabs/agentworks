@@ -12,7 +12,7 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, cast
 
-from agentworks.plugins.proxmox.api import ProxmoxAPIError, _InvalidQGAExecStatus, _validate_qga_exec_status
+from agentworks.plugins.proxmox.api import ProxmoxAPIError, _InvalidQGAExecStatus
 from agentworks.ssh import SSHError, SSHResult
 from agentworks.transports import ExecTransport
 
@@ -95,6 +95,7 @@ class ProxmoxExecTransport(ExecTransport):
                 f"Proxmox QGA status failed for {self.describe()} (PID {pid}); the guest command may still be running"
             )
             status_failed = False
+            invalid_status = False
             try:
                 status = self._api.guest_agent_exec_status(
                     self.node,
@@ -102,6 +103,10 @@ class ProxmoxExecTransport(ExecTransport):
                     pid=pid,
                     timeout=status_timeout,
                 )
+            except _InvalidQGAExecStatus as error:
+                if input_text is None:
+                    raise SSHError(str(error)) from error
+                invalid_status = True
             except ProxmoxAPIError as error:
                 if input_text is None:
                     raise SSHError(f"{status_failure}: {error}") from error
@@ -110,16 +115,14 @@ class ProxmoxExecTransport(ExecTransport):
                 if input_text is None:
                     raise
                 status_failed = True
+            if invalid_status:
+                raise SSHError(
+                    f"Proxmox QGA returned an invalid command status for {self.describe()} (PID {pid})"
+                ) from None
             if status_failed:
                 raise SSHError(status_failure) from None
 
-            validation_failure: str | None = None
-            try:
-                exited, result = _parse_status(status, sensitive=input_text is not None)
-            except SSHError as error:
-                validation_failure = str(error)
-            if validation_failure is not None:
-                raise SSHError(f"{validation_failure} for {self.describe()} (PID {pid})") from None
+            exited, result = _parse_status(status, sensitive=input_text is not None)
             if exited:
                 assert result is not None
                 self._log(command, result)
@@ -172,18 +175,13 @@ def _command_argv(command: str, *, admin_username: str, sudo: bool) -> list[str]
 
 
 def _parse_status(status: dict[str, object], *, sensitive: bool) -> tuple[bool, SSHResult | None]:
-    """Validate one external exec-status response and map complete output."""
-    try:
-        normalized = _validate_qga_exec_status(status)
-    except _InvalidQGAExecStatus as error:
-        raise SSHError(str(error)) from None
-
-    if not cast("bool", normalized["exited"]):
+    """Map one API-validated exec-status response."""
+    if not cast("bool", status["exited"]):
         return False, None
 
-    returncode = cast("int", normalized["exitcode"]) if "exitcode" in normalized else -cast("int", normalized["signal"])
-    stdout = cast("str", normalized.get("out-data", ""))
-    stderr = cast("str", normalized.get("err-data", ""))
+    returncode = cast("int", status["exitcode"]) if "exitcode" in status else -cast("int", status["signal"])
+    stdout = cast("str", status.get("out-data", ""))
+    stderr = cast("str", status.get("err-data", ""))
     if sensitive:
         stdout = ""
         stderr = ""

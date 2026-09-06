@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError
+from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError, _InvalidQGAExecStatus
 from agentworks.plugins.proxmox.transport import ProxmoxExecTransport
 from agentworks.ssh import SSHError, SSHResult
 from agentworks.transports import native_transport as build_native_transport
@@ -204,20 +204,6 @@ def test_checked_failure_logs_completed_result_then_raises(status: dict[str, Any
     assert logger.errors == []
 
 
-@pytest.mark.parametrize("check", [False, True])
-@pytest.mark.parametrize(
-    "status",
-    [
-        {"exited": True, "signal": 0},
-        {"exited": True, "signal": -1},
-        {"exited": True, "exitcode": -1},
-    ],
-)
-def test_invalid_numeric_exit_status_is_rejected(status: dict[str, object], check: bool) -> None:
-    with pytest.raises(SSHError):
-        _transport(_API([status])).run("false", check=check)
-
-
 def test_sensitive_input_has_one_carrier_and_suppresses_output() -> None:
     api = _API(
         [
@@ -381,35 +367,6 @@ def test_timeout_after_dispatch_reports_pid_without_redispatch(monkeypatch: pyte
     assert logger.errors == [str(caught.value)]
 
 
-@pytest.mark.parametrize(
-    "status",
-    [
-        {},
-        {"exited": "yes"},
-        {"exited": False, "exitcode": 0},
-        {"exited": False, "signal": 9},
-        {"exited": False, "out-data": ""},
-        {"exited": False, "err-data": ""},
-        {"exited": False, "out-truncated": False},
-        {"exited": False, "err-truncated": False},
-        {"exited": True},
-        {"exited": True, "exitcode": 0, "signal": 1},
-        {"exited": True, "exitcode": 0, "signal": None},
-        {"exited": True, "exitcode": "0"},
-        {"exited": True, "exitcode": 0, "out-data": 1},
-        {"exited": True, "exitcode": 0, "out-truncated": "yes"},
-        {"exited": True, "exitcode": 0, "out-truncated": True},
-        {"exited": True, "exitcode": 0, "err-truncated": True},
-    ],
-)
-def test_invalid_or_incomplete_status_is_never_returned(status: dict[str, Any]) -> None:
-    with pytest.raises(SSHError) as caught:
-        _transport(_API([status])).run("true")
-
-    assert "proxmox:101@pve1" in str(caught.value)
-    assert "42" in str(caught.value)
-
-
 @patch("urllib.request.urlopen")
 def test_numeric_wire_status_runs_then_exits(
     mock_urlopen: MagicMock,
@@ -442,7 +399,7 @@ def test_numeric_wire_status_runs_then_exits(
 
 
 @patch("urllib.request.urlopen")
-def test_numeric_wire_truncation_is_rejected(mock_urlopen: MagicMock) -> None:
+def test_numeric_wire_truncation_is_rejected_without_status_ambiguity(mock_urlopen: MagicMock) -> None:
     mock_urlopen.side_effect = [
         _wire_response({"pid": 42}),
         _wire_response(
@@ -456,10 +413,70 @@ def test_numeric_wire_truncation_is_rejected(mock_urlopen: MagicMock) -> None:
         ),
     ]
 
-    with pytest.raises(SSHError):
+    with pytest.raises(SSHError) as caught:
         ProxmoxExecTransport(
             _wire_api(),
             node="pve1",
             vmid=101,
             admin_username="agentworks",
         ).run("true")
+
+    assert isinstance(caught.value.__cause__, _InvalidQGAExecStatus)
+    assert str(caught.value) == str(caught.value.__cause__)
+    assert "pve1" in str(caught.value)
+    assert "101" in str(caught.value)
+    assert "42" in str(caught.value)
+
+
+@pytest.mark.parametrize("check", [False, True])
+@pytest.mark.parametrize(
+    "status",
+    [
+        {"exited": 1, "signal": 0},
+        {"exited": 1, "exitcode": -1},
+    ],
+)
+@patch("urllib.request.urlopen")
+def test_invalid_numeric_wire_status_is_transport_failure(
+    mock_urlopen: MagicMock,
+    status: dict[str, object],
+    check: bool,
+) -> None:
+    mock_urlopen.side_effect = [_wire_response({"pid": 42}), _wire_response(status)]
+
+    with pytest.raises(SSHError) as caught:
+        ProxmoxExecTransport(
+            _wire_api(),
+            node="pve1",
+            vmid=101,
+            admin_username="agentworks",
+        ).run("false", check=check)
+
+    assert isinstance(caught.value.__cause__, _InvalidQGAExecStatus)
+
+
+@patch("urllib.request.urlopen")
+def test_sensitive_invalid_wire_status_drops_provider_exception(mock_urlopen: MagicMock) -> None:
+    mock_urlopen.side_effect = [
+        _wire_response({"pid": 42}),
+        _wire_response(
+            {
+                "exited": 1,
+                "exitcode": 0,
+                "out-data": f"reflected {_SECRET}",
+                "out-truncated": 1,
+            }
+        ),
+    ]
+
+    with pytest.raises(SSHError) as caught:
+        ProxmoxExecTransport(
+            _wire_api(),
+            node="pve1",
+            vmid=101,
+            admin_username="agentworks",
+        ).run("read secret", input_text=f"{_SECRET}\n")
+
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    _assert_exception_graph_is_secret_free(caught.value)
