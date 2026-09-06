@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
 import time
@@ -143,12 +144,15 @@ class TyperHandler:
         if prompt_stream.isatty() and not non_interactive():
             typer.echo(MOUSE_TRACKING_DISABLE, nl=False, err=prompt_on_stderr)
         try:
-            confirm = click.confirm if prompt_on_stderr else typer.confirm
-            return confirm(
-                f"{_pad(level)}{message}",
-                default=default,
-                err=prompt_on_stderr,
-            )
+            if prompt_on_stderr:
+                # click.confirm(err=True) echoes the prompt text to stderr, but
+                # its input()-side prompt suffix still reaches stdout on Windows
+                # (a stray space), which would violate machine-output stdout
+                # purity. Redirect stdout to stderr for the read so the whole
+                # prompt stays off the machine stream.
+                with contextlib.redirect_stdout(sys.stderr):
+                    return click.confirm(f"{_pad(level)}{message}", default=default, err=True)
+            return typer.confirm(f"{_pad(level)}{message}", default=default, err=False)
         except (click.exceptions.Abort, typer.Abort):
             # typer.confirm/typer.prompt raise typer's vendored Abort (a
             # different class from the top-level click's), so catching only
