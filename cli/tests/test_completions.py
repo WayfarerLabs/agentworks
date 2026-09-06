@@ -1321,10 +1321,12 @@ def test_marker_probe_refuses_stale_database_for_every_dynamic_path_without_side
     assert not backup_directory(database_path).exists()
 
 
-@requires_posix_shell
-def test_shell_wrapped_probe_suppresses_config_warning_and_preserves_database_bytes(tmp_path: Path) -> None:
-    # Skips on Windows: models a real POSIX shell wrapping the probe with
-    # ``2>/dev/null``; Git-for-Windows' bash differs here. Linux CI covers it.
+def test_direct_probe_keeps_stdout_pure_while_warning_lands_on_stderr(tmp_path: Path) -> None:
+    # Unguarded on purpose: this spawns no POSIX shell. It invokes the installed
+    # `agw` directly to prove the completion probe keeps stdout machine-pure (the
+    # config warning goes to stderr, not stdout) on the controller host. That is
+    # the native subprocess stream purity the test-windows job exists to guard
+    # (issue #749's fix), so it must run on Windows too, not only Linux.
     from agentworks.db import Database
 
     config_dir = _write_warning_config(tmp_path)
@@ -1341,6 +1343,28 @@ def test_shell_wrapped_probe_suppresses_config_warning_and_preserves_database_by
         text=True,
         check=False,
     )
+
+    assert direct.returncode == 0
+    assert direct.stdout == ""
+    assert "Config: unexpected keys in [operator]" in direct.stderr
+    _assert_no_committed_writes(config_dir, database_path, before)
+
+
+@requires_posix_shell
+def test_shell_wrapped_probe_suppresses_config_warning_and_preserves_database_bytes(tmp_path: Path) -> None:
+    # Skips on Windows: models a real POSIX shell wrapping the probe with
+    # ``2>/dev/null``; Git-for-Windows' bash differs here. Linux CI covers it.
+    # The native stdout-purity half runs on every host in the sibling
+    # test_direct_probe_keeps_stdout_pure_while_warning_lands_on_stderr.
+    from agentworks.db import Database
+
+    config_dir = _write_warning_config(tmp_path)
+    database_path = config_dir / "agentworks.db"
+    Database(database_path).close()
+    before = {entry.name: entry.read_bytes() for entry in config_dir.iterdir()}
+    env = _isolated_subprocess_env(tmp_path)
+    env["PATH"] = f"{_installed_agw().parent}{os.pathsep}{env.get('PATH', '')}"
+
     completed = subprocess.run(
         ["bash", "-c", "agw --completion-probe session list --names-only 2>/dev/null"],
         env=env,
@@ -1349,9 +1373,6 @@ def test_shell_wrapped_probe_suppresses_config_warning_and_preserves_database_by
         check=False,
     )
 
-    assert direct.returncode == 0
-    assert direct.stdout == ""
-    assert "Config: unexpected keys in [operator]" in direct.stderr
     assert completed.returncode == 0
     assert completed.stdout == ""
     assert completed.stderr == ""

@@ -95,12 +95,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      # A few kept tests shell out to a POSIX `sh` to verify the guest-target
-      # command quoting round-trips (e.g. the codex recorder probes). Windows
-      # ships Git for Windows; putting its bin on PATH makes `sh` resolvable.
-      # Tests that exercise Linux-target bash/sh behavior git-bash cannot
-      # reproduce skip on Windows via the shared `requires_posix_shell` marker
-      # (which gates on `/bin/sh`, absent on Windows); Linux CI still covers them.
+      # Several kept tests spawn a POSIX `sh`/`bash` to check the shell text
+      # agentworks generates (e.g. the codex/lima `sh -c` word-split and
+      # portable-quoting tests, some of which run on every host). Windows ships
+      # Git for Windows; putting its bin on PATH provides that `sh`, without
+      # which those tests error with FileNotFoundError. Tests that need
+      # Linux-guest shell semantics git-bash cannot reproduce skip on Windows
+      # via the shared `requires_posix_shell` marker (which gates on `/bin/sh`,
+      # absent on Windows); Linux CI still covers those.
       - name: Put Git Bash on PATH (POSIX sh for shell-dependent tests)
         shell: pwsh
         run: Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files\Git\bin'
