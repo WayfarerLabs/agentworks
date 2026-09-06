@@ -25,7 +25,9 @@ from agentworks.sessions.multi_console_layout import (
     _apply_layout,
     _focus_session_pane,
     _list_panes_with_tags,
+    _reorder_session_windows,
     _reorder_shell_panes,
+    _SessionWindowOrderOutcome,
 )
 from agentworks.sessions.tmux import ProbeStatus, exact_tmux_target
 
@@ -37,6 +39,27 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
     from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.transports import Transport
+
+
+def _reconcile_configured_window_order(
+    db: Database,
+    target: Transport,
+    console_name: str,
+) -> bool:
+    outcome = _reorder_session_windows(
+        target,
+        console_name=console_name,
+        ordered_session_windows=[m.session_name for m in db.list_console_sessions(console_name)],
+    )
+    if outcome is _SessionWindowOrderOutcome.FAILED:
+        raise ExternalError(
+            f"failed to reconcile live window order for console '{console_name}'",
+            entity_kind="console",
+            entity_name=console_name,
+            hint=f"Run `agw console restart {console_name}` to rebuild the console in configured order.",
+        )
+    return outcome is _SessionWindowOrderOutcome.CHANGED
 
 
 def restore_session(
@@ -50,9 +73,10 @@ def restore_session(
     """Reconcile a single session window's live tmux state against its configured
     shell list. Additive only: it rebuilds the window if it is gone entirely and
     fills in any shell panes the operator accidentally killed (each back in its
-    configured position), but it never destroys a live pane or window. Where the
-    only repair would be destructive, it raises and points the operator at
-    `console restart` so the call is theirs. Three states take that path:
+    configured position), then reconciles live session-window order with the
+    configured console member order. It never destroys a live pane or window.
+    Where the only repair would be destructive, it raises and points the operator
+    at `console restart` so the call is theirs. Three states take that path:
 
     - More live panes than configured: removing one is not ours to choose.
     - Shell panes that can't be mapped back to the config (untagged, duplicated,
@@ -213,6 +237,7 @@ def restore_session(
                     entity_name=console_name,
                     hint=(f"Run `agw console restart {console_name}` to rebuild from scratch."),
                 )
+            _reconcile_configured_window_order(db, target, console_name)
             output.result(f"Rebuilt window '{session_name}' in console '{console_name}'.")
             return
 
@@ -312,9 +337,14 @@ def restore_session(
         # tag_values is now a subset of 0..configured_count-1 with no duplicates,
         # so len(tag_values) <= configured_count.
         if len(tag_values) == configured_count:
-            output.info(
-                f"session '{session_name}' already matches config ({len(tag_values)} shell pane(s)); nothing to do."
-            )
+            window_order_changed = _reconcile_configured_window_order(db, target, console_name)
+            if window_order_changed:
+                output.result(f"Restored configured window order in console '{console_name}'.")
+            else:
+                output.info(
+                    f"session '{session_name}' already matches config ({len(tag_values)} shell pane(s)); "
+                    "window order is also configured."
+                )
             # Still focus the session pane on this no-op path so post-restore
             # landing focus is consistent whether or not repairs were needed.
             _focus_session_pane(target, q_con, q_win, base_pidx)
@@ -412,4 +442,5 @@ def restore_session(
         # we still want consistent landing focus).
         _apply_layout(target, q_con, q_win, layout)
         _focus_session_pane(target, q_con, q_win, base_pidx)
+        _reconcile_configured_window_order(db, target, console_name)
         output.result(f"Restored {output.count(len(missing), 'shell pane')} in '{session_name}'.")

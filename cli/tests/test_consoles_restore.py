@@ -13,6 +13,7 @@ import pytest
 
 from agentworks.db import Database
 from agentworks.errors import ExternalError, NotFoundError, StateError
+from agentworks.output import Role
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.multi_console import restore_session
 from agentworks.sessions.multi_console_layout import SHELL_INDEX_OPTION
@@ -171,6 +172,7 @@ def test_restore_session_noop_when_live_matches_config(
     create_console(db, name="con", vm_name="vm1", session_specs=["a+2"])
 
     fake_target.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
+    fake_target.responses["-F '#{window_index}|#{window_name}'"] = _FakeResult(stdout="0|a\n")
     fake_target.responses["list-windows -t '=aw-console-con'"] = _FakeResult(stdout="a\n")
     fake_target.responses["list-panes -t '=aw-console-con':a"] = _FakeResult(stdout="%1|0|\n%2|1|0\n%3|2|1\n")
 
@@ -196,6 +198,7 @@ def test_restore_session_rebuilds_missing_window(db: Database, fake_target: _Fak
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
 
     fake_target.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
+    fake_target.responses["-F '#{window_index}|#{window_name}'"] = _FakeResult(stdout="0|a\n")
     # No 'a' in the listed windows; only a placeholder name.
     fake_target.responses["list-windows -t '=aw-console-con'"] = _FakeResult(stdout="other\n")
 
@@ -204,6 +207,29 @@ def test_restore_session_rebuilds_missing_window(db: Database, fake_target: _Fak
 
     new_windows = [c for c in fake_target.commands if "new-window -t '=aw-console-con'" in c]
     assert len(new_windows) == 1
+
+
+def test_restore_session_rebuild_reconciles_live_window_order(
+    db: Database,
+    console_target_factory: Callable[..., _FakeTarget],
+) -> None:
+    """A rebuilt window can claim tmux's lowest free index, but the complete
+    restore settles session windows back into configured member order."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a", "b"])
+
+    model = TmuxModel()
+    model.new_session(CON, "_PLACEHOLDER")
+    model.new_window(CON, "a")
+    assert model.kill_window(CON, "_PLACEHOLDER")
+    assert model.windows_with_index(CON) == [(1, "a")]
+    target = console_target_factory(model)
+
+    restore_session(db, _StubConfig(), console_name="con", session_name="b", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert model.window_names(CON) == ["a", "b"]
+    assert _destructive(target.commands) == []
 
 
 def test_restore_session_rebuild_focuses_session_pane_under_pane_base_index_one(
@@ -221,6 +247,7 @@ def test_restore_session_rebuild_focuses_session_pane_under_pane_base_index_one(
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
 
     fake_target.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
+    fake_target.responses["-F '#{window_index}|#{window_name}'"] = _FakeResult(stdout="0|a\n")
     # Window absent, so restore-session takes the rebuild path.
     fake_target.responses["list-windows -t '=aw-console-con'"] = _FakeResult(stdout="other\n")
     # The freshly built window's pane reports index 1 (pane-base-index 1).
@@ -463,6 +490,7 @@ def test_restore_session_healthy_under_pane_base_index_one(
     create_console(db, name="con", vm_name="vm1", session_specs=["a+2"])
 
     fake_target.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
+    fake_target.responses["-F '#{window_index}|#{window_name}'"] = _FakeResult(stdout="0|a\n")
     fake_target.responses["list-windows -t '=aw-console-con'"] = _FakeResult(stdout="a\n")
     # Session pane at index 1 (untagged), shells at 2 and 3.
     fake_target.responses["list-panes -t '=aw-console-con':a"] = _FakeResult(stdout="%1|1|\n%2|2|0\n%3|3|1\n")
@@ -513,6 +541,7 @@ def test_restore_session_reorders_relative_to_the_session_pane(
     create_console(db, name="con", vm_name="vm1", session_specs=["a+2"])
 
     fake_target.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
+    fake_target.responses["-F '#{window_index}|#{window_name}'"] = _FakeResult(stdout="0|a\n")
     fake_target.responses["list-windows -t '=aw-console-con'"] = _FakeResult(stdout="a\n")
     # Session pane at index 1; config index 0 is missing, so the surviving
     # shell (config index 1) sits at index 2 and has to move up to index 3.
@@ -577,6 +606,7 @@ def test_restore_session_splits_missing_config_indices_and_tags_them(db: Databas
     create_console(db, name="con", vm_name="vm1", session_specs=["a+3"])
 
     fake_target.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
+    fake_target.responses["-F '#{window_index}|#{window_name}'"] = _FakeResult(stdout="0|a\n")
     fake_target.responses["list-windows -t '=aw-console-con'"] = _FakeResult(stdout="a\n")
     # Live: session pane (pidx 0), tagged shells for indices 0 and 2; 1 is gone.
     fake_target.responses["list-panes -t '=aw-console-con':a"] = _FakeResult(stdout="%1|0|\n%2|1|0\n%3|2|2\n")
@@ -617,6 +647,8 @@ def test_restore_session_splits_missing_config_indices_and_tags_them(db: Databas
 #   - The mutation-dependent proofs are the ones that DO drive mutators
 #     through the model: `test_restore_session_additively_repairs_a_missing_shell_pane`
 #     (the split/tag/reorder repair must land the panes in the right slots)
+#     and `test_restore_session_additive_repair_also_reconciles_window_order`
+#     (one restore repairs simultaneous pane and window-order drift)
 #     and `test_stateful_model_catches_kill_window_then_new_window_destruction`
 #     (the destructive remedy leaves the model with the session destroyed,
 #     which the stateless fake could not represent). Those are where asserting
@@ -706,6 +738,76 @@ def test_restore_session_is_a_noop_on_a_healthy_model(
     assert [tag for _pid, _pidx, tag in rows] == [None, 0]
 
 
+def test_restore_session_healthy_target_reconciles_live_window_order(
+    db: Database,
+    console_target_factory: Callable[..., _FakeTarget],
+    captured_output: CapturedOutput,
+) -> None:
+    """A healthy target window still repairs pre-existing console-order drift."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a", "b"])
+
+    model = TmuxModel()
+    model.new_session(CON, "b")
+    model.new_window(CON, "a")
+    target = console_target_factory(model)
+
+    restore_session(db, _StubConfig(), console_name="con", session_name="a", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert model.window_names(CON) == ["a", "b"]
+    assert _destructive(target.commands) == []
+    assert any(role is Role.RESULT for role, _level, _message in captured_output.lines)
+
+
+@pytest.mark.parametrize(
+    ("failure_command", "failure_result"),
+    [
+        pytest.param(
+            "-F '#{window_index}|#{window_name}'",
+            _FakeResult(returncode=1, stderr="tmux failed"),
+            id="list-windows",
+        ),
+        pytest.param(
+            "-F '#{window_index}|#{window_name}'",
+            _FakeResult(stdout="0|a\n0|b\n"),
+            id="duplicate-window-indices",
+        ),
+        pytest.param(
+            "-F '#{window_index}|#{window_name}'",
+            _FakeResult(stdout="0|a\ngarbage\n1|b\n"),
+            id="malformed-window-listing",
+        ),
+        pytest.param("swap-window", _FakeResult(returncode=1, stderr="tmux failed"), id="swap-window"),
+    ],
+)
+def test_restore_session_reports_incomplete_window_order_reconciliation(
+    db: Database,
+    console_target_factory: Callable[..., _FakeTarget],
+    failure_command: str,
+    failure_result: _FakeResult,
+) -> None:
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a", "b"])
+
+    model = TmuxModel()
+    model.new_session(CON, "b")
+    model.new_window(CON, "a")
+    target = console_target_factory(model)
+    target.responses[failure_command] = failure_result
+
+    with pytest.raises(ExternalError) as exc_info:
+        restore_session(
+            db, _StubConfig(), console_name="con", session_name="a", interaction=TtyInteractionPolicy.REFUSE
+        )
+
+    assert exc_info.value.entity_kind == "console"
+    assert exc_info.value.entity_name == "con"
+    assert model.window_names(CON) == ["b", "a"]
+    assert _destructive(target.commands) == []
+
+
 def test_restore_session_additively_repairs_a_missing_shell_pane(
     db: Database,
     console_target_factory: Callable[..., _FakeTarget],
@@ -730,6 +832,31 @@ def test_restore_session_additively_repairs_a_missing_shell_pane(
     assert [pidx for _pid, pidx, _tag in rows] == [0, 1, 2]
     assert [tag for _pid, _pidx, tag in rows] == [None, 0, 1]
     # The pre-existing shell pane was never destroyed, just kept in place.
+    assert any(pid == surviving_shell_id for pid, _pidx, _tag in rows)
+    assert _destructive(target.commands) == []
+
+
+def test_restore_session_additive_repair_also_reconciles_window_order(
+    db: Database,
+    console_target_factory: Callable[..., _FakeTarget],
+) -> None:
+    """One restore repairs a missing shell pane and simultaneous window drift."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a+2", "b"])
+
+    model = TmuxModel()
+    model.seed_session(CON, "b")
+    model.seed_window(CON, "a", pane_tags=(None, 0))
+    surviving_shell_id = model.pane_rows(CON, "a")[1][0]  # type: ignore[index]
+    target = console_target_factory(model)
+
+    restore_session(db, _StubConfig(), console_name="con", session_name="a", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert model.window_names(CON) == ["a", "b"]
+    rows = model.pane_rows(CON, "a")
+    assert rows is not None
+    assert [tag for _pid, _pidx, tag in rows] == [None, 0, 1]
     assert any(pid == surviving_shell_id for pid, _pidx, _tag in rows)
     assert _destructive(target.commands) == []
 

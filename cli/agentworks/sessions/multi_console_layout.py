@@ -30,6 +30,7 @@ with that hint.
 from __future__ import annotations
 
 import shlex
+from enum import Enum, auto
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -43,6 +44,12 @@ if TYPE_CHECKING:
 # Defined here because the layout helpers rely on it; re-exported by
 # ``multi_console`` for backward compatibility with existing imports.
 SHELL_INDEX_OPTION = "@agentworks-shell-index"
+
+
+class _SessionWindowOrderOutcome(Enum):
+    UNCHANGED = auto()
+    CHANGED = auto()
+    FAILED = auto()
 
 
 # -- Layout application ----------------------------------------------------
@@ -348,14 +355,16 @@ def _reorder_session_windows(
     *,
     console_name: str,
     ordered_session_windows: list[str],
-) -> None:
+) -> _SessionWindowOrderOutcome:
     """Reorder session windows in a live console to match *ordered_session_windows*.
 
     Walks the desired order and issues ``tmux swap-window`` for each slot
     that's out of place, tracking window indices in memory across swaps so
     we never need a second list-windows round trip. Best-effort: a failed
     swap doesn't abort the rest, and the local map is only mirrored on
-    success so subsequent iterations target the right windows.
+    success so subsequent iterations target the right windows. The outcome
+    lets strict callers surface an incomplete reconciliation while existing
+    best-effort callers can ignore it.
 
     Permutable slots are derived positively from the session set: only
     windows whose names appear in *ordered_session_windows* are candidates,
@@ -376,27 +385,29 @@ def _reorder_session_windows(
         check=False,
     )
     if not res.ok:
-        return
+        return _SessionWindowOrderOutcome.FAILED
     pairs: list[tuple[int, str]] = []
     for line in res.stdout.strip().splitlines():
         parts = line.split("|", 1)
         if len(parts) != 2:
-            continue
+            return _SessionWindowOrderOutcome.FAILED
         try:
             pairs.append((int(parts[0]), parts[1]))
         except ValueError:
-            continue
+            return _SessionWindowOrderOutcome.FAILED
     if not pairs:
-        return
+        return _SessionWindowOrderOutcome.FAILED
     pairs.sort(key=lambda p: p[0])
+    if len({idx for idx, _name in pairs}) != len(pairs):
+        return _SessionWindowOrderOutcome.FAILED
     desired_set = set(ordered_session_windows)
 
     # Duplicate window names among the session set break the swap-by-name
     # logic (the dict below would silently retain only the last index for
     # each name and we'd target the wrong window). tmux allows duplicates
     # but we can't disambiguate, so bail with a recovery hint rather than
-    # scramble the layout. The DB is already updated; restart materializes
-    # the new order from a clean slate.
+    # scramble the layout. A restart materializes the configured order from a
+    # clean slate.
     name_counts: dict[str, int] = {}
     for _idx, name in pairs:
         name_counts[name] = name_counts.get(name, 0) + 1
@@ -406,11 +417,10 @@ def _reorder_session_windows(
         output.warn(
             f"console '{console_name}' has duplicate window name(s) "
             f"({', '.join(duplicated)}); cannot reorder live tmux safely. "
-            f"DB order was updated; run "
-            f"`agw console restart {q_console}` to rebuild "
-            f"tmux from DB state."
+            f"Run `agw console restart {q_console}` to rebuild "
+            f"tmux from configured state."
         )
-        return
+        return _SessionWindowOrderOutcome.FAILED
 
     session_slots = [idx for idx, name in pairs if name in desired_set]
     widx_by_name: dict[str, int] = {name: idx for idx, name in pairs}
@@ -424,14 +434,9 @@ def _reorder_session_windows(
     # stranded at slot i+1 with no member at slot i.
     present_desired = [n for n in ordered_session_windows if n in widx_by_name]
 
-    for k, desired_name in enumerate(present_desired):
-        if k >= len(session_slots):
-            # Defensive: session_slots and present_desired should be the
-            # same length by construction (both filter on desired_set ∩
-            # live-names). If they ever diverge, stop rather than risk a
-            # bad swap. A console restart will reconcile.
-            break
-        target_idx = session_slots[k]
+    changed = False
+    failed = False
+    for target_idx, desired_name in zip(session_slots, present_desired, strict=False):
         src_idx = widx_by_name[desired_name]
         if src_idx == target_idx:
             continue
@@ -441,7 +446,16 @@ def _reorder_session_windows(
             check=False,
         )
         if swap.ok:
+            changed = True
             widx_by_name[desired_name] = target_idx
             widx_by_name[displaced_name] = src_idx
             name_by_widx[target_idx] = desired_name
             name_by_widx[src_idx] = displaced_name
+        else:
+            failed = True
+
+    if failed:
+        return _SessionWindowOrderOutcome.FAILED
+    if changed:
+        return _SessionWindowOrderOutcome.CHANGED
+    return _SessionWindowOrderOutcome.UNCHANGED
