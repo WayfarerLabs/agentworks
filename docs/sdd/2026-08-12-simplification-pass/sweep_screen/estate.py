@@ -27,10 +27,10 @@ UNTYPED_REGEX_METHODS = frozenset({"assertRegex", "assertNotRegex"})
 
 REGEX_METHODS = TYPED_REGEX_METHODS | UNTYPED_REGEX_METHODS
 
-#: The shortest prefix that separates every distinct needle in the estate, with
-#: margin for a tree that keeps moving. `estate` reports both the needle
-#: population and the prefix that would separate it today, so this is a
-#: decision recorded once rather than a figure kept true in two places.
+#: The prefix length a needle digest is cut to. `estate` reports the distinct
+#: needle population and the shortest prefix that would separate it today, so
+#: whether this still has margin is a question the command answers rather than a
+#: figure kept true here.
 DIGEST_LENGTH = 6
 
 
@@ -124,7 +124,18 @@ def assertions_of(node: ast.AST) -> tuple[str, ...]:
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 continue
             if isinstance(child, ast.Assert):
-                found.append((child.lineno, child.col_offset, ast.unparse(child.test)))
+                # The whole statement, message included. Hashing `.test` alone
+                # dropped the part that distinguishes two otherwise identical
+                # scans, which is how L-131 and L-132 came to share a digest.
+                found.append((child.lineno, child.col_offset, ast.unparse(child)))
+            elif (
+                isinstance(child, ast.Expr)
+                and isinstance(child.value, ast.Call)
+                and call_name(child.value) in RAISES_CM
+            ):
+                # A bare `pytest.raises(...)` outside a `with`, which the estate
+                # counts as a site and this counted as nothing.
+                found.append((child.lineno, child.col_offset, ast.unparse(child.value)))
             elif isinstance(child, (ast.With, ast.AsyncWith)):
                 for item in child.items:
                     expr = item.context_expr
@@ -154,10 +165,7 @@ class Function:
     #: digests it so that changing an assertion under a surviving function is
     #: visible. Empty means the body asserts nothing itself, which is usually a
     #: test that hands its assertions to a helper.
-    assertions: tuple[str, ...] = ()
-
-    def holds(self, line: int) -> bool:
-        return self.start <= line <= self.end
+    assertions: tuple[str, ...]
 
 
 def _is_overload(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:

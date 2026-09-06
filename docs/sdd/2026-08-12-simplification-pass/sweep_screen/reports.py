@@ -31,6 +31,7 @@ from .inventory import (
     QUALIFIED,
     RETIRED_HEADING,
     RETIRED_ROW,
+    URL,
     LineAnchor,
     Row,
     SiteAnchor,
@@ -129,13 +130,12 @@ def check_map(
     faults: list[str] = []
     ids = [r.id for r in rows]
     live = set(ids)
-    mine, theirs = retired
-    known = live | mine
+    known = live | retired[0]
     row_at = {row.source_line: row for row in rows}
     # An id this cut retired must not also be live: that one really would
     # resolve to two rows. The 2026-08-19 map's ids are a separate namespace
     # and may collide freely, which is what qualifying a citation is for.
-    for row_id in sorted(live & mine):
+    for row_id in sorted(live & retired[0]):
         faults.append(f"{row_id} is both a live row and an id this cut retired, so a citation resolves to two rows")
     for row_id in sorted({i for i in ids if ids.count(i) > 1}):
         faults.append(f"duplicate row id {row_id}")
@@ -156,14 +156,13 @@ def check_map(
     for number, line in enumerate(Path(map_path).read_text(encoding="utf-8").splitlines(), start=1):
         here = row_at.get(number)
         source = f"row {here.id}" if here else f"line {number}"
-        mine = {here.id} if here else set()
-        bare = outside_code_spans(line)
+        bare = URL.sub(" ", outside_code_spans(line))
         # A qualified citation is already answered: it says the id belongs to a
         # map that no longer exists, so there is nothing here to resolve it
         # against and pointing a reader at this file would be the error. It is
         # dropped before the rest is read, so the id inside it is not taken for
         # a row of this cut.
-        for name in sorted(set(CITED_ID.findall(QUALIFIED.sub("", bare))) - known - {source.removeprefix("row ")}):
+        for name in sorted(set(CITED_ID.findall(QUALIFIED.sub("", bare))) - known - {here.id if here else ""}):
             faults.append(f"{source} cites {name}, which is neither a row nor an id this cut retired")
         for path in sorted(set(CITED_FILE.findall(line))):
             checked += 1
@@ -352,7 +351,11 @@ def generate(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
     # ever used. Numbering positionally, which is what this did, renamed rows
     # under every citation of them whenever a file left the batch.
     held = {a.path: r.id for r in rows if r.section == MECHANICAL_BATCH for a in r.anchors}
-    used = [int(r.id[3:]) for r in rows if r.id.startswith("G1-") and r.id[3:].isdigit()]
+    # Every id this cut has used, not every id it still uses: a retired id is
+    # retired, so allocating above the live maximum alone would reissue one. The
+    # sixteenth new file would have taken G1-155, which the retired table holds.
+    ever = {r.id for r in rows} | retired_ids(map_path)[0]
+    used = [int(i[3:]) for i in ever if i.startswith("G1-") and i[3:].isdigit()]
     nxt = max(used, default=0) + 1
     for path in sorted(by_path):
         row_id = held.get(path)
@@ -369,7 +372,7 @@ def generate(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
         verified = all(screened.get(s.where, ("", "", ""))[0] == "single-raise-path" for s in sites)
         marker = "**[1-raise]** " if verified else ""
         shape = f"{marker}{len(sites)} `match=` site(s) over {kinds}"
-        row = Row(row_id, GROUP_1, MECHANICAL_BATCH, list(anchors), shape, "delete", "", 0)
+        row = Row(row_id, GROUP_1, MECHANICAL_BATCH, list(anchors), shape, "delete", 0)
         generated.append(row)
         print(f"| {row.id} | {row.render_cell()} | {shape} | delete |")
 
@@ -476,8 +479,9 @@ def restamp(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
     than leaving the next reader a `changed` verdict that means "we did that".
 
     This is the one command that WRITES the map. Everything else prints and
-    leaves the file alone, so the divergence is deliberate: 1,516 anchors is not
-    a paste, and the diff under review is the artifact either way.
+    leaves the file alone, so the divergence is deliberate: the whole span-anchor
+    population is not a paste, and the diff under review is the artifact either
+    way.
 
     A span anchor whose function is gone keeps whatever it had and is reported,
     because inventing a digest for a function nobody can find would answer a
@@ -567,8 +571,23 @@ def totals(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
             if any(a.claims(site) for a in row.anchors)
         )
     ]
+    # An anchor that does not resolve is a row addressing something that is not
+    # there, which is the whole point of anchoring by identity. Nothing failed on
+    # one until now: a digest moved by an edit to an anchored test reported
+    # `changed` into a listing nobody gated on, and a wrong digest written by
+    # hand survived a round that way. `line-anchored` is the one state that
+    # passes, because a line anchor declares up front that it resolves to
+    # nothing; every other state is a fault, and `restamp` is how a deliberate
+    # change is absorbed.
+    adrift = [
+        f"{row.id} anchor {anchor.render()} is {outcome.state}" + (f" ({outcome.detail})" if outcome.detail else "")
+        for row in rows
+        for anchor in row.anchors
+        if (outcome := anchor.resolve(snapshot)).state not in ("resolved", "line-anchored")
+    ]
     missing = unrowed(rows, snapshot)
     faults = check_map(rows, retired_ids(map_path), snapshot.tree.path_suffixes(), map_path)
+    faults += adrift
     faults += [f"{row_id} carries [1-raise] and the screen does not verify every site it claims" for row_id in stale]
     faults += check_accounting(map_path, missing)
     print(f"\n# structural faults: {len(faults)}", file=sys.stderr)

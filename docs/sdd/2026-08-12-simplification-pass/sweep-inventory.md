@@ -497,9 +497,16 @@ someone has to go looking for.
 
 ## Rows this cut retired
 
-An id is never reused, so a row that leaves is recorded here rather than becoming a gap. `totals`
-reads this list, so prose may name a retired id; a citation of an id that is neither a row nor
-retired is a fault it refuses.
+**Every id this cut has used and no longer uses is here**, derived from the map at every commit of
+this branch since the part fold rather than added by hand as rows left. That is what makes the list
+worth checking a citation against: a gap in it would resolve as "not a row" and send a reader
+looking. `totals` reads it, so prose may name a retired id, and a citation of an id that is neither
+a row nor retired is a fault it refuses. `generate` reads it too, so a new file takes an id above
+every one this cut has ever issued rather than reissuing a retired one.
+
+**The scope is this cut's namespace only.** An id the 2026-08-19 map used and this cut never carried
+is that map's, recorded by `3c6e6d92`, and is not listed here; this list starts where that map's
+numbering stopped being ours.
 
 **Two numberings meet here.** The ids marked `(2026-08-19 map)` are that map's, which numbered its
 mechanical batch by position, so regenerating the batch handed several of them to different rows.
@@ -508,24 +515,194 @@ resolves only against this list, while an unqualified id always means a row of t
 cut forward the question does not arise, because `generate` keeps the id a file already has and
 allocates a new one above every id the map has used.
 
-| id                      | What happened                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| B-003                   | Retired 2026-09-06. `d99835da` removed the banner pins and all four `Role.*` assertions from `test_create_stopped_vm_gate_resolves_once_and_seeds_the_boundary`, so the estate both rows addressed is gone. The fresh cut's rename rescue moved them with their file and did not notice, because a span anchor resolves on the function surviving.                                                                                                                                                                                                     |
-| B-004                   | Retired 2026-09-06, with B-003 and for the same reason.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| B-125                   | Dropped by `75b60699`: its estate is gone at this cut's basis.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| B-060                   | Retired 2026-09-06. `b8f94fda`, the backend preview contract rewrite, removed the `format_outcome(...).endswith(...)` assertion this row addressed; `test_declared_source_accepts_string_subclass_plugin_attribution` survives and now asserts preview status and block reason, which no row here proposes to touch. The `remediation` and `remediation_target` fields the row credited with carrying the behavior are gone from production too: `format_outcome` (`secrets/outcomes.py:171-177`) renders status, reason, source, identifier and hint. |
-| C-177                   | Removed as a duplicate of E-167, which carries the disposition.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| C-187                   | Removed as a duplicate of E-178, whose scope was widened to cover it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| E-097                   | Dropped by `75b60699`: its estate is gone at this cut's basis.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| F-129                   | `onboarding-copy.test.mjs` was replaced by `onboarding.test.mjs` at `1b9bbb9b` (2026-08-17); RB-012 is the successor and keeps the property.                                                                                                                                                                                                                                                                                                                                                                                                           |
-| G1-013 (2026-08-19 map) | Every site it claimed moved to G1-K19.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| G1-062 (2026-08-19 map) | Every site it claimed moved to G1-C02.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| G1-099 (2026-08-19 map) | Every site it claimed moved to an injected-marker row, the file holding nothing but injected markers.                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| G1-123 (2026-08-19 map) | As G1-099.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| G1-135 (2026-08-19 map) | As G1-099.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| G1-140 (2026-08-19 map) | As G1-099.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| G1-155                  | Superseded by `dc63b4be`, which regenerated group 1 at the basis; its sites are in the regenerated batch.                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| L-102                   | `guide/test_power_import_boundary.py` was deleted; E-211 is the guard that survived it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+<!-- prettier-ignore -->
+| id | What happened |
+| --- | --- |
+| A-001 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-002 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-003 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-004 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-005 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-006 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-007 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-008 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-009 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-010 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-011 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-012 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-013 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-014 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-015 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-016 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-017 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-018 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-019 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-020 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-021 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-022 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-023 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-024 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-025 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-026 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-027 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-028 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-029 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-030 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-031 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-032 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-033 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-034 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-035 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-036 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-037 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-038 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-039 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-040 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-041 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-042 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-043 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-044 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-045 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-046 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-047 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-048 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-049 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-050 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-051 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-052 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-053 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-054 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-055 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-056 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-057 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-058 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-059 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-060 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-061 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-062 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| A-063 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-003 | Retired 2026-09-06. `d99835da` removed the banner pins and all four `Role.*` assertions from `test_create_stopped_vm_gate_resolves_once_and_seeds_the_boundary`, so the estate both rows addressed is gone. The fresh cut's rename rescue moved them with their file and did not notice, because a span anchor resolves on the function surviving. |
+| B-004 | Retired 2026-09-06, with B-003 and for the same reason. |
+| B-005 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-006 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-049 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-050 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-051 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-060 | Retired 2026-09-06. `b8f94fda`, the backend preview contract rewrite, removed the `format_outcome(...).endswith(...)` assertion this row addressed; `test_declared_source_accepts_string_subclass_plugin_attribution` survives and now asserts preview status and block reason, which no row here proposes to touch. The `remediation` and `remediation_target` fields the row credited with carrying the behavior are gone from production too: `format_outcome` (`secrets/outcomes.py:171-177`) renders status, reason, source, identifier and hint. |
+| B-061 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-072 | Renumbered by `efffb7a4`, which folded the three part cuts into one numbering. |
+| B-074 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-075 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-076 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-077 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-077a | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-078 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-093 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-094 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-095 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-096 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-097 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-098 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-099 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-100 | Renumbered by `efffb7a4`, which folded the three part cuts into one numbering. |
+| B-103 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-104 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-105 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-106 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-107 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-108 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-109 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-110 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-111 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-112 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-124 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| B-125 | Dropped by `75b60699`: its estate is gone at this cut's basis. |
+| C-004 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| C-005 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| C-006 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| C-007 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| C-031 | Renumbered by `efffb7a4`, which folded the three part cuts into one numbering. |
+| C-071 | Renumbered by `efffb7a4`, which folded the three part cuts into one numbering. |
+| C-072 | Renumbered by `efffb7a4`, which folded the three part cuts into one numbering. |
+| C-099 | Renumbered by `efffb7a4`, which folded the three part cuts into one numbering. |
+| C-100 | Renumbered by `efffb7a4`, which folded the three part cuts into one numbering. |
+| C-103 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| C-147 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| C-148 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| C-149 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| C-150 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| C-177 | Removed as a duplicate of E-167, which carries the disposition. |
+| C-187 | Removed as a duplicate of E-178, whose scope was widened to cover it. |
+| D-024 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| D-107 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| D-145 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| D-169 | Split by `5be6e684` into lettered rows, which carry the evidence. |
+| E-095 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| E-096 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| E-097 | Dropped by `75b60699`: its estate is gone at this cut's basis. |
+| E-112 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| E-160 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| F-004 | Renumbered by `efffb7a4`, which folded the three part cuts into one numbering. |
+| F-019 | Renumbered by `efffb7a4`, which folded the three part cuts into one numbering. |
+| F-020 | Renumbered by `efffb7a4`, which folded the three part cuts into one numbering. |
+| F-021 | Renumbered by `efffb7a4`, which folded the three part cuts into one numbering. |
+| F-022 | Renumbered by `efffb7a4`, which folded the three part cuts into one numbering. |
+| F-129 | `onboarding-copy.test.mjs` was replaced by `onboarding.test.mjs` at `1b9bbb9b` (2026-08-17); RB-012 is the successor and keeps the property. |
+| F-149 | Split by `5be6e684` into lettered rows, which carry the evidence. |
+| F-184 | Split by `5be6e684` into lettered rows, which carry the evidence. |
+| G1-013 (2026-08-19 map) | Every site it claimed moved to G1-K19. |
+| G1-062 (2026-08-19 map) | Every site it claimed moved to G1-C02. |
+| G1-099 (2026-08-19 map) | Every site it claimed moved to an injected-marker row, the file holding nothing but injected markers. |
+| G1-123 (2026-08-19 map) | As G1-099 (2026-08-19 map). |
+| G1-135 (2026-08-19 map) | As G1-099 (2026-08-19 map). |
+| G1-140 (2026-08-19 map) | As G1-099 (2026-08-19 map). |
+| G1-141 | Superseded by `24fd2281`, which regenerated group 1 at the basis; the sites are in the regenerated batch. |
+| G1-142 | Superseded by `24fd2281`, which regenerated group 1 at the basis; the sites are in the regenerated batch. |
+| G1-143 | Superseded by `24fd2281`, which regenerated group 1 at the basis; the sites are in the regenerated batch. |
+| G1-144 | Superseded by `24fd2281`, which regenerated group 1 at the basis; the sites are in the regenerated batch. |
+| G1-145 | Superseded by `24fd2281`, which regenerated group 1 at the basis; the sites are in the regenerated batch. |
+| G1-146 | Superseded by `24fd2281`, which regenerated group 1 at the basis; the sites are in the regenerated batch. |
+| G1-147 | Superseded by `24fd2281`, which regenerated group 1 at the basis; the sites are in the regenerated batch. |
+| G1-148 | Superseded by `24fd2281`, which regenerated group 1 at the basis; the sites are in the regenerated batch. |
+| G1-149 | Superseded by `24fd2281`, which regenerated group 1 at the basis; the sites are in the regenerated batch. |
+| G1-150 | Superseded by `24fd2281`, which regenerated group 1 at the basis; the sites are in the regenerated batch. |
+| G1-151 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| G1-152 | Superseded by `24fd2281`, which regenerated group 1 at the basis; the sites are in the regenerated batch. |
+| G1-153 | Superseded by `24fd2281`, which regenerated group 1 at the basis; the sites are in the regenerated batch. |
+| G1-154 | Superseded by `24fd2281`, which regenerated group 1 at the basis; the sites are in the regenerated batch. |
+| G1-155 | Superseded by `dc63b4be`, which regenerated group 1 at the basis; its sites are in the regenerated batch. |
+| G1-156 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| G1-I02 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| G1-K04 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| G1-K14 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| G1-M03 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| G1-M04 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| L-001 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| L-013 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| L-018 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| L-102 | `guide/test_power_import_boundary.py` was deleted; E-211 is the guard that survived it. |
+| L-115 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| L-122 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| L-301 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| L-302 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| L-303 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| L-304 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| L-305 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| L-306 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| L-307 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| L-308 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| L-309 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| L-310 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| L-311 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| L-312 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| RB-002 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| RB-003 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| RB-004 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| RB-006 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| RB-007 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| RB-008 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| RB-009 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
+| RB-010 | Dropped by `62d42215`: the row's file or its every site is gone at this cut's basis. |
 
 ## What the 2026-08-19 re-baseline measured
 

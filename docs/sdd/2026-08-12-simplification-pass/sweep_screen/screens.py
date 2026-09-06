@@ -52,7 +52,6 @@ class Func:
     lineno: int
     raises: list[tuple[str, int]] = field(default_factory=list)
     calls: list[ast.Call] = field(default_factory=list)
-    in_class: str | None = None
 
 
 @dataclass
@@ -93,7 +92,6 @@ class _Collector(ast.NodeVisitor):
             path=self.module.path,
             name=node.name,
             lineno=node.lineno,
-            in_class=self.classes[-1] if self.classes else None,
         )
         if not self.stack:
             if self.classes:

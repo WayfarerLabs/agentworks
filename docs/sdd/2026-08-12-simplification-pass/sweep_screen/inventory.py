@@ -28,24 +28,25 @@ INVENTORY = "docs/sdd/2026-08-12-simplification-pass/sweep-inventory.md"
 #: construction, which is why the parser needs no list of them.
 ROW_ID = re.compile(r"(?:[A-F]|L|RB|G1)-[A-Z]?\d{1,3}[a-z]?$")
 
-#: A row id as a justification cites one. It admits the `P2-`, `P3-` and
-#: `P4-` shapes the part cuts used, which are exactly the citations that stop
-#: resolving when those files are folded in and deleted.
 #: A file cited with a line or a line range, in any cell. The map cites paths
 #: at whatever depth reads clearly, from a bare basename to a full repository
 #: path, so the check behind this resolves a citation as a path SUFFIX rather
 #: than demanding one spelling. What it answers is only whether the file is
-#: still there; a line number inside it is not checked, because line numbers in
-#: a justification are a reading aid and the anchors are what resolve. A match
-#: opening on a quote is NOT a citation: it is a string literal the row is
-#: quoting from the test, like the rendered `"a.yaml:2"` location a CLI prints,
-#: which names no file in this tree and never did.
+#: still there; a line number inside it is not checked, because a line number in
+#: prose is a reading aid and the anchors are what resolve. It reads `py` and
+#: `mjs` alone, which is what lets it drop a quote exemption it once needed: the
+#: rendered `"a.yaml:2"` locations that tripped it are not source files.
 CITED_FILE = re.compile(r"([A-Za-z0-9_./+-]*[A-Za-z0-9_+-]\.(?:py|mjs)):\d+(?:-\d+)?")
 
-#: A row id, always three digits. The looser form matched prose: `L-1` in the
-#: middle of a sentence about a visa is not a citation, and a check that faults
-#: on it teaches its reader to stop believing it.
-CITED_ID = re.compile(r"\b(?:[A-F]|L|RB|G1)-[A-Z]?\d{3}[a-z]?\b")
+#: A row id. Three digits, or a letter and two, which is what `G1-C05` and
+#: `G1-K14` are: reading only the three-digit form left 55 live ids and 78
+#: citations of them invisible to the check. `L-1` in a sentence about a visa
+#: is still not a citation, which is what the digit floor is for.
+CITED_ID = re.compile(r"\b(?:[A-F]|L|RB|G1)-(?:[A-Z]\d{2,3}|\d{3})[a-z]?\b")
+
+#: A URL, blanked before ids are read for the same reason code spans are: the
+#: digits in `https://example/G1-999` are a path, not a citation.
+URL = re.compile(r"https?://\S+")
 
 PATH_RE = re.compile(r"((?:cli|website)/[A-Za-z0-9_./-]+?\.(?:py|mjs))")
 LINE_ANCHOR = re.compile(r"L(\d+)(?:-(\d+))?$")
@@ -87,7 +88,7 @@ RETIRED_ROW = re.compile(r"^\| ((?:[A-F]|L|RB|G1)-[A-Z]?\d{3}[a-z]?)( \(2026-08-
 #: different rows when this cut regenerated: `G1-013` names one row there and
 #: another here. A citation of the old one says so, and resolves only against
 #: the ids that map retired.
-QUALIFIED = re.compile(r"\b((?:[A-F]|L|RB|G1)-[A-Z]?\d{3}[a-z]?) \(2026-08-19 map\)")
+QUALIFIED = re.compile(r"\b((?:[A-F]|L|RB|G1)-(?:[A-Z]\d{2,3}|\d{3})[a-z]?) \(2026-08-19 map\)")
 ACCOUNTED = re.compile(r"^\| `([^`]+)` *\|")
 
 #: The one section whose rows `generate` emits. Everything else in group 1 is a
@@ -214,8 +215,9 @@ class SpanAnchor(Anchor):
 
     path: str
     qualname: str
-    #: What the function asserted when the row was cut.
-    digest: str = ""
+    #: What the function asserted when the row was cut. Empty means unstamped,
+    #: which `totals` refuses; `restamp` is what fills it.
+    digest: str
 
     def render(self) -> str:
         return f"{self.qualname}@{self.digest}" if self.digest else self.qualname
@@ -298,12 +300,7 @@ class Row:
     anchors: list[Anchor]
     shape: str
     disposition: str
-    justification: str
     source_line: int
-
-    @property
-    def path(self) -> str | None:
-        return self.anchors[0].path if self.anchors else None
 
     @property
     def markers(self) -> set[str]:
@@ -330,7 +327,7 @@ class Row:
         return ", ".join(parts)
 
 
-def parse_anchors(cell: str, where: str = "cell") -> list[Anchor]:
+def parse_anchors(cell: str, where: str) -> list[Anchor]:
     """The anchors one column-2 cell addresses.
 
     Reading a cell is a question about the map and not about any tree, so this
@@ -557,7 +554,6 @@ def read_rows(path: str) -> list[Row]:
                 anchors=parse_anchors(cells[1], where=where),
                 shape=cells[2],
                 disposition=cells[3] if len(cells) > 3 else "",
-                justification=cells[4] if len(cells) > 4 else "",
                 source_line=number,
             )
         )
