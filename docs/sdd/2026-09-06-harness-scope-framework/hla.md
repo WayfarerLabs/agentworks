@@ -80,16 +80,27 @@ distinct scopes and both use the user facet; deferral never changes the origin.
 | Workspace    | `workspace-template.harness_integrations`                       | workspace, `workspace_init`  | Workspace                 |
 | Session      | Existing `session-template.harness_integration`                 | session, `start(intent=...)` | Session                   |
 
-Broader attachments are ordered lists of tagged capability config blocks. Each block has the
-existing `name` discriminator and only that facet's fields. A resource may select an integration
-once per facet invocation; duplicate names in one effective list are a config error. Empty lists
-select none. Session selection stays singular and preserves its current shell fallback.
+**List membership explicitly enables an integration at that setup resource.** Broader attachments
+are ordered lists of tagged capability config blocks. Each block has the existing `name`
+discriminator and only that facet's fields. A name-only block enables the integration with defaults;
+there is no separate `enabled` flag. Multiple entries enable multiple integrations, each bound to
+its own config and executed in list order. Duplicate names in one effective list are a config error.
+An empty effective list selects none; default config or an implemented method cannot attach
+anything.
+
+Session selection remains singular and explicit through `harness_integration: {name: ...}`. A
+selection declared by the selected template or inherited from a parent counts as explicit. If the
+effective selection is absent, report a config error rather than silently choosing shell. Preserve
+ordinary default shell use by giving the code-synthesized `session-template/default` an explicit
+`name: shell` block (`sessions/kinds.py:82`), not by substituting shell during resolution.
 
 An attachment does not enable its plugin globally, select a session workload, or implicitly attach
 the integration to an ancestor or descendant. Existing plugin enablement and graph miss policies
-apply. An ancestor selecting a different integration or none does not consume its artifacts for this
-integration: original contributions remain available to establish that integration's input. An
-integration's deferred output never changes another integration's delivery.
+apply, including the existing capability-enabled gate. Plugin availability is distinct from resource
+selection: making a plugin available never enables its facets on every resource. An ancestor
+selecting a different integration or none does not consume its artifacts for this integration:
+original contributions remain available to establish that integration's input. An integration's
+deferred output never changes another integration's delivery.
 
 **Admin attachment proposal, for confirmation:** place selection and user config together on the
 already-selected admin-template, using the same list shape and user-facet schema as agent templates.
@@ -98,6 +109,13 @@ independent `--admin-spec` overlay (`cli/agentworks/instance_specs.py:105`). Thi
 admin selection/config join on the vm-template. FRD open question 3 explicitly asks about a
 vm-template spelling, so this is a proposed answer requiring confirmation, not a silent amendment.
 If a separate VM attachment is required, settle its ownership before the plan and LLD.
+
+This changes every silent session-template lineage, not only `default`. Remove the fallback in
+`sessions/templates.py:276` and finalize validation at `sessions/template.py:125`; the standalone
+dictionary resolver follows the same rule. Reference edges then reflect the explicit effective
+selection, including the synthesized default. Config-only child templates still inherit their
+parent's selection. Existing named templates with no effective selection need an explicit block or
+an explicit parent selection before use.
 
 For inheriting templates, the attachment list replaces as a whole when authored by a nearer layer;
 omission inherits and an explicit empty list removes the inherited selection. Each block still uses
@@ -194,11 +212,12 @@ kind: agent-template
 metadata:
   name: team-claude
 spec:
-  user_install_commands: [claude]
+  user_install_commands: [claude, codex]
   harness_integrations:
     - name: claude-code
       marketplaces: [example-org/team-plugins]
       plugins: [reviewer@team-plugins]
+    - name: codex
 ---
 apiVersion: agentworks/v1
 kind: workspace-template
@@ -219,15 +238,18 @@ spec:
     initial_prompt: Review the pending changes.
 ```
 
-Creating a user from `team-claude` installs its CLI through core setup, runs user-features, then
-invokes Claude's user facet with the marketplace/plugin lists and emitted artifacts. Creating a
-workspace from `team-project` runs Claude's workspace facet with its own artifact inputs and no
-extra config fields. A `team-review` session using those resources gets only session config,
+Creating a user from `team-claude` installs both CLIs through core setup, runs user-features, then
+invokes Claude's user facet with the marketplace/plugin lists and Codex's user facet with defaults,
+each receiving its own artifact inputs. The name-only Codex entry is its explicit enablement.
+Creating a workspace from `team-project` runs Claude's workspace facet with its own artifact inputs
+and no extra config fields. A `team-review` session using those resources gets only session config,
 applicable env, deferred artifacts, and upstream readiness facts; it does not receive the user
 config as launch flags. The same user block is valid on the proposed admin-template attachment
 surface. Putting `permission_mode` in the user block or `plugins` in the session block is a
-facet-specific validation error. Omitting the workspace attachment selects no workspace integration;
-an explicit empty attachment list also removes inherited selection.
+facet-specific validation error. The user's Codex attachment does not implicitly attach Codex to the
+workspace or select it for the session. With no inherited attachment, omitting the workspace list
+selects none; an explicit empty list removes inherited selection. To use Codex for a session, select
+`name: codex` in that session's singular block.
 
 The other shipped integrations retain ordinary session-only use. These are alternative
 `session-template.spec.harness_integration` blocks, each paired with its existing CLI-installing
@@ -243,7 +265,7 @@ approval_policy: on-request
 name: grok-build
 permission_mode: default
 ---
-# Core shell needs no plugin or setup attachment; defaults launch a login shell.
+# Explicit shell selection needs no plugin or setup attachment; defaults launch a login shell.
 name: shell
 ```
 
@@ -602,6 +624,13 @@ installations are inspected, not automatically claimed as owned just because old
 them. The migration strategy must explain how an operator deliberately establishes ownership or
 removes conflicting old material before reconciliation can manage it.
 
+Explicit session selection also needs migration guidance. Session rows store a template name and
+explicit instance overlay, not a snapshot of the resolved integration. Rows using the synthesized
+`default` pick up its explicit shell block. Rows using custom silent lineages need their template or
+overlay amended before start/restart; report the missing selection and that remedy. Integration
+state namespaces are not authoritative selection and must not be used to guess one. The LLD must
+cover finalize/reference output, dictionary resolution, and existing-session restart in this sweep.
+
 This review PR contains the FRD amendment and HLA. It contains no plan, LLD, permanent behavior
 docs, or migration file. The next artifacts must specify the storage/locking and interruption
 protocol, schema-host walk, Claude reconciliation, and config/overlay migration before
@@ -621,11 +650,17 @@ where setup changes the guest:
 | R7, R12        | Hints, rules, and skill bundles retain semantics and origin through grouping and delivery; handled payloads do not reach session, deferral is integration-specific across both ancestor branches and creation orders, and any final deferral blocks launch with its reason.         |
 | R9             | Repeated VM/admin and agent setup is unchanged; desired changes/removals converge; edited/unowned files cause drift/conflict reports; failed same-input reinit invalidates completion; interrupted work, unknown versions, and concurrent reinit do not overwrite or lose evidence. |
 | R10            | Required, recommended, and absent user-facet prerequisites block, warn, or proceed respectively for the bound user; another user's setup cannot satisfy them; missing/stale/failed setup, correct owner remediation, and no upstream mutation are covered.                          |
-| R11, R13       | Fresh and existing Claude admin/agent config migrates; marketplace/plugin changes reconcile; core has no Claude-specific knowledge (the existing generic shell fallback remains); workspace create materializes real content, failure cleans partial output, and retry succeeds.    |
+| R11, R13       | Fresh and existing Claude admin/agent config migrates; marketplace/plugin changes reconcile; core has no Claude-specific knowledge (shell remains explicitly selectable); workspace create materializes real content, failure cleans partial output, and retry succeeds.            |
 
 Readiness acceptance includes a failed config-only user setup with independently established empty
 artifact inputs: recommended warns and launches, required blocks. With artifact delivery depending
 on an incomplete snapshot, launch fails under either readiness policy.
+
+Enablement acceptance covers name-only default config, two enabled integrations with distinct
+configs and ordered calls, unavailable/disabled capabilities, duplicate entries, inherited explicit
+selection, an empty setup list, and missing effective session selection. Unselected integrations do
+no new setup; retirement of previously owned attachments still runs cleanup. A missing session
+selection never silently enables shell.
 
 Schema/reference checks cover manifest, config, instance overlay, explain/reference, and secret
 preflight parity for every new hosting field. Negative secret tests inspect persisted state and

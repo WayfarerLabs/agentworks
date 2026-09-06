@@ -123,7 +123,10 @@ there is nothing to validate there.
 vm, agent, workspace, or session template that selects the integration) and is validated the way all
 capability config is validated: by core against capability-provided schema, one blob at a time as
 the graph walk reaches each resource. Per-facet config is a harness-integration specialty, not a new
-framework mechanism.
+framework mechanism. Integrations must be explicitly selected on the resource, even when all config
+uses defaults. A setup resource can select multiple integrations, each with its own config; an
+available plugin or default config never implicitly attaches one. A session has one explicit
+effective integration selection, including when it selects the generic shell.
 
 **R6. Env and typed agent artifacts are the pipeline's two currencies.** Artifact shapes start with
 hints plus a reduced Rulesync model of rules and skills. A hint is a small setup fact, such as the
@@ -191,8 +194,8 @@ consuming integration's readiness requirements, not global required/optional fla
 `claude_marketplaces` and `claude_plugins` leave the VM admin config and agent templates and become
 user-facet config on the Claude integration. This is the acceptance test for the whole effort: if
 core still carries harness-specific fields or setup dispatch after this lands, the framework did not
-do its job. The existing generic shell fallback is preserved; it is not a Claude-specific
-configuration or installation path.
+do its job. The generic shell integration remains available through explicit selection; core must
+not silently substitute it when the effective session integration selection is absent.
 
 **R12. The artifact schema must not foreclose wave 6.** Hint, rule, and skill shapes are concrete
 now, with origin attribution and a producer-local identity that survives delivery. Global stable
@@ -243,7 +246,7 @@ emit rules or skills for stronger guidance. MCP server configurations are explic
 future artifact kind alongside limited hooks. The operator then explicitly authorized updating this
 FRD and publishing it together with the corresponding HLA revision in the existing draft review PR.
 R1, R3, R6, R7, R9, R12, and R13 express that refinement; scope/facet terminology and R11's generic
-shell preservation are clarified alongside it.
+shell integration are clarified alongside it.
 
 This ruling supersedes the saga scope-participation contract and target-state wording that every
 session receives all artifact payloads. Their other constraints still apply. The saga lead owns
@@ -256,6 +259,13 @@ declarations remain deferred pending a separate decision.
 > admin.
 
 R1 records `user-feature` as the single capability kind for user setup.
+
+## Operator ruling: explicit integration enablement, 2026-09-06
+
+> harness integrations must be explicitly enabled, even if the config is pure default.
+
+R5 requires explicit resource selection. R11 retains the generic shell as a selectable integration
+and removes its implicit runtime fallback.
 
 ## What changed since the scope-participation contract was written
 
