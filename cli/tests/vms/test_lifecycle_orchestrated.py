@@ -151,7 +151,7 @@ def test_start_running_vm_short_circuits_but_still_clears_flag(
     assert not any("is ready" in m for m in captured_output.info)
 
 
-def test_start_with_unknown_status_does_not_invent_a_start_observation(
+def test_start_with_unknown_status_clears_stale_start_observation(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
@@ -168,7 +168,7 @@ def test_start_with_unknown_status_does_not_invent_a_start_observation(
 
     assert events == ["status", "start", "tailscale"]
     row = db.get_vm("box")
-    assert row is not None and row.last_started_at == original_start
+    assert row is not None and row.last_started_at is None
 
 
 class _TrackedValues(dict[str, str]):

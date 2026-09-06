@@ -17,7 +17,7 @@ from agentworks.errors import (
     StateError,
     UserAbort,
 )
-from agentworks.runtime_time import derive_uptime_seconds, format_duration
+from agentworks.runtime_time import derive_uptime_seconds, format_uptime
 from agentworks.sessions._resource_cleanup import cleanup_now_empty_resource
 from agentworks.sessions.tmux import exact_tmux_target
 
@@ -563,17 +563,17 @@ def render_session_description(description: SessionDescription) -> None:
     mode_label = (
         mode if mode == "unknown" else f"agent ({description.agent_name})" if description.agent_name else "admin"
     )
-    output.info(f"Name:       {description.name}")
-    output.info(f"Workspace:  {description.workspace_name}")
-    output.info(f"VM:         {description.vm_name}")
-    output.info(f"Template:   {description.template}")
+    output.info(f"Name:           {description.name}")
+    output.info(f"Workspace:      {description.workspace_name}")
+    output.info(f"VM:             {description.vm_name}")
+    output.info(f"Template:       {description.template}")
     output.info(f"Harness integration: {description.harness_integration or '-'}")
-    output.info(f"Mode:       {mode_label}")
-    output.info(f"Status:     {status_label}")
-    output.info(f"Created:    {description.created_at}")
-    output.info(f"Last Started: {description.last_started_at or 'unknown'}")
-    output.info(f"Uptime:     {format_duration(description.uptime_seconds)}")
-    output.info(f"Updated:    {description.updated_at}")
+    output.info(f"Mode:           {mode_label}")
+    output.info(f"Status:         {status_label}")
+    output.info(f"Created:        {description.created_at}")
+    output.info(f"Last Started:   {description.last_started_at or 'unknown'}")
+    output.info(f"Uptime:         {format_uptime(description.uptime_seconds, running=status == 'running')}")
+    output.info(f"Updated:        {description.updated_at}")
     from agentworks.instance_description import render_instance_state
 
     render_instance_state(description.instance_state)

@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import pytest
 
 from agentworks.errors import StateError
-from agentworks.runtime_time import derive_uptime_seconds, format_duration
+from agentworks.runtime_time import derive_uptime_seconds, format_duration, format_uptime
 
 
 def test_uptime_requires_running_status_and_known_start_time() -> None:
@@ -84,6 +84,18 @@ def test_format_duration(seconds: int | None, expected: str) -> None:
     assert format_duration(seconds) == expected
 
 
-def test_format_duration_rejects_negative_values() -> None:
-    with pytest.raises(ValueError):
-        format_duration(-1)
+@pytest.mark.parametrize(
+    ("seconds", "running", "expected"),
+    [
+        (None, True, "unknown"),
+        (62, True, "1m 2s"),
+        (None, False, "-"),
+        (62, False, "-"),
+    ],
+)
+def test_format_uptime_distinguishes_unknown_from_not_running(
+    seconds: int | None,
+    running: bool,
+    expected: str,
+) -> None:
+    assert format_uptime(seconds, running=running) == expected

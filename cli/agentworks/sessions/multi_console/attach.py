@@ -30,7 +30,7 @@ from agentworks.errors import (
 )
 from agentworks.name_filters import validate_name_filters
 from agentworks.resources.access import named_console_template
-from agentworks.runtime_time import derive_uptime_seconds, format_duration
+from agentworks.runtime_time import derive_uptime_seconds, format_uptime
 from agentworks.sessions.tmux import ProbeStatus, exact_tmux_target, tmux_cmd
 from agentworks.vms.manager import gated_vm_boundary
 
@@ -589,14 +589,17 @@ def console_description(
 def render_console_description(description: ConsoleDescription) -> None:
     """Render console detail facts with the legacy human layout."""
 
-    output.info(f"Name:        {description.name}")
-    output.info(f"VM:          {description.vm_name}")
-    output.info(f"Admin shell: {'yes' if description.admin_shell else 'no'}")
-    output.info(f"Created:     {description.created_at}")
-    output.info(f"Last Started: {description.last_started_at or 'unknown'}")
-    output.info(f"Uptime:      {format_duration(description.uptime_seconds)}")
-    output.info(f"Updated:     {description.updated_at}")
-    output.info(f"Status:      {description.status}")
+    output.info(f"Name:           {description.name}")
+    output.info(f"VM:             {description.vm_name}")
+    output.info(f"Admin shell:    {'yes' if description.admin_shell else 'no'}")
+    output.info(f"Created:        {description.created_at}")
+    output.info(f"Last Started:   {description.last_started_at or 'unknown'}")
+    output.info(
+        f"Uptime:         "
+        f"{format_uptime(description.uptime_seconds, running=description.status == ConsoleStatus.RUNNING.value)}"
+    )
+    output.info(f"Updated:        {description.updated_at}")
+    output.info(f"Status:         {description.status}")
     output.info("")
     output.info(f"Configured sessions: {len(description.sessions)}")
 

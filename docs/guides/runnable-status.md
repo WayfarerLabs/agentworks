@@ -25,7 +25,10 @@ Each describe view also reports the most recent successful start Agentworks obse
 uptime. Uptime is available only when that resource's own status observation says `running` and a
 start time is known. Older resources keep an unknown start time until Agentworks successfully starts
 them; stopped, deallocated, residual, broken, and unknown resources have no current uptime. A future
-timestamp caused by clock skew reports zero seconds rather than a negative duration.
+timestamp caused by clock skew reports zero seconds rather than a negative duration. VM uptime
+reflects starts observed by Agentworks. Provider or guest restarts performed outside Agentworks do
+not refresh that observation, so the reported uptime may be stale until Agentworks next records a
+conclusive start.
 
 These observations do not start a VM, repair a session, create or destroy tmux state, or persist an
 observed result. An expected provider, credential, identity, or transport failure keeps the local

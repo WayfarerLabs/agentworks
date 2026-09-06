@@ -74,6 +74,8 @@ def start_vm(
         platform.start(vm, ops_ctx)
         if status in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
             db.record_vm_started(name)
+        else:
+            db.clear_vm_start_observation(name)
 
     # Probe and conditionally acquire the standalone repair credential inside
     # the same hold that protects the reconnect/rejoin lifecycle.

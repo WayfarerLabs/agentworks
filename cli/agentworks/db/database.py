@@ -433,6 +433,20 @@ class Database:
             raise StateError(f"VM '{name}' no longer exists", entity_kind="vm", entity_name=name)
         self._commit_unless_in_tx()
 
+    def clear_vm_start_observation(self, name: str) -> None:
+        """Forget a VM start time after an inconclusive pre-start observation."""
+        result = self._conn.execute(
+            "UPDATE vms SET last_started_at = NULL WHERE name = ?",
+            (name,),
+        )
+        if result.rowcount != 1:
+            if self._tx_depth == 0:
+                self._conn.rollback()
+            from agentworks.errors import StateError
+
+            raise StateError(f"VM '{name}' no longer exists", entity_kind="vm", entity_name=name)
+        self._commit_unless_in_tx()
+
     def delete_vm(self, name: str) -> None:
         with self.transaction():
             workspace_names = tuple(

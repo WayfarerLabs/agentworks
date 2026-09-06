@@ -704,11 +704,15 @@ def test_runnable_start_observations_are_nullable_and_recorded(db: Database) -> 
         assert observation is not None
         datetime.strptime(observation, "%Y-%m-%dT%H:%M:%SZ")
 
+    db.clear_vm_start_observation("dev-vm")
+    assert db.get_vm("dev-vm").last_started_at is None  # type: ignore[union-attr]
+
 
 @pytest.mark.parametrize(
     ("method_name", "entity_kind"),
     [
         ("record_vm_started", "vm"),
+        ("clear_vm_start_observation", "vm"),
         ("record_session_started", "session"),
         ("record_console_started", "console"),
     ],

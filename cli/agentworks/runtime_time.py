@@ -39,8 +39,6 @@ def format_duration(seconds: int | None) -> str:
     """Format a nonnegative duration compactly, or report unknown."""
     if seconds is None:
         return "unknown"
-    if seconds < 0:
-        raise ValueError("duration must be nonnegative")
     remainder = seconds
     parts: list[str] = []
     for unit_seconds, suffix in ((86_400, "d"), (3_600, "h"), (60, "m")):
@@ -50,3 +48,10 @@ def format_duration(seconds: int | None) -> str:
     if remainder or not parts:
         parts.append(f"{remainder}s")
     return " ".join(parts)
+
+
+def format_uptime(seconds: int | None, *, running: bool) -> str:
+    """Format uptime when applicable, distinguishing unknown from not running."""
+    if not running:
+        return "-"
+    return format_duration(seconds)

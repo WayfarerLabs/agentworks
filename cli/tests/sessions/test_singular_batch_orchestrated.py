@@ -934,7 +934,7 @@ def test_describe_session_observes_without_a_vm_hold(
 
     assert events == ["probe"]
     assert resolve_counter == []
-    assert any("Status:     stopped" in m for m in captured_output.info)
+    assert any("Status:         stopped" in m for m in captured_output.info)
 
 
 def test_describe_session_derives_vm_from_its_structural_snapshot(
