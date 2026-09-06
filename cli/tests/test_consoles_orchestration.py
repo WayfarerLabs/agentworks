@@ -691,13 +691,15 @@ def test_console_uptime_follows_exact_observed_status(
     assert db._conn.total_changes == changes_before
 
 
+@pytest.mark.parametrize("stored_value", ["invalid", b"invalid"], ids=("text", "blob"))
 def test_console_description_rejects_malformed_start_time_while_stopped(
     db: Database,
     monkeypatch: pytest.MonkeyPatch,
+    stored_value: str | bytes,
 ) -> None:
     _seed_vm(db)
     db.insert_console("con", "vm1", admin_shell=True)
-    db._conn.execute("UPDATE consoles SET last_started_at = 'invalid' WHERE name = 'con'")
+    db._conn.execute("UPDATE consoles SET last_started_at = ? WHERE name = 'con'", (stored_value,))
     db._conn.commit()
     monkeypatch.setattr(
         "agentworks.sessions.multi_console.observe_console_statuses",

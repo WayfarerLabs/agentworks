@@ -22,7 +22,7 @@ def derive_uptime_seconds(
         return None
     try:
         started_at = datetime.strptime(last_started_at, _STORED_UTC_FORMAT).replace(tzinfo=UTC)
-    except ValueError:
+    except (TypeError, ValueError):
         raise StateError(
             f"stored {entity_kind} last start time is malformed",
             entity_kind=entity_kind,

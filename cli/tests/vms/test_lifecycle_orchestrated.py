@@ -151,6 +151,26 @@ def test_start_running_vm_short_circuits_but_still_clears_flag(
     assert not any("is ready" in m for m in captured_output.info)
 
 
+def test_start_with_unknown_status_does_not_invent_a_start_observation(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config()
+    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "ts-key")
+    _seed_vm(db)
+    original_start = "2026-01-01T00:00:00Z"
+    db._conn.execute("UPDATE vms SET last_started_at = ? WHERE name = ?", (original_start, "box"))
+    db._conn.commit()
+    events = _fake_power(monkeypatch, VMStatus.UNKNOWN)
+
+    vm_manager.start_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert events == ["status", "start", "tailscale"]
+    row = db.get_vm("box")
+    assert row is not None and row.last_started_at == original_start
+
+
 class _TrackedValues(dict[str, str]):
     def __init__(self, events: list[str]) -> None:
         super().__init__({"tailscale-auth-key": "ts-key"})

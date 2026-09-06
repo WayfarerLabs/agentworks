@@ -355,6 +355,38 @@ def test_session_start_records_immediately_after_tmux_creation(
     db.close()
 
 
+def test_session_start_cleans_up_if_start_observation_cannot_be_recorded(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.sessions import manager as session_manager
+    from agentworks.sessions import tmux as tmux_mod
+
+    db, _events = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
+    cleaned: list[str] = []
+
+    def _fail_record(_name: str) -> None:
+        raise StateError("session row disappeared", entity_kind="session", entity_name="s1")
+
+    monkeypatch.setattr(db, "record_session_started", _fail_record)
+    monkeypatch.setattr(
+        tmux_mod,
+        "kill_server_and_probe",
+        lambda **kwargs: cleaned.append(kwargs["socket_path"]) or ProbeStatus.ABSENT,
+    )
+
+    with pytest.raises(StateError):
+        session_manager.start_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+            name="s1",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )  # type: ignore[arg-type]
+
+    assert cleaned == ["/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock"]
+    db.close()
+
+
 def test_unsupported_resume_only_refuses_before_restart_teardown(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

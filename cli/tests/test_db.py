@@ -9,6 +9,7 @@ import pytest
 
 from agentworks.db import Database, InitStatus, ProvisioningStatus
 from agentworks.debian import DebianRelease
+from agentworks.errors import StateError
 
 
 def test_roundtrip_vm(db: Database) -> None:
@@ -702,6 +703,26 @@ def test_runnable_start_observations_are_nullable_and_recorded(db: Database) -> 
     for observation in observations:
         assert observation is not None
         datetime.strptime(observation, "%Y-%m-%dT%H:%M:%SZ")
+
+
+@pytest.mark.parametrize(
+    ("method_name", "entity_kind"),
+    [
+        ("record_vm_started", "vm"),
+        ("record_session_started", "session"),
+        ("record_console_started", "console"),
+    ],
+)
+def test_runnable_start_observation_requires_an_existing_row(
+    db: Database,
+    method_name: str,
+    entity_kind: str,
+) -> None:
+    with pytest.raises(StateError) as raised:
+        getattr(db, method_name)("missing")
+
+    assert raised.value.entity_kind == entity_kind
+    assert raised.value.entity_name == "missing"
 
 
 def test_migration_21_adds_boot_id(tmp_path: Path) -> None:

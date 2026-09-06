@@ -421,10 +421,14 @@ class Database:
 
     def record_vm_started(self, name: str) -> None:
         """Record a successful provider create or start."""
-        self._conn.execute(
+        result = self._conn.execute(
             "UPDATE vms SET last_started_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE name = ?",
             (name,),
         )
+        if result.rowcount != 1:
+            from agentworks.errors import StateError
+
+            raise StateError(f"VM '{name}' no longer exists", entity_kind="vm", entity_name=name)
         self._commit_unless_in_tx()
 
     def delete_vm(self, name: str) -> None:
@@ -879,10 +883,14 @@ class Database:
 
     def record_session_started(self, name: str) -> None:
         """Record a successful managed tmux creation."""
-        self._conn.execute(
+        result = self._conn.execute(
             "UPDATE sessions SET last_started_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE name = ?",
             (name,),
         )
+        if result.rowcount != 1:
+            from agentworks.errors import StateError
+
+            raise StateError(f"session '{name}' no longer exists", entity_kind="session", entity_name=name)
         self._commit_unless_in_tx()
 
     def update_session_harness_integration_state(self, name: str, harness_integration_state: dict[str, object]) -> None:
@@ -1151,10 +1159,14 @@ class Database:
 
     def record_console_started(self, name: str) -> None:
         """Record a successful canonical console publication."""
-        self._conn.execute(
+        result = self._conn.execute(
             "UPDATE consoles SET last_started_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE name = ?",
             (name,),
         )
+        if result.rowcount != 1:
+            from agentworks.errors import StateError
+
+            raise StateError(f"console '{name}' no longer exists", entity_kind="console", entity_name=name)
         self._commit_unless_in_tx()
 
     # -- VM Events ---------------------------------------------------------

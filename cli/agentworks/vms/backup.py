@@ -106,12 +106,18 @@ def backup_vm(
                     desired_overlays,
                     applied_slices,
                 ) = db.snapshot_vm_backup_data(vm_name)
+                if _vm is None:
+                    raise StateError(
+                        f"VM '{vm_name}' no longer exists",
+                        entity_kind="vm",
+                        entity_name=vm_name,
+                    )
                 if not _host_supports_private_backup_permissions() and desired_overlays:
                     _raise_windows_overlay_backup_error(vm_name)
 
                 # 1. VM metadata
                 output.info("Exporting VM metadata...")
-                _write_json(backup_dir / "vm.json", asdict(vm))
+                _write_json(backup_dir / "vm.json", asdict(_vm))
 
                 # 2. Events
                 output.info(f"Exporting {len(events)} VM events...")
@@ -215,7 +221,7 @@ def backup_vm(
 
                 # 9. Manifest
                 manifest = {
-                    "version": 4,
+                    "version": 5,
                     "vm_name": vm_name,
                     "timestamp": timestamp,
                     "agent_count": len(agents_data),

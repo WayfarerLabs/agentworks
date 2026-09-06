@@ -343,13 +343,17 @@ def _start_session_slice(
                 is_admin=(mode == SessionMode.ADMIN),
                 env=session_env,
             )
-            db.record_session_started(name)
-
             from agentworks.sessions.tmux import (
                 ProbeStatus,
                 capture_tmux_server_fingerprint,
                 kill_server_and_probe,
             )
+
+            try:
+                db.record_session_started(name)
+            except Exception:
+                kill_server_and_probe(run_command=session_run_command, socket_path=sock)
+                raise
 
             fingerprint_target = agent_target if mode == SessionMode.AGENT else target
             assert fingerprint_target is not None

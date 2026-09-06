@@ -787,13 +787,17 @@ def _launch_existing_session(
                         hint="Use 'session stop --force' to kill it, then retry.",
                     ) from exc
                 raise
-            db.record_session_started(name)
-
             from agentworks.sessions.tmux import (
                 ProbeStatus,
                 capture_tmux_server_fingerprint,
                 kill_server_and_probe,
             )
+
+            try:
+                db.record_session_started(name)
+            except Exception:
+                kill_server_and_probe(run_command=session_run_command, socket_path=new_sock)
+                raise
 
             fingerprint_probe = capture_tmux_server_fingerprint(
                 target=session_target,
