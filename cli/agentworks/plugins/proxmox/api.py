@@ -29,10 +29,22 @@ class ProxmoxAPIError(ProvisioningError):
 
 
 _QGA_BOOLEAN_FIELDS = ("exited", "out-truncated", "err-truncated")
+_QGA_COMPLETION_FIELDS = {
+    "exitcode",
+    "signal",
+    "out-data",
+    "err-data",
+    "out-truncated",
+    "err-truncated",
+}
 
 
-def _normalize_qga_exec_status(status: dict[str, Any]) -> dict[str, Any]:
-    """Normalize Proxmox VE 8's integer-encoded QGA booleans."""
+class _InvalidQGAExecStatus(ValueError):
+    """A QGA exec-status response violates the provider contract."""
+
+
+def _validate_qga_exec_status(status: dict[str, object]) -> dict[str, object]:
+    """Normalize exact wire booleans and validate one QGA status shape."""
     normalized = dict(status)
     for field in _QGA_BOOLEAN_FIELDS:
         if field not in normalized:
@@ -43,7 +55,40 @@ def _normalize_qga_exec_status(status: dict[str, Any]) -> dict[str, Any]:
         if type(value) is int and value in (0, 1):
             normalized[field] = bool(value)
             continue
-        raise ProxmoxAPIError(f"Proxmox guest-agent exec-status returned an invalid {field} field")
+        raise _InvalidQGAExecStatus(f"Proxmox guest-agent exec-status returned an invalid {field} field")
+
+    exited = normalized.get("exited")
+    if type(exited) is not bool:
+        raise _InvalidQGAExecStatus("Proxmox guest-agent exec-status returned an invalid exited field")
+    if not exited:
+        if _QGA_COMPLETION_FIELDS.intersection(normalized):
+            raise _InvalidQGAExecStatus("Proxmox guest-agent exec-status reported completion data before exit")
+        return normalized
+
+    has_exitcode = "exitcode" in normalized
+    has_signal = "signal" in normalized
+    if has_exitcode == has_signal:
+        raise _InvalidQGAExecStatus("Proxmox guest-agent exec-status returned an invalid exit status")
+    if has_exitcode:
+        exitcode = normalized["exitcode"]
+        if type(exitcode) is not int or exitcode < 0:
+            raise _InvalidQGAExecStatus("Proxmox guest-agent exec-status returned an invalid exit status")
+    else:
+        signal = normalized["signal"]
+        if type(signal) is not int or signal <= 0:
+            raise _InvalidQGAExecStatus("Proxmox guest-agent exec-status returned an invalid exit status")
+
+    stdout = normalized.get("out-data", "")
+    stderr = normalized.get("err-data", "")
+    if not isinstance(stdout, str) or not isinstance(stderr, str):
+        raise _InvalidQGAExecStatus("Proxmox guest-agent exec-status returned invalid output fields")
+
+    out_truncated = normalized.get("out-truncated", False)
+    err_truncated = normalized.get("err-truncated", False)
+    if type(out_truncated) is not bool or type(err_truncated) is not bool:
+        raise _InvalidQGAExecStatus("Proxmox guest-agent exec-status returned invalid truncation fields")
+    if out_truncated or err_truncated:
+        raise _InvalidQGAExecStatus("Proxmox guest-agent exec-status reported truncated output")
     return normalized
 
 
@@ -249,7 +294,7 @@ class ProxmoxAPI:
         """Run a command via the guest agent and wait for completion.
 
         Uses exec then polls exec-status until finished or timeout.
-        Returns the result dict with exitcode, out-data, err-data.
+        Returns a validated completion status, or ``None`` at the deadline.
 
         Proxmox 8 requires the command as a JSON array sent with
         Content-Type: application/json.
@@ -314,7 +359,10 @@ class ProxmoxAPI:
         )
         if not isinstance(result, dict):
             raise ProxmoxAPIError("Proxmox guest-agent exec-status returned a malformed response")
-        return _normalize_qga_exec_status(result)
+        try:
+            return _validate_qga_exec_status(result)
+        except _InvalidQGAExecStatus as error:
+            raise ProxmoxAPIError(str(error)) from None
 
     def guest_agent_file_write(self, node: str, vmid: int, path: str, content: str) -> None:
         """Write a file inside the VM via the guest agent.

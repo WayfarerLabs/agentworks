@@ -183,11 +183,11 @@ class TestResponseParsing:
         mock_urlopen: MagicMock,
         api: ProxmoxAPI,
     ) -> None:
-        mock_urlopen.return_value = _mock_response({"exited": 1, "out-truncated": 0, "err-truncated": True})
+        mock_urlopen.return_value = _mock_response({"exited": 1, "exitcode": 0, "out-truncated": 0, "err-truncated": 0})
 
         result = api.guest_agent_exec_status("pve", 100, pid=42)
 
-        assert result == {"exited": True, "out-truncated": False, "err-truncated": True}
+        assert result == {"exited": True, "exitcode": 0, "out-truncated": False, "err-truncated": False}
 
     @pytest.mark.parametrize("field", ["exited", "out-truncated", "err-truncated"])
     @pytest.mark.parametrize("value", [-1, 2, "1", 0.0, None])
@@ -199,7 +199,9 @@ class TestResponseParsing:
         field: str,
         value: object,
     ) -> None:
-        mock_urlopen.return_value = _mock_response({field: value})
+        status: dict[str, object] = {"exited": 1, "exitcode": 0}
+        status[field] = value
+        mock_urlopen.return_value = _mock_response(status)
 
         with pytest.raises(ProxmoxAPIError):
             api.guest_agent_exec_status("pve", 100, pid=42)
@@ -222,6 +224,31 @@ class TestResponseParsing:
 
         assert result == {"exited": True, "exitcode": 0}
         assert mock_urlopen.call_count == 3
+
+    @pytest.mark.parametrize(
+        "status",
+        [
+            {"exited": 0, "exitcode": 0},
+            {"exited": 1, "exitcode": 0, "signal": 9},
+            {"exited": 1, "exitcode": 0, "out-truncated": 1},
+            {"exited": 1, "signal": 0},
+            {"exited": 1, "exitcode": -1},
+            {"exited": 1, "exitcode": 0, "out-data": 1},
+        ],
+    )
+    @patch("urllib.request.urlopen")
+    def test_guest_agent_exec_wait_rejects_invalid_status(
+        self,
+        mock_urlopen: MagicMock,
+        api: ProxmoxAPI,
+        status: dict[str, object],
+    ) -> None:
+        mock_urlopen.side_effect = [_mock_response({"pid": 42}), _mock_response(status)]
+
+        with pytest.raises(ProxmoxAPIError):
+            api.guest_agent_exec_wait("pve", 100, "/bin/true")
+
+        assert mock_urlopen.call_count == 2
 
     @pytest.mark.parametrize("response", [None, [], "invalid"])
     @patch("urllib.request.urlopen")

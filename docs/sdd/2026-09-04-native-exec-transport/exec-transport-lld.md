@@ -227,7 +227,7 @@ bootstrap caller, but the bootstrap flow itself is not redesigned. Every respons
 - dispatch data is one integer PID;
 - status `exited` is boolean after the API boundary normalizes Proxmox VE 8's exact integer `0`/`1`
   encoding;
-- complete exit has either integer `exitcode` or integer `signal` under the provider's valid shape;
+- complete exit has either a non-negative integer `exitcode` or a positive integer `signal`;
 - output fields are strings when present; and
 - truncation flags are boolean when present after the same exact `0`/`1` normalization.
 
@@ -326,12 +326,13 @@ Implementation updates:
 - `capabilities/vm_platform/README.md`, for exact version-1 obligations and optional rich behavior;
 - the published vm-platform capability description;
 - `docs/guides/proxmox.md`, for QGA recovery and the interactive console limitation;
+- `cli/command-reference.md`, for native Proxmox execution and interactive-shell guidance;
 - `cli/commands/vm.py`, for the optional native-interaction help;
 - nearby transport and platform docstrings; and
 - tests and fixtures that teach the old optional return.
 
-No sample config, CLI reference, completion script, JSON schema, release migration, or database
-documentation changes because none of those surfaces changes.
+No sample config, completion script, JSON schema, release migration, or database documentation
+changes because none of those surfaces changes.
 
 ## Testing seams
 

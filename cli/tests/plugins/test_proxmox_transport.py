@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 from dataclasses import dataclass, field
 from typing import Any, cast
@@ -9,9 +10,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from agentworks.capabilities.base import RunContext
 from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError
 from agentworks.plugins.proxmox.transport import ProxmoxExecTransport
 from agentworks.ssh import SSHError, SSHResult
+from agentworks.transports import native_transport as build_native_transport
 
 _SECRET = "tskey-proxmox-transport-sentinel"
 
@@ -202,10 +205,17 @@ def test_checked_failure_logs_completed_result_then_raises(status: dict[str, Any
 
 
 @pytest.mark.parametrize("check", [False, True])
-@pytest.mark.parametrize("signal", [0, -1])
-def test_non_positive_signal_is_rejected(signal: int, check: bool) -> None:
+@pytest.mark.parametrize(
+    "status",
+    [
+        {"exited": True, "signal": 0},
+        {"exited": True, "signal": -1},
+        {"exited": True, "exitcode": -1},
+    ],
+)
+def test_invalid_numeric_exit_status_is_rejected(status: dict[str, object], check: bool) -> None:
     with pytest.raises(SSHError):
-        _transport(_API([{"exited": True, "signal": signal}])).run("false", check=check)
+        _transport(_API([status])).run("false", check=check)
 
 
 def test_sensitive_input_has_one_carrier_and_suppresses_output() -> None:
@@ -276,11 +286,13 @@ def test_non_sensitive_dispatch_preserves_provider_failure() -> None:
     failure.code = 503
     api.dispatch_error = failure
 
-    with pytest.raises(ProxmoxAPIError) as caught:
+    with pytest.raises(SSHError) as caught:
         _transport(api).run("true")
 
-    assert caught.value is failure
-    assert caught.value.code == 503
+    assert caught.value.__cause__ is failure
+    assert failure.code == 503
+    assert "provider dispatch diagnostic" in str(caught.value)
+    assert _transport(api).describe() in str(caught.value)
 
 
 def test_non_sensitive_status_preserves_provider_failure() -> None:
@@ -288,13 +300,43 @@ def test_non_sensitive_status_preserves_provider_failure() -> None:
     failure.code = 502
     api = _API([failure])
 
-    with pytest.raises(ProxmoxAPIError) as caught:
+    with pytest.raises(SSHError) as caught:
         _transport(api).run("true")
 
-    assert caught.value is failure
-    assert caught.value.code == 502
+    assert caught.value.__cause__ is failure
+    assert failure.code == 502
+    assert "provider status diagnostic" in str(caught.value)
+    assert _transport(api).describe() in str(caught.value)
+    assert "42" in str(caught.value)
     assert len(api.dispatches) == 1
     assert len(api.status_calls) == 1
+
+
+def test_provider_failure_remains_retryable_by_native_factory() -> None:
+    api = _API()
+    target = _transport(api)
+    platform = MagicMock()
+    platform.name = "proxmox"
+    platform.probe_failure_hint = None
+    platform.transient_route.return_value = contextlib.nullcontext()
+    platform.native_transport.return_value = target
+    failure = ProxmoxAPIError("provider unavailable")
+
+    with (
+        patch.object(api, "guest_agent_exec", side_effect=[failure, 42]) as dispatch,
+        patch("agentworks.transports.time.sleep"),
+        contextlib.ExitStack() as stack,
+    ):
+        result = build_native_transport(
+            MagicMock(),
+            platform,
+            MagicMock(),
+            ctx=RunContext(),
+            stack=stack,
+        )
+
+    assert result is target
+    assert dispatch.call_count == 2
 
 
 def test_input_data_provider_boundary_is_checked_before_dispatch() -> None:

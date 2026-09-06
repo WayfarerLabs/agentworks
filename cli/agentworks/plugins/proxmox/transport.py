@@ -10,8 +10,9 @@ after an ambiguous failure.
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
+from agentworks.plugins.proxmox.api import ProxmoxAPIError, _InvalidQGAExecStatus, _validate_qga_exec_status
 from agentworks.ssh import SSHError, SSHResult
 from agentworks.transports import ExecTransport
 
@@ -65,6 +66,9 @@ class ProxmoxExecTransport(ExecTransport):
         deadline = None if resolved_timeout is None else time.monotonic() + resolved_timeout
         dispatch_timeout = self._remaining(deadline, pid=None)
 
+        dispatch_failure = (
+            f"Proxmox QGA command dispatch failed for {self.describe()}; the guest command may have started"
+        )
         dispatch_failed = False
         try:
             pid = self._api.guest_agent_exec(
@@ -74,17 +78,22 @@ class ProxmoxExecTransport(ExecTransport):
                 input_data=input_text,
                 timeout=dispatch_timeout,
             )
+        except ProxmoxAPIError as error:
+            if input_text is None:
+                raise SSHError(f"{dispatch_failure}: {error}") from error
+            dispatch_failed = True
         except Exception:
             if input_text is None:
                 raise
             dispatch_failed = True
         if dispatch_failed:
-            raise SSHError(
-                f"Proxmox QGA command dispatch failed for {self.describe()}; the guest command may have started"
-            ) from None
+            raise SSHError(dispatch_failure) from None
 
         while True:
             status_timeout = self._remaining(deadline, pid=pid)
+            status_failure = (
+                f"Proxmox QGA status failed for {self.describe()} (PID {pid}); the guest command may still be running"
+            )
             status_failed = False
             try:
                 status = self._api.guest_agent_exec_status(
@@ -93,15 +102,16 @@ class ProxmoxExecTransport(ExecTransport):
                     pid=pid,
                     timeout=status_timeout,
                 )
+            except ProxmoxAPIError as error:
+                if input_text is None:
+                    raise SSHError(f"{status_failure}: {error}") from error
+                status_failed = True
             except Exception:
                 if input_text is None:
                     raise
                 status_failed = True
             if status_failed:
-                raise SSHError(
-                    f"Proxmox QGA status failed for {self.describe()} (PID {pid}); "
-                    "the guest command may still be running"
-                ) from None
+                raise SSHError(status_failure) from None
 
             validation_failure: str | None = None
             try:
@@ -163,50 +173,17 @@ def _command_argv(command: str, *, admin_username: str, sudo: bool) -> list[str]
 
 def _parse_status(status: dict[str, object], *, sensitive: bool) -> tuple[bool, SSHResult | None]:
     """Validate one external exec-status response and map complete output."""
-    exited = status.get("exited")
-    if type(exited) is not bool:
-        raise SSHError("Proxmox QGA exec-status response has an invalid exited field") from None
-    if not exited:
-        completion_fields = {
-            "exitcode",
-            "signal",
-            "out-data",
-            "err-data",
-            "out-truncated",
-            "err-truncated",
-        }
-        if completion_fields.intersection(status):
-            raise SSHError("Proxmox QGA exec-status response reports completion data before exit") from None
+    try:
+        normalized = _validate_qga_exec_status(status)
+    except _InvalidQGAExecStatus as error:
+        raise SSHError(str(error)) from None
+
+    if not cast("bool", normalized["exited"]):
         return False, None
 
-    has_exitcode = "exitcode" in status
-    has_signal = "signal" in status
-    if has_exitcode == has_signal:
-        raise SSHError("Proxmox QGA exec-status response has an invalid exit status") from None
-
-    stdout = status.get("out-data", "")
-    stderr = status.get("err-data", "")
-    out_truncated = status.get("out-truncated", False)
-    err_truncated = status.get("err-truncated", False)
-    if not isinstance(stdout, str) or not isinstance(stderr, str):
-        raise SSHError("Proxmox QGA exec-status response has invalid output fields") from None
-    if type(out_truncated) is not bool or type(err_truncated) is not bool:
-        raise SSHError("Proxmox QGA exec-status response has invalid truncation fields") from None
-    if out_truncated or err_truncated:
-        raise SSHError("Proxmox QGA command output was truncated") from None
-
-    if has_exitcode:
-        exitcode = status["exitcode"]
-        if type(exitcode) is not int:
-            raise SSHError("Proxmox QGA exec-status response has an invalid exit status") from None
-        assert isinstance(exitcode, int)
-        returncode = exitcode
-    else:
-        signal = status["signal"]
-        if type(signal) is not int or signal <= 0:
-            raise SSHError("Proxmox QGA exec-status response has an invalid exit status") from None
-        assert isinstance(signal, int)
-        returncode = -signal
+    returncode = cast("int", normalized["exitcode"]) if "exitcode" in normalized else -cast("int", normalized["signal"])
+    stdout = cast("str", normalized.get("out-data", ""))
+    stderr = cast("str", normalized.get("err-data", ""))
     if sensitive:
         stdout = ""
         stderr = ""
