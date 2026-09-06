@@ -11,6 +11,7 @@ this row's anchor sit now"), and `carry` row-first against a second, older map
 
 from __future__ import annotations
 
+import re
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -148,8 +149,9 @@ def carry(snapshot: Snapshot, map_path: str, at: str) -> None:
     """An older map's rows onto the current estate, by identity.
 
     `at` is the commit that map's line numbers were measured against, which is
-    what turns them into identities in the first place. Rows already written in
-    the identity grammar ignore it.
+    what turns them into identities in the first place. A row already written
+    in the identity grammar needs it only for the before-state that tells
+    `found` from `moved`.
     """
     older = Snapshot(Tree(at))
     rows = read_rows(map_path, older)
@@ -355,6 +357,26 @@ def bases(map_path: str, first: str, second: str) -> None:
         print(f"#   {name}: {count}", file=sys.stderr)
 
 
+def _with_cause(row: Row, shape: str, causes: Counter[str]) -> str:
+    """The shape cell, carrying `[line-anchored: <cause>]` when the row keeps
+    literal lines and carrying no such marker when it does not.
+
+    The cause is computed when the row is lifted from line numbers and read
+    back off the marker when it is not, so re-running over an already-rewritten
+    map writes the same marker rather than an empty one.
+    """
+    stripped = re.sub(r"\*\*\[line-anchored:[^\]]*\]\*\*\s*", "", shape).strip()
+    lined = [a for a in row.anchors if isinstance(a, LineAnchor)]
+    if not lined:
+        return stripped
+    computed = ", ".join(sorted({a.cause for a in lined if a.cause}))
+    if not computed:
+        existing = re.search(r"\[line-anchored:\s*([^\]]*)\]", shape)
+        computed = existing.group(1).strip() if existing else "unknown"
+    causes[computed] += 1
+    return f"**[line-anchored: {computed}]** {stripped}".strip()
+
+
 def reanchor(map_path: str, at: str) -> None:
     """Rewrite a map's line anchors into identity anchors, in place.
 
@@ -368,6 +390,7 @@ def reanchor(map_path: str, at: str) -> None:
     older = Snapshot(Tree(at))
     rows = {r.source_line: r for r in read_rows(map_path, older)}
     kinds: Counter[str] = Counter()
+    causes: Counter[str] = Counter()
     out: list[str] = []
     for number, line in enumerate(Path(map_path).read_text(encoding="utf-8").splitlines(), start=1):
         row = rows.get(number)
@@ -378,10 +401,14 @@ def reanchor(map_path: str, at: str) -> None:
         if cells and cells[-1] == "":
             cells = cells[:-1]
         cells[1] = row.render_cell()
+        cells[2] = _with_cause(row, cells[2], causes)
         out.append(join_cells(cells))
         for anchor in row.anchors:
             kinds[type(anchor).__name__] += 1
     Path(map_path).write_text("\n".join(out) + "\n", encoding="utf-8")
     print(f"# rewrote {len(rows)} rows in {map_path} against {at}", file=sys.stderr)
     for name, count in sorted(kinds.items()):
+        print(f"#   {name}: {count}", file=sys.stderr)
+    print(f"# line-anchored rows by cause: {sum(causes.values())}", file=sys.stderr)
+    for name, count in sorted(causes.items()):
         print(f"#   {name}: {count}", file=sys.stderr)

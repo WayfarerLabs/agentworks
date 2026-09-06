@@ -147,6 +147,9 @@ class LineAnchor(Anchor):
 
     path: str
     spans: tuple[tuple[int, int], ...]
+    #: Why nothing could be named here, written onto the row by `reanchor` so
+    #: the declaration is per row rather than only in the grammar section.
+    cause: str = ""
 
     def render(self) -> str:
         return ",".join(f"L{lo}" if lo == hi else f"L{lo}-{hi}" for lo, hi in self.spans)
@@ -341,7 +344,8 @@ def _lift(path: str, spans: list[tuple[int, int]], snapshot: Snapshot, *, sites_
             group = snapshot.by_identity[identity]
             anchors.append(SiteAnchor(identity, group.multiplicity))
     if orphans:
-        anchors.append(LineAnchor(path, tuple(orphans)))
+        causes = {snapshot.why_unnamed(path, lo) for lo, _ in orphans}
+        anchors.append(LineAnchor(path, tuple(orphans), ", ".join(sorted(causes))))
     return anchors or [FileAnchor(path)]
 
 

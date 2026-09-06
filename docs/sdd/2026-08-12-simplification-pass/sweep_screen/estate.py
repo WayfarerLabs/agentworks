@@ -234,6 +234,20 @@ class Snapshot:
         holders = [f for f in self.functions(path) or [] if f.holds(line)]
         return max(holders, key=lambda f: (f.start, -f.end)) if holders else None
 
+    def why_unnamed(self, path: str, line: int) -> str:
+        """Why a line sits in no function here, which is what a line anchor
+        records on its row so a reader knows whether it can ever be fixed."""
+        if not path.endswith(".py"):
+            return "not Python"
+        if not self.tree.exists(path):
+            return "file gone"
+        for node in ast.iter_child_nodes(self.tree.parse(path)):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            if isinstance(node, ast.stmt) and node.lineno <= line <= (node.end_lineno or node.lineno):
+                return "module level"
+        return "between functions"
+
     def site_at(self, path: str, line: int) -> Site | None:
         return next((s for s in self.sites if s.path == path and s.line == line), None)
 
