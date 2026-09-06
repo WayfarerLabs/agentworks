@@ -205,9 +205,8 @@ shares no files with the website work; it waits on the sweep instead, per group 
       - **Re-derive from scratch every non-group-1 row in the twenty files the two-basis measurement
         named**, which is 128 of the 144 rows the two candidate bases disagree about; the other 16
         are group 1's, whose basis is known. Those rows were lifted from line numbers whose tree is
-        not known. Re-deriving is the recourse rather than auditing,
-        because 125 of the 144 resolve cleanly today and no tree can say whether they resolve to the
-        right test.
+        not known. Re-deriving is the recourse rather than auditing, because 125 of the 144 resolve
+        cleanly today and no tree can say whether they resolve to the right test.
       - **Re-decide the twelve claim anchors `generate` refuses on**, over nine judgment rows
         (L-013, L-018, L-026, G1-M03, G1-M04, G1-K04, G1-K14, G1-I02, G1-I06). Each carries evidence
         that no longer reaches an assertion that exists, so the cut re-decides rather than carries
