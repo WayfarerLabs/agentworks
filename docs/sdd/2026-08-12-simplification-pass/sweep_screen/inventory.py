@@ -50,17 +50,22 @@ GROUP_1 = "Group 1"
 
 
 def outside_code_spans(text: str) -> str:
-    """`text` with every code span blanked, so a quoted marker is not one.
+    r"""`text` with every code span blanked, so a quoted marker is not one.
 
-    A row that writes `` `[dead]` `` in its justification is quoting the
-    vocabulary, not using it. Reading such a quote as a live marker took a keep
-    row out of the executable set and handed its site to the mechanical batch as
-    a delete, with every command still reporting success, which is the quietest
-    failure this parser has had.
+    A row that writes `` `[dead]` `` is quoting the vocabulary, not using it.
+    Quoted in the SHAPE cell it was read as row state, which took a keep row out
+    of the executable set and handed its site to the mechanical batch as a
+    delete while every command reported success; quoted anywhere else it was a
+    RowError, which is loud but still wrong. `\`` is an escaped backtick and
+    opens nothing, the same exemption `split_cells` makes for `\|`.
     """
     out: list[str] = []
     index = 0
     while index < len(text):
+        if text[index] == "\\" and index + 1 < len(text) and text[index + 1] == "`":
+            out.append("  ")
+            index += 2
+            continue
         if text[index] == "`":
             run = len(text[index:]) - len(text[index:].lstrip("`"))
             closing = text.find("`" * run, index + run)
@@ -158,10 +163,12 @@ class SpanAnchor(Anchor):
     def resolve(self, snapshot: Snapshot) -> Resolution:
         if not snapshot.tree.exists(self.path):
             return Resolution("file-gone", "")
-        function = snapshot.function(self.path, self.qualname)
-        if function is None:
+        ranges = snapshot.function(self.path, self.qualname)
+        if not ranges:
             return Resolution("gone", "")
-        return Resolution("resolved", f"{self.path}:{function.start}-{function.end}")
+        where = ",".join(f"{f.start}-{f.end}" for f in ranges)
+        detail = "defined in more than one branch" if len(ranges) > 1 else ""
+        return Resolution("resolved", f"{self.path}:{where}", detail)
 
     def claims(self, site: Site) -> bool:
         return site.path == self.path and site.identity.qualname == self.qualname
@@ -367,9 +374,12 @@ def _lift(path: str, spans: list[tuple[int, int]], snapshot: Snapshot, *, sites_
                 landed = True
         if not landed:
             orphans.append((lo, hi))
+    # A helper nested inside a test the row already names adds nothing: the
+    # test's span covers it, and listing both reads as two claims.
+    outer = {q for q in cited if not any(q != o and q.startswith(f"{o}.") for o in cited)}
     anchors: list[Anchor] = []
     for qualname, identities in cited.items():
-        if not identities or not sites_only:
+        if (not identities or not sites_only) and qualname in outer:
             anchors.append(SpanAnchor(path, qualname))
         for identity in identities:
             group = snapshot.by_identity[identity]

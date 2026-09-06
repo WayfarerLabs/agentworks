@@ -202,10 +202,25 @@ def _verdict(outcomes: list[str]) -> str:
 def carry(snapshot: Snapshot, map_path: str, at: str) -> None:
     """An older map's rows onto the current estate, by identity.
 
-    `at` is the commit that map's line numbers were measured against, which is
-    what turns them into identities in the first place. A row already written
-    in the identity grammar needs it only for the before-state that tells
-    `found` from `moved`.
+    `at` must be the map's own basis, and for a line-anchored map this tool
+    cannot check that: its anchors are lifted from `at`, so they resolve there
+    by construction and a wrong ref produces a full run of plausible answers
+    rather than a complaint. The caller is trusted on it. For a map already in
+    the identity grammar the anchors are read rather than lifted, so an anchor
+    that resolves here and not at `at` is a real signal and carry refuses.
+
+    Two labels on top of what an anchor resolves to, since this holds two trees:
+    `found` is resolved at the same line as at `at`, `moved` is resolved at a
+    different one. And four verdicts for a whole row, from its anchors' states:
+
+    * `carries`, every anchor that can settle is found or moved;
+    * `partial`, some are and some are not, which includes a site group that
+      grew or shrank, because the row's evidence was written against a
+      different number of assertions;
+    * `lost`, none are;
+    * `unchecked`, none could settle: a row with no anchor, or one whose only
+      anchors are literal lines in a file that still exists, which no tree can
+      confirm or deny.
     """
     older = Snapshot(Tree(at))
     rows = read_rows(map_path, older)
@@ -298,7 +313,7 @@ def generate(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
     fall into the batch.
     """
     rows = read_rows(map_path, snapshot)
-    claims = [r for r in rows if r.group == GROUP_1 and r.section != MECHANICAL_BATCH and "dead" not in r.markers]
+    claims = claim_rows(rows)
     estate = [s for s in snapshot.sites if s.kind == "match="]
     claimed = {s for s in estate if any(r.claims(s) for r in claims)}
     remaining = [s for s in estate if s not in claimed]
@@ -424,10 +439,12 @@ def reanchor(map_path: str, at: str) -> None:
 
     One job: it reproduces the map's anchor cells from the legacy line-anchored
     map, so every rewrite of them is reproducible rather than taken on trust,
-    and it retires with the fresh cut, when no line anchors remain to lift. `at` is the commit the map's line
-    numbers were measured against and is required, because reading them at any
-    other tree would name whatever function happens to sit at that line now,
-    which is the drift this grammar exists to retire.
+    and it retires with the fresh cut, when no line anchors remain to lift.
+
+    `at` is the commit the map's line numbers were measured against, and it is
+    required because reading them at any other tree names whatever function
+    happens to sit at that line now, which is the drift this grammar exists to
+    retire.
     """
     older = Snapshot(Tree(at))
     rows = {r.source_line: r for r in read_rows(map_path, older)}
