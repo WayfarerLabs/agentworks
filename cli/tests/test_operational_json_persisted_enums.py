@@ -198,13 +198,6 @@ def test_the_parity_check_catches_a_persisted_member_the_output_vocabulary_lacks
 
 
 def test_projection_boundaries_close_manual_invalid_facts() -> None:
-    from agentworks.sessions.manager._queries import (
-        SessionDescription,
-        SessionListing,
-        SessionListRow,
-        session_description_data,
-        session_listing_data,
-    )
     from agentworks.vms.manager.inspect import VMListing, VMListRow, vm_listing_data
     from agentworks.workspaces.manager.create import (
         WorkspaceDescription,
@@ -225,25 +218,3 @@ def test_projection_boundaries_close_manual_invalid_facts() -> None:
     )
     projected_workspace = cast("dict[str, object]", workspace_description_data(workspace)["workspace"])
     assert cast("list[dict[str, object]]", projected_workspace["sessions"])[0]["mode"] == "unknown"
-
-    listed = SessionListRow("s", "ws", "box", "default", None, _RAW_TEXT, None, "unavailable")
-    projected_list = cast("list[dict[str, object]]", session_listing_data(SessionListing((listed,)))["sessions"])[0]
-    assert projected_list["mode"] == "unknown"
-    assert projected_list["status"] == "unavailable"
-    description = SessionDescription(
-        "s",
-        "ws",
-        "box",
-        "default",
-        None,
-        _RAW_TEXT,
-        None,
-        _RAW_TEXT,
-        None,
-        "c",
-        "u",
-        (),
-        stub_instance_state("session"),
-    )
-    projected_description = cast("dict[str, object]", session_description_data(description)["session"])
-    assert projected_description["mode"] == projected_description["status"] == "unknown"

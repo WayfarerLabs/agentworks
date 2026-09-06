@@ -206,6 +206,23 @@ def test_console_listing_is_local_until_status_is_requested(
     assert calls == [("alpha",)]
 
 
+def test_plain_console_listing_preserves_orphaned_inventory(
+    db,  # noqa: ANN001
+) -> None:
+    db.insert_vm("removed-vm", site="site", hostname="removed-vm")
+    db.insert_console("orphan", "removed-vm")
+    db._conn.execute("PRAGMA foreign_keys = OFF")
+    db._conn.execute("DELETE FROM vms WHERE name = 'removed-vm'")
+    db._conn.commit()
+    db._conn.execute("PRAGMA foreign_keys = ON")
+
+    listing = console_listing(db)
+
+    assert [(row.name, row.vm_name, row.status) for row in listing.consoles] == [
+        ("orphan", "removed-vm", "unavailable")
+    ]
+
+
 def test_console_listing_status_column_follows_explicit_render_request(
     db,  # noqa: ANN001
     captured_output,  # noqa: ANN001

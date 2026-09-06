@@ -16,6 +16,7 @@ from agentworks.errors import (
     UserAbort,
 )
 from agentworks.sessions.tmux import ProbeStatus, probe_tmux_server, probe_tmux_session
+from agentworks.status_observation import GUEST_OBSERVATION_ATTEMPTS, GUEST_OBSERVATION_TIMEOUT_SECONDS
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -24,7 +25,6 @@ if TYPE_CHECKING:
 
 _PID_PRESENT_FACT = "present"
 _PID_ABSENT_FACT = "absent"
-_OBSERVATION_TIMEOUT_SECONDS = 10
 
 
 class _BoundedStatusTarget:
@@ -35,8 +35,8 @@ class _BoundedStatusTarget:
 
     def run(self, command: str, **kwargs: Any) -> Any:
         kwargs.update(
-            timeout=_OBSERVATION_TIMEOUT_SECONDS,
-            retries=1,
+            timeout=GUEST_OBSERVATION_TIMEOUT_SECONDS,
+            retries=GUEST_OBSERVATION_ATTEMPTS,
             tty=False,
         )
         return self._target.run(command, **kwargs)
@@ -184,8 +184,8 @@ def batch_check_status(
     result = target.run(
         cmd,
         check=False,
-        timeout=_OBSERVATION_TIMEOUT_SECONDS,
-        retries=1,
+        timeout=GUEST_OBSERVATION_TIMEOUT_SECONDS,
+        retries=GUEST_OBSERVATION_ATTEMPTS,
         tty=False,
         input_data=_batch_probe_data(checkable),
     )

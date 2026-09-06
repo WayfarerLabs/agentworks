@@ -81,7 +81,7 @@ def session_listing_data(listing: SessionListing) -> JsonObject:
                 "vm_name": session.vm_name,
                 "template": session.template,
                 "harness_integration": session.harness_integration,
-                "mode": project_session_mode(session.mode),
+                "mode": session.mode,
                 "agent_name": session.agent_name,
                 "status": project_session_status(session.status, allow_unavailable=True),
             }
@@ -99,7 +99,7 @@ def session_description_data(description: SessionDescription) -> JsonObject:
             "vm_name": description.vm_name,
             "template": description.template,
             "harness_integration": description.harness_integration,
-            "mode": project_session_mode(description.mode),
+            "mode": description.mode,
             "agent_name": description.agent_name,
             "status": project_session_status(description.status, allow_unavailable=False),
             "pid": description.pid,
@@ -547,7 +547,7 @@ def render_session_description(description: SessionDescription) -> None:
         status_label = f"running (PID {description.pid})"
     elif status == "broken" and description.pid is not None:
         status_label = f"broken (PID {description.pid} alive, tmux unreachable)"
-    mode = project_session_mode(description.mode)
+    mode = description.mode
     mode_label = (
         mode if mode == "unknown" else f"agent ({description.agent_name})" if description.agent_name else "admin"
     )
@@ -712,7 +712,7 @@ def render_session_listing(listing: SessionListing, *, include_status: bool = Fa
     unknown_by_vm: dict[str, list[str]] = {}
     for session in listing.sessions:
         status = "-" if session.status == "unavailable" else session.status
-        mode = project_session_mode(session.mode)
+        mode = session.mode
         mode_label = mode if mode == "unknown" else f"agent ({session.agent_name})" if session.agent_name else "admin"
         row = (
             session.name,

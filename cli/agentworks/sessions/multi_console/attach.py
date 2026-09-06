@@ -460,13 +460,6 @@ def console_listing(
         workspace_name=workspace_name,
         agent_name=agent_name,
     )
-    for console, _session_count in consoles:
-        if db.get_vm(console.vm_name) is None:
-            raise NotFoundError(
-                f"VM '{console.vm_name}' not found",
-                entity_kind="vm",
-                entity_name=console.vm_name,
-            )
     statuses: dict[str, ConsoleStatus] = {}
     if include_status and consoles:
         if config is None:
@@ -545,12 +538,6 @@ def console_description(
 ) -> ConsoleDescription:
     """Collect configured console facts plus non-activating live status."""
     console = _require_console(db, name)
-    if db.get_vm(console.vm_name) is None:
-        raise NotFoundError(
-            f"VM '{console.vm_name}' not found",
-            entity_kind="vm",
-            entity_name=console.vm_name,
-        )
     members = tuple(
         ConsoleMember(
             position=member.position,
