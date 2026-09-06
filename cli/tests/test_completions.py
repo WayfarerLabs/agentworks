@@ -27,6 +27,7 @@ from agentworks.completions.spec import (
     completion_version,
     is_legacy_database_completion,
 )
+from tests.conftest import requires_posix_shell
 
 
 def _walk_commands(spec: CommandSpec, path: str = "") -> dict[str, CommandSpec]:
@@ -223,7 +224,12 @@ class TestDynamicCompletionsMapping:
         assert "$index = $groupCommandIndex + 1" in powershell
         assert "agw guide list" in powershell
 
+    @requires_posix_shell
     def test_generated_bash_guide_completion_follows_the_group_grammar(self) -> None:
+        # Skips on Windows: it runs the generated bash completion under a real
+        # bash to check the group grammar. That is the bash-shell target; the
+        # zsh and powershell siblings cover their own shells, and the
+        # pure-string mapping tests still run everywhere. Linux CI covers bash.
         from agentworks.guide.service import list_guide_topics
 
         expected_topics = list_guide_topics().markdown.splitlines()
@@ -442,7 +448,10 @@ function Complete([string]$line) {{
             assert "restore" in script
             assert "--yes" in script
 
+    @requires_posix_shell
     def test_generated_bash_preserves_spaces_in_restore_file_completion(self, tmp_path: Path) -> None:
+        # Skips on Windows: runs the generated bash completion under a real bash
+        # to check file-name space handling. Linux CI covers the bash target.
         filename = "backup with spaces.db"
         (tmp_path / filename).touch()
         script = generate("bash")
@@ -1274,11 +1283,15 @@ def _write_warning_config(home: Path) -> Path:
     return config_dir
 
 
+@requires_posix_shell
 @pytest.mark.parametrize("command_path", sorted(DATABASE_BACKED_COMPLETION_PATHS))
 def test_marker_probe_refuses_stale_database_for_every_dynamic_path_without_side_effects(
     tmp_path: Path,
     command_path: tuple[str, str],
 ) -> None:
+    # Skips on Windows: it wraps the probe in a real POSIX shell (``bash -c ...
+    # 2>/dev/null``) to model how a shell invokes completion. Git-for-Windows'
+    # bash handles the redirect and stdout bytes differently. Linux CI covers it.
     from agentworks.db import LATEST_VERSION, Database, backup_directory
 
     config_dir = _write_warning_config(tmp_path)
@@ -1308,7 +1321,10 @@ def test_marker_probe_refuses_stale_database_for_every_dynamic_path_without_side
     assert not backup_directory(database_path).exists()
 
 
+@requires_posix_shell
 def test_shell_wrapped_probe_suppresses_config_warning_and_preserves_database_bytes(tmp_path: Path) -> None:
+    # Skips on Windows: models a real POSIX shell wrapping the probe with
+    # ``2>/dev/null``; Git-for-Windows' bash differs here. Linux CI covers it.
     from agentworks.db import Database
 
     config_dir = _write_warning_config(tmp_path)
@@ -1342,7 +1358,10 @@ def test_shell_wrapped_probe_suppresses_config_warning_and_preserves_database_by
     _assert_no_committed_writes(config_dir, database_path, before)
 
 
+@requires_posix_shell
 def test_shell_wrapped_probe_consumes_empty_stdout_when_config_is_invalid(tmp_path: Path) -> None:
+    # Skips on Windows: models a real POSIX shell wrapping the probe with
+    # ``2>/dev/null``; Git-for-Windows' bash differs here. Linux CI covers it.
     from agentworks.db import Database
 
     config_dir = tmp_path / ".config" / "agentworks"

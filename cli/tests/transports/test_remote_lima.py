@@ -10,6 +10,7 @@ import pytest
 
 from agentworks.ssh import SSHError, SSHResult
 from agentworks.transports import RemoteLimaTransport
+from tests.conftest import requires_posix_shell
 from tests.transports.conftest import fail_completed as _fail_completed
 from tests.transports.conftest import ok_completed as _ok_completed
 
@@ -38,7 +39,11 @@ def test_run_two_hops_ssh_to_host_then_limactl() -> None:
         assert "echo hi" in payload
 
 
+@requires_posix_shell
 def test_run_keeps_compound_guest_payload_inside_lima_bash_lc(tmp_path) -> None:  # noqa: ANN001
+    # Skips on Windows: it spawns a real POSIX ``bash -c`` to prove the compound
+    # guest payload stays inside lima's ``bash -lc`` and never reaches the host
+    # shell. That is guest-target shell semantics; Linux CI covers it.
     marker = tmp_path / "host-shell-leak"
     guest_command = f"printf guest && touch {shlex.quote(str(marker))}; printf done"
     t = RemoteLimaTransport(vm_name="my-vm", vm_host_ssh="host.example")
