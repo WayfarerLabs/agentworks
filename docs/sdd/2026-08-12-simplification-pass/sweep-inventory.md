@@ -144,11 +144,9 @@ build unless the groups cover every site exactly once.
 it now sits. `grown` and `shrunk` are a site group that changed size, with both counts. `retargeted`
 is the same test asserting the same type against a different needle, which is what a reworded
 message leaves behind. `gone` is the file present and the anchor not in it, `file-gone` is the file
-itself, and `line-anchored` is a line anchor, which resolves to nothing by construction. `carry`
-holds two trees and so adds two labels of its own, `found` and `moved`, plus four verdicts it gives
-a whole row. All six are defined in `carry`'s own docstring in
-[sweep_screen/reports.py](sweep_screen/reports.py), because they describe a comparison between two
-commits rather than anything a row says.
+itself, and `line-anchored` is a line anchor, which resolves to nothing by construction. Those are
+all of them: `carry` used to add its own labels for a comparison between two commits, and it retired
+with the fresh cut.
 
 **A site anchor beats a span anchor in the same function, in group 1 only.** Group 1's rows address
 `match=` sites, so where a function holds sites such a row cited, those sites are the whole claim: a
@@ -162,12 +160,13 @@ sites they were never about: 22 in group 5, 12 deferred and 5 in group 4.
 **A span anchor is deliberately coarser than the row.** It names the test, not the assertion inside
 it, so several rows can share one span anchor and column 3 is what tells them apart. That is the
 price of anchoring groups 3 to 6 to a name rather than a number, and it is the right price: a test
-name survives every edit above it, while the line does not. It also means a `carries` from `carry`
-on such a row says the test is still here, not that the assertion is.
+name survives every edit above it, while the line does not. It also means a resolved span says the
+test is still here, not that the assertion inside it is; only a site anchor says that.
 
 **A line anchor is a declaration that the row will go stale**, so the row says on itself why, in a
-`[line-anchored: <cause>]` marker `reanchor` writes into column 3. Four causes, and this map holds
-93 line anchors across them:
+`[line-anchored: <cause>]` marker in column 3, written by `reanchor` while that command existed and
+maintained by hand now that it does not. Four causes, and this map holds 93 line anchors across
+them:
 
 - **file gone** (66): the file did not exist at the tree the anchors were derived from. 50 of these
   are group 2's whole estate, deleted by the guide rework, and the other 16 sit in live groups
@@ -438,10 +437,10 @@ Two annotate a row that stays in it:
 
 And one is derived rather than judged:
 
-- **`[line-anchored: <cause>]`**: the row keeps literal lines, and this is why.
-  `sweep-screen.py reanchor` writes every one of them and nothing else does, so it is regenerated
-  rather than maintained and a hand edit to one is a defect the parser refuses. It leaves the
-  executable set exactly as it found it.
+- **`[line-anchored: <cause>]`**: the row keeps literal lines, and this is why. every one was
+  written by `sweep-screen.py reanchor` before that command retired with the fresh cut, so a row
+  that gains literal lines from here on carries its cause by hand. The parser still refuses a cause
+  outside the vocabulary. It leaves the executable set exactly as it found it.
 
 **`[dead]` and `[subtracted]` retired on 2026-09-06.** A row whose estate is gone is no longer in
 the ledger, so there is nothing left for `[dead]` to describe, and the subtraction `[subtracted]`
@@ -2235,3 +2234,15 @@ edits; everything else here is still a flag.
 - **The absorbed survey's file list was not exhaustive.**
   `capabilities/test_secret_backend_conformance.py` is the same family as `test_conformance.py`,
   larger, and unlisted.
+
+## The tooling that retired with this cut
+
+`carry` and `reanchor` are gone, and the `Tree(ref)` layer that let either read a historical commit
+went with them. Both existed for one job: turning a map's line numbers into identities, and moving
+an older map's evidence into a newer one. This cut leaves no line numbers, so there is nothing left
+to lift and nothing left to carry. `resolve` answers survival on its own now, by identity, against
+the tree in front of it.
+
+What remains is `estate`, `attribute`, `injected`, `screen`, `resolve`, `generate` and `totals`, and
+all seven read the working tree only. The commands that could read history are in git history, which
+is where a reader who needs to re-run the 2026-09-06 cut against its own basis will find them.

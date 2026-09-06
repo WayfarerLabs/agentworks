@@ -1,22 +1,22 @@
 """The reports: what the map claims, where its rows now sit, and what a fresh
 cut of the mechanical batch looks like.
 
-`attribute`, `resolve` and `carry` are one join at three granularities: an
-anchor from some map against a snapshot of some tree. `attribute` reads it
-site-first ("which row owns this site"), `resolve` anchor-first ("where does
-this row's anchor sit now"), and `carry` row-first against a second, older map
-("does this row's evidence still apply"). `totals` counts the row markup.
-`generate` and `reanchor` write instead of reporting.
+`attribute` and `resolve` are one join at two granularities: an anchor of the
+map against the tree. `attribute` reads it site-first ("which row owns this
+site") and `resolve` anchor-first ("where does this row's anchor sit now").
+`totals` counts the row markup, and `generate` writes instead of reporting.
+
+`carry` and `reanchor` were the third and fourth and retired with the fresh
+cut: both existed to move a line-anchored map's evidence into an
+identity-anchored one, and the cut leaves no line numbers to move.
 """
 
 from __future__ import annotations
 
-import re
 import sys
 from collections import Counter, defaultdict
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-from .estate import Site, Snapshot
 from .inventory import (
     GROUP_1,
     INVENTORY,
@@ -25,27 +25,21 @@ from .inventory import (
     Row,
     SiteAnchor,
     SpanAnchor,
-    join_cells,
     read_rows,
-    split_cells,
 )
-from .tree import Tree
 
-#: `carry`'s states for an anchor that still reaches what it was cut against.
-INTACT = frozenset({"found", "moved"})
+if TYPE_CHECKING:
+    from .estate import Site, Snapshot
 
 #: How the map titles its groups, so a `totals` run pastes into it unedited.
 GROUP_TITLES = {
     "Group 1": "1. Mechanical `match=` narrowing",
-    "Group 2": "2. Guide and migration topics",
     "Group 3": "3. Report lines and hints (four sub-batches)",
     "Group 4": "4. Schema, manifests, capabilities and platforms",
     "Group 5": "5. Authored-artifact form policing",
     "Group 6": "6. Source guards",
     "Deferred": "Deferred (held for R4)",
 }
-#: States that mean it reaches something, but not the same number of sites.
-SHIFTED = frozenset({"grown", "shrunk"})
 
 
 def claim_rows(rows: list[Row]) -> list[Row]:
@@ -167,122 +161,6 @@ def resolve(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
         print(f"#   {group}: {spelled}", file=sys.stderr)
     print(f"# totals: {' '.join(f'{k}={v}' for k, v in sorted(states.items()))}", file=sys.stderr)
     print(f"# anchors: {sum(states.values())} over {len(rows)} rows", file=sys.stderr)
-
-
-def _family(row_id: str) -> str:
-    for prefix in ("G1-C", "G1-M", "G1-I", "G1-K", "RB-"):
-        if row_id.startswith(prefix):
-            return prefix
-    return row_id.split("-")[0]
-
-
-def _verdict(outcomes: list[str]) -> str:
-    """One row's carry verdict from its anchors' states.
-
-    `carries` means every anchor that can settle reaches what it was cut
-    against. `partial` means some do and some do not, which includes a group
-    that grew or shrank, since the row's evidence was written against a
-    different number of assertions. `lost` means none.
-
-    `unchecked` is the honest answer where nothing could settle: a row with no
-    anchor at all, and a row whose only anchors are literal lines in a file that
-    still exists, which no tree can confirm or deny. Calling those `lost` said
-    the evidence had gone when all that had happened was that nobody looked.
-    """
-    settled = {o for o in outcomes if o != "line-anchored"}
-    if not outcomes or not settled:
-        return "unchecked"
-    if settled <= INTACT:
-        return "carries"
-    if settled & (INTACT | SHIFTED):
-        return "partial"
-    return "lost"
-
-
-def carry(snapshot: Snapshot, map_path: str, at: str) -> None:
-    """An older map's rows onto the current estate, by identity.
-
-    `at` must be the map's own basis, and for a line-anchored map this tool
-    cannot check that: its anchors are lifted from `at`, so they resolve there
-    by construction and a wrong ref produces a full run of plausible answers
-    rather than a complaint. The caller is trusted on it. For a map already in
-    the identity grammar the anchors are read rather than lifted, so an anchor
-    that resolves here and not at `at` is a real signal and carry refuses.
-
-    Two labels on top of what an anchor resolves to, since this holds two trees:
-    `found` is resolved at the same line as at `at`, `moved` is resolved at a
-    different one. And four verdicts for a whole row, from its anchors' states:
-
-    * `carries`, every anchor that can settle is found or moved;
-    * `partial`, some are and some are not, which includes a site group that
-      grew or shrank, because the row's evidence was written against a
-      different number of assertions;
-    * `lost`, none are;
-    * `unchecked`, none could settle: a row with no anchor, or one whose only
-      anchors are literal lines in a file that still exists, which no tree can
-      confirm or deny.
-    """
-    older = Snapshot(Tree(at))
-    rows = read_rows(map_path, older)
-    states: Counter[str] = Counter()
-    row_states: Counter[str] = Counter()
-    per_group: dict[str, Counter[str]] = defaultdict(Counter)
-    families: dict[str, Counter[str]] = defaultdict(Counter)
-    #: Group 1's own estate is `match=` under `cli/tests`; its website sites are
-    #: the same rows' `assertRaisesRegex` claims and are counted apart.
-    group_one_match: Counter[str] = Counter()
-    group_one_web: Counter[str] = Counter()
-
-    print("row\tgroup\tanchor\tstate\tat-source\tat-head")
-    for row in rows:
-        outcomes: list[str] = []
-        for anchor in row.anchors:
-            before = anchor.resolve(older)
-            after = anchor.resolve(snapshot)
-            state = after.state
-            if state == "resolved":
-                if before.state != "resolved":
-                    # A map lifted at `at` resolves at `at` by construction, so
-                    # this says the ref is not the tree those lines were read
-                    # from, and every "moved" in the run would be a guess.
-                    raise SystemExit(
-                        f"{row.id}: {anchor.path}::{anchor.render()} does not resolve at {at}"
-                        f" but does at {snapshot.tree}; {at} is not the tree this map's lines were read from"
-                    )
-                state = "found" if before.where == after.where else "moved"
-            outcomes.append(state)
-            states[state] += 1
-            per_group[row.group][state] += 1
-            if row.group == GROUP_1 and isinstance(anchor, SiteAnchor):
-                bucket = group_one_match if anchor.path.startswith("cli/tests/") else group_one_web
-                bucket[state] += 1
-            print(f"{row.id}\t{row.group}\t{anchor.path}::{anchor.render()}\t{state}\t{before.where}\t{after.where}")
-        verdict = _verdict(outcomes)
-        row_states[verdict] += 1
-        families[_family(row.id)][verdict] += 1
-        if "subtracted" in row.markers:
-            families["[subtracted]"][verdict] += 1
-
-    def spell(counter: Counter[str]) -> str:
-        return " ".join(f"{k}={v}" for k, v in sorted(counter.items()))
-
-    print(f"\n# carry {map_path} (lines read at {at}) onto {snapshot.tree}", file=sys.stderr)
-    print(f"# anchors: {spell(states)}", file=sys.stderr)
-    print(
-        f"# group-1 site anchors, `match=` under cli/tests: {spell(group_one_match)}"
-        f" (total {sum(group_one_match.values())})",
-        file=sys.stderr,
-    )
-    print(
-        f"# group-1 site anchors, regex family under website/tests: {spell(group_one_web)}"
-        f" (total {sum(group_one_web.values())})",
-        file=sys.stderr,
-    )
-    print(f"# rows: {spell(row_states)}", file=sys.stderr)
-    for name in sorted(families):
-        print(f"#   {name}: {spell(families[name])} (rows {sum(families[name].values())})", file=sys.stderr)
-    for group in sorted(per_group):
-        print(f"#   {group}: {spell(per_group[group])}", file=sys.stderr)
 
 
 def generate(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
@@ -413,57 +291,3 @@ def totals(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
         f"| {ledger['deferred']} | {ledger['ledger']} |"
     )
     print(f"\n# executable set: {ledger['live']} rows; ledger: {ledger['ledger']} rows", file=sys.stderr)
-
-
-def _with_cause(row: Row, shape: str, causes: Counter[str]) -> str:
-    """The shape cell, carrying `[line-anchored: <cause>]` when the row keeps
-    literal lines and carrying no such marker when it does not.
-
-    The cause comes off the anchor either way, since both grammars fill it from
-    the tree, so this rewrites rather than preserves and no marker in the file
-    is ever the authority for what it says.
-    """
-    stripped = re.sub(r"\*\*\[line-anchored:[^\]]*\]\*\*\s*", "", shape).strip()
-    lined = [a for a in row.anchors if isinstance(a, LineAnchor)]
-    if not lined:
-        return stripped
-    cause = ", ".join(sorted({a.cause for a in lined if a.cause}))
-    causes[cause] += 1
-    return f"**[line-anchored: {cause}]** {stripped}".strip()
-
-
-def reanchor(map_path: str, at: str) -> None:
-    """Rewrite a map's line anchors into identity anchors, in place.
-
-    One job: it reproduces the map's anchor cells from the legacy line-anchored
-    map, so every rewrite of them is reproducible rather than taken on trust,
-    and it retires with the fresh cut, when no line anchors remain to lift.
-
-    `at` is the commit the map's line numbers were measured against, and it is
-    required because reading them at any other tree names whatever function
-    happens to sit at that line now, which is the drift this grammar exists to
-    retire.
-    """
-    older = Snapshot(Tree(at))
-    rows = {r.source_line: r for r in read_rows(map_path, older)}
-    kinds: Counter[str] = Counter()
-    causes: Counter[str] = Counter()
-    out: list[str] = []
-    for number, line in enumerate(Path(map_path).read_text(encoding="utf-8").splitlines(), start=1):
-        row = rows.get(number)
-        if row is None:
-            out.append(line)
-            continue
-        cells = split_cells(line)
-        cells[1] = row.render_cell()
-        cells[2] = _with_cause(row, cells[2], causes)
-        out.append(join_cells(cells))
-        for anchor in row.anchors:
-            kinds[type(anchor).__name__] += 1
-    Path(map_path).write_text("\n".join(out) + "\n", encoding="utf-8")
-    print(f"# rewrote {len(rows)} rows in {map_path} against {at}", file=sys.stderr)
-    for name, count in sorted(kinds.items()):
-        print(f"#   {name}: {count}", file=sys.stderr)
-    print(f"# line-anchored rows by cause: {sum(causes.values())}", file=sys.stderr)
-    for name in sorted(causes):
-        print(f"#   {name}: {causes[name]}", file=sys.stderr)

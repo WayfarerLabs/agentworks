@@ -13,10 +13,8 @@ serves rather than under `cli/` or `scripts/`. The implementation is the
     injected   sites whose needle is a marker their own test wrote
     screen     whether the asserted type discriminates, callee side
     resolve    every anchor in the map, at its current line
-    carry      an older map's rows onto the current estate, by identity
     generate   the group-1 mechanical batch as the estate minus the claims
     totals     the row markup, counted, which the Totals section reports
-    reanchor   rewrite a map's line anchors into identities, in place
 
 Run from the repository root with Python 3.12 or newer, which this enforces
 rather than documents: 3.11 cannot parse the PEP 701 f-strings some estate
@@ -27,12 +25,9 @@ is an assertion whose arguments are splatted.
 
     python3 docs/sdd/2026-08-12-simplification-pass/sweep-screen.py estate
     python3 docs/sdd/2026-08-12-simplification-pass/sweep-screen.py generate
-    python3 docs/sdd/2026-08-12-simplification-pass/sweep-screen.py carry OLD.md --at REF
-    python3 docs/sdd/2026-08-12-simplification-pass/sweep-screen.py reanchor MAP.md --at REF
 
-Every command reads the working tree unless it names a commit, and every one
-writes its table to stdout and its totals to stderr, so a run can be piped
-without losing the count.
+Every command reads the working tree, and every one writes its table to stdout
+and its totals to stderr, so a run can be piped without losing the count.
 """
 
 from __future__ import annotations
@@ -53,24 +48,12 @@ from sweep_screen.tree import Tree
 #: refusal rather than a warning.
 MIN_PYTHON = (3, 12)
 
-#: The commit the ported 2026-08-19 map's line numbers were measured against.
-#: `carry` defaults to it because that map is the only one it has been pointed
-#: at; `reanchor` requires it, because a rewrite against the wrong tree writes
-#: wrong names into every row.
-CARRY_BASIS = "426cccae"
-
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("estate", "attribute", "injected", "screen", "resolve", "generate", "totals"):
         sub.add_parser(name)
-    one = sub.add_parser("carry")
-    one.add_argument("map", nargs="?", default=INVENTORY)
-    one.add_argument("--at", default=CARRY_BASIS, help="the commit that map's line numbers were read at")
-    two = sub.add_parser("reanchor")
-    two.add_argument("map", help="the map to rewrite in place")
-    two.add_argument("--at", required=True, help="the commit that map's line numbers were read at")
     return parser
 
 
@@ -82,10 +65,6 @@ def main(argv: list[str] | None = None) -> None:
     if not Path(INVENTORY).exists():
         raise SystemExit("run this from the repository root")
     args = build_parser().parse_args(argv)
-
-    if args.command == "reanchor":
-        reports.reanchor(args.map, args.at)
-        return
     here = Snapshot(Tree())
     if args.command == "estate":
         for site in here.sites:
@@ -111,8 +90,6 @@ def main(argv: list[str] | None = None) -> None:
         screen(here.tree)
     elif args.command == "resolve":
         reports.resolve(here)
-    elif args.command == "carry":
-        reports.carry(here, args.map, args.at)
     elif args.command == "generate":
         reports.generate(here)
     elif args.command == "totals":

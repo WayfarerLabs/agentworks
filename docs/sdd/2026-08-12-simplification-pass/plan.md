@@ -199,29 +199,33 @@ shares no files with the website work; it waits on the sweep instead, per group 
       step for every group's delete rows.
 
       **Re-anchored on 2026-09-06**, so a row keys what it addresses by identity rather than by
-      line; the fresh cut itself waits on #747. Three things it owes, all recorded in the inventory
-      rather than here:
+      line, and then **cut fresh at `c310d05b`** once #747 merged. The map is a new document: 1,157
+      rows, 1,132 executable, over five groups, every count derived from the row markup and every
+      anchor resolving at the basis. What the cut did is in the inventory's Basis and Totals
+      sections rather than here, and this is the whole of what it owed:
 
-      - **Re-derive from scratch every non-group-1 row in the twenty files the two-basis measurement
-        named**, which is 128 of the 144 rows the two candidate bases disagree about; the other 16
-        are group 1's, whose basis is known. Those rows were lifted from line numbers whose tree is
-        not known. Re-deriving is the recourse rather than auditing, because 125 of the 144 resolve
-        cleanly today and no tree can say whether they resolve to the right test.
-      - **Re-decide the twelve claim anchors `generate` refuses on**, over nine judgment rows
-        (L-013, L-018, L-026, G1-M03, G1-M04, G1-K04, G1-K14, G1-I02, G1-I06). Each carries evidence
-        that no longer reaches an assertion that exists, so the cut re-decides rather than carries
-        it, and `generate` will not emit a batch until it does.
-      - **Re-mark the twenty rows whose files are gone.** `[dead]` was applied at `426cccae` and not
-        re-derived since, so five more files have gone; seventeen of the twenty still read as live
-        and three are already `[subtracted]`. The
-        inventory lists them by file.
+      - **Four populations re-derived**: the 20 mixed-basis files (128 non-group-1 rows), the 102
+        unsurveyed files (46 rows over 30 of them, the other 72 accounted for), the 8 files whose
+        anchors drifted between `426cccae` and the basis (10 rows), and the rows whose estate is
+        gone (157 dropped, plus 12 more the re-derivation retired).
+      - **The 2026-08-19 subtraction reversed**, its premise having failed: 89 rows returned to
+        their groups with their dispositions and the 34 deletes among them were re-screened.
+        instance-model's seven files are back in this sweep's scope and the sequencing against its
+        open live-validation gate is an operator question, recorded in the inventory.
+      - **Group 1 regenerated** at the basis, and the twelve stale claim anchors decided. Nine
+        of the ten rows behind them left with the ledger, which is their answer; L-026 keeps its
+        delete on the twelve anchors that remain.
+      - **`attribute` and `generate` both exit 0**, which is the acceptance condition, and every one
+        of the map's 2,244 anchors resolves or is line-anchored.
 
-- [ ] Retire `reanchor` and `carry`, with the `Tree(ref)` layer under them, in the PR that lands the
+- [x] Retire `reanchor` and `carry`, with the `Tree(ref)` layer under them, in the PR that lands the
       fresh cut. Both exist to move the 2026-08-19 map's evidence into that cut and neither has a
       job after it: `reanchor` lifts line numbers, and the cut leaves none to lift; `carry` answers
       whether an older map's row survives, and once the cut is the map, `resolve` answers survival
       by identity on its own. Done when: the fresh cut is committed, neither command remains, and
-      reading a tree at a ref is gone with them.
+      reading a tree at a ref is gone with them. **Done, 2026-09-06**: both commands gone, `Tree`
+      reads the working tree only, and the seven that remain (`estate`, `attribute`, `injected`,
+      `screen`, `resolve`, `generate`, `totals`) all pass ruff, ruff format and mypy --strict.
 
       **Three corrections to this item's own enumeration, verified at HEAD 2026-08-16.** Two of the
       files it names for the sweep no longer exist: `test_schema_adapter.py` and

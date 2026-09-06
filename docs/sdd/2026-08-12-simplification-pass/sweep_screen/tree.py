@@ -1,10 +1,9 @@
-"""Reading first-party source, either from the working tree or at a git ref.
+"""Reading first-party source from the working tree.
 
-Every command here answers a question about one snapshot of the repository.
-Most ask it of HEAD; `carry` and `reanchor` ask it of the commit an older map's
-line numbers were measured at, because a line number only means something
-against the tree it was read from. One class serves both so there is a single
-spelling of "parse this file" rather than one per point in history.
+Every command here answers a question about the tree in front of it. Reading a
+historical commit was needed only while the map still carried line numbers, to
+turn them into identities; the fresh cut leaves none, so that layer retired
+with `carry` and `reanchor`.
 """
 
 from __future__ import annotations
@@ -19,9 +18,7 @@ WEB_ROOT = "website/tests"
 
 
 class Tree:
-    """One snapshot of the repository, listed and parsed on demand.
-
-    `ref` is a git commit-ish, or None for the working tree.
+    """The working tree, listed and parsed on demand.
 
     A file that is listed but does not parse is fatal, not skipped. Skipping
     would silently shrink the estate: the file's sites would not exist to be
@@ -29,20 +26,15 @@ class Tree:
     would pass over a file nobody had looked at.
     """
 
-    def __init__(self, ref: str | None = None) -> None:
-        self.ref = ref
+    def __init__(self) -> None:
         self._parsed: dict[str, ast.Module] = {}
         self._listed: dict[tuple[str, ...], list[str]] = {}
-        if ref is not None:
-            done = subprocess.run(["git", "rev-parse", "--verify", f"{ref}^{{commit}}"], capture_output=True, text=True)
-            if done.returncode != 0:
-                raise SystemExit(f"{ref!r} is not a commit in this repository")
 
     def __str__(self) -> str:
-        return self.ref or "the working tree"
+        return "the working tree"
 
     def files(self, *roots: str) -> list[str]:
-        """Every `.py` file under `roots` in this snapshot, in git's order.
+        """Every `.py` file under `roots`, sorted by path.
 
         The working tree includes files git does not track yet, because a test
         file added but not staged holds real sites and an estate that cannot see
@@ -51,10 +43,7 @@ class Tree:
         whitespace cannot split into two.
         """
         if roots not in self._listed:
-            if self.ref is None:
-                command = ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *roots]
-            else:
-                command = ["git", "ls-tree", "-r", "-z", "--name-only", self.ref, "--", *roots]
+            command = ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *roots]
             done = subprocess.run(command, capture_output=True, text=True)
             if done.returncode != 0:
                 raise SystemExit(f"cannot list {', '.join(roots)} at {self}: {done.stderr.strip()}")
@@ -63,20 +52,17 @@ class Tree:
         return self._listed[roots]
 
     def read(self, path: str) -> str | None:
-        """The file's text, or None when it does not exist in this snapshot."""
-        if self.ref is None:
-            try:
-                return Path(path).read_text(encoding="utf-8")
-            except OSError:
-                return None
-        done = subprocess.run(["git", "show", f"{self.ref}:{path}"], capture_output=True, text=True)
-        return done.stdout if done.returncode == 0 else None
+        """The file's text, or None when it does not exist."""
+        try:
+            return Path(path).read_text(encoding="utf-8")
+        except OSError:
+            return None
 
     def exists(self, path: str) -> bool:
         return self.read(path) is not None
 
     def parse(self, path: str) -> ast.Module:
-        """Parse one file in this snapshot, or stop.
+        """Parse one file, or stop.
 
         See the class docstring for why an unparsed file is fatal rather than
         skipped.
@@ -84,7 +70,7 @@ class Tree:
         if path not in self._parsed:
             text = self.read(path)
             if text is None:
-                raise SystemExit(f"{path}: absent from {self}, so it cannot be parsed")
+                raise SystemExit(f"{path}: absent from the working tree, so it cannot be parsed")
             try:
                 self._parsed[path] = ast.parse(text, path)
             except SyntaxError as exc:
