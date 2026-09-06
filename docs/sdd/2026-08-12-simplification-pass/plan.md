@@ -199,7 +199,18 @@ shares no files with the website work; it waits on the sweep instead, per group 
       step for every group's delete rows.
 
       **Re-anchored on 2026-09-06**, so a row keys what it addresses by identity rather than by
-      line; the fresh cut itself waits on #747.
+      line; the fresh cut itself waits on #747. Two things it owes, both recorded in the inventory
+      rather than here:
+
+      - **Re-derive from scratch every non-group-1 row in the twenty files the two-basis measurement
+        named.** Those rows were lifted from line numbers whose tree is not known, and 144 of them
+        name a different test depending on which candidate basis they are read at. Re-deriving is
+        the recourse rather than auditing, because 125 of the 144 resolve cleanly today and no tree
+        can say whether they resolve to the right test. Group 1 is unaffected; its basis is known.
+      - **Re-decide the twelve claim anchors `generate` refuses on**, over nine judgment rows
+        (L-013, L-018, L-026, G1-M03, G1-M04, G1-K04, G1-K14, G1-I02, G1-I06). Each carries evidence
+        that no longer reaches an assertion that exists, so the cut re-decides rather than carries
+        it, and `generate` will not emit a batch until it does.
 
 - [ ] Retire `reanchor` and `carry`, with the `Tree(ref)` layer under them, in the PR that lands the
       fresh cut. Both exist to move the 2026-08-19 map's evidence into that cut and neither has a
