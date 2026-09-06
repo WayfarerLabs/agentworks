@@ -42,7 +42,12 @@ CITED_FILE = re.compile(r"([A-Za-z0-9_./+-]*[A-Za-z0-9_+-]\.(?:py|mjs)):\d+(?:-\
 #: `G1-K14` are: reading only the three-digit form left 55 live ids and 78
 #: citations of them invisible to the check. `L-1` in a sentence about a visa
 #: is still not a citation, which is what the digit floor is for.
-CITED_ID = re.compile(r"\b(?:[A-F]|L|RB|G1)-(?:[A-Z]\d{2,3}|\d{3})[a-z]?\b")
+#: What a row id looks like, written once because three patterns need it and
+#: they drifted apart when they did not: a lettered family like `G1-I02` was
+#: invisible to two of them while the third read it.
+ID = r"(?:[A-F]|L|RB|G1)-(?:[A-Z]\d{2,3}|\d{3})[a-z]?"
+
+CITED_ID = re.compile(rf"\b{ID}\b")
 
 #: A URL, blanked before ids are read for the same reason code spans are: the
 #: digits in `https://example/G1-999` are a path, not a citation.
@@ -81,14 +86,14 @@ RETIRED_HEADING = "## Rows this cut retired"
 #: optional split-row suffix, which is what `D-169a` is; the separator line's
 #: dashes are not an id and this is what tells them apart. The optional
 #: qualification is what separates the two namespaces this table holds.
-RETIRED_ROW = re.compile(r"^\| ((?:[A-F]|L|RB|G1)-[A-Z]?\d{3}[a-z]?)( \(2026-08-19 map\))? *\|")
+RETIRED_ROW = re.compile(rf"^\| ({ID})( \(2026-08-19 map\))? *\|")
 
 #: A citation that says which map's numbering it means. The 2026-08-19 map
 #: numbered its mechanical batch positionally, so ids it used were handed to
 #: different rows when this cut regenerated: `G1-013` names one row there and
 #: another here. A citation of the old one says so, and resolves only against
 #: the ids that map retired.
-QUALIFIED = re.compile(r"\b((?:[A-F]|L|RB|G1)-(?:[A-Z]\d{2,3}|\d{3})[a-z]?) \(2026-08-19 map\)")
+QUALIFIED = re.compile(rf"\b({ID}) \(2026-08-19 map\)")
 ACCOUNTED = re.compile(r"^\| `([^`]+)` *\|")
 
 #: The one section whose rows `generate` emits. Everything else in group 1 is a
