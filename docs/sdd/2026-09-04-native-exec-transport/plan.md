@@ -99,9 +99,10 @@ capability-appropriate live validation under the integration-testing process.
 - [x] Complete up to three authorized published feedback/fix rounds, or stop sooner when one full
       batch produces no material changes.
 - [x] Remove `review-requested` and promote the artifact PR to ready when design converges.
-- [ ] Complete the operator-requested post-ready review of the three requirement and architecture
-      threads, then publish one exact-head feedback/fix handoff.
-- [ ] Promote the artifact PR again when the reopened review converges.
+- [x] Incorporate the operator-authorized post-ready review of the three requirement and
+      architecture threads and obtain clean exact-head private reviews.
+- [ ] Publish the exact-head feedback/fix handoff, complete the remaining authorized review, and
+      promote the artifact PR again when the reopened review converges.
 
 ### Phase 0 definition of done
 
