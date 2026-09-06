@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 from .inventory import (
     ACCOUNTED,
+    CITED_FILE,
     CITED_ID,
     GROUP_1,
     INVENTORY,
@@ -89,7 +90,7 @@ def section_ids(map_path: str, heading: str, pattern: re.Pattern[str]) -> set[st
     return found
 
 
-def check_map(rows: list[Row], retired: set[str]) -> list[str]:
+def check_map(rows: list[Row], retired: set[str], files: set[str]) -> list[str]:
     """Structural faults in the map itself, as a list of complaints.
 
     These are the properties the map's prose used to promise a reader and
@@ -103,10 +104,17 @@ def check_map(rows: list[Row], retired: set[str]) -> list[str]:
     known = set(ids) | retired
     for row_id in sorted({i for i in ids if ids.count(i) > 1}):
         faults.append(f"duplicate row id {row_id}")
+    checked = 0
     for row in rows:
-        cited = {c for cell in (row.shape, row.disposition, row.justification) for c in CITED_ID.findall(cell)}
+        cells = (row.shape, row.disposition, row.justification)
+        cited = {c for cell in cells for c in CITED_ID.findall(cell)}
         for name in sorted(cited - known - {row.id}):
             faults.append(f"{row.id} cites {name}, which is not a row in this map")
+        paths = {p for cell in cells for p in CITED_FILE.findall(cell)}
+        checked += len(paths)
+        for path in sorted(paths - files):
+            faults.append(f"{row.id} cites {path}, which is not a file in this tree")
+    print(f"# file citations checked: {checked}", file=sys.stderr)
     return faults
 
 
@@ -384,7 +392,7 @@ def totals(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
     )
     missing = unrowed(rows, snapshot)
     retired = section_ids(map_path, RETIRED_HEADING, RETIRED_ROW)
-    faults = check_map(rows, retired) + check_accounting(map_path, missing)
+    faults = check_map(rows, retired, snapshot.tree.path_suffixes()) + check_accounting(map_path, missing)
     print(f"\n# structural faults: {len(faults)}", file=sys.stderr)
     for fault in faults:
         print(f"#   {fault}", file=sys.stderr)

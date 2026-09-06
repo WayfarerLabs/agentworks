@@ -57,6 +57,22 @@ class Tree:
         """
         return [f for f in self._list(roots) if f.endswith(".py")]
 
+    def path_suffixes(self) -> set[str]:
+        """Every way a file in this tree can be named by a trailing path.
+
+        A citation in the map names a file at whatever depth reads clearly, so
+        `errors.py`, `agentworks/errors.py` and the full path all have to
+        resolve to the same file. Every suffix of every tracked path is that
+        set, and membership is the whole question: this answers whether a cited
+        file exists, not which one it is.
+        """
+        out: set[str] = set()
+        for path in self._list(()):
+            parts = path.split("/")
+            for start in range(len(parts)):
+                out.add("/".join(parts[start:]))
+        return out
+
     def test_files(self) -> list[str]:
         """Every test file the sweep accounts for, sorted by path.
 

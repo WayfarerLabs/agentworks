@@ -31,6 +31,19 @@ ROW_ID = re.compile(r"(?:[A-F]|L|RB|G1)-[A-Z]?\d{1,3}[a-z]?$")
 #: A row id as a justification cites one. It admits the `P2-`, `P3-` and
 #: `P4-` shapes the part cuts used, which are exactly the citations that stop
 #: resolving when those files are folded in and deleted.
+#: A file cited with a line or a line range, in any cell. The map cites paths
+#: at whatever depth reads clearly, from a bare basename to a full repository
+#: path, so the check behind this resolves a citation as a path SUFFIX rather
+#: than demanding one spelling. What it answers is only whether the file is
+#: still there; a line number inside it is not checked, because line numbers in
+#: a justification are a reading aid and the anchors are what resolve. A match
+#: opening on a quote is NOT a citation: it is a string literal the row is
+#: quoting from the test, like the rendered `"a.yaml:2"` location a CLI prints,
+#: which names no file in this tree and never did.
+CITED_FILE = re.compile(
+    r"(?<![\w./\"'])([A-Za-z0-9_./+-]*[A-Za-z0-9_+-]\.(?:py|mjs|md|toml|ya?ml|jsonc?|sh|cfg|ini)):\d+(?:-\d+)?"
+)
+
 CITED_ID = re.compile(r"\b(?:[A-F]|L|RB|G1|P[234])-[A-Z]?\d{1,3}[a-z]?\b")
 
 PATH_RE = re.compile(r"((?:cli|website)/[A-Za-z0-9_./-]+?\.(?:py|mjs))")
