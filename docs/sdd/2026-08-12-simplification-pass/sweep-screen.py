@@ -103,7 +103,15 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "estate":
         for site in here.sites:
             print(f"{site.identity}\t{site.where}\t{site.kind}\t{site.needle}")
-        print(f"\n# {len(here.sites)} sites, each with a distinct identity", file=sys.stderr)
+        ties = here.ties
+        print(
+            f"\n# {len(here.sites)} sites over {len(here.by_identity)} identities;"
+            f" {len(ties)} identities name more than one site,"
+            f" covering {sum(g.multiplicity for g in ties)}",
+            file=sys.stderr,
+        )
+        for group in ties:
+            print(f"#   x{group.multiplicity} {group.identity} at {group.where}", file=sys.stderr)
     elif args.command == "attribute":
         reports.attribute(here)
     elif args.command == "injected":

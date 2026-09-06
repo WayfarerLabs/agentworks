@@ -2,8 +2,11 @@
 
 The map owns the grammar; its "Reading this file mechanically" section is where
 a reader goes for what a row means. What the code needs is only this: an
-identity is five fields, `path::qualname::Type::digest#ordinal`, and only the
-last is a position, among the sites of one test that tie on the other four.
+identity is four fields, `path::qualname::Type::digest`, none of them a
+position, and it names a GROUP of sites rather than one, because assertions in
+one test that tie on all four are indistinguishable in evidence and a row's
+disposition applies to all of them alike. The group's size is its multiplicity,
+and a change in it is reported rather than silently reattached.
 """
 
 from __future__ import annotations
@@ -35,7 +38,7 @@ def digest_of(needle: str) -> str:
 
 @dataclass(frozen=True, order=True)
 class Identity:
-    """What a site is, independent of where it sits.
+    """What a group of indistinguishable sites is, independent of where it sits.
 
     `qualname` is the enclosing function dotted through any class or nesting.
     That is a dotted path, not pytest's `::` node-id spelling, which the map's
@@ -46,12 +49,11 @@ class Identity:
     qualname: str
     type_name: str
     digest: str
-    ordinal: int
 
     @property
     def tail(self) -> str:
         """The identity without its path, as a row cell writes it."""
-        return f"{self.qualname}::{self.type_name}::{self.digest}#{self.ordinal}"
+        return f"{self.qualname}::{self.type_name}::{self.digest}"
 
     def __str__(self) -> str:
         return f"{self.path}::{self.tail}"
@@ -74,6 +76,22 @@ class Site:
     @property
     def where(self) -> str:
         return f"{self.identity.path}:{self.line}"
+
+
+@dataclass(frozen=True)
+class SiteGroup:
+    """Every site of one identity, in source order."""
+
+    identity: Identity
+    sites: tuple[Site, ...]
+
+    @property
+    def multiplicity(self) -> int:
+        return len(self.sites)
+
+    @property
+    def where(self) -> str:
+        return f"{self.identity.path}:{','.join(str(s.line) for s in self.sites)}"
 
 
 @dataclass(frozen=True, order=True)
@@ -154,13 +172,10 @@ def sites_in(tree: Tree, path: str) -> list[Site]:
             walk(child, qualname)
 
     walk(tree.parse(path), "")
-    seen: dict[tuple[str, str, str], int] = {}
-    sites: list[Site] = []
-    for line, col, qualname, type_name, needle, kind in sorted(raw):
-        key = (qualname, type_name, digest_of(needle))
-        seen[key] = seen.get(key, 0) + 1
-        sites.append(Site(Identity(path, *key, seen[key]), line, col, kind, needle))
-    return sites
+    return [
+        Site(Identity(path, qualname, type_name, digest_of(needle)), line, col, kind, needle)
+        for line, col, qualname, type_name, needle, kind in sorted(raw)
+    ]
 
 
 class Snapshot:
@@ -179,12 +194,25 @@ class Snapshot:
             self.sites.extend(s for s in sites_in(tree, path) if s.kind != "match=")
         self.sites.sort(key=lambda s: (s.path, s.line, s.col))
 
-        self.by_identity = {s.identity: s for s in self.sites}
-        # Every anchor in the map keys on this being one-to-one, so it is
-        # checked here rather than asserted in the map's prose.
-        if len(self.by_identity) != len(self.sites):
-            raise SystemExit(f"identity is not unique at {tree}")
+        grouped: dict[Identity, list[Site]] = {}
+        for site in self.sites:
+            grouped.setdefault(site.identity, []).append(site)
+        self.by_identity = {i: SiteGroup(i, tuple(s)) for i, s in grouped.items()}
+        # Every anchor in the map keys on the groups partitioning the estate, so
+        # it is checked here rather than asserted in the map's prose.
+        counted = sum(g.multiplicity for g in self.by_identity.values())
+        if counted != len(self.sites):
+            raise SystemExit(f"site groups do not partition the estate at {tree}: {counted} of {len(self.sites)}")
         self._functions: dict[str, list[Function] | None] = {}
+
+    @property
+    def ties(self) -> list[SiteGroup]:
+        """Identities naming more than one site, which is the population the
+        multiplicity exists for."""
+        return sorted(
+            (g for g in self.by_identity.values() if g.multiplicity > 1),
+            key=lambda g: g.identity,
+        )
 
     def functions(self, path: str) -> list[Function] | None:
         """The function index of one file, or None when the file is gone."""
@@ -209,13 +237,14 @@ class Snapshot:
     def site_at(self, path: str, line: int) -> Site | None:
         return next((s for s in self.sites if s.path == path and s.line == line), None)
 
-    def near(self, identity: Identity) -> list[Site]:
-        """Sites in the same test asserting the same type, which is where a
-        reworded message leaves its assertion."""
+    def near(self, identity: Identity) -> list[SiteGroup]:
+        """Groups in the same test asserting the same type against a DIFFERENT
+        needle, which is what a reworded message leaves behind."""
         return [
-            s
-            for s in self.sites
-            if s.identity.path == identity.path
-            and s.identity.qualname == identity.qualname
-            and s.identity.type_name == identity.type_name
+            g
+            for g in self.by_identity.values()
+            if g.identity.path == identity.path
+            and g.identity.qualname == identity.qualname
+            and g.identity.type_name == identity.type_name
+            and g.identity.digest != identity.digest
         ]

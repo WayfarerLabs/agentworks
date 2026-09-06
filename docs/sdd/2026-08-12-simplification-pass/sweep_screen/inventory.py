@@ -4,8 +4,9 @@ resolves to a place in a given tree.
 The map owns the grammar; its "Reading this file mechanically" section is the
 prose, and this module is the implementation it points at. What the code needs
 is only this. A cell is one or more backticked anchor groups, each `path` or
-`path::tail,tail`; a tail is `qualname::Type::digest#n` for one site, a
-bare `qualname` for a test function, or `L120-124` for literal lines. Two grammars are read: the current
+`path::tail,tail`; a tail is `qualname::Type::digest` for a site group, with
+`*n` where the group holds more than one site, a bare `qualname` for a test
+function, or `L120-124` for literal lines. Two grammars are read: the current
 one, and the line-anchored one every earlier cut used, so `carry` and
 `reanchor` can take an older map as input. Nothing writes line anchors any more
 except a row that has no name to reach for.
@@ -75,21 +76,30 @@ class Anchor:
 
 @dataclass(frozen=True)
 class SiteAnchor(Anchor):
-    """One assertion site, keyed on what it asserts."""
+    """One group of indistinguishable assertion sites, keyed on what it asserts.
+
+    `multiplicity` is what the group held when the row was cut. A group that has
+    since grown or shrunk resolves loudly rather than quietly covering a
+    different number of assertions than the row was written against.
+    """
 
     identity: Identity
+    multiplicity: int = 1
 
     @property
     def path(self) -> str:  # type: ignore[override]
         return self.identity.path
 
     def render(self) -> str:
-        return self.identity.tail
+        return self.identity.tail if self.multiplicity == 1 else f"{self.identity.tail}*{self.multiplicity}"
 
     def resolve(self, snapshot: Snapshot) -> Resolution:
-        site = snapshot.by_identity.get(self.identity)
-        if site is not None:
-            return Resolution("resolved", site.where)
+        group = snapshot.by_identity.get(self.identity)
+        if group is not None:
+            if group.multiplicity == self.multiplicity:
+                return Resolution("resolved", group.where)
+            state = "grown" if group.multiplicity > self.multiplicity else "shrunk"
+            return Resolution(state, group.where, f"{self.multiplicity} site(s) when cut, {group.multiplicity} now")
         if not snapshot.tree.exists(self.identity.path):
             return Resolution("file-gone", "")
         # A reworded message leaves the assertion in place matching something
@@ -97,7 +107,7 @@ class SiteAnchor(Anchor):
         # deleted test.
         near = snapshot.near(self.identity)
         if near:
-            spelled = ", ".join(f"{s.where} ({s.identity.digest})" for s in near)
+            spelled = ", ".join(f"{g.where} ({g.identity.digest})" for g in near)
             return Resolution("retargeted", near[0].where, f"same test and type, other needle: {spelled}")
         return Resolution("gone", "")
 
@@ -265,10 +275,10 @@ def _parse_identity_anchors(path: str, tail: str, where: str) -> list[Anchor]:
         if len(parts) != 3:
             raise RowError(where, f"anchor {token!r} has {len(parts)} `::` fields; a site anchor has three")
         qualname, type_name, rest = parts
-        digest, _, ordinal = rest.partition("#")
-        if ordinal and not ordinal.isdigit():
-            raise RowError(where, f"anchor {token!r} has a non-numeric ordinal {ordinal!r}")
-        anchors.append(SiteAnchor(Identity(path, qualname, type_name, digest, int(ordinal or 1))))
+        digest, _, count = rest.partition("*")
+        if count and not count.isdigit():
+            raise RowError(where, f"anchor {token!r} has a non-numeric multiplicity {count!r}")
+        anchors.append(SiteAnchor(Identity(path, qualname, type_name, digest), int(count or 1)))
     if lines:
         anchors.append(LineAnchor(path, tuple(lines)))
     return anchors
@@ -328,7 +338,8 @@ def _lift(path: str, spans: list[tuple[int, int]], snapshot: Snapshot, *, sites_
         if not identities or not sites_only:
             anchors.append(SpanAnchor(path, qualname))
         for identity in identities:
-            anchors.append(SiteAnchor(identity))
+            group = snapshot.by_identity[identity]
+            anchors.append(SiteAnchor(identity, group.multiplicity))
     if orphans:
         anchors.append(LineAnchor(path, tuple(orphans)))
     return anchors or [FileAnchor(path)]
