@@ -1,13 +1,15 @@
 # Harness Scope Framework: Functional Requirements
 
-- Status: Seed, awaiting an effort lead
+- Status: Active, architecture under review
 - Date: 2026-09-06
 - Saga: `docs/sdd/2026-08-04-next-steps/` (wave 4)
 - Governing inputs: `scope-participation-contract.md` (the settled design), `target-state.md`
   section "Harness scopes (destination 4)", `capability-descriptor-contract.md`, and
   `message-2026-08-16-capability-config-shape.md`
-- Authorship: seeded by the saga lead per the `saga-lead` skill. The effort lead owns the HLA, plan,
-  and LLDs, and owns this document's revisions once the effort is picked up
+- Ownership: the operator owns these requirements. The effort lead owns the HLA, plan, and LLDs and
+  maintains explicitly authorized FRD revisions. The saga lead seeded this document.
+- Artifact refinement: operator-authorized 2026-09-06; see the ruling below. The FRD amendment and
+  corresponding HLA revision are reviewed together.
 
 ## Why this exists
 
@@ -62,7 +64,14 @@ Admin and agent collapse into one facet because a harness does the same thing fo
 user. They stay separate scopes because their lifecycles and owning resources differ. The
 consequence to hold onto is that **an integration author never writes the word admin or agent**:
 they implement `user_init` and read the invocation context to learn which user they were called for.
-Only core knows a scope.
+Core owns the scope mapping and lifecycle dispatch. Origin metadata may describe a scope without
+making it an integration API choice: integration code uses one user method for either identity.
+
+An artifact originates at a scope and retains that owning resource and producer throughout delivery.
+A facet identifies the integration API invoked to handle it, not a new location where it originated.
+The corresponding origin facet is derived from core's mapping rather than independently authored.
+Actual resource relationships govern delivery: agent and workspace are separate ancestors of a
+session, not scopes nested inside one another.
 
 The practical test: if the question is _when_ something runs, it is a scope question and the answer
 is core's. If the question is _what an integration implements or configures_, it is a facet question
@@ -71,10 +80,10 @@ and the answer is the capability's.
 ## Who this is for
 
 - **Operators**, who select integrations on the template that owns each resource and attach
-  configuration there, and who expect VM, agent, and workspace setup to converge on reinit rather
-  than accumulate drift.
+  configuration there, and who expect VM and agent reinit to converge and workspace creation to
+  materialize its configured artifacts without accumulating drift.
 - **Integration authors** (first-party today; external plugins are wave 8), who implement only the
-  scopes their harness needs and get no-op defaults for the rest.
+  setup facets their harness needs and get no-op defaults that defer artifacts for the rest.
 - **Core maintainers**, who need the harness-specific knowledge out of core surfaces.
 
 ## Functional requirements
@@ -83,8 +92,9 @@ and the answer is the capability's.
 may emit env and agent artifacts. Features run next in template declaration order, each receiving
 env-to-date (including env inherited from broader scopes, which core assembles and delivers) and
 each able to emit env and agent artifacts alongside its own side effects. Enabled harness
-integrations run last, receiving all env and agent artifacts for the scope. Reinit reruns the same
-pipeline idempotently.
+integrations run last, receiving the completed env and local artifacts plus applicable inherited
+artifacts still deferred for that integration, as specified in R7. Reinit reruns the same pipeline
+idempotently.
 
 **R2. The integration API carries one init method per facet.** `vm_init`, `user_init`, and
 `workspace_init` (names indicative) join the existing session surface on the one registered
@@ -92,9 +102,11 @@ integration API. `user_init` is a single surface invoked for the admin user duri
 reinit, and for each agent during agent init and reinit; the invocation context says which user, and
 one method body serves both.
 
-**R3. Unimplemented scopes are no-ops, not errors.** The base class provides no-op defaults and an
-integration implements only what it supports. This supersedes the originating perspective's
-absence-means-unsupported rule: review and testing catch a mistyped override.
+**R3. Unimplemented setup facets are no-ops, not errors.** The base class provides no-op defaults
+that defer every input artifact. An integration implements the setup facets it needs; the existing
+session launch contract remains required. There is no setup failure merely because a facet defers an
+artifact. R7's final session-facet enforcement still applies. This supersedes the originating
+perspective's absence-means-unsupported rule: review and testing catch a mistyped override.
 
 **R4. Integrations declare config per facet.** Config follows the same four facets the methods do,
 for the same reason: a capability declares a fixed set of facet configs exactly as it declares a
@@ -112,22 +124,52 @@ capability config is validated: by core against capability-provided schema, one 
 the graph walk reaches each resource. Per-facet config is a harness-integration specialty, not a new
 framework mechanism.
 
-**R6. Env and agent artifacts are the pipeline's two currencies.** Their schemas are this effort's
-to settle, subject to R12.
+**R6. Env and typed agent artifacts are the pipeline's two currencies.** Artifact shapes start with
+a reduced Rulesync model: rules and skills. A rule preserves its instructional content and
+applicability, including always-applying and path-specific rules. A skill preserves its name,
+discovery description, instructions, and supporting files as a package with discovery/invocation
+semantics. Converting a skill into prompt text is not equivalent handling. Core and features may
+emit both env and artifacts; the producer contract must permit a later manual template-artifact
+surface without redesign, but that surface is not required now. Concrete schemas are the effort
+lead's to settle within these requirements and R12.
 
-**R7. Sessions receive everything, and the integration owns representation.** A session receives env
-and agent artifacts from all ancestor scopes plus its own. Content that cannot be represented at its
-own scope is hoisted into the session, and the integration decides placement using its harness
-knowledge, including deduplication and double-provisioning avoidance. Hoisting is isolation, not
-security: other sessions being able to see user-scope artifacts is expected, and the integration's
-obligation is that hoisted material only takes effect for its own workload.
+**R7. Integrations defer what they cannot handle; core rejects final session deferral.** Native
+placement at the defining scope is the ordinary case. Each facet invocation receives local artifacts
+plus applicable inherited artifacts not already handled for that integration and resource path. The
+integration decides representation and returns only the artifacts it defers, with a reason for each.
+Omission from a successful deferred result means handling for that invocation; there is no separate
+handled-item acknowledgment ledger. Failed, stale, or absent invocations do not imply successful
+handling.
+
+Deferral belongs to an integration and its applicable resource path. Claude handling a user skill
+does not handle it for another integration or another user. A session receives accumulated env from
+its ancestors and its own scope, but artifact payloads already handled upstream do not need to reach
+its session-facet invocation. Core preserves originating scope, resource identity, and producer, and
+combines applicable ancestor paths without delivering the same originating item twice. Different
+artifacts are not duplicates merely because their text matches.
+
+The session facet returns the same deferred collection as setup facets. Any remaining entry becomes
+an immediate core error before launching the workload, preserving the integration's explanation and
+artifact origin in standard error framing. Ordinary execution failures remain errors independently
+of deferral. Core enforces this returned contract; integration code and testing establish that
+omitted artifacts were actually handled. Scope discipline remains trust-based.
+
+A session-specific representation must preserve the artifact's semantics and affect only that
+workload. Writing session-only artifacts into shared user or workspace auto-discovery is not an
+acceptable fallback. If no suitable representation exists, the integration defers and core refuses
+launch. This is workload isolation, not secrecy: other sessions being able to read artifacts does
+not itself violate the contract. Applied-state receipts remain available to readiness even when
+handled payloads are filtered out.
 
 **R8. Per-scope invocations are constructed for their owning resource.** An invocation never reuses
 a session instance's target identity, readiness cache, or state namespace; those stay session-bound.
 
 **R9. Applied state is recorded so reinit converges and drift is reported.** Per-(owning resource,
 integration) state records what was applied (destinations, strategies, hashes). Records carry their
-schema version. Secrets never enter persisted state or resolved configuration.
+schema version. Successful contributions and integration-specific deferred outputs also survive
+between lifecycle operations, so session creation does not rerun ancestor setup to reconstruct
+inputs. A changed input or incomplete operation must not reuse old deferral output as proof of
+handling. Secrets never enter persisted state or resolved configuration.
 
 **R10. Upstream prerequisites are reported, never repaired from a session operation.** A session
 integration checks its own upstream prerequisites during readiness using persisted applied state and
@@ -138,14 +180,21 @@ fails the operation, a recommended one warns and permits degraded operation.
 **R11. The Claude-specific template fields migrate into the Claude integration's config.**
 `claude_marketplaces` and `claude_plugins` leave the VM admin config and agent templates and become
 user-facet config on the Claude integration. This is the acceptance test for the whole effort: if
-core still names a harness after this lands, the framework did not do its job.
+core still carries harness-specific fields or setup dispatch after this lands, the framework did not
+do its job. The existing generic shell fallback is preserved; it is not a Claude-specific
+configuration or installation path.
 
-**R12. The artifact schema must not foreclose wave 6.** Stable identity, attributed composition, and
-typed hooks belong to wave 6's artifact model; this effort's schema must leave room for them without
-implementing them.
+**R12. The artifact schema must not foreclose wave 6.** Rule and skill shapes are concrete now, with
+origin attribution and a producer-local identity that survives delivery. Global stable identity,
+attributed composition, and limited typed hooks remain wave 6 work. Hooks must be able to join later
+as a distinct artifact kind with explicit event and execution semantics, without flattening
+artifacts to strings or rebuilding their delivery protocol. This effort does not implement hook
+execution, global identity, or composition.
 
-**R13. One vertical integration proves create and reinit end to end**, including workspace
-create-time materialization, rather than the framework landing with only unit-level evidence.
+**R13. One vertical integration proves create and reinit end to end**, including native rules and
+complete skill packages at user and workspace scopes, workspace create-time materialization,
+downstream filtering of handled payloads, and terminal refusal for an unrepresentable artifact. The
+framework must not land with only unit-level evidence.
 
 ## Settled constraints, not to be reopened
 
@@ -170,6 +219,20 @@ through the saga lead.
   unit; never silently adopt or overwrite repository, operator, or generator-owned content; record
   applied state so reinit converges; secrets never enter persisted state.
 - **Rulesync informs the artifact design but is not a runtime dependency.**
+
+## Operator ruling: artifact delivery, 2026-09-06
+
+The operator approved the reduced rules/skills model, native placement with integration-owned
+deferral, shared deferral results with core enforcement at the session facet, and immutable origin
+metadata. The operator then explicitly authorized updating this FRD and publishing it together with
+the corresponding HLA revision in the existing draft review PR. R1, R3, R6, R7, R9, R12, and R13
+express that refinement; scope/facet terminology and R11's generic shell preservation are clarified
+alongside it.
+
+This ruling supersedes the saga scope-participation contract and target-state wording that every
+session receives all artifact payloads. Their other constraints still apply. The saga lead owns
+reconciling those shared artifacts; this effort does not edit them. Cross-feature dependency
+declarations remain deferred pending a separate decision.
 
 ## What changed since the scope-participation contract was written
 
@@ -236,7 +299,9 @@ caution, and the pre-design call-site discovery walk.
 - The universal event vocabulary, session and run identity plumbing, PTY observation, and anything
   else on the observability track (wave 5). Note that `scope-participation-contract.md` settles the
   identity model for both waves; this effort consumes it only if a requirement here needs it.
-- The artifact composition and hook model (wave 6), beyond R12's obligation not to foreclose it.
+- Global artifact identity, attributed composition, and hook execution (wave 6), beyond R12's
+  obligation not to foreclose them. The rule/skill shapes and origin tracking in R6/R7 are in scope.
+- A manually authored template-artifact surface, while preserving its immediate follow-on path.
 - External plugin distribution and its trust model (wave 8).
 - Harness integration config knobs for per-session workload inputs (issue #674), which shipped ahead
   of this charter by operator ruling on 2026-08-26 and deliberately without an SDD. That work does
@@ -250,4 +315,6 @@ The effort is functionally complete when a harness integration can participate a
 workspace scope through its own API and its own config; when core carries no harness-specific field
 at any scope (R11 discharged); when reinit at each setup scope converges rather than accumulating,
 proven by the vertical integration; and when an integration that implements nothing beyond `start`
-behaves exactly as it does today.
+behaves exactly as it does today when no artifact inputs are supplied. With artifact inputs,
+completion also requires faithful rule/skill representation or a final deferral error, with no
+session payload duplication or widening of session-only applicability.

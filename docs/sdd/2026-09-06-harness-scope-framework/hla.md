@@ -6,15 +6,22 @@
 - Saga: [next-steps](../2026-08-04-next-steps/target-state.md), wave 4
 - Governing design: [scope participation](../2026-08-04-next-steps/scope-participation-contract.md)
   and [capability descriptors](../2026-08-04-next-steps/capability-descriptor-contract.md)
-- Code baseline: `d7dfd6986d03daaa011f1c8a1d390cf25efb04fd`
+- Code baseline: `0c8cf6bc77dd49a2a30440cde0326f37a3980689`
+
+The [operator's artifact-delivery ruling](frd.md#operator-ruling-artifact-delivery-2026-09-06)
+replaces the original all-payload session rollup with rules, skills, and integration-specific
+deferral. This draft carries the authorized FRD amendment and its architecture response together;
+the saga lead owns reconciling the superseded shared-contract wording.
 
 ## Architecture in one view
 
 Each resource's existing lifecycle drives a small setup pipeline: core, ordered features, then
 ordered harness integrations. Core supplies the resource identity, execution target, inherited env,
 and artifacts. An integration receives the config for the facet being invoked and owns its harness's
-representation and applied facts. Sessions consume the accumulated inputs and diagnose missing
-setup; they do not run ancestor setup as a side effect of starting a workload.
+representation and applied facts. Each invocation returns artifacts it defers; core delivers those
+to later applicable invocations of the same integration. Sessions consume accumulated env and the
+remaining artifact payloads, diagnose missing setup, and cannot launch with unresolved deferrals.
+They do not run ancestor setup as a side effect of starting a workload.
 
 ```mermaid
 flowchart TD
@@ -24,12 +31,14 @@ flowchart TD
     Owner --> Core[Core setup]
     Core --> Features[Features in declaration order]
     Features --> Harnesses[Harness integrations in declaration order]
-    Harnesses --> Store[Instance-state store]
+    Harnesses --> Store[Contributions, deferred outputs, and applied facts]
     Core --> Contributions[Env declarations and agent artifacts]
     Features --> Contributions
     Contributions --> Store
     Store --> Session[Session input assembly and readiness]
     Session --> Start[Selected integration start with launch intent]
+    Start --> Check[Core rejects any returned deferrals]
+    Check --> Launch[Launch workload]
 ```
 
 The pipeline is shared orchestration code, not a registry of scopes or an extensible execution
@@ -56,7 +65,11 @@ These anchors describe the baseline, not the proposed implementation's eventual 
 
 The five setup/runtime scopes and four capability facets remain distinct. `OperationScope` currently
 describes the command's identity and also includes a system level. It is not the five-scope setup
-model and must not become the facet selector. Core's consuming resource chooses the facet once.
+model and must not become the facet selector. Core's consuming resource chooses the facet once. A
+scope names the resource/lifecycle boundary; a facet pairs the API methods and config an integration
+implements. An artifact originates at a scope, possibly emitted before any harness method runs. An
+integration handles it through a facet invocation for a concrete resource. Admin and agent stay
+distinct scopes and both use the user facet; deferral never changes the origin.
 
 | Owning scope | Config and selection surface                                    | Facet and operation          | Persistent owner          |
 | ------------ | --------------------------------------------------------------- | ---------------------------- | ------------------------- |
@@ -73,8 +86,9 @@ select none. Session selection stays singular and preserves its current shell fa
 
 An attachment does not enable its plugin globally, select a session workload, or implicitly attach
 the integration to an ancestor or descendant. Existing plugin enablement and graph miss policies
-apply. Sessions can use contributions from an ancestor even if that ancestor selected a different
-integration or none: the currencies belong to the resource, not to a chosen renderer.
+apply. An ancestor selecting a different integration or none does not consume its artifacts for this
+integration: original contributions remain available to establish that integration's input. An
+integration's deferred output never changes another integration's delivery.
 
 **Admin attachment proposal, for confirmation:** place selection and user config together on the
 already-selected admin-template, using the same list shape and user-facet schema as agent templates.
@@ -140,11 +154,15 @@ first-party.
 
 Retain `vm_init`, `user_init`, and `workspace_init` as the method names. Each receives a typed
 invocation for its facet and reports applied facts through a manager-owned checkpoint channel; the
-base defaults perform no work and report no facts. `start` retains `HarnessLaunchIntent` and
-`HarnessStartResult`, extended with session inputs. The contract version increments from 3 across
-the descriptor and all four first-party integrations. `start` remains the required operation; the
-inherited setup defaults satisfy R3 without a supported scope registry. Existing session probe
-obligations remain on the session path.
+base defaults perform no work, report no applied facts, and return every input artifact as deferred.
+Setup results carry the deferred collection and an integration-authored reason for each item.
+`start` retains `HarnessLaunchIntent` and the current launch-result alternatives; its successful
+result adds the same deferred collection alongside the proposed launch command. Core checks it
+before launching the workload. Ordinary execution failures and unsupported launch intents retain
+their existing error/result paths, distinct from artifact deferral. The contract version increments
+from 3 across the descriptor and all four first-party integrations. `start` remains the required
+operation; the inherited setup defaults satisfy R3 without a supported scope registry. Existing
+session probe obligations remain on the session path.
 
 Construct an integration binding for one owning resource and facet. A present attachment supplies
 its effective config and contributions; an absent attachment supplies prior ownership for retirement
@@ -154,7 +172,8 @@ username, home, and user runner for user; workspace identity, root, and setup ru
 Each also receives artifacts, previous applied facts for this integration, an applied-fact
 checkpoint channel, and an env view carried by the runner. Core translates its admin/agent
 distinction into the concrete user; an integration author implements one `user_init` body without an
-admin or agent branch.
+admin or agent branch. Origin metadata is descriptive provenance; it does not ask the integration to
+reconstruct core's scope-to-facet dispatch.
 
 Session construction adds session identity, workspace, workload target, launch readiness cache, and
 conversation state. None of those fields is required to construct setup bindings. Conversely, a
@@ -177,8 +196,9 @@ Features use the existing descriptor/registration pattern as the three core-owne
 setup operation, return env/artifact contributions, and are selected in a `features` list with the
 same ordering and replacement rules as attachments. The user setup pipeline consumes the
 agent-feature API for both concrete users, so features do not introduce duplicate admin
-implementations. A concrete test feature, registered and driven through the real CLI in the vertical
-acceptance run, proves env and artifact delivery. A production feature that only repeats direct
+implementations. Concrete test implementations registered as vm-feature, agent-feature (covering
+both user scopes), and workspace-feature exercise every lane through the real CLI in the vertical
+acceptance run, proving env and artifact delivery. A production feature that only repeats direct
 template declarations would add no operator value, so it is not part of this design. There is no
 session-feature.
 
@@ -192,8 +212,10 @@ within one scope does not change that precedence. Core-protected identity variab
 
 A user setup sees VM plus that user's env. Workspace setup sees VM plus workspace env, never an
 arbitrary user's env. A session combines VM, workspace, its actual user, and session contributions.
-The same ordering applies to artifact delivery; unlike env, artifact delivery retains individual
-items instead of flattening them by text equality.
+Env precedence is not an artifact placement ladder. Artifact routing follows the actual resource
+relationships: VM to user or workspace, then those applicable ancestors to session. Agent and
+workspace are siblings, not ancestors of one another. Each invocation receives local artifacts plus
+applicable inherited items still deferred for its integration, preserving their individual origins.
 
 Template env becomes pipeline input alongside core-produced values. Existing bootstrap and core
 install commands retain their hermetic runners. The new feature and integration lanes receive the
@@ -203,51 +225,97 @@ boundary. A feature declares all secret references it may emit through its confi
 Its output may use that declared set but cannot introduce a secret lookup after the boundary
 resolves. Runtime values exist only in the operation's runner and scoped secret view.
 
-**Agent artifacts start as instruction documents.** The input envelope contains a kind (initially
-instruction), non-secret text, and a producer-local name. Core attaches the owning resource and
-producer address, giving the integration an unambiguous source locator for reporting and applied
-state. Resource templates may declare instruction artifacts directly, including session templates;
-features can emit them. Duplicate names from one producer fail at its input/output boundary.
+**Agent artifacts have two concrete kinds: rule and skill.** Their shapes are a reduced Rulesync
+model, independent of target filenames:
 
-The source locator is an address for this pipeline, not wave 6's global artifact identity. Do not
-use a destination filename or content hash as identity, flatten source attribution away, or model
-artifacts as arbitrary executable strings. This leaves room for wave 6 to add stable identities,
-composition, and distinct typed hooks without claiming to implement them now. No hook executor,
-artifact registry, merge language, or distillation subsystem ships in this effort.
+| Kind  | Content and behavior preserved through delivery                                                                                                                                                                                                           |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Rule  | A producer-local name, instructional text, and applicability: always applying or matching declared workspace-relative paths. The integration preserves that applicability when representing the rule.                                                     |
+| Skill | A producer-local name, discovery description, instructions, and a bundle of supporting files addressed relative to the skill root. Preserve the package and its discovery/invocation semantics; appending its instructions to a prompt is not equivalent. |
 
-A resource publishes its successful core/feature contributions to the instance-state store so a
-later session does not rerun setup to recover them. Persist declarations and non-secret instruction
-content only. An output schema has no resolved-secret arm; integrations must not copy secret values
-into text, logs, hashes, or state. Schema shape cannot police arbitrary trusted code, so disclosure,
-review, and negative runtime tests enforce that conduct. Secret references are resolved afresh at
-the consuming operation boundary, never recovered from persisted plaintext.
+Core attaches immutable origin metadata: owning scope, resource identity, and producer (core or the
+named feature). Together with the producer-local name, these identify an item across delivery;
+duplicate names within a producer are errors. A facet is not an independent origin field: core's
+fixed mapping derives the corresponding facet from the origin scope. A current deferral adds the
+attempt's facet, owning resource, and reason without rewriting origin or accumulating an event log.
+
+The name and origin form a pipeline source address, not wave 6's global artifact identity. Content
+and applicability remain distinct from identity and from native destination. Skill members preserve
+relative paths and non-secret contents so references and scripts travel with their instructions;
+source paths are not destinations or permission to copy arbitrary host files. Package ingestion
+validates relative paths and refuses escapes. The LLD settles the concrete bundle carrier and codec.
+
+Core and features may emit these typed artifacts alongside env. Their producer API does not depend
+on a manually authored template-artifact field, so that operator surface can follow immediately
+without changing delivery. It is not required in this effort. Session inputs may likewise come from
+core; this does not add a session-feature or change the shipped workload config knobs.
+
+Limited hooks can later join as a distinct kind carrying explicit event and execution semantics. Do
+not flatten kinds into arbitrary text or executable strings, erase provenance, or turn a skill into
+a rule as a fallback. Global identity, attributed composition, hook execution, an artifact registry,
+and distillation remain wave 6 work. Rules and skills get concrete shapes now; the vertical
+integration proves both without implementing the deferred machinery.
+
+A resource publishes successful core/feature contributions and each invoked integration's deferred
+output to the instance-state store. Later operations reconstruct inputs without rerunning ancestor
+setup. Persist env declarations and non-secret rule/skill content, including bundle members, in the
+versioned domain payload. An output schema has no resolved-secret arm. Integrations must not copy
+secret values into artifact content, logs, hashes, reasons, or state. Trusted-code review and
+negative runtime tests enforce that conduct; schema shape alone cannot. Secret env references
+resolve afresh at the consuming operation boundary.
 
 ## Representation, ordering, and conflicts
 
-All integrations at a setup scope receive the same completed core/feature inputs and run in the
-effective attachment order. They do not feed env or artifacts to one another. A failed integration
-stops the pipeline; completed work remains attributable for a retry. Ordering is deterministic but
-never makes the last integration the winner of a destination collision.
+Integrations run after core and every feature that emits env or artifacts. Features consume
+env-to-date in template declaration order. Each integration receives the completed local outputs,
+all applicable env, and its own inherited deferred artifacts. Integrations run in attachment order
+but do not feed one another. A failed integration stops setup; deferral is an ordinary successful
+setup result, not an error until the final session facet. Ordering never makes the last integration
+the winner of a destination collision.
 
-Each integration maps inputs to its harness's native destinations or records that an input needs
-session representation. Claim an individual file or managed member where practical, never an entire
-repository configuration directory. Before changing a claimed unit, inspect its current content and
-compare it with recorded ownership and hash. An unclaimed existing file is a conflict even when its
-bytes match the proposed output. A changed owned file is drift. Neither case silently overwrites,
-adopts, or deletes the file; report the resource, integration, and destination without content.
+**Native placement at the defining scope is the ordinary case.** The integration decides what its
+harness can represent at each invocation. A user-facet invocation normally installs a user skill
+under that user's native skill directory. An item omitted from the successful deferred output is
+handled for that integration and applicable resource path; later invocations need no payload copy.
+Handling for Claude neither handles it for Codex nor handles it for another user.
 
-Integration state is namespaced, while core's owner-level view can report conflicting claims from
-multiple integrations. Known claims are checked before mutation; integrations still inspect their
-actual destinations because state can be stale. There is no cross-integration merge policy, and
-checks over declared facts do not pretend to enforce trusted in-process side effects.
+Setup results return only the items left deferred, preserving the original artifacts and attaching
+specific reasons. The no-op default defers every item. There is no separate handled-item result or
+per-artifact acknowledgment ledger. Applied-state receipts still describe actual managed writes for
+ownership, convergence, and readiness; they are not the delivery mechanism.
 
-A session receives every applicable ancestor artifact with its attribution and applied evidence,
-including material that already has a native representation. The selected integration determines
-which native placements affect this workload, which need hoisting, and which inputs are already
-represented. It must not deduplicate unrelated artifacts merely because their text hashes match.
-Session-only material is passed through a workload-specific launch input or stored outside shared
-harness auto-discovery and referenced only by this workload. It must never become an automatically
-loaded workspace or user rule for neighboring sessions.
+Core assembles pending payloads using contribution snapshots and successful deferred outputs for the
+same input revisions. An absent integration provides no handling evidence, so that path passes
+artifacts unchanged. A failed invocation or unknown/stale snapshot cannot imply handling through
+absence. At a session, combine the workspace branch and the selected user's branch by originating
+item, not text equality. A VM-origin item handled by an applicable user invocation must not reappear
+merely because the workspace branch deferred it. Absence means handled only where that same item
+revision was in a completed invocation's input. Source snapshots and deferred outputs establish
+this; an additional acknowledgment table is unnecessary. Each integration's placement choices must
+also avoid installing the same inherited item through both branches.
+
+**Core enforces final completion.** A successful session-facet result carries the same deferred
+collection as a setup result. Any remaining entry becomes a typed core error before launching the
+workload. The error identifies the artifact and immutable origin, the current session invocation,
+and the integration's own reason. This preserves harness-specific explanations while putting the
+terminal check in one place. Core enforces the returned contract; integration code and tests remain
+responsible for actually applying everything it omits. Execution errors still raise normally.
+
+A harness may use a workload-specific input or a privately referenced package to handle a deferred
+artifact at the session facet, if that preserves the artifact's semantics. It must not place
+session-only content in a user or workspace auto-discovery directory shared with other sessions. If
+the harness has no suitable session mechanism, it defers with a reason and core refuses launch.
+There is no universal prompt-text fallback. Already handled payloads stay upstream; their applied
+receipts remain available to session readiness for prerequisite and drift checks.
+
+For every materialization, claim the smallest practical ownership unit: a rule file, a managed
+member, or the files of a skill package, never an entire repository configuration directory. Inspect
+the live destination against recorded ownership and hashes before changing it. Unclaimed existing
+content is a conflict even when bytes match; changed owned content is drift. Neither is silently
+adopted, overwritten, or deleted. Report resource, integration, and destination without content.
+Core can report conflicting recorded claims across integrations; integrations still inspect actual
+destinations because state can be stale. There is no cross-integration merge policy or claim that
+these checks constrain arbitrary trusted in-process side effects.
 
 ## Applied state and convergence
 
@@ -256,6 +324,12 @@ state. The VM payload separates VM setup from admin setup; agent, workspace, and
 their own rows. Inside each harness payload, integration names separate versioned records. The store
 schema needs no new table and no key per integration. Conversation state remains in its existing
 session namespace; an artifact record does not replace a harness conversation ID.
+
+Persist each integration's successful deferred collection together with its input revision
+references and the scope's published contributions. This identifies which outputs can still be used
+for delivery after config changes or reinit; it is not a historical record of every attempt.
+Preserve source content needed by another integration and earlier applied receipts needed for
+cleanup.
 
 An applied record carries its payload version, source locator, destination or native resource,
 representation strategy, non-secret content hash where meaningful, and confirmed outcome. The owning
@@ -277,10 +351,10 @@ pretend cleanup happened.
 Each completed mutation checkpoints its applied facts before the next mutation. The manager owns
 persistence and acknowledges the checkpoint only after it succeeds; persistence failure stops
 further writes. Thus a later exception preserves the successfully recorded prefix, without requiring
-a successful method return to recover it. Core/feature contributions become the published scope
-snapshot only on successful scope completion; partial integration receipts remain distinguishable
-from that completed snapshot. For a new workspace, the checkpoint channel buffers facts until the
-creation commit, because its failed partial work is unwound as described below.
+a successful method return to recover it. Contributions and deferred outputs become the published
+scope snapshot only on successful scope completion; partial integration receipts remain
+distinguishable from that completed snapshot. For a new workspace, the checkpoint channel buffers
+facts until the creation commit, because its failed partial work is unwound as described below.
 
 Remote writes and SQLite are not a distributed transaction. A process can die after a remote change
 and before recording it. Treat any unexplained residue on retry as unowned until the integration can
@@ -292,7 +366,8 @@ ruling.
 
 Serialize setup for the same owning resource across command executions, covering observation, remote
 mutation, and receipt persistence. This prevents two reinitializations from both claiming the same
-prior hash. The LLD must choose a lock with that actual cross-process lifetime; a SQLite write
+prior hash. A competing setup refuses with the owning resource and retry guidance instead of
+queueing. The LLD must choose a lock with that actual cross-process lifetime; a SQLite write
 transaction held across network calls is not the design.
 
 ## Workspace retry and session readiness
@@ -300,7 +375,7 @@ transaction held across network calls is not the design.
 Workspace setup participates in `realize_workspace`, shared by standalone create and
 `session create --new-workspace`. Run features and integrations after the directory and repository
 exist but before publishing successful creation. Commit the workspace row, desired overlay,
-contributions, and initial applied facts together only after setup succeeds.
+contributions, deferred outputs, and initial applied facts together only after setup succeeds.
 
 On a handled failure before that commit, unwind the newly created workspace directory, group, and
 local stub using the existing partial-create path. A retry is another `workspace create` with the
@@ -315,15 +390,19 @@ Session readiness asks the selected integration to check upstream facts and inex
 its own prerequisites. Core supplies applicable ancestor records and owner remediation references;
 the integration need not invent an admin-versus-agent command. Required gaps raise the existing
 typed error with the owning repair operation. Recommended gaps warn and allow degraded operation.
-Missing optional broader attachments are not automatically required: an unchanged session-only
-integration keeps working. No supported-scopes report is introduced; schema output describes config,
-and doctor reports actual readiness rather than inferring support from overrides or model presence.
+Missing optional broader attachments are not automatically required: a session-only integration with
+no artifact inputs keeps working. No supported-scopes report is introduced; schema output describes
+config, and doctor reports actual readiness rather than inferring support from overrides or model
+presence.
 
 For VM/admin and agent drift, remediation points to VM or agent reinit respectively. For workspace
 materialization problems, report the specific path and create-only lifecycle, with inspection and
-explicit recreation guidance. Do not imply `workspace repair` reruns this pipeline. A session may
-hoist an input whose normal representation is unavailable only when doing so preserves the intended
-workload behavior and prerequisite severity; it cannot quietly repair a required upstream gap.
+explicit recreation guidance. Do not imply `workspace repair` reruns this pipeline. Successfully
+handled upstream artifacts are not silently reclassified as deferred after drift. Readiness reports
+that missing prerequisite through the owning operation. A deferred artifact may be handled at the
+session facet only if that preserves its semantics and workload applicability; it cannot quietly
+repair a required upstream gap. Final nonempty deferral is always a launch error, independent of the
+required/recommended classification of other readiness prerequisites.
 
 ## Claude vertical slice and migration
 
@@ -333,19 +412,24 @@ state and prior ownership, handles removals only for resources it owns, and uses
 method for admin and agents. Core invokes an integration; it contains no Claude-specific field,
 import, installer branch, or default selection.
 
-Its workspace facet materializes instruction artifacts in a dedicated file under `.claude/rules/`,
-subject to ownership checks. User instructions use a dedicated user rules file. VM instruction
-artifacts can remain unrepresented until session start rather than writing machine-wide Claude
-policy. The session facet hoists those VM and session-local instructions through its existing launch
-prompt machinery while accounting for the native user and workspace inputs it already loads.
-Config-specific `append_system_prompt` remains supported and combines in a documented order with
-pipeline instructions; this does not reopen the already-shipped session workload knobs.
+Its user and workspace facets materialize rules and complete skill packages at native user and
+project destinations, subject to ownership checks. Claude documents rules under `.claude/rules/` and
+skills under `.claude/skills/` at those levels. A user skill successfully handled by `user_init` is
+absent from subsequent session payloads; session readiness can still check its installation.
 
-The native directory choice is grounded in Claude's documented project and user rules support.
-Rulesync's source-to-target generation motivates preserving attribution and leaving generated files
-alone; it is not invoked by the runtime. Exact file names, byte-safe launch delivery, and native
-plugin ownership probes belong in the LLD and must be verified against the actual CLI before
-implementation is accepted. These are integration details, not core special cases.
+VM-origin artifacts are deferred where Claude cannot represent their intended applicability, and
+later facet invocations choose a suitable native representation or defer again. The session facet
+must preserve rule applicability and skill package behavior when using any session-specific
+mechanism; otherwise it returns a reason and core refuses launch. Existing `append_system_prompt`
+remains supported, but it is not a general substitute for a rule or a skill. The integration owns
+how any compatible session rule representation combines with that explicit config.
+
+Rulesync informs the rule/skill model and separation of sources from generated destinations; it is
+not invoked at runtime. Exact file names, package delivery, available session mechanisms, and native
+plugin ownership probes belong in the LLD and must be verified against the actual CLI. The vertical
+acceptance includes native user and workspace rules/skills, successful downstream filtering,
+unchanged skill support files, and terminal refusal for an unrepresentable artifact. These are
+integration details, not core special cases.
 
 Update first-party manifests and upgrade guidance in the implementation change. Retire old template
 fields and the two core install call sites together; do not leave two active configuration paths.
@@ -356,25 +440,26 @@ installations are inspected, not automatically claimed as owned just because old
 them. The migration strategy must explain how an operator deliberately establishes ownership or
 removes conflicting old material before reconciliation can manage it.
 
-No plan, LLD, FRD revision, permanent behavior docs, or migration file is included in this review
-PR. The next artifacts must specify the storage/locking and interruption protocol, schema-host walk,
-Claude reconciliation, and config/overlay migration before implementation begins. Their acceptance
-must include copy, rehome, delete, and state restore handling so owner records cannot bless
-artifacts at a different destination or survive deletion and recreation under the same name.
+This review PR contains the FRD amendment and HLA. It contains no plan, LLD, permanent behavior
+docs, or migration file. The next artifacts must specify the storage/locking and interruption
+protocol, schema-host walk, Claude reconciliation, and config/overlay migration before
+implementation begins. Their acceptance must include copy, rehome, delete, and state restore
+handling so owner records cannot bless artifacts at a different destination or survive deletion and
+recreation under the same name.
 
 ## Validation and requirement coverage
 
 Implementation evidence must include these observable cases, through the real CLI and a live backend
 where setup changes the guest:
 
-| Requirement    | Acceptance evidence                                                                                                                                                                                                                |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| R1, R2, R6     | A concrete feature receives env-to-date, emits env and instructions, and Claude receives them after core; VM, admin, agent, and workspace ordering is observed.                                                                    |
-| R3, R4, R5, R8 | A session-only integration remains compatible; different facet schemas validate on the proper resource, invalid public plugin hooks fail at registration, and setup never carries session identity/cache/state.                    |
-| R7, R12        | Two sessions sharing a user and workspace receive common native artifacts once and distinct hoisted inputs only in their own workload; attribution survives delivery.                                                              |
-| R9             | Repeated VM/admin and agent setup is unchanged; desired changes/removals converge; edited/unowned files cause drift/conflict reports; interrupted work, unknown versions, and concurrent reinit do not overwrite or lose evidence. |
-| R10            | Required and recommended upstream gaps produce different outcomes with the correct owning remediation and no upstream mutation from session start/restart.                                                                         |
-| R11, R13       | Fresh and existing Claude admin/agent config migrates; marketplace/plugin changes reconcile; workspace create materializes real content, failure cleans partial output, and retry succeeds.                                        |
+| Requirement    | Acceptance evidence                                                                                                                                                                                                                                                              |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1, R2, R6     | Feature fixtures for all three kinds receive env-to-date and emit env, rules, and skills; integrations run after all producers; VM, admin, agent, and workspace ordering is observed.                                                                                            |
+| R3, R4, R5, R8 | A session-only integration remains compatible; different facet schemas validate on the proper resource, invalid public plugin hooks fail at registration, and setup never carries session identity/cache/state.                                                                  |
+| R7, R12        | User/workspace rules and skill bundles retain semantics and origin; handled payloads do not reach session, deferral is integration-specific across both ancestor branches, and any final deferral blocks launch with its reason.                                                 |
+| R9             | Repeated VM/admin and agent setup is unchanged; desired changes/removals converge; edited/unowned files cause drift/conflict reports; interrupted work, unknown versions, and concurrent reinit do not overwrite or lose evidence.                                               |
+| R10            | Required and recommended upstream gaps produce different outcomes with the correct owning remediation and no upstream mutation from session start/restart.                                                                                                                       |
+| R11, R13       | Fresh and existing Claude admin/agent config migrates; marketplace/plugin changes reconcile; core has no Claude-specific knowledge (the existing generic shell fallback remains); workspace create materializes real content, failure cleans partial output, and retry succeeds. |
 
 Schema/reference checks cover manifest, config, instance overlay, explain/reference, and secret
 preflight parity for every new hosting field. Negative secret tests inspect persisted state and
@@ -387,9 +472,10 @@ collateral changes travel with the behavior that makes them true.
 The five FRD open questions have proposals here: typed facet invocations and existing env entries;
 no supported-scopes reporting mechanism; admin-template attachment ownership pending confirmation;
 workspace cleanup then fresh create; and ordered attachments with conflicts instead of overwrite.
-The highest-risk implementation boundaries are facet selection through all schema consumers,
-non-secret contributions across executions, and recovery between a remote write and a local receipt.
-The architecture does not claim those are solved by no-op defaults or by a state table alone.
+The highest-risk boundaries are facet selection through all schema consumers, rule/skill fidelity,
+merging deferred inputs across sibling ancestors without duplicate delivery, non-secret
+contributions across executions, and recovery between a remote write and a local receipt. The
+architecture does not claim those are solved by no-op defaults or by a state table alone.
 
 ## Sources checked for this response
 
@@ -398,6 +484,11 @@ The architecture does not claim those are solved by no-op defaults or by a state
 - [Claude Code memory documentation](https://code.claude.com/docs/en/memory), checked 2026-09-06:
   project and user rules provide native instruction destinations; shared discovery is why hoisted
   session content requires separate delivery.
+- [Claude Code skill documentation](https://code.claude.com/docs/en/skills), checked 2026-09-06:
+  native user/project skill packages establish the vertical integration's placement candidates.
+- [Rulesync file formats](https://rulesync.dyoshikawa.com/reference/file-formats.html), checked
+  2026-09-06: rules preserve applicability and skills preserve instructions with supporting files;
+  this response adopts those distinctions without the full tool-specific configuration model.
 - [Rulesync CLI documentation](https://rulesync.dyoshikawa.com/reference/cli-commands.html), checked
   2026-09-06, and this repository's `CONTRIBUTING.md`: generation has source and target ownership;
   this architecture declines runtime generation or adoption of its outputs.
