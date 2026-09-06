@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import stat
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from json import loads
 from pathlib import Path
 from types import SimpleNamespace
@@ -292,7 +292,7 @@ def test_vm_backup_exports_versioned_instance_specs(
     manifest = loads((destination / "manifest.json").read_text(encoding="utf-8"))
     specs = loads((destination / "instance-specs.json").read_text(encoding="utf-8"))
     applied = loads((destination / "instance-applied-state.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == 4
+    assert manifest["version"] == 5
     assert manifest["instance_spec_count"] == 1
     assert manifest["applied_state_count"] == 2
     expected_value = (
@@ -336,6 +336,36 @@ def test_vm_backup_exports_versioned_instance_specs(
             "recorded_at": applied[1]["recorded_at"],
         },
     ]
+
+
+def test_vm_backup_uses_post_activation_start_observation(
+    db: Database,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db.insert_vm("bvm", site="lima-local", hostname="bvm")
+    db.update_vm_tailscale("bvm", "100.64.0.8")
+    _install_metadata_only_backup_fakes(monkeypatch)
+
+    @contextmanager
+    def _activating_boundary(*args: object, **kwargs: object):  # noqa: ANN202
+        db.record_vm_started("bvm")
+        yield
+
+    monkeypatch.setattr(vm_backup, "gated_vm_boundary", _activating_boundary)
+    config = SimpleNamespace(paths=SimpleNamespace(backups=tmp_path))
+
+    destination = vm_backup.backup_vm(
+        db,
+        config,  # type: ignore[arg-type]
+        "bvm",
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+
+    manifest = loads((destination / "manifest.json").read_text(encoding="utf-8"))
+    vm = loads((destination / "vm.json").read_text(encoding="utf-8"))
+    assert manifest["version"] == 5
+    assert vm["last_started_at"] is not None
 
 
 def test_windows_refuses_overlay_backup_before_any_json_write(

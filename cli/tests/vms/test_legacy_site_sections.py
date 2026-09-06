@@ -24,7 +24,7 @@ def write_config(tmp_path: Path):
 
     def _write(extra: str) -> Path:
         path = tmp_path / "config.toml"
-        path.write_text(BASE.format(key=key) + extra)
+        path.write_text(BASE.format(key=key.as_posix()) + extra)
         return path
 
     return _write

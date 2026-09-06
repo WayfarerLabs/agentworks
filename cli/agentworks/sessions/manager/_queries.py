@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, cast
 import agentworks.sessions.manager as _mgr
 from agentworks import output
 from agentworks.db import SessionStatus
-from agentworks.db.projections import project_session_mode, project_session_status
+from agentworks.db.projections import project_session_mode
 from agentworks.errors import (
     AgentworksError,
     BrokenStateError,
@@ -17,6 +17,7 @@ from agentworks.errors import (
     StateError,
     UserAbort,
 )
+from agentworks.runtime_time import derive_uptime_seconds, format_uptime
 from agentworks.sessions._resource_cleanup import cleanup_now_empty_resource
 from agentworks.sessions.tmux import exact_tmux_target
 
@@ -69,6 +70,8 @@ class SessionDescription:
     updated_at: str
     consoles: tuple[SessionConsole, ...]
     instance_state: InstanceStateDescription
+    last_started_at: str | None = None
+    uptime_seconds: int | None = None
 
 
 def session_listing_data(listing: SessionListing) -> JsonObject:
@@ -81,9 +84,9 @@ def session_listing_data(listing: SessionListing) -> JsonObject:
                 "vm_name": session.vm_name,
                 "template": session.template,
                 "harness_integration": session.harness_integration,
-                "mode": project_session_mode(session.mode),
+                "mode": session.mode,
                 "agent_name": session.agent_name,
-                "status": project_session_status(session.status, allow_unavailable=True),
+                "status": session.status,
             }
             for session in listing.sessions
         ],
@@ -99,11 +102,13 @@ def session_description_data(description: SessionDescription) -> JsonObject:
             "vm_name": description.vm_name,
             "template": description.template,
             "harness_integration": description.harness_integration,
-            "mode": project_session_mode(description.mode),
+            "mode": description.mode,
             "agent_name": description.agent_name,
-            "status": project_session_status(description.status, allow_unavailable=False),
+            "status": description.status,
             "pid": description.pid,
             "created_at": description.created_at,
+            "last_started_at": description.last_started_at,
+            "uptime_seconds": description.uptime_seconds,
             "updated_at": description.updated_at,
             "consoles": [
                 {"console_name": console.console_name, "position": console.position} for console in description.consoles
@@ -500,6 +505,13 @@ def _session_structural_description(
                 for console_name, position in db.list_console_memberships_for_session(session.name)
             ),
             instance_state=instance_state,
+            last_started_at=session.last_started_at,
+            uptime_seconds=derive_uptime_seconds(
+                session.last_started_at,
+                running=status is SessionStatus.RUNNING,
+                entity_kind="session",
+                entity_name=session.name,
+            ),
         )
 
 
@@ -541,25 +553,27 @@ def _session_harness_integration(state: InstanceStateDescription) -> str | None:
 
 def render_session_description(description: SessionDescription) -> None:
     """Render session detail facts with the legacy human layout."""
-    status = project_session_status(description.status, allow_unavailable=False)
+    status = description.status
     status_label = status
     if status == "running" and description.pid is not None:
         status_label = f"running (PID {description.pid})"
     elif status == "broken" and description.pid is not None:
         status_label = f"broken (PID {description.pid} alive, tmux unreachable)"
-    mode = project_session_mode(description.mode)
+    mode = description.mode
     mode_label = (
         mode if mode == "unknown" else f"agent ({description.agent_name})" if description.agent_name else "admin"
     )
-    output.info(f"Name:       {description.name}")
-    output.info(f"Workspace:  {description.workspace_name}")
-    output.info(f"VM:         {description.vm_name}")
-    output.info(f"Template:   {description.template}")
+    output.info(f"Name:           {description.name}")
+    output.info(f"Workspace:      {description.workspace_name}")
+    output.info(f"VM:             {description.vm_name}")
+    output.info(f"Template:       {description.template}")
     output.info(f"Harness integration: {description.harness_integration or '-'}")
-    output.info(f"Mode:       {mode_label}")
-    output.info(f"Status:     {status_label}")
-    output.info(f"Created:    {description.created_at}")
-    output.info(f"Updated:    {description.updated_at}")
+    output.info(f"Mode:           {mode_label}")
+    output.info(f"Status:         {status_label}")
+    output.info(f"Created:        {description.created_at}")
+    output.info(f"Last Started:   {description.last_started_at or 'unknown'}")
+    output.info(f"Uptime:         {format_uptime(description.uptime_seconds, running=status == 'running')}")
+    output.info(f"Updated:        {description.updated_at}")
     from agentworks.instance_description import render_instance_state
 
     render_instance_state(description.instance_state)
@@ -712,7 +726,7 @@ def render_session_listing(listing: SessionListing, *, include_status: bool = Fa
     unknown_by_vm: dict[str, list[str]] = {}
     for session in listing.sessions:
         status = "-" if session.status == "unavailable" else session.status
-        mode = project_session_mode(session.mode)
+        mode = session.mode
         mode_label = mode if mode == "unknown" else f"agent ({session.agent_name})" if session.agent_name else "admin"
         row = (
             session.name,

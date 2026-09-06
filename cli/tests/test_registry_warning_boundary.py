@@ -103,7 +103,7 @@ def test_build_registry_with_explicit_manifest_set_does_not_render_warnings(tmp_
     pub.write_text("ssh-ed25519 AAAA")
     priv.write_text("private")
     config_path = tmp_path / "config.toml"
-    config_path.write_text(f'[operator]\nssh_public_key = "{pub}"\nssh_private_key = "{priv}"\n')
+    config_path.write_text(f'[operator]\nssh_public_key = "{pub.as_posix()}"\nssh_private_key = "{priv.as_posix()}"\n')
     resources = tmp_path / "resources"
     resources.mkdir()
     # An advisory (an AGENTWORKS_* env key the runtime prelude overrides),

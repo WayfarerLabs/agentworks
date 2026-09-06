@@ -57,7 +57,7 @@ def _write_operator_config(
     pub.write_text("ssh-ed25519 X")
     priv.write_text("-----BEGIN-----")
     cfg = tmp_path / "config.toml"
-    cfg.write_text(f'[operator]\nssh_public_key = "{pub}"\nssh_private_key = "{priv}"\n')
+    cfg.write_text(f'[operator]\nssh_public_key = "{pub.as_posix()}"\nssh_private_key = "{priv.as_posix()}"\n')
     for filename, content in (manifests or {}).items():
         write_manifests(tmp_path, content, filename=filename)
     return cfg

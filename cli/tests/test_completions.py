@@ -27,6 +27,7 @@ from agentworks.completions.spec import (
     completion_version,
     is_legacy_database_completion,
 )
+from tests.conftest import requires_posix_shell
 
 
 def _walk_commands(spec: CommandSpec, path: str = "") -> dict[str, CommandSpec]:
@@ -223,7 +224,12 @@ class TestDynamicCompletionsMapping:
         assert "$index = $groupCommandIndex + 1" in powershell
         assert "agw guide list" in powershell
 
+    @requires_posix_shell
     def test_generated_bash_guide_completion_follows_the_group_grammar(self) -> None:
+        # Skips on Windows: it runs the generated bash completion under a real
+        # bash to check the group grammar. That is the bash-shell target; the
+        # zsh and powershell siblings cover their own shells, and the
+        # pure-string mapping tests still run everywhere. Linux CI covers bash.
         from agentworks.guide.service import list_guide_topics
 
         expected_topics = list_guide_topics().markdown.splitlines()
@@ -442,7 +448,10 @@ function Complete([string]$line) {{
             assert "restore" in script
             assert "--yes" in script
 
+    @requires_posix_shell
     def test_generated_bash_preserves_spaces_in_restore_file_completion(self, tmp_path: Path) -> None:
+        # Skips on Windows: runs the generated bash completion under a real bash
+        # to check file-name space handling. Linux CI covers the bash target.
         filename = "backup with spaces.db"
         (tmp_path / filename).touch()
         script = generate("bash")
@@ -1265,11 +1274,15 @@ def _write_warning_config(home: Path) -> Path:
     return config_dir
 
 
+@requires_posix_shell
 @pytest.mark.parametrize("command_path", sorted(DATABASE_BACKED_COMPLETION_PATHS))
 def test_marker_probe_refuses_stale_database_for_every_dynamic_path_without_side_effects(
     tmp_path: Path,
     command_path: tuple[str, str],
 ) -> None:
+    # Skips on Windows: it wraps the probe in a real POSIX shell (``bash -c ...
+    # 2>/dev/null``) to model how a shell invokes completion. Git-for-Windows'
+    # bash handles the redirect and stdout bytes differently. Linux CI covers it.
     from agentworks.db import LATEST_VERSION, Database, backup_directory
 
     config_dir = _write_warning_config(tmp_path)
@@ -1299,7 +1312,12 @@ def test_marker_probe_refuses_stale_database_for_every_dynamic_path_without_side
     assert not backup_directory(database_path).exists()
 
 
-def test_shell_wrapped_probe_suppresses_config_warning_and_preserves_database_bytes(tmp_path: Path) -> None:
+def test_direct_probe_keeps_stdout_pure_while_warning_lands_on_stderr(tmp_path: Path) -> None:
+    # Unguarded on purpose: this spawns no POSIX shell. It invokes the installed
+    # `agw` directly to prove the completion probe keeps stdout machine-pure (the
+    # config warning goes to stderr, not stdout) on the controller host. That is
+    # the native subprocess stream purity the test-windows job exists to guard
+    # (issue #749's fix), so it must run on Windows too, not only Linux.
     from agentworks.db import Database
 
     config_dir = _write_warning_config(tmp_path)
@@ -1316,6 +1334,28 @@ def test_shell_wrapped_probe_suppresses_config_warning_and_preserves_database_by
         text=True,
         check=False,
     )
+
+    assert direct.returncode == 0
+    assert direct.stdout == ""
+    assert "Config: unexpected keys in [operator]" in direct.stderr
+    _assert_no_committed_writes(config_dir, database_path, before)
+
+
+@requires_posix_shell
+def test_shell_wrapped_probe_suppresses_config_warning_and_preserves_database_bytes(tmp_path: Path) -> None:
+    # Skips on Windows: models a real POSIX shell wrapping the probe with
+    # ``2>/dev/null``; Git-for-Windows' bash differs here. Linux CI covers it.
+    # The native stdout-purity half runs on every host in the sibling
+    # test_direct_probe_keeps_stdout_pure_while_warning_lands_on_stderr.
+    from agentworks.db import Database
+
+    config_dir = _write_warning_config(tmp_path)
+    database_path = config_dir / "agentworks.db"
+    Database(database_path).close()
+    before = {entry.name: entry.read_bytes() for entry in config_dir.iterdir()}
+    env = _isolated_subprocess_env(tmp_path)
+    env["PATH"] = f"{_installed_agw().parent}{os.pathsep}{env.get('PATH', '')}"
+
     completed = subprocess.run(
         ["bash", "-c", "agw --completion-probe session list --names-only 2>/dev/null"],
         env=env,
@@ -1324,16 +1364,16 @@ def test_shell_wrapped_probe_suppresses_config_warning_and_preserves_database_by
         check=False,
     )
 
-    assert direct.returncode == 0
-    assert direct.stdout == ""
-    assert "Config: unexpected keys in [operator]" in direct.stderr
     assert completed.returncode == 0
     assert completed.stdout == ""
     assert completed.stderr == ""
     _assert_no_committed_writes(config_dir, database_path, before)
 
 
+@requires_posix_shell
 def test_shell_wrapped_probe_consumes_empty_stdout_when_config_is_invalid(tmp_path: Path) -> None:
+    # Skips on Windows: models a real POSIX shell wrapping the probe with
+    # ``2>/dev/null``; Git-for-Windows' bash differs here. Linux CI covers it.
     from agentworks.db import Database
 
     config_dir = tmp_path / ".config" / "agentworks"
