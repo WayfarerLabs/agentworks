@@ -72,14 +72,14 @@ capability-appropriate live validation under the integration-testing process.
 
 ## Requirement traceability
 
-| Requirements | Architecture owner                           | Planned proof                                       |
-| ------------ | -------------------------------------------- | --------------------------------------------------- |
-| R1-R5        | required native factory and vm-platform hook | conformance, fake, route, and no-fallback tests     |
-| R6-R10       | `ExecTransport` contract                     | base contract and sensitive-input tests             |
-| R11-R13      | full `Transport` subtype and shell narrowing | concrete transport and shell tests                  |
-| R14-R18      | `ProxmoxExecTransport` and QGA API           | API wire, adapter, create, recovery, and live tests |
-| R19-R22      | atomic v1 migration and permanent collateral | registry, residual, docs, and release checks        |
-| Q1-Q5        | verification strategy                        | focused, full, private, CI, and live evidence       |
+| Requirements | Architecture owner                             | Planned proof                                       |
+| ------------ | ---------------------------------------------- | --------------------------------------------------- |
+| R1-R5        | required native factory and vm-platform hook   | conformance, fake, route, and no-fallback tests     |
+| R6-R10       | `ExecTransport` contract                       | base contract and sensitive-input tests             |
+| R11-R13      | full `Transport` subtype and shell narrowing   | concrete transport and shell tests                  |
+| R14-R18      | `ProxmoxExecTransport` and QGA API             | API wire, adapter, create, recovery, and live tests |
+| R19-R24      | atomic v1 migration and provider compatibility | registry, setup, readiness, docs, and live checks   |
+| Q1-Q5        | verification strategy                          | focused, full, private, CI, and live evidence       |
 
 ## Phase 0: Complete SDD checkpoint
 
@@ -201,6 +201,10 @@ capability-appropriate live validation under the integration-testing process.
       canonical no-fallback, platform-shell refusal, timeout honesty, and canary-secret absence.
 - [ ] Record any unavailable Proxmox live evidence for authenticated operator disposition rather
       than satisfying acceptance from mocks.
+- [ ] Correct the live VE 9 cloud-init, role, disk-import, and repository-diagnostic findings while
+      preserving VE 8 compatibility; run focused and full gates on the resulting head.
+- [ ] Re-run private review lanes and live Proxmox create and recovery validation on the corrected
+      exact head.
 - [ ] Complete up to three authorized published runtime feedback/fix rounds, if needed.
 - [x] Merge or rebase the latest `main`, resolve conflicts semantically, and rerun exact-head gates
       and reviews.

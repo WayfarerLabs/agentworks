@@ -194,6 +194,24 @@ removes it in a `finally` path. This remains unchanged. It solves a larger scrip
 and already has interruption and cleanup coverage. The new transport uses direct `input-data` for
 the small stdin payloads required by ordinary `run` calls.
 
+### Provider setup and readiness
+
+The supported Proxmox majors use different privilege names. The setup script reads the installed
+`pve-manager` major and chooses one complete role: VE 8 uses `VM.Monitor`; VE 9 uses
+`VM.GuestAgent.Audit` for network inspection, `VM.GuestAgent.FileWrite` for bootstrap staging, and
+`VM.GuestAgent.Unrestricted` for exec and status. An unknown major is refused rather than receiving
+an unverified role.
+
+Disk import is storage-dependent, so setup reads the imported `unused0` volume ID from VM config and
+attaches that exact value. It does not derive a block-volume name from the storage identifier. If
+installing `libguestfs-tools` requires a package refresh and that refresh fails, setup explains the
+Proxmox repository prerequisite without editing host package sources.
+
+Cloud-init status 0 and 2 both mean execution completed; status 2 carries recoverable warnings and
+is surfaced as such before provisioning continues. Status 1 is a completed hard failure, not a
+reason to poll until a timeout. Transient QGA failures remain retryable during the readiness window,
+and the final timeout retains the last safe provider diagnostic.
+
 ## Error model and operator guidance
 
 The new boundary reuses existing typed transport errors. It distinguishes:
@@ -219,8 +237,8 @@ atomically. A version bump or compatibility adapter would describe consumers tha
 There is no database, config, CLI grammar, machine-output, or completion change. Runtime work began
 from a post-0.18.0 `main` baseline and targets a later release.
 
-Provider-version compatibility remains within R22. The evidence and rejected alternatives for that
-boundary and for pyinfra are centralized in [prior-art-research.md](./prior-art-research.md).
+Provider-version compatibility remains within R22-R24. The evidence and rejected alternatives for
+that boundary and for pyinfra are centralized in [prior-art-research.md](./prior-art-research.md).
 
 ## Risks and safeguards
 

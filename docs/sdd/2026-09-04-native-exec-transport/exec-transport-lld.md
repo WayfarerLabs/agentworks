@@ -305,6 +305,16 @@ The existing private bootstrap staging retains its write, execute, cleanup, and 
 may call the split API methods internally if that is a mechanical consequence, but it does not
 become a public file-transfer implementation.
 
+The setup script supports the repository's VE 8 and VE 9 range without pretending their privilege
+names are interchangeable. It selects the QGA role from the installed `pve-manager` major and
+refuses unknown majors. After `qm importdisk`, it attaches the exact `unused0` volume ID recorded in
+VM config so both directory and block storage use the provider's result. A failed package refresh
+stops with repository guidance; Agentworks does not rewrite host apt sources.
+
+The create-time cloud-init wait accepts exit 0 as success and exit 2 as completed with recoverable
+warnings. Any other completed status fails immediately. Provider errors may be retried until the
+existing readiness deadline, whose terminal error includes the last safe provider diagnostic.
+
 ## Error normalization
 
 The implementation uses the established transport failure family so current orchestration catches
@@ -362,7 +372,9 @@ changes because none of those surfaces changes.
 - QGA unavailable, request failure, timeout before PID, and timeout after PID;
 - no adapter redispatch after ambiguity;
 - ordinary logging and sensitive log, result, diagnostic, exception, cause, and context absence; and
-- bootstrap staging cleanup remains unchanged.
+- bootstrap staging cleanup remains unchanged;
+- cloud-init success, degraded completion, hard failure, and provider-error timeout handling; and
+- VE 8/VE 9 role selection plus provider-reported disk attachment in setup validation.
 
 ### Platform conformance
 

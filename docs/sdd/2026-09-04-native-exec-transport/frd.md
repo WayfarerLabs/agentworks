@@ -129,8 +129,15 @@ shell support optional and honestly reported.
 - **R21.** Permanent root and vm-platform capability documentation shall distinguish required native
   execution, optional full native transport, and canonical Tailscale transport. The Proxmox guide
   shall document QGA recovery support and the remaining interactive-shell limitation.
-- **R22.** The implementation shall retain the repository's documented Proxmox VE 8 scope. Support
-  for a later Proxmox permission model is a separate compatibility decision.
+- **R22.** The implementation shall support Proxmox VE 8 and VE 9. Setup shall select the
+  least-privilege QGA role for the installed supported major and refuse an unknown major rather than
+  guessing.
+- **R23.** Proxmox creation shall treat cloud-init status 0 as success, status 2 as completed with
+  recoverable warnings, and status 1 as a hard failure. A genuine readiness timeout shall retain the
+  last safe provider diagnostic when one exists.
+- **R24.** Proxmox setup shall attach the imported disk by the volume ID Proxmox reports,
+  independent of storage layout. If package metadata cannot be refreshed to install a required setup
+  tool, it shall stop with repository guidance and shall not rewrite host package sources.
 
 ## Quality requirements
 
@@ -138,7 +145,8 @@ shell support optional and honestly reported.
   `vm shell --platform` without implementing interactive, streaming, or file-transfer methods.
 - **Q2.** Tests shall prove admin-versus-root rendering, finite stdin, provider payload limits,
   timeouts, ambiguous dispatch, signals, truncation, malformed responses, checked exits, and
-  sensitive-input non-disclosure outside its required provider request field.
+  sensitive-input non-disclosure outside its required provider request field. Focused coverage shall
+  also prove cloud-init degraded completion and hard failure handling.
 - **Q3.** Tests shall prove that `vm shell --platform` accepts a full native transport and rejects a
   declared execution-only platform before resolving credentials, constructing or probing a native
   transport, or invoking an interactive method.
@@ -156,7 +164,9 @@ shell support optional and honestly reported.
 5. Sensitive stdin is absent from every captured Agentworks and provider-facing diagnostic surface.
 6. QGA timeout, signal, truncation, malformed response, and nonzero exit behavior is explicit and
    covered by tests.
-7. Full automated gates, installed-wheel smoke tests, private reviews, CI, and
+7. The setup path works with Proxmox VE 8 and VE 9 least-privilege roles and with directory-backed
+   or block-backed disk storage.
+8. Full automated gates, installed-wheel smoke tests, private reviews, CI, and
    capability-appropriate live validation pass before implementation merge intent.
 
 ## Out of scope
@@ -178,3 +188,5 @@ shell support optional and honestly reported.
 - 2026-09-04: The operator excluded runtime implementation from 0.18.0.
 - 2026-09-06: After approving the design, the operator authorized runtime implementation on the same
   PR and up to three implementation feedback/fix rounds.
+- 2026-09-06: The operator authorized the live-Proxmox findings, including pre-existing setup and
+  readiness defects, to be corrected in this PR while preserving the approved compatibility scope.

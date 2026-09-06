@@ -99,10 +99,17 @@ QGA executes with the guest agent's root authority and does not accept a guest u
 must deliberately run ordinary commands as the configured admin user and reserve root for
 `sudo=True`.
 
-The repository currently supports Proxmox VE 8. Its guest-exec endpoints require `VM.Monitor`, which
-the existing setup role grants. Current VE documentation shows finer-grained guest-agent
-permissions. That difference is evidence against using unversioned current docs to claim VE 8 setup
-is wrong, and against silently adding VE 9 support here.
+Proxmox VE 8 guest-agent endpoints use `VM.Monitor`. VE 9 removed that privilege and split its QGA
+permissions: Agentworks needs `VM.GuestAgent.Audit` for network inspection,
+`VM.GuestAgent.FileWrite` for bootstrap staging, and `VM.GuestAgent.Unrestricted` for exec and
+status. A single unversioned role cannot support both majors, so setup must select the role from the
+installed supported major.
+
+Live VE 9 validation also showed two provider-owned shapes that setup must respect. `qm importdisk`
+records the actual imported volume under `unused0`; directory storage and block storage do not share
+a derivable volume name. Cloud-init 23.4 and later returns status 2 after completing with
+recoverable errors, while status 1 is unrecoverable. Readiness must distinguish completion from
+success rather than treating every nonzero result as unfinished.
 
 ## Existing Agentworks prior art
 
@@ -127,23 +134,26 @@ specialized bootstrap lifecycle alone.
 | provider timeout cancels the guest process     | No guest-exec cancellation endpoint exists              |
 | all QGA input requires file staging            | Proxmox exposes bounded direct `input-data`             |
 | QGA ordinary execution naturally matches admin | QGA starts with root authority and needs demotion       |
-| current Proxmox permissions describe VE 8      | VE 8 and current VE permissions differ                  |
+| one QGA role works unchanged on VE 8 and VE 9  | The supported majors use incompatible privilege names   |
 | a capability-version bump protects consumers   | The contract is internal and all bundled code is atomic |
 
 ## Sources
 
-| Source                                                                                                                                  | Quality                       | Angle used                            |
-| --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | ------------------------------------- |
-| [pyinfra connector API](https://docs.pyinfra.com/en/3.x/api/connectors.html)                                                            | Primary project documentation | Connector scope and lifecycle         |
-| [pyinfra BaseConnector source](https://github.com/pyinfra-dev/pyinfra/blob/3.x/src/pyinfra/connectors/base.py)                          | Primary upstream source       | Host and state coupling               |
-| [pyinfra command source](https://github.com/pyinfra-dev/pyinfra/blob/3.x/src/pyinfra/api/command.py)                                    | Primary upstream source       | Command values and hidden fragments   |
-| [pyinfra connector utilities](https://github.com/pyinfra-dev/pyinfra/blob/3.x/src/pyinfra/connectors/util.py)                           | Primary upstream source       | Central command wrapping              |
-| [pyinfra facts](https://docs.pyinfra.com/en/3.x/facts.html)                                                                             | Primary project documentation | Fact lifecycle and caching            |
-| [pyinfra operations](https://docs.pyinfra.com/en/3.x/using-operations.html)                                                             | Primary project documentation | Desired-state execution model         |
-| [pyinfra package metadata](https://github.com/pyinfra-dev/pyinfra/blob/3.x/pyproject.toml)                                              | Primary upstream source       | Dependency and framework weight       |
-| [Proxmox VE 8 guest exec](https://pve.proxmox.com/pve-docs-8/api-viewer/#/nodes/{node}/qemu/{vmid}/agent/exec)                          | Primary provider API          | Command, stdin limit, permission, PID |
-| [Proxmox VE 8 guest exec status](https://pve.proxmox.com/pve-docs-8/api-viewer/#/nodes/{node}/qemu/{vmid}/agent/exec-status)            | Primary provider API          | Exit, signal, output, truncation      |
-| [Proxmox guest exec implementation](https://lists.proxmox.com/pipermail/pve-devel/2018-June/032733.html)                                | Primary provider source       | REST boolean wire encoding            |
-| [Current Proxmox guest exec](https://pve.proxmox.com/pve-docs/api-viewer/#/nodes/{node}/qemu/{vmid}/agent/exec)                         | Primary provider API          | Permission evolution                  |
-| [QEMU guest-exec reference](https://www.qemu.org/docs/master/interop/qemu-ga-ref.html#command-QGA-qapi-schema.guest-exec)               | Primary upstream API          | Guest process and input model         |
-| [QEMU guest-exec-status reference](https://www.qemu.org/docs/master/interop/qemu-ga-ref.html#command-QGA-qapi-schema.guest-exec-status) | Primary upstream API          | Asynchronous result model             |
+| Source                                                                                                                                  | Quality                        | Angle used                            |
+| --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | ------------------------------------- |
+| [pyinfra connector API](https://docs.pyinfra.com/en/3.x/api/connectors.html)                                                            | Primary project documentation  | Connector scope and lifecycle         |
+| [pyinfra BaseConnector source](https://github.com/pyinfra-dev/pyinfra/blob/3.x/src/pyinfra/connectors/base.py)                          | Primary upstream source        | Host and state coupling               |
+| [pyinfra command source](https://github.com/pyinfra-dev/pyinfra/blob/3.x/src/pyinfra/api/command.py)                                    | Primary upstream source        | Command values and hidden fragments   |
+| [pyinfra connector utilities](https://github.com/pyinfra-dev/pyinfra/blob/3.x/src/pyinfra/connectors/util.py)                           | Primary upstream source        | Central command wrapping              |
+| [pyinfra facts](https://docs.pyinfra.com/en/3.x/facts.html)                                                                             | Primary project documentation  | Fact lifecycle and caching            |
+| [pyinfra operations](https://docs.pyinfra.com/en/3.x/using-operations.html)                                                             | Primary project documentation  | Desired-state execution model         |
+| [pyinfra package metadata](https://github.com/pyinfra-dev/pyinfra/blob/3.x/pyproject.toml)                                              | Primary upstream source        | Dependency and framework weight       |
+| [Proxmox VE 8 guest exec](https://pve.proxmox.com/pve-docs-8/api-viewer/#/nodes/{node}/qemu/{vmid}/agent/exec)                          | Primary provider API           | Command, stdin limit, permission, PID |
+| [Proxmox VE 8 guest exec status](https://pve.proxmox.com/pve-docs-8/api-viewer/#/nodes/{node}/qemu/{vmid}/agent/exec-status)            | Primary provider API           | Exit, signal, output, truncation      |
+| [Proxmox guest exec implementation](https://lists.proxmox.com/pipermail/pve-devel/2018-June/032733.html)                                | Primary provider source        | REST boolean wire encoding            |
+| [Current Proxmox guest exec](https://pve.proxmox.com/pve-docs/api-viewer/#/nodes/{node}/qemu/{vmid}/agent/exec)                         | Primary provider API           | Permission evolution                  |
+| [Proxmox VE 9 privilege change](https://lore.proxmox.com/pve-devel/20250717133711.84715-4-f.ebner@proxmox.com/)                         | Primary provider source        | Guest-agent permission split          |
+| [Proxmox disk import guidance](https://pve.proxmox.com/wiki/Migrate_to_Proxmox_VE)                                                      | Primary provider documentation | Imported `unused0` volume             |
+| [cloud-init status return codes](https://docs.cloud-init.io/en/latest/explanation/return_codes.html)                                    | Primary upstream documentation | Completed degraded status             |
+| [QEMU guest-exec reference](https://www.qemu.org/docs/master/interop/qemu-ga-ref.html#command-QGA-qapi-schema.guest-exec)               | Primary upstream API           | Guest process and input model         |
+| [QEMU guest-exec-status reference](https://www.qemu.org/docs/master/interop/qemu-ga-ref.html#command-QGA-qapi-schema.guest-exec-status) | Primary upstream API           | Asynchronous result model             |
