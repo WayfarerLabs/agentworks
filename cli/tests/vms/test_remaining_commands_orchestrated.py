@@ -294,26 +294,14 @@ def test_rekey_rejects_multiline_key_before_status_or_daemon_action(
 
 def _fake_rekey_transports(
     monkeypatch: pytest.MonkeyPatch,
-) -> list[tuple[str, dict[str, object]]]:
+) -> list[ExecCall]:
     """Fake the rekey body's out-of-band transport work: the native
     transport records the tailscale commands, the Tailscale-side
     verification succeeds, and the per-step stabilization sleeps cost
     nothing."""
     from agentworks.transports import SSHTransport
 
-    calls: list[tuple[str, dict[str, object]]] = []
-
     def _run(call: ExecCall) -> SSHResult:
-        kwargs: dict[str, object] = {}
-        if call.sudo:
-            kwargs["sudo"] = True
-        if not call.check:
-            kwargs["check"] = False
-        if call.timeout is not None:
-            kwargs["timeout"] = call.timeout
-        if call.input_text is not None:
-            kwargs["input_text"] = call.input_text
-        calls.append((call.command, kwargs))
         stdout = "100.64.0.77\n" if call.command == "tailscale ip -4" else ""
         return SSHResult(returncode=0, stdout=stdout, stderr="")
 
@@ -331,7 +319,7 @@ def _fake_rekey_transports(
     import time
 
     monkeypatch.setattr(time, "sleep", lambda secs: None)
-    return calls
+    return native.calls
 
 
 def test_rekey_one_boundary_burst_covers_key_and_site_secret(
@@ -357,14 +345,17 @@ def test_rekey_one_boundary_burst_covers_key_and_site_secret(
     assert len(resolve_counter) == 1
     assert sorted(resolve_counter[0]) == ["proxmox-token", "tailscale-auth-key"]
     assert events == ["status"]
-    sensitive = [(command, kwargs) for command, kwargs in calls if kwargs.get("input_text") is not None]
+    sensitive = [call for call in calls if call.input_text is not None]
     assert sensitive == [
-        (
+        ExecCall(
             TAILSCALE_JOIN_STDIN_COMMAND,
-            {"sudo": True, "timeout": 30, "input_text": "tskey-new\n"},
+            True,
+            True,
+            30,
+            "tskey-new\n",
         )
     ]
-    assert all("tskey-new" not in command for command, _kwargs in calls)
+    assert all("tskey-new" not in call.command for call in calls)
     row = db.get_vm("box")
     assert row is not None and row.tailscale_host == "100.64.0.77"
     assert any("rekeyed successfully" in m for m in captured_output.info)

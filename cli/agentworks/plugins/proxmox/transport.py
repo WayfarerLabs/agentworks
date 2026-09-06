@@ -10,8 +10,6 @@ from agentworks.ssh import SSHError, SSHResult
 from agentworks.transports import ExecTransport
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from agentworks.plugins.proxmox.api import ProxmoxAPI
     from agentworks.ssh import SSHLogger
 
@@ -32,8 +30,6 @@ class ProxmoxExecTransport(ExecTransport):
         admin_username: str,
         logger: SSHLogger | None = None,
         default_timeout: int | None = None,
-        monotonic: Callable[[], float] = time.monotonic,
-        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._api = api
         self.node = node
@@ -41,8 +37,6 @@ class ProxmoxExecTransport(ExecTransport):
         self.admin_username = admin_username
         self.logger = logger
         self.default_timeout = default_timeout
-        self._monotonic = monotonic
-        self._sleep = sleep
 
     def describe(self) -> str:
         return f"proxmox:{self.vmid}@{self.node}"
@@ -58,11 +52,11 @@ class ProxmoxExecTransport(ExecTransport):
     ) -> SSHResult:
         """Run ``command`` once through QGA and return its captured result."""
         if input_text is not None and len(input_text) > _INPUT_DATA_LIMIT:
-            raise ValueError(f"Proxmox QGA input_text exceeds {_INPUT_DATA_LIMIT} characters")
+            raise SSHError(f"Proxmox QGA input_text exceeds {_INPUT_DATA_LIMIT} characters") from None
 
         argv = _command_argv(command, admin_username=self.admin_username, sudo=sudo)
         resolved_timeout = self._resolve_timeout(timeout)
-        deadline = None if resolved_timeout is None else self._monotonic() + resolved_timeout
+        deadline = None if resolved_timeout is None else time.monotonic() + resolved_timeout
         dispatch_timeout = self._remaining(deadline, pid=None)
 
         dispatch_failed = False
@@ -125,12 +119,12 @@ class ProxmoxExecTransport(ExecTransport):
                 return result
 
             remaining = self._remaining(deadline, pid=pid)
-            self._sleep(_POLL_INTERVAL_SECONDS if remaining is None else min(_POLL_INTERVAL_SECONDS, remaining))
+            time.sleep(_POLL_INTERVAL_SECONDS if remaining is None else min(_POLL_INTERVAL_SECONDS, remaining))
 
     def _remaining(self, deadline: float | None, *, pid: int | None) -> float | None:
         if deadline is None:
             return None
-        remaining = deadline - self._monotonic()
+        remaining = deadline - time.monotonic()
         if remaining > 0:
             return remaining
         if pid is None:
@@ -171,6 +165,16 @@ def _parse_status(status: dict[str, object], *, sensitive: bool) -> tuple[bool, 
     if type(exited) is not bool:
         raise SSHError("Proxmox QGA exec-status response has an invalid exited field") from None
     if not exited:
+        completion_fields = {
+            "exitcode",
+            "signal",
+            "out-data",
+            "err-data",
+            "out-truncated",
+            "err-truncated",
+        }
+        if completion_fields.intersection(status):
+            raise SSHError("Proxmox QGA exec-status response reports completion data before exit") from None
         return False, None
 
     exitcode = status.get("exitcode")

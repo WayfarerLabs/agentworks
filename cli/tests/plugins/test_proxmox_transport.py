@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any, cast
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -86,11 +88,9 @@ class _Logger:
 def _transport(
     api: _API,
     *,
-    clock: _Clock | None = None,
     logger: _Logger | None = None,
     default_timeout: int | None = None,
 ) -> ProxmoxExecTransport:
-    clock = clock or _Clock()
     return ProxmoxExecTransport(
         cast("ProxmoxAPI", api),
         node="pve1",
@@ -98,8 +98,28 @@ def _transport(
         admin_username="agentworks",
         logger=logger,  # type: ignore[arg-type]
         default_timeout=default_timeout,
-        monotonic=clock.monotonic,
-        sleep=clock.sleep,
+    )
+
+
+def _patch_clock(monkeypatch: pytest.MonkeyPatch, clock: _Clock) -> None:
+    monkeypatch.setattr("agentworks.plugins.proxmox.transport.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("agentworks.plugins.proxmox.transport.time.sleep", clock.sleep)
+
+
+def _wire_response(data: object) -> MagicMock:
+    response = MagicMock()
+    response.read.return_value = json.dumps({"data": data}).encode()
+    response.__enter__ = lambda value: value
+    response.__exit__ = MagicMock(return_value=False)
+    return response
+
+
+def _wire_api() -> ProxmoxAPI:
+    return ProxmoxAPI(
+        api_url="https://pve.example.com:8006",
+        token_id="user@pam!token",
+        token_secret="secret-value",
+        verify_ssl=False,
     )
 
 
@@ -240,16 +260,19 @@ def test_input_data_provider_boundary_is_checked_before_dispatch() -> None:
     assert len(accepted.dispatches) == 1
 
     rejected = _API()
-    with pytest.raises(ValueError):
-        _transport(rejected).run("read secret", input_text="x" * 65_537)
+    payload = f"{_SECRET}{'x' * 65_537}"
+    with pytest.raises(SSHError) as caught:
+        _transport(rejected).run("read secret", input_text=payload)
     assert rejected.dispatches == []
+    _assert_exception_graph_is_secret_free(caught.value)
 
 
-def test_default_timeout_is_one_deadline_across_dispatch_and_polling() -> None:
+def test_default_timeout_is_one_deadline_across_dispatch_and_polling(monkeypatch: pytest.MonkeyPatch) -> None:
     clock = _Clock()
     api = _API([{"exited": False}, {"exited": True, "exitcode": 0}])
+    _patch_clock(monkeypatch, clock)
 
-    _transport(api, clock=clock, default_timeout=10).run("true")
+    _transport(api, default_timeout=10).run("true")
 
     assert api.dispatches[0]["timeout"] == 10
     assert api.status_calls[0]["timeout"] == 10
@@ -257,13 +280,14 @@ def test_default_timeout_is_one_deadline_across_dispatch_and_polling() -> None:
     assert clock.sleeps == [2.0]
 
 
-def test_timeout_after_dispatch_reports_pid_without_redispatch() -> None:
+def test_timeout_after_dispatch_reports_pid_without_redispatch(monkeypatch: pytest.MonkeyPatch) -> None:
     clock = _Clock()
     api = _API([{"exited": False}])
     logger = _Logger()
+    _patch_clock(monkeypatch, clock)
 
     with pytest.raises(SSHError) as caught:
-        _transport(api, clock=clock, logger=logger).run("long-operation", timeout=1)
+        _transport(api, logger=logger).run("long-operation", timeout=1)
 
     assert len(api.dispatches) == 1
     assert len(api.status_calls) == 1
@@ -277,6 +301,12 @@ def test_timeout_after_dispatch_reports_pid_without_redispatch() -> None:
     [
         {},
         {"exited": "yes"},
+        {"exited": False, "exitcode": 0},
+        {"exited": False, "signal": 9},
+        {"exited": False, "out-data": ""},
+        {"exited": False, "err-data": ""},
+        {"exited": False, "out-truncated": False},
+        {"exited": False, "err-truncated": False},
         {"exited": True},
         {"exited": True, "exitcode": 0, "signal": 1},
         {"exited": True, "exitcode": "0"},
@@ -303,3 +333,58 @@ def test_status_api_failure_reports_possible_continuation_without_redispatch() -
     assert len(api.dispatches) == 1
     assert len(api.status_calls) == 1
     assert "42" in str(caught.value)
+
+
+@patch("urllib.request.urlopen")
+def test_numeric_wire_status_runs_then_exits(
+    mock_urlopen: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mock_urlopen.side_effect = [
+        _wire_response({"pid": 42}),
+        _wire_response({"exited": 0}),
+        _wire_response(
+            {
+                "exited": 1,
+                "exitcode": 0,
+                "out-data": "done\n",
+                "out-truncated": 0,
+                "err-truncated": 0,
+            }
+        ),
+    ]
+    monkeypatch.setattr("agentworks.plugins.proxmox.transport.time.sleep", lambda _seconds: None)
+
+    result = ProxmoxExecTransport(
+        _wire_api(),
+        node="pve1",
+        vmid=101,
+        admin_username="agentworks",
+    ).run("true")
+
+    assert result == SSHResult(returncode=0, stdout="done\n", stderr="")
+    assert mock_urlopen.call_count == 3
+
+
+@patch("urllib.request.urlopen")
+def test_numeric_wire_truncation_is_rejected(mock_urlopen: MagicMock) -> None:
+    mock_urlopen.side_effect = [
+        _wire_response({"pid": 42}),
+        _wire_response(
+            {
+                "exited": 1,
+                "exitcode": 0,
+                "out-data": "partial",
+                "out-truncated": 1,
+                "err-truncated": 0,
+            }
+        ),
+    ]
+
+    with pytest.raises(SSHError):
+        ProxmoxExecTransport(
+            _wire_api(),
+            node="pve1",
+            vmid=101,
+            admin_username="agentworks",
+        ).run("true")

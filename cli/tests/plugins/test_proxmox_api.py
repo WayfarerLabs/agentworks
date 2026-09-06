@@ -177,6 +177,52 @@ class TestResponseParsing:
         assert req.full_url.endswith("/nodes/pve/qemu/100/agent/exec-status?pid=42")
         assert mock_urlopen.call_args.kwargs["timeout"] == 3
 
+    @patch("urllib.request.urlopen")
+    def test_guest_agent_exec_status_normalizes_wire_booleans(
+        self,
+        mock_urlopen: MagicMock,
+        api: ProxmoxAPI,
+    ) -> None:
+        mock_urlopen.return_value = _mock_response({"exited": 1, "out-truncated": 0, "err-truncated": True})
+
+        result = api.guest_agent_exec_status("pve", 100, pid=42)
+
+        assert result == {"exited": True, "out-truncated": False, "err-truncated": True}
+
+    @pytest.mark.parametrize("field", ["exited", "out-truncated", "err-truncated"])
+    @pytest.mark.parametrize("value", [-1, 2, "1", 0.0, None])
+    @patch("urllib.request.urlopen")
+    def test_guest_agent_exec_status_rejects_invalid_wire_booleans(
+        self,
+        mock_urlopen: MagicMock,
+        api: ProxmoxAPI,
+        field: str,
+        value: object,
+    ) -> None:
+        mock_urlopen.return_value = _mock_response({field: value})
+
+        with pytest.raises(ProxmoxAPIError):
+            api.guest_agent_exec_status("pve", 100, pid=42)
+
+    @patch("urllib.request.urlopen")
+    def test_guest_agent_exec_wait_handles_numeric_running_and_exited_wire_status(
+        self,
+        mock_urlopen: MagicMock,
+        api: ProxmoxAPI,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        mock_urlopen.side_effect = [
+            _mock_response({"pid": 42}),
+            _mock_response({"exited": 0}),
+            _mock_response({"exited": 1, "exitcode": 0}),
+        ]
+        monkeypatch.setattr("agentworks.plugins.proxmox.api.time.sleep", lambda _seconds: None)
+
+        result = api.guest_agent_exec_wait("pve", 100, "/bin/true")
+
+        assert result == {"exited": True, "exitcode": 0}
+        assert mock_urlopen.call_count == 3
+
     @pytest.mark.parametrize("response", [None, [], "invalid"])
     @patch("urllib.request.urlopen")
     def test_guest_agent_exec_status_rejects_malformed_data(

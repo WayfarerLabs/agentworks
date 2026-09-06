@@ -24,7 +24,7 @@ from agentworks import output
 from agentworks.capabilities.base import RunContext
 from agentworks.ssh import SSHResult
 from agentworks.vms import manager as vm_manager
-from tests.native_exec_support import ExecutionOnlyTransport
+from tests.native_exec_support import ExecCall, ExecutionOnlyTransport
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -35,27 +35,6 @@ _OPEN_LINE = "Opening SSH route (allow scoped to 198.51.100.7/32)..."
 _CLOSE_LINE = "Closing SSH route (removing allow rule 'allow-ssh-transient-cafe0001')..."
 
 
-class _RecordingTransport(ExecutionOnlyTransport):
-    """Stand-in transport: the factory's reachability probe and the
-    logout dispatch both succeed, and every command is recorded."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.commands: list[str] = []
-
-    def run(
-        self,
-        command: str,
-        *,
-        sudo: bool = False,
-        check: bool = True,
-        timeout: int | None = None,
-        input_text: str | None = None,
-    ) -> SSHResult:
-        self.commands.append(command)
-        return super().run(command, sudo=sudo, check=check, timeout=timeout, input_text=input_text)
-
-
 class _AzureShapedPlatform:
     """A platform whose ``transient_route`` emits the real Azure route
     lines around the window, so the ordering pin observes the same
@@ -64,7 +43,7 @@ class _AzureShapedPlatform:
     name = "azure-vm"
     probe_failure_hint = None
 
-    def __init__(self, target: _RecordingTransport) -> None:
+    def __init__(self, target: ExecutionOnlyTransport) -> None:
         self._target = target
 
     @contextlib.contextmanager
@@ -75,7 +54,7 @@ class _AzureShapedPlatform:
         finally:
             output.info(_CLOSE_LINE)
 
-    def native_transport(self, vm: object, ctx: object, *, config: object | None = None) -> _RecordingTransport:
+    def native_transport(self, vm: object, ctx: object, *, config: object | None = None) -> ExecutionOnlyTransport:
         return self._target
 
 
@@ -85,13 +64,13 @@ class _NullRoutePlatform:
     name = "lima"
     probe_failure_hint = None
 
-    def __init__(self, target: _RecordingTransport) -> None:
+    def __init__(self, target: ExecutionOnlyTransport) -> None:
         self._target = target
 
     def transient_route(self, vm: object, ctx: object, *, config: object | None = None) -> Any:
         return contextlib.nullcontext()
 
-    def native_transport(self, vm: object, ctx: object, *, config: object | None = None) -> _RecordingTransport:
+    def native_transport(self, vm: object, ctx: object, *, config: object | None = None) -> ExecutionOnlyTransport:
         return self._target
 
 
@@ -110,7 +89,7 @@ def test_deregistered_prints_inside_the_route_window(captured_output: CapturedOu
     announcement, the route open, the success message, THEN the route
     close. The success message printing after the close (the pre-#350
     ordering) would misstate when the deregistration happened."""
-    target = _RecordingTransport()
+    target = ExecutionOnlyTransport()
     platform: Any = _AzureShapedPlatform(target)
 
     vm_manager._tailscale_logout(_fake_vm(), _fake_config(), platform, RunContext())
@@ -121,14 +100,14 @@ def test_deregistered_prints_inside_the_route_window(captured_output: CapturedOu
         "Tailscale node deregistered",
         _CLOSE_LINE,
     ]
-    assert any("tailscale down && tailscale logout" in cmd for cmd in target.commands)
+    assert any("tailscale down && tailscale logout" in call.command for call in target.calls)
 
 
 def test_nullcontext_route_platform_output_is_unchanged(captured_output: CapturedOutput) -> None:
     """Platforms without transient route state see the same two lines as
     before the reorder: the window is invisible, so moving the success
     message inside it changes nothing for them."""
-    target = _RecordingTransport()
+    target = ExecutionOnlyTransport()
     platform: Any = _NullRoutePlatform(target)
 
     vm_manager._tailscale_logout(_fake_vm(), _fake_config(), platform, RunContext())
@@ -137,28 +116,19 @@ def test_nullcontext_route_platform_output_is_unchanged(captured_output: Capture
         "Deregistering from Tailscale...",
         "Tailscale node deregistered",
     ]
-    assert any("tailscale down && tailscale logout" in cmd for cmd in target.commands)
+    assert any("tailscale down && tailscale logout" in call.command for call in target.calls)
 
 
 def test_failed_dispatch_still_warns_without_success_line(captured_output: CapturedOutput) -> None:
     """The failure path is unchanged by the reorder: a dispatch that
     raises warns and never prints the success message."""
 
-    class _FailingTransport(_RecordingTransport):
-        def run(
-            self,
-            command: str,
-            *,
-            sudo: bool = False,
-            check: bool = True,
-            timeout: int | None = None,
-            input_text: str | None = None,
-        ) -> SSHResult:
-            if "tailscale down" in command:
-                raise RuntimeError("ssh died mid-logout")
-            return super().run(command, sudo=sudo, check=check, timeout=timeout, input_text=input_text)
+    def fail_logout(call: ExecCall) -> SSHResult:
+        if "tailscale down" in call.command:
+            raise RuntimeError("ssh died mid-logout")
+        return SSHResult(returncode=0, stdout="", stderr="")
 
-    platform: Any = _AzureShapedPlatform(_FailingTransport())
+    platform: Any = _AzureShapedPlatform(ExecutionOnlyTransport(fail_logout))
     vm_manager._tailscale_logout(_fake_vm(), _fake_config(), platform, RunContext())
 
     assert "Tailscale node deregistered" not in captured_output.info

@@ -28,6 +28,25 @@ class ProxmoxAPIError(ProvisioningError):
     code: int | None = None
 
 
+_QGA_BOOLEAN_FIELDS = ("exited", "out-truncated", "err-truncated")
+
+
+def _normalize_qga_exec_status(status: dict[str, Any]) -> dict[str, Any]:
+    """Normalize Proxmox VE 8's integer-encoded QGA booleans."""
+    normalized = dict(status)
+    for field in _QGA_BOOLEAN_FIELDS:
+        if field not in normalized:
+            continue
+        value = normalized[field]
+        if type(value) is bool:
+            continue
+        if type(value) is int and value in (0, 1):
+            normalized[field] = bool(value)
+            continue
+        raise ProxmoxAPIError(f"Proxmox guest-agent exec-status returned an invalid {field} field")
+    return normalized
+
+
 class ProxmoxAPI:
     """Minimal Proxmox VE REST client."""
 
@@ -295,7 +314,7 @@ class ProxmoxAPI:
         )
         if not isinstance(result, dict):
             raise ProxmoxAPIError("Proxmox guest-agent exec-status returned a malformed response")
-        return result
+        return _normalize_qga_exec_status(result)
 
     def guest_agent_file_write(self, node: str, vmid: int, path: str, content: str) -> None:
         """Write a file inside the VM via the guest agent.
