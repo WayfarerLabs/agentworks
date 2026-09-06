@@ -191,13 +191,12 @@ Existing orchestration orders prerequisites when session creation also creates r
 explicitly requested creations may run setup. Starting an existing session never does so.
 
 Features use the existing descriptor/registration pattern as the three core-owned kinds
-`vm-feature`, `agent-feature`, and `workspace-feature`. They have one config and one idempotent
-setup operation, return env/artifact contributions, and are selected in a `features` list with the
-same ordering and replacement rules as attachments. The user setup pipeline consumes the
-agent-feature API for both concrete users, so features do not introduce duplicate admin
-implementations. Concrete test implementations registered as vm-feature, agent-feature (covering
-both user scopes), and workspace-feature exercise every lane through the real CLI in the vertical
-acceptance run, proving env and artifact delivery. There is no session-feature.
+`vm-feature`, `user-feature`, and `workspace-feature`. They have one config and one idempotent setup
+operation, return env/artifact contributions, and are selected in a `features` list with the same
+ordering and replacement rules as attachments. User-features run in the user setup pipeline; the
+invocation context identifies the user. Concrete test implementations registered as vm-feature,
+user-feature (covering both user scopes), and workspace-feature exercise every lane through the real
+CLI in the vertical acceptance run, proving env and artifact delivery. There is no session-feature.
 
 ## The two currencies
 

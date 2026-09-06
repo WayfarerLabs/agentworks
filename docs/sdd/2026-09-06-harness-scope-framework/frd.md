@@ -94,7 +94,8 @@ env-to-date (including env inherited from broader scopes, which core assembles a
 each able to emit env and agent artifacts alongside its own side effects. Enabled harness
 integrations run last, receiving the completed env and local artifacts plus applicable inherited
 artifacts still deferred for that integration, as specified in R7. Reinit reruns the same pipeline
-idempotently.
+idempotently. User setup selects `user-feature` capabilities: one kind serves both admin and agent
+users, with the invocation context identifying the user.
 
 **R2. The integration API carries one init method per facet.** `vm_init`, `user_init`, and
 `workspace_init` (names indicative) join the existing session surface on the one registered
@@ -244,6 +245,13 @@ This ruling supersedes the saga scope-participation contract and target-state wo
 session receives all artifact payloads. Their other constraints still apply. The saga lead owns
 reconciling those shared artifacts; this effort does not edit them. Cross-feature dependency
 declarations remain deferred pending a separate decision.
+
+## Operator ruling: user-feature naming, 2026-09-06
+
+> user-features is for sure the right name. We don't want different capability kinds for agent vs
+> admin.
+
+R1 records `user-feature` as the single capability kind for user setup.
 
 ## What changed since the scope-participation contract was written
 
