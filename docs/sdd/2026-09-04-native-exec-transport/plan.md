@@ -202,7 +202,8 @@ capability-appropriate live validation under the integration-testing process.
 - [ ] Record any unavailable Proxmox live evidence for authenticated operator disposition rather
       than satisfying acceptance from mocks.
 - [ ] Correct the live VE 9 cloud-init, role, disk-import, and repository-diagnostic findings while
-      preserving VE 8 compatibility; run focused and full gates on the resulting head.
+      preserving VE 8 compatibility, bounded readiness, and partial-setup rollback; run focused and
+      full gates on the resulting head.
 - [ ] Re-run private review lanes and live Proxmox create and recovery validation on the corrected
       exact head.
 - [ ] Complete up to three authorized published runtime feedback/fix rounds, if needed.

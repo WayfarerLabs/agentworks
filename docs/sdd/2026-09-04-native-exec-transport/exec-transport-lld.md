@@ -311,9 +311,15 @@ refuses unknown majors. After `qm importdisk`, it attaches the exact `unused0` v
 VM config so both directory and block storage use the provider's result. A failed package refresh
 stops with repository guidance; Agentworks does not rewrite host apt sources.
 
+Once `qm create` succeeds for a target VMID proven absent at invocation start, an EXIT trap owns
+that partial VM until template finalization. Failure runs `qm destroy <vmid> --purge 1`, which
+removes the config-referenced imported disk, while success disarms the trap. Cleanup does not scan
+for or delete unreferenced volumes that may predate the invocation.
+
 The create-time cloud-init wait accepts exit 0 as success and exit 2 as completed with recoverable
 warnings. Any other completed status fails immediately. Provider errors may be retried until the
-existing readiness deadline, whose terminal error includes the last safe provider diagnostic.
+existing readiness deadline. The nested QGA wait and retry sleep receive only its remaining budget,
+and the terminal error includes the last safe provider diagnostic.
 
 ## Error normalization
 
@@ -374,7 +380,7 @@ changes because none of those surfaces changes.
 - ordinary logging and sensitive log, result, diagnostic, exception, cause, and context absence; and
 - bootstrap staging cleanup remains unchanged;
 - cloud-init success, degraded completion, hard failure, and provider-error timeout handling; and
-- VE 8/VE 9 role selection plus provider-reported disk attachment in setup validation.
+- VE 8/VE 9 role selection, provider-reported disk attachment, and partial-setup rollback.
 
 ### Platform conformance
 

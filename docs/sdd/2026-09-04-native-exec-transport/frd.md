@@ -137,7 +137,9 @@ shell support optional and honestly reported.
   last safe provider diagnostic when one exists.
 - **R24.** Proxmox setup shall attach the imported disk by the volume ID Proxmox reports,
   independent of storage layout. If package metadata cannot be refreshed to install a required setup
-  tool, it shall stop with repository guidance and shall not rewrite host package sources.
+  tool, it shall stop with repository guidance and shall not rewrite host package sources. A failure
+  after creating a previously absent target VMID shall remove only the partial VM created by that
+  setup invocation.
 
 ## Quality requirements
 

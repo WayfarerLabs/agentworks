@@ -207,10 +207,15 @@ attaches that exact value. It does not derive a block-volume name from the stora
 installing `libguestfs-tools` requires a package refresh and that refresh fails, setup explains the
 Proxmox repository prerequisite without editing host package sources.
 
+After setup proves the target VMID absent, successful `qm create` arms invocation-owned rollback.
+Any later failure destroys that partial VM and its config-referenced disks; successful template
+finalization disarms rollback. Cleanup never targets a VMID that this invocation did not create.
+
 Cloud-init status 0 and 2 both mean execution completed; status 2 carries recoverable warnings and
 is surfaced as such before provisioning continues. Status 1 is a completed hard failure, not a
-reason to poll until a timeout. Transient QGA failures remain retryable during the readiness window,
-and the final timeout retains the last safe provider diagnostic.
+reason to poll until a timeout. Transient QGA failures remain retryable during the readiness window.
+Each nested wait and retry sleep is capped by the remaining outer deadline, and the final timeout
+retains the last safe provider diagnostic.
 
 ## Error model and operator guidance
 
