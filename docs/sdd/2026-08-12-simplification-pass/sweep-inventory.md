@@ -25,8 +25,9 @@ Four things came out of it and each has its own section: the completeness re-sca
 subtraction, the callee-side raise screen, and a Totals section counted off the row markup rather
 than carried forward. Every row-level correction is marked in place, so
 `grep 'Corrected 2026-08-19'` lists them all. The whole of group 1's estate was re-derived and every
-one of its rows now resolves at HEAD; rows in other groups were re-derived only where the
-re-baseline touched them, so a line number elsewhere may still be a `c686cd6d` anchor.
+one of its rows resolved at `426cccae`, which is what that re-baseline measured and not a claim
+about HEAD; rows in other groups were re-derived only where the re-baseline touched them, so a line
+number elsewhere may still be a `c686cd6d` anchor.
 
 **Re-anchored on 2026-09-06**, mechanically, at `426cccae`. Every row now keys what it addresses by
 identity rather than by line, per the grammar below, and nothing but column 2 and the line-anchored
@@ -50,10 +51,31 @@ quiet case: the anchor names a real test, so nothing reports anything, and wheth
 RIGHT test is not a question any tree can answer. 11 resolve nothing and 8 are mixed. Group 1 is not
 at risk, because its basis is known; the exposure is the non-group-1 rows.
 
+**Twenty rows point at files that no longer exist and say nothing about it**, which the fresh cut
+owes too. `[dead]` was applied at `426cccae` and has not been re-derived since, so these five files
+went after it and their rows still read as live:
+
+| File                                                    | Rows                                        |
+| ------------------------------------------------------- | ------------------------------------------- |
+| `cli/tests/vms/test_add_git_credential_orchestrated.py` | G1-M03, G1-M04, G1-132, E-095, E-096, E-097 |
+| `cli/tests/sessions/test_create_resume_orchestrated.py` | G1-I06, G1-057, B-003, B-004, B-005, B-006  |
+| `cli/tests/test_obtain_token_removed.py`                | C-004, C-005, C-006, C-007                  |
+| `cli/tests/secrets/test_resolution_lifecycle.py`        | L-018, G1-156, B-061                        |
+| `cli/tests/test_session_resume_cli.py`                  | B-124                                       |
+
+Six of the twenty are also among the twelve claim anchors below, since a judgment row whose file is
+gone fails both ways. The sessions file was renamed rather than deleted, so its rows have a
+successor to be re-cut against; the others were deleted outright.
+
 **The recourse is re-derivation, not repair.** The fresh cut re-derives from scratch every
 non-group-1 row in the 20 files below, rather than carrying their anchors forward, so the mixed
 basis dies with the cut instead of being audited row by row. Eight of these files disagree on every
 row asked, and four of them hold 93 of the 144.
+
+Rows anchored to a whole file are out of the table's scope, having no lines to disagree about, and
+so are group 1's, whose basis is known: `cli/tests/assistance/test_generation.py` holds two
+disagreeing group-1 rows that are therefore absent below. That is the whole of the gap between the
+144 the measurement counted and the 142 these twenty files hold.
 
 | File                                                     | Rows asked | Disagreeing |
 | -------------------------------------------------------- | ---------: | ----------: |
@@ -122,9 +144,20 @@ separator: that is a dotted path (`TemplateContractTests.test_favicon_is_exact_a
 pytest's `::` node-id spelling, so neither can be pasted into the other. `Type` is the asserted
 exception or warning name exactly as written, or the assertion method's own name where the call
 takes no type (`assertRegex`, `assertNotRegex`). `digest` is the first six hex of sha256 over the
-extracted match template, which is the needle with its interpolations blanked, so the site is keyed
-on what it matches; six is the shortest prefix that separates every distinct needle in this estate,
-five colliding once and four twice.
+needle's SKELETON: the literal with every interpolation blanked to `{}`, which covers f-strings,
+`"..." % x` from its literal left operand, and `"...".format(...)` from its literal receiver.
+
+**The skeleton is deliberately blind to what is interpolated**, and that is a trade made on purpose.
+Keying on the interpolated expression would tell `f"a{x}b"` from `f"a{y}b"`, and would also mean
+that renaming a local variable inside a test orphans the row naming the site, which is exactly the
+drift this whole grammar exists to retire; 24 sites in this estate carry an interpolation and would
+have been that fragile. So two sites in one test that differ only in what they interpolate are one
+identity with a multiplicity of two. Their disposition is the same, a row addresses both alike, and
+`grown` and `shrunk` are what report the difference if one of them ever goes.
+
+**Measured at `a64b1b9c`**: the estate's 678 sites carry 488 distinct needles, and six hex is the
+shortest prefix that separates all of them. Five collides once, over two needles; four collides
+twice, over four.
 
 **Sites that tie on all four are one identity, not several.** An earlier cut separated them by
 1-based source order, which reintroduced the exact drift this grammar exists to retire: inserting an
@@ -145,8 +178,10 @@ it now sits. `grown` and `shrunk` are a site group that changed size, with both 
 is the same test asserting the same type against a different needle, which is what a reworded
 message leaves behind. `gone` is the file present and the anchor not in it, `file-gone` is the file
 itself, and `line-anchored` is a line anchor, which resolves to nothing by construction. `carry`
-holds two trees and so adds its own labels on top of these; its docstring is where those live,
-because they describe a comparison between commits rather than what a row says.
+holds two trees and so adds two labels of its own on top of these, `found` and `moved`, plus four
+verdicts it gives a whole row. Those live in `carry`'s docstring in
+[sweep_screen/reports.py](sweep_screen/reports.py), because they describe a comparison between two
+commits rather than anything a row says.
 
 **A site anchor beats a span anchor in the same function, in group 1 only.** Group 1's rows address
 `match=` sites, so where a function holds sites such a row cited, those sites are the whole claim: a
@@ -463,8 +498,10 @@ the R4 reassessment might want to audit. An unmarked row is live and executable.
 
 Three markers take a row OUT of the executable set:
 
-- **`[dead]`**: the row's target file or site no longer exists at HEAD. The row keeps its original
-  disposition as the record of what was intended.
+- **`[dead]`**: the row's target file or site did not exist at `426cccae`, the basis this marker was
+  applied against. It is not a statement about HEAD and has not been re-derived since; twenty rows
+  over five more files have gone the same way and carry no marker, listed with the fresh cut's owed
+  work above. The row keeps its original disposition as the record of what was intended.
 - **`[subtracted: <owner>]`**: the row's estate left the sweep's scope, per the re-scope subtraction
   section below, and the named effort inherits it.
 - **`[deferred]`**: the row is held for the R4 reassessment, per the deferred block. These rows were
@@ -495,11 +532,11 @@ injected-marker rows, those four files having held nothing but injected markers.
 
 ### The estate, re-measured at HEAD
 
-| Estate                                           | At the basis | At HEAD | What moved                                                                                 |
-| ------------------------------------------------ | -----------: | ------: | ------------------------------------------------------------------------------------------ |
-| `pytest.raises(..., match=)` under `cli/tests`   |          663 |     664 | The Grok Build integration (`703fb625`, 2026-08-17) added one site, rowed below as RB-011  |
-| `assertRaisesRegex` under `website/tests`        |           51 |      49 | `test_site_templates.py` lost two to an unrelated `assertRaises` narrowing                 |
-| Test files under `cli/tests` and `website/tests` |          n/a |     362 | A guide rework deleted fifteen files at `4ac084cd` and added four, with two more following |
+| Estate                                           | At `c686cd6d` | At `426cccae` | What moved                                                                                 |
+| ------------------------------------------------ | ------------: | ------------: | ------------------------------------------------------------------------------------------ |
+| `pytest.raises(..., match=)` under `cli/tests`   |           663 |           664 | The Grok Build integration (`703fb625`, 2026-08-17) added one site, rowed below as RB-011  |
+| `assertRaisesRegex` under `website/tests`        |            51 |            49 | `test_site_templates.py` lost two to an unrelated `assertRaises` narrowing                 |
+| Test files under `cli/tests` and `website/tests` |           n/a |           362 | A guide rework deleted fifteen files at `4ac084cd` and added four, with two more following |
 
 Two site families in `website/tests` sit in the same suite and were never part of the 51: one
 `assertRegex` (`test_site_build.py:530`) and eight `assertNotRegex` (five in `test_lander_404.py`,
@@ -731,10 +768,14 @@ needs re-cutting for the restart, which is a sequencing decision and not this ma
 ## Group 1: mechanical `match=` narrowing
 
 204 live rows: 146 delete, 7 convert, 51 keep, out of a ledger of 231 (two `[dead]`, 25
-`[subtracted]`). The group splits in three. The 33 rows immediately below are the sites the taxonomy
-does NOT decide mechanically; the 23 `G1-K` rows after them are the sites whose matched text varies
-with the test's input; the 152 rows in the mechanical batch last are one per file and share one
-justification. A reviewer who reads the first two tables has read all the judgment in this PR.
+`[subtracted]`). The group splits into four sections, counted by `sweep-screen.py totals` and by the
+section headings below. The **40 rows immediately below** are the sites the taxonomy does NOT decide
+mechanically: 28 `L-` and one `RB-` row read by hand, the 4 `G1-C` rows the callee screen converted,
+and the 7 `G1-M` rows the mutation screen decided. Then **23 `G1-K` rows**, the sites whose matched
+text varies with the test's input; then **19 `G1-I` rows**, the ones the injected-marker screen
+pulled out; then the **149 rows of the mechanical batch**, one per file, sharing one justification.
+40 plus 23 plus 19 plus 149 is the 231 the Totals section reports. A reviewer who reads the first
+three tables has read all the judgment in this PR.
 
 **This group is no longer the no-judgment batch its name promises.** The callee-side raise screen
 found that four in five of the sites it can resolve are multi-raise-path, so the mechanical batch's
@@ -900,7 +941,7 @@ enough the first time.
 
 454 live `match=` sites over 131 files, one row per file, out of a ledger of 517 over 149. The gap
 is the dead and subtracted rows, and it is the number to size a PR from. Every one is `delete`, and
-the justification is shared rather than restated 152 times: the matched string is a fixed literal
+the justification is shared rather than restated 149 times: the matched string is a fixed literal
 that varies with nothing, and it is prose this repository authors, which no case in the taxonomy
 licenses. The `raises` stays; only the `match=` argument goes.
 
