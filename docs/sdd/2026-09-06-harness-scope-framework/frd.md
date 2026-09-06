@@ -125,13 +125,16 @@ the graph walk reaches each resource. Per-facet config is a harness-integration 
 framework mechanism.
 
 **R6. Env and typed agent artifacts are the pipeline's two currencies.** Artifact shapes start with
-a reduced Rulesync model: rules and skills. A rule preserves its instructional content and
-applicability, including always-applying and path-specific rules. A skill preserves its name,
-discovery description, instructions, and supporting files as a package with discovery/invocation
-semantics. Converting a skill into prompt text is not equivalent handling. Core and features may
-emit both env and artifacts; the producer contract must permit a later manual template-artifact
-surface without redesign, but that surface is not required now. Concrete schemas are the effort
-lead's to settle within these requirements and R12.
+instructions plus a reduced Rulesync model of rules and skills. An instruction is a small setup
+fact, such as the existence of an env variable or that an authentication feature made a tool
+available. It remains separate from a rule, so the integration may collect such facts into a native
+rule or a session launch prompt without manufacturing one rule per fact. A rule preserves its
+instructional content and applicability, including always-applying and path-specific rules. A skill
+preserves its name, discovery description, instructions, and supporting files as a package with
+discovery/invocation semantics. Converting a skill into prompt text is not equivalent handling. Core
+and features may emit both env and artifacts; the producer contract must permit a later manual
+template-artifact surface without redesign, but that surface is not required now. Concrete schemas
+are the effort lead's to settle within these requirements and R12.
 
 **R7. Integrations defer what they cannot handle; core rejects final session deferral.** Native
 placement at the defining scope is the ordinary case. Each facet invocation receives local artifacts
@@ -184,17 +187,17 @@ core still carries harness-specific fields or setup dispatch after this lands, t
 do its job. The existing generic shell fallback is preserved; it is not a Claude-specific
 configuration or installation path.
 
-**R12. The artifact schema must not foreclose wave 6.** Rule and skill shapes are concrete now, with
-origin attribution and a producer-local identity that survives delivery. Global stable identity,
-attributed composition, and limited typed hooks remain wave 6 work. Hooks must be able to join later
-as a distinct artifact kind with explicit event and execution semantics, without flattening
-artifacts to strings or rebuilding their delivery protocol. This effort does not implement hook
-execution, global identity, or composition.
+**R12. The artifact schema must not foreclose wave 6.** Instruction, rule, and skill shapes are
+concrete now, with origin attribution and a producer-local identity that survives delivery. Global
+stable identity, attributed composition, and limited typed hooks remain wave 6 work. Hooks must be
+able to join later as a distinct artifact kind with explicit event and execution semantics, without
+flattening artifacts to strings or rebuilding their delivery protocol. This effort does not
+implement hook execution, global identity, or composition.
 
-**R13. One vertical integration proves create and reinit end to end**, including native rules and
-complete skill packages at user and workspace scopes, workspace create-time materialization,
-downstream filtering of handled payloads, and terminal refusal for an unrepresentable artifact. The
-framework must not land with only unit-level evidence.
+**R13. One vertical integration proves create and reinit end to end**, including grouped setup
+instructions, native rules, and complete skill packages at user and workspace scopes, workspace
+create-time materialization, downstream filtering of handled payloads, and terminal refusal for an
+unrepresentable artifact. The framework must not land with only unit-level evidence.
 
 ## Settled constraints, not to be reopened
 
@@ -224,9 +227,11 @@ through the saga lead.
 
 The operator approved the reduced rules/skills model, native placement with integration-owned
 deferral, shared deferral results with core enforcement at the session facet, and immutable origin
-metadata. The operator then explicitly authorized updating this FRD and publishing it together with
-the corresponding HLA revision in the existing draft review PR. R1, R3, R6, R7, R9, R12, and R13
-express that refinement; scope/facet terminology and R11's generic shell preservation are clarified
+metadata. The operator then clarified that small instructions describing Agentworks setup remain a
+separate artifact kind, available for integration-owned grouping into a rule or launch prompt. The
+operator then explicitly authorized updating this FRD and publishing it together with the
+corresponding HLA revision in the existing draft review PR. R1, R3, R6, R7, R9, R12, and R13 express
+that refinement; scope/facet terminology and R11's generic shell preservation are clarified
 alongside it.
 
 This ruling supersedes the saga scope-participation contract and target-state wording that every
@@ -300,7 +305,8 @@ caution, and the pre-design call-site discovery walk.
   else on the observability track (wave 5). Note that `scope-participation-contract.md` settles the
   identity model for both waves; this effort consumes it only if a requirement here needs it.
 - Global artifact identity, attributed composition, and hook execution (wave 6), beyond R12's
-  obligation not to foreclose them. The rule/skill shapes and origin tracking in R6/R7 are in scope.
+  obligation not to foreclose them. The instruction/rule/skill shapes and origin tracking in R6/R7
+  are in scope.
 - A manually authored template-artifact surface, while preserving its immediate follow-on path.
 - External plugin distribution and its trust model (wave 8).
 - Harness integration config knobs for per-session workload inputs (issue #674), which shipped ahead
@@ -316,5 +322,5 @@ workspace scope through its own API and its own config; when core carries no har
 at any scope (R11 discharged); when reinit at each setup scope converges rather than accumulating,
 proven by the vertical integration; and when an integration that implements nothing beyond `start`
 behaves exactly as it does today when no artifact inputs are supplied. With artifact inputs,
-completion also requires faithful rule/skill representation or a final deferral error, with no
-session payload duplication or widening of session-only applicability.
+completion also requires faithful instruction/rule/skill representation or a final deferral error,
+with no session payload duplication or widening of session-only applicability.

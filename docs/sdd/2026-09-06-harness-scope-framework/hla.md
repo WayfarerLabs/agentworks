@@ -9,9 +9,10 @@
 - Code baseline: `0c8cf6bc77dd49a2a30440cde0326f37a3980689`
 
 The [operator's artifact-delivery ruling](frd.md#operator-ruling-artifact-delivery-2026-09-06)
-replaces the original all-payload session rollup with rules, skills, and integration-specific
-deferral. This draft carries the authorized FRD amendment and its architecture response together;
-the saga lead owns reconciling the superseded shared-contract wording.
+replaces the original all-payload session rollup with typed artifacts and integration-specific
+deferral, retaining small setup instructions alongside rules and skills. This draft carries the
+authorized FRD amendment and its architecture response together; the saga lead owns reconciling the
+superseded shared-contract wording.
 
 ## Architecture in one view
 
@@ -170,10 +171,8 @@ without validating absent config or inventing defaults. Both use the same facet 
 methods only the invocation that belongs to that resource: VM identity and system runner for vm;
 username, home, and user runner for user; workspace identity, root, and setup runner for workspace.
 Each also receives artifacts, previous applied facts for this integration, an applied-fact
-checkpoint channel, and an env view carried by the runner. Core translates its admin/agent
-distinction into the concrete user; an integration author implements one `user_init` body without an
-admin or agent branch. Origin metadata is descriptive provenance; it does not ask the integration to
-reconstruct core's scope-to-facet dispatch.
+checkpoint channel, and an env view carried by the runner. Core binds the user invocation to its
+user. Origin metadata is descriptive provenance, not another dispatch mechanism.
 
 Session construction adds session identity, workspace, workload target, launch readiness cache, and
 conversation state. None of those fields is required to construct setup bindings. Conversely, a
@@ -198,9 +197,7 @@ same ordering and replacement rules as attachments. The user setup pipeline cons
 agent-feature API for both concrete users, so features do not introduce duplicate admin
 implementations. Concrete test implementations registered as vm-feature, agent-feature (covering
 both user scopes), and workspace-feature exercise every lane through the real CLI in the vertical
-acceptance run, proving env and artifact delivery. A production feature that only repeats direct
-template declarations would add no operator value, so it is not part of this design. There is no
-session-feature.
+acceptance run, proving env and artifact delivery. There is no session-feature.
 
 ## The two currencies
 
@@ -225,13 +222,14 @@ boundary. A feature declares all secret references it may emit through its confi
 Its output may use that declared set but cannot introduce a secret lookup after the boundary
 resolves. Runtime values exist only in the operation's runner and scoped secret view.
 
-**Agent artifacts have two concrete kinds: rule and skill.** Their shapes are a reduced Rulesync
-model, independent of target filenames:
+**Agent artifacts have three concrete kinds: instruction, rule, and skill.** Instructions describe
+Agentworks setup; rules and skills follow a reduced Rulesync model. None is a target filename:
 
-| Kind  | Content and behavior preserved through delivery                                                                                                                                                                                                           |
-| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Rule  | A producer-local name, instructional text, and applicability: always applying or matching declared workspace-relative paths. The integration preserves that applicability when representing the rule.                                                     |
-| Skill | A producer-local name, discovery description, instructions, and a bundle of supporting files addressed relative to the skill root. Preserve the package and its discovery/invocation semantics; appending its instructions to a prompt is not equivalent. |
+| Kind        | Content and behavior preserved through delivery                                                                                                                                                                                                           |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Instruction | A producer-local name and short, non-secret setup fact, such as an available env variable or successful tool authentication. It carries no separate rule applicability or skill invocation metadata.                                                      |
+| Rule        | A producer-local name, instructional text, and applicability: always applying or matching declared workspace-relative paths. The integration preserves that applicability when representing the rule.                                                     |
+| Skill       | A producer-local name, discovery description, instructions, and a bundle of supporting files addressed relative to the skill root. Preserve the package and its discovery/invocation semantics; appending its instructions to a prompt is not equivalent. |
 
 Core attaches immutable origin metadata: owning scope, resource identity, and producer (core or the
 named feature). Together with the producer-local name, these identify an item across delivery;
@@ -245,20 +243,23 @@ relative paths and non-secret contents so references and scripts travel with the
 source paths are not destinations or permission to copy arbitrary host files. Package ingestion
 validates relative paths and refuses escapes. The LLD settles the concrete bundle carrier and codec.
 
-Core and features may emit these typed artifacts alongside env. Their producer API does not depend
-on a manually authored template-artifact field, so that operator surface can follow immediately
-without changing delivery. It is not required in this effort. Session inputs may likewise come from
-core; this does not add a session-feature or change the shipped workload config knobs.
+Core and features may emit these typed artifacts alongside env. An env declaration may be
+accompanied by an instruction describing the variable; a successful user authentication feature may
+emit an instruction that its tool is available. Descriptions contain no secret value. A claim about
+completed setup is emitted only after that setup succeeds. Their producer API does not depend on a
+manually authored template-artifact field, so that operator surface can follow immediately without
+changing delivery. It is not required in this effort. Session inputs may likewise come from core;
+this does not add a session-feature or change the shipped workload config knobs.
 
 Limited hooks can later join as a distinct kind carrying explicit event and execution semantics. Do
 not flatten kinds into arbitrary text or executable strings, erase provenance, or turn a skill into
 a rule as a fallback. Global identity, attributed composition, hook execution, an artifact registry,
-and distillation remain wave 6 work. Rules and skills get concrete shapes now; the vertical
-integration proves both without implementing the deferred machinery.
+and distillation remain wave 6 work. Simple instruction grouping is native rendering, not that
+future composition system. All three kinds get concrete shapes now and are proven by the vertical.
 
 A resource publishes successful core/feature contributions and each invoked integration's deferred
 output to the instance-state store. Later operations reconstruct inputs without rerunning ancestor
-setup. Persist env declarations and non-secret rule/skill content, including bundle members, in the
+setup. Persist env declarations and non-secret artifact content, including skill members, in the
 versioned domain payload. An output schema has no resolved-secret arm. Integrations must not copy
 secret values into artifact content, logs, hashes, reasons, or state. Trusted-code review and
 negative runtime tests enforce that conduct; schema shape alone cannot. Secret env references
@@ -275,9 +276,12 @@ the winner of a destination collision.
 
 **Native placement at the defining scope is the ordinary case.** The integration decides what its
 harness can represent at each invocation. A user-facet invocation normally installs a user skill
-under that user's native skill directory. An item omitted from the successful deferred output is
-handled for that integration and applicable resource path; later invocations need no payload copy.
-Handling for Claude neither handles it for Codex nor handles it for another user.
+under that user's native skill directory. Instructions may be grouped into one native rule for an
+owning resource/facet invocation or deferred to a launch prompt. Grouping retains each contributing
+item's origin and applies or defers those original items, not a replacement artifact with a new
+origin. An item omitted from the successful deferred output is handled for that integration and
+applicable resource path; later invocations need no payload copy. Handling for Claude neither
+handles it for Codex nor handles it for another user.
 
 Setup results return only the items left deferred, preserving the original artifacts and attaching
 specific reasons. The no-op default defers every item. There is no separate handled-item result or
@@ -305,7 +309,8 @@ A harness may use a workload-specific input or a privately referenced package to
 artifact at the session facet, if that preserves the artifact's semantics. It must not place
 session-only content in a user or workspace auto-discovery directory shared with other sessions. If
 the harness has no suitable session mechanism, it defers with a reason and core refuses launch.
-There is no universal prompt-text fallback. Already handled payloads stay upstream; their applied
+Plain instructions may be delivered through the launch prompt; that is not a universal fallback for
+rules or skills with additional semantics. Already handled payloads stay upstream; their applied
 receipts remain available to session readiness for prerequisite and drift checks.
 
 For every materialization, claim the smallest practical ownership unit: a rule file, a managed
@@ -331,12 +336,12 @@ for delivery after config changes or reinit; it is not a historical record of ev
 Preserve source content needed by another integration and earlier applied receipts needed for
 cleanup.
 
-An applied record carries its payload version, source locator, destination or native resource,
-representation strategy, non-secret content hash where meaningful, and confirmed outcome. The owning
-manager persists facts from completed work, using partial slice replacement so another scope,
-another integration, and unknown future keys survive. Successful feature/core contributions and the
-evidence describing their application must describe the same setup generation. Readiness must not
-combine fresh desired config with stale receipts and call that applied success.
+An applied record carries its payload version, contributing source locators, destination or native
+resource, representation strategy, non-secret content hash where meaningful, and confirmed outcome.
+The owning manager persists facts from completed work, using partial slice replacement so another
+scope, another integration, and unknown future keys survive. Successful feature/core contributions
+and the evidence describing their application must describe the same setup generation. Readiness
+must not combine fresh desired config with stale receipts and call that applied success.
 
 Reinit recomputes desired output and reconciles it with the prior record and live destination. It
 writes changed owned content, leaves matching content alone, and removes obsolete owned units only
@@ -412,24 +417,29 @@ state and prior ownership, handles removals only for resources it owns, and uses
 method for admin and agents. Core invokes an integration; it contains no Claude-specific field,
 import, installer branch, or default selection.
 
-Its user and workspace facets materialize rules and complete skill packages at native user and
-project destinations, subject to ownership checks. Claude documents rules under `.claude/rules/` and
-skills under `.claude/skills/` at those levels. A user skill successfully handled by `user_init` is
-absent from subsequent session payloads; session readiness can still check its installation.
+Its user and workspace facets group setup instructions into owned rules where suitable and
+materialize declared rules and complete skill packages at native user and project destinations,
+subject to ownership checks. Claude documents rules under `.claude/rules/` and skills under
+`.claude/skills/` at those levels. A user skill successfully handled by `user_init` is absent from
+subsequent session payloads; session readiness can still check its installation. Instructions
+deferred to the session can join the launch prompt without losing their original attribution. The
+integration records every source contributing to a grouped rule, so reinit can remove or update one
+instruction without retaining stale text or claiming unrelated content.
 
 VM-origin artifacts are deferred where Claude cannot represent their intended applicability, and
 later facet invocations choose a suitable native representation or defer again. The session facet
 must preserve rule applicability and skill package behavior when using any session-specific
 mechanism; otherwise it returns a reason and core refuses launch. Existing `append_system_prompt`
 remains supported, but it is not a general substitute for a rule or a skill. The integration owns
-how any compatible session rule representation combines with that explicit config.
+how setup instructions and any compatible session rule representation combine with that explicit
+config.
 
 Rulesync informs the rule/skill model and separation of sources from generated destinations; it is
 not invoked at runtime. Exact file names, package delivery, available session mechanisms, and native
 plugin ownership probes belong in the LLD and must be verified against the actual CLI. The vertical
-acceptance includes native user and workspace rules/skills, successful downstream filtering,
-unchanged skill support files, and terminal refusal for an unrepresentable artifact. These are
-integration details, not core special cases.
+acceptance includes grouped instructions, native user and workspace rules/skills, downstream
+filtering, unchanged skill support files, and terminal refusal for an unrepresentable artifact.
+These are integration details, not core special cases.
 
 Update first-party manifests and upgrade guidance in the implementation change. Retire old template
 fields and the two core install call sites together; do not leave two active configuration paths.
@@ -454,9 +464,9 @@ where setup changes the guest:
 
 | Requirement    | Acceptance evidence                                                                                                                                                                                                                                                              |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| R1, R2, R6     | Feature fixtures for all three kinds receive env-to-date and emit env, rules, and skills; integrations run after all producers; VM, admin, agent, and workspace ordering is observed.                                                                                            |
+| R1, R2, R6     | Feature fixtures for all three kinds receive env-to-date and emit env, instructions, rules, and skills; integrations run after all producers; VM, admin, agent, and workspace ordering is observed.                                                                              |
 | R3, R4, R5, R8 | A session-only integration remains compatible; different facet schemas validate on the proper resource, invalid public plugin hooks fail at registration, and setup never carries session identity/cache/state.                                                                  |
-| R7, R12        | User/workspace rules and skill bundles retain semantics and origin; handled payloads do not reach session, deferral is integration-specific across both ancestor branches, and any final deferral blocks launch with its reason.                                                 |
+| R7, R12        | Instructions, rules, and skill bundles retain semantics and origin through grouping and delivery; handled payloads do not reach session, deferral is integration-specific across both ancestor branches, and any final deferral blocks launch with its reason.                   |
 | R9             | Repeated VM/admin and agent setup is unchanged; desired changes/removals converge; edited/unowned files cause drift/conflict reports; interrupted work, unknown versions, and concurrent reinit do not overwrite or lose evidence.                                               |
 | R10            | Required and recommended upstream gaps produce different outcomes with the correct owning remediation and no upstream mutation from session start/restart.                                                                                                                       |
 | R11, R13       | Fresh and existing Claude admin/agent config migrates; marketplace/plugin changes reconcile; core has no Claude-specific knowledge (the existing generic shell fallback remains); workspace create materializes real content, failure cleans partial output, and retry succeeds. |
@@ -488,7 +498,7 @@ architecture does not claim those are solved by no-op defaults or by a state tab
   native user/project skill packages establish the vertical integration's placement candidates.
 - [Rulesync file formats](https://rulesync.dyoshikawa.com/reference/file-formats.html), checked
   2026-09-06: rules preserve applicability and skills preserve instructions with supporting files;
-  this response adopts those distinctions without the full tool-specific configuration model.
+  this response adopts those distinctions.
 - [Rulesync CLI documentation](https://rulesync.dyoshikawa.com/reference/cli-commands.html), checked
   2026-09-06, and this repository's `CONTRIBUTING.md`: generation has source and target ownership;
   this architecture declines runtime generation or adoption of its outputs.
