@@ -55,13 +55,17 @@ requires_symlinks = pytest.mark.skipif(
 )
 
 
-# Tests that drive a real POSIX login shell by absolute path (``/bin/sh``),
-# modeling the Unix target a probe runs against. Windows has no ``/bin/sh``
-# (git-bash installs it elsewhere and cannot honor the POSIX chmod/exec the
-# scripts use), so these skip there rather than fail on a host without it.
+# Gate for tests that spawn a POSIX ``sh``/``bash`` to model the Unix target a
+# probe or guest payload runs against: ``bash -n`` syntax checks, ``bash -c`` /
+# ``bash -lc`` wrapping, heredocs, and ``2>/dev/null`` stream handling. Most
+# resolve the shell by name; the marker gates on ``/bin/sh`` presence purely as
+# a host proxy. Windows has no ``/bin/sh`` (git-bash installs its shell
+# elsewhere and cannot honor the POSIX chmod/exec the scripts use), and
+# Git-for-Windows' bash diverges from the Unix target on exactly these
+# constructs, so these skip there rather than fail. Linux CI still runs each one.
 requires_posix_shell = pytest.mark.skipif(
     not Path("/bin/sh").exists(),
-    reason="requires a POSIX /bin/sh login shell",
+    reason="requires a POSIX shell (skipped on the Windows controller)",
 )
 
 
