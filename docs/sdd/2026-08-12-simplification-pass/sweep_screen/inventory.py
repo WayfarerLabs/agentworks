@@ -71,11 +71,11 @@ FENCE = re.compile(r"^\s*(```|~~~)")
 #: The section that accounts for what the map leaves alone, and the shape of
 #: one of its rows: a backticked path in the first cell. It is checked against
 #: the estate rather than read, so both are needed here.
-NO_ROW_HEADING = "### Files with no row, and why"
+NO_ROW_HEADING = "## Files with no row, and why"
 
 #: The section recording rows that left the map. An id is never reused, so a
 #: retired one still resolves a citation even though it addresses nothing.
-RETIRED_HEADING = "### Rows this cut retired"
+RETIRED_HEADING = "## Rows this cut retired"
 #: A retired id in the retired table's first cell. Three digits and an
 #: optional split-row suffix, which is what `D-169a` is; the separator line's
 #: dashes are not an id and this is what tells them apart. The optional

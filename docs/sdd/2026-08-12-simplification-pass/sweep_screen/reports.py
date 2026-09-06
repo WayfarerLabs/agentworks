@@ -307,7 +307,7 @@ def generate(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
     A claim is any group-1 row outside the mechanical batch, which is exactly
     how the 2026-08-19 batch was built by hand.
 
-    Three checks follow, because the generated set is the complement of the
+    Four checks follow, because the generated set is the complement of the
     claims and so adds up by construction whatever the claims are. Comparing
     counts proves nothing; these ask whether the claims are worth complementing.
 

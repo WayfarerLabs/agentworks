@@ -43,9 +43,11 @@ landed, and one is a finding rather than a change.
 **The rows whose estate is gone.** 157 rows left the ledger because their file or their every site
 no longer exists, group 2's whole estate among them, and part 2 retired 12 more on its own reading.
 Three that looked gone were not: `test_create_resume_orchestrated.py` was renamed rather than
-deleted, so G1-I06, B-003 and B-004 moved with it. `[dead]` and `[subtracted]` retire as markers
-with them; a row whose estate is gone is not in the ledger for a marker to describe, and the
-subtraction those markers recorded is reversed below.
+deleted, so G1-I06 moved with it. B-003 and B-004 moved with it too and then retired, because the
+assertions they addressed had gone from the surviving function and only the function's name had been
+rescued. `[dead]` and `[subtracted]` retire as markers with them; a row whose estate is gone is not
+in the ledger for a marker to describe, and the subtraction those markers recorded is reversed
+below.
 
 ### The 2026-08-19 subtraction is reversed
 
@@ -122,9 +124,9 @@ have been that fragile. So two sites in one test that differ only in what they i
 identity with a multiplicity of two. Their disposition is the same, a row addresses both alike, and
 `grown` and `shrunk` are what report the difference if one of them ever goes.
 
-**Measured at `a64b1b9c`**: the estate's 678 sites carry 488 distinct needles, and six hex is the
-shortest prefix that separates all of them. Five collides once, over two needles; four collides
-twice, over four.
+**`sweep-screen.py estate` reports the needle population and the shortest prefix that separates
+it.** Six hex is the shortest prefix that separates all of them. Five collides once, over two
+needles; four collides twice, over four.
 
 **Sites that tie on all four are one identity, not several.** An earlier cut separated them by
 1-based source order, which reintroduced the exact drift this grammar exists to retire: inserting an
@@ -349,10 +351,10 @@ test is named for, and see whether the test still fails once the `match=` is gon
 assertion and pass without it means the assertion is the only probe, and the row keeps.
 
 This is not a screen to run over hundreds of sites; it is what to do with the handful a reading
-leaves genuinely uncertain. Seven sites were decided this way on 2026-08-19 and are rowed as G1-M01
-to G1-M07, and the result is why the method is recorded rather than the sites alone: **five of the
-seven keep and two do not**, and no reading of the rows predicted which. The batch justification
-would have deleted all seven.
+leaves genuinely uncertain. The sites decided this way on 2026-08-19 are the `G1-M` rows, and the
+result is why the method is recorded rather than the sites alone: **five of the seven keep and two
+do not**, and no reading of the rows predicted which. The batch justification would have deleted all
+seven.
 
 ## Groups
 
@@ -375,11 +377,11 @@ forward, because a total carried forward is how this map drifted twice. Two figu
 are different: the LEDGER is every row the map holds, and the EXECUTABLE SET is what the sweep owns
 once the deferred block comes out.
 
-**Executable set: 1,132 rows, 491 delete, 221 convert, 420 keep**, over five groups.
+**The executable set is every live row over five groups**, counted in the Totals table below.
 
-**Ledger: 1,157 rows**, the executable 1,132 plus the 25 `[deferred]`. Nothing else is subtracted
-from it: a row whose estate is gone is not in the ledger at all, which is what changed on 2026-09-06
-when `[dead]` and `[subtracted]` retired.
+**The ledger is the executable set plus the `[deferred]` rows.** Nothing else is subtracted from it:
+a row whose estate is gone is not in the ledger at all, which is what changed on 2026-09-06 when
+`[dead]` and `[subtracted]` retired.
 
 <!-- prettier-ignore -->
 | Group | Live | delete | convert | keep | Deferred | Ledger |
@@ -410,13 +412,7 @@ sites they carry share a single shape, a single disposition, and a single justif
 This file is long for the repository's 500-line guidance, deliberately. It is a ledger, it is
 temporary, and one row per line is what makes it checkable against a diff.
 
-## Completeness re-scan, 2026-08-19
-
-The tree moved between this inventory's basis (`c686cd6d`) and the re-baseline commit (`426cccae`),
-so the map was re-derived against the latter rather than trusted. Every figure below was measured
-from the AST at `426cccae`, never estimated, and none of them has been re-derived since.
-
-### Markers this file uses
+## Markers this file uses
 
 Every row state rides in the shape cell as a bold marker, so a mechanical count can separate the
 executable set from the rest without reading prose, and so nothing is deleted from the ledger that
@@ -454,7 +450,7 @@ row that leaves is retired, never replaced, and the retired list below says what
 citation that names neither a row nor a retired id is a fault `totals` refuses rather than a row
 someone has to go looking for.
 
-### Rows this cut retired
+## Rows this cut retired
 
 An id is never reused, so a row that leaves is recorded here rather than becoming a gap. `totals`
 reads this list, so prose may name a retired id; a citation of an id that is neither a row nor
@@ -486,14 +482,14 @@ allocates a new one above every id the map has used.
 | G1-155                  | Superseded by `dc63b4be`, which regenerated group 1 at the basis; its sites are in the regenerated batch.                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | L-102                   | `guide/test_power_import_boundary.py` was deleted; E-211 is the guard that survived it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
-### What the 2026-08-19 re-baseline measured
+## What the 2026-08-19 re-baseline measured
 
 That round's estate table, its dead-row list and its rows-added list described `426cccae` and are
 not carried forward; this cut re-derived all of it at `c310d05b`. The Basis says what moved and the
 Totals section says what the map now holds. `3c6e6d92` is the last commit that held those figures,
 and git history is where they live.
 
-### Files with no row, and why
+## Files with no row, and why
 
 **`sweep-screen.py totals` names every test file the map leaves alone.** The population is a
 `test_*.py` module under `cli/tests` or `website/tests`, or a `*.test.mjs` suite under the
@@ -676,21 +672,21 @@ way rather than asserted from reading.
 
 ### Sites the re-check pulled out of the mechanical batch
 
-43 of the `match=` sites in this group match a string that VARIES with the test's input (an f-string
-over a field name, a parametrize variable, an interpolated production constant). Those probe that
-the diagnostic tracks the input, which is behavior, so they keep. Two `assertRaisesRegex` sites of
-the same shape sit in L-403's range and keep with them, at G1-K23. What is left after this section,
-the mutation screen's and the injected-marker screen's takes out is the mechanical batch, whose
-sites match a fixed literal in a single-input test.
+Some `match=` sites in this group match a string that VARIES with the test's input (an f-string over
+a field name, a parametrize variable, an interpolated production constant). Those probe that the
+diagnostic tracks the input, which is behavior, so they keep. Two `assertRaisesRegex` sites of the
+same shape sit in L-403's range and keep with them, at G1-K23. What is left after this section, the
+mutation screen's and the injected-marker screen's takes out is the mechanical batch, whose sites
+match a fixed literal in a single-input test.
 
-**One reason serves every row here, so it is stated once rather than 23 times.** These are not fixed
+**One reason serves every row here, so it is stated once rather than per row.** These are not fixed
 phrasing: the matched text varies with the case, so each assertion fails when the diagnostic stops
 tracking the input, not only when someone rewords it. The cost is stated with it: they break on a
 rewording too, and whoever rewords must update them. Each row below carries only what is specific to
 its sites.
 
-Rows G1-K01 through G1-K16 are the first pass; G1-K17 through G1-K23 are the thirteen `match=` and
-two `assertRaisesRegex` sites the second re-check added, as the group header explains.
+Rows G1-K01 through G1-K16 are the first pass; G1-K17 and above are the `match=` and two
+`assertRaisesRegex` sites the second re-check added, as the group header explains.
 
 <!-- prettier-ignore -->
 | id | file and anchors | shape | disposition | justification |
@@ -720,12 +716,12 @@ two `assertRaisesRegex` sites the second re-check added, as the group header exp
 
 ### Sites the injected-marker screen pulled out of the mechanical batch
 
-30 further sites over 19 files match a string the test file itself wrote and handed to an exception
-constructor. For those the mechanical batch's shared justification is false in the way that decides
-the row: the matched text is not prose this repository authors, it is a marker, and the assertion is
-the proof that the INJECTED failure is the one observed. That is word for word why L-004, L-008,
-L-009 and L-010 already keep; the screen finds the rest of that family instead of leaving it to
-whoever happens to read a row closely.
+Further sites match a string the test file itself wrote and handed to an exception constructor. For
+those the mechanical batch's shared justification is false in the way that decides the row: the
+matched text is not prose this repository authors, it is a marker, and the assertion is the proof
+that the INJECTED failure is the one observed. That is word for word why L-004, L-008, L-009 and
+L-010 already keep; the screen finds the rest of that family instead of leaving it to whoever
+happens to read a row closely.
 
 `sweep-screen.py injected` derives them: a site qualifies when its needle appears in a string its
 own module passes to an exception constructor AND appears in no string production emits. Both halves
@@ -773,10 +769,9 @@ enough the first time.
 
 At `426cccae`, 454 live `match=` sites over 131 files, one row per file, out of a ledger of 517 over
 149; the gap is the dead and subtracted rows. Those are the figures this batch was cut to and they
-have not been re-derived. At `a64b1b9c` the live mechanical rows claim 415 sites and
-`sweep-screen.py generate` emits 142 rows over 486, which is the number to size a PR from once the
-fresh cut lands. Every one is `delete`, and the justification is shared rather than restated 149
-times: the matched string is a fixed literal that varies with nothing, and it is prose this
+have not been re-derived. Run `sweep-screen.py generate` to size a PR from: it reports how many rows
+it emits and over how many sites. Every one is `delete`, and the justification is shared rather than
+restated times: the matched string is a fixed literal that varies with nothing, and it is prose this
 repository authors, which no case in the taxonomy licenses. The `raises` stays; only the `match=`
 argument goes.
 
@@ -785,7 +780,7 @@ judgment and keep rows above claim. Read it as the row's claim; there is no rang
 `sweep-screen.py attribute` fails loudly if a site ends up owned by two rows or by none.
 **`sweep-screen.py generate` is that derivation**, so a batch cut at a later tree is emitted rather
 than assembled by hand: it prints these rows in the row grammar, with the header and the
-prettier-ignore line, ready to paste. Then it runs three checks over the claims plus what it just
+prettier-ignore line, ready to paste. Then it runs four checks over the claims plus what it just
 generated, none of them a count comparison, because the generated set is the complement of the
 claims and adds up by construction whatever the claims are. Each refuses:
 
@@ -966,8 +961,7 @@ row before the edit lands.
 
 ## Group 3: report lines and hints
 
-343 rows: 158 delete, 91 convert, 94 keep. This is the second largest convert population in the map,
-behind group 4.
+This is the second largest convert population in the map, behind group 4.
 
 **Precondition, operator disposition 2026-08-19: the recipe verification is re-run before this group
 executes.** Its recipes were verified in the #573 round, four of them carry a recorded trap, and 22
@@ -1605,8 +1599,8 @@ executes**, on the same terms as group 3's.
 
 ## Group 5: authored-artifact form policing
 
-246 rows: 98 delete, 17 convert, 131 keep. The fresh cut grew this group most, the unsurveyed files
-and the twenty re-derived ones both landing mostly here.
+The fresh cut grew this group most, the unsurveyed files and the twenty re-derived ones both landing
+mostly here.
 
 <!-- prettier-ignore -->
 | id | file and anchors | shape | disposition | justification |
@@ -1862,8 +1856,6 @@ and the twenty re-derived ones both landing mostly here.
 
 ## Group 6: source guards
 
-73 rows: 27 delete, 11 convert, 35 keep.
-
 <!-- prettier-ignore -->
 | id | file and anchors | shape | disposition | justification |
 | --- | --- | --- | --- | --- |
@@ -2066,9 +2058,9 @@ recorded in the #573 round as a gating condition on the PRs carrying those conve
 something that round closed, and the re-baseline neither closed it nor carried it forward until now.
 It is NOT superseded by the callee-side raise screen: that screen asks whether a delete row's raised
 type discriminates, and this asks whether a convert row's replacement actually bites at every site
-the recipe covers. Different question, different rows, both open. Treat it exactly as the 532-site
-screen debt above: per-site, owed by the PR that carries the conversion, and paid by sampling the
-unsampled sites rather than by re-reading the recipe.
+the recipe covers. Different question, different rows, both open. Treat it exactly as the screen
+debt above: per-site, owed by the PR that carries the conversion, and paid by sampling the unsampled
+sites rather than by re-reading the recipe.
 
 Four verified recipes carry a trap, each of which was silently vacuous on the first attempt. These
 are recorded on their rows because a reviewer cannot see them in the diff:
@@ -2108,14 +2100,14 @@ the `phase7` item, the contained cli items, and P5.
    lands. Those rows were re-read and now cite the surviving `raises` type or a structural sibling
    instead. Hold any new row to the same rule.
 2. **Group 2 sits downstream of the guide work item.** Resolved rather than binding: the guide item
-   landed as `4ac084cd` and deleted the whole estate, so every group 2 row is `[dead]` and there is
-   no group 2 PR to order.
+   landed as `4ac084cd` and deleted the whole estate, so no group 2 row survived into this cut and
+   there is no group 2 PR to order.
 3. **Group 5 carries the W2 question**, which is an ordering decision rather than something this
    inventory can settle. See the open questions.
-4. **Group 3 is too big for one PR at 322 live rows.** It is the judgment-heavy batch and the
-   largest by a wide margin. The natural cut is by subsystem inside the one shape (consoles and
-   sessions; workspaces and agents; vms and platforms; the rest), which keeps the review's judgment
-   uniform while making each round reviewable.
+4. **Group 3 is too big for one PR.** It is the judgment-heavy batch and the largest by a wide
+   margin. The natural cut is by subsystem inside the one shape (consoles and sessions; workspaces
+   and agents; vms and platforms; the rest), which keeps the review's judgment uniform while making
+   each round reviewable.
 
 ## Overlaps found
 
@@ -2340,7 +2332,7 @@ edits; everything else here is still a flag.
   list was 30 entries at this inventory's basis, not 47 and not the 31 this file claimed until the
   2026-08-19 re-baseline counted the tuple; `test_render_service.py` had one prose-shaped line
   rather than "scattered pins". Both files were deleted by `4ac084cd`, so the finding is historical
-  and its rows are `[dead]`.
+  and its rows went with it.
 - **C10's `cli/tests/capabilities/test_retired_shapes.py` no longer exists.** It and its production
   module were both deleted by `ab0a6303 feat(config)!: remove retired compatibility rewrites`, so
   the "three blacklists redundant with its own structural tests" item is moot and its redundancy
@@ -2348,12 +2340,12 @@ edits; everything else here is still a flag.
 - **C10's `test_capability_shape.py:21-32` anchor is stale.** Those lines are a helper and a
   `parametrize` opening at HEAD, and every message assertion in that file is a `match=` site, so the
   finding resolves into group 1 rather than into its own rows.
-- **APPLIED. `hla.md`'s site counts were both wrong.** `match=` is 664 at HEAD, all under
-  `cli/tests` and none under `website/tests`, after the wave 1 landings and the one site the Grok
-  Build integration added, where `hla.md` said 663. The website suite carries 49 `assertRaisesRegex`
-  sites, not the 51 it recorded. And nine further regex-family sites in that suite were in neither
-  count, one `assertRegex` and eight `assertNotRegex`, all of them already covered by group 5 rows.
-  All three corrections are now in `hla.md`.
+- **APPLIED. `hla.md`'s site counts were both wrong**, and it no longer states any: `match=` is
+  under `cli/tests` and none under `website/tests`, after the wave 1 landings and the one site the
+  Grok Build integration added, where `hla.md` said 663. The website suite carries 49
+  `assertRaisesRegex` sites, not the 51 it recorded. And nine further regex-family sites in that
+  suite were in neither count, one `assertRegex` and eight `assertNotRegex`, all of them already
+  covered by group 5 rows. All three corrections are now in `hla.md`.
 - **APPLIED. `hla.md`'s case 1 needed the callee-side condition.** "The raised type already
   discriminates" is a claim about the callee, and the map established it from the call site, which
   does not follow. The callee-side raise screen found the single-path premise false for roughly four

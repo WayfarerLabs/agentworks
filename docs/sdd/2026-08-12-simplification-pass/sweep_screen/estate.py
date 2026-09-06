@@ -27,9 +27,10 @@ UNTYPED_REGEX_METHODS = frozenset({"assertRegex", "assertNotRegex"})
 
 REGEX_METHODS = TYPED_REGEX_METHODS | UNTYPED_REGEX_METHODS
 
-#: Six hex is the shortest prefix that separates every distinct needle in this
-#: estate: five collides once, over two needles, and four collides twice, over
-#: four. The margin above six is for a tree that keeps moving.
+#: The shortest prefix that separates every distinct needle in the estate, with
+#: margin for a tree that keeps moving. `estate` reports both the needle
+#: population and the prefix that would separate it today, so this is a
+#: decision recorded once rather than a figure kept true in two places.
 DIGEST_LENGTH = 6
 
 

@@ -186,8 +186,8 @@ shares no files with the website work; it waits on the sweep instead, per group 
 
       **Step one is done**: [sweep-inventory.md](sweep-inventory.md), which is the single source for
       this item's counts and topology; nothing here restates them. Its Totals section carries the
-      executable set and the full ledger, its group headers carry the per-group split, and group 3
-      is cut into four sub-batches by subsystem because one review round cannot hold it. That
+      executable set, the full ledger and the per-group split, and group 3 is cut into four
+      sub-batches by subsystem because one review round cannot hold it. That
       artifact is deleted when the sweep closes; its header says so.
 
       **Re-derived against HEAD on 2026-08-19**, after the post-#573 audit and the operator's
@@ -199,8 +199,8 @@ shares no files with the website work; it waits on the sweep instead, per group 
       step for every group's delete rows.
 
       **Re-anchored on 2026-09-06**, so a row keys what it addresses by identity rather than by
-      line, and then **cut fresh at `c310d05b`** once #747 merged. The map is a new document: 1,157
-      rows, 1,132 executable, over five groups, every count derived from the row markup and every
+      line, and then **cut fresh at `c310d05b`** once #747 merged. The map is a new document over
+      five groups, every count derived from the row markup and reported by `totals`, and every
       anchor resolving at the basis. What the cut did is in the inventory's Basis and Totals
       sections rather than here, and this is the whole of what it owed:
 
