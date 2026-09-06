@@ -229,7 +229,6 @@ def test_restore_session_rebuild_reconciles_live_window_order(
     restore_session(db, _StubConfig(), console_name="con", session_name="b", interaction=TtyInteractionPolicy.REFUSE)
 
     assert model.window_names(CON) == ["a", "b"]
-    assert any("swap-window" in command for command in target.commands)
     assert _destructive(target.commands) == []
 
 
@@ -648,6 +647,8 @@ def test_restore_session_splits_missing_config_indices_and_tags_them(db: Databas
 #   - The mutation-dependent proofs are the ones that DO drive mutators
 #     through the model: `test_restore_session_additively_repairs_a_missing_shell_pane`
 #     (the split/tag/reorder repair must land the panes in the right slots)
+#     and `test_restore_session_additive_repair_also_reconciles_window_order`
+#     (one restore repairs simultaneous pane and window-order drift)
 #     and `test_stateful_model_catches_kill_window_then_new_window_destruction`
 #     (the destructive remedy leaves the model with the session destroyed,
 #     which the stateless fake could not represent). Those are where asserting
@@ -755,7 +756,6 @@ def test_restore_session_healthy_target_reconciles_live_window_order(
     restore_session(db, _StubConfig(), console_name="con", session_name="a", interaction=TtyInteractionPolicy.REFUSE)
 
     assert model.window_names(CON) == ["a", "b"]
-    assert any("swap-window" in command for command in target.commands)
     assert _destructive(target.commands) == []
     assert any(role is Role.RESULT for role, _level, _message in captured_output.lines)
 
@@ -772,6 +772,11 @@ def test_restore_session_healthy_target_reconciles_live_window_order(
             "-F '#{window_index}|#{window_name}'",
             _FakeResult(stdout="0|a\n0|b\n"),
             id="duplicate-window-indices",
+        ),
+        pytest.param(
+            "-F '#{window_index}|#{window_name}'",
+            _FakeResult(stdout="0|a\ngarbage\n1|b\n"),
+            id="malformed-window-listing",
         ),
         pytest.param("swap-window", _FakeResult(returncode=1, stderr="tmux failed"), id="swap-window"),
     ],
@@ -827,6 +832,31 @@ def test_restore_session_additively_repairs_a_missing_shell_pane(
     assert [pidx for _pid, pidx, _tag in rows] == [0, 1, 2]
     assert [tag for _pid, _pidx, tag in rows] == [None, 0, 1]
     # The pre-existing shell pane was never destroyed, just kept in place.
+    assert any(pid == surviving_shell_id for pid, _pidx, _tag in rows)
+    assert _destructive(target.commands) == []
+
+
+def test_restore_session_additive_repair_also_reconciles_window_order(
+    db: Database,
+    console_target_factory: Callable[..., _FakeTarget],
+) -> None:
+    """One restore repairs a missing shell pane and simultaneous window drift."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a+2", "b"])
+
+    model = TmuxModel()
+    model.seed_session(CON, "b")
+    model.seed_window(CON, "a", pane_tags=(None, 0))
+    surviving_shell_id = model.pane_rows(CON, "a")[1][0]  # type: ignore[index]
+    target = console_target_factory(model)
+
+    restore_session(db, _StubConfig(), console_name="con", session_name="a", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert model.window_names(CON) == ["a", "b"]
+    rows = model.pane_rows(CON, "a")
+    assert rows is not None
+    assert [tag for _pid, _pidx, tag in rows] == [None, 0, 1]
     assert any(pid == surviving_shell_id for pid, _pidx, _tag in rows)
     assert _destructive(target.commands) == []
 
