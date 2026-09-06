@@ -199,13 +199,13 @@ shares no files with the website work; it waits on the sweep instead, per group 
       step for every group's delete rows.
 
       **Re-anchored on 2026-09-06**, so a row keys what it addresses by identity rather than by
-      line; the fresh cut itself waits on #747. Two things it owes, both recorded in the inventory
+      line; the fresh cut itself waits on #747. Three things it owes, all recorded in the inventory
       rather than here:
 
       - **Re-derive from scratch every non-group-1 row in the twenty files the two-basis measurement
         named**, which is 128 of the 144 rows the two candidate bases disagree about; the other 16
-        are group 1's, whose basis is known, or are anchored to a whole file. Those rows were lifted
-        from line numbers whose tree is not known. Re-deriving is the recourse rather than auditing,
+        are group 1's, whose basis is known. Those rows were lifted from line numbers whose tree is
+        not known. Re-deriving is the recourse rather than auditing,
         because 125 of the 144 resolve cleanly today and no tree can say whether they resolve to the
         right test.
       - **Re-decide the twelve claim anchors `generate` refuses on**, over nine judgment rows
@@ -213,7 +213,8 @@ shares no files with the website work; it waits on the sweep instead, per group 
         that no longer reaches an assertion that exists, so the cut re-decides rather than carries
         it, and `generate` will not emit a batch until it does.
       - **Re-mark the twenty rows whose files are gone.** `[dead]` was applied at `426cccae` and not
-        re-derived since, so five more files have gone and their rows still read as live. The
+        re-derived since, so five more files have gone; seventeen of the twenty still read as live
+        and three are already `[subtracted]`. The
         inventory lists them by file.
 
 - [ ] Retire `reanchor` and `carry`, with the `Tree(ref)` layer under them, in the PR that lands the
