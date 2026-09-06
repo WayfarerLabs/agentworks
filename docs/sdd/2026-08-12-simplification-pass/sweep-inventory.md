@@ -77,7 +77,7 @@ basis dies with the cut instead of being audited row by row. Eight of these file
 row asked, and four of them hold 93 of the 144.
 
 The table lists the files holding at least one disagreeing row that is not group 1's, which is what
-the re-derivation covers. Of the 144, **128 are non-group-1 rows and are the work**; the other 14
+the re-derivation covers. Of the 144, **128 are non-group-1 rows and are the work**; the other 16
 are group 1's, whose basis is known. The 142 the table's own column adds to is those 128 plus 14
 group-1 rows that share a file with them. The remaining 2 of the 144 are the two group-1 rows in
 `cli/tests/assistance/test_generation.py`, absent below because that file holds no non-group-1
@@ -196,9 +196,10 @@ commits rather than anything a row says.
 `match=` sites, so where a function holds sites such a row cited, those sites are the whole claim: a
 span anchor beside them would claim every other site in the same test for the same row, and that is
 what keeps "every `match=` site is claimed by exactly one group-1 row" checkable. Every other
-group's rows address assertions the estate scan cannot see, so their enclosing function is always
-anchored, with any cited sites alongside it. Dropping the span there narrowed 39 rows onto sites
-they were never about: 22 in group 5, 12 deferred and 5 in group 4.
+group's rows address assertions the estate scan cannot see, so their enclosing function is anchored
+too, with any cited sites alongside it, unless a function the row already names encloses it: a
+helper nested inside a cited test is named by that test. Dropping the span narrowed 39 rows onto
+sites they were never about: 22 in group 5, 12 deferred and 5 in group 4.
 
 **A span anchor is deliberately coarser than the row.** It names the test, not the assertion inside
 it, so several rows can share one span anchor and column 3 is what tells them apart. That is the
@@ -302,7 +303,7 @@ exception type raisable from more than one distinct path?** Three answers, three
 
 #### Method, and what it can and cannot answer
 
-Derived from the AST at HEAD, not from reading. Names resolve through the calling module's own
+Derived from the AST at `426cccae`, not from reading. Names resolve through the calling module's own
 namespace (its imports, its module aliases, its top-level definitions), so `_validate` in one module
 is not confused with `_validate` in another; a call on a value whose type is not known statically
 does not resolve at all and is reported as unresolved rather than guessed. From each `pytest.raises`
@@ -478,9 +479,9 @@ G1-156; `test_claude_code_integration.py`; `test_config.py`), five judgment and 
 re-derived, six mechanical rows had range endpoints that excluded real sites, and 25 sites sat
 inside a mechanical row's range while a judgment or keep row above it owned them. The fix is
 structural rather than case by case: **every mechanical row's file cell is now the explicit list of
-the sites it owns**, generated from the estate at HEAD minus what the rows above it claim, so a
-range can no longer sweep up a kept site and the "exactly one row" property is checkable rather than
-asserted.
+the sites it owns**, generated from the estate at `426cccae` minus what the rows above it claim, so
+a range can no longer sweep up a kept site and the "exactly one row" property is checkable rather
+than asserted.
 
 One row is one test or one contiguous assertion group, so a file that mixes wholly-policing tests
 with prose assertions riding inside legitimate ones appears several times. Group 1's mechanical
@@ -600,16 +601,16 @@ Twelve. Ten (RB-001 to RB-010) row the two orchestrated session files the settle
 entirely, `cli/tests/sessions/test_claude_code_orchestrated.py` and
 `cli/tests/sessions/test_codex_orchestrated.py`; they sit in group 3, sub-batch 3a, because the
 assertions ride inside behavioral tests rather than constituting whole tests (which is what puts
-their siblings B-068 and B-072 in group 5). RB-011 rows the one file at HEAD carrying a `match=`
-site with no group-1 row. RB-012 replaces F-129 with its successor file.
+their siblings B-068 and B-072 in group 5). RB-011 rows the one file at `426cccae` carrying a
+`match=` site with no group-1 row at that basis. RB-012 replaces F-129 with its successor file.
 
 `cli/tests/sessions/test_grok_build_orchestrated.py` was read for the same launch-note shape and has
 none: it asserts only argv (`--session-id`, `--resume`) and persisted state.
 
 ### Files with no row, and why
 
-**Sixty-nine test files at HEAD carry no row**, measured this way so a second auditor lands on the
-same number: take every `git ls-files` path under `cli/tests` and `website/tests` whose basename
+**Sixty-nine test files at `426cccae` carry no row**, measured this way so a second auditor lands on
+the same number: take every `git ls-files` path under `cli/tests` and `website/tests` whose basename
 starts with `test_` and ends `.py`, or which ends `.test.mjs` (362 files); a file counts as rowed if
 any row's file cell names it, resolving a bare basename against the NEAREST PRECEDING directory in
 the same cell and expanding a `*` glob, and dead and subtracted rows count as rowed. Skipping the

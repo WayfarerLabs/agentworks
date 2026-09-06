@@ -346,9 +346,10 @@ def _lift(path: str, spans: list[tuple[int, int]], snapshot: Snapshot, *, sites_
     same row and break the exactly-once ownership the group rests on.
 
     Every other group's rows address assertions the estate scan cannot see, so
-    the enclosing function is always emitted, with any cited sites alongside it.
-    Dropping the span there narrowed 39 rows onto `match=` sites they were never
-    about.
+    the enclosing function is emitted too, with any cited sites alongside it,
+    unless a function the row already cites encloses it: a helper nested inside
+    a cited test is named by that test. Dropping the span narrowed 39 rows onto
+    `match=` sites they were never about.
 
     Lines inside no function stay literal, because inventing a name for them
     would be a guess.
@@ -401,7 +402,11 @@ def split_cells(line: str) -> list[str]:
     as what it says.
 
     Code spans follow CommonMark: a run of n backticks opens a span that only a
-    run of exactly n closes, so ``a | b`` is one span rather than two.
+    run of exactly n closes, so ``a | b`` is one span rather than two. An
+    escaped backtick opens nothing, so this and `outside_code_spans`, the two
+    parsers that read one cell, agree on where its spans are. It is kept
+    verbatim rather than unescaped, unlike `\|`, because `join_cells` escapes
+    only the pipe and a bare backtick written back would open a span.
     """
     cells: list[str] = []
     current: list[str] = []
@@ -412,6 +417,10 @@ def split_cells(line: str) -> list[str]:
         char = body[index]
         if char == "\\" and index + 1 < len(body) and body[index + 1] == "|":
             current.append("|")
+            index += 2
+            continue
+        if char == "\\" and index + 1 < len(body) and body[index + 1] == "`":
+            current.append(body[index : index + 2])
             index += 2
             continue
         if char == "`":
