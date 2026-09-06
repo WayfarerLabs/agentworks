@@ -301,7 +301,7 @@ class ProxmoxAPI:
         command: str,
         args: list[str] | None = None,
         *,
-        timeout: int = 60,
+        timeout: float = 60,
     ) -> dict[str, Any] | None:
         """Run a command via the guest agent and wait for completion.
 
@@ -312,22 +312,27 @@ class ProxmoxAPI:
         Content-Type: application/json.
         """
         deadline = time.monotonic() + timeout
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
         pid = self.guest_agent_exec(
             node,
             vmid,
             command=[command, *(args or [])],
-            timeout=max(deadline - time.monotonic(), 0.001),
+            timeout=remaining,
         )
-        while time.monotonic() < deadline:
+        while (remaining := deadline - time.monotonic()) > 0:
             status = self.guest_agent_exec_status(
                 node,
                 vmid,
                 pid=pid,
-                timeout=max(deadline - time.monotonic(), 0.001),
+                timeout=remaining,
             )
             if status.get("exited") is True:
                 return status
-            time.sleep(min(2, max(deadline - time.monotonic(), 0)))
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                time.sleep(min(2, remaining))
 
         return None
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
@@ -17,9 +18,15 @@ if TYPE_CHECKING:
 
 
 class _CloudInitAPI:
-    def __init__(self, *results: dict[str, Any] | None | BaseException) -> None:
+    def __init__(
+        self,
+        *results: dict[str, Any] | None | BaseException,
+        advance: Callable[[float], None] | None = None,
+    ) -> None:
         self.results = list(results)
+        self.advance = advance
         self.calls = 0
+        self.timeouts: list[float] = []
 
     def guest_agent_exec_wait(
         self,
@@ -28,10 +35,13 @@ class _CloudInitAPI:
         command: str,
         args: list[str] | None = None,
         *,
-        timeout: int = 60,
+        timeout: float = 60,
     ) -> dict[str, Any] | None:
-        del node, vmid, command, args, timeout
+        del node, vmid, command, args
         self.calls += 1
+        self.timeouts.append(timeout)
+        if self.advance is not None:
+            self.advance(timeout / 2)
         result = self.results.pop(0)
         if isinstance(result, BaseException):
             raise result
@@ -105,3 +115,27 @@ def test_cloud_init_timeout_retains_last_provider_error(monkeypatch: pytest.Monk
     assert api.calls == 1
     assert caught.value.__cause__ is provider_error
     assert "provider diagnostic token" in str(caught.value)
+
+
+def test_cloud_init_wait_does_not_exceed_small_outer_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = 0.0
+    sleeps: list[float] = []
+
+    def advance(seconds: float) -> None:
+        nonlocal now
+        now += seconds
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        advance(seconds)
+
+    api = _CloudInitAPI(ProxmoxAPIError("not ready"), advance=advance)
+    monkeypatch.setattr("agentworks.plugins.proxmox.platform.time.monotonic", lambda: now)
+    monkeypatch.setattr("agentworks.plugins.proxmox.platform.time.sleep", sleep)
+
+    with pytest.raises(ProvisioningError):
+        _platform(api)._wait_for_cloud_init("pve1", 101, RunContext(), timeout=0.25)
+
+    assert api.timeouts == [0.25]
+    assert sleeps == [0.125]
+    assert now == pytest.approx(0.25)

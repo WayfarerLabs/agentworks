@@ -225,6 +225,15 @@ class TestResponseParsing:
         assert result == {"exited": True, "exitcode": 0}
         assert mock_urlopen.call_count == 3
 
+    @patch("urllib.request.urlopen")
+    def test_guest_agent_exec_wait_does_not_dispatch_after_deadline(
+        self,
+        mock_urlopen: MagicMock,
+        api: ProxmoxAPI,
+    ) -> None:
+        assert api.guest_agent_exec_wait("pve", 100, "/bin/true", timeout=0) is None
+        mock_urlopen.assert_not_called()
+
     @pytest.mark.parametrize(
         "status",
         [

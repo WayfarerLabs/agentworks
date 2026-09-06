@@ -503,35 +503,36 @@ class ProxmoxPlatform(VMPlatform):
 
     # -- Helpers ---------------------------------------------------------------
 
-    def _wait_for_cloud_init(self, node: str, vmid: int, ctx: RunContext, *, timeout: int = 300) -> None:
+    def _wait_for_cloud_init(self, node: str, vmid: int, ctx: RunContext, *, timeout: float = 300) -> None:
         """Wait for cloud-init to finish inside the VM."""
         deadline = time.monotonic() + timeout
         last_provider_error: ProxmoxAPIError | None = None
-        while time.monotonic() < deadline:
+        while (remaining := deadline - time.monotonic()) > 0:
             try:
                 result = self._api(ctx).guest_agent_exec_wait(
                     node,
                     vmid,
                     "/usr/bin/cloud-init",
                     ["status", "--wait"],
-                    timeout=60,
+                    timeout=min(60, remaining),
                 )
-                if result is None:
-                    time.sleep(5)
-                    continue
+                if result is not None:
+                    exitcode = result.get("exitcode")
+                    if exitcode == 0:
+                        return
+                    if exitcode == 2:
+                        output.warn(
+                            f"cloud-init completed with recoverable warnings on Proxmox VMID {vmid}; continuing"
+                        )
+                        return
 
-                exitcode = result.get("exitcode")
-                if exitcode == 0:
-                    return
-                if exitcode == 2:
-                    output.warn(f"cloud-init completed with recoverable warnings on Proxmox VMID {vmid}; continuing")
-                    return
-
-                status = f"exit {exitcode}" if exitcode is not None else f"signal {result.get('signal')}"
-                raise ProvisioningError(f"cloud-init failed on Proxmox VMID {vmid} ({status})")
+                    status = f"exit {exitcode}" if exitcode is not None else f"signal {result.get('signal')}"
+                    raise ProvisioningError(f"cloud-init failed on Proxmox VMID {vmid} ({status})")
             except ProxmoxAPIError as exc:
                 last_provider_error = exc
-            time.sleep(5)
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                time.sleep(min(5, remaining))
         message = (
             f"Timed out waiting for cloud-init on Proxmox VMID {vmid}; "
             "the template must have cloud-init and the QEMU guest agent installed and enabled"

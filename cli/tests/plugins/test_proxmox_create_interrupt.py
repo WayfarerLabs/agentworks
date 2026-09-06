@@ -191,7 +191,7 @@ class FakeProxmoxAPI:
         ]
 
     def guest_agent_exec_wait(
-        self, node: str, vmid: int, command: str, args: list[str] | None = None, *, timeout: int = 60
+        self, node: str, vmid: int, command: str, args: list[str] | None = None, *, timeout: float = 60
     ) -> dict[str, Any] | None:
         argv = tuple(args or ())
         self.calls.append(("guest_agent_exec_wait", node, vmid, command, argv, timeout))

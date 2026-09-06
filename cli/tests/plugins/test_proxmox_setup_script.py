@@ -19,7 +19,6 @@ pytestmark = requires_posix_shell
 _LIFECYCLE_PRIVILEGES = {
     "VM.Allocate",
     "VM.Audit",
-    "VM.Clone",
     "VM.Config.CPU",
     "VM.Config.Cloudinit",
     "VM.Config.Disk",
@@ -68,6 +67,8 @@ def _install_fakes(bin_dir: Path, *, include_virt_customize: bool) -> None:
                 record()
                 if args[0] == "status":
                     raise SystemExit(1)
+                if args[0] == "destroy":
+                    raise SystemExit(int(os.environ["FAKE_DESTROY_STATUS"]))
                 if args[0] == "config" and (volume := os.environ.get("FAKE_IMPORTED_VOLUME")):
                     print(f"unused0: {volume},size=2G")
             elif command == "pvesh":
@@ -109,6 +110,7 @@ def _run_setup(
     imported_volume: str = "local:9001/vm-9001-disk-0.qcow2",
     include_virt_customize: bool = True,
     apt_update_status: int = 0,
+    destroy_status: int = 0,
 ) -> tuple[subprocess.CompletedProcess[str], list[tuple[str, ...]]]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -120,6 +122,7 @@ def _run_setup(
         "PATH": str(bin_dir),
         "FAKE_APT_UPDATE_STATUS": str(apt_update_status),
         "FAKE_CALL_LOG": str(call_log),
+        "FAKE_DESTROY_STATUS": str(destroy_status),
         "FAKE_IMAGE_DIR": str(tmp_path / "image"),
         "FAKE_IMPORTED_VOLUME": imported_volume,
         "FAKE_PVE_MAJOR": pve_major,
@@ -159,15 +162,17 @@ def test_setup_attaches_discovered_volume_and_selects_version_privileges(
 
     assert result.returncode == 0, result.stderr
     assert ("qm", "set", "9001", "--scsi0", volume) in calls
+    assert not any(call[:2] == ("qm", "destroy") for call in calls)
     vm_role = next(call for call in calls if call[:4] == ("pveum", "role", "add", "AgentworksVM"))
     privileges = set(vm_role[vm_role.index("--privs") + 1].split())
     assert privileges == _LIFECYCLE_PRIVILEGES | guest_agent_privileges
 
 
 def test_setup_refuses_import_without_recorded_volume(tmp_path: Path) -> None:
-    result, calls = _run_setup(tmp_path, pve_major="9", imported_volume="")
+    result, calls = _run_setup(tmp_path, pve_major="9", imported_volume="", destroy_status=42)
 
-    assert result.returncode != 0
+    assert result.returncode == 1
+    assert ("qm", "destroy", "9001", "--purge", "1") in calls
     assert not any(call[:4] == ("qm", "set", "9001", "--scsi0") for call in calls)
 
 

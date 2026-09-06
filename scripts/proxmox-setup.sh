@@ -37,7 +37,7 @@ TOKEN_NAME="agentworks"
 IMAGE_URL="https://cloud.debian.org/images/cloud/${RELEASE}/latest/debian-${DEBIAN_VERSION}-generic-amd64.qcow2"
 TEMPLATE_NAME="debian-${DEBIAN_VERSION}-template"
 TEMPLATE_TAGS="agentworks;debian-${RELEASE}"
-VM_LIFECYCLE_PRIVS="VM.Allocate VM.Clone VM.Config.CPU VM.Config.Memory VM.Config.Cloudinit VM.Config.Disk VM.Config.HWType VM.Config.Options VM.Config.Network VM.PowerMgmt VM.Audit"
+VM_LIFECYCLE_PRIVS="VM.Allocate VM.Config.CPU VM.Config.Memory VM.Config.Cloudinit VM.Config.Disk VM.Config.HWType VM.Config.Options VM.Config.Network VM.PowerMgmt VM.Audit"
 
 PVE_VERSION=$(pveversion 2>/dev/null || true)
 if [[ "$PVE_VERSION" =~ ^pve-manager/([0-9]+)\. ]]; then
@@ -92,11 +92,23 @@ else
     # on every exit, including failures and interrupts.
     IMAGE_DIR="$(mktemp -d /var/tmp/agentworks-proxmox-setup.XXXXXXXXXX)"
     IMAGE_FILE="${IMAGE_DIR}/debian-${DEBIAN_VERSION}-generic-amd64.qcow2"
+    REMOVE_CREATED_VM=0
     cleanup_image() {
-        rm -f -- "$IMAGE_FILE"
+        rm -f -- "$IMAGE_FILE" || true
         rmdir -- "$IMAGE_DIR" 2>/dev/null || true
     }
-    trap cleanup_image EXIT
+    cleanup_on_exit() {
+        local status=$?
+        trap - EXIT
+        cleanup_image
+        if [ "$REMOVE_CREATED_VM" -eq 1 ]; then
+            if ! qm destroy "$VMID" --purge 1; then
+                echo "  Error: cleanup could not remove incomplete VMID $VMID; remove it manually." >&2
+            fi
+        fi
+        exit "$status"
+    }
+    trap cleanup_on_exit EXIT
     chmod 700 "$IMAGE_DIR"
 
     echo "  Downloading Debian ${DEBIAN_VERSION} cloud image..."
@@ -121,6 +133,7 @@ else
         --scsihw virtio-scsi-pci \
         --serial0 socket --vga serial0 \
         --agent enabled=1
+    REMOVE_CREATED_VM=1
 
     # Import and attach disk
     echo "  Importing disk..."
@@ -141,6 +154,7 @@ else
     echo "  Converting to template..."
     qm template "$VMID"
     qm set "$VMID" --tags "$TEMPLATE_TAGS"
+    REMOVE_CREATED_VM=0
     echo "  Template created."
 
     cleanup_image
