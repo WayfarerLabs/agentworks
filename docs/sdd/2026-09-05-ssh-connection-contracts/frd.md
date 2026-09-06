@@ -53,9 +53,11 @@ required. The shared model must serve the concrete existing consumers without Li
 
 ## R3: Preserve execution behavior
 
-Consolidation must preserve explicit PTY selection, finite stdin when no payload is supplied,
-byte-exact stdin delivery, stream separation where supported, environment delivery, sensitive-data
-suppression, and terminal restoration. Raw archive streams must remain byte-transparent.
+Consolidation must preserve explicit PTY selection, byte-exact stdin delivery, stream separation
+where supported, environment delivery, sensitive-data suppression, and terminal restoration.
+Buffered programmatic execution supplies EOF when no payload is provided. Interactive and streaming
+operations retain explicitly inherited keyboard or piped stdin. Raw archive streams must remain
+byte-transparent.
 
 All supported controller platforms must receive equivalent guarantees. Interactive and streaming
 operations must detect an unresponsive connection within a documented keepalive budget; buffered
@@ -80,7 +82,7 @@ and preserve uncertainty when it does not.
 
 A clean detach or remote exit must be distinguished from a detected connection failure when the
 corresponding completion evidence arrives. Perfect knowledge after loss is not promised. An
-unacknowledged clean detach is an uncertain outcome, not proof that the operator intended recovery.
+unacknowledged clean detach leaves remote completion unknown, even if connection loss is known.
 
 Remote command failures must not automatically become connectivity failures. Logs and transfers must
 not present failed or incomplete output as a successful complete result. Existing CLI exit status
@@ -100,10 +102,12 @@ the required access and route lifetime throughout the attempt. It must not creat
 replace the workload. A received clean detach or exit, operator cancellation, missing runtime, or
 non-retryable authentication or trust failure ends recovery.
 
-Recovery has finite attempts, bounded backoff, visible status, and immediate local cancellation. An
-indeterminate termination requires an explicit operator decision before reattachment; it must not
-silently undo a possible intentional detach. A successful reattachment resets no lifetime budget in
-a way that permits an unbounded reconnect loop.
+Recovery has finite attempts, bounded backoff, visible status, and immediate local cancellation.
+Opting in permits reattachment after known connection loss despite unknown remote completion,
+including the race where a detach acknowledgement was lost. The option must disclose this behavior.
+If the carrier cannot distinguish connection loss from normal termination, reattachment requires an
+explicit operator decision. A successful reattachment resets no lifetime budget in a way that
+permits an unbounded reconnect loop.
 
 Plain shells, arbitrary execution, file transfers, and tunnels receive reliable outcome reporting in
 this effort but no automatic continuation. Reopening a plain shell is a new shell. Transfer resume

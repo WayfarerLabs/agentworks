@@ -52,10 +52,11 @@ An SSH agent may provide signing for the configured identity. This is distinct f
 forwarding, which remains disabled. The implementation must test actual offered identities and
 encrypted-key behavior instead of equating `-i` alone with exclusive identity selection.
 
-Operation-specific execution choices are supplied separately: PTY or no PTY, stdin payload or EOF,
-captured or inherited streams, explicit environment, connection timeout, operation deadline, and
-intentional forwarding. Keepalive detection applies to long-lived connections, including nested
-outer hops. Forwarding uses explicit listeners and fails when their establishment fails.
+Operation-specific execution choices are supplied separately: PTY or no PTY, stdin payload, EOF, or
+explicitly inherited input, captured or inherited streams, explicit environment, connection timeout,
+operation deadline, and intentional forwarding. Keepalive detection applies to long-lived
+connections, including nested outer hops. Forwarding uses explicit listeners and fails when their
+establishment fails.
 
 Buffered primitive execution and `SSHTransport.run` share one execution path, including logging,
 sensitive-input handling, error translation, and any caller-authorized retries. Interactive,
@@ -129,10 +130,12 @@ same runtime identity and operation resource hold, classify the outcome, check t
 still exists, and reconnect only when the outcome and policy permit it. Access is revalidated when
 needed, and failures of authorization or host trust terminate recovery.
 
-Received clean completion and local cancellation end attachment. Known connection loss permits
-bounded reattachment; an indeterminate termination asks the operator before reattachment. Recovery
-never invokes session creation, restart, or console realization as a side effect. Terminal cleanup
-runs after each lost attachment and before recovery diagnostics.
+Received clean completion and local cancellation end attachment. With reconnect enabled, known
+connection loss permits bounded reattachment even when remote completion is unknown. The opt-in
+discloses that a lost detach acknowledgement can therefore cause reattachment. If the carrier cannot
+distinguish connection loss from normal termination, it asks the operator before reattachment.
+Recovery never invokes session creation, restart, or console realization as a side effect. Terminal
+cleanup runs after each lost attachment and before recovery diagnostics.
 
 The future implementation plan will specify the exact CLI option, finite attempt budget, backoff,
 and non-interactive refusal behavior together with completions and help. Those choices cannot be
