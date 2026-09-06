@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+from collections import Counter
 from dataclasses import dataclass
 
 from .tree import TEST_ROOT, WEB_ROOT, Tree, call_name, exc_name, template
@@ -120,6 +121,12 @@ def functions_in(tree: Tree, path: str) -> list[Function]:
                 walk(child, f"{prefix}{child.name}.")
 
     walk(tree.parse(path), "")
+    twice = sorted({f.qualname for f in found if sum(g.qualname == f.qualname for g in found) > 1})
+    if twice:
+        raise SystemExit(
+            f"{path}: {', '.join(twice)} defined more than once in one scope,"
+            " so a span anchor naming it cannot say which; rename one or the map cannot address it"
+        )
     return sorted(found)
 
 
@@ -188,10 +195,23 @@ class Snapshot:
     def __init__(self, tree: Tree) -> None:
         self.tree = tree
         self.sites: list[Site] = []
+        #: What the per-root filter drops, counted rather than dropped in
+        #: silence: the sweep's estate is `match=` under `cli/tests` and the
+        #: regex family under `website/tests`, and a suite that starts using
+        #: the other spelling would otherwise vanish from every count here.
+        self.excluded: Counter[str] = Counter()
         for path in tree.files(TEST_ROOT):
-            self.sites.extend(s for s in sites_in(tree, path) if s.kind == "match=")
+            for site in sites_in(tree, path):
+                if site.kind == "match=":
+                    self.sites.append(site)
+                else:
+                    self.excluded[f"{site.kind} under {TEST_ROOT}"] += 1
         for path in tree.files(WEB_ROOT):
-            self.sites.extend(s for s in sites_in(tree, path) if s.kind != "match=")
+            for site in sites_in(tree, path):
+                if site.kind != "match=":
+                    self.sites.append(site)
+                else:
+                    self.excluded[f"match= under {WEB_ROOT}"] += 1
         self.sites.sort(key=lambda s: (s.path, s.line, s.col))
 
         grouped: dict[Identity, list[Site]] = {}

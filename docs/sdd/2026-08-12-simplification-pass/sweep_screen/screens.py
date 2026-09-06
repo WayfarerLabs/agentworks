@@ -26,7 +26,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from .estate import sites_in
+from .estate import Snapshot, sites_in
 from .tree import PROD_ROOT, TEST_ROOT, Tree, call_name, exc_name, template
 
 if TYPE_CHECKING:
@@ -38,6 +38,10 @@ if TYPE_CHECKING:
 MAX_DEPTH = 6
 
 EXCEPTION_NAME = re.compile(r"(?:Error|Exception|Interrupt|Abort|Failure)$")
+
+#: What the screen puts in place of an interpolation: the message says anything
+#: at all there, so a needle that matches the fixed parts selects the raise.
+WILDCARD = "\x00"
 
 
 @dataclass
@@ -205,7 +209,7 @@ def raise_facts(world: World) -> dict[tuple[str, int], dict[str, str | None]]:
                 continue
             call = node.exc
             fact: dict[str, str | None] = {
-                "message": template(call.args[0]) if call.args else None,
+                "message": template(call.args[0], wildcard=WILDCARD) if call.args else None,
                 "entity_kind": None,
                 "entity_name": None,
             }
@@ -241,25 +245,23 @@ def selects(needle: str, message: str | None) -> bool:
     if message is None:
         return False
     try:
-        if re.search(needle, message.replace("\x00", "")):
+        if re.search(needle, message.replace(WILDCARD, "")):
             return True
     except re.error:
         pass
-    pattern = ".*".join(re.escape(part) for part in message.split("\x00"))
+    pattern = ".*".join(re.escape(part) for part in message.split(WILDCARD))
     return bool(re.search(pattern, needle))
 
 
-def raises_sites(tree: Tree, path: str) -> Iterator[tuple[int, str, str, list[ast.Call] | None]]:
-    """Each `pytest.raises(..., match=)` in a module, with the calls under it.
+def raises_sites(tree: Tree, path: str) -> Iterator[tuple[int, str, str, list[ast.Call]]]:
+    """Each `pytest.raises(..., match=)` this screen can walk, with its body.
 
     The screen's question is what the operation under test can raise, so it
-    needs the operation, which is the `with` body. A `match=` site spelled any
-    other way (as a bare call, or with the context manager bound and entered
-    elsewhere) has no body to walk, so it yields `None` and the screen reports
-    it as unscreened. Omitting those would make the screen's totals smaller than
-    the estate and hide which sites it never looked at.
+    needs the operation, which is the `with` body. Everything this yields has
+    one; what it cannot reach is not enumerated here but subtracted from the
+    estate afterwards, so a site spelled in a way this walk does not recognise
+    is reported rather than quietly absent.
     """
-    with_calls = set()
     for node in ast.walk(tree.parse(path)):
         if not isinstance(node, (ast.With, ast.AsyncWith)):
             continue
@@ -273,20 +275,8 @@ def raises_sites(tree: Tree, path: str) -> Iterator[tuple[int, str, str, list[as
             asserted = exc_name(call.args[0])
             if asserted is None:
                 continue
-            with_calls.add(id(call))
             body = [c for stmt in node.body for c in ast.walk(stmt) if isinstance(c, ast.Call)]
-            yield call.lineno, asserted, template(keyword.value) or "<expr>", body
-
-    for node in ast.walk(tree.parse(path)):
-        if not isinstance(node, ast.Call) or id(node) in with_calls:
-            continue
-        if call_name(node) != "raises" or not node.args:
-            continue
-        keyword = next((k for k in node.keywords if k.arg == "match"), None)
-        asserted = exc_name(node.args[0])
-        if keyword is None or asserted is None:
-            continue
-        yield node.lineno, asserted, template(keyword.value) or "<expr>", None
+            yield call.lineno, asserted, template(keyword.value, wildcard=WILDCARD) or "<expr>", body
 
 
 def screen(tree: Tree) -> None:
@@ -297,6 +287,7 @@ def screen(tree: Tree) -> None:
         world.add_test(path)
     facts = raise_facts(world)
     verdicts: Counter[str] = Counter()
+    walked: set[tuple[str, int]] = set()
 
     print("site\tasserted\tverdict\ttargeted-raise\tevidence")
     for path in test_paths:
@@ -304,10 +295,7 @@ def screen(tree: Tree) -> None:
         if module is None:
             continue
         for line, asserted, needle, body in raises_sites(tree, path):
-            if body is None:
-                verdicts["unscreened"] += 1
-                print(f"{path}:{line}\t{asserted}\tunscreened\t-\tnot a `with` context, so it has no body to walk")
-                continue
+            walked.add((path, line))
             family = families.get(asserted, set()) | {asserted}
             hits = reachable(world, module, body, family)
             target: tuple[str, int] | None = None
@@ -336,6 +324,17 @@ def screen(tree: Tree) -> None:
             verdicts[verdict] += 1
             where = f"{target[0]}:{target[1]}" if target else "-"
             print(f"{path}:{line}\t{asserted}\t{verdict}\t{where}\t{evidence}")
+
+    # The estate is the authority on what exists, so what the screen did not
+    # reach is the estate minus what it walked, rather than a second walk
+    # guessing at the shapes it might have missed. That covers a bare call, a
+    # context manager entered elsewhere, a tuple of asserted types and a
+    # `raises` with no positional argument, without naming any of them.
+    for site in Snapshot(tree).sites:
+        if site.kind != "match=" or (site.path, site.line) in walked:
+            continue
+        verdicts["unscreened"] += 1
+        print(f"{site.where}\t{site.identity.type_name}\tunscreened\t-\tno `with` body this walk could reach")
 
     print("\n# verdict totals", file=sys.stderr)
     for name, count in sorted(verdicts.items()):

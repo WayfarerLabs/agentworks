@@ -15,7 +15,7 @@ except a row that has no name to reach for.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from .estate import Identity, Site, Snapshot
@@ -33,6 +33,12 @@ PATH_RE = re.compile(r"((?:cli|website)/[A-Za-z0-9_./-]+?\.(?:py|mjs))")
 LINE_ANCHOR = re.compile(r"L(\d+)(?:-(\d+))?$")
 SPAN_RE = re.compile(r"\d+(?:-\d+)?")
 MARKER_RE = re.compile(r"\[(dead|deferred|1-raise|unverified|subtracted:[^\]]*|line-anchored:[^\]]*)\]")
+ANY_MARKER = re.compile(r"\[(?:dead|deferred|1-raise|unverified|subtracted|line-anchored)\b[^\]]*\]")
+CAUSE_RE = re.compile(r"\[line-anchored:\s*([^\]]*)\]")
+
+#: Every cause a line anchor may record. `reanchor` computes these and nothing
+#: else writes them, so one outside the set is a hand edit that has drifted.
+CAUSES = frozenset({"file gone", "not Python", "between functions", "module level"})
 BACKTICKED = re.compile(r"`([^`]+)`")
 FENCE = re.compile(r"^\s*(```|~~~)")
 
@@ -148,7 +154,10 @@ class LineAnchor(Anchor):
     path: str
     spans: tuple[tuple[int, int], ...]
     #: Why nothing could be named here, written onto the row by `reanchor` so
-    #: the declaration is per row rather than only in the grammar section.
+    #: the declaration is per row rather than only in the grammar section. It
+    #: is a fact about the tree the anchor was derived at, not about HEAD, so
+    #: reading a map at another tree recomputes it and may differ; the marker
+    #: `reanchor` wrote is the record.
     cause: str = ""
 
     def render(self) -> str:
@@ -193,7 +202,6 @@ class Row:
     shape: str
     disposition: str
     source_line: int
-    cells: list[str] = field(default_factory=list)
 
     @property
     def path(self) -> str | None:
@@ -211,8 +219,6 @@ class Row:
         return any(a.claims(site) for a in self.anchors)
 
     def render_cell(self) -> str:
-        if not self.anchors:
-            return self.cells[1] if len(self.cells) > 1 else ""
         grouped: dict[str, list[str]] = {}
         for anchor in self.anchors:
             grouped.setdefault(anchor.path, []).append(anchor.render())
@@ -247,7 +253,7 @@ def parse_anchors(cell: str, snapshot: Snapshot, *, sites_only: bool, where: str
                 " because everything after the first path is read as belonging to it",
             )
         if tail.startswith("::"):
-            anchors.extend(_parse_identity_anchors(path, tail[2:], where))
+            anchors.extend(_parse_identity_anchors(path, tail[2:], where, snapshot))
         elif tail.startswith(":"):
             anchors.extend(_lift(path, _parse_legacy_spans(tail[1:]), snapshot, sites_only=sites_only))
         else:
@@ -255,7 +261,7 @@ def parse_anchors(cell: str, snapshot: Snapshot, *, sites_only: bool, where: str
     return anchors
 
 
-def _parse_identity_anchors(path: str, tail: str, where: str) -> list[Anchor]:
+def _parse_identity_anchors(path: str, tail: str, where: str, snapshot: Snapshot) -> list[Anchor]:
     anchors: list[Anchor] = []
     lines: list[tuple[int, int]] = []
     for token in (t.strip() for t in tail.split(",")):
@@ -283,7 +289,8 @@ def _parse_identity_anchors(path: str, tail: str, where: str) -> list[Anchor]:
             raise RowError(where, f"anchor {token!r} has a non-numeric multiplicity {count!r}")
         anchors.append(SiteAnchor(Identity(path, qualname, type_name, digest), int(count or 1)))
     if lines:
-        anchors.append(LineAnchor(path, tuple(lines)))
+        causes = {snapshot.why_unnamed(path, lo) for lo, _ in lines}
+        anchors.append(LineAnchor(path, tuple(lines), ", ".join(sorted(causes))))
     return anchors
 
 
@@ -358,11 +365,14 @@ def split_cells(line: str) -> list[str]:
     quoting. Getting either wrong shifts every later cell, which silently moves
     the disposition out of column 4. The escape is undone here, so a cell reads
     as what it says.
+
+    Code spans follow CommonMark: a run of n backticks opens a span that only a
+    run of exactly n closes, so ``a | b`` is one span rather than two.
     """
     cells: list[str] = []
     current: list[str] = []
     index = 0
-    in_code = False
+    fence = 0
     body = line.strip()
     while index < len(body):
         char = body[index]
@@ -371,16 +381,29 @@ def split_cells(line: str) -> list[str]:
             index += 2
             continue
         if char == "`":
-            in_code = not in_code
-        if char == "|" and not in_code:
+            run = len(body[index:]) - len(body[index:].lstrip("`"))
+            if fence == 0:
+                fence = run
+            elif fence == run:
+                fence = 0
+            current.append(body[index : index + run])
+            index += run
+            continue
+        if char == "|" and fence == 0:
             cells.append("".join(current).strip())
             current = []
         else:
             current.append(char)
         index += 1
+    if fence:
+        raise ValueError(f"unclosed code span: a run of {fence} backticks never closes")
     cells.append("".join(current).strip())
-    # The leading pipe opens the row, so the first split is always empty.
-    return cells[1:]
+    # The leading pipe opens the row and the trailing one closes it, so the
+    # first split is always empty and the last is too when the row is closed.
+    body_cells = cells[1:]
+    if body_cells and body_cells[-1] == "":
+        body_cells.pop()
+    return body_cells
 
 
 def join_cells(cells: list[str]) -> str:
@@ -403,10 +426,15 @@ def read_rows(path: str, snapshot: Snapshot) -> list[Row]:
     `generate` knows the mechanical batch from the claims above it. Fenced
     blocks are skipped, because an example row inside one is documentation
     rather than a claim.
+
+    Everything this cannot read is refused by name rather than skipped. A
+    silently skipped row is a row whose sites nobody owns, reported later as
+    unowned with no hint that a parse gave up.
     """
     rows: list[Row] = []
     group = section = ""
     fence = ""
+    fence_line = 0
     for number, line in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), start=1):
         opener = FENCE.match(line)
         if fence:
@@ -414,7 +442,7 @@ def read_rows(path: str, snapshot: Snapshot) -> list[Row]:
                 fence = ""
             continue
         if opener is not None:
-            fence = opener.group(1)
+            fence, fence_line = opener.group(1), number
             continue
         if line.startswith("#"):
             level = len(line) - len(line.lstrip("#"))
@@ -426,21 +454,56 @@ def read_rows(path: str, snapshot: Snapshot) -> list[Row]:
             continue
         if not line.startswith("|"):
             continue
-        cells = split_cells(line)
-        if len(cells) < 3 or not ROW_ID.fullmatch(cells[0]):
+        where = f"{path}:{number}"
+        try:
+            cells = split_cells(line)
+        except ValueError as exc:
+            raise RowError(where, str(exc)) from exc
+        if not cells or not ROW_ID.fullmatch(cells[0]):
             continue
+        where = f"{where} row {cells[0]}"
+        if len(cells) < 3:
+            raise RowError(where, f"{len(cells)} cells; a row has at least an id, a target and a shape")
+        _check_markers(cells, where)
         rows.append(
             Row(
                 id=cells[0],
                 group=group,
                 section=section,
-                anchors=parse_anchors(
-                    cells[1], snapshot, sites_only=group == GROUP_1, where=f"{path}:{number} row {cells[0]}"
-                ),
+                anchors=parse_anchors(cells[1], snapshot, sites_only=group == GROUP_1, where=where),
                 shape=cells[2],
                 disposition=cells[3] if len(cells) > 3 else "",
                 source_line=number,
-                cells=cells,
             )
         )
+    if fence:
+        raise RowError(f"{path}:{fence_line}", f"a `{fence}` fence never closes, so every row after it goes unread")
     return rows
+
+
+def _check_markers(cells: list[str], where: str) -> None:
+    """Markers live in the shape cell, once each, with a known cause.
+
+    Every marker is written by a command or by a reviewer following the map's
+    own vocabulary, so one that is duplicated, misplaced or unrecognised is a
+    hand edit that has drifted, and a row state read off a drifted marker is
+    worse than no row at all.
+    """
+    for index, cell in enumerate(cells):
+        if index == 2:
+            continue
+        stray = ANY_MARKER.search(cell)
+        if stray is not None:
+            raise RowError(where, f"marker {stray.group(0)!r} is in column {index + 1}; markers live in the shape cell")
+    shape = cells[2]
+    found = MARKER_RE.findall(shape)
+    for marker in found:
+        if found.count(marker) > 1:
+            raise RowError(where, f"marker [{marker}] appears more than once")
+    causes = CAUSE_RE.findall(shape)
+    if len(causes) > 1:
+        raise RowError(where, "more than one line-anchored marker")
+    for cause in causes:
+        unknown = [c for c in (part.strip() for part in cause.split(",")) if c not in CAUSES]
+        if unknown:
+            raise RowError(where, f"line-anchored cause {', '.join(unknown)!r} is not one of {sorted(CAUSES)}")

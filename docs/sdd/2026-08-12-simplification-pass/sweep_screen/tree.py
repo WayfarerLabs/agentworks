@@ -104,17 +104,35 @@ def exc_name(node: ast.AST | None) -> str | None:
     return None
 
 
-def template(node: ast.AST | None) -> str | None:
-    r"""A string expression with its interpolations blanked to \x00, so a fixed
-    part can still be matched against a `match=` needle."""
+def template(node: ast.AST | None, *, wildcard: str | None = None) -> str | None:
+    """A string expression, with its interpolations rendered.
+
+    By default an interpolation becomes its own source text in braces, so
+    `f"no {kind} named {name}"` reads back as `no {kind} named {name}`. That
+    keeps two different skeletons apart, which matters because the identity
+    digest is taken over this: blanking every interpolation to one placeholder
+    gives `f"a{x}b"` and `f"a{y}b"` the same digest and hands two unrelated
+    assertions one identity.
+
+    `wildcard` replaces every interpolation with a single marker instead, which
+    is what the callee screen wants: there the question is whether a `match=`
+    needle can select a raise's message, and the interpolated part is anything
+    at all rather than a thing to compare.
+    """
+
+    def rendered(value: ast.AST) -> str:
+        # `ast.unparse` of a FormattedValue already carries its braces, its
+        # conversion and its format spec, so it is the source text verbatim.
+        return wildcard if wildcard is not None else ast.unparse(value)
+
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
     if isinstance(node, ast.JoinedStr):
         return "".join(
-            v.value if isinstance(v, ast.Constant) and isinstance(v.value, str) else "\x00" for v in node.values
+            v.value if isinstance(v, ast.Constant) and isinstance(v.value, str) else rendered(v) for v in node.values
         )
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        left, right = template(node.left), template(node.right)
+        left, right = template(node.left, wildcard=wildcard), template(node.right, wildcard=wildcard)
         return None if left is None or right is None else left + right
     return None
 
