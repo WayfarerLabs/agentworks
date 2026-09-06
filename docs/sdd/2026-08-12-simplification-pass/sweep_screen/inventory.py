@@ -1,26 +1,14 @@
 """The map's row grammar: how a row says what it addresses, and how that
 resolves to a place in a given tree.
 
-This module is the reference implementation the inventory's "Reading this file
-mechanically" section points at. Two grammars are read, deliberately:
-
-* **Identity anchors**, the current grammar, key a row to what it addresses.
-* **Line anchors**, the grammar every earlier cut used, key a row to where it
-  sat. They are still read so `carry` and `reanchor` can take an older map as
-  input; nothing writes them any more except a row that says why it must.
-
-Four anchor kinds, in order of precision. A row lists as many as it addresses.
-
-    path::qualname::Type::digest#n   one assertion site      -> its current line
-    path::qualname                   one test function       -> its line span
-    path::L120-124                   literal lines           -> nothing
-    path                             the whole file          -> the file
-
-`::` separates the fields of one anchor and `,` separates anchors, so a cell is
-one backticked string a reader can copy whole. Neither separator can occur
-inside a path, a qualname, a type name or a hex digest, which is what makes the
-split unambiguous. A line anchor's `L` prefix is what tells it from a qualname;
-no test function is named `L` followed by digits.
+The map owns the grammar; its "Reading this file mechanically" section is the
+prose, and this module is the implementation it points at. What the code needs
+is only this. A cell is one or more backticked anchor groups, each `path` or
+`path::tail,tail`; a tail is `qualname::Type::digest#n` for one site, a
+bare `qualname` for a test function, or `L120-124` for literal lines. Two grammars are read: the current
+one, and the line-anchored one every earlier cut used, so `carry` and
+`reanchor` can take an older map as input. Nothing writes line anchors any more
+except a row that has no name to reach for.
 """
 
 from __future__ import annotations
@@ -44,10 +32,21 @@ PATH_RE = re.compile(r"((?:cli|website)/[A-Za-z0-9_./-]+?\.(?:py|mjs))")
 LINE_ANCHOR = re.compile(r"L(\d+)(?:-(\d+))?$")
 SPAN_RE = re.compile(r"\d+(?:-\d+)?")
 MARKER_RE = re.compile(r"\[(dead|deferred|1-raise|unverified|subtracted:[^\]]*|line-anchored:[^\]]*)\]")
+BACKTICKED = re.compile(r"`([^`]+)`")
+FENCE = re.compile(r"^\s*(```|~~~)")
 
 #: The one section whose rows `generate` emits. Everything else in group 1 is a
 #: claim against the estate that the generated batch must leave alone.
 MECHANICAL_BATCH = "The mechanical batch"
+
+GROUP_1 = "Group 1"
+
+
+class RowError(SystemExit):
+    """A row this parser cannot read, named so it can be found and fixed."""
+
+    def __init__(self, where: str, message: str) -> None:
+        super().__init__(f"{where}: {message}")
 
 
 @dataclass(frozen=True)
@@ -130,10 +129,10 @@ class SpanAnchor(Anchor):
 
 @dataclass(frozen=True)
 class LineAnchor(Anchor):
-    """Literal lines, kept only where nothing better resolves.
+    """Literal lines, kept only where nothing could be named.
 
-    A line anchor is a declaration that this row will go stale, so every one
-    the map carries says on the row why it could not be anchored to a name.
+    A line anchor is a declaration that this row will go stale, so every one the
+    map carries says on the row why it could not be anchored to a name.
     """
 
     path: str
@@ -201,54 +200,75 @@ class Row:
     def render_cell(self) -> str:
         if not self.anchors:
             return self.cells[1] if len(self.cells) > 1 else ""
-        path = self.anchors[0].path
-        tails = [a.render() for a in self.anchors if a.render()]
-        return f"`{path}::{','.join(tails)}`" if tails else f"`{path}`"
+        grouped: dict[str, list[str]] = {}
+        for anchor in self.anchors:
+            grouped.setdefault(anchor.path, []).append(anchor.render())
+        parts = []
+        for path, tails in grouped.items():
+            written = [t for t in tails if t]
+            parts.append(f"`{path}::{','.join(written)}`" if written else f"`{path}`")
+        return ", ".join(parts)
 
 
-def parse_anchors(cell: str, snapshot: Snapshot | None = None) -> list[Anchor]:
+def parse_anchors(cell: str, snapshot: Snapshot, *, sites_only: bool, where: str = "cell") -> list[Anchor]:
     """The anchors one column-2 cell addresses, in either grammar.
 
-    `snapshot` is what turns a legacy line anchor into an identity, and it must
-    be the tree that map's line numbers were measured at. Without it the legacy
-    numbers stay `LineAnchor`s, which is the honest reading of a number nobody
-    can date.
+    `snapshot` must be the tree the cell's line numbers were measured at; it is
+    what turns a legacy line anchor into an identity, and what an identity
+    anchor is checked against. `sites_only` is the group-1 rule described on
+    `_lift`.
     """
-    target = cell.replace("`", "").strip()
-    match = PATH_RE.search(target)
-    if match is None:
-        return []
-    path = match.group(1)
-    tail = target[match.end() :]
-    if tail.startswith("::"):
-        return _parse_identity_anchors(path, tail[2:])
-    if tail.startswith(":"):
-        return _lift(path, _parse_legacy_spans(tail[1:]), snapshot)
-    return [FileAnchor(path)]
+    groups = BACKTICKED.findall(cell) or [cell]
+    anchors: list[Anchor] = []
+    for group in groups:
+        target = group.strip().strip(",").strip()
+        match = PATH_RE.search(target)
+        if match is None:
+            continue
+        path = match.group(1)
+        tail = target[match.end() :]
+        if PATH_RE.search(tail):
+            raise RowError(
+                where,
+                f"{group!r} names more than one file; write one backticked `path::anchors` group per file,"
+                " because everything after the first path is read as belonging to it",
+            )
+        if tail.startswith("::"):
+            anchors.extend(_parse_identity_anchors(path, tail[2:], where))
+        elif tail.startswith(":"):
+            anchors.extend(_lift(path, _parse_legacy_spans(tail[1:]), snapshot, sites_only=sites_only))
+        else:
+            anchors.append(FileAnchor(path))
+    return anchors
 
 
-def _parse_identity_anchors(path: str, tail: str) -> list[Anchor]:
+def _parse_identity_anchors(path: str, tail: str, where: str) -> list[Anchor]:
     anchors: list[Anchor] = []
     lines: list[tuple[int, int]] = []
     for token in (t.strip() for t in tail.split(",")):
         if not token:
             continue
+        if PATH_RE.search(token):
+            raise RowError(
+                where,
+                f"anchor {token!r} carries a second path; write one backticked `path::anchors` group per file",
+            )
         span = LINE_ANCHOR.fullmatch(token)
         if span is not None:
             lo = int(span.group(1))
             lines.append((lo, int(span.group(2)) if span.group(2) else lo))
             continue
         parts = token.split("::")
-        if len(parts) == 4:
-            qualname, type_name, rest = parts[0], parts[2], parts[3]
-            digest, _, ordinal = rest.partition("#")
-            anchors.append(SiteAnchor(Identity(path, qualname, type_name, digest, int(ordinal or 1))))
-        elif len(parts) == 3:
-            qualname, type_name, rest = parts
-            digest, _, ordinal = rest.partition("#")
-            anchors.append(SiteAnchor(Identity(path, qualname, type_name, digest, int(ordinal or 1))))
-        else:
+        if len(parts) == 1:
             anchors.append(SpanAnchor(path, token))
+            continue
+        if len(parts) != 3:
+            raise RowError(where, f"anchor {token!r} has {len(parts)} `::` fields; a site anchor has three")
+        qualname, type_name, rest = parts
+        digest, _, ordinal = rest.partition("#")
+        if ordinal and not ordinal.isdigit():
+            raise RowError(where, f"anchor {token!r} has a non-numeric ordinal {ordinal!r}")
+        anchors.append(SiteAnchor(Identity(path, qualname, type_name, digest, int(ordinal or 1))))
     if lines:
         anchors.append(LineAnchor(path, tuple(lines)))
     return anchors
@@ -265,22 +285,26 @@ def _parse_legacy_spans(tail: str) -> list[tuple[int, int]]:
     return spans
 
 
-def _lift(path: str, spans: list[tuple[int, int]], snapshot: Snapshot | None) -> list[Anchor]:
+def _lift(path: str, spans: list[tuple[int, int]], snapshot: Snapshot, *, sites_only: bool) -> list[Anchor]:
     """Turn legacy line spans into the most precise anchor the tree supports.
 
-    One function at a time. Where the row's lines include assertion sites in
-    that function, the sites are what the row addresses and they alone are
-    emitted: a site anchor is self-verifying, because the tree agrees the line
-    holds that assertion, and a span anchor beside it would claim every other
-    site in the same test for the same row. Where they include no site, the
-    function itself is the anchor. Lines inside no function at all stay
-    literal, because inventing a name for them would be a guess.
+    One function at a time, and the rule differs by what the row is about.
+    Group 1's rows address `match=` sites, so where a function holds sites the
+    row cited, those sites are the whole claim and no span anchor joins them:
+    a span anchor there would claim every other site in the same test for the
+    same row and break the exactly-once ownership the group rests on.
+
+    Every other group's rows address assertions the estate scan cannot see, so
+    the enclosing function is always emitted, with any cited sites alongside it.
+    Dropping the span there narrowed 36 rows onto `match=` sites they were never
+    about.
+
+    Lines inside no function stay literal, because inventing a name for them
+    would be a guess.
     """
     if not spans:
         return [FileAnchor(path)]
-    if snapshot is None:
-        return [LineAnchor(path, tuple(spans))]
-    #: qualname -> the sites this row cites in it, empty when it cites none
+    #: qualname -> the site identities this row cites in it, empty when it cites none
     cited: dict[str, list[Identity]] = {}
     orphans: list[tuple[int, int]] = []
     for lo, hi in spans:
@@ -301,51 +325,82 @@ def _lift(path: str, spans: list[tuple[int, int]], snapshot: Snapshot | None) ->
             orphans.append((lo, hi))
     anchors: list[Anchor] = []
     for qualname, identities in cited.items():
-        if identities:
-            anchors.extend(SiteAnchor(i) for i in identities)
-        else:
+        if not identities or not sites_only:
             anchors.append(SpanAnchor(path, qualname))
+        for identity in identities:
+            anchors.append(SiteAnchor(identity))
     if orphans:
         anchors.append(LineAnchor(path, tuple(orphans)))
     return anchors or [FileAnchor(path)]
 
 
 def split_cells(line: str) -> list[str]:
-    r"""One table row's cells, split on unescaped pipes only.
+    r"""One table row's cells, split on pipes that are neither escaped nor
+    inside a code span.
 
-    `\|` inside a code span is content: a naive split turns one row into three.
+    Both exemptions are content a naive split turns into extra columns: `\|` is
+    a literal pipe, and a `|` inside backticks is part of a regex the row is
+    quoting. Getting either wrong shifts every later cell, which silently moves
+    the disposition out of column 4. The escape is undone here, so a cell reads
+    as what it says.
     """
     cells: list[str] = []
     current: list[str] = []
     index = 0
+    in_code = False
     body = line.strip()
     while index < len(body):
-        if body[index] == "\\" and index + 1 < len(body) and body[index + 1] == "|":
-            current.append("\\|")
+        char = body[index]
+        if char == "\\" and index + 1 < len(body) and body[index + 1] == "|":
+            current.append("|")
             index += 2
-        elif body[index] == "|":
+            continue
+        if char == "`":
+            in_code = not in_code
+        if char == "|" and not in_code:
             cells.append("".join(current).strip())
             current = []
-            index += 1
         else:
-            current.append(body[index])
-            index += 1
+            current.append(char)
+        index += 1
     cells.append("".join(current).strip())
     # The leading pipe opens the row, so the first split is always empty.
     return cells[1:]
 
 
-def read_rows(path: str = INVENTORY, snapshot: Snapshot | None = None) -> list[Row]:
+def join_cells(cells: list[str]) -> str:
+    """One table row from its cell texts, with every literal pipe escaped.
+
+    Reading is lenient and writing is strict, deliberately. `split_cells` treats
+    a pipe inside a code span as content because rows in the wild carry regexes
+    written that way, but markdownlint and prettier are not code-span aware and
+    count such a pipe as a column break, so anything written back escapes every
+    pipe. `\\|` renders as a literal pipe in both places.
+    """
+    return "| " + " | ".join(cell.replace("|", "\\|") for cell in cells) + " |"
+
+
+def read_rows(path: str, snapshot: Snapshot) -> list[Row]:
     """Every row of a map, with the group and section heading it sits under.
 
-    Only a `##` heading changes the group, since the pulled-out blocks are
-    `###` subsections of the group they belong to; the section tracks those,
-    which is how `generate` knows the mechanical batch from the claims above
-    it.
+    Only a `##` heading changes the group, since the pulled-out blocks are `###`
+    subsections of the group they sit in; the section tracks those, which is how
+    `generate` knows the mechanical batch from the claims above it. Fenced
+    blocks are skipped, because an example row inside one is documentation
+    rather than a claim.
     """
     rows: list[Row] = []
     group = section = ""
+    fence = ""
     for number, line in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), start=1):
+        opener = FENCE.match(line)
+        if fence:
+            if opener is not None and opener.group(1) == fence:
+                fence = ""
+            continue
+        if opener is not None:
+            fence = opener.group(1)
+            continue
         if line.startswith("#"):
             level = len(line) - len(line.lstrip("#"))
             heading = line.lstrip("# ").strip()
@@ -364,7 +419,9 @@ def read_rows(path: str = INVENTORY, snapshot: Snapshot | None = None) -> list[R
                 id=cells[0],
                 group=group,
                 section=section,
-                anchors=parse_anchors(cells[1], snapshot),
+                anchors=parse_anchors(
+                    cells[1], snapshot, sites_only=group == GROUP_1, where=f"{path}:{number} row {cells[0]}"
+                ),
                 shape=cells[2],
                 disposition=cells[3] if len(cells) > 3 else "",
                 source_line=number,
