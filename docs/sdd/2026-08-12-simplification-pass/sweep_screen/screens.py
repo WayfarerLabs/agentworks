@@ -387,6 +387,32 @@ def shipped_strings(tree: Tree) -> str:
     return "\n".join(parts)
 
 
+def wraps_prose(needle: str, markers: list[str]) -> str:
+    """What a needle keeps once the markers inside it are removed.
+
+    A needle can be a marker and still pin authored prose: match on
+    `no active backend could resolve secret(s): api-key` and the seeded name is
+    the test's, while the sentence around it is the repository's. Whole-needle
+    containment cannot see that, because the whole string exists nowhere but
+    the test. So the markers the needle CONTAINS come out, and whatever is left
+    with a letter or a digit in it is prose the site is pinning after all.
+
+    One false positive is inherent and cheap: where one marker is an accidental
+    substring of another, stripping it leaves a fragment rather than a sentence.
+    `kaboom` with a sibling `boom` in the same file leaves `ka`. The verdict is
+    a report and not a gate, so that costs a reader one glance.
+    """
+    inside = sorted((m for m in markers if m and m in needle and m != needle), key=len, reverse=True)
+    if not inside:
+        # Nothing of the test's own is a proper part of this needle, so the
+        # needle sits wholly inside one marker: the clean case.
+        return ""
+    rest = needle
+    for marker in inside:
+        rest = rest.replace(marker, " ")
+    return rest if any(c.isalnum() for c in rest) else ""
+
+
 def injected(tree: Tree) -> None:
     """Report every `match=` site whose needle is a marker its own test wrote.
 
@@ -396,10 +422,16 @@ def injected(tree: Tree) -> None:
     route, which is what the batch deletes. What survives is a phrase that
     exists nowhere but the test, so the assertion can only be proof that the
     injected failure is the observed one.
+
+    Two verdicts, and neither gates. `marker` is the clean case. `mixed` is a
+    needle that carries authored prose around its marker, per `wraps_prose`;
+    the site is reported so a reader decides it rather than a keep being taken
+    on the screen's word.
     """
     shipped = shipped_strings(tree)
     hits = 0
-    print("identity\tsite\tneedle\tinjected-string")
+    mixed = 0
+    print("identity\tsite\tverdict\tneedle\tinjected-string\tprose-around-it")
     for path in tree.files(TEST_ROOT):
         markers = injected_markers(tree, path)
         if not markers:
@@ -408,7 +440,11 @@ def injected(tree: Tree) -> None:
             if site.needle == "<expr>" or site.needle in shipped:
                 continue
             source = next((m for m in markers if site.needle in m), None)
-            if source is not None:
-                hits += 1
-                print(f"{site.identity}\t{site.where}\t{site.needle}\t{source}")
-    print(f"\n# injected-marker sites: {hits}", file=sys.stderr)
+            if source is None:
+                continue
+            hits += 1
+            prose = wraps_prose(site.needle, markers)
+            verdict = "mixed" if prose else "marker"
+            mixed += bool(prose)
+            print(f"{site.identity}\t{site.where}\t{verdict}\t{site.needle}\t{source}\t{prose}")
+    print(f"\n# injected-marker sites: {hits}, of which mixed: {mixed}", file=sys.stderr)
