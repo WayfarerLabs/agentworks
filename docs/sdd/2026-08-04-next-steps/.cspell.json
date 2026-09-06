@@ -5,6 +5,7 @@
     "Pydantic",
     "Rulesync",
     "SIEM",
+    "baselined",
     "burndown",
     "constructibility",
     "deletability",
@@ -23,8 +24,10 @@
     "timestamping",
     "tombstoned",
     "tombstoning",
+    "undispositioned",
     "unkeyed",
     "unmemoized",
+    "unspawned",
     "unwired"
   ]
 }

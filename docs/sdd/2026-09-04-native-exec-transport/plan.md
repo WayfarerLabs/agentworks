@@ -10,7 +10,7 @@
 - Migration: [migration-strategy.md](./migration-strategy.md)
 - Research: [prior-art-research.md](./prior-art-research.md)
 - Source baseline: `c962f52043e9ea239197ad96d5a383f98db9164d`
-- Implementation baseline: `a64b1b9cff5449807695e6933a0e92786b24a06d`
+- Implementation baseline: `a64b1b9c3bfc57a31ea36dcd7f66eb376f8a5f36`
 - Delivery: SDD and post-0.18.0 runtime implementation on PR #746
 
 ## Delivery rules
@@ -193,7 +193,7 @@ capability-appropriate live validation under the integration-testing process.
 
 ## Phase 4: Review, live validation, and closeout
 
-- [ ] Obtain clean private agentworks-reviewer, Muntz, and cold correctness/security passes on one
+- [x] Obtain clean private agentworks-reviewer, Muntz, and cold correctness/security passes on one
       exact runtime head; apply every material authorized correction and rerun affected gates.
 - [ ] Load the integration-testing and agw-test-env skills, prepare an operator-reviewed live
       charter, and validate one full native platform plus Proxmox QGA on expendable resources.
@@ -202,7 +202,7 @@ capability-appropriate live validation under the integration-testing process.
 - [ ] Record any unavailable Proxmox live evidence for authenticated operator disposition rather
       than satisfying acceptance from mocks.
 - [ ] Complete up to three authorized published runtime feedback/fix rounds, if needed.
-- [ ] Merge or rebase the latest `main`, resolve conflicts semantically, and rerun exact-head gates
+- [x] Merge or rebase the latest `main`, resolve conflicts semantically, and rerun exact-head gates
       and reviews.
 - [ ] Promote load-bearing rules to permanent docs and code, truthfully complete the plan, add
       `locked.md`, remove `review-requested`, mark ready, and obtain operator disposition without
