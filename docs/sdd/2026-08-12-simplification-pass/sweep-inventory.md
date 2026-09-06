@@ -135,10 +135,11 @@ every site in it, and `*n` records how many the row was cut against. A group tha
 shrunk then resolves as `grown` or `shrunk`, with both counts, rather than quietly covering a
 different number of assertions than the row was written against.
 
-**The tie population is small and named.** At `a64b1b9c` the estate is 678 sites over 669
-identities; the 8 identities that name more than one cover 17 sites, each a test asserting the same
-needle against the same type twice. `sweep-screen.py estate` prints them, and `Snapshot` refuses to
-build unless the groups cover every site exactly once.
+**The tie population is small and named.** `sweep-screen.py estate` reports the estate's size, the
+identities in it, and every identity that names more than one site, each of those a test asserting
+the same needle against the same type twice. `Snapshot` refuses to build unless the groups cover
+every site exactly once, so the partition the command prints is the whole estate rather than a
+sample of it.
 
 **The states an anchor resolves to.** `resolved` is what the row was cut against, at whatever line
 it now sits. `grown` and `shrunk` are a site group that changed size, with both counts. `retargeted`
@@ -164,24 +165,21 @@ name survives every edit above it, while the line does not. It also means a reso
 test is still here, not that the assertion inside it is; only a site anchor says that.
 
 **A line anchor is a declaration that the row will go stale**, so the row says on itself why, in a
-`[line-anchored: <cause>]` marker in column 3, written by `reanchor` while that command existed and
-maintained by hand now that it does not. Four causes, and this map holds 93 line anchors across
-them:
+`[line-anchored: <cause>]` marker in column 3, written by hand and refused if it names a cause
+outside this set. Three causes remain:
 
-- **file gone** (66): the file did not exist at the tree the anchors were derived from. 50 of these
-  are group 2's whole estate, deleted by the guide rework, and the other 16 sit in live groups
-  (group 1: 2, group 3: 1, group 4: 6, group 5: 6, group 6: 1), so this cause is not group 2's alone
-  and a reader counting dead rows by it will over-count.
-- **not Python** (14): no AST to read, which is the `.mjs` rows that cite lines; the other three
-  `.mjs` rows name their file and no lines, so they are file anchors.
-- **between functions** (10, and one row that is both): a stale number landing on a blank line, a
-  divider comment or the gap after a test's last line, which is the commonest in-tree cause and the
-  one that says the number was read at a tree this map no longer matches.
-- **module level** (2, and that same mixed row): the lines are real and outside any function, as
+- **not Python**: no AST to read, which is the `.mjs` rows that cite lines. The `.mjs` rows that
+  name their file and no lines are file anchors instead.
+- **between functions**: the number lands on a blank line, a divider comment or the gap after a
+  test's last line, which is the cause that says the number was read at a tree this map no longer
+  matches.
+- **module level**: the lines are real and outside any function, as
   `test_builtin_entries_parity.py`'s `EXPECTED_*` constants are.
 
-`resolve` reports 27 of the 93 as `line-anchored` and the other 66 as `file-gone`, since a line
-anchor in a deleted file cannot even be read.
+`sweep-screen.py resolve` counts the line anchors that remain, per group and in total, alongside the
+anchors that resolve to a name. A fourth cause, **file gone**, retired with the rows it described:
+those rows are no longer in this map, so nothing can be line-anchored to a file that is not there
+and the parser refuses the cause.
 
 **To write a row by hand**, run `sweep-screen.py estate` and copy the identity it prints for the
 site, or `sweep-screen.py resolve` to see what the rows around yours address. The digest is a
@@ -275,48 +273,48 @@ more than one reachable raise of that type. A site it calls single-raise-path is
 the resolver reached, and a site it cannot resolve is not screened at all. So `[1-raise]` means
 "screened and single", never "checked by hand and safe".
 
-**The outstanding screen debt, stated once and counted in sites, is 532 of the estate's 664.** That
-is 413 the resolver could not reach plus 119 it reached but could not tie to a targeted raise. The
-other 132 are settled: 52 single-raise-path, 74 multi-raise-path with no discriminator, and 6
-multi-raise-path with one. The 199 multi-raise-path sites do NOT need re-screening; what they need
-is the disposition the screen already gave them. Anywhere else in this file that talks about what
-the executor still owes means this number.
+**The outstanding screen debt is every site the screen has not settled**: the ones whose callee it
+could not resolve, plus the ones it resolved to several raises but could not tie to a targeted one.
+A multi-raise-path site with a verdict does NOT need re-screening; what it needs is the disposition
+the screen already gave it. `sweep-screen.py screen` partitions the estate by verdict and counts
+each part, so the debt is a number the command produces at whatever tree you run it against, rather
+than one this file carries and has to keep true. Anywhere else in this file that talks about what
+the executor still owes means that partition.
 
 **Owing the screen on an unresolved site means reading the called code by hand and recording the
 answer on the row, not re-running the script.** Re-running it returns "unresolved" again, by
 construction: the resolver already told you it cannot reach that callee. The hand answer is the same
 question the script asks. Open the operation the test calls, find every `raise` of the asserted type
 it can reach, and if there is more than one, say on the row whether a handle tells the targeted one
-apart. The seven sites the mutation screen below turned into named rows were all in this bucket,
-which is what that debt looks like when it is paid.
+apart. The sites the mutation screen below turned into named rows were all in this bucket, which is
+what that debt looks like when it is paid.
 
 #### What it found in group 1
 
-Run over all 664 `pytest.raises(..., match=)` sites under `cli/tests` at `426cccae`.
+`sweep-screen.py screen` runs over every `pytest.raises(..., match=)` site under `cli/tests` and
+prints one line per site, with its verdict, the targeted raise and the handle values behind that
+verdict. Five verdicts are possible:
 
-| Verdict                                                              | Sites | Settled by the screen |
-| -------------------------------------------------------------------- | ----: | --------------------- |
-| Multi-raise-path, a structural handle tells the targeted raise apart |     6 | yes, convert          |
-| Multi-raise-path, no discriminator                                   |    74 | yes, delete           |
-| Multi-raise-path, targeted raise not identified mechanically         |   119 | no                    |
-| Single-raise-path                                                    |    52 | yes, delete           |
-| Callee did not resolve, or reached no raise of the asserted type     |   413 | no                    |
+- **Multi-raise-path, a structural handle tells the targeted raise apart.** Settled: convert.
+- **Multi-raise-path, no discriminator.** Settled: delete.
+- **Multi-raise-path, targeted raise not identified mechanically.** Not settled.
+- **Single-raise-path.** Settled: delete.
+- **Callee did not resolve, or reached no raise of the asserted type.** Not settled.
 
-`sweep-screen.py screen` prints this partition one site per line, with the targeted raise and the
-handle values behind each verdict, so a later executor regenerates it rather than trusting the
-table. The six converts and the twelve `[1-raise]` rows are the only verdicts carried on rows; the
-other 645 sites live in the script's output, which is why the script is committed beside this file.
+Only two of them are carried on rows: the `G1-C` converts, and the `[1-raise]` marker, which
+`generate` derives from this screen rather than a reader copying it across. Every other site's
+verdict lives in the command's output, which is why the command is committed beside this file.
 
-**199 of the 251 sites the screen could resolve, four in five, are multi-raise-path.** That is the
-finding, and it is larger than the six rows it moves: the group's defining claim, that the batch
-needs no judgment because the raised type discriminates, does not survive contact with the code
-those tests call. The dispositions mostly do not change, because case 2's fallback lands on the same
-edit as case 1, but the reason does, and so does what the batch costs. The mechanical batch's shared
+**Most of what the screen can resolve is multi-raise-path, by a wide margin.** That is the finding,
+and it is larger than the rows it moves: the group's defining claim, that the batch needs no
+judgment because the raised type discriminates, does not survive contact with the code those tests
+call. The dispositions mostly do not change, because case 2's fallback lands on the same edit as
+case 1, but the reason does, and so does what the batch costs. The mechanical batch's shared
 justification now says so.
 
-Six sites over four files have a handle and convert; they are G1-C01 to G1-C04 below. Twelve delete
-rows verified single-raise-path across every site they claim and carry `[1-raise]`. The 532
-unsettled sites are the executor's, per row, before the edit lands.
+The sites with a handle convert, and are the `G1-C` rows below. The delete rows the screen verified
+single-raise-path across every site they claim carry `[1-raise]`. Every unsettled site is the
+executor's, per row, before the edit lands.
 
 ### The injected-marker screen
 
@@ -337,17 +335,18 @@ a shipped sentence through a fake, which is the shape the batch correctly delete
 `vms/nodes.py:243`, so they stay deleted. Comments and docstrings are excluded from the production
 side, because a phrase a docstring discusses is not one the code says.
 
-**It found 30 live sites over 19 files in the mechanical batch, all of them keeps**, rowed as G1-I01
-to G1-I19 below, plus one that the mutation screen had already taken (G1-M07) and eleven inside rows
-already subtracted, named in the subtraction hand-off. Verdict: on those 30 sites the batch's shared
-justification was not a judgment call that went the wrong way, it was a false statement of fact.
+**Every live site it finds in the mechanical batch is a keep**, rowed as a `G1-I` row below.
+`sweep-screen.py injected` prints them, along with the one site whose needle wraps its marker in
+authored prose, which the command reports as `mixed` rather than deciding. Verdict: on those sites
+the batch's shared justification was not a judgment call that went the wrong way, it was a false
+statement of fact.
 
 ### The mutation screen, for what neither of the above reaches
 
-Both screens above are static, and 532 sites are beyond the resolver. For a site an executor cannot
-decide by reading, the question has an empirical answer: **break the behavior the test is named for,
-and see whether the test still fails once the `match=` is gone.** Fail with the assertion and pass
-without it means the assertion is the only probe, and the row keeps.
+Both screens above are static, and the sites the resolver cannot reach are beyond both. For a site
+an executor cannot decide by reading, the question has an empirical answer: **break the behavior the
+test is named for, and see whether the test still fails once the `match=` is gone.** Fail with the
+assertion and pass without it means the assertion is the only probe, and the row keeps.
 
 This is not a screen to run over hundreds of sites; it is what to do with the handful a reading
 leaves genuinely uncertain. Seven sites were decided this way on 2026-08-19 and are rowed as G1-M01
@@ -385,23 +384,23 @@ when `[dead]` and `[subtracted]` retired.
 <!-- prettier-ignore -->
 | Group | Live | delete | convert | keep | Deferred | Ledger |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1. Mechanical `match=` narrowing | 219 | 155 | 6 | 58 | 0 | 219 |
+| 1. Mechanical `match=` narrowing | 220 | 155 | 7 | 58 | 0 | 220 |
 | 3. Report lines and hints (four sub-batches) | 343 | 158 | 91 | 94 | 0 | 343 |
 | 4. Schema, manifests, capabilities and platforms | 251 | 53 | 96 | 102 | 0 | 251 |
 | 5. Authored-artifact form policing | 246 | 98 | 17 | 131 | 0 | 246 |
 | 6. Source guards | 73 | 27 | 11 | 35 | 0 | 73 |
 | Deferred (held for R4) | 0 | 0 | 0 | 0 | 25 | 25 |
-| **All** | 1132 | 491 | 221 | 420 | 25 | 1157 |
+| **All** | 1133 | 491 | 222 | 420 | 25 | 1158 |
 
 Group 1's site counts are derived exactly, because that estate is scanned rather than read.
 `sweep-screen.py estate` is where the site figures come from, one site per line, and
 `sweep-screen.py attribute` is what checks the ownership claim; both are run at the basis and
-`attribute` exits non-zero when the claim is false. **All 621 `match=` sites under `cli/tests` at
-`c310d05b` are claimed by exactly one group-1 row**, with none claimed by two and none unclaimed,
-and `generate` exits zero against the same estate. Of the 58 regex-family sites under
-`website/tests`, group 1 claims 35 and the deferred L-402 claims the rest. The other groups were
-read rather than scanned, and one row there covers an assertion group of one to a dozen lines, so no
-site total is claimed for them.
+`attribute` exits non-zero when the claim is false. **Every `match=` site under `cli/tests` is
+claimed by exactly one group-1 row**, with none claimed by two and none unclaimed, and `generate`
+exits zero against the same estate. The regex-family sites under `website/tests` are split between
+group 1 and the deferred L-402, which claims the rest. The other groups were read rather than
+scanned, and one row there covers an assertion group of one to a dozen lines, so no site total is
+claimed for them.
 
 One row is one test or one contiguous assertion group, so a file that mixes wholly-policing tests
 with prose assertions riding inside legitimate ones appears several times. Group 1's mechanical
@@ -447,10 +446,12 @@ the ledger, so there is nothing left for `[dead]` to describe, and the subtracti
 recorded is reversed. Both are gone from the parser's vocabulary too, so one written by hand is now
 a refusal rather than silent row state.
 
-Ids say where a row came from. `RB-` marks the twelve rows the 2026-08-19 re-baseline added, and
-`G1-C`, `G1-M` and `G1-I` the rows its three screens pulled out of the mechanical batch (the callee
-screen, the mutation screen and the injected-marker screen respectively). `G1-K17` through `G1-K23`
-are the seven the 2026-08-16 harvest added, which is why those rules do not cover them.
+Ids say where a row came from. `RB-` marks the rows the 2026-08-19 re-baseline added, and `G1-C`,
+`G1-M` and `G1-I` the rows its three screens pulled out of the mechanical batch (the callee screen,
+the mutation screen and the injected-marker screen respectively). `G1-K17` and above are the ones
+the 2026-08-16 harvest added, which is why those rules do not cover them. An id is never reused: a
+row the fresh cut dropped leaves a gap rather than a successor, so a citation that names a missing
+id is a fault `totals` refuses rather than a row someone has to go looking for.
 
 Six rows were removed rather than marked, each because every site it claimed moved to another row:
 G1-013 (2026-08-19 map) into G1-K19, G1-062 (2026-08-19 map) into G1-C02, and G1-099 (2026-08-19
@@ -572,28 +573,26 @@ effort says which one.
 
 ## Group 1: mechanical `match=` narrowing
 
-219 rows: 155 delete, 6 convert, 58 keep, none deferred. The group splits into four sections,
-counted by `sweep-screen.py totals` and by the section headings below. The **rows immediately
-below** are the sites the taxonomy does NOT decide mechanically: 28 `L-` and one `RB-` row read by
-hand, the 4 `G1-C` rows the callee screen converted, and the 7 `G1-M` rows the mutation screen
-decided. Then **23 `G1-K` rows**, the sites whose matched text varies with the test's input; then
-**19 `G1-I` rows**, the ones the injected-marker screen pulled out; then the **149 rows of the
-mechanical batch**, one per file, sharing one justification. 40 plus 23 plus 19 plus 149 is the 231
-the Totals section reports. A reviewer who reads the first three tables has read all the judgment in
-this PR.
+The group splits into four sections, which `sweep-screen.py totals` counts and the headings below
+name. The **rows immediately below** are the sites the taxonomy does NOT decide mechanically: the
+`L-` and `RB-` rows read by hand, the `G1-C` rows the callee screen converted, and the `G1-M` rows
+the mutation screen decided. Then the **`G1-K` rows**, the sites whose matched text varies with the
+test's input; then the **`G1-I` rows**, the ones the injected-marker screen pulled out; then the
+**mechanical batch**, one row per file, sharing one justification. A reviewer who reads the first
+three tables has read all the judgment in this PR.
 
 **This group is no longer the no-judgment batch its name promises.** The callee-side raise screen
-found that four in five of the sites it can resolve are multi-raise-path, so the mechanical batch's
+found that most of the sites it can resolve are multi-raise-path, so the mechanical batch's
 deletions rest on `hla.md` case 2's fallback rather than its case 1. The injected-marker screen then
-found 30 sites where the batch's other claim was false outright. The edit is the same and the review
-is not.
+found sites where the batch's other claim was false outright. The edit is the same and the review is
+not.
 
 **Operator disposition, 2026-08-19: group 1 executes as TWO PRs.** The mechanical batch goes at
-mechanical speed as one, and the judgment rows go as the other with their own review depth: G1-C01
-to G1-C04, G1-M01 to G1-M07, G1-I01 to G1-I19, and group 1's remaining converts and keeps, which are
-the rows whose evidence a reviewer has to read rather than scan. The split follows the screens: what
-is left in the mechanical batch after three screens have taken their sites out is the part that
-genuinely needs no judgment.
+mechanical speed as one, and the judgment rows go as the other with their own review depth: every
+`G1-C`, `G1-M` and `G1-I` row, and group 1's remaining converts and keeps, which are the rows whose
+evidence a reviewer has to read rather than scan. The split follows the screens: what is left in the
+mechanical batch after three screens have taken their sites out is the part that genuinely needs no
+judgment.
 
 **Corrected 2026-08-16, during execution.** The re-check that produced the `G1-K` rows found 30
 input-varying sites. There are 43, plus two of the same shape in unittest's spelling. It had missed
@@ -759,7 +758,7 @@ judgment and keep rows above claim. Read it as the row's claim; there is no rang
 than assembled by hand: it prints these rows in the row grammar, with the header and the
 prettier-ignore line, ready to paste. Then it runs three checks over the claims plus what it just
 generated, none of them a count comparison, because the generated set is the complement of the
-claims and adds up by construction whatever the claims are:
+claims and adds up by construction whatever the claims are. Each refuses:
 
 1. **Ownership.** Every `match=` site owned by exactly one row, which is what catches two claim rows
    reaching the same site.
@@ -768,30 +767,30 @@ claims and adds up by construction whatever the claims are:
    written about.
 3. **Stale claims.** A group-1 claim anchor that does not resolve at this tree, because its sites
    fall into the batch as ordinary deletes and the judgment that pulled them out goes with no word
-   said. A `[dead]` row is not a claim and is not checked; its file is gone, so it can neither own a
-   site nor lose one. `[subtracted]` and `[deferred]` rows are still claims, because their sites are
-   real and must not fall into the batch.
+   said. A `[deferred]` row is still a claim, because its sites are real and must not fall into the
+   batch.
+4. **A handle the screen found.** A site the callee-side raise screen settles as
+   multi-raise-path-with-a-handle is `hla.md` case 2's first arm, so it converts onto the handle and
+   must not leave as a mechanical delete. This is the check that stops case 2 being decided by
+   nobody noticing it, and G1-C05 is the row it produced.
 
-**At `a64b1b9c` the third check refuses, on 12 anchors over 9 rows, and that is work the fresh cut
-owes**: L-013, L-018 (3), L-026, G1-M03, G1-M04, G1-K04 (2), G1-K14, G1-I02 and G1-I06. Each is a
-judgment row whose evidence no longer reaches an assertion that exists, so the cut has to re-decide
-it rather than carry it. `generate` also reports 8 group-1 span claims that resolve and cover no
-site; those do not refuse, because one tree cannot tell a test that lost its sites from one that
-never had any.
+`generate` also reports the group-1 span claims that resolve and cover no site. Those do not refuse,
+because one tree cannot tell a test that lost its sites from one that never had any.
 
 **Corrected 2026-08-19 by the callee-side raise screen.** This paragraph used to say that no test
 function in the set raises the same type twice, and conclude from that that each site is `hla.md`
 case 1, the raised type already discriminating. The premise is a fact about the CALLER and the
-conclusion is a claim about the CALLEE, and the screen shows the conclusion is false for four in
-five of the sites it can resolve: the operations these tests call raise the asserted type from
-several paths, so the type discriminates nothing. What that changes is the reason and the cost, not
-the edit. Where a handle tells the targeted raise apart the row has been pulled out to G1-C01
-through G1-C04 and converts; everywhere else this batch is `hla.md` case 2's fallback rather than
-its case 1, which R2.4 resolves to the same deletion with the branch coverage going too. **Stated
-plainly, because it is what this batch now costs: after the edit, a same-type failure raised from a
-different path in the same operation will satisfy these tests.** Rows carrying `[1-raise]` are the
-twelve the screen verified as genuinely single-path; the rest of the batch is unscreened and the
-executor owes it the screen per row before the edit lands.
+conclusion is a claim about the CALLEE, and the screen shows the conclusion is false for most of the
+sites it can resolve: the operations these tests call raise the asserted type from several paths, so
+the type discriminates nothing. What that changes is the reason and the cost, not the edit. Where a
+handle tells the targeted raise apart the row has been pulled out to a `G1-C` row and converts;
+everywhere else this batch is `hla.md` case 2's fallback rather than its case 1, which R2.4 resolves
+to the same deletion with the branch coverage going too. **Stated plainly, because it is what this
+batch now costs: after the edit, a same-type failure raised from a different path in the same
+operation will satisfy these tests.** A row carrying `[1-raise]` is one the screen verified as
+genuinely single-path across every site it claims, and `generate` writes that marker from the
+screen's own verdicts. The rest of the batch is unscreened, and the executor owes it the screen per
+row before the edit lands.
 
 <!-- prettier-ignore -->
 | id | file and anchors | shape | disposition |
@@ -950,19 +949,17 @@ batch, so the cut is by subsystem INSIDE the single shape. That keeps the kind o
 within a round while making each round readable. Rows carry their file path, which is what assigns
 them.
 
-**Corrected 2026-08-19 (map re-baseline).** The sub-batch table below never reconciled with the
-group: it summed to 378 rows against a stated 372, and its per-disposition columns summed to 225
-deletes where the group holds 158. Sub-batch membership is now DERIVED from each row's file path
-rather than tallied by hand, on the stated scopes below, so the four rows sum to the group by
-construction. Both a live and a ledger column are given, because the re-scope subtraction lands
-almost entirely in 3a and 3d.
+**A sub-batch is a scope, not a tally.** The table below carried per-disposition counts once and
+they never reconciled with the group, so they are gone. Membership follows from each row's file
+path: apply the scope to the rows and the four sub-batches partition the group by construction,
+which is the property that matters and the one a count column kept breaking.
 
-| Sub-batch | Scope                                                                                                                                                                                                                                                                                           | Live | delete | convert | keep | Ledger |
-| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---: | -----: | ------: | ---: | -----: |
-| 3a        | Consoles, sessions and secrets: `cli/tests/sessions/`, `cli/tests/secrets/`, `cli/tests/transports/`, `orchestration/test_secrets.py`, and the `test_consoles_*`, `test_console_*`, `test_session*`, `test_secret*`, `test_tmux*`, `test_claude_code_*`, `test_codex_*` and `test_grok_*` roots |   71 |     36 |      20 |   15 |     94 |
-| 3b        | VMs and platforms: `cli/tests/vms/`, `cli/tests/plugins/`, and the `test_aws_*`, `test_azure_*`, `test_wsl2_*`, `test_vm_*`, `test_lima*`, `test_proxmox*`, bootstrap and cloud-init roots                                                                                                      |  121 |     77 |      32 |   12 |    121 |
-| 3c        | Workspaces and agents: `cli/tests/workspaces/`, `cli/tests/agents/`, `test_agents.py`                                                                                                                                                                                                           |   25 |     12 |       7 |    6 |     25 |
-| 3d        | Everything else in the group: database, doctor, git credentials and the core CLI surfaces                                                                                                                                                                                                       |  105 |     33 |      29 |   43 |    142 |
+| Sub-batch | Scope                                                                                                                                                                                                                                                                                           |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 3a        | Consoles, sessions and secrets: `cli/tests/sessions/`, `cli/tests/secrets/`, `cli/tests/transports/`, `orchestration/test_secrets.py`, and the `test_consoles_*`, `test_console_*`, `test_session*`, `test_secret*`, `test_tmux*`, `test_claude_code_*`, `test_codex_*` and `test_grok_*` roots |
+| 3b        | VMs and platforms: `cli/tests/vms/`, `cli/tests/plugins/`, and the `test_aws_*`, `test_azure_*`, `test_wsl2_*`, `test_vm_*`, `test_lima*`, `test_proxmox*`, bootstrap and cloud-init roots                                                                                                      |
+| 3c        | Workspaces and agents: `cli/tests/workspaces/`, `cli/tests/agents/`, `test_agents.py`                                                                                                                                                                                                           |
+| 3d        | Everything else in the group: database, doctor, git credentials and the core CLI surfaces                                                                                                                                                                                                       |
 
 3c is small enough to ride with 3a as one round if three PRs suits the review cadence better; the
 other three are each a full round on their own.
@@ -1316,8 +1313,8 @@ other three are each a full round on their own.
 
 ## Group 4: schema, manifests, capabilities and platforms
 
-251 rows: 53 delete, 96 convert, 102 keep. Once group 3 splits into its sub-batches this is the
-largest single PR by converts.
+Once group 3 splits into its sub-batches this is the largest single PR by converts; the Totals
+section counts the group.
 
 **Precondition, operator disposition 2026-08-19: the recipe verification is re-run before this group
 executes**, on the same terms as group 3's.
@@ -1994,11 +1991,11 @@ Four facts it established, three of which do not depend on the counts that went 
    independent and never need to stack.
 3. **Group 6 is not independent**, which was the standing guess: it shared files with both group 5
    and group 1. Group 3c was the closest thing to independent, overlapping group 1 alone.
-4. **Group 4 carries the rework risk.** Group 3 holds more converts in total, 88 against group 4's
-   81, but group 3 lands as four PRs and its largest sub-batch carries 32, so **group 4 is the
-   largest single PR by converts** and the likeliest to need rework. That is why the old stack put
-   it at the top with only leaves above it. Whatever order the re-cut chooses, nothing should be
-   built on group 4 that a rework of its converts would drag with it.
+4. **Group 4 carries the rework risk.** Group 3 holds more converts in total, but it lands as four
+   PRs and no one of them approaches group 4, so **group 4 is the largest single PR by converts**
+   and the likeliest to need rework. That is why the old stack put it at the top with only leaves
+   above it. Whatever order the re-cut chooses, nothing should be built on group 4 that a rework of
+   its converts would drag with it.
 
 ### Recipe verification
 
