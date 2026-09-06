@@ -32,8 +32,8 @@ class Tree:
     def __str__(self) -> str:
         return "the working tree"
 
-    def files(self, *roots: str) -> list[str]:
-        """Every `.py` file under `roots`, sorted by path.
+    def _list(self, roots: tuple[str, ...]) -> list[str]:
+        """Every file under `roots`, sorted by path.
 
         The working tree includes files git does not track yet, because a test
         file added but not staged holds real sites and an estate that cannot see
@@ -46,9 +46,31 @@ class Tree:
             done = subprocess.run(command, capture_output=True, text=True)
             if done.returncode != 0:
                 raise SystemExit(f"cannot list {', '.join(roots)} at {self}: {done.stderr.strip()}")
-            names = sorted({f for f in done.stdout.split("\0") if f.endswith(".py")})
-            self._listed[roots] = names
+            self._listed[roots] = sorted({f for f in done.stdout.split("\0") if f})
         return self._listed[roots]
+
+    def files(self, *roots: str) -> list[str]:
+        """Every `.py` file under `roots`, sorted by path.
+
+        This is what the estate walks, so it takes every module rather than only
+        the test ones: a helper beside the tests can hold a site too.
+        """
+        return [f for f in self._list(roots) if f.endswith(".py")]
+
+    def test_files(self) -> list[str]:
+        """Every test file the sweep accounts for, sorted by path.
+
+        The population behind "which files carry no row": a `test_*.py` module
+        under either test root, or a `*.test.mjs` suite under the website's. A
+        `conftest.py` or a helper module beside the tests holds no test of its
+        own, so no row is expected to name it and it is not part of the
+        accounting.
+        """
+        return [
+            f
+            for f in self._list((TEST_ROOT, WEB_ROOT))
+            if (Path(f).name.startswith("test_") and f.endswith(".py")) or f.endswith(".test.mjs")
+        ]
 
     def read(self, path: str) -> str | None:
         """The file's text, or None when it does not exist."""

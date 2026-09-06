@@ -89,6 +89,18 @@ def check_map(rows: list[Row]) -> list[str]:
     return faults
 
 
+def unrowed(rows: list[Row], snapshot: Snapshot) -> list[str]:
+    """Every test file in the sweep's population that no row's anchor names.
+
+    The map has to account for what it left alone as well as what it addresses,
+    and that accounting was previously a recipe a second auditor was asked to
+    re-execute by hand. An anchor names its file outright, so the set is a
+    subtraction: the population, minus every path an anchor carries.
+    """
+    named = {anchor.path for row in rows for anchor in row.anchors}
+    return [path for path in snapshot.tree.test_files() if path not in named]
+
+
 def _ownership(rows: list[Row], sites: list[Site]) -> tuple[list[Site], list[Site], dict[Site, list[str]]]:
     """Sites owned by no row and by more than one, plus the owner ids."""
     owners = {s: [r.id for r in rows if r.claims(s)] for s in sites}
@@ -338,5 +350,10 @@ def totals(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
     for fault in faults:
         print(f"#   {fault}", file=sys.stderr)
     print(f"# executable set: {ledger['live']} rows; ledger: {ledger['ledger']} rows", file=sys.stderr)
+    missing = unrowed(rows, snapshot)
+    population = snapshot.tree.test_files()
+    print(f"# test files: {len(population)}, of which no row names: {len(missing)}", file=sys.stderr)
+    for path in missing:
+        print(f"#   {path}", file=sys.stderr)
     if faults:
         raise SystemExit(f"the map has {len(faults)} structural fault(s)")
