@@ -221,8 +221,8 @@ missing any of them, naming the plugin:
   Registration requires an exact match with the version its kind's descriptor declares supported, so
   a contract change is a hard cutover rather than a silent re-certification. The current contract is
   version 3, and every shipped integration declares 3. The version number identifies this current
-  start-only contract; it does not imply compatibility with the version-1 or version-2 shapes that
-  shipped before 0.18.
+  start-only contract; it does not imply compatibility with the earlier version-1 or version-2
+  shapes.
 - `config_model`: what the config IS (see below). A capability that accepts none declares a model
   with no fields beyond its tag, which is closed-world by construction.
 - `name` / `description`: the registry row's identity.

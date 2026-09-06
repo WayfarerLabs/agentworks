@@ -102,9 +102,6 @@ agw session delete s1                      # Reports that my-console still refer
 agw console delete my-console              # Extra shells are lost but sessions are preserved
 ```
 
-Automation upgrading from the former session-resume or console-create-on-attach grammar should
-follow [Upgrading to 0.18](../docs/guides/upgrading-to-0.18.md).
-
 ## Prerequisites
 
 - Python 3.12+ (uv will install one for you if needed)

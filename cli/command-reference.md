@@ -244,7 +244,7 @@ last matching live observation. VMs retain name order. Provisioning is `pending`
 `complete`, `failed`, or `unknown`; initialization additionally permits `partial`. These frozen JSON
 v1 vocabularies do not expand when domain enums gain members. In this VM list JSON projection,
 `unknown` is the stable sentinel for an invalid persisted value and never echoes that stored value.
-The 0.18 producer always emits the additive nullable v1 fields `observed_status` and
+The current producer always emits the additive nullable v1 fields `observed_status` and
 `status_disposition`; a v1 consumer must tolerate their absence from older producers. Plain list
 emits null for both. With `--status`, observed status is `running`, `stopped`, `deallocated`, or
 `unknown`; disposition is `manual` or `idle` only for stopped or deallocated VMs.
@@ -294,7 +294,7 @@ this ordered shape:
 `platform`, `backend`, `status_disposition`, `system_slug`, `template`, `admin_template`,
 `tailscale_host`, `last_seen_at`, `debian_release`, `debian_release_observed_at`, and
 `live_resources` are nullable. Older JSON v1 producers may also emit a null `observed_status`; the
-0.18 producer always emits `running`, `stopped`, `deallocated`, or `unknown` because describe
+current producer always emits `running`, `stopped`, `deallocated`, or `unknown` because describe
 requests observation. Non-null release observations have the same recognized-codename and timestamp
 semantics as VM list. `status_disposition` is `manual` or `idle` only for stopped or deallocated
 VMs; and `system_slug_state` is `set`, `declined`, or `unset`. `provisioned_resources` is
@@ -381,9 +381,9 @@ zero-based position. Current producers emit `[]` when the session has no console
 v1 producers may omit this additive field under the compatibility contract below.
 
 `agw console list --output json` uses `console.list` and
-`{consoles: [{name, vm_name, session_count, status}]}` in configured name order after filtering. The
-0.18 producer always emits the additive v1 console `status` field; a v1 consumer must tolerate its
-absence from older producers. Status is `unavailable` for plain list; with `--status` it is
+`{consoles: [{name, vm_name, session_count, status}]}` in configured name order after filtering.
+Current producers always emit the additive v1 console `status` field; a v1 consumer must tolerate
+its absence from older producers. Status is `unavailable` for plain list; with `--status` it is
 `running`, `stopped`, `residual`, or `unknown`. `agw console describe NAME --output json` uses
 `console.describe` and `{console}`. Console is
 `{name, vm_name, admin_shell, created_at, updated_at, status, sessions}`. Describe status uses the
