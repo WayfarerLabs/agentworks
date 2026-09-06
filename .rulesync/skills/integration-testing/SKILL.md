@@ -196,12 +196,43 @@ Tier 2 is a strict superset of Tier 1, so a Tier 2 pass implies the Tier 1 resul
 What Tier 2 adds is one more reachable platform, not a deeper class of testing; do not read the
 higher number as a stronger verdict.
 
+### Standing up a bed for a decoupled platform
+
+A decoupled platform needs a reachable service rather than a particular workstation, and a cloud VM
+with nested virtualization is usually the cheapest way to get one, because it runs the hypervisor
+itself as an ordinary guest. Check the provider before assuming this is possible: offerings differ
+sharply, and where one exposes nested virtualization on ordinary instance types, another may require
+bare metal at an order of magnitude more cost for the same work. Prefer a project or account
+separate from anything the operator uses personally, so a mistake on the bed cannot reach their
+resources.
+
+Two things are worth expecting the first time a platform gets a live bed.
+
+**The setup tooling is part of the surface under test.** Where the repository ships a script to
+prepare the backend, running it is a test and its failures are findings, not obstacles to work
+around silently. The parameters such a script accepts (storage, network, release) are exactly where
+it is most likely to have been exercised against only one value, so a bed that picks a different one
+finds real defects immediately. Fix forward locally to keep the bed moving if you must, but report
+what the unmodified script did.
+
+**Assume the basic path is broken.** A platform nothing has driven live has had no pressure keeping
+it aligned with the system it manages, so the managed system's own vocabulary drifts underneath it:
+privileges get renamed, exit codes gain meanings, defaults move. The first end-to-end create is the
+highest-yield test that platform will ever get. Budget for it failing, and prove the diagnosis by
+changing one thing and re-running rather than reasoning from the error text, which on an untested
+path is itself untested and often names the wrong cause.
+
 ### A bed's toolchain is part of its result
 
 A bed missing an external binary manufactures failures that look exactly like product defects.
 Record what each bed has installed, and when a suite fails there, attribute the failures before
 reporting them: a spawn error or a shell exit code of 127 is the bed talking, not the code. Where
 the difference changes the verdict, say which bed produced the number.
+
+The same care runs the other way. When a bed runs a newer release of the managed system than the
+code was written against, a failure there is a finding about the code rather than about the bed, and
+it is the most valuable kind: it is the drift no unit suite can see. Record the bed's version
+alongside its toolchain so a reader can tell which of the two a result speaks to.
 
 ## Live-testing discipline
 
