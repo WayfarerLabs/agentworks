@@ -97,11 +97,13 @@ def test_create_vm_request_shape_and_row(
     initialized_release: list[DebianRelease] = []
     attested_release: list[DebianRelease] = []
     outcomes: list[OverlayOutcome] = []
+    start_events: list[str] = []
     native_transport = SimpleNamespace()
     monkeypatch.setattr("agentworks.instance_specs.render_overlay_outcome", outcomes.append)
 
     def _verify_release(transport: object, *, expected: DebianRelease) -> DebianRelease:
         assert transport is native_transport
+        start_events.append("attest")
         attested_release.append(expected)
         return expected
 
@@ -111,6 +113,7 @@ def test_create_vm_request_shape_and_row(
     )
 
     def _fake_create(self: LimaPlatform, request: ProvisionRequest, ctx: object) -> ProvisionResult:
+        start_events.append("provider-create")
         captured_platform.append(self)
         captured_request.append(request)
         return ProvisionResult(
@@ -120,6 +123,13 @@ def test_create_vm_request_shape_and_row(
         )
 
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)
+    record_vm_started = db.record_vm_started
+
+    def _record_started(name: str) -> None:
+        start_events.append("record-start")
+        record_vm_started(name)
+
+    monkeypatch.setattr(db, "record_vm_started", _record_started)
     # Phase A / Phase B are faked here: this suite pins the create()
     # request shape and the persisted row, not the init sequence.
     monkeypatch.setattr(
@@ -165,8 +175,10 @@ def test_create_vm_request_shape_and_row(
     assert vm.debian_release is DebianRelease.TRIXIE
     assert vm.debian_release_observed_at is not None
     assert vm.operator_stopped is False
+    assert vm.last_started_at is not None
     assert attested_release == [DebianRelease.TRIXIE]
     assert initialized_release == [DebianRelease.TRIXIE]
+    assert start_events == ["provider-create", "record-start", "attest"]
     stored = db.instance_state.get_desired_overlay("vm", "dvm")
     assert stored is not None and stored.payload.value == {
         "vm": {"cpus": 6},

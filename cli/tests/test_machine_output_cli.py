@@ -221,6 +221,8 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
             [
                 "name",
                 "created_at",
+                "last_started_at",
+                "uptime_seconds",
                 "site",
                 "platform",
                 "backend",
@@ -284,6 +286,8 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
                 "status",
                 "pid",
                 "created_at",
+                "last_started_at",
+                "uptime_seconds",
                 "updated_at",
                 "consoles",
                 "instance_state",
@@ -293,7 +297,17 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
             ["console", "describe", "c", "--output", "json"],
             "console.describe",
             "console",
-            ["name", "vm_name", "admin_shell", "created_at", "updated_at", "status", "sessions"],
+            [
+                "name",
+                "vm_name",
+                "admin_shell",
+                "created_at",
+                "last_started_at",
+                "uptime_seconds",
+                "updated_at",
+                "status",
+                "sessions",
+            ],
         ),
     ):
         first = CliRunner().invoke(app, argv)
