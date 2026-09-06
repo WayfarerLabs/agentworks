@@ -284,23 +284,25 @@ recorded-fact section `Lifecycle evidence`.
 this ordered shape:
 
 ```text
-{name, created_at, site, platform, backend, observed_status, status_disposition,
+{name, created_at, last_started_at, uptime_seconds, site, platform, backend,
+ observed_status, status_disposition,
  operator_stopped, hostname, system_slug, system_slug_state, template, admin_template,
  admin_username, provisioning_status, initialization_status, tailscale_host, last_seen_at,
  debian_release, debian_release_observed_at, provisioned_resources, live_resources, agents,
  workspaces, events, instance_state}
 ```
 
-`platform`, `backend`, `status_disposition`, `system_slug`, `template`, `admin_template`,
-`tailscale_host`, `last_seen_at`, `debian_release`, `debian_release_observed_at`, and
-`live_resources` are nullable. Older JSON v1 producers may also emit a null `observed_status`; the
-current producer always emits `running`, `stopped`, `deallocated`, or `unknown` because describe
-requests observation. Non-null release observations have the same recognized-codename and timestamp
-semantics as VM list. `status_disposition` is `manual` or `idle` only for stopped or deallocated
-VMs; and `system_slug_state` is `set`, `declined`, or `unset`. `provisioned_resources` is
-`{cpus, memory_gib, disk_gib, swap_gib}` with nullable integers. It is the provisioning request
-recorded by Agentworks, not provider-observed realized hardware. Human VM describe labels these
-persisted values `Requested`. `live_resources` is null or this record:
+`last_started_at`, `uptime_seconds`, `platform`, `backend`, `status_disposition`, `system_slug`,
+`template`, `admin_template`, `tailscale_host`, `last_seen_at`, `debian_release`,
+`debian_release_observed_at`, and `live_resources` are nullable. Older JSON v1 producers may also
+emit a null `observed_status`; the current producer always emits `running`, `stopped`,
+`deallocated`, or `unknown` because describe requests observation. Non-null release observations
+have the same recognized-codename and timestamp semantics as VM list. `status_disposition` is
+`manual` or `idle` only for stopped or deallocated VMs; and `system_slug_state` is `set`,
+`declined`, or `unset`. `provisioned_resources` is `{cpus, memory_gib, disk_gib, swap_gib}` with
+nullable integers. It is the provisioning request recorded by Agentworks, not provider-observed
+realized hardware. Human VM describe labels these persisted values `Requested`. `live_resources` is
+null or this record:
 
 ```text
 {cpus, load_average, memory_total, memory_used, memory_percent, swap_total,
@@ -371,14 +373,16 @@ uses `session.describe` and `{session}`. Session is this record:
 
 ```text
 {name, workspace_name, vm_name, template, harness_integration, mode, agent_name,
- status, pid, created_at, updated_at, consoles, instance_state}
+ status, pid, created_at, last_started_at, uptime_seconds, updated_at, consoles, instance_state}
 ```
 
-`pid` is a positive integer or null. Opaque harness state, socket paths, and boot identifiers are
-never serialized. `consoles` is the additive optional v1 field `[{console_name, position}]`. Entries
-retain deterministic console-name order, and `position` is the console membership's stored
-zero-based position. Current producers emit `[]` when the session has no console associations; older
-v1 producers may omit this additive field under the compatibility contract below.
+`pid` and `uptime_seconds` are nonnegative integers or null; `pid` is positive when present.
+`last_started_at` is a UTC timestamp or null. Opaque harness state, socket paths, and boot
+identifiers are never serialized. `consoles` is the additive optional v1 field
+`[{console_name, position}]`. Entries retain deterministic console-name order, and `position` is the
+console membership's stored zero-based position. Current producers emit `[]` when the session has no
+console associations; older v1 producers may omit this additive field under the compatibility
+contract below.
 
 `agw console list --output json` uses `console.list` and
 `{consoles: [{name, vm_name, session_count, status}]}` in configured name order after filtering.
@@ -386,11 +390,17 @@ Current producers always emit the additive v1 console `status` field; a v1 consu
 its absence from older producers. Status is `unavailable` for plain list; with `--status` it is
 `running`, `stopped`, `residual`, or `unknown`. `agw console describe NAME --output json` uses
 `console.describe` and `{console}`. Console is
-`{name, vm_name, admin_shell, created_at, updated_at, status, sessions}`. Describe status uses the
-console live vocabulary and never `unavailable`. Members are `{position, session_name, shells}` in
-ascending position, and shells are `{cwd, admin}` in configured shell order. `cwd` is nullable and
-all booleans remain JSON booleans. Console inspection preserves configured database membership even
-when its non-activating live observation is unknown.
+`{name, vm_name, admin_shell, created_at, last_started_at, uptime_seconds, updated_at, status, sessions}`.
+Describe status uses the console live vocabulary and never `unavailable`. Members are
+`{position, session_name, shells}` in ascending position, and shells are `{cwd, admin}` in
+configured shell order. `cwd` is nullable and all booleans remain JSON booleans. Console inspection
+preserves configured database membership even when its non-activating live observation is unknown.
+
+For all three runnable describes, `last_started_at` is the raw nullable UTC timestamp persisted
+after a successful start. `uptime_seconds` is a nullable nonnegative integer derived at inspection
+time. It is present only when the resource's exact observed status is `running` and the start time
+is known; a future start time clamps it to zero. These additive fields may be absent from older JSON
+v1 producers.
 
 #### Doctor JSON schema
 

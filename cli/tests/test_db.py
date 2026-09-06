@@ -676,6 +676,34 @@ def test_update_session_runtime_joins_explicit_transaction(db: Database) -> None
     assert session.tmux_server_start_ticks is None
 
 
+def test_runnable_start_observations_are_nullable_and_recorded(db: Database) -> None:
+    from datetime import datetime
+
+    from agentworks.db import SessionMode
+
+    db.insert_vm("dev-vm", site="lima", hostname="lima--dev-vm")
+    db.insert_workspace("ws", workspace_path="/tmp/ws", vm_name="dev-vm", linux_group="ws-ws")
+    db.insert_session("ws-s1", "ws", "default", SessionMode.ADMIN)
+    db.insert_console("work", "dev-vm", admin_shell=True)
+
+    assert db.get_vm("dev-vm").last_started_at is None  # type: ignore[union-attr]
+    assert db.get_session("ws-s1").last_started_at is None  # type: ignore[union-attr]
+    assert db.get_console("work").last_started_at is None  # type: ignore[union-attr]
+
+    db.record_vm_started("dev-vm")
+    db.record_session_started("ws-s1")
+    db.record_console_started("work")
+
+    observations = (
+        db.get_vm("dev-vm").last_started_at,  # type: ignore[union-attr]
+        db.get_session("ws-s1").last_started_at,  # type: ignore[union-attr]
+        db.get_console("work").last_started_at,  # type: ignore[union-attr]
+    )
+    for observation in observations:
+        assert observation is not None
+        datetime.strptime(observation, "%Y-%m-%dT%H:%M:%SZ")
+
+
 def test_migration_21_adds_boot_id(tmp_path: Path) -> None:
     """Migration 21 adds a boot_id column."""
     from agentworks.db import MIGRATIONS

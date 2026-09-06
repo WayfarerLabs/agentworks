@@ -103,13 +103,21 @@ def test_start_stopped_vm_resolves_once_starts_and_clears_flag(
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "ts-key")
     _seed_vm(db, operator_stopped=True)
     events = _fake_power(monkeypatch, VMStatus.STOPPED)
+    record_vm_started = db.record_vm_started
+
+    def _record_started(name: str) -> None:
+        events.append("record-start")
+        record_vm_started(name)
+
+    monkeypatch.setattr(db, "record_vm_started", _record_started)
 
     vm_manager.start_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"], ["tailscale-auth-key"]]
-    assert events == ["status", "start", "tailscale"]
+    assert events == ["status", "start", "record-start", "tailscale"]
     row = db.get_vm("box")
     assert row is not None and row.operator_stopped is False
+    assert row.last_started_at is not None
     assert any("VM 'box' is ready" in m for m in captured_output.info)
     assert not any("already running" in m for m in captured_output.info)
 
@@ -127,6 +135,9 @@ def test_start_running_vm_short_circuits_but_still_clears_flag(
     config = make_config()
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "ts-key")
     _seed_vm(db, operator_stopped=True)
+    original_start = "2026-01-01T00:00:00Z"
+    db._conn.execute("UPDATE vms SET last_started_at = ? WHERE name = ?", (original_start, "box"))
+    db._conn.commit()
     events = _fake_power(monkeypatch, VMStatus.RUNNING)
 
     vm_manager.start_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
@@ -135,6 +146,7 @@ def test_start_running_vm_short_circuits_but_still_clears_flag(
     assert events == ["status", "tailscale"]
     row = db.get_vm("box")
     assert row is not None and row.operator_stopped is False
+    assert row.last_started_at == original_start
     assert any("VM 'box' is already running" in m for m in captured_output.info)
     assert not any("is ready" in m for m in captured_output.info)
 

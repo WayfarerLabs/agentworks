@@ -285,6 +285,73 @@ def test_existing_session_launch_passes_operator_intent_to_the_harness_integrati
     )
 
     assert intents == [expected_intent]
+    refreshed = db.get_session("s1")
+    assert refreshed is not None and refreshed.last_started_at is not None
+    db.close()
+
+
+def test_running_session_start_noop_preserves_last_start_time(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.sessions.manager import start_session
+
+    db, events = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.RUNNING)
+    original = "2026-01-01T00:00:00Z"
+    db._conn.execute("UPDATE sessions SET last_started_at = ? WHERE name = ?", (original, "s1"))
+    db._conn.commit()
+
+    start_session(
+        db,
+        SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+        name="s1",
+        interaction=TtyInteractionPolicy.REFUSE,
+    )  # type: ignore[arg-type]
+
+    refreshed = db.get_session("s1")
+    assert refreshed is not None and refreshed.last_started_at == original
+    assert events == []
+    db.close()
+
+
+def test_session_start_records_immediately_after_tmux_creation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.sessions import manager as session_manager
+    from agentworks.sessions import tmux as tmux_mod
+
+    db, _events = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
+    create_session = tmux_mod.create_session
+    capture_fingerprint = tmux_mod.capture_tmux_server_fingerprint
+    record_session_started = db.record_session_started
+    order: list[str] = []
+
+    def _create(*args: Any, **kwargs: Any) -> tuple[str, int | None]:
+        result = create_session(*args, **kwargs)
+        order.append("tmux-created")
+        return result
+
+    def _record(name: str) -> None:
+        order.append("start-recorded")
+        record_session_started(name)
+
+    def _capture(**kwargs: Any) -> FingerprintProbe:
+        order.append("fingerprint-captured")
+        return capture_fingerprint(**kwargs)
+
+    monkeypatch.setattr(tmux_mod, "create_session", _create)
+    monkeypatch.setattr(db, "record_session_started", _record)
+    monkeypatch.setattr(tmux_mod, "capture_tmux_server_fingerprint", _capture)
+
+    session_manager.start_session(
+        db,
+        SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+        name="s1",
+        interaction=TtyInteractionPolicy.REFUSE,
+    )  # type: ignore[arg-type]
+
+    assert order == ["tmux-created", "start-recorded", "fingerprint-captured"]
     db.close()
 
 
@@ -418,6 +485,7 @@ def test_indeterminate_post_launch_cleanup_retains_addressable_runtime(
     assert refreshed is not None
     assert refreshed.socket_path == "/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock"
     assert refreshed.pid is None and refreshed.boot_id is None
+    assert refreshed.last_started_at is not None
     db.close()
 
 
@@ -1207,6 +1275,8 @@ def test_create_pane_command_is_the_harness_integration_output_substituted(
     )
 
     assert captured["command"] == "claude s1 in ws1"
+    session = db.get_session("s1")
+    assert session is not None and session.last_started_at is not None
     db.close()
 
 

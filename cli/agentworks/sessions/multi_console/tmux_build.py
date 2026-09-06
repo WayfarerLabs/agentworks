@@ -593,6 +593,7 @@ def _build_console_tmux(
                 entity_kind="console",
                 entity_name=console.name,
             )
+        db.record_console_started(console.name)
     except Exception:
         _teardown_console_tmux(target, console.name)
         raise

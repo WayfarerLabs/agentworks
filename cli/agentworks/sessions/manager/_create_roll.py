@@ -343,6 +343,7 @@ def _start_session_slice(
                 is_admin=(mode == SessionMode.ADMIN),
                 env=session_env,
             )
+            db.record_session_started(name)
 
             from agentworks.sessions.tmux import (
                 ProbeStatus,

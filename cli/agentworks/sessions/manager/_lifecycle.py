@@ -787,6 +787,7 @@ def _launch_existing_session(
                         hint="Use 'session stop --force' to kill it, then retry.",
                     ) from exc
                 raise
+            db.record_session_started(name)
 
             from agentworks.sessions.tmux import (
                 ProbeStatus,

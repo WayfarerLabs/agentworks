@@ -21,6 +21,12 @@ agw session describe review
 agw console describe development
 ```
 
+Each describe view also reports the most recent successful start Agentworks observed and the current
+uptime. Uptime is available only when that resource's own status observation says `running` and a
+start time is known. Older resources keep an unknown start time until Agentworks successfully starts
+them; stopped, deallocated, residual, broken, and unknown resources have no current uptime. A future
+timestamp caused by clock skew reports zero seconds rather than a negative duration.
+
 These observations do not start a VM, repair a session, create or destroy tmux state, or persist an
 observed result. An expected provider, credential, identity, or transport failure keeps the local
 facts and reports status as `unknown`. One failed VM or provider boundary does not remove successful

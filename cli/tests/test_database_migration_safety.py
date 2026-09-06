@@ -98,7 +98,7 @@ def test_version_33_advances_through_checkpoint_retirement(tmp_path: Path) -> No
     Database(path).close()
 
     after = sqlite3.connect(path)
-    assert _version(path) == 36
+    assert _version(path) == LATEST_VERSION
     assert (
         after.execute("SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'vm_checkpoints'").fetchone()
         is None
@@ -711,6 +711,48 @@ def test_safe_open_migrates_stale_state_and_preserves_historical_backup(tmp_path
     assert result.backup is not None
     assert _version(result.backup.path) == LATEST_VERSION - 1
     assert _version(path) == LATEST_VERSION
+
+
+def test_start_time_migration_keeps_existing_runnables_unknown_and_backup_historical(tmp_path: Path) -> None:
+    path = tmp_path / "state.db"
+    _build_schema(path, 36)
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "INSERT INTO vms (name, site, hostname) VALUES (?, ?, ?)",
+        ("box", "lima-local", "box"),
+    )
+    connection.execute(
+        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES (?, ?, ?, ?)",
+        ("work", "box", "/tmp/work", "ws-work"),
+    )
+    connection.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode) VALUES (?, ?, ?, ?)",
+        ("session", "work", "default", "admin"),
+    )
+    connection.execute(
+        "INSERT INTO consoles (name, vm_name, admin_shell) VALUES (?, ?, ?)",
+        ("console", "box", 1),
+    )
+    connection.commit()
+    connection.close()
+
+    result = open_database_safely(path, prepare_database_open(path), create_backup=True)
+    try:
+        assert result.database.get_vm("box").last_started_at is None  # type: ignore[union-attr]
+        assert result.database.get_session("session").last_started_at is None  # type: ignore[union-attr]
+        assert result.database.get_console("console").last_started_at is None  # type: ignore[union-attr]
+    finally:
+        result.database.close()
+
+    assert result.backup is not None
+    assert _version(result.backup.path) == 36
+    backup = sqlite3.connect(result.backup.path)
+    try:
+        for table in ("vms", "sessions", "consoles"):
+            columns = {str(row[1]) for row in backup.execute(f"PRAGMA table_info({table})")}
+            assert "last_started_at" not in columns
+    finally:
+        backup.close()
 
 
 @pytest.mark.parametrize("shape", ["empty-file", "empty-version-table"])

@@ -250,6 +250,7 @@ class LiveVMNode:
         output.info(f"VM '{self._row.name}' is {observed}. Starting...")
         platform = self._site.platform
         platform.start(self._row, self._gate_ops_ctx(gate_secrets))
+        self._db.record_vm_started(self._row.name)
 
         with platform.vm_active(self._row, config=self._config):
             if _tailscale_rejoin_required(

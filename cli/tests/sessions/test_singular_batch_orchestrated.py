@@ -946,6 +946,11 @@ def test_describe_session_derives_vm_from_its_structural_snapshot(
 ) -> None:
     config = make_config()
     _seed_singular(db)
+    db._conn.execute(
+        "UPDATE sessions SET last_started_at = ? WHERE name = ?",
+        ("2020-01-01T00:00:00Z", "s1"),
+    )
+    db._conn.commit()
     _seed_vm(db, "moved", "100.64.0.10")
     _reachable(monkeypatch, True)
 
@@ -967,7 +972,31 @@ def test_describe_session_derives_vm_from_its_structural_snapshot(
     )
 
     assert description.vm_name == "moved"
+    assert description.last_started_at == "2020-01-01T00:00:00Z"
+    assert description.uptime_seconds is None
     assert resolve_counter == []
+
+
+def test_running_session_description_derives_uptime(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config()
+    _seed_singular(db)
+    _reachable(monkeypatch, True)
+    db._conn.execute(
+        "UPDATE sessions SET last_started_at = ? WHERE name = ?",
+        ("2020-01-01T00:00:00Z", "s1"),
+    )
+    db._conn.commit()
+    monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, **kwargs: session)
+    monkeypatch.setattr(session_manager, "check_session_status", lambda *args, **kwargs: SessionStatus.RUNNING)
+
+    description = session_manager.session_description(db, config, name="s1")
+
+    assert description.last_started_at == "2020-01-01T00:00:00Z"
+    assert description.uptime_seconds is not None and description.uptime_seconds > 0
 
 
 def test_describe_session_preserves_live_legacy_structural_error(

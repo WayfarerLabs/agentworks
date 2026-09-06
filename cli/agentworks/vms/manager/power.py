@@ -72,6 +72,7 @@ def start_vm(
         output.info(f"VM '{name}' is already running")
     else:
         platform.start(vm, ops_ctx)
+        db.record_vm_started(name)
 
     # Probe and conditionally acquire the standalone repair credential inside
     # the same hold that protects the reconnect/rejoin lifecycle.

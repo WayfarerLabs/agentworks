@@ -419,6 +419,14 @@ class Database:
         )
         self._commit_unless_in_tx()
 
+    def record_vm_started(self, name: str) -> None:
+        """Record a successful provider create or start."""
+        self._conn.execute(
+            "UPDATE vms SET last_started_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE name = ?",
+            (name,),
+        )
+        self._commit_unless_in_tx()
+
     def delete_vm(self, name: str) -> None:
         with self.transaction():
             workspace_names = tuple(
@@ -869,6 +877,14 @@ class Database:
         )
         self._commit_unless_in_tx()
 
+    def record_session_started(self, name: str) -> None:
+        """Record a successful managed tmux creation."""
+        self._conn.execute(
+            "UPDATE sessions SET last_started_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE name = ?",
+            (name,),
+        )
+        self._commit_unless_in_tx()
+
     def update_session_harness_integration_state(self, name: str, harness_integration_state: dict[str, object]) -> None:
         """Persist the harness integration's per-session state blob.
 
@@ -1132,6 +1148,14 @@ class Database:
             "UPDATE consoles SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE name = ?",
             (name,),
         )
+
+    def record_console_started(self, name: str) -> None:
+        """Record a successful canonical console publication."""
+        self._conn.execute(
+            "UPDATE consoles SET last_started_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE name = ?",
+            (name,),
+        )
+        self._commit_unless_in_tx()
 
     # -- VM Events ---------------------------------------------------------
 

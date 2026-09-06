@@ -553,6 +553,7 @@ def create_vm(
                     entity_kind="vm",
                     entity_name=vm_name,
                 ) from e
+            db.record_vm_started(vm_name)
             # The platform's rollback window closes here: its create returned
             # and the VM exists. Core acceptance is still pending below; a
             # failure there keeps an addressable row with recovery guidance.

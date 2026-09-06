@@ -720,6 +720,12 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
     36: """
         ALTER TABLE sessions ADD COLUMN tmux_server_start_ticks INTEGER;
     """,
+    # Latest successful start observations. Existing rows remain unknown. --
+    37: """
+        ALTER TABLE vms ADD COLUMN last_started_at TEXT;
+        ALTER TABLE sessions ADD COLUMN last_started_at TEXT;
+        ALTER TABLE consoles ADD COLUMN last_started_at TEXT;
+    """,
 }
 
 LATEST_VERSION = max(MIGRATIONS)
@@ -844,6 +850,11 @@ _SCHEMA_SENTINEL_ADDITIONS: dict[int, dict[str, tuple[str, ...]]] = {
         )
     },
     36: {"sessions": ("tmux_server_start_ticks",)},
+    37: {
+        "vms": ("last_started_at",),
+        "sessions": ("last_started_at",),
+        "consoles": ("last_started_at",),
+    },
 }
 
 _SCHEMA_SENTINEL_REMOVED_TABLES: dict[int, tuple[str, ...]] = {

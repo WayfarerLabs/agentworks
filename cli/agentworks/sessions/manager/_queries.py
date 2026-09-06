@@ -17,6 +17,7 @@ from agentworks.errors import (
     StateError,
     UserAbort,
 )
+from agentworks.runtime_time import derive_uptime_seconds, format_duration
 from agentworks.sessions._resource_cleanup import cleanup_now_empty_resource
 from agentworks.sessions.tmux import exact_tmux_target
 
@@ -69,6 +70,8 @@ class SessionDescription:
     updated_at: str
     consoles: tuple[SessionConsole, ...]
     instance_state: InstanceStateDescription
+    last_started_at: str | None = None
+    uptime_seconds: int | None = None
 
 
 def session_listing_data(listing: SessionListing) -> JsonObject:
@@ -104,6 +107,8 @@ def session_description_data(description: SessionDescription) -> JsonObject:
             "status": project_session_status(description.status, allow_unavailable=False),
             "pid": description.pid,
             "created_at": description.created_at,
+            "last_started_at": description.last_started_at,
+            "uptime_seconds": description.uptime_seconds,
             "updated_at": description.updated_at,
             "consoles": [
                 {"console_name": console.console_name, "position": console.position} for console in description.consoles
@@ -500,6 +505,13 @@ def _session_structural_description(
                 for console_name, position in db.list_console_memberships_for_session(session.name)
             ),
             instance_state=instance_state,
+            last_started_at=session.last_started_at,
+            uptime_seconds=derive_uptime_seconds(
+                session.last_started_at,
+                running=status is SessionStatus.RUNNING,
+                entity_kind="session",
+                entity_name=session.name,
+            ),
         )
 
 
@@ -559,6 +571,8 @@ def render_session_description(description: SessionDescription) -> None:
     output.info(f"Mode:       {mode_label}")
     output.info(f"Status:     {status_label}")
     output.info(f"Created:    {description.created_at}")
+    output.info(f"Last Started: {description.last_started_at or 'unknown'}")
+    output.info(f"Uptime:     {format_duration(description.uptime_seconds)}")
     output.info(f"Updated:    {description.updated_at}")
     from agentworks.instance_description import render_instance_state
 

@@ -28,12 +28,15 @@ from agentworks.sessions.manager._status import _encoded_probe_field
 from agentworks.sessions.multi_console import (
     add_sessions,
     add_shell,
+    console_description,
     delete_console,
     delete_console_record,
     describe_console,
     list_consoles,
     remove_sessions,
     reorder_sessions,
+    restart_console,
+    start_console,
 )
 from agentworks.sessions.multi_console import (
     create_console as _real_create_console,
@@ -80,6 +83,33 @@ def test_create_console_explicit_specs(db: Database, captured_output: CapturedOu
         ("alpha", 0),
         ("gamma", 1),
     ]
+
+
+def test_console_start_records_publication_without_refreshing_running_noop(
+    db: Database,
+    console_target_factory,  # noqa: ANN001
+) -> None:
+    from tests._tmux_model import TmuxModel
+
+    _seed_vm(db, with_tailscale=True)
+    db.insert_console("work", "vm1", admin_shell=True)
+    model = TmuxModel()
+    console_target_factory(model)
+
+    start_console(db, _StubConfig(), name="work", interaction=TtyInteractionPolicy.REFUSE)
+    started = db.get_console("work")
+    assert started is not None and started.last_started_at is not None
+
+    original = "2026-01-01T00:00:00Z"
+    db._conn.execute("UPDATE consoles SET last_started_at = ? WHERE name = ?", (original, "work"))
+    db._conn.commit()
+    start_console(db, _StubConfig(), name="work", interaction=TtyInteractionPolicy.REFUSE)
+    unchanged = db.get_console("work")
+    assert unchanged is not None and unchanged.last_started_at == original
+
+    restart_console(db, _StubConfig(), name="work", interaction=TtyInteractionPolicy.REFUSE)
+    restarted = db.get_console("work")
+    assert restarted is not None and restarted.last_started_at != original
 
 
 def test_running_session_names_raises_on_unreachable(db: Database, fake_target: _FakeTarget) -> None:
@@ -632,6 +662,53 @@ def test_delete_console_db_only_when_vm_unreachable(
 
 
 # -- describe_console / list_consoles output -------------------------------
+
+
+@pytest.mark.parametrize(("status", "has_uptime"), [(ConsoleStatus.RUNNING, True), (ConsoleStatus.RESIDUAL, False)])
+def test_console_uptime_follows_exact_observed_status(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    status: ConsoleStatus,
+    has_uptime: bool,
+) -> None:
+    _seed_vm(db)
+    db.insert_console("con", "vm1", admin_shell=True)
+    db._conn.execute(
+        "UPDATE consoles SET last_started_at = ? WHERE name = ?",
+        ("2020-01-01T00:00:00Z", "con"),
+    )
+    db._conn.commit()
+    monkeypatch.setattr(
+        "agentworks.sessions.multi_console.observe_console_statuses",
+        lambda _db, _config, consoles: {console.name: status for console in consoles},
+    )
+    changes_before = db._conn.total_changes
+
+    description = console_description(db, _StubConfig(), name="con")
+
+    assert description.last_started_at == "2020-01-01T00:00:00Z"
+    assert (description.uptime_seconds is not None) is has_uptime
+    assert db._conn.total_changes == changes_before
+
+
+def test_console_description_rejects_malformed_start_time_while_stopped(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_vm(db)
+    db.insert_console("con", "vm1", admin_shell=True)
+    db._conn.execute("UPDATE consoles SET last_started_at = 'invalid' WHERE name = 'con'")
+    db._conn.commit()
+    monkeypatch.setattr(
+        "agentworks.sessions.multi_console.observe_console_statuses",
+        lambda _db, _config, consoles: {console.name: ConsoleStatus.STOPPED for console in consoles},
+    )
+
+    with pytest.raises(StateError) as raised:
+        console_description(db, _StubConfig(), name="con")
+
+    assert raised.value.entity_kind == "console"
+    assert raised.value.entity_name == "con"
 
 
 def test_describe_console_uses_iteration_index(
