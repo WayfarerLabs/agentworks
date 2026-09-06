@@ -193,10 +193,9 @@ shares no files with the website work; it waits on the sweep instead, per group 
       **Re-derived against HEAD on 2026-08-19**, after the post-#573 audit and the operator's
       re-scope. Three things the restart inherits, all recorded in the inventory rather than here:
       the guide rework deleted group 2's whole estate, so that group has no live row and no PR to
-      cut; the re-scope subtraction moves the secret-backend, secrets, database, resource
-      show/inspect and doctor-drift estates to the two owning efforts, group by group, in the
-      inventory's re-scope subtraction section; and the callee-side raise screen is now a mandatory
-      step for every group's delete rows.
+      cut; the 2026-08-19 re-scope subtraction has since been REVERSED, so those estates are back
+      in this sweep's scope and the section that recorded the move is gone from the inventory; and
+      the callee-side raise screen is now a mandatory step for every group's delete rows.
 
       **Re-anchored on 2026-09-06**, so a row keys what it addresses by identity rather than by
       line, and then **cut fresh at `c310d05b`** once #747 merged, and rebased onto `0c8cf6bc`. The map is a new document over
@@ -204,12 +203,11 @@ shares no files with the website work; it waits on the sweep instead, per group 
       anchor resolving at the basis. What the cut did is in the inventory's Basis and Totals
       sections rather than here, and this is the whole of what it owed:
 
-      - **Four populations re-derived**: the 20 mixed-basis files (128 non-group-1 rows), the 102
-        unsurveyed files (46 rows over 30 of them, the other 72 accounted for), the 8 files whose
-        anchors drifted between `426cccae` and the basis (10 rows), and the rows whose estate is
-        gone (157 dropped, plus 12 more the re-derivation retired).
-      - **The 2026-08-19 subtraction reversed**, its premise having failed: 89 rows returned to
-        their groups with their dispositions and the 34 deletes among them were re-screened.
+      - **Four populations re-derived**: the mixed-basis files, the unsurveyed files, the files
+        whose anchors drifted between the previous basis and this one, and the rows whose estate is
+        gone. The inventory's Basis section carries what each came to.
+      - **The 2026-08-19 subtraction reversed**, its premise having failed: the rows returned to
+        their groups with their dispositions and the deletes among them were re-screened.
         instance-model's seven files are back in this sweep's scope and the sequencing against its
         open live-validation gate is an operator question, recorded in the inventory.
       - **Group 1 regenerated** at the basis, and every stale claim anchor decided. Most of the
@@ -236,8 +234,9 @@ shares no files with the website work; it waits on the sweep instead, per group 
       whether an older map's row survives, and once the cut is the map, `resolve` answers survival
       by identity on its own. Done when: the fresh cut is committed, neither command remains, and
       reading a tree at a ref is gone with them. **Done, 2026-09-06**: both commands gone, `Tree`
-      reads the working tree only, and the seven that remain (`estate`, `attribute`, `injected`,
-      `screen`, `resolve`, `generate`, `totals`) all pass ruff, ruff format and mypy --strict.
+      reads the working tree only, and the eight that remain (`estate`, `attribute`, `injected`,
+      `screen`, `resolve`, `generate`, `restamp`, `totals`) all pass ruff, ruff format and mypy
+      --strict. `restamp` writes the map in place, the only one that does.
 
 - [x] Delete guide dead surface and interior re-validation (G8's guide-module members and G2;
       `JsonScalar` lives in `machine_output.py` and belongs to the G6 item below); fix the vacuous

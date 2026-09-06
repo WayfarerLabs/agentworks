@@ -121,12 +121,12 @@ does not move is the shape: the estate is `match=` under `cli/tests` plus the re
 
 Case 2's "where the code already offers a handle" turned out to be the common case rather than the
 rare one, which is worth stating because it sized a whole batch. Two handles already exist in
-production and neither needs a change: `AgentworksError` carries `entity_kind` and `entity_name`
-(populated at 286 raise sites, already asserted on at 75 test sites), and `schema.errors._problems`
-exposes `path`, `unknown_field` and `alternatives` and is already imported by
+production and neither needs a change: `AgentworksError` carries `entity_kind` and `entity_name`,
+populated at raise sites throughout and already asserted on in tests, and `schema.errors._problems`
+exposes `path`, `union_path`, `unknown_field` and `alternatives` and is already imported by
 `cli/tests/schema/test_errors.py`. Check for a handle before falling through to the delete arm, and
-check that it DISCRIMINATES: the platform-config family carries `entity_kind` identically on all
-sixteen sites, so the handle is present and useless there.
+check that it DISCRIMINATES: the platform-config family carries `entity_kind` identically across its
+sites, so the handle is present and useless there.
 
 ### The rubric for a borderline assertion
 

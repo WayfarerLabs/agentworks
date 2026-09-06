@@ -135,19 +135,22 @@ and `test_zsh_contains_all_commands` (F-152), `test_split_shell_pane_warns_when_
 Three more `e3b0c4` anchors are helpers rather than tests and correctly assert nothing:
 `Exclusive._mutually_exclusive` (D-035), `_agentworks_imports` (L-103) and `_read_module_source`
 (L-114). Following a call into a helper is a whole-program question this grammar does not open.
+**The blind spot is wider than those nine.** Many anchored tests have a non-empty digest and still
+hand part of their assertions to an `assert*`-named helper, so the digest covers what the test
+asserts directly and says nothing about the rest.
 
-**Digests are compared per anchor, never used as keys**, so two anchors sharing one is not a
-collision: parametrized siblings and identical one-line helpers do it routinely.
+**A digest is compared per anchor and never used as a key.** Two anchors sharing one is therefore
+not a collision. It happens routinely: two tests generated from one `parametrize` assert the same
+thing, and so do identical one-line helpers.
 
 **`sweep-screen.py restamp` is what brings the digests up to date**, and it is the one command that
 writes this file. Two things need it. An interpreter upgrade changes how `ast.unparse` spells a test
 and invalidates every digest at once, which is why the entry point refuses a Python minor other than
-the one the digests were stamped with rather than reporting every anchor as `changed`. And a PR that
-edits an anchored test changes its assertions on purpose, so it runs `restamp` and carries the map
-with it, instead of leaving the next reader a `changed` verdict that means "we did that". It names
-every digest it moves, and the reviewed diff is where an unexpected one gets caught. Before writing
-it checks that the file differs from the one it read by digests and nothing else, and that every
-digest ends an anchor token; if either fails it writes nothing.
+the version the digests were stamped with rather than reporting every anchor as `changed`. And a PR
+that edits an anchored test changes its assertions on purpose, so it runs `restamp` and carries the
+map with it, instead of leaving the next reader a `changed` verdict that means "we did that". It
+names every digest it moves, and the reviewed diff is where an unexpected one gets caught. It checks
+what it is about to write, and if it refuses it wrote nothing.
 
 **The site identity is four fields, and none of them is a position.** `path` is the test file.
 `qualname` is the innermost enclosing function, dotted through any class or nesting. Mind the
@@ -192,9 +195,14 @@ sample of it.
 it now sits. `grown` and `shrunk` are a site group that changed size, with both counts. `retargeted`
 is the same test asserting the same type against a different needle, which is what a reworded
 message leaves behind. `gone` is the file present and the anchor not in it, `file-gone` is the file
-itself, and `line-anchored` is a line anchor, which resolves to nothing by construction. Those are
-all of them: `carry` used to add its own labels for a comparison between two commits, and it retired
-with the fresh cut.
+itself, and `line-anchored` is a line anchor, which resolves to nothing by construction. `changed`
+is a span anchor whose function no longer asserts what it did, and `unstamped` is one that never
+recorded what it asserted. Those are all of them.
+
+**Only `resolved` and `line-anchored` pass.** `totals` faults on every other state, which is what
+makes a row addressing something that is not there a failure rather than a line in a listing. A line
+anchor is exempt because it declares up front that it resolves to nothing; a `changed` digest is not
+exempt, because absorbing one deliberately is what `restamp` is for.
 
 **A site anchor beats a span anchor in the same function, in group 1 only.** Group 1's rows address
 `match=` sites, so where a function holds sites such a row cited, those sites are the whole claim: a
@@ -229,12 +237,14 @@ those rows are no longer in this map, so nothing can be line-anchored to a file 
 and the parser refuses the cause.
 
 **To write a row by hand**, run `sweep-screen.py estate` and copy the identity it prints for the
-site, or `sweep-screen.py resolve` to see what the rows around yours address. The digest is a
-tiebreaker nobody needs to read; `estate` prints the needle beside it.
+site, or `sweep-screen.py resolve` to see what the rows around yours address. A site digest is a
+tiebreaker nobody needs to read, and `estate` prints the needle beside it. Do not write a SPAN
+anchor's digest by hand at all: leave it off and run `restamp`, which is the only thing that gets it
+right, and `totals` refuses an unstamped anchor so a forgotten one cannot pass quietly.
 
-**Two things in column 2 carry no meaning.** Backticks around a group are decoration, not a signal.
-And three rows (D-154, D-157, F-128) name further files by bare basename after a leading directory,
-so a scan that only matches full paths under-counts what is rowed by sixteen files.
+**One thing in column 2 carries no meaning**: backticks around a group are decoration, not a signal.
+Every anchor names its file by full path, which is what lets the accounting be a subtraction rather
+than a recipe; a cell that named a file any other way would be refused.
 
 **The row tables carry `<!-- prettier-ignore -->` and are not padded.** Prettier pads every cell in
 a table to the widest cell in its column, and an identity is much wider than a line number, so
@@ -397,9 +407,9 @@ assertion and pass without it means the assertion is the only probe, and the row
 
 This is not a screen to run over hundreds of sites; it is what to do with the handful a reading
 leaves genuinely uncertain. The sites decided this way on 2026-08-19 are the `G1-M` rows, and the
-result is why the method is recorded rather than the sites alone: **five of the seven keep and two
-do not**, and no reading of the rows predicted which. The batch justification would have deleted all
-seven.
+result is why the method is recorded rather than the sites alone: **most of them keep and one does
+not**, and no reading of the rows predicted which. The batch justification would have deleted every
+one.
 
 ## Groups
 
@@ -477,8 +487,8 @@ Two annotate a row that stays in it:
 
 And one is derived rather than judged:
 
-- **`[line-anchored: <cause>]`**: the row keeps literal lines, and this is why. every one was
-  written by `sweep-screen.py reanchor` before that command retired with the fresh cut, so a row
+- **`[line-anchored: <cause>]`**: the row keeps literal lines, and this is why. Every one this map
+  carries was written while `reanchor` existed; that command retired with the fresh cut, so a row
   that gains literal lines from here on carries its cause by hand. The parser still refuses a cause
   outside the vocabulary. It leaves the executable set exactly as it found it.
 
@@ -706,10 +716,12 @@ allocates a new one above every id the map has used.
 
 ## What the 2026-08-19 re-baseline measured
 
-That round's estate table, its dead-row list and its rows-added list described `426cccae` and are
-not carried forward; this cut re-derived all of it at `c310d05b`. The Basis says what moved and the
-Totals section says what the map now holds. `3c6e6d92` is the last commit that held those figures,
-and git history is where they live.
+That round's estate table, its dead-row list and its rows-added list described a tree two bases ago
+and are not carried forward; this cut re-derived all of it, and has re-derived it again since
+against the basis the Basis section names. The Basis says what moved and the Totals section says
+what the map now holds. `3c6e6d92` is the last commit that held those figures, and git history is
+where they live. Its vocabulary went with them: no row here is dead or subtracted, because a row
+whose estate is gone left the ledger and is in the retired list instead.
 
 ## Files with no row, and why
 
@@ -732,7 +744,7 @@ effort says which one.
 | `cli/tests/agents/test_install_commands.py` | Emitted command text, not prose we display: the assertion holds what the code sends to a shell, a transport, a completion script or a browser, which is behavior at a boundary. |
 | `cli/tests/capabilities/test_secret_backend_client.py` | Boundary validation at the secret-backend contract plus a redaction defense. In the secrets-preview estate, and hands over nothing. |
 | `cli/tests/capabilities/test_secret_backend_relocation.py` | No in-scope operand: no `match=`, no regex-family member, and no multi-word string literal in an assertion operand position. |
-| `cli/tests/db/test_read_transaction.py` | Subtracted to instance-model. Snapshot isolation, nesting refusal and post-close behavior; the only strings are `entity_kind == "database"`. |
+| `cli/tests/db/test_read_transaction.py` | In the instance-model estate, which is back in scope. Snapshot isolation, nesting refusal and post-close behavior; the only strings are `entity_kind == "database"`. |
 | `cli/tests/guide/test_release_history.py` | Topic-identifier mapping, unsafe-payload refusal, and size bounds. The topic strings are a route identifier, not prose. |
 | `cli/tests/guide/test_shell_catalog.py` | Derivation parity over a fixture the test authors. Markdown in, rendered markdown out. |
 | `cli/tests/guide/test_shell_commands.py` | Derivation parity between authored guide markdown and the live CLI spec. It asserts that documented commands exist, never how they are worded. |
@@ -761,9 +773,9 @@ effort says which one.
 | `cli/tests/schema/test_owner_templates.py` | Emitted-schema structure for fixture models (required, nullable, marker placement), plus the validation-and-extraction agreement. |
 | `cli/tests/secrets/test_batch_completion.py` | Batch dooming and typed block reasons. In the secrets-preview estate, and hands over nothing. |
 | `cli/tests/secrets/test_disabled_plugin_attribution.py` | No in-scope operand: the preview status and block reason it asserts are enum members, and the plugin attribution is an identity check on the value the test seeded. B-060 addressed a `format_outcome` assertion that `b8f94fda` removed, and retired with it. |
-| `cli/tests/secrets/test_line_safety.py` | Subtracted to secrets-preview. A structured refusal plus the injected-sentinel leak defense named in the preamble. |
+| `cli/tests/secrets/test_line_safety.py` | In the secrets-preview estate, which is back in scope. A structured refusal plus the injected-sentinel leak defense named in the preamble. |
 | `cli/tests/secrets/test_outcomes.py` | The rendered needle is the outcome's own status value, so it is derivation rather than a pin. Secrets-preview estate, nothing to hand over. |
-| `cli/tests/secrets/test_result_precedence.py` | Subtracted to secrets-preview. Precedence matrices over production enum members; every expected reason is `SomeEnum.MEMBER` or `.value`. |
+| `cli/tests/secrets/test_result_precedence.py` | In the secrets-preview estate, which is back in scope. Precedence matrices over production enum members; every expected reason is `SomeEnum.MEMBER` or `.value`. |
 | `cli/tests/sessions/test_grok_build_orchestrated.py` | Emitted command text, not prose we display: the assertion holds what the code sends to a shell, a transport, a completion script or a browser, which is behavior at a boundary. |
 | `cli/tests/test_apt_declared_at.py` | Source-location provenance for manifest-loaded entries. |
 | `cli/tests/test_azure_collision.py` | Fail-closed probe behavior at the provider SDK boundary, with the cause chain as the assertion. |
@@ -797,7 +809,7 @@ effort says which one.
 | `cli/tests/test_secret_verify.py` | No in-scope operand, by the same scan. |
 | `cli/tests/test_secrets_env_var.py` | No in-scope operand, by the same scan. |
 | `cli/tests/test_secrets_prompt.py` | No in-scope operand, by the same scan. |
-| `cli/tests/test_secrets_resolve.py` | Subtracted to secrets-preview. A backend-boundary conformance and defense suite: enum reasons, call lists, exception identity, and injected-sentinel non-leakage. The backend is third-party code, so none of its validation is interior. |
+| `cli/tests/test_secrets_resolve.py` | In the secrets-preview estate, which is back in scope. A backend-boundary conformance and defense suite: enum reasons, call lists, exception identity, and injected-sentinel non-leakage. The backend is third-party code, so none of its validation is interior. |
 | `cli/tests/test_session_console_filter.py` | Filter results, forwarded kwargs, exit codes and `entity_kind`/`entity_name` over seeded rows. |
 | `cli/tests/test_session_create_ephemeral_secret_target_parity.py` | One equality between two builders' outputs (`pre == post`) and the same over `compute_needed_secrets`. |
 | `cli/tests/test_ssh_identity.py` | Parsing at an operator-file boundary: `error.kind` classifications, a fingerprint checked against real `ssh-keygen`, a detail-length threshold, and the leak defense from the preamble. |
@@ -990,13 +1002,12 @@ enough the first time.
 
 ### The mechanical batch
 
-At `426cccae`, 454 live `match=` sites over 131 files, one row per file, out of a ledger of 517 over
-149; the gap is the dead and subtracted rows. Those are the figures this batch was cut to and they
-have not been re-derived. Run `sweep-screen.py generate` to size a PR from: it reports how many rows
-it emits and over how many sites. Every one is `delete`, and the justification is shared rather than
-restated times: the matched string is a fixed literal that varies with nothing, and it is prose this
-repository authors, which no case in the taxonomy licenses. The `raises` stays; only the `match=`
-argument goes.
+One row per file, every one a `delete`. Run `sweep-screen.py generate` to size a PR from: it reports
+how many rows it emits and over how many sites, at whatever tree you run it against. The
+justification is shared rather than restated per row, because it is the same sentence every time:
+the matched string is a fixed literal that varies with nothing, and it is prose this repository
+authors, which no case in the taxonomy licenses. The `raises` stays; only the `match=` argument
+goes.
 
 Each row's cell lists the sites that row owns, generated from the estate minus the sites the
 judgment and keep rows above claim. Read it as the row's claim; there is no range to over-apply, and
@@ -2466,7 +2477,18 @@ no row of this map fixes.
    reversed, so instance-model's seven files are back in this sweep's scope. That effort is a lock
    candidate with live VM validation still open, and its plan's own commitment was to trim these
    tests itself. Whether the sweep's edits to those files wait on that gate, land before it, or land
-   beside it is the operator's call. 45 rows are affected.
+   beside it is the operator's call, and here is what it is a call about:
+   - `cli/tests/db/test_instance_state.py`: D-171, E-197, E-214
+   - `cli/tests/db/test_read_transaction.py`: no rows
+   - `cli/tests/test_db.py`: G1-079, L-002
+   - `cli/tests/test_db_migration_harness_integration_state.py`: A-077, A-078, A-079
+   - `cli/tests/test_db_migration_harness_state.py`: no rows
+   - `cli/tests/test_db_migration_vm_sites.py`: A-074, A-075, A-076, G1-080
+   - `cli/tests/test_instance_specs.py`: D-164, E-191, G1-090
+
+   Sequencing against a list is possible; sequencing against a count is not, which is why the files
+   and the ids are here rather than a total.
+
 2. **A live coverage gap in `cli/tests/test_config.py`.** Three assertions at lines 285, 311 and 326
    match on `does not follow the naming rules` while production says
    `does not follow the secret naming rules` at `manifests/decode.py:367-371`. They are vacuous
@@ -2543,6 +2565,12 @@ no row of this map fixes.
    F-194, F-195, F-196 and F-197. A row not on this list and not carrying the marker is a row whose
    justification the phrase set did not catch, which is the gap this population knowingly has.
 
+   **Two marked rows the recipe does not select: C-094 and C-108.** They carried the marker before
+   it was derived, on the earlier hand-picked basis, and they keep it: their claims are genuinely
+   unexecuted and the phrase set simply does not reach their wording. Re-running the recipe
+   therefore returns two fewer ids than the map marks, and that difference is these two rather than
+   a drift.
+
    **Corrected 2026-09-06.** This item read "four rows, `C-005`, `C-025`, C-094, C-108" while only
    C-094 and C-108 ever carried the marker: `C-025` never had it and `C-005` is not a row in this
    map at all. That is exactly the failure the fresh cut's citation check now refuses, and it is why
@@ -2597,6 +2625,8 @@ an older map's evidence into a newer one. This cut leaves no line numbers, so th
 to lift and nothing left to carry. `resolve` answers survival on its own now, by identity, against
 the tree in front of it.
 
-What remains is `estate`, `attribute`, `injected`, `screen`, `resolve`, `generate` and `totals`, and
-all seven read the working tree only. The commands that could read history are in git history, which
-is where a reader who needs to re-run the 2026-09-06 cut against its own basis will find them.
+What remains is `estate`, `attribute`, `injected`, `screen`, `resolve`, `generate`, `restamp` and
+`totals`, and all eight read the working tree only. `restamp` also WRITES it, the only one that
+does: it brings every span anchor's assertion digest up to date, which is how a PR that edits an
+anchored test carries the map with it. The commands that could read history are in git history,
+which is where a reader who needs to re-run the 2026-09-06 cut against its own basis will find them.
