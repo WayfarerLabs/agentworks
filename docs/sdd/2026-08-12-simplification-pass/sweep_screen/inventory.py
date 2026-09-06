@@ -17,7 +17,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from .estate import Identity, Site, Snapshot
+from .estate import Identity, Site, Snapshot, assertion_digest
 
 INVENTORY = "docs/sdd/2026-08-12-simplification-pass/sweep-inventory.md"
 
@@ -40,11 +40,12 @@ ROW_ID = re.compile(r"(?:[A-F]|L|RB|G1)-[A-Z]?\d{1,3}[a-z]?$")
 #: opening on a quote is NOT a citation: it is a string literal the row is
 #: quoting from the test, like the rendered `"a.yaml:2"` location a CLI prints,
 #: which names no file in this tree and never did.
-CITED_FILE = re.compile(
-    r"(?<![\w./\"'])([A-Za-z0-9_./+-]*[A-Za-z0-9_+-]\.(?:py|mjs|md|toml|ya?ml|jsonc?|sh|cfg|ini)):\d+(?:-\d+)?"
-)
+CITED_FILE = re.compile(r"([A-Za-z0-9_./+-]*[A-Za-z0-9_+-]\.(?:py|mjs)):\d+(?:-\d+)?")
 
-CITED_ID = re.compile(r"\b(?:[A-F]|L|RB|G1|P[234])-[A-Z]?\d{1,3}[a-z]?\b")
+#: A row id, always three digits. The looser form matched prose: `L-1` in the
+#: middle of a sentence about a visa is not a citation, and a check that faults
+#: on it teaches its reader to stop believing it.
+CITED_ID = re.compile(r"\b(?:[A-F]|L|RB|G1)-[A-Z]?\d{3}[a-z]?\b")
 
 PATH_RE = re.compile(r"((?:cli|website)/[A-Za-z0-9_./-]+?\.(?:py|mjs))")
 LINE_ANCHOR = re.compile(r"L(\d+)(?:-(\d+))?$")
@@ -62,6 +63,8 @@ CAUSE_RE = re.compile(r"\[line-anchored:\s*([^\]]*)\]")
 #: literal lines carries its cause by hand, so one outside the set is a hand
 #: edit that has drifted.
 CAUSES = frozenset({"not Python", "between functions", "module level"})
+#: Six lowercase hex, the shape both digests in this grammar take.
+DIGEST = re.compile(r"[0-9a-f]{6}")
 BACKTICKED = re.compile(r"`([^`]+)`")
 FENCE = re.compile(r"^\s*(```|~~~)")
 
@@ -73,7 +76,18 @@ NO_ROW_HEADING = "### Files with no row, and why"
 #: The section recording rows that left the map. An id is never reused, so a
 #: retired one still resolves a citation even though it addresses nothing.
 RETIRED_HEADING = "### Rows this cut retired"
-RETIRED_ROW = re.compile(r"^\| ([A-Z0-9-]+) *\|")
+#: A retired id in the retired table's first cell. Three digits and an
+#: optional split-row suffix, which is what `D-169a` is; the separator line's
+#: dashes are not an id and this is what tells them apart. The optional
+#: qualification is what separates the two namespaces this table holds.
+RETIRED_ROW = re.compile(r"^\| ((?:[A-F]|L|RB|G1)-[A-Z]?\d{3}[a-z]?)( \(2026-08-19 map\))? *\|")
+
+#: A citation that says which map's numbering it means. The 2026-08-19 map
+#: numbered its mechanical batch positionally, so ids it used were handed to
+#: different rows when this cut regenerated: `G1-013` names one row there and
+#: another here. A citation of the old one says so, and resolves only against
+#: the ids that map retired.
+QUALIFIED = re.compile(r"\b((?:[A-F]|L|RB|G1)-[A-Z]?\d{3}[a-z]?) \(2026-08-19 map\)")
 ACCOUNTED = re.compile(r"^\| `([^`]+)` *\|")
 
 #: The one section whose rows `generate` emits. Everything else in group 1 is a
@@ -186,13 +200,25 @@ class SiteAnchor(Anchor):
 
 @dataclass(frozen=True)
 class SpanAnchor(Anchor):
-    """One test function, wherever it now sits."""
+    """One test function, wherever it now sits, and what it asserted there.
+
+    A span resolves on the function surviving, which says nothing about the
+    assertions inside it. Three rows retired in this cut because an assertion
+    went while the span went on resolving, and one of the three was a
+    substitution rather than a deletion, so counting was not enough: the digest
+    is over the assertions themselves, and a swap of equal size moves it.
+
+    It cannot see an assertion a test hands to a helper. Those functions digest
+    as `e3b0c4`, over nothing, and the grammar section names them.
+    """
 
     path: str
     qualname: str
+    #: What the function asserted when the row was cut.
+    digest: str = ""
 
     def render(self) -> str:
-        return self.qualname
+        return f"{self.qualname}@{self.digest}" if self.digest else self.qualname
 
     def resolve(self, snapshot: Snapshot) -> Resolution:
         if not snapshot.tree.exists(self.path):
@@ -201,6 +227,18 @@ class SpanAnchor(Anchor):
         if not ranges:
             return Resolution("gone", "")
         where = ",".join(f"{f.start}-{f.end}" for f in ranges)
+        # One name may hold several ranges, the platform-conditional idiom of
+        # defining a test in sibling branches. Digesting their assertions in
+        # range order makes that one answer rather than a merge of answers.
+        now = assertion_digest([text for f in ranges for text in f.assertions])
+        if not self.digest:
+            return Resolution("unstamped", f"{self.path}:{where}", f"this function asserts @{now} here")
+        if now != self.digest:
+            return Resolution(
+                "changed",
+                f"{self.path}:{where}",
+                f"cut against @{self.digest}, and this function asserts @{now} here",
+            )
         detail = "defined in more than one branch" if len(ranges) > 1 else ""
         return Resolution("resolved", f"{self.path}:{where}", detail)
 
@@ -218,11 +256,6 @@ class LineAnchor(Anchor):
 
     path: str
     spans: tuple[tuple[int, int], ...]
-    #: Why nothing could be named here, carried in the row's
-    #: `[line-anchored:]` marker so the declaration is per row rather than only
-    #: in the grammar section. It is a fact about the tree the row was written
-    #: at, not about HEAD, so the marker in the map is the record.
-    cause: str = ""
 
     def render(self) -> str:
         return ",".join(f"L{lo}" if lo == hi else f"L{lo}-{hi}" for lo, hi in self.spans)
@@ -297,10 +330,11 @@ class Row:
         return ", ".join(parts)
 
 
-def parse_anchors(cell: str, snapshot: Snapshot, where: str = "cell") -> list[Anchor]:
-    """The anchors one column-2 cell addresses, in either grammar.
+def parse_anchors(cell: str, where: str = "cell") -> list[Anchor]:
+    """The anchors one column-2 cell addresses.
 
-    `snapshot` is the tree the anchors are read against.
+    Reading a cell is a question about the map and not about any tree, so this
+    takes none: what an anchor MEANS at a tree is `Anchor.resolve`'s answer.
     """
     groups = BACKTICKED.findall(cell) or [cell]
     anchors: list[Anchor] = []
@@ -318,7 +352,7 @@ def parse_anchors(cell: str, snapshot: Snapshot, where: str = "cell") -> list[An
                 " because everything after the first path is read as belonging to it",
             )
         if tail.startswith("::"):
-            anchors.extend(_parse_identity_anchors(path, tail[2:], where, snapshot))
+            anchors.extend(_parse_identity_anchors(path, tail[2:], where))
         elif tail:
             raise RowError(where, f"{group!r} is neither a bare path nor `path::anchors`")
         else:
@@ -326,7 +360,7 @@ def parse_anchors(cell: str, snapshot: Snapshot, where: str = "cell") -> list[An
     return anchors
 
 
-def _parse_identity_anchors(path: str, tail: str, where: str, snapshot: Snapshot) -> list[Anchor]:
+def _parse_identity_anchors(path: str, tail: str, where: str) -> list[Anchor]:
     anchors: list[Anchor] = []
     lines: list[tuple[int, int]] = []
     for token in (t.strip() for t in tail.split(",")):
@@ -344,7 +378,16 @@ def _parse_identity_anchors(path: str, tail: str, where: str, snapshot: Snapshot
             continue
         parts = token.split("::")
         if len(parts) == 1:
-            anchors.append(SpanAnchor(path, token))
+            qualname, at, digest = token.partition("@")
+            # No digest at all is UNSTAMPED, which parses: `restamp` has to read
+            # the map to stamp it, and a row written by hand should get its
+            # digest from the tool rather than from someone guessing six hex.
+            # `totals` is what refuses an unstamped anchor, beside the other
+            # things a finished map has to be. A digest that is present and
+            # malformed is a typo, not a state, and is refused here.
+            if at and not DIGEST.fullmatch(digest):
+                raise RowError(where, f"span anchor {token!r} has a malformed assertion digest {digest!r}")
+            anchors.append(SpanAnchor(path, qualname, digest))
             continue
         if len(parts) != 3:
             raise RowError(where, f"anchor {token!r} has {len(parts)} `::` fields; a site anchor has three")
@@ -354,9 +397,38 @@ def _parse_identity_anchors(path: str, tail: str, where: str, snapshot: Snapshot
             raise RowError(where, f"anchor {token!r} has a non-numeric multiplicity {count!r}")
         anchors.append(SiteAnchor(Identity(path, qualname, type_name, digest), int(count or 1)))
     if lines:
-        causes = {snapshot.why_unnamed(path, lo) for lo, _ in lines}
-        anchors.append(LineAnchor(path, tuple(lines), ", ".join(sorted(causes))))
+        anchors.append(LineAnchor(path, tuple(lines)))
     return anchors
+
+
+def stamp_spans(cell: str, digests: dict[tuple[str, str], str]) -> str:
+    """Column 2 with each span anchor's assertion digest brought up to date.
+
+    Token-wise, and never a substring replace over the cell. A row may carry a
+    span anchor and a site anchor on ONE qualname, and 23 rows in this map do:
+    replacing the bare name would stamp the site anchor's copy too, turning
+    `qualname::Type::digest` into `qualname@span::Type::digest`. A token holding
+    `::` is a site anchor and is left exactly as written, as is anything outside
+    a backticked group, so what this rewrites is only what it means to.
+    """
+
+    def group(match: re.Match[str]) -> str:
+        body = match.group(1)
+        found = PATH_RE.search(body)
+        if found is None or not body[found.end() :].startswith("::"):
+            return match.group(0)
+        path = found.group(1)
+        out: list[str] = []
+        for token in body[found.end() + 2 :].split(","):
+            bare = token.strip()
+            digest = digests.get((path, bare.partition("@")[0]))
+            if not bare or "::" in bare or digest is None:
+                out.append(token)
+                continue
+            out.append(token.replace(bare, f"{bare.partition('@')[0]}@{digest}"))
+        return "`" + body[: found.end()] + "::" + ",".join(out) + "`"
+
+    return BACKTICKED.sub(group, cell)
 
 
 def split_cells(line: str) -> list[str]:
@@ -373,7 +445,7 @@ def split_cells(line: str) -> list[str]:
     run of exactly n closes, so ``a | b`` is one span rather than two. An
     escaped backtick opens nothing, so this and `outside_code_spans`, the two
     parsers that read one cell, agree on where its spans are. It is kept
-    verbatim rather than unescaped, unlike `\|`, because `join_cells` escapes
+    verbatim rather than unescaped, unlike `\|`, because a writer escapes
     only the pipe and a bare backtick written back would open a span.
     """
     cells: list[str] = []
@@ -417,7 +489,7 @@ def split_cells(line: str) -> list[str]:
     return body_cells
 
 
-def read_rows(path: str, snapshot: Snapshot) -> list[Row]:
+def read_rows(path: str) -> list[Row]:
     """Every row of a map, with the group and section heading it sits under.
 
     Only a `##` heading changes the group, since the pulled-out blocks are `###`
@@ -482,7 +554,7 @@ def read_rows(path: str, snapshot: Snapshot) -> list[Row]:
                 id=cells[0],
                 group=group,
                 section=section,
-                anchors=parse_anchors(cells[1], snapshot, where=where),
+                anchors=parse_anchors(cells[1], where=where),
                 shape=cells[2],
                 disposition=cells[3] if len(cells) > 3 else "",
                 justification=cells[4] if len(cells) > 4 else "",

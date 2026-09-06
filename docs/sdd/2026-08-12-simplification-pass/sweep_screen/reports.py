@@ -13,11 +13,13 @@ identity-anchored one, and the cut leaves no line numbers to move.
 
 from __future__ import annotations
 
+import re
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .estate import assertion_digest
 from .inventory import (
     ACCOUNTED,
     CITED_FILE,
@@ -26,19 +28,21 @@ from .inventory import (
     INVENTORY,
     MECHANICAL_BATCH,
     NO_ROW_HEADING,
+    QUALIFIED,
     RETIRED_HEADING,
     RETIRED_ROW,
     LineAnchor,
     Row,
     SiteAnchor,
     SpanAnchor,
+    outside_code_spans,
     read_rows,
+    split_cells,
+    stamp_spans,
 )
 from .screens import screen_verdicts
 
 if TYPE_CHECKING:
-    import re
-
     from .estate import Site, Snapshot
 
 #: How the map titles its groups, so a `totals` run pastes into it unedited.
@@ -76,6 +80,27 @@ def unresolved_claims(rows: list[Row], snapshot: Snapshot) -> list[tuple[str, st
     ]
 
 
+def retired_ids(map_path: str) -> tuple[set[str], set[str]]:
+    """The retired table's two namespaces: this cut's ids, and the 2026-08-19 map's.
+
+    They have to be separate. That map numbered its mechanical batch by
+    position, so an id it retired was handed to a different row when this cut
+    regenerated, and five ids name one row there and another here. Merging them
+    would make a citation of `G1-013` resolve to whichever the reader guesses.
+    """
+    mine: set[str] = set()
+    theirs: set[str] = set()
+    lines = Path(map_path).read_text(encoding="utf-8").splitlines()
+    if RETIRED_HEADING not in lines:
+        return mine, theirs
+    for line in lines[lines.index(RETIRED_HEADING) + 1 :]:
+        if line.startswith("#"):
+            break
+        if match := RETIRED_ROW.match(line):
+            (theirs if match.group(2) else mine).add(match.group(1))
+    return mine, theirs
+
+
 def section_ids(map_path: str, heading: str, pattern: re.Pattern[str]) -> set[str]:
     """The first cell of every table row under `heading`, up to the next one."""
     lines = Path(map_path).read_text(encoding="utf-8").splitlines()
@@ -90,7 +115,9 @@ def section_ids(map_path: str, heading: str, pattern: re.Pattern[str]) -> set[st
     return found
 
 
-def check_map(rows: list[Row], retired: set[str], files: set[str]) -> list[str]:
+def check_map(
+    rows: list[Row], retired: tuple[set[str], set[str]], files: Counter[str], map_path: str = INVENTORY
+) -> list[str]:
     """Structural faults in the map itself, as a list of complaints.
 
     These are the properties the map's prose used to promise a reader and
@@ -101,19 +128,50 @@ def check_map(rows: list[Row], retired: set[str], files: set[str]) -> list[str]:
     """
     faults: list[str] = []
     ids = [r.id for r in rows]
-    known = set(ids) | retired
+    live = set(ids)
+    mine, theirs = retired
+    known = live | mine
+    row_at = {row.source_line: row for row in rows}
+    # An id this cut retired must not also be live: that one really would
+    # resolve to two rows. The 2026-08-19 map's ids are a separate namespace
+    # and may collide freely, which is what qualifying a citation is for.
+    for row_id in sorted(live & mine):
+        faults.append(f"{row_id} is both a live row and an id this cut retired, so a citation resolves to two rows")
     for row_id in sorted({i for i in ids if ids.count(i) > 1}):
         faults.append(f"duplicate row id {row_id}")
-    checked = 0
     for row in rows:
-        cells = (row.shape, row.disposition, row.justification)
-        cited = {c for cell in cells for c in CITED_ID.findall(cell)}
-        for name in sorted(cited - known - {row.id}):
-            faults.append(f"{row.id} cites {name}, which is not a row in this map")
-        paths = {p for cell in cells for p in CITED_FILE.findall(cell)}
-        checked += len(paths)
-        for path in sorted(paths - files):
-            faults.append(f"{row.id} cites {path}, which is not a file in this tree")
+        for anchor in row.anchors:
+            if isinstance(anchor, SpanAnchor) and not anchor.digest:
+                faults.append(f"{row.id} span anchor {anchor.qualname} carries no assertion digest; run restamp")
+    # Every line, not only a row's cells: the map's prose cites ids and files
+    # the same way its rows do, and three prose citations dangled while this
+    # read rows alone.
+    #
+    # An id is read OUTSIDE code spans and a path INSIDE them, which is not an
+    # inconsistency but the two conventions this file actually uses. A row
+    # quoting `L-401` is showing the grammar, not citing a row; a path is
+    # written in backticks every time, so blanking spans would read almost none
+    # of them.
+    checked = 0
+    for number, line in enumerate(Path(map_path).read_text(encoding="utf-8").splitlines(), start=1):
+        here = row_at.get(number)
+        source = f"row {here.id}" if here else f"line {number}"
+        mine = {here.id} if here else set()
+        bare = outside_code_spans(line)
+        # A qualified citation is already answered: it says the id belongs to a
+        # map that no longer exists, so there is nothing here to resolve it
+        # against and pointing a reader at this file would be the error. It is
+        # dropped before the rest is read, so the id inside it is not taken for
+        # a row of this cut.
+        for name in sorted(set(CITED_ID.findall(QUALIFIED.sub("", bare))) - known - {source.removeprefix("row ")}):
+            faults.append(f"{source} cites {name}, which is neither a row nor an id this cut retired")
+        for path in sorted(set(CITED_FILE.findall(line))):
+            checked += 1
+            matches = files.get(path, 0)
+            if matches == 0:
+                faults.append(f"{source} cites {path}, which is not a file in this tree")
+            elif matches > 1:
+                faults.append(f"{source} cites {path}, which names {matches} files; add a directory segment")
     print(f"# file citations checked: {checked}", file=sys.stderr)
     return faults
 
@@ -163,7 +221,7 @@ def attribute(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
     report that says "25 unowned" and returns success is a check nothing can
     gate on.
     """
-    rows = read_rows(map_path, snapshot)
+    rows = read_rows(map_path)
     group_one = [r for r in rows if r.group == GROUP_1]
     claimed = {s: [r for r in rows if r.claims(s)] for s in snapshot.sites}
 
@@ -220,7 +278,7 @@ def attribute(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
 
 def resolve(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
     """Every anchor in the map, to its place in this tree."""
-    rows = read_rows(map_path, snapshot)
+    rows = read_rows(map_path)
     states: Counter[str] = Counter()
     per_group: dict[str, Counter[str]] = defaultdict(Counter)
 
@@ -274,7 +332,7 @@ def generate(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
     `claim_rows` says which rows are claims. `[deferred]` rows are among them,
     because their sites are real and must not fall into the batch.
     """
-    rows = read_rows(map_path, snapshot)
+    rows = read_rows(map_path)
     claims = claim_rows(rows)
     screened = screen_verdicts(snapshot.tree)
     estate = [s for s in snapshot.sites if s.kind == "match="]
@@ -289,7 +347,17 @@ def generate(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
     print("<!-- prettier-ignore -->")
     print("| id | file and anchors | shape | disposition |")
     print("| --- | --- | --- | --- |")
-    for number, path in enumerate(sorted(by_path), start=1):
+    # An id is never reused, so a file that still has sites keeps the id it
+    # was given and a new file takes the next one above every id this map has
+    # ever used. Numbering positionally, which is what this did, renamed rows
+    # under every citation of them whenever a file left the batch.
+    held = {a.path: r.id for r in rows if r.section == MECHANICAL_BATCH for a in r.anchors}
+    used = [int(r.id[3:]) for r in rows if r.id.startswith("G1-") and r.id[3:].isdigit()]
+    nxt = max(used, default=0) + 1
+    for path in sorted(by_path):
+        row_id = held.get(path)
+        if row_id is None:
+            row_id, nxt = f"G1-{nxt:03d}", nxt + 1
         sites = sorted(by_path[path], key=lambda s: (s.line, s.col))
         identities = dict.fromkeys(s.identity for s in sites)
         anchors = [SiteAnchor(i, snapshot.by_identity[i].multiplicity) for i in identities]
@@ -301,7 +369,7 @@ def generate(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
         verified = all(screened.get(s.where, ("", "", ""))[0] == "single-raise-path" for s in sites)
         marker = "**[1-raise]** " if verified else ""
         shape = f"{marker}{len(sites)} `match=` site(s) over {kinds}"
-        row = Row(f"G1-{number:03d}", GROUP_1, MECHANICAL_BATCH, list(anchors), shape, "delete", "", 0)
+        row = Row(row_id, GROUP_1, MECHANICAL_BATCH, list(anchors), shape, "delete", "", 0)
         generated.append(row)
         print(f"| {row.id} | {row.render_cell()} | {shape} | delete |")
 
@@ -361,13 +429,108 @@ def generate(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
         )
 
 
+def _refuse_unless_only_digests_moved(map_path: str, before: str, after: str) -> None:
+    """Two checks on what `restamp` is about to write; it writes nothing if
+    either fails.
+
+    Both exist because stamping went wrong once in a way that looked right.
+
+    The first is that the map differs from the one it read by digests and
+    nothing else: strip every digest from both and they must be identical, so a
+    moved cell boundary, a mangled escape or a lost line fails here rather than
+    in a reader six weeks later.
+
+    The second is that every digest ends an anchor token, and it is the check
+    the first cannot make. Stamping by substring rewrote every occurrence of a
+    qualname in a cell, and 23 rows carry a span anchor and a site anchor on one
+    name, so 55 site anchors became `qualname@span::Type::digest`. Stripping the
+    digests hides that exactly, because the corruption strips out too.
+    """
+    bare = re.compile(r"@[0-9a-f]{6}")
+    if bare.sub("", after) != bare.sub("", before):
+        raise SystemExit(
+            f"{map_path}: restamp would change more than digests, so it wrote nothing."
+            " Strip the digests from both to see what moved"
+        )
+    misplaced = [
+        after[: found.start()].count("\n") + 1
+        for found in bare.finditer(after)
+        if after[found.end() : found.end() + 1] not in {",", "`"}
+    ]
+    if misplaced:
+        where = ", ".join(str(number) for number in misplaced[:5])
+        raise SystemExit(
+            f"{map_path}: restamp would put {len(misplaced)} digest(s) somewhere other than the end of"
+            f" an anchor token (line {where}), so it wrote nothing"
+        )
+
+
+def restamp(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
+    """Bring every span anchor's assertion digest into line with the tree.
+
+    Two consumers, which is why this is a command and not a one-off script. An
+    interpreter upgrade changes how `ast.unparse` spells a test and invalidates
+    every digest at once, which the entry point refuses until they are stamped
+    again. And an executing PR that edits an anchored test changes its
+    assertions ON PURPOSE, so it brings the map with it in the same PR rather
+    than leaving the next reader a `changed` verdict that means "we did that".
+
+    This is the one command that WRITES the map. Everything else prints and
+    leaves the file alone, so the divergence is deliberate: 1,516 anchors is not
+    a paste, and the diff under review is the artifact either way.
+
+    A span anchor whose function is gone keeps whatever it had and is reported,
+    because inventing a digest for a function nobody can find would answer a
+    question the row's owner has to. What it is about to write is checked before
+    it writes it, and a failure leaves the map alone.
+    """
+    rows = read_rows(map_path)
+    digests: dict[tuple[str, str], str] = {}
+    absent: list[tuple[str, str]] = []
+    moved: list[tuple[str, str, str]] = []
+    for row in rows:
+        for anchor in row.anchors:
+            if not isinstance(anchor, SpanAnchor):
+                continue
+            ranges = snapshot.function(anchor.path, anchor.qualname)
+            if not ranges:
+                absent.append((row.id, f"{anchor.path}::{anchor.qualname}"))
+                continue
+            now = assertion_digest([text for f in ranges for text in f.assertions])
+            digests[(anchor.path, anchor.qualname)] = now
+            if now != anchor.digest:
+                moved.append((row.id, anchor.render(), f"{anchor.qualname}@{now}"))
+
+    by_line = {row.source_line: row for row in rows}
+    before = Path(map_path).read_text(encoding="utf-8")
+    lines = before.splitlines()
+    for number in by_line:
+        cells = split_cells(lines[number - 1])
+        if len(cells) < 2:
+            continue
+        stamped = stamp_spans(cells[1], digests)
+        if stamped != cells[1]:
+            lines[number - 1] = lines[number - 1].replace(cells[1], stamped, 1)
+    after = "\n".join(lines) + "\n"
+    _refuse_unless_only_digests_moved(map_path, before, after)
+    Path(map_path).write_text(after, encoding="utf-8")
+
+    print(f"# functions digested: {len(digests)}", file=sys.stderr)
+    print(f"# span anchor digests that moved: {len(moved)}", file=sys.stderr)
+    for row_id, was, now in moved:
+        print(f"#   {row_id} {was} -> {now}", file=sys.stderr)
+    print(f"# span anchors whose function is gone, left alone: {len(absent)}", file=sys.stderr)
+    for row_id, where in absent:
+        print(f"#   {row_id} {where}", file=sys.stderr)
+
+
 def totals(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
     """The row markup, counted, which is what the Totals section reports.
 
     Counted here rather than by hand because the map has twice carried a total
     forward that no longer matched its rows.
     """
-    rows = read_rows(map_path, snapshot)
+    rows = read_rows(map_path)
     groups = list(dict.fromkeys(r.group for r in rows))
     print("| Group | Live | delete | convert | keep | Deferred | Ledger |")
     print("| --- | ---: | ---: | ---: | ---: | ---: | ---: |")
@@ -390,9 +553,24 @@ def totals(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
         f"| **All** | {ledger['live']} | {ledger['delete']} | {ledger['convert']} | {ledger['keep']} "
         f"| {ledger['deferred']} | {ledger['ledger']} |"
     )
+    # The marker means the screen verified every site the row claims. It is
+    # derived for the batch, but a judgment row can carry one by hand, and a
+    # hand-carried verdict goes stale the moment the code under it moves.
+    screened = screen_verdicts(snapshot.tree)
+    stale = [
+        row.id
+        for row in rows
+        if "1-raise" in row.markers
+        and not all(
+            screened.get(site.where, ("", "", ""))[0] == "single-raise-path"
+            for site in snapshot.sites
+            if any(a.claims(site) for a in row.anchors)
+        )
+    ]
     missing = unrowed(rows, snapshot)
-    retired = section_ids(map_path, RETIRED_HEADING, RETIRED_ROW)
-    faults = check_map(rows, retired, snapshot.tree.path_suffixes()) + check_accounting(map_path, missing)
+    faults = check_map(rows, retired_ids(map_path), snapshot.tree.path_suffixes(), map_path)
+    faults += [f"{row_id} carries [1-raise] and the screen does not verify every site it claims" for row_id in stale]
+    faults += check_accounting(map_path, missing)
     print(f"\n# structural faults: {len(faults)}", file=sys.stderr)
     for fault in faults:
         print(f"#   {fault}", file=sys.stderr)

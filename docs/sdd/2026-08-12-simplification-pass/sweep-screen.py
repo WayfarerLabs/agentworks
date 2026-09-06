@@ -42,26 +42,41 @@ from sweep_screen.inventory import INVENTORY
 from sweep_screen.screens import injected, screen
 from sweep_screen.tree import Tree
 
-#: Below this, `ast.parse` rejects the PEP 701 f-strings some estate files use.
-#: Those files would then be skipped rather than counted, and a short estate
-#: reports the same "every site is claimed" as a complete one, so this is a
-#: refusal rather than a warning.
-MIN_PYTHON = (3, 12)
+#: The interpreter minor this map's span-anchor digests were stamped with, and
+#: the only one that can read them. Exact, not a floor, and for two reasons.
+#: Below it, `ast.parse` rejects the PEP 701 f-strings some estate files use, so
+#: those files would be skipped rather than counted and a short estate reports
+#: the same "every site is claimed" as a complete one. Above it, `ast.unparse`
+#: is free to spell the same tree differently, and every span anchor in the map
+#: would then report `changed` at once: 1,516 spurious verdicts saying nothing
+#: about the tests, which is the silence this digest exists to end, wearing a
+#: different costume. An upgrade is a re-stamp, and a re-stamp is a reviewed
+#: change to the map, so it fails loudly here rather than in a reader's head.
+STAMPED_PYTHON = (3, 12)
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("estate", "attribute", "injected", "screen", "resolve", "generate", "totals"):
+    for name in ("estate", "attribute", "injected", "screen", "resolve", "generate", "restamp", "totals"):
         sub.add_parser(name)
     return parser
 
 
 def main(argv: list[str] | None = None) -> None:
-    if sys.version_info < MIN_PYTHON:
+    if sys.version_info[:2] != STAMPED_PYTHON:
         running = ".".join(str(n) for n in sys.version_info[:3])
-        want = ".".join(str(n) for n in MIN_PYTHON)
-        raise SystemExit(f"needs Python {want} or newer to parse the whole estate; this is {running}")
+        want = ".".join(str(n) for n in STAMPED_PYTHON)
+        if sys.version_info[:2] < STAMPED_PYTHON:
+            raise SystemExit(f"needs Python {want} to parse the whole estate; this is {running}")
+        raise SystemExit(
+            f"this map's span-anchor digests were stamped with Python {want} and this is {running}."
+            " `ast.unparse` may spell the same test differently here, which would report every span"
+            " anchor as `changed` and tell you nothing. Run it on"
+            f" {want}, or re-stamp the digests on {running} and move STAMPED_PYTHON in the same commit,"
+            " reviewing the diff: a digest that moves because the assertions moved is a finding, and one"
+            " that moves because the interpreter did is not."
+        )
     if not Path(INVENTORY).exists():
         raise SystemExit("run this from the repository root")
     args = build_parser().parse_args(argv)
@@ -92,6 +107,8 @@ def main(argv: list[str] | None = None) -> None:
         reports.resolve(here)
     elif args.command == "generate":
         reports.generate(here)
+    elif args.command == "restamp":
+        reports.restamp(here)
     elif args.command == "totals":
         reports.totals(here)
 

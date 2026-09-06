@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 import subprocess
+from collections import Counter
 from pathlib import Path
 
 PROD_ROOT = "cli/agentworks"
@@ -57,21 +58,22 @@ class Tree:
         """
         return [f for f in self._list(roots) if f.endswith(".py")]
 
-    def path_suffixes(self) -> set[str]:
-        """Every way a file in this tree can be named by a trailing path.
+    def path_suffixes(self) -> Counter[str]:
+        """Every way a file in this tree can be named by a trailing path, counted.
 
-        A citation in the map names a file at whatever depth reads clearly, so
-        `errors.py`, `agentworks/errors.py` and the full path all have to
-        resolve to the same file. Every suffix of every tracked path is that
-        set, and membership is the whole question: this answers whether a cited
-        file exists, not which one it is.
+        A citation names a file at whatever depth reads clearly, so `errors.py`,
+        `agentworks/errors.py` and the full path all resolve to the same file.
+        The COUNT is what makes that safe: a suffix two files share points at
+        neither, and a reader who follows it lands on whichever they guess. So
+        this counts rather than collecting, and the check refuses a citation
+        that names more than one file as firmly as one that names none.
         """
-        out: set[str] = set()
+        found: Counter[str] = Counter()
         for path in self._list(()):
             parts = path.split("/")
             for start in range(len(parts)):
-                out.add("/".join(parts[start:]))
-        return out
+                found["/".join(parts[start:])] += 1
+        return found
 
     def test_files(self) -> list[str]:
         """Every test file the sweep accounts for, sorted by path.

@@ -95,6 +95,53 @@ class SiteGroup:
         return f"{self.identity.path}:{','.join(str(s.line) for s in self.sites)}"
 
 
+#: Context managers that assert a raise, by the bare name `call_name` reads.
+RAISES_CM = frozenset({"raises", "assertRaises", "assertRaisesRegex", "assertWarns", "assertWarnsRegex"})
+
+
+def assertions_of(node: ast.AST) -> tuple[str, ...]:
+    """Every assertion a function makes in its own body, unparsed, in order.
+
+    Three shapes, which are the three ways this suite says a test checked
+    something: an `assert` statement, a context manager that asserts a raise,
+    and a call to any `assert*` method. The third is not decoration: most of
+    `website/tests` asserts only that way, and a rule that skipped it would read
+    a suite of eight assertions as empty.
+
+    A function nested inside this one is skipped, because the walk names it
+    separately and it carries its own assertions.
+
+    Unparsed AS WRITTEN, string literals included. This is deliberately the
+    opposite of a site anchor's digest, which blanks interpolations so a local
+    rename cannot orphan a row: here a reworded literal inside an anchored test
+    is exactly what the row is about, so it has to be loud.
+    """
+    found: list[tuple[int, int, str]] = []
+
+    def walk(here: ast.AST) -> None:
+        for child in ast.iter_child_nodes(here):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            if isinstance(child, ast.Assert):
+                found.append((child.lineno, child.col_offset, ast.unparse(child.test)))
+            elif isinstance(child, (ast.With, ast.AsyncWith)):
+                for item in child.items:
+                    expr = item.context_expr
+                    if isinstance(expr, ast.Call) and call_name(expr) in RAISES_CM:
+                        found.append((expr.lineno, expr.col_offset, ast.unparse(expr)))
+            elif isinstance(child, ast.Call) and call_name(child).startswith("assert"):
+                found.append((child.lineno, child.col_offset, ast.unparse(child)))
+            walk(child)
+
+    walk(node)
+    return tuple(text for _, _, text in sorted(found))
+
+
+def assertion_digest(texts: list[str]) -> str:
+    """Six hex over what a function asserts, `e3b0c4` when it asserts nothing."""
+    return hashlib.sha256("\n".join(texts).encode("utf-8")).hexdigest()[:6]
+
+
 @dataclass(frozen=True, order=True)
 class Function:
     """One function definition, from its first decorator to its last line."""
@@ -102,6 +149,11 @@ class Function:
     qualname: str
     start: int
     end: int
+    #: What this body asserts, unparsed and in source order. A span anchor
+    #: digests it so that changing an assertion under a surviving function is
+    #: visible. Empty means the body asserts nothing itself, which is usually a
+    #: test that hands its assertions to a helper.
+    assertions: tuple[str, ...] = ()
 
     def holds(self, line: int) -> bool:
         return self.start <= line <= self.end
@@ -120,7 +172,7 @@ def functions_in(tree: Tree, path: str) -> list[Function]:
     arm or in a `match` case is found and named as though it sat at the top of
     its enclosing scope. One name may therefore have several ranges, which is
     the platform-conditional idiom of defining the same test in sibling
-    branches; `enclosing` resolves those by line. Two definitions of one name in
+    branches, and an anchor answers for all of them. Two definitions of one name in
     the SAME block are a different thing, since only the second ever runs, and
     they are refused because a span anchor naming it cannot say which is meant.
     """
@@ -149,7 +201,7 @@ def functions_in(tree: Tree, path: str) -> list[Function]:
                         )
                     here.add(qualname)
                     start = min([child.lineno] + [d.lineno for d in child.decorator_list])
-                    found.append(Function(qualname, start, child.end_lineno or child.lineno))
+                    found.append(Function(qualname, start, child.end_lineno or child.lineno, assertions_of(child)))
                 walk(child, f"{qualname}.")
 
     walk(tree.parse(path), "")
@@ -268,20 +320,6 @@ class Snapshot:
         """Every range this name covers here, which is more than one where the
         same test is defined in sibling branches."""
         return [f for f in self.functions(path) or [] if f.qualname == qualname]
-
-    def why_unnamed(self, path: str, line: int) -> str:
-        """Why a line sits in no function here, which is what a line anchor
-        records on its row so a reader knows whether it can ever be fixed."""
-        if not path.endswith(".py"):
-            return "not Python"
-        if not self.tree.exists(path):
-            return "file gone"
-        for node in ast.iter_child_nodes(self.tree.parse(path)):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                continue
-            if isinstance(node, ast.stmt) and node.lineno <= line <= (node.end_lineno or node.lineno):
-                return "module level"
-        return "between functions"
 
     def near(self, identity: Identity) -> list[SiteGroup]:
         """Groups in the same test asserting the same type against a DIFFERENT
