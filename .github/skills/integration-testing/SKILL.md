@@ -155,6 +155,53 @@ that skill rather than from a copy here. Only a saga lead can charter its confor
 written; outside a saga, that pass generalizes to the same clause-by-clause check against whatever
 contracts govern the PR.
 
+## Coverage axes: workstation and platform
+
+Live coverage runs along two independent axes, and conflating them is the easy mistake. A claim like
+"we tested wsl2" does not say which axis it covers, so it cannot be checked.
+
+- **Workstation**: the operating system `agw` itself runs on. This axis owns the CLI's own surface:
+  path handling, config location, terminal and console behavior, the ssh client, process spawning.
+- **VM platform (site)**: what `agw` reaches out and manages. This axis owns provisioning,
+  bootstrap, exposure, and teardown against a real backend.
+
+Most platforms are **decoupled** from the workstation: they reach a backend over SSH or a REST
+endpoint, so any workstation can drive them and you pick one for convenience. A few are
+**workstation-bound**: the platform drives host-local tooling, so `agw` has to be running on that
+operating system, and covering the platform therefore requires a bed running that OS.
+
+Read the platform's transport to tell which kind you have, rather than assuming. A platform that
+shells a local binary or resolves a local app-data path is workstation-bound. A platform whose
+config carries an endpoint plus credentials is decoupled, and its bed is a reachable service rather
+than a particular workstation.
+
+State both axes when reporting coverage: name the platform exercised and the workstation it was
+driven from. The same discipline applies to gaps, because a platform can be unreachable for either
+reason, and the two call for completely different beds.
+
+### Windows beds
+
+Windows testing uses two beds, and the tier numbers name **beds, not thoroughness levels**:
+
+- **Tier 1** is a plain Windows machine with no nested virtualization. It covers the workstation
+  axis only: the CLI surface on Windows, `doctor`, console and ssh behavior, path handling. It is
+  the cheaper bed and the default for anything whose Windows risk is the CLI itself.
+- **Tier 2** is Windows with nested virtualization and a real WSL2 install. It covers the same
+  workstation axis plus the `wsl2` platform axis, which is workstation-bound and therefore
+  unreachable from any other bed. It costs more, so reserve it for changes that touch WSL and for
+  pre-release passes.
+
+Tier 2 is a strict superset of Tier 1, so a Tier 2 pass implies the Tier 1 result on the same tree.
+What Tier 2 adds is one more reachable platform, not a deeper class of testing; do not read the
+higher number as a stronger verdict.
+
+### A bed's toolchain is part of its result
+
+A bed missing an external binary manufactures failures that look exactly like product defects.
+Record what each bed has installed, and when a suite fails there, attribute the failures before
+reporting them: a spawn error or a shell exit code of 127 is the bed talking, not the code. Where
+the difference changes the verdict, say which bed produced the number.
+
 ## Live-testing discipline
 
 - Run long operations (provisioning, initialization, teardown) synchronously with generous timeouts.
