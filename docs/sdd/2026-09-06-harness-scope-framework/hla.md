@@ -445,9 +445,14 @@ Preserve source content needed by another integration and earlier applied receip
 cleanup. Before the first setup mutation, invalidate the prior completed delivery snapshot while
 retaining its content and receipts for reconciliation. A failed reinit cannot leave that old
 completion eligible, even when input revisions have not changed. Publish a new completed snapshot
-only after success. An invalidated or incomplete snapshot is an upstream setup-state failure:
-session readiness reports the owning recovery operation instead of treating it as an empty deferred
-result or manufacturing new deferrals that might duplicate partly applied content.
+only after success. An invalidated or incomplete snapshot cannot supply delivery evidence. If
+artifact routing depends on that snapshot, session readiness reports an upstream setup-state failure
+and the owning recovery operation instead of treating it as an empty deferred result or
+manufacturing new deferrals that might duplicate partly applied content. When complete producer
+records independently establish that there are no applicable artifact inputs, no residual delivery
+result is needed; a config-only setup gap follows its declared readiness severity. A failed
+recommended config-only setup can therefore warn and permit launch. An invalid snapshot itself is
+never evidence of empty inputs.
 
 An applied record carries its payload version, contributing source locators, destination or native
 resource, representation strategy, non-secret content hash where meaningful, and confirmed outcome.
@@ -617,6 +622,10 @@ where setup changes the guest:
 | R9             | Repeated VM/admin and agent setup is unchanged; desired changes/removals converge; edited/unowned files cause drift/conflict reports; failed same-input reinit invalidates completion; interrupted work, unknown versions, and concurrent reinit do not overwrite or lose evidence. |
 | R10            | Required, recommended, and absent user-facet prerequisites block, warn, or proceed respectively for the bound user; another user's setup cannot satisfy them; missing/stale/failed setup, correct owner remediation, and no upstream mutation are covered.                          |
 | R11, R13       | Fresh and existing Claude admin/agent config migrates; marketplace/plugin changes reconcile; core has no Claude-specific knowledge (the existing generic shell fallback remains); workspace create materializes real content, failure cleans partial output, and retry succeeds.    |
+
+Readiness acceptance includes a failed config-only user setup with independently established empty
+artifact inputs: recommended warns and launches, required blocks. With artifact delivery depending
+on an incomplete snapshot, launch fails under either readiness policy.
 
 Schema/reference checks cover manifest, config, instance overlay, explain/reference, and secret
 preflight parity for every new hosting field. Negative secret tests inspect persisted state and
