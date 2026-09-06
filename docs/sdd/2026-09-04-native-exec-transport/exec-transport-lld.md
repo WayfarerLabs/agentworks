@@ -180,8 +180,8 @@ class ProxmoxExecTransport(ExecTransport):
 ```
 
 `describe()` returns a stable label such as `proxmox:<vmid>@<node>` and never includes the API
-token. Constructor validation reuses established node, VMID, and username validators rather than
-creating a second naming policy.
+token. Construction uses the platform's established node and VMID accessors plus the admin username
+that core validates before recording the VM; it does not create a second naming policy.
 
 ### Command renderer
 
@@ -225,10 +225,11 @@ The existing `guest_agent_exec_wait` may become a small composition over these m
 bootstrap caller, but the bootstrap flow itself is not redesigned. Every response is shape-checked:
 
 - dispatch data is one integer PID;
-- status `exited` is boolean;
+- status `exited` is boolean after the API boundary normalizes Proxmox VE 8's exact integer `0`/`1`
+  encoding;
 - complete exit has either integer `exitcode` or integer `signal` under the provider's valid shape;
 - output fields are strings when present; and
-- truncation flags are boolean when present.
+- truncation flags are boolean when present after the same exact `0`/`1` normalization.
 
 Unexpected or contradictory data raises a typed transport error with node, VMID, and PID but no
 request body or token.
@@ -282,8 +283,9 @@ out-truncated or err-truncated
   -> typed failure; partial output is not returned as complete
 ```
 
-Logger behavior mirrors other transports: safe command and complete ordinary results are logged;
-checked failures use the logger's error path. Sensitive mode does not log result streams.
+Logger behavior mirrors other transports: safe commands and complete ordinary results are logged
+before a checked nonzero result raises. The logger's error path remains reserved for failures such
+as an exhausted timeout. Sensitive mode does not log result streams.
 
 ## Proxmox platform integration
 
@@ -324,11 +326,12 @@ Implementation updates:
 - `capabilities/vm_platform/README.md`, for exact version-1 obligations and optional rich behavior;
 - the published vm-platform capability description;
 - `docs/guides/proxmox.md`, for QGA recovery and the interactive console limitation;
+- `cli/commands/vm.py`, for the optional native-interaction help;
 - nearby transport and platform docstrings; and
 - tests and fixtures that teach the old optional return.
 
-No sample config, CLI reference, command help, completion script, JSON schema, release migration, or
-database documentation changes because none of those surfaces changes.
+No sample config, CLI reference, completion script, JSON schema, release migration, or database
+documentation changes because none of those surfaces changes.
 
 ## Testing seams
 

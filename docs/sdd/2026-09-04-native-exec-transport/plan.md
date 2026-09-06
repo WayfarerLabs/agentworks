@@ -120,21 +120,21 @@ capability-appropriate live validation under the integration-testing process.
 
 ## Phase 1: Build the narrow type and Proxmox carrier
 
-- [ ] Refresh the baseline after 0.18.0 and confirm the SDD inventory before editing.
-- [ ] Add `ExecTransport` with only `sudo`, `check`, `timeout`, and sensitive `input_text`; make
+- [x] Refresh the baseline after 0.18.0 and confirm the SDD inventory before editing.
+- [x] Add `ExecTransport` with only `sudo`, `check`, `timeout`, and sensitive `input_text`; make
       `Transport` extend it and retain its existing wider `run`, terminal, streaming, and file
       surface.
-- [ ] Keep existing result, error, and logger compatibility types; update only imports and type
+- [x] Keep existing result, error, and logger compatibility types; update only imports and type
       annotations required by the split.
-- [ ] Split Proxmox guest exec dispatch from status polling with response validation and injected
-      time controls.
-- [ ] Implement the QGA execution transport with admin/root rendering, checked exits, finite stdin,
+- [x] Split Proxmox guest exec dispatch from status polling with response validation and
+      deterministic clock patching in tests.
+- [x] Implement the QGA execution transport with admin/root rendering, checked exits, finite stdin,
       payload-size enforcement, and logging.
-- [ ] Implement remaining-deadline polling, explicit signal and truncation handling, safe timeout
+- [x] Implement remaining-deadline polling, explicit signal and truncation handling, safe timeout
       context, and no adapter redispatch after ambiguity.
-- [ ] Prove that sensitive stdin appears only in the outgoing provider `input-data` field and is
+- [x] Prove that sensitive stdin appears only in the outgoing provider `input-data` field and is
       absent from argv, logs, results, diagnostics, exceptions, causes, and contexts.
-- [ ] Preserve the existing private bootstrap staging, cleanup, and interrupt behavior.
+- [x] Preserve the existing private bootstrap staging, cleanup, and interrupt behavior.
 
 ### Phase 1 definition of done
 
@@ -146,19 +146,19 @@ capability-appropriate live validation under the integration-testing process.
 
 ## Phase 2: Cut over the version-1 contract atomically
 
-- [ ] Narrow `ProvisionResult.native_transport`, `VMPlatform.native_transport`, and the native
+- [x] Narrow `ProvisionResult.native_transport`, `VMPlatform.native_transport`, and the native
       factory; make the platform hook abstract and nonoptional.
-- [ ] Update every VM-platform implementation and version-1 conformance fixture, implement the
+- [x] Update every VM-platform implementation and version-1 conformance fixture, implement the
       Proxmox hook, and return the QGA transport from Proxmox create in the same transition.
-- [ ] Narrow Debian attestation, Phase A provisioning, Tailscale repair, rekey, and logout to the
+- [x] Narrow Debian attestation, Phase A provisioning, Tailscale repair, rekey, and logout to the
       execution type.
-- [ ] Add an execution-only fake and prove all core native consumers except the sole allowlisted
+- [x] Add an execution-only fake and prove all core native consumers except the sole allowlisted
       platform-shell path use only the narrow contract.
-- [ ] Rename the shell guidance to `native_shell_unavailable_hint`, let Proxmox declare it, and
+- [x] Rename the shell guidance to `native_shell_unavailable_hint`, let Proxmox declare it, and
       reject `vm shell --platform` before credential, route, transport, or probe work.
-- [ ] For platforms declaring native shell support, require a full `Transport` before interaction
+- [x] For platforms declaring native shell support, require a full `Transport` before interaction
       and preserve canonical shell behavior.
-- [ ] Delete the optional-return error path and scan for any other broad native caller.
+- [x] Delete the optional-return error path and scan for any other broad native caller.
 
 ### Phase 2 definition of done
 
@@ -172,18 +172,18 @@ capability-appropriate live validation under the integration-testing process.
 
 ## Phase 3: Permanent collateral and static verification
 
-- [ ] Update root and vm-platform capability requirements with required native execution and
+- [x] Update root and vm-platform capability requirements with required native execution and
       optional full interaction, while retaining contract version 1.
-- [ ] Update the Proxmox guide and capability description for QGA recovery, the declared provider
+- [x] Update the Proxmox guide and capability description for QGA recovery, the declared provider
       scope, and unavailable platform shell.
-- [ ] Update nearby code contracts and delete the temporary Proxmox non-compliance language.
-- [ ] Run `rg -n '727|non-compliant|noncompliant' cli/agentworks docs/guides scripts` and remove or
+- [x] Update nearby code contracts and delete the temporary Proxmox non-compliance language.
+- [x] Run `rg -n '727|non-compliant|noncompliant' cli/agentworks docs/guides scripts` and remove or
       disposition every residual temporary tracking statement.
-- [ ] Confirm no config, sample config, completion, command reference, JSON schema, database
+- [x] Confirm no config, sample config, completion, command reference, JSON schema, database
       migration, or release-upgrade guide changed without a new requirement.
-- [ ] Confirm dependency manifests contain no new pyinfra package.
-- [ ] Run focused tests throughout, then the complete Python and repository gate set.
-- [ ] Build and install the wheel in an isolated environment and smoke the affected CLI paths.
+- [x] Confirm dependency manifests contain no new pyinfra package.
+- [x] Run focused tests throughout, then the complete Python and repository gate set.
+- [x] Build and install the wheel in an isolated environment and smoke the affected CLI paths.
 
 ### Phase 3 definition of done
 

@@ -67,7 +67,9 @@ facts cache belongs in this effort.
 The Proxmox VE 8 guest exec endpoint accepts a command array and an optional `input-data` string
 with a 65,536-character API-field limit, then returns a PID. The status endpoint reports whether
 execution ended and may report exit code, signal, stdout, stderr, and explicit output-truncation
-flags. This maps directly to the buffered `run` contract.
+flags. Proxmox VE 8 converts the QGA JSON boolean fields in that response to exact integer `0`/`1`
+values before returning them through REST, so the provider boundary must normalize that wire shape
+before transport validation. The result maps directly to the buffered `run` contract.
 
 QEMU's guest-exec model likewise accepts an argument list, optional base64 input, and captured
 output, with a separate guest-exec-status call. It is process execution, not a PTY or file-transfer
@@ -141,6 +143,7 @@ specialized bootstrap lifecycle alone.
 | [pyinfra package metadata](https://github.com/pyinfra-dev/pyinfra/blob/3.x/pyproject.toml)                                              | Primary upstream source       | Dependency and framework weight       |
 | [Proxmox VE 8 guest exec](https://pve.proxmox.com/pve-docs-8/api-viewer/#/nodes/{node}/qemu/{vmid}/agent/exec)                          | Primary provider API          | Command, stdin limit, permission, PID |
 | [Proxmox VE 8 guest exec status](https://pve.proxmox.com/pve-docs-8/api-viewer/#/nodes/{node}/qemu/{vmid}/agent/exec-status)            | Primary provider API          | Exit, signal, output, truncation      |
+| [Proxmox guest exec implementation](https://lists.proxmox.com/pipermail/pve-devel/2018-June/032733.html)                                | Primary provider source       | REST boolean wire encoding            |
 | [Current Proxmox guest exec](https://pve.proxmox.com/pve-docs/api-viewer/#/nodes/{node}/qemu/{vmid}/agent/exec)                         | Primary provider API          | Permission evolution                  |
 | [QEMU guest-exec reference](https://www.qemu.org/docs/master/interop/qemu-ga-ref.html#command-QGA-qapi-schema.guest-exec)               | Primary upstream API          | Guest process and input model         |
 | [QEMU guest-exec-status reference](https://www.qemu.org/docs/master/interop/qemu-ga-ref.html#command-QGA-qapi-schema.guest-exec-status) | Primary upstream API          | Asynchronous result model             |
