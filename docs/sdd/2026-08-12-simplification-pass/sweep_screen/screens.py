@@ -279,23 +279,27 @@ def raises_sites(tree: Tree, path: str) -> Iterator[tuple[int, str, str, list[as
             yield call.lineno, asserted, template(keyword.value, wildcard=WILDCARD) or "<expr>", body
 
 
-def screen(tree: Tree) -> None:
+def screen_verdicts(tree: Tree) -> dict[str, tuple[str, str, str]]:
+    """Every `match=` site's callee verdict, keyed by `path:line`.
+
+    Split out from the printing so `generate` can ask the same question the
+    screen answers rather than a reader carrying the answer across by hand: a
+    site the screen gives a handle is `hla.md` case 2's first arm and must not
+    be batched as a mechanical delete.
+    """
     world = World(tree)
     families = subclass_closure(tree)
     test_paths = tree.files(TEST_ROOT)
     for path in test_paths:
         world.add_test(path)
     facts = raise_facts(world)
-    verdicts: Counter[str] = Counter()
-    walked: set[tuple[str, int]] = set()
+    out: dict[str, tuple[str, str, str]] = {}
 
-    print("site\tasserted\tverdict\ttargeted-raise\tevidence")
     for path in test_paths:
         module = world.by_path.get(path)
         if module is None:
             continue
         for line, asserted, needle, body in raises_sites(tree, path):
-            walked.add((path, line))
             family = families.get(asserted, set()) | {asserted}
             hits = reachable(world, module, body, family)
             target: tuple[str, int] | None = None
@@ -321,9 +325,7 @@ def screen(tree: Tree) -> None:
                         f"entity_kind={mine['entity_kind']} entity_name={mine['entity_name']}"
                         f" among {len(hits)} reachable raises"
                     )
-            verdicts[verdict] += 1
-            where = f"{target[0]}:{target[1]}" if target else "-"
-            print(f"{path}:{line}\t{asserted}\t{verdict}\t{where}\t{evidence}")
+            out[f"{path}:{line}"] = (verdict, f"{target[0]}:{target[1]}" if target else "-", evidence)
 
     # The estate is the authority on what exists, so what the screen did not
     # reach is the estate minus what it walked, rather than a second walk
@@ -331,10 +333,19 @@ def screen(tree: Tree) -> None:
     # context manager entered elsewhere, a tuple of asserted types and a
     # `raises` with no positional argument, without naming any of them.
     for site in Snapshot(tree).sites:
-        if site.kind != "match=" or (site.path, site.line) in walked:
-            continue
-        verdicts["unscreened"] += 1
-        print(f"{site.where}\t{site.identity.type_name}\tunscreened\t-\tno `with` body this walk could reach")
+        if site.kind == "match=" and site.where not in out:
+            out[site.where] = ("unscreened", "-", "no `with` body this walk could reach")
+    return out
+
+
+def screen(tree: Tree) -> None:
+    verdicts: Counter[str] = Counter()
+    print("site\tasserted\tverdict\ttargeted-raise\tevidence")
+    here = Snapshot(tree)
+    asserted_at = {s.where: s.identity.type_name for s in here.sites}
+    for where, (verdict, target, evidence) in screen_verdicts(tree).items():
+        verdicts[verdict] += 1
+        print(f"{where}\t{asserted_at.get(where, '?')}\t{verdict}\t{target}\t{evidence}")
 
     print("\n# verdict totals", file=sys.stderr)
     for name, count in sorted(verdicts.items()):

@@ -1,9 +1,8 @@
 """Reading first-party source from the working tree.
 
-Every command here answers a question about the tree in front of it. Reading a
-historical commit was needed only while the map still carried line numbers, to
-turn them into identities; the fresh cut leaves none, so that layer retired
-with `carry` and `reanchor`.
+Every command here answers a question about the tree in front of it, and only
+that tree. A row is anchored by identity rather than by line number, so it
+resolves against whatever is checked out and nothing here reads a ref.
 """
 
 from __future__ import annotations

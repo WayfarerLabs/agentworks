@@ -244,11 +244,6 @@ class Snapshot:
         for site in self.sites:
             grouped.setdefault(site.identity, []).append(site)
         self.by_identity = {i: SiteGroup(i, tuple(s)) for i, s in grouped.items()}
-        # Every anchor in the map keys on the groups partitioning the estate, so
-        # it is checked here rather than asserted in the map's prose.
-        counted = sum(g.multiplicity for g in self.by_identity.values())
-        if counted != len(self.sites):
-            raise SystemExit(f"site groups do not partition the estate at {tree}: {counted} of {len(self.sites)}")
         self._functions: dict[str, list[Function] | None] = {}
 
     @property
@@ -274,11 +269,6 @@ class Snapshot:
         same test is defined in sibling branches."""
         return [f for f in self.functions(path) or [] if f.qualname == qualname]
 
-    def enclosing(self, path: str, line: int) -> Function | None:
-        """The innermost function holding `line`, or None."""
-        holders = [f for f in self.functions(path) or [] if f.holds(line)]
-        return max(holders, key=lambda f: (f.start, -f.end)) if holders else None
-
     def why_unnamed(self, path: str, line: int) -> str:
         """Why a line sits in no function here, which is what a line anchor
         records on its row so a reader knows whether it can ever be fixed."""
@@ -292,9 +282,6 @@ class Snapshot:
             if isinstance(node, ast.stmt) and node.lineno <= line <= (node.end_lineno or node.lineno):
                 return "module level"
         return "between functions"
-
-    def site_at(self, path: str, line: int) -> Site | None:
-        return next((s for s in self.sites if s.path == path and s.line == line), None)
 
     def near(self, identity: Identity) -> list[SiteGroup]:
         """Groups in the same test asserting the same type against a DIFFERENT

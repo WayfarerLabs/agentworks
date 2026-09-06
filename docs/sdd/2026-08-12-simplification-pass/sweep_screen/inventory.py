@@ -6,10 +6,9 @@ prose, and this module is the implementation it points at. What the code needs
 is only this. A cell is one or more backticked anchor groups, each `path` or
 `path::tail,tail`; a tail is `qualname::Type::digest` for a site group, with
 `*n` where the group holds more than one site, a bare `qualname` for a test
-function, or `L120-124` for literal lines. Two grammars are read: the current
-one, and the line-anchored one every earlier cut used, so `carry` and
-`reanchor` can take an older map as input. Nothing writes line anchors any more
-except a row that has no name to reach for.
+function, or `L120-124` for literal lines. One grammar is read. The
+line-anchored cell every earlier cut used is refused rather than guessed at,
+and nothing writes a line anchor except a row with no name to reach for.
 """
 
 from __future__ import annotations
@@ -29,16 +28,27 @@ INVENTORY = "docs/sdd/2026-08-12-simplification-pass/sweep-inventory.md"
 #: construction, which is why the parser needs no list of them.
 ROW_ID = re.compile(r"(?:[A-F]|L|RB|G1)-[A-Z]?\d{1,3}[a-z]?$")
 
+#: A row id as a justification cites one. It admits the `P2-`, `P3-` and
+#: `P4-` shapes the part cuts used, which are exactly the citations that stop
+#: resolving when those files are folded in and deleted.
+CITED_ID = re.compile(r"\b(?:[A-F]|L|RB|G1|P[234])-[A-Z]?\d{1,3}[a-z]?\b")
+
 PATH_RE = re.compile(r"((?:cli|website)/[A-Za-z0-9_./-]+?\.(?:py|mjs))")
 LINE_ANCHOR = re.compile(r"L(\d+)(?:-(\d+))?$")
-SPAN_RE = re.compile(r"\d+(?:-\d+)?")
 MARKER_RE = re.compile(r"\[(deferred|1-raise|unverified|line-anchored:[^\]]*)\]")
 ANY_MARKER = re.compile(r"\[(?:deferred|1-raise|unverified|line-anchored)\b[^\]]*\]")
+
+#: Markers this map no longer has: `[dead]` because a row whose estate is gone
+#: is not in the ledger, and `[subtracted]` because the subtraction is reversed.
+#: One written by hand would read as row state and carry none, so it is refused
+#: rather than ignored.
+RETIRED_MARKER = re.compile(r"\[(?:dead|subtracted)\b[^\]]*\]")
 CAUSE_RE = re.compile(r"\[line-anchored:\s*([^\]]*)\]")
 
-#: Every cause a line anchor may record. `reanchor` computes these and nothing
-#: else writes them, so one outside the set is a hand edit that has drifted.
-CAUSES = frozenset({"file gone", "not Python", "between functions", "module level"})
+#: Every cause a line anchor may record. A row that has to fall back to
+#: literal lines carries its cause by hand, so one outside the set is a hand
+#: edit that has drifted.
+CAUSES = frozenset({"not Python", "between functions", "module level"})
 BACKTICKED = re.compile(r"`([^`]+)`")
 FENCE = re.compile(r"^\s*(```|~~~)")
 
@@ -184,11 +194,10 @@ class LineAnchor(Anchor):
 
     path: str
     spans: tuple[tuple[int, int], ...]
-    #: Why nothing could be named here, written onto the row by `reanchor` so
-    #: the declaration is per row rather than only in the grammar section. It
-    #: is a fact about the tree the anchor was derived at, not about HEAD, so
-    #: reading a map at another tree recomputes it and may differ; the marker
-    #: `reanchor` wrote is the record.
+    #: Why nothing could be named here, carried in the row's
+    #: `[line-anchored:]` marker so the declaration is per row rather than only
+    #: in the grammar section. It is a fact about the tree the row was written
+    #: at, not about HEAD, so the marker in the map is the record.
     cause: str = ""
 
     def render(self) -> str:
@@ -232,6 +241,7 @@ class Row:
     anchors: list[Anchor]
     shape: str
     disposition: str
+    justification: str
     source_line: int
 
     @property
@@ -263,13 +273,10 @@ class Row:
         return ", ".join(parts)
 
 
-def parse_anchors(cell: str, snapshot: Snapshot, *, sites_only: bool, where: str = "cell") -> list[Anchor]:
+def parse_anchors(cell: str, snapshot: Snapshot, where: str = "cell") -> list[Anchor]:
     """The anchors one column-2 cell addresses, in either grammar.
 
-    `snapshot` must be the tree the cell's line numbers were measured at; it is
-    what turns a legacy line anchor into an identity, and what an identity
-    anchor is checked against. `sites_only` is the group-1 rule described on
-    `_lift`.
+    `snapshot` is the tree the anchors are read against.
     """
     groups = BACKTICKED.findall(cell) or [cell]
     anchors: list[Anchor] = []
@@ -288,8 +295,8 @@ def parse_anchors(cell: str, snapshot: Snapshot, *, sites_only: bool, where: str
             )
         if tail.startswith("::"):
             anchors.extend(_parse_identity_anchors(path, tail[2:], where, snapshot))
-        elif tail.startswith(":"):
-            anchors.extend(_lift(path, _parse_legacy_spans(tail[1:]), snapshot, sites_only=sites_only))
+        elif tail:
+            raise RowError(where, f"{group!r} is neither a bare path nor `path::anchors`")
         else:
             anchors.append(FileAnchor(path))
     return anchors
@@ -326,72 +333,6 @@ def _parse_identity_anchors(path: str, tail: str, where: str, snapshot: Snapshot
         causes = {snapshot.why_unnamed(path, lo) for lo, _ in lines}
         anchors.append(LineAnchor(path, tuple(lines), ", ".join(sorted(causes))))
     return anchors
-
-
-def _parse_legacy_spans(tail: str) -> list[tuple[int, int]]:
-    spans: list[tuple[int, int]] = []
-    for token in SPAN_RE.findall(tail):
-        if "-" in token:
-            lo, hi = token.split("-")
-            spans.append((int(lo), int(hi)))
-        else:
-            spans.append((int(token), int(token)))
-    return spans
-
-
-def _lift(path: str, spans: list[tuple[int, int]], snapshot: Snapshot, *, sites_only: bool) -> list[Anchor]:
-    """Turn legacy line spans into the most precise anchor the tree supports.
-
-    One function at a time, and the rule differs by what the row is about.
-    Group 1's rows address `match=` sites, so where a function holds sites the
-    row cited, those sites are the whole claim and no span anchor joins them:
-    a span anchor there would claim every other site in the same test for the
-    same row and break the exactly-once ownership the group rests on.
-
-    Every other group's rows address assertions the estate scan cannot see, so
-    the enclosing function is emitted too, with any cited sites alongside it,
-    unless a function the row already cites encloses it: a helper nested inside
-    a cited test is named by that test. Dropping the span narrowed 39 rows onto
-    `match=` sites they were never about.
-
-    Lines inside no function stay literal, because inventing a name for them
-    would be a guess.
-    """
-    if not spans:
-        return [FileAnchor(path)]
-    #: qualname -> the site identities this row cites in it, empty when it cites none
-    cited: dict[str, list[Identity]] = {}
-    orphans: list[tuple[int, int]] = []
-    for lo, hi in spans:
-        landed = False
-        for line in range(lo, hi + 1):
-            site = snapshot.site_at(path, line)
-            if site is not None:
-                here = cited.setdefault(site.identity.qualname, [])
-                if site.identity not in here:
-                    here.append(site.identity)
-                landed = True
-                continue
-            function = snapshot.enclosing(path, line)
-            if function is not None:
-                cited.setdefault(function.qualname, [])
-                landed = True
-        if not landed:
-            orphans.append((lo, hi))
-    # A helper nested inside a test the row already names adds nothing: the
-    # test's span covers it, and listing both reads as two claims.
-    outer = {q for q in cited if not any(q != o and q.startswith(f"{o}.") for o in cited)}
-    anchors: list[Anchor] = []
-    for qualname, identities in cited.items():
-        if (not identities or not sites_only) and qualname in outer:
-            anchors.append(SpanAnchor(path, qualname))
-        for identity in identities:
-            group = snapshot.by_identity[identity]
-            anchors.append(SiteAnchor(identity, group.multiplicity))
-    if orphans:
-        causes = {snapshot.why_unnamed(path, lo) for lo, _ in orphans}
-        anchors.append(LineAnchor(path, tuple(orphans), ", ".join(sorted(causes))))
-    return anchors or [FileAnchor(path)]
 
 
 def split_cells(line: str) -> list[str]:
@@ -452,18 +393,6 @@ def split_cells(line: str) -> list[str]:
     return body_cells
 
 
-def join_cells(cells: list[str]) -> str:
-    """One table row from its cell texts, with every literal pipe escaped.
-
-    Reading is lenient and writing is strict, deliberately. `split_cells` treats
-    a pipe inside a code span as content because rows in the wild carry regexes
-    written that way, but markdownlint and prettier are not code-span aware and
-    count such a pipe as a column break, so anything written back escapes every
-    pipe. `\\|` renders as a literal pipe in both places.
-    """
-    return "| " + " | ".join(cell.replace("|", "\\|") for cell in cells) + " |"
-
-
 def read_rows(path: str, snapshot: Snapshot) -> list[Row]:
     """Every row of a map, with the group and section heading it sits under.
 
@@ -514,6 +443,8 @@ def read_rows(path: str, snapshot: Snapshot) -> list[Row]:
         if not cells or not ROW_ID.fullmatch(cells[0]):
             continue
         where = f"{where} row {cells[0]}"
+        if not group:
+            raise RowError(where, "a row above the first `##` heading belongs to no group")
         if len(cells) < 3:
             raise RowError(where, f"{len(cells)} cells; a row has at least an id, a target and a shape")
         _check_markers(cells, where)
@@ -522,9 +453,10 @@ def read_rows(path: str, snapshot: Snapshot) -> list[Row]:
                 id=cells[0],
                 group=group,
                 section=section,
-                anchors=parse_anchors(cells[1], snapshot, sites_only=group == GROUP_1, where=where),
+                anchors=parse_anchors(cells[1], snapshot, where=where),
                 shape=cells[2],
                 disposition=cells[3] if len(cells) > 3 else "",
+                justification=cells[4] if len(cells) > 4 else "",
                 source_line=number,
             )
         )
@@ -536,10 +468,9 @@ def read_rows(path: str, snapshot: Snapshot) -> list[Row]:
 def _check_markers(cells: list[str], where: str) -> None:
     """Markers live in the shape cell, once each, with a known cause.
 
-    Every marker is written by a command or by a reviewer following the map's
-    own vocabulary, so one that is duplicated, misplaced or unrecognised is a
-    hand edit that has drifted, and a row state read off a drifted marker is
-    worse than no row at all.
+    Every marker follows the map's own vocabulary, so one that is duplicated,
+    misplaced, unrecognised or retired is a hand edit that has drifted, and a
+    row state read off a drifted marker is worse than no row at all.
     """
     for index, cell in enumerate(cells):
         if index == 2:
@@ -548,6 +479,9 @@ def _check_markers(cells: list[str], where: str) -> None:
         if stray is not None:
             raise RowError(where, f"marker {stray.group(0)!r} is in column {index + 1}; markers live in the shape cell")
     shape = outside_code_spans(cells[2])
+    retired = RETIRED_MARKER.search(shape)
+    if retired is not None:
+        raise RowError(where, f"marker {retired.group(0)!r} retired on 2026-09-06 and no longer means anything")
     found = MARKER_RE.findall(shape)
     for marker in found:
         if found.count(marker) > 1:

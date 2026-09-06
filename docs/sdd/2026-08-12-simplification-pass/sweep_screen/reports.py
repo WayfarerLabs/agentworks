@@ -18,6 +18,7 @@ from collections import Counter, defaultdict
 from typing import TYPE_CHECKING
 
 from .inventory import (
+    CITED_ID,
     GROUP_1,
     INVENTORY,
     MECHANICAL_BATCH,
@@ -27,6 +28,7 @@ from .inventory import (
     SpanAnchor,
     read_rows,
 )
+from .screens import screen_verdicts
 
 if TYPE_CHECKING:
     from .estate import Site, Snapshot
@@ -64,6 +66,27 @@ def unresolved_claims(rows: list[Row], snapshot: Snapshot) -> list[tuple[str, st
         for anchor in row.anchors
         if (outcome := anchor.resolve(snapshot)).state not in ("resolved", "line-anchored")
     ]
+
+
+def check_map(rows: list[Row]) -> list[str]:
+    """Structural faults in the map itself, as a list of complaints.
+
+    These are the properties the map's prose used to promise a reader and
+    nothing enforced, which is how it came to cite two dozen ids that were not
+    rows: part-local ids from files that no longer exist, and rows the ledger
+    dropped. A citation that resolves to nothing sends a reader looking for
+    evidence that is not there.
+    """
+    faults: list[str] = []
+    ids = [r.id for r in rows]
+    known = set(ids)
+    for row_id in sorted({i for i in ids if ids.count(i) > 1}):
+        faults.append(f"duplicate row id {row_id}")
+    for row in rows:
+        cited = {c for cell in (row.shape, row.disposition, row.justification) for c in CITED_ID.findall(cell)}
+        for name in sorted(cited - known - {row.id}):
+            faults.append(f"{row.id} cites {name}, which is not a row in this map")
+    return faults
 
 
 def _ownership(rows: list[Row], sites: list[Site]) -> tuple[list[Site], list[Site], dict[Site, list[str]]]:
@@ -179,6 +202,11 @@ def generate(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
     * **Widened claims.** A group-1 claim that reaches a site through a span or
       line anchor fails, because such a claim covers every assertion the test
       gains after it was written rather than the one it was written about.
+    * **A handle the screen found.** A site the callee screen marks
+      `multi-handle-discriminates` is `hla.md` case 2's first arm: the code
+      already offers a handle that tells the targeted raise apart, so the row
+      converts onto it rather than deleting the assertion. Emitting one as a
+      mechanical delete would decide case 2 by not noticing it.
     * **Stale claims.** A group-1 claim row with an anchor that does not resolve
       here fails, because its sites fall into the mechanical batch as ordinary
       deletes and the judgment that pulled them out is lost without a word. This
@@ -191,6 +219,7 @@ def generate(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
     """
     rows = read_rows(map_path, snapshot)
     claims = claim_rows(rows)
+    screened = screen_verdicts(snapshot.tree)
     estate = [s for s in snapshot.sites if s.kind == "match="]
     claimed = {s for s in estate if any(r.claims(s) for r in claims)}
     remaining = [s for s in estate if s not in claimed]
@@ -208,14 +237,25 @@ def generate(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
         identities = dict.fromkeys(s.identity for s in sites)
         anchors = [SiteAnchor(i, snapshot.by_identity[i].multiplicity) for i in identities]
         kinds = ", ".join(sorted({s.identity.type_name for s in sites}))
-        shape = f"{len(sites)} `match=` site(s) over {kinds}"
-        row = Row(f"G1-{number:03d}", GROUP_1, MECHANICAL_BATCH, list(anchors), shape, "delete", 0)
+        # The marker is the screen's verdict, so it is derived from the screen
+        # rather than carried across by a reader. A row earns it only when every
+        # site it claims is single-raise-path, which is what the marker's entry
+        # in the map's marker section says it means.
+        verified = all(screened.get(s.where, ("", "", ""))[0] == "single-raise-path" for s in sites)
+        marker = "**[1-raise]** " if verified else ""
+        shape = f"{marker}{len(sites)} `match=` site(s) over {kinds}"
+        row = Row(f"G1-{number:03d}", GROUP_1, MECHANICAL_BATCH, list(anchors), shape, "delete", "", 0)
         generated.append(row)
         print(f"| {row.id} | {row.render_cell()} | {shape} | delete |")
 
     print(f"\n# generated {len(by_path)} rows over {len(remaining)} sites", file=sys.stderr)
     print(f"# claimed by {len(claims)} judgment and keep rows: {len(claimed)} sites", file=sys.stderr)
 
+    handled = [
+        (site.where, verdict[1])
+        for site in remaining
+        if (verdict := screened.get(site.where)) is not None and verdict[0] == "multi-handle-discriminates"
+    ]
     unowned, twice, owners = _ownership(claims + generated, estate)
     widened = [
         (row.id, anchor.render())
@@ -226,10 +266,10 @@ def generate(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
     stale = unresolved_claims(claims, snapshot)
     # A group-1 span claim that resolves and covers no site shields nothing from
     # the batch. It is reported and does not refuse, because one tree cannot
-    # tell a test that LOST its sites from a test that never had any, and
-    # `_lift` gives a group-1 row a span only where the function it anchored
-    # held no cited site, so every instance here is the second kind. The
-    # comparison is against every site rather than this batch's `match=` estate,
+    # tell a test that LOST its sites from a test that never had any, and a
+    # group-1 row was only ever given a span where the function it anchored held
+    # no cited site, so every instance here is the second kind. The comparison
+    # is against every site rather than this batch's `match=` estate,
     # which is what keeps a group-1 row over `website/tests` out of the list.
     barren = [
         (row.id, anchor.render())
@@ -247,17 +287,20 @@ def generate(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
     print(f"# group-1 claims reaching a site through a span or line anchor: {len(widened)}", file=sys.stderr)
     for row_id, rendered in widened:
         print(f"#   {row_id} {rendered}", file=sys.stderr)
+    print(f"# batched sites the callee screen gives a handle: {len(handled)}", file=sys.stderr)
+    for where, target in handled:
+        print(f"#   {where} discriminates on the raise at {target}", file=sys.stderr)
     print(f"# group-1 claim anchors that do not resolve here: {len(stale)}", file=sys.stderr)
     for row_id, rendered, state in stale:
         print(f"#   {row_id} {state} {rendered}", file=sys.stderr)
     print(f"# group-1 span claims covering no site (reported, not refused): {len(barren)}", file=sys.stderr)
     for row_id, rendered in barren:
         print(f"#   {row_id} {rendered}", file=sys.stderr)
-    if unowned or twice or widened or stale:
+    if unowned or twice or widened or stale or handled:
         raise SystemExit(
-            "the claims this batch was generated against are not sound here"
+            "this batch is not sound here"
             f" ({len(unowned)} unowned, {len(twice)} owned twice, {len(widened)} widened,"
-            f" {len(stale)} unresolved claim anchors)"
+            f" {len(stale)} unresolved claim anchors, {len(handled)} sites with a handle)"
         )
 
 
@@ -290,4 +333,10 @@ def totals(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
         f"| **All** | {ledger['live']} | {ledger['delete']} | {ledger['convert']} | {ledger['keep']} "
         f"| {ledger['deferred']} | {ledger['ledger']} |"
     )
-    print(f"\n# executable set: {ledger['live']} rows; ledger: {ledger['ledger']} rows", file=sys.stderr)
+    faults = check_map(rows)
+    print(f"\n# structural faults: {len(faults)}", file=sys.stderr)
+    for fault in faults:
+        print(f"#   {fault}", file=sys.stderr)
+    print(f"# executable set: {ledger['live']} rows; ledger: {ledger['ledger']} rows", file=sys.stderr)
+    if faults:
+        raise SystemExit(f"the map has {len(faults)} structural fault(s)")
