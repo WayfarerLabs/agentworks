@@ -66,3 +66,27 @@ def test_resume_only_and_force_new_are_mutually_exclusive(
 
     assert result.exit_code != 0
     assert command_calls == []
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["session", "resume", "coding"],
+        ["session", "list", "--no-status"],
+        ["console", "attach", "coding", "--recreate"],
+    ],
+)
+def test_retired_lifecycle_forms_fail_before_state(
+    arguments: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected_state(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("retired lifecycle form reached application state")
+
+    monkeypatch.setattr("agentworks.cli.commands.session.get_db", unexpected_state)
+    monkeypatch.setattr("agentworks.cli.commands.console.get_db", unexpected_state)
+    monkeypatch.setattr("agentworks.config.load_config", unexpected_state)
+
+    result = CliRunner().invoke(app, arguments)
+
+    assert result.exit_code == 2
