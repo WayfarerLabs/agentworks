@@ -221,8 +221,9 @@ status = api.guest_agent_exec_status(
 )
 ```
 
-The existing `guest_agent_exec_wait` may become a small composition over these methods for the
-bootstrap caller, but the bootstrap flow itself is not redesigned. Every response is shape-checked:
+The existing `guest_agent_exec_wait` remains a small composition over these methods for the
+bootstrap caller, and both polling paths reuse the API-owned status validator. The bootstrap flow
+itself is not redesigned. Every response is shape-checked:
 
 - dispatch data is one integer PID;
 - status `exited` is boolean after the API boundary normalizes Proxmox VE 8's exact integer `0`/`1`
@@ -231,8 +232,8 @@ bootstrap caller, but the bootstrap flow itself is not redesigned. Every respons
 - output fields are strings when present; and
 - truncation flags are boolean when present after the same exact `0`/`1` normalization.
 
-Unexpected or contradictory data raises a typed transport error with node, VMID, and PID but no
-request body or token.
+Unexpected or contradictory data raises `ProxmoxAPIError` at the API boundary. The adapter converts
+that into a typed transport error with node, VMID, and PID but no request body or token.
 
 ### Input policy
 
