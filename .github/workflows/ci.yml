@@ -95,17 +95,23 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Several kept tests spawn a POSIX `sh`/`bash` to check the shell text
-      # agentworks generates (e.g. the codex/lima `sh -c` word-split and
-      # portable-quoting tests, some of which run on every host). Windows ships
-      # Git for Windows; putting its bin on PATH provides that `sh`, without
-      # which those tests error with FileNotFoundError. Tests that need
-      # Linux-guest shell semantics git-bash cannot reproduce skip on Windows
-      # via the shared `requires_posix_shell` marker (which gates on `/bin/sh`,
-      # absent on Windows); Linux CI still covers those.
-      - name: Put Git Bash on PATH (POSIX sh for shell-dependent tests)
+      # Several kept tests shell out to the POSIX toolchain to check the shell
+      # text agentworks generates, and Git for Windows (shipped on the runner)
+      # provides it once the right directories are on PATH. `sh`/`bash` from
+      # `Git\bin` back the shell-wrapping tests (e.g. the codex/lima `sh -c`
+      # word-split and portable-quoting tests, some of which run on every host);
+      # coreutils (`grep`, `sed`, `awk`) from `Git\usr\bin` back tests that
+      # invoke a tool directly rather than through a shell (e.g. test_sve_gate,
+      # which runs `grep` on the generated script). Without these on PATH those
+      # tests error with FileNotFoundError. Tests that need Linux-guest shell
+      # semantics git-bash cannot reproduce skip on Windows via the shared
+      # `requires_posix_shell` marker (which gates on `/bin/sh`, absent on
+      # Windows); Linux CI still covers those.
+      - name: Put the Git for Windows POSIX toolchain on PATH
         shell: pwsh
-        run: Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files\Git\bin'
+        run: |
+          Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files\Git\bin'
+          Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files\Git\usr\bin'
 
       - uses: astral-sh/setup-uv@v7
         with:
