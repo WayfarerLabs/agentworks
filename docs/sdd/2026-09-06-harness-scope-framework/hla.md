@@ -624,12 +624,15 @@ installations are inspected, not automatically claimed as owned just because old
 them. The migration strategy must explain how an operator deliberately establishes ownership or
 removes conflicting old material before reconciliation can manage it.
 
-Explicit session selection also needs migration guidance. Session rows store a template name and
-explicit instance overlay, not a snapshot of the resolved integration. Rows using the synthesized
-`default` pick up its explicit shell block. Rows using custom silent lineages need their template or
-overlay amended before start/restart; report the missing selection and that remedy. Integration
-state namespaces are not authoritative selection and must not be used to guess one. The LLD must
-cover finalize/reference output, dictionary resolution, and existing-session restart in this sweep.
+Explicit session selection also needs migration guidance. A session row stores its template name;
+its explicit instance overlay lives separately in instance-state. Neither snapshots the resolved
+integration. Sessions using the synthesized `default` pick up its explicit shell block. Sessions
+using custom silent lineages need an explicit selection in their template or inherited parent before
+start/restart. There is no in-place session-overlay replacement operation; an instance-specific
+change requires explicit recreation with `session create --spec`, not an invented start/restart
+option. Report the missing selection and these supported remedies. Integration state namespaces are
+not authoritative selection and must not be used to guess one. The LLD must cover finalize/reference
+output, dictionary resolution, and existing-session restart in this sweep.
 
 This review PR contains the FRD amendment and HLA. It contains no plan, LLD, permanent behavior
 docs, or migration file. The next artifacts must specify the storage/locking and interruption
