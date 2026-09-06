@@ -27,9 +27,9 @@ required native hook. Platforms with the richer behavior continue returning `Tra
              WSL2 and cloud SSH
 ```
 
-Core recovery sees only `ExecTransport`. The single operator-facing native shell path narrows to
-`Transport` before calling `interactive`. There is no fallback, adapter registry, duplicate platform
-hook, database state, or configuration switch.
+Every core native-channel path sees only `ExecTransport`, except the single operator-facing native
+shell path, which narrows to `Transport` before calling `interactive`. There is no fallback, adapter
+registry, duplicate platform hook, database state, or configuration switch.
 
 ## Current architecture and correction
 
@@ -79,7 +79,9 @@ provide native interaction. `vm shell --platform` checks it before native creden
 transport, or probe work. For platforms that declare support, the command also verifies that the
 returned object is a full `Transport` before interaction. A second hook would make every full
 platform repeat native construction and route ownership for one caller, so this design does not add
-one.
+one. The complete core allowlist for requiring this richer native type contains only
+`vm shell --platform`; adding another caller is a capability-contract change, not an incidental use
+of methods available on a concrete transport.
 
 ## Execution contract
 
@@ -112,19 +114,19 @@ The required execution type owns mechanism, not orchestration. Core still decide
 - whether a failed Tailscale repair stops an operation; and
 - which secret values may be delivered through sensitive stdin.
 
-The following paths narrow to `ExecTransport` without behavioral redesign:
+The following table is the complete core native-channel inventory:
 
-| Path                        | Native operation                                      |
-| --------------------------- | ----------------------------------------------------- |
-| VM create                   | release attestation and Phase A provisioning          |
-| VM start                    | Tailscale reachability probe and repair               |
-| Tailscale rekey             | authenticate through sensitive stdin                  |
-| VM delete                   | best-effort Tailscale logout before provider deletion |
-| `vm shell --platform`       | reject declared absence, then require full transport  |
-| native reachability factory | bounded `echo ok`                                     |
+| Path                        | Required type    | Native operation                                      |
+| --------------------------- | ---------------- | ----------------------------------------------------- |
+| VM create                   | `ExecTransport`  | release attestation and Phase A provisioning          |
+| VM start                    | `ExecTransport`  | Tailscale reachability probe and repair               |
+| Tailscale rekey             | `ExecTransport`  | authenticate through sensitive stdin                  |
+| VM delete                   | `ExecTransport`  | best-effort Tailscale logout before provider deletion |
+| native reachability factory | `ExecTransport`  | bounded `echo ok`                                     |
+| `vm shell --platform`       | full `Transport` | reject declared absence, then interact                |
 
-This inventory is also a permanent testing seam: an execution-only fake must cross every row except
-the shell row.
+No other core path may narrow a native transport to the full type. This inventory is also a
+permanent testing seam: an execution-only fake must cross every row except the shell row.
 
 ## Proxmox execution
 
@@ -133,6 +135,12 @@ the shell row.
 `ProxmoxExecTransport` receives the already-bound API client, node, VMID, VM admin username, logger,
 and default timeout. No live config lookup or new persisted value is required. The existing site
 context supplies the API token just as other Proxmox operations do.
+
+QGA is available outside Proxmox, but this carrier is not provider-neutral: it depends on the
+Proxmox REST client, authentication and permission model, endpoint parameters, and response shapes.
+Core therefore owns `ExecTransport`, while the Proxmox plugin owns this adapter. A shared QGA
+component should be extracted only when a second platform supplies a concrete carrier with behavior
+that is actually common.
 
 VM creation constructs the same transport after QGA availability has been established and returns it
 in `ProvisionResult`. Existing VMs construct it from their persisted `node` and `vmid` metadata.
@@ -205,9 +213,8 @@ shell.
 
 ## Capability and release compatibility
 
-The capability API is internal and all bundled implementations ship together. Contract version 1
-changes atomically. A version bump or compatibility adapter would describe consumers that do not
-exist.
+The capability API is internal and all implementations ship together. Contract version 1 changes
+atomically. A version bump or compatibility adapter would describe consumers that do not exist.
 
 There is no database, config, CLI grammar, machine-output, or completion change. The runtime work is
 scheduled after 0.18.0. Its implementation branch must start from the post-0.18 release baseline or

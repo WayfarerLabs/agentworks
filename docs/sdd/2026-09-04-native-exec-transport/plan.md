@@ -99,6 +99,9 @@ capability-appropriate live validation under the integration-testing process.
 - [x] Complete up to three authorized published feedback/fix rounds, or stop sooner when one full
       batch produces no material changes.
 - [x] Remove `review-requested` and promote the artifact PR to ready when design converges.
+- [ ] Complete the operator-requested post-ready review of the three requirement and architecture
+      threads, then publish one exact-head feedback/fix handoff.
+- [ ] Promote the artifact PR again when the reopened review converges.
 
 ### Phase 0 definition of done
 
@@ -139,12 +142,12 @@ capability-appropriate live validation under the integration-testing process.
 
 - [ ] Narrow `ProvisionResult.native_transport`, `VMPlatform.native_transport`, and the native
       factory; make the platform hook abstract and nonoptional.
-- [ ] Update every bundled platform and version-1 conformance fixture, implement the Proxmox hook,
-      and return the QGA transport from Proxmox create in the same transition.
+- [ ] Update every VM-platform implementation and version-1 conformance fixture, implement the
+      Proxmox hook, and return the QGA transport from Proxmox create in the same transition.
 - [ ] Narrow Debian attestation, Phase A provisioning, Tailscale repair, rekey, and logout to the
       execution type.
-- [ ] Add an execution-only fake and prove all core native consumers except platform shell use only
-      the narrow contract.
+- [ ] Add an execution-only fake and prove all core native consumers except the sole allowlisted
+      platform-shell path use only the narrow contract.
 - [ ] Rename the shell guidance to `native_shell_unavailable_hint`, let Proxmox declare it, and
       reject `vm shell --platform` before credential, route, transport, or probe work.
 - [ ] For platforms declaring native shell support, require a full `Transport` before interaction
@@ -153,7 +156,7 @@ capability-appropriate live validation under the integration-testing process.
 
 ### Phase 2 definition of done
 
-- Every bundled platform registers with one required native execution implementation.
+- Every VM platform registers with one required native execution implementation.
 - Proxmox release attestation, Phase A provisioning, repair, rekey, logout, and probe paths accept
   the adapter.
 - Only the explicit platform shell path requires the full subtype, and Proxmox refuses it before

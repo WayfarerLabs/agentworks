@@ -79,11 +79,11 @@ exception and old claim that native transport always supports interaction.
 
 The SDD lands as a documentation-only PR if its review converges. Runtime implementation requires a
 separate authenticated operator direction after 0.18.0 and a fresh branch at the correct baseline.
-The runtime PR keeps the type split, all bundled platforms, Proxmox implementation, tests, and
-permanent documentation together. There is no useful partially compatible midpoint to release.
+The runtime PR keeps the type split, all VM-platform implementations, Proxmox implementation, tests,
+and permanent documentation together. There is no useful partially compatible midpoint to release.
 
 Within the runtime branch, tests may land alongside each step, but every pushed handoff must keep
-the capability registry and all bundled implementations internally consistent.
+the capability registry and all VM-platform implementations internally consistent.
 
 ## Rollback
 

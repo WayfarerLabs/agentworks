@@ -9,7 +9,8 @@
 
 1. Canonical operator work uses Tailscale transport and never silently falls back.
 2. Every vm-platform implementation returns a native `ExecTransport`.
-3. Core native operations depend only on `run`, `describe`, logger, and timeout behavior.
+3. Every core native-channel operation depends only on `run`, `describe`, logger, and timeout
+   behavior, except the operation named by invariant 4.
 4. Only `vm shell --platform` reads native-shell availability and requires a full `Transport`.
 5. `sudo=False` means VM admin authority on every implementation, including QGA.
 6. No stdin payload means immediate EOF. Sensitive stdin never appears in observable diagnostics.
@@ -114,9 +115,8 @@ class VMPlatform(Capability):
 ```
 
 Proxmox sets `native_shell_unavailable_hint` to its web-console guidance. The hook has no default
-body and no `None` result. Registration conformance uses abstract-class inspection to reject a
-bundled implementation that omits it; no config-dependent platform instantiation is needed for that
-proof.
+body and no `None` result. Registration conformance uses abstract-class inspection to reject an
+implementation that omits it; no config-dependent platform instantiation is needed for that proof.
 
 The package factory retains its name and lifetime:
 
@@ -151,9 +151,9 @@ if not isinstance(target, Transport):
 return target.interactive(command, env=env)
 ```
 
-The canonical shell branch still obtains `transport(vm, config) -> Transport` and needs no check. No
-other production caller performs this narrowing. A residual scan and an execution-only fake pin that
-claim.
+The canonical shell branch still obtains `transport(vm, config) -> Transport` and needs no check.
+This is the complete allowlist: no other production caller narrows a native transport to the full
+type. A residual scan and an execution-only fake pin that claim.
 
 ## Proxmox transport
 
@@ -161,6 +161,9 @@ claim.
 
 Place the adapter beside the platform, for example `agentworks/plugins/proxmox/transport.py`. It
 depends on the Proxmox API client but the generic transport package does not depend on a plugin.
+Although other providers can expose QGA, this adapter speaks the Proxmox REST carrier and remains
+plugin-owned. Extract shared QGA code only after a second concrete carrier demonstrates a common
+seam.
 
 ```python
 class ProxmoxExecTransport(ExecTransport):

@@ -36,12 +36,12 @@ shell support optional and honestly reported.
 
 ## Settled product decisions
 
-1. Agentworks requires one Tailscale-independent native execution transport from every bundled VM
-   platform.
+1. Agentworks requires one Tailscale-independent native execution transport from every VM platform.
 2. Native interactive shell, streaming, and file transfer are richer capabilities. A platform may
    omit them.
-3. Core recovery and lifecycle paths use only the required execution surface. They do not use
-   interactive or file-transfer methods accidentally hidden behind a broad type.
+3. Every core operation that uses the native channel depends only on the required execution surface,
+   except `vm shell --platform`. That command is the sole core operation allowed to require the full
+   native `Transport`.
 4. The canonical VM transport remains Tailscale SSH. Native execution never becomes an automatic
    fallback for canonical operator work.
 5. Proxmox implements native execution through QEMU Guest Agent. `vm shell --platform` remains
@@ -65,7 +65,9 @@ shell support optional and honestly reported.
 - **R2.** VM creation shall return a native execution transport that core can use for live Debian
   release attestation and Phase A provisioning before Phase B switches to the canonical transport.
 - **R3.** Start-time Tailscale repair, Tailscale rekey, Tailscale logout, release attestation, and
-  every other core native-channel consumer shall type against the execution-only surface.
+  every other core native-channel consumer shall type against the execution-only surface. No core
+  native-channel consumer other than the `vm shell --platform` path specified by R12 shall require
+  interactive, streaming, copy, or file-helper behavior.
 - **R4.** Native transport construction shall retain the existing transient-route lifetime. A
   platform may open temporary provider access before constructing the transport and must unwind it
   through the caller-owned context stack.
@@ -120,7 +122,7 @@ shell support optional and honestly reported.
 
 ### Compatibility and collateral
 
-- **R19.** The vm-platform capability shall remain version 1. All bundled platform implementations,
+- **R19.** The vm-platform capability shall remain version 1. Every platform implementation,
   conformance fixtures, capability documentation, and core callers shall change in the same runtime
   implementation.
 - **R20.** The change shall add no database migration, persisted compatibility marker, new platform
@@ -133,8 +135,8 @@ shell support optional and honestly reported.
 
 ## Quality requirements
 
-- **Q1.** An execution-only fake shall pass every core native-channel path without implementing
-  interactive, streaming, or file-transfer methods.
+- **Q1.** An execution-only fake shall pass every core native-channel path other than
+  `vm shell --platform` without implementing interactive, streaming, or file-transfer methods.
 - **Q2.** Tests shall prove admin-versus-root rendering, finite stdin, provider payload limits,
   timeouts, ambiguous dispatch, signals, truncation, malformed responses, checked exits, and
   sensitive-input non-disclosure outside its required provider request field.
@@ -148,7 +150,7 @@ shell support optional and honestly reported.
 
 ## Acceptance criteria
 
-1. Every bundled platform satisfies one required Tailscale-independent native execution hook.
+1. Every VM platform satisfies one required Tailscale-independent native execution hook.
 2. An execution-only fake completes all core recovery and create-time call paths.
 3. Proxmox rejoin and rekey work through QGA while canonical Tailscale SSH is unavailable.
 4. Proxmox `vm shell --platform` fails clearly and points to an available provider console.
