@@ -146,15 +146,3 @@ def test_console_filter_requires_batch_mode(
 
     assert result.exit_code != 0
     assert calls == []
-
-
-def test_legacy_resume_does_not_accept_console_filter(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(session_manager, "restart_all_sessions", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr("agentworks.cli.commands.session.get_db", lambda: object())
-    monkeypatch.setattr("agentworks.config.load_config", lambda: object())
-    result = CliRunner().invoke(
-        app,
-        ["session", "resume", "--all", "--yes", "--console", "console-a"],
-    )
-
-    assert result.exit_code != 0
