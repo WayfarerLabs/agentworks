@@ -1,11 +1,17 @@
-"""QEMU Guest Agent execution transport for Proxmox VMs."""
+"""QEMU Guest Agent execution transport for Proxmox VMs.
+
+QGA always starts commands as root, so admin commands use ``runuser`` while
+``sudo=True`` retains the root identity. Its ``input-data`` field is limited
+to 65,536 characters. QGA has no cancellation endpoint, so this adapter stops
+polling without claiming that the guest process stopped and never redispatches
+after an ambiguous failure.
+"""
 
 from __future__ import annotations
 
 import time
 from typing import TYPE_CHECKING
 
-from agentworks.plugins.proxmox.api import ProxmoxAPIError
 from agentworks.ssh import SSHError, SSHResult
 from agentworks.transports import ExecTransport
 
@@ -68,8 +74,6 @@ class ProxmoxExecTransport(ExecTransport):
                 input_data=input_text,
                 timeout=dispatch_timeout,
             )
-        except ProxmoxAPIError:
-            dispatch_failed = True
         except Exception:
             if input_text is None:
                 raise
@@ -89,8 +93,6 @@ class ProxmoxExecTransport(ExecTransport):
                     pid=pid,
                     timeout=status_timeout,
                 )
-            except ProxmoxAPIError:
-                status_failed = True
             except Exception:
                 if input_text is None:
                     raise
@@ -177,10 +179,8 @@ def _parse_status(status: dict[str, object], *, sensitive: bool) -> tuple[bool, 
             raise SSHError("Proxmox QGA exec-status response reports completion data before exit") from None
         return False, None
 
-    exitcode = status.get("exitcode")
-    signal = status.get("signal")
-    has_exitcode = type(exitcode) is int
-    has_signal = type(signal) is int
+    has_exitcode = "exitcode" in status
+    has_signal = "signal" in status
     if has_exitcode == has_signal:
         raise SSHError("Proxmox QGA exec-status response has an invalid exit status") from None
 
@@ -196,9 +196,15 @@ def _parse_status(status: dict[str, object], *, sensitive: bool) -> tuple[bool, 
         raise SSHError("Proxmox QGA command output was truncated") from None
 
     if has_exitcode:
+        exitcode = status["exitcode"]
+        if type(exitcode) is not int:
+            raise SSHError("Proxmox QGA exec-status response has an invalid exit status") from None
         assert isinstance(exitcode, int)
         returncode = exitcode
     else:
+        signal = status["signal"]
+        if type(signal) is not int or signal <= 0:
+            raise SSHError("Proxmox QGA exec-status response has an invalid exit status") from None
         assert isinstance(signal, int)
         returncode = -signal
     if sensitive:

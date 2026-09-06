@@ -201,6 +201,13 @@ def test_checked_failure_logs_completed_result_then_raises(status: dict[str, Any
     assert logger.errors == []
 
 
+@pytest.mark.parametrize("check", [False, True])
+@pytest.mark.parametrize("signal", [0, -1])
+def test_non_positive_signal_is_rejected(signal: int, check: bool) -> None:
+    with pytest.raises(SSHError):
+        _transport(_API([{"exited": True, "signal": signal}])).run("false", check=check)
+
+
 def test_sensitive_input_has_one_carrier_and_suppresses_output() -> None:
     api = _API(
         [
@@ -243,8 +250,17 @@ def test_sensitive_provider_failure_is_sanitized_without_chaining(
     _assert_exception_graph_is_secret_free(caught.value)
 
 
-def test_sensitive_status_failure_is_sanitized_without_chaining() -> None:
-    api = _API([RuntimeError(f"provider reflected {_SECRET}")])
+@pytest.mark.parametrize(
+    "provider_failure",
+    [
+        ProxmoxAPIError(f"provider reflected {_SECRET}"),
+        RuntimeError(f"unexpected provider failure reflected {_SECRET}"),
+    ],
+)
+def test_sensitive_status_failure_is_sanitized_without_chaining(
+    provider_failure: BaseException,
+) -> None:
+    api = _API([provider_failure])
 
     with pytest.raises(SSHError) as caught:
         _transport(api).run("read secret", input_text=f"{_SECRET}\n")
@@ -252,6 +268,33 @@ def test_sensitive_status_failure_is_sanitized_without_chaining() -> None:
     assert len(api.dispatches) == 1
     assert len(api.status_calls) == 1
     _assert_exception_graph_is_secret_free(caught.value)
+
+
+def test_non_sensitive_dispatch_preserves_provider_failure() -> None:
+    api = _API()
+    failure = ProxmoxAPIError("provider dispatch diagnostic")
+    failure.code = 503
+    api.dispatch_error = failure
+
+    with pytest.raises(ProxmoxAPIError) as caught:
+        _transport(api).run("true")
+
+    assert caught.value is failure
+    assert caught.value.code == 503
+
+
+def test_non_sensitive_status_preserves_provider_failure() -> None:
+    failure = ProxmoxAPIError("provider status diagnostic")
+    failure.code = 502
+    api = _API([failure])
+
+    with pytest.raises(ProxmoxAPIError) as caught:
+        _transport(api).run("true")
+
+    assert caught.value is failure
+    assert caught.value.code == 502
+    assert len(api.dispatches) == 1
+    assert len(api.status_calls) == 1
 
 
 def test_input_data_provider_boundary_is_checked_before_dispatch() -> None:
@@ -309,6 +352,7 @@ def test_timeout_after_dispatch_reports_pid_without_redispatch(monkeypatch: pyte
         {"exited": False, "err-truncated": False},
         {"exited": True},
         {"exited": True, "exitcode": 0, "signal": 1},
+        {"exited": True, "exitcode": 0, "signal": None},
         {"exited": True, "exitcode": "0"},
         {"exited": True, "exitcode": 0, "out-data": 1},
         {"exited": True, "exitcode": 0, "out-truncated": "yes"},
@@ -321,17 +365,6 @@ def test_invalid_or_incomplete_status_is_never_returned(status: dict[str, Any]) 
         _transport(_API([status])).run("true")
 
     assert "proxmox:101@pve1" in str(caught.value)
-    assert "42" in str(caught.value)
-
-
-def test_status_api_failure_reports_possible_continuation_without_redispatch() -> None:
-    api = _API([ProxmoxAPIError("unavailable")])
-
-    with pytest.raises(SSHError) as caught:
-        _transport(api).run("mutation")
-
-    assert len(api.dispatches) == 1
-    assert len(api.status_calls) == 1
     assert "42" in str(caught.value)
 
 

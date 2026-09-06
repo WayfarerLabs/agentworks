@@ -303,6 +303,43 @@ def test_shell_vm_refuses_execution_only_platform_before_boundary_work(
     db.close()
 
 
+def test_shell_vm_rejects_execution_only_transport_after_construction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A platform declaration cannot substitute for the returned full type."""
+    from agentworks.vms import manager as vm_manager
+    from tests.native_exec_support import ExecutionOnlyTransport
+
+    db = _seed_db(tmp_path)
+    interactive_log: list[bool] = []
+    _patch_common(monkeypatch, vm_manager, interactive_log=interactive_log)
+    target = ExecutionOnlyTransport()
+    native_calls: list[str] = []
+
+    def _execution_only(*_args: object, **_kwargs: object) -> ExecutionOnlyTransport:
+        native_calls.append("called")
+        return target
+
+    monkeypatch.setattr("agentworks.transports.native_transport", _execution_only)
+
+    with pytest.raises(StateError) as caught:
+        vm_manager.shell_vm(
+            db,
+            _make_config(),  # type: ignore[arg-type]
+            "vm1",
+            platform_transport=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert caught.value.entity_kind == "vm"
+    assert caught.value.entity_name == "vm1"
+    assert native_calls == ["called"]
+    assert target.calls == []
+    assert interactive_log == []
+    db.close()
+
+
 def test_native_transport_opens_route_and_registers_close_for_azure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
