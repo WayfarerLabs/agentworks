@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -18,6 +17,8 @@ from agentworks.debian import (
     validate_release_profiles,
 )
 from agentworks.errors import StateError
+from agentworks.ssh import SSHResult
+from tests.native_exec_support import ExecCall, ExecutionOnlyTransport
 
 
 @pytest.mark.parametrize(
@@ -71,12 +72,17 @@ def test_appending_a_candidate_profile_reclassifies_older_releases() -> None:
 
 
 def test_probe_validates_the_expected_release() -> None:
-    class FakeTransport:
-        def run(self, _command: str) -> SimpleNamespace:
-            return SimpleNamespace(stdout="ID=debian\nVERSION_ID=13\nVERSION_CODENAME=trixie\n")
+    def release_result(_call: ExecCall) -> SSHResult:
+        return SSHResult(
+            returncode=0,
+            stdout="ID=debian\nVERSION_ID=13\nVERSION_CODENAME=trixie\n",
+            stderr="",
+        )
 
-    assert probe_debian_release(FakeTransport(), expected=DebianRelease.TRIXIE) is DebianRelease.TRIXIE  # type: ignore[arg-type]
+    target = ExecutionOnlyTransport(release_result)
+
+    assert probe_debian_release(target, expected=DebianRelease.TRIXIE) is DebianRelease.TRIXIE
 
     with pytest.raises(StateError) as caught:
-        probe_debian_release(FakeTransport(), expected=DebianRelease.BOOKWORM)  # type: ignore[arg-type]
+        probe_debian_release(target, expected=DebianRelease.BOOKWORM)
     assert caught.value.entity_kind == "debian-release"

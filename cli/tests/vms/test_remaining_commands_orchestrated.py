@@ -25,8 +25,10 @@ from agentworks.capabilities.vm_platform.tailscale_join import TAILSCALE_JOIN_ST
 from agentworks.db import VMStatus
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
+from agentworks.ssh import SSHResult
 from agentworks.vms import manager as vm_manager
 from tests.conftest import stub_vm_ssh_identity
+from tests.native_exec_support import ExecCall, ExecutionOnlyTransport
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
@@ -297,19 +299,25 @@ def _fake_rekey_transports(
     transport records the tailscale commands, the Tailscale-side
     verification succeeds, and the per-step stabilization sleeps cost
     nothing."""
-    from types import SimpleNamespace
-
     from agentworks.transports import SSHTransport
 
     calls: list[tuple[str, dict[str, object]]] = []
 
-    def _run(cmd: str, **kwargs: object) -> object:
-        calls.append((cmd, kwargs))
-        if cmd == "tailscale ip -4":
-            return SimpleNamespace(stdout="100.64.0.77\n", ok=True)
-        return SimpleNamespace(stdout="", ok=True)
+    def _run(call: ExecCall) -> SSHResult:
+        kwargs: dict[str, object] = {}
+        if call.sudo:
+            kwargs["sudo"] = True
+        if not call.check:
+            kwargs["check"] = False
+        if call.timeout is not None:
+            kwargs["timeout"] = call.timeout
+        if call.input_text is not None:
+            kwargs["input_text"] = call.input_text
+        calls.append((call.command, kwargs))
+        stdout = "100.64.0.77\n" if call.command == "tailscale ip -4" else ""
+        return SSHResult(returncode=0, stdout=stdout, stderr="")
 
-    native = SimpleNamespace(run=_run)
+    native = ExecutionOnlyTransport(_run)
     monkeypatch.setattr(
         "agentworks.transports.native_transport",
         lambda vm, platform, config, *, ctx, stack: native,

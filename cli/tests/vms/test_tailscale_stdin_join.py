@@ -17,6 +17,7 @@ from agentworks.errors import ProvisioningError, ValidationError
 from agentworks.plugins.gcp.bootstrap import GCE_READINESS_COMMAND, GCE_READINESS_LABEL
 from agentworks.ssh import SSHError, SSHResult
 from agentworks.vms.initializer.credentials import _join_tailscale
+from tests.native_exec_support import ExecCall, ExecutionOnlyTransport
 
 _SENTINEL = "tskey-join-'swordfish"
 
@@ -96,13 +97,20 @@ def test_bootstrap_rejects_line_unsafe_key_before_readiness_transport() -> None:
 
 def test_initializer_join_uses_fixed_stdin_once_then_updates_the_ip() -> None:
     db = MagicMock()
-    target = _RecordingTransport()
 
-    result = _join_tailscale(db, "vm1", target, auth_key=_SENTINEL)  # type: ignore[arg-type]
+    def result_for(call: ExecCall) -> SSHResult:
+        stdout = "100.64.0.77\n" if call.command == "tailscale ip -4" else ""
+        return SSHResult(returncode=0, stdout=stdout, stderr="")
+
+    target = ExecutionOnlyTransport(result_for)
+
+    result = _join_tailscale(db, "vm1", target, auth_key=_SENTINEL)
 
     assert result == "100.64.0.77"
-    _assert_fixed_stdin_call(target.calls[0], timeout=None)
-    assert target.calls[1] == ("tailscale ip -4", {"sudo": True})
+    assert target.calls == [
+        ExecCall(TAILSCALE_JOIN_STDIN_COMMAND, True, True, None, f"{_SENTINEL}\n"),
+        ExecCall("tailscale ip -4", True, True, None, None),
+    ]
     db.update_vm_tailscale.assert_called_once_with("vm1", "100.64.0.77")
 
 

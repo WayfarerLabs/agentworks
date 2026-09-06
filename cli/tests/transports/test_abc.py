@@ -13,14 +13,17 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from agentworks.capabilities.vm_platform import ProvisionResult
 from agentworks.ssh import SSHError, SSHResult
 from agentworks.transports import (
+    ExecTransport,
     LimaTransport,
     RemoteLimaTransport,
     SSHTransport,
     Transport,
     WSL2Transport,
 )
+from tests.native_exec_support import ExecutionOnlyTransport
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -34,6 +37,7 @@ REQUIRED_METHODS = {
     "copy_from",
     "call_streaming",
 }
+EXEC_REQUIRED_METHODS = {"describe", "run"}
 # ``copy_dir_to`` and ``write_file`` are concrete defaults on the ABC
 # (tarball + ``copy_to`` + remote extract; tempfile + ``copy_to``).
 # They're not in REQUIRED_METHODS because the ABC ships a working
@@ -49,6 +53,25 @@ def test_transport_is_abstract() -> None:
     """``Transport`` cannot be instantiated directly."""
     with pytest.raises(TypeError):
         Transport()  # type: ignore[abstract]
+
+
+def test_exec_transport_is_the_narrow_abstract_base() -> None:
+    with pytest.raises(TypeError):
+        ExecTransport()  # type: ignore[abstract]
+    methods = {
+        name for name, value in inspect.getmembers(ExecTransport) if getattr(value, "__isabstractmethod__", False)
+    }
+    assert methods == EXEC_REQUIRED_METHODS
+    assert issubclass(Transport, ExecTransport)
+
+
+def test_provision_result_accepts_execution_only_transport() -> None:
+    target = ExecutionOnlyTransport()
+
+    result = ProvisionResult(native_transport=target)
+
+    assert result.native_transport is target
+    assert not isinstance(target, Transport)
 
 
 def test_abc_surface_is_complete() -> None:

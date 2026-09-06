@@ -49,8 +49,10 @@ infrastructure: `lima` and `wsl2` provide local VMs on macOS and Windows, while 
 `proxmox`, `aws-ec2`, and `gcp-gce` target cloud or datacenter capacity. Whatever the backend, each
 delivers the same foundation: a Debian VM with a passwordless-sudo admin login reachable over
 Tailscale and a lifecycle (create, start, a cost-saving stop that resumes with state intact, delete)
-that Agentworks drives through the platform. See [`vm_platform/README.md`](vm_platform/README.md)
-for what a platform must provide and the specifics of each.
+that Agentworks drives through the platform. Each platform also provides Tailscale-independent
+native command execution for bootstrap and recovery. Interactive native access is optional. See
+[`vm_platform/README.md`](vm_platform/README.md) for what a platform must provide and the specifics
+of each.
 
 ### Harness Integration
 

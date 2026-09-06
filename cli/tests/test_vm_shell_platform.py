@@ -6,9 +6,9 @@ exists primarily so an operator can reach a VM to fix Tailscale itself
 (e.g. the issue #117 latched DNS state, whose heal involves stopping
 tailscaled and would terminate a Tailscale-SSH session mid-sequence).
 
-These tests pin the branching behavior in ``shell_vm`` and the typed-
-error wrapping in the native transport factory. They mock the interactive
-SSH layer so the tests stay hermetic.
+These tests pin the branching behavior in ``shell_vm`` and the early
+execution-only refusal. They mock the interactive SSH layer so the tests
+stay hermetic.
 """
 
 from __future__ import annotations
@@ -65,17 +65,23 @@ def _seed_db(
 
 
 def _stub_target() -> object:
-    """Minimal ``Transport``-shaped object that ``interactive`` and the
-    reachability probe in ``native_transport`` both accept.
+    """Full transport double accepted by the platform-shell narrowing.
 
     ``run`` returns an SSHResult-shaped object so ``target.run('echo ok',
     timeout=10)`` succeeds without invoking a real subprocess.
     ``interactive`` is the polymorphic method the shell flow calls.
     """
-    return SimpleNamespace(
-        run=lambda *_a, **_k: SimpleNamespace(returncode=0, stdout="ok", stderr="", ok=True),
-        interactive=lambda *_a, **_k: 0,
+    from agentworks.transports import SSHTransport
+
+    target = SSHTransport(host="203.0.113.8")
+    target.run = lambda *_a, **_k: SimpleNamespace(  # type: ignore[method-assign, assignment]
+        returncode=0,
+        stdout="ok",
+        stderr="",
+        ok=True,
     )
+    target.interactive = lambda *_a, **_k: 0  # type: ignore[method-assign, assignment]
+    return target
 
 
 class _NullCM:
@@ -211,6 +217,7 @@ def test_shell_vm_platform_uses_native_transport(
 
     class _StubPlatform:
         name = "stub"
+        native_shell_unavailable_hint = None
 
         def preflight(self, ctx: object) -> None:
             return None
@@ -258,101 +265,41 @@ def test_shell_vm_platform_uses_native_transport(
     db.close()
 
 
-# -- Typed-error wrapping for unavailable native transports ------------------
+# -- Execution-only platform refusal -----------------------------------------
 
 
-def test_native_transport_wraps_missing_native_transport(
+def test_shell_vm_refuses_execution_only_platform_before_boundary_work(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A ``None`` from the platform's ``native_transport`` (proxmox: the
-    one-shot guest-agent exec can't host a shell) is wrapped into a typed
-    StateError so the CLI renders it as a one-liner rather than leaking a
-    Python traceback."""
-    import contextlib
-
-    from agentworks.transports import native_transport as _native_transport
-    from agentworks.vms import manager as vm_manager
-
-    db = _seed_db(tmp_path, platform="lima")
-
-    class _UnsupportedPlatform:
-        name = "stub"
-        no_native_transport_hint = "no interactive transport here"
-
-        def native_transport(self, vm: object, ctx: object, *, config: object | None = None) -> object | None:
-            return None
-
-        @contextlib.contextmanager  # type: ignore[arg-type]
-        def transient_route(self, vm: object, ctx: object, *, config: object | None = None):  # type: ignore[no-untyped-def]
-            yield
-
-    # The platform arrives already bound from the caller's composition
-    # root (the orchestrated node's site edge); hand the stub directly.
-    vm = vm_manager._require_vm(db, "vm1")
-    with contextlib.ExitStack() as stack, pytest.raises(StateError) as exc_info:
-        _native_transport(
-            vm,
-            _UnsupportedPlatform(),
-            _make_config(),
-            ctx=RunContext(),
-            stack=stack,
-        )  # type: ignore[arg-type]
-
-    err = exc_info.value
-    assert err.entity_kind == "vm"
-    assert "No native transport" in str(err)
-    db.close()
-
-
-def test_native_transport_proxmox_hint_points_at_web_console(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """On Proxmox the ``None`` return carries a hint pointing the operator
-    at the web UI's serial console. The guest agent's exec interface can't
-    carry an interactive session, so the web console is the realistic
-    escape hatch and the operator should hear that directly."""
-    import contextlib
-
-    from agentworks.transports import native_transport as _native_transport
+    """A declared lack of interaction refuses before secret or provider work."""
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path, platform="proxmox")
-
     from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
-    class _ProxmoxPlatformStub:
-        name = "proxmox"
-        # The real platform's hint: this test pins the operator-facing
-        # prose, so read it from the class rather than restating it.
-        no_native_transport_hint = ProxmoxPlatform.no_native_transport_hint
+    platform = SimpleNamespace(
+        name="proxmox",
+        native_shell_unavailable_hint=ProxmoxPlatform.native_shell_unavailable_hint,
+    )
+    monkeypatch.setattr("agentworks.vms.sites.resolve_site", lambda *_a, **_k: platform)
 
-        def native_transport(self, vm: object, ctx: object, *, config: object | None = None) -> object | None:
-            return None
+    def forbidden(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("early native-shell refusal reached boundary work")
 
-        @contextlib.contextmanager  # type: ignore[arg-type]
-        def transient_route(self, vm: object, ctx: object, *, config: object | None = None):  # type: ignore[no-untyped-def]
-            yield
+    monkeypatch.setattr(vm_manager, "gated_vm_platform_recovery_boundary", forbidden)
+    monkeypatch.setattr(vm_manager, "_resolve_vm_admin_env_scopes", forbidden)
+    monkeypatch.setattr("agentworks.transports.native_transport", forbidden)
 
-    vm = vm_manager._require_vm(db, "vm1")
-    with contextlib.ExitStack() as stack, pytest.raises(StateError) as exc_info:
-        _native_transport(
-            vm,
-            _ProxmoxPlatformStub(),
-            _make_config(),
-            ctx=RunContext(),
-            stack=stack,
-        )  # type: ignore[arg-type]
+    with pytest.raises(StateError):
+        vm_manager.shell_vm(
+            db,
+            _make_config(),  # type: ignore[arg-type]
+            "vm1",
+            platform_transport=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
 
-    err = exc_info.value
-    assert err.entity_kind == "vm"
-    hint = err.hint or ""
-    # Proxmox-specific guidance: point at the web UI's serial console as
-    # the equivalent of the per-platform escape hatch other platforms
-    # have (limactl shell, wsl.exe, Azure public IP attach).
-    assert "serial console" in hint
-    assert "Proxmox VE web UI" in hint
     db.close()
 
 

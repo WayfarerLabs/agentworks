@@ -794,7 +794,7 @@ class AzureVMPlatform(VMPlatform):
         ctx: RunContext,
         *,
         config: Config | None = None,
-    ) -> Transport | None:
+    ) -> Transport:
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
         compute = self._compute_client(az_cfg, ctx)
         network = self._network_client(az_cfg, ctx)

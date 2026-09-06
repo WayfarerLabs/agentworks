@@ -13,7 +13,7 @@ from agentworks.ssh import SSHError
 
 if TYPE_CHECKING:
     from agentworks.db import Database
-    from agentworks.transports import Transport
+    from agentworks.transports import ExecTransport
 
 
 def verify_tailscale_available() -> None:
@@ -43,7 +43,7 @@ def verify_tailscale_available() -> None:
 def rejoin_tailscale(
     db: Database,
     vm_name: str,
-    exec_target: Transport,
+    exec_target: ExecTransport,
     *,
     auth_key: str,
 ) -> str:
@@ -70,7 +70,7 @@ def rejoin_tailscale(
 def _join_tailscale(
     db: Database,
     vm_name: str,
-    exec_target: Transport,
+    exec_target: ExecTransport,
     *,
     auth_key: str,
 ) -> str:

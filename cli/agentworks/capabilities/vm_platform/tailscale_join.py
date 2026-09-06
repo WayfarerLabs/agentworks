@@ -10,7 +10,7 @@ from agentworks.errors import ProvisioningError
 from agentworks.ssh import SSHError
 
 if TYPE_CHECKING:
-    from agentworks.transports import Transport
+    from agentworks.transports import ExecTransport
 
 TAILSCALE_JOIN_STDIN_COMMAND = (
     'IFS= read -r TAILSCALE_AUTH_KEY && test -n "$TAILSCALE_AUTH_KEY" && tailscale up --auth-key "$TAILSCALE_AUTH_KEY"'
@@ -20,7 +20,7 @@ DEFAULT_READINESS_LABEL = "cloud-init"
 
 
 def join_tailscale_ephemerally(
-    target: Transport,
+    target: ExecTransport,
     auth_key: str,
     *,
     timeout: int | None = None,
@@ -53,7 +53,7 @@ class EphemeralTailscaleBootstrap:
 
     def __init__(
         self,
-        target: Transport,
+        target: ExecTransport,
         *,
         readiness_command: str = DEFAULT_READINESS_COMMAND,
         readiness_label: str = DEFAULT_READINESS_LABEL,

@@ -602,7 +602,6 @@ def test_lifecycle_is_idempotent_live_ip_and_transient_routes_are_distinct(
     platform.start(vm, _ctx())
     assert len(instances.start_requests) == 1
     native = platform.native_transport(vm, _ctx())
-    assert native is not None
     assert cast("Any", native).host == "203.0.113.20"
 
     with platform.transient_route(vm, _ctx()):
@@ -620,6 +619,21 @@ def test_lifecycle_is_idempotent_live_ip_and_transient_routes_are_distinct(
     assert instances.resource is None
     assert firewalls.resources == {}
     assert len(instances.delete_requests) == 1
+
+
+def test_native_transport_fails_when_the_owned_instance_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform, cache = _platform(monkeypatch, _Transport())
+    result = platform.create(_request(), _ctx())
+    vm = _vm(result.platform_metadata)
+    cache.instances.resource = None
+
+    with pytest.raises(StateError) as caught:
+        platform.native_transport(vm, _ctx())
+
+    assert caught.value.entity_kind == "vm"
+    assert caught.value.entity_name == vm.name
 
 
 @pytest.mark.parametrize(

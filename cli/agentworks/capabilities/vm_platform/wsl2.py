@@ -894,7 +894,7 @@ class WSL2Platform(VMPlatform):
         ctx: RunContext,
         *,
         config: Config | None = None,
-    ) -> Transport | None:
+    ) -> Transport:
         # ctx is unused: wsl.exe is local and needs no backend credential.
         return WSL2Transport(distro_name=self._distro_name(vm), user=vm.admin_username)
 

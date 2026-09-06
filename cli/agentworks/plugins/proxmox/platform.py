@@ -27,14 +27,15 @@ from agentworks.plugins.proxmox.teardown import (
     rollback_partial_create,
     stop_and_delete_vm,
 )
+from agentworks.plugins.proxmox.transport import ProxmoxExecTransport
 from agentworks.schema import AgwModel, NonEmptyStr, PositiveInt, SecretRef
 from agentworks.topics import TopicProse
-from agentworks.transports import SSHTransport
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.capabilities.base import RunContext
+    from agentworks.config import Config
     from agentworks.db import VMRow
 
 
@@ -136,14 +137,12 @@ class ProxmoxPlatform(VMPlatform):
         resolved through the configured source chain like any other secret. The token id is not a
         secret and is written in the document.
 
-        Proxmox does not currently implement the required native administrative transport
-        that works independently of the VM's Tailscale state. The QEMU guest agent's exec
-        interface provides the needed non-interactive foundation; issue #727 tracks the
-        transport correction. Until then, use the Proxmox web UI's serial console for manual
-        access.
+        QEMU Guest Agent provides Tailscale-independent administrative execution for
+        bootstrap and recovery. Interactive native shell remains unavailable; use the
+        Proxmox web UI's serial console for manual access.
 
         Creation passes the required Tailscale key through a private guest-agent staging
-        file and verifies removal of that file before returning a Tailscale-backed transport.
+        file and verifies removal of that file before returning the QGA execution transport.
         Core checks the live Debian release through the returned transport. A bootstrap
         failure rolls the cloned VM back; a later core mismatch retains an addressable failed
         VM for explicit deletion.
@@ -152,9 +151,9 @@ class ProxmoxPlatform(VMPlatform):
         `[plugins] system` lists it.
         """,
     )
-    no_native_transport_hint: ClassVar[str] = (
-        "Proxmox does not yet implement the required native administrative "
-        "transport (#727). Use the Proxmox web UI's serial console "
+    native_shell_unavailable_hint: ClassVar[str] = (
+        "Proxmox QEMU Guest Agent does not provide an interactive native shell. "
+        "Use the Proxmox web UI's serial console "
         "(VM > Console in the Proxmox VE web UI) for manual access."
     )
 
@@ -412,10 +411,11 @@ class ProxmoxPlatform(VMPlatform):
                     raise ProvisioningError("Proxmox bootstrap did not return a Tailscale IP")
                 output.detail(f"Tailscale IP: {tailscale_ip}")
 
-                target = SSHTransport(
-                    host=tailscale_ip,
-                    user=request.admin_username,
-                    identity_file=request.ssh_private_key,
+                target = ProxmoxExecTransport(
+                    self._api(ctx),
+                    node=node,
+                    vmid=newid,
+                    admin_username=request.admin_username,
                 )
             except Exception:
                 # Re-raised unwrapped after rollback: the manager preserves
@@ -485,9 +485,21 @@ class ProxmoxPlatform(VMPlatform):
         node = vm.platform_metadata.get("node") or self.config.node
         return f"{vmid}@{node}"
 
-    # native_transport: inherited None default. This is a known contract
-    # violation (#727), not an optional capability. The transports factory
-    # raises the typed StateError with the web-console hint.
+    def native_transport(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        config: Config | None = None,
+    ) -> ProxmoxExecTransport:
+        """Build the VM's Tailscale-independent QGA execution channel."""
+        del config
+        return ProxmoxExecTransport(
+            self._api(ctx),
+            node=self._vm_node(vm),
+            vmid=self._vmid(vm),
+            admin_username=vm.admin_username,
+        )
 
     # -- Helpers ---------------------------------------------------------------
 

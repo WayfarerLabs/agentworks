@@ -456,6 +456,7 @@ class _StubPlatform:
     """
 
     name = "stub"
+    native_shell_unavailable_hint = None
 
     def preflight(self, ctx: object) -> None:
         return None

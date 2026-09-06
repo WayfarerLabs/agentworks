@@ -22,7 +22,9 @@ from typing import TYPE_CHECKING, Any
 
 from agentworks import output
 from agentworks.capabilities.base import RunContext
+from agentworks.ssh import SSHResult
 from agentworks.vms import manager as vm_manager
+from tests.native_exec_support import ExecutionOnlyTransport
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -33,16 +35,25 @@ _OPEN_LINE = "Opening SSH route (allow scoped to 198.51.100.7/32)..."
 _CLOSE_LINE = "Closing SSH route (removing allow rule 'allow-ssh-transient-cafe0001')..."
 
 
-class _RecordingTransport:
+class _RecordingTransport(ExecutionOnlyTransport):
     """Stand-in transport: the factory's reachability probe and the
     logout dispatch both succeed, and every command is recorded."""
 
     def __init__(self) -> None:
+        super().__init__()
         self.commands: list[str] = []
 
-    def run(self, command: str, **kwargs: object) -> object:
+    def run(
+        self,
+        command: str,
+        *,
+        sudo: bool = False,
+        check: bool = True,
+        timeout: int | None = None,
+        input_text: str | None = None,
+    ) -> SSHResult:
         self.commands.append(command)
-        return None
+        return super().run(command, sudo=sudo, check=check, timeout=timeout, input_text=input_text)
 
 
 class _AzureShapedPlatform:
@@ -134,10 +145,18 @@ def test_failed_dispatch_still_warns_without_success_line(captured_output: Captu
     raises warns and never prints the success message."""
 
     class _FailingTransport(_RecordingTransport):
-        def run(self, command: str, **kwargs: object) -> object:
+        def run(
+            self,
+            command: str,
+            *,
+            sudo: bool = False,
+            check: bool = True,
+            timeout: int | None = None,
+            input_text: str | None = None,
+        ) -> SSHResult:
             if "tailscale down" in command:
                 raise RuntimeError("ssh died mid-logout")
-            return super().run(command, **kwargs)
+            return super().run(command, sudo=sudo, check=check, timeout=timeout, input_text=input_text)
 
     platform: Any = _AzureShapedPlatform(_FailingTransport())
     vm_manager._tailscale_logout(_fake_vm(), _fake_config(), platform, RunContext())

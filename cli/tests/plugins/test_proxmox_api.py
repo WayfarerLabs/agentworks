@@ -135,6 +135,74 @@ class TestResponseParsing:
         assert len(result) == 2
         assert result[1]["name"] == "eth0"
 
+    @patch("urllib.request.urlopen")
+    def test_guest_agent_exec_sends_argv_and_optional_input(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
+        mock_urlopen.return_value = _mock_response({"pid": 42})
+
+        pid = api.guest_agent_exec(
+            "pve",
+            100,
+            command=["/bin/bash", "-lc", "read value"],
+            input_data="sensitive input\n",
+            timeout=9.5,
+        )
+
+        req = mock_urlopen.call_args.args[0]
+        assert pid == 42
+        assert req.get_method() == "POST"
+        assert json.loads(req.data) == {
+            "command": ["/bin/bash", "-lc", "read value"],
+            "input-data": "sensitive input\n",
+        }
+        assert mock_urlopen.call_args.kwargs["timeout"] == 9.5
+
+    @patch("urllib.request.urlopen")
+    def test_guest_agent_exec_omits_input_for_immediate_eof(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
+        mock_urlopen.return_value = _mock_response({"pid": 42})
+
+        api.guest_agent_exec("pve", 100, command=["/bin/true"])
+
+        req = mock_urlopen.call_args.args[0]
+        assert json.loads(req.data) == {"command": ["/bin/true"]}
+
+    @patch("urllib.request.urlopen")
+    def test_guest_agent_exec_status_reads_pid(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
+        status = {"exited": True, "exitcode": 0}
+        mock_urlopen.return_value = _mock_response(status)
+
+        assert api.guest_agent_exec_status("pve", 100, pid=42, timeout=3) == status
+
+        req = mock_urlopen.call_args.args[0]
+        assert req.get_method() == "GET"
+        assert req.full_url.endswith("/nodes/pve/qemu/100/agent/exec-status?pid=42")
+        assert mock_urlopen.call_args.kwargs["timeout"] == 3
+
+    @pytest.mark.parametrize("response", [None, [], "invalid"])
+    @patch("urllib.request.urlopen")
+    def test_guest_agent_exec_status_rejects_malformed_data(
+        self,
+        mock_urlopen: MagicMock,
+        api: ProxmoxAPI,
+        response: object,
+    ) -> None:
+        mock_urlopen.return_value = _mock_response(response)
+
+        with pytest.raises(ProxmoxAPIError):
+            api.guest_agent_exec_status("pve", 100, pid=42)
+
+    @pytest.mark.parametrize("response", [None, {}, {"pid": None}, {"pid": "42"}, {"pid": True}])
+    @patch("urllib.request.urlopen")
+    def test_guest_agent_exec_rejects_malformed_pid(
+        self,
+        mock_urlopen: MagicMock,
+        api: ProxmoxAPI,
+        response: object,
+    ) -> None:
+        mock_urlopen.return_value = _mock_response(response)
+
+        with pytest.raises(ProxmoxAPIError):
+            api.guest_agent_exec("pve", 100, command=["/bin/true"])
+
 
 class TestErrorHandling:
     """Test error handling."""

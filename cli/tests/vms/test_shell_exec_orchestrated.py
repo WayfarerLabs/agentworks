@@ -11,7 +11,6 @@ transport are the fakes.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -20,6 +19,7 @@ from agentworks.db import VersionedPayload, VMStatus
 from agentworks.errors import StateError, ValidationError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
+from agentworks.transports import SSHTransport
 from agentworks.vms import manager as vm_manager
 from tests.conftest import ManifestDoc, stub_vm_ssh_identity
 
@@ -658,10 +658,13 @@ def test_shell_platform_transport_routes_through_the_node_platform(
     _seed_vm(db)
     _reachable(monkeypatch, True)
     seen: list[object] = []
+    target = SSHTransport(host="203.0.113.8")
+    target.interactive = lambda *_args, **_kwargs: 0  # type: ignore[method-assign]
+    monkeypatch.setattr(ProxmoxPlatform, "native_shell_unavailable_hint", None)
 
-    def _fake_native(vm: object, platform: object, cfg: object, *, ctx: object, stack: object) -> object:
+    def _fake_native(vm: object, platform: object, cfg: object, *, ctx: object, stack: object) -> SSHTransport:
         seen.append(platform)
-        return SimpleNamespace(interactive=lambda cmd, **k: 0)
+        return target
 
     monkeypatch.setattr("agentworks.transports.native_transport", _fake_native)
 
@@ -700,10 +703,20 @@ def test_shell_platform_transport_hands_a_secret_bearing_ctx(
     _seed_vm(db)
     _reachable(monkeypatch, True)
     seen: list[RunContext] = []
+    target = SSHTransport(host="203.0.113.8")
+    target.interactive = lambda *_args, **_kwargs: 0  # type: ignore[method-assign]
+    monkeypatch.setattr(ProxmoxPlatform, "native_shell_unavailable_hint", None)
 
-    def _fake_native(vm: object, platform: object, cfg: object, *, ctx: RunContext, stack: object) -> object:
+    def _fake_native(
+        vm: object,
+        platform: object,
+        cfg: object,
+        *,
+        ctx: RunContext,
+        stack: object,
+    ) -> SSHTransport:
         seen.append(ctx)
-        return SimpleNamespace(interactive=lambda cmd, **k: 0)
+        return target
 
     monkeypatch.setattr("agentworks.transports.native_transport", _fake_native)
     monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: None)

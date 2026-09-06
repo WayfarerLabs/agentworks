@@ -111,6 +111,17 @@ def shell_vm(
     from agentworks.bootstrap import load_request_registry
 
     registry = load_request_registry(config, live_database=db)
+    if platform_transport:
+        from agentworks.vms.sites import resolve_site
+
+        platform = resolve_site(vm.site, registry)
+        if platform.native_shell_unavailable_hint is not None:
+            raise StateError(
+                f"VM platform '{platform.name}' does not provide an interactive native shell.",
+                entity_kind="vm",
+                entity_name=vm.name,
+                hint=platform.native_shell_unavailable_hint,
+            )
     scopes = _mgr._resolve_vm_admin_env_scopes(db, registry, vm, ws=ws)
 
     boundary = gated_vm_platform_recovery_boundary if platform_transport else gated_vm_boundary
@@ -148,11 +159,20 @@ def shell_vm(
         # cloud backend is an authenticated call: it gets the boundary's
         # op-start context (site secrets scoped to the site's declared
         # names), the same one the no-gate power commands hand their ops.
-        target = (
-            native_transport(vm, vm_node.site.platform, config, ctx=ops_ctx, stack=stack)
-            if platform_transport
-            else transport(vm, config)
-        )
+        if platform_transport:
+            from agentworks.transports import Transport
+
+            target = native_transport(vm, vm_node.site.platform, config, ctx=ops_ctx, stack=stack)
+            if not isinstance(target, Transport):
+                raise StateError(
+                    f"VM platform '{vm_node.site.platform.name}' declared native shell support "
+                    "but returned an execution-only transport.",
+                    entity_kind="vm",
+                    entity_name=vm.name,
+                    hint="Update Agentworks so the VM platform and core capability contract match.",
+                )
+        else:
+            target = transport(vm, config)
         if ws is not None:
             cmd = f"cd {shlex.quote(ws.workspace_path)} && exec $SHELL -l"
             return target.interactive(cmd, env=env)

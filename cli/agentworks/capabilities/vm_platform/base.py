@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import VMRow, VMStatus
     from agentworks.debian import DebianRelease
-    from agentworks.transports import Transport
+    from agentworks.transports import ExecTransport
 
 
 class BootstrapProgress(Protocol):
@@ -105,7 +105,7 @@ class ProvisionResult:
     strings.
     """
 
-    native_transport: Transport
+    native_transport: ExecTransport
     platform_metadata: dict[str, str] = field(default_factory=dict)
     tailscale_ip: str | None = None
 
@@ -184,8 +184,9 @@ class VMPlatform(Capability):
         """
         return None
 
-    # Operator guidance shown when native_transport returns None.
-    no_native_transport_hint: ClassVar[str] = "This platform has no interactive native transport."
+    # Operator guidance shown before attempting a native interactive shell.
+    # None means the platform declares full native interaction.
+    native_shell_unavailable_hint: ClassVar[str | None] = None
 
     # Operator guidance warned when every reachability probe of the
     # native transport fails (the transports factory emits it just
@@ -325,20 +326,14 @@ class VMPlatform(Capability):
         proxmox ``vmid@node``). Reads ``vm.platform_metadata``.
         """
 
-    def native_transport(self, vm: VMRow, ctx: RunContext, *, config: Config | None = None) -> Transport | None:
-        """Platform-native :class:`Transport` for Tailscale recovery and
-        ``vm shell --platform``.
-
-        The contract requires this transport to work independently of the VM's
-        Tailscale state. The optional return and default ``None`` temporarily
-        preserve the current non-compliant Proxmox behavior (#727); they do not
-        make the transport optional for an implementation.
+    @abstractmethod
+    def native_transport(self, vm: VMRow, ctx: RunContext, *, config: Config | None = None) -> ExecTransport:
+        """Build the required Tailscale-independent execution transport.
 
         Callers reach this through the
         :func:`agentworks.transports.native_transport` factory, which
-        wraps the call in :meth:`transient_route`, applies the
-        reachability probe, and raises a typed ``StateError`` (with the
-        platform's console hint) on ``None``.
+        wraps the call in :meth:`transient_route` and applies the
+        reachability probe.
 
         ``ctx`` is the op-start :class:`RunContext`, exactly as the ops
         receive it (see :meth:`create`): building a native transport is
@@ -351,7 +346,6 @@ class VMPlatform(Capability):
         ``config.operator.ssh_private_key`` for the public-IP path),
         distinct from the bound ``platform_config``.
         """
-        return None
 
     def post_tailscale_ready(self, vm: VMRow, ctx: RunContext) -> None:  # noqa: B027  # intentional concrete no-op
         """Hook called once the VM's Tailscale node is up during create.

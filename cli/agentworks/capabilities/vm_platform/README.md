@@ -74,9 +74,11 @@ A vm-platform stands up a machine and hands Agentworks an administrative foothol
   matches.
 - **MUST NOT** gate existing-VM operations on the current creation release or image catalog.
 - **MUST** create the configured admin with passwordless `sudo`, SSH-key access, and no password.
-- **MUST** provide a native administrative `Transport` that runs arbitrary commands as the admin
-  without depending on the VM's Tailscale state or identity. Proxmox does not currently satisfy this
-  obligation ([#727](https://github.com/WayfarerLabs/agentworks/issues/727)).
+- **MUST** provide a native administrative `ExecTransport` that runs bounded, non-interactive
+  commands as the admin or root without depending on the VM's Tailscale state or identity.
+- Native interactive shell, streaming, and file transfer are optional. A platform that lacks native
+  interaction **MUST** declare `native_shell_unavailable_hint` with usable provider-console
+  guidance.
 - **MUST** complete the Tailscale join before returning from `create()`.
 - **MUST** honor requested CPU, memory, and disk, rounding up to an available shape if needed. A
   backend that cannot set a per-VM shape **MUST** warn instead
@@ -202,24 +204,22 @@ or implementing a no-op still violates the contract and must be caught by review
 registration does not attempt to infer method semantics or ask a platform to interpret Debian's
 current release.
 
-**Transport and lifecycle hooks** (sensible defaults on `VMPlatform`; implementations override only
-what their backends need). All are entered by callers that gate first, so on entry the VM is running
-or was just started. The three transport hooks take `ctx: RunContext` for the same reason the ops
-do: opening a route to a cloud VM is a backend call, so a platform reads any credential it needs
-from `ctx.secret(name)` here exactly as in an op. Lima and WSL2 accept and ignore it (their
-transports are local); Azure, EC2, and GCE use it:
+**Transport and lifecycle hooks.** `native_transport` is required; the remaining hooks have sensible
+defaults. All are entered by callers that gate first, so on entry the VM is running or was just
+started. The three transport hooks take `ctx: RunContext` for the same reason the ops do: opening a
+route to a cloud VM is a backend call, so a platform reads any credential it needs from
+`ctx.secret(name)` here exactly as in an op. Lima and WSL2 accept and ignore it (their transports
+are local); Azure, EC2, GCE, and Proxmox use it:
 
-- `native_transport(vm, ctx, *, config=None) -> Transport | None`. The contract requires a
-  `Transport` that remains usable when the VM's Tailscale state or identity is unavailable. The
-  optional return and default `None` remain as compatibility for the currently non-compliant Proxmox
-  implementation ([#727](https://github.com/WayfarerLabs/agentworks/issues/727)); they do not make
-  the transport optional. The `agentworks.transports.native_transport` factory wraps the call in
-  `transient_route`, probes reachability with an `echo ok` retry loop, and raises a typed
-  `StateError` (using `no_native_transport_hint`) when a platform returns `None`. Lima returns a
-  `limactl shell` transport, Azure, EC2, and GCE an `SSHTransport` against the VM's current public
-  IP (Azure reads its persistent address live off the NIC; EC2 reads its address live off a fresh
-  `describe_instances`, because EC2 reassigns the auto-assigned IP across stop/start; GCE likewise
-  reads its lifetime ephemeral access config live), WSL2 a `wsl.exe`-backed transport.
+- `native_transport(vm, ctx, *, config=None) -> ExecTransport`. The required result remains usable
+  when the VM's Tailscale state or identity is unavailable. The
+  `agentworks.transports.native_transport` factory wraps the call in `transient_route` and probes
+  reachability with an `echo ok` retry loop. Lima, WSL2, Azure, EC2, and GCE return their full
+  interactive `Transport`: local platform CLIs for Lima and WSL2, and SSH against the current public
+  IP for the cloud platforms. Proxmox returns an execution-only QEMU Guest Agent transport. Core
+  uses only `ExecTransport` for native bootstrap and recovery. `vm shell --platform` is the sole
+  caller that requires the full subtype; it checks `native_shell_unavailable_hint` before route,
+  credential, transport, or probe work.
 - `transient_route(vm, ctx, *, config=None) -> context manager` (default `nullcontext()`). Azure
   opens a scoped SSH route on enter (heals a missing public IP, converges the NSG onto the
   baseline-deny model, pokes this operation's own ephemeral allow rule scoped to the operator's
@@ -772,8 +772,8 @@ A new `Transport` subclass belongs under `cli/tests/transports/` alongside the p
 - `agentworks.vms.sites`: how a `vm-site` binds a platform to config.
 - `agentworks.vms.nodes`: the `vm-site` / live-VM nodes that hold and drive a platform instance
   under the orchestration layer.
-- `agentworks.transports`: the `Transport` ABC and the `native_transport` factory that wraps
-  `transient_route`.
+- `agentworks.transports`: the `ExecTransport` and full `Transport` ABCs, plus the
+  `native_transport` factory that wraps `transient_route`.
 - `docs/guides/idempotency.md`: the canonical table of what `vm reinit` reconciles.
 - ADR 0012: VM hardening at init.
 - ADR 0016: the `vm-platform` capability / `vm-site` declarable split.

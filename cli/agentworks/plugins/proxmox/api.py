@@ -235,30 +235,67 @@ class ProxmoxAPI:
         Proxmox 8 requires the command as a JSON array sent with
         Content-Type: application/json.
         """
-        cmd_array = [command] + (args or [])
+        deadline = time.monotonic() + timeout
+        pid = self.guest_agent_exec(
+            node,
+            vmid,
+            command=[command, *(args or [])],
+            timeout=max(deadline - time.monotonic(), 0.001),
+        )
+        while time.monotonic() < deadline:
+            status = self.guest_agent_exec_status(
+                node,
+                vmid,
+                pid=pid,
+                timeout=max(deadline - time.monotonic(), 0.001),
+            )
+            if status.get("exited") is True:
+                return status
+            time.sleep(min(2, max(deadline - time.monotonic(), 0)))
 
+        return None
+
+    def guest_agent_exec(
+        self,
+        node: str,
+        vmid: int,
+        *,
+        command: list[str],
+        input_data: str | None = None,
+        timeout: float | None = None,
+    ) -> int:
+        """Dispatch one QGA command and return its provider PID."""
+        payload: dict[str, Any] = {"command": command}
+        if input_data is not None:
+            payload["input-data"] = input_data
         result = self._request(
             "POST",
             f"/nodes/{node}/qemu/{vmid}/agent/exec",
-            {"command": cmd_array},
+            payload,
             json_body=True,
+            timeout=timeout,
         )
-        pid = result.get("pid") if result else None
-        if pid is None:
-            return None
+        if not isinstance(result, dict) or type(result.get("pid")) is not int:
+            raise ProxmoxAPIError("Proxmox guest-agent exec returned a malformed response")
+        return int(result["pid"])
 
-        # Poll for completion
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            status = self._request(
-                "GET",
-                f"/nodes/{node}/qemu/{vmid}/agent/exec-status?pid={pid}",
-            )
-            if status and status.get("exited"):
-                return status  # type: ignore[no-any-return]
-            time.sleep(2)
-
-        return None
+    def guest_agent_exec_status(
+        self,
+        node: str,
+        vmid: int,
+        *,
+        pid: int,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        """Read one QGA command's current status."""
+        result = self._request(
+            "GET",
+            f"/nodes/{node}/qemu/{vmid}/agent/exec-status?pid={pid}",
+            timeout=timeout,
+        )
+        if not isinstance(result, dict):
+            raise ProxmoxAPIError("Proxmox guest-agent exec-status returned a malformed response")
+        return result
 
     def guest_agent_file_write(self, node: str, vmid: int, path: str, content: str) -> None:
         """Write a file inside the VM via the guest agent.

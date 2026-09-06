@@ -795,7 +795,7 @@ class LimaPlatform(VMPlatform):
         ctx: RunContext,
         *,
         config: Config | None = None,
-    ) -> Transport | None:
+    ) -> Transport:
         # ctx is unused: limactl (local or over the placement host SSH hop)
         # needs no backend credential.
         return self._transport_for(self._instance_name(vm))

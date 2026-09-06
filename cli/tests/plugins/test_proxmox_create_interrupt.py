@@ -37,7 +37,7 @@ from agentworks.debian import DebianRelease
 from agentworks.errors import ProvisioningError
 from agentworks.plugins.proxmox.api import ProxmoxAPIError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
-from agentworks.transports import SSHTransport
+from agentworks.plugins.proxmox.transport import ProxmoxExecTransport
 
 if TYPE_CHECKING:
     from agentworks.db import VMRow
@@ -658,10 +658,7 @@ class TestPlainFailure:
 
 class TestProvisionResultTransport:
     """The transport a successful ``create`` hands back (#345): a
-    guest-facing ``SSHTransport`` aimed at the VM's Tailscale endpoint.
-    Proxmox's provisioning transport was once missing entirely, so
-    ``create`` returning a well-formed one for the right guest is the
-    invariant worth pinning."""
+    QGA execution channel bound to the created VM."""
 
     def test_provisioning_transport_targets_the_guest(self, monkeypatch: pytest.MonkeyPatch) -> None:
         platform, _fake = _platform_with_fake(monkeypatch)
@@ -669,9 +666,10 @@ class TestProvisionResultTransport:
         result = platform.create(_request(tailscale=False), RunContext())
 
         target = result.native_transport
-        assert isinstance(target, SSHTransport)
-        assert target.host == "100.64.0.7"
-        assert target.user == "agentworks"
+        assert isinstance(target, ProxmoxExecTransport)
+        assert target.node == "pve1"
+        assert target.vmid == _NEWID
+        assert target.admin_username == "agentworks"
 
 
 class TestDeleteOpUnchanged:

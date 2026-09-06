@@ -139,9 +139,9 @@ A site without `template_vmids.trixie` remains loadable for best-effort operatio
 New VM creation validates the concrete core-selected release during preflight and fails before the
 command's secret-resolution phase or Proxmox API authentication when that mapping is missing. After
 cloning and bootstrapping the mapped template, core verifies the live guest's `/etc/os-release`
-through the returned Tailscale SSH transport. A missing, non-Debian, or wrong-release observation
-retains an addressable failed VM row for explicit deletion. There is no configuration switch to skip
-the check.
+through the returned QEMU Guest Agent execution transport. A missing, non-Debian, or wrong-release
+observation retains an addressable failed VM row for explicit deletion. There is no configuration
+switch to skip the check.
 
 For 0.13 configuration migration, see [Upgrading to 0.14](upgrading-to-0.14.md).
 
@@ -189,13 +189,15 @@ agw vm describe test-vm
 agw vm delete test-vm
 ```
 
-### Native transport limitation
+### Native recovery and interactive access
 
-Proxmox does not currently implement the required administrative transport that works independently
-of the VM's Tailscale state. Consequently, `vm shell --platform`, start-time Tailscale rejoin, and
-`vm rekey` cannot use Proxmox to recover a broken VM registration. Use the Proxmox web UI's serial
-console for manual access. [Issue #727](https://github.com/WayfarerLabs/agentworks/issues/727)
-tracks the native execution transport.
+Agentworks uses QEMU Guest Agent for Tailscale-independent administrative commands. Start-time
+Tailscale rejoin, `vm rekey`, logout during deletion, and create-time release verification therefore
+remain available when Tailscale SSH is unavailable.
+
+QEMU Guest Agent does not provide an interactive terminal, so `vm shell --platform` is unavailable
+for Proxmox. Use the Proxmox web UI's serial console for interactive access. Normal Agentworks work
+continues to use Tailscale SSH and never falls back to QGA automatically.
 
 ## How it works
 
@@ -206,8 +208,8 @@ When you run `agw vm create <name> --site proxmox`:
 3. Starts the VM and waits for the QEMU guest agent to report an IP
 4. Waits for cloud-init and runs the private bootstrap script through QEMU Guest Agent
 5. The bootstrap installs system packages, configures the admin user, and joins Tailscale
-6. Returns Tailscale SSH to core, which verifies the live Debian release and completes
-   initialization
+6. Returns the QGA execution transport to core, which verifies the live Debian release
+7. Switches to Tailscale SSH and completes initialization
 
 After provisioning, normal operations use Tailscale SSH, as they do on Lima and Azure VMs.
 
