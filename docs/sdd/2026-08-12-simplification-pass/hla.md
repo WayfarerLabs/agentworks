@@ -137,6 +137,15 @@ is cost rather than coverage, does not reach an assertion that also fails when a
 breaks. (Operator ruling, 2026-08-16; this is what R2.4's "case by case, mostly by deletion" means,
 not a loosening of it.)
 
+### A platform-conditional path is covered, not speculative
+
+At HEAD the suite runs on `windows-latest` in CI, in the `test-windows` job that `ci-success`
+requires, per [.github/workflows/ci.yml](../../../.github/workflows/ci.yml), after PR #747 made it
+pass there. So a test guarding a platform-conditional path is CI coverage rather than inert
+generality, and the delete criteria treat it as live coverage: the branch it guards runs on every
+pull request, and deleting the test drops real branch coverage rather than retiring an abstraction
+nothing exercises. (Effort lead, 2026-09-06.)
+
 ## Guidance delivery
 
 Wave 0 first resolves rule delivery (issue #511), then amends the two existing rules
