@@ -15,96 +15,54 @@ settled, eight after the 2026-08-19 re-baseline emptied group 2.
 
 ## Basis
 
-Derived at `c686cd6d` (the merge of PR #559), after the wave 1 work that landed before the sweep,
-namely PRs #546, #548, #559 and #560. Every `file:line` was read at that commit. Line numbers drift
-as the deletion PRs land, so a later reader should treat them as anchors and re-derive, as
-[findings.md](findings.md) says of its own.
+**Cut fresh at `c310d05b`, 2026-09-06.** Every row here addresses something that exists at that
+commit, and every anchor resolves there or says on its own row why it cannot. The map before this
+one was cut at `c686cd6d`, re-derived at `426cccae`, and re-anchored by identity on 2026-09-06; none
+of its counts survive into this file, because a count carried forward is how it drifted twice.
+`3c6e6d92` is the last commit that held it whole.
 
-**Re-derived at `426cccae` on 2026-08-19**, against the post-#573 audit and the operator's re-scope.
-Four things came out of it and each has its own section: the completeness re-scan, the re-scope
-subtraction, the callee-side raise screen, and a Totals section counted off the row markup rather
-than carried forward. Every row-level correction is marked in place, so
-`grep 'Corrected 2026-08-19'` lists them all. The whole of group 1's estate was re-derived and every
-one of its rows resolved at `426cccae`, which is what that re-baseline measured and not a claim
-about HEAD; rows in other groups were re-derived only where the re-baseline touched them, so a line
-number elsewhere may still be a `c686cd6d` anchor.
+Four populations were re-derived to get here, and the fourth is the reason the other three were
+needed.
 
-**Re-anchored on 2026-09-06**, mechanically, at `426cccae`. Every row that can be now keys what it
-addresses by identity rather than by line, per the grammar below; 93 anchors could not be named and
-keep literal lines, each saying on its own row why. Nothing but column 2 and the line-anchored
-markers moved: no disposition, justification or id changed and no site was reclassified.
+**The 20 mixed-basis files.** Their rows had been lifted from line numbers whose tree nobody
+recorded, and a measurement on 2026-09-06 found 144 rows that name a different test depending on
+which of the two candidate bases they are read at. Auditing them was not possible, because 125 of
+the 144 resolve cleanly and no tree can say whether they resolve to the RIGHT test. So the 128
+non-group-1 rows among them were read from the file and written again from nothing.
 
-**The rows' own basis is what limits this, and the fresh cut owes work because of it.** Group 1's
-line numbers were `426cccae` readings, so its anchors are exact. The other groups were re-derived
-only where the 2026-08-19 re-baseline touched them, so some of their span anchors were lifted from a
-number that had been read at `c686cd6d`, and a number read at one tree and lifted at another names
-whatever function now sits there.
+**The 102 unsurveyed files.** Test files carrying no row at all, which the settled map's own
+completeness scan had listed and left. 46 rows came out of them, over 30 files; the other 72 files
+are accounted for as carrying nothing the criteria reach, each with its reason.
 
-**Measured 2026-09-06**, by lifting the pre-rewrite map (the `96aa6617` cells, with B-116 corrected
-by hand because no parser could read its two-file cell) at `c686cd6d` and at `426cccae` and
-comparing what each named: **987 rows agree, 144 disagree, 84 are not applicable** because the file
-is absent at a base or is not Python. That measurement is history, not a live check; the command
-that produced it was deleted with this round, because it answers a question about a map that is
-about to be replaced. It reproduces from what survives: `Tree(ref)` for each basis, `read_rows` on
-the legacy map against each, and `Row.render_cell` to compare what the two lifts named.
+**The 8 drifted files.** Nobody's re-derivation covered these, because their rows were sound when
+written; what moved was the tree under them, between `426cccae` where their anchors were taken and
+this basis. Ten rows had an anchor that reached nothing, and each was read at the basis: four are
+renames, six are anchors whose assertion is gone because the work the row asked for has already
+landed, and one is a finding rather than a change.
 
-**Do not read the 144 as loud failures.** Of them, 125 resolve cleanly at HEAD, which is exactly the
-quiet case: the anchor names a real test, so nothing reports anything, and whether it names the
-RIGHT test is not a question any tree can answer. 11 resolve nothing and 8 are mixed. Group 1 is not
-at risk, because its basis is known; the exposure is the non-group-1 rows.
+**The rows whose estate is gone.** 157 rows left the ledger because their file or their every site
+no longer exists, group 2's whole estate among them, and part 2 retired 12 more on its own reading.
+Three that looked gone were not: `test_create_resume_orchestrated.py` was renamed rather than
+deleted, so G1-I06, B-003 and B-004 moved with it. `[dead]` and `[subtracted]` retire as markers
+with them; a row whose estate is gone is not in the ledger for a marker to describe, and the
+subtraction those markers recorded is reversed below.
 
-**Twenty rows point at files that no longer exist and say nothing about it**, which the fresh cut
-owes too. `[dead]` was applied at `426cccae` and has not been re-derived since, so these five files
-went after it. Seventeen of the twenty read as live; the other three (L-018, G1-156 (2026-08-19
-map), B-061) are already `[subtracted]` and so are out of the executable set for a different reason.
+### The 2026-08-19 subtraction is reversed
 
-| File                                                    | Rows                                                         |
-| ------------------------------------------------------- | ------------------------------------------------------------ |
-| `cli/tests/vms/test_add_git_credential_orchestrated.py` | G1-M03, G1-M04, G1-132 (2026-08-19 map), E-095, E-096, E-097 |
-| `cli/tests/sessions/test_create_resume_orchestrated.py` | G1-I06, G1-057 (2026-08-19 map), B-003, B-004, B-005, B-006  |
-| `cli/tests/test_obtain_token_removed.py`                | C-004, C-005, C-006, C-007                                   |
-| `cli/tests/secrets/test_resolution_lifecycle.py`        | L-018, G1-156 (2026-08-19 map), B-061                        |
-| `cli/tests/test_session_resume_cli.py`                  | B-124                                                        |
+That round handed 117 rows to the secrets-preview and instance-model efforts on the premise that
+each would take the estate into its own work. It did not hold. A scout re-check found the tests
+still standing, and an independent cross-check by identity agreed with it on all 29 rows both said
+were gone, so the disagreement was not about method.
 
-Four of the twenty rows are also among the nine the twelve claim anchors below belong to, since a
-judgment row whose file is gone fails both ways; they account for six of those twelve anchors. The
-sessions file was renamed rather than deleted, so its rows have a successor to be re-cut against;
-the others were deleted outright.
+**89 rows return to their groups with their original dispositions**: 45 that had gone to
+instance-model and 44 to secrets-preview. The other 28 left with the ledger, their estate being gone
+on any reading. The 34 deletes among the returning rows were re-screened as the grammar requires;
+the injected-marker screen decided four of them against the batch and they are keeps now, as G1-I20
+through G1-I23.
 
-**The recourse is re-derivation, not repair.** The fresh cut re-derives from scratch every
-non-group-1 row in the 20 files below, rather than carrying their anchors forward, so the mixed
-basis dies with the cut instead of being audited row by row. Eight of these files disagree on every
-row asked, and four of them hold 93 of the 144.
-
-The table lists the files holding at least one disagreeing row that is not group 1's, which is what
-the re-derivation covers. Of the 144, **128 are non-group-1 rows and are the work**; the other 16
-are group 1's, whose basis is known. The 142 the table's own column adds to is those 128 plus 14
-group-1 rows that share a file with them. The remaining 2 of the 144 are the two group-1 rows in
-`cli/tests/assistance/test_generation.py`, absent below because that file holds no non-group-1
-disagreeing row and so earns no line.
-
-| File                                                     | Rows asked | Disagreeing |
-| -------------------------------------------------------- | ---------: | ----------: |
-| `cli/tests/test_completions.py`                          |         36 |          34 |
-| `website/tests/test_site_templates.py`                   |         26 |          24 |
-| `website/tests/test_site_documents.py`                   |         24 |          20 |
-| `website/tests/test_site_content.py`                     |         16 |          15 |
-| `cli/tests/test_doctor_env_and_secrets.py`               |          6 |           6 |
-| `cli/tests/test_config.py`                               |          7 |           5 |
-| `cli/tests/test_secret_describe.py`                      |          8 |           5 |
-| `cli/tests/test_resource_edit.py`                        |          8 |           5 |
-| `cli/tests/test_codex_integration.py`                    |          7 |           4 |
-| `cli/tests/manifests/test_samples.py`                    |          8 |           4 |
-| `cli/tests/secrets/test_resolution_lifecycle.py`         |          3 |           3 |
-| `cli/tests/sessions/test_singular_batch_orchestrated.py` |          5 |           3 |
-| `cli/tests/test_doctor.py`                               |          7 |           3 |
-| `cli/tests/test_claude_code_integration.py`              |          2 |           2 |
-| `website/tests/test_lander_phase4j_browser.py`           |          2 |           2 |
-| `website/tests/test_lander_phase4k_browser_cleanup.py`   |          2 |           2 |
-| `cli/tests/test_resource_list.py`                        |          4 |           2 |
-| `cli/tests/test_resource_kinds.py`                       |          1 |           1 |
-| `cli/tests/test_list_truncation.py`                      |          1 |           1 |
-| `cli/tests/manifests/test_schema_command.py`             |          1 |           1 |
+**instance-model is still a lock candidate with its live-validation gate open**, and its seven files
+are back in this sweep's scope. Sequencing the sweep's edits against that gate is the operator's
+call, not this map's; it is in the open questions.
 
 ### Reading this file mechanically
 
@@ -416,83 +374,40 @@ no-judgment mechanical change into the same review as the sweep's riskiest delet
 
 **`sweep-screen.py totals` is this section**, counted off the row markup rather than carried
 forward, because a total carried forward is how this map drifted twice. Two figures matter and they
-are different: the LEDGER is every row this map has ever held, and the EXECUTABLE SET is what a
-restart of the sweep actually owns after the dead rows and the re-scope subtraction come out.
+are different: the LEDGER is every row the map holds, and the EXECUTABLE SET is what the sweep owns
+once the deferred block comes out.
 
-**Executable set: 1,006 rows, 476 delete, 191 convert, 339 keep**, over five groups. Group 2 has
-none left.
+**Executable set: 1,132 rows, 491 delete, 221 convert, 420 keep**, over five groups.
 
-**Ledger: 1,215 rows**, which is the executable 1,006 plus 67 `[dead]`, 117 `[subtracted]`, and 25
-`[deferred]`.
+**Ledger: 1,157 rows**, the executable 1,132 plus the 25 `[deferred]`. Nothing else is subtracted
+from it: a row whose estate is gone is not in the ledger at all, which is what changed on 2026-09-06
+when `[dead]` and `[subtracted]` retired.
 
-| Group                                            | Live | delete | convert | keep | Dead | Subtracted | Deferred | Ledger |
-| ------------------------------------------------ | ---: | -----: | ------: | ---: | ---: | ---------: | -------: | -----: |
-| 1. Mechanical `match=` narrowing                 |  204 |    146 |       7 |   51 |    2 |         25 |        0 |    231 |
-| 2. Guide and migration topics                    |    0 |      0 |       0 |    0 |   50 |          0 |        0 |     50 |
-| 3. Report lines and hints (four sub-batches)     |  322 |    158 |      88 |   76 |    1 |         59 |        0 |    382 |
-| 4. Schema, manifests, capabilities and platforms |  228 |     52 |      81 |   95 |    6 |         16 |        0 |    250 |
-| 5. Authored-artifact form policing               |  200 |     95 |      11 |   94 |    7 |          7 |        0 |    214 |
-| 6. Source guards                                 |   52 |     25 |       4 |   23 |    1 |         10 |        0 |     63 |
-| Deferred (held for R4)                           |    0 |      0 |       0 |    0 |    0 |          0 |       25 |     25 |
-| **All**                                          | 1006 |    476 |     191 |  339 |   67 |        117 |       25 |   1215 |
-
-**Corrected 2026-09-06 by `totals`.** The Deferred row used to read 25 live, 23 delete, 2 convert,
-which contradicted both this section's own executable-set figure of 1,006 and the markers section
-above, where `[deferred]` is one of the three markers that takes a row OUT of the executable set.
-The dispositions those 23 and 2 recorded are still on the rows; what was wrong was counting them as
-live. Deferred is now its own column, every group is counted the same way, and the row that used to
-disagree is the one the command found.
+<!-- prettier-ignore -->
+| Group | Live | delete | convert | keep | Deferred | Ledger |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1. Mechanical `match=` narrowing | 219 | 155 | 6 | 58 | 0 | 219 |
+| 3. Report lines and hints (four sub-batches) | 343 | 158 | 91 | 94 | 0 | 343 |
+| 4. Schema, manifests, capabilities and platforms | 251 | 53 | 96 | 102 | 0 | 251 |
+| 5. Authored-artifact form policing | 246 | 98 | 17 | 131 | 0 | 246 |
+| 6. Source guards | 73 | 27 | 11 | 35 | 0 | 73 |
+| Deferred (held for R4) | 0 | 0 | 0 | 0 | 25 | 25 |
+| **All** | 1132 | 491 | 221 | 420 | 25 | 1157 |
 
 Group 1's site counts are derived exactly, because that estate is scanned rather than read.
-`sweep-screen.py estate` run at `426cccae` is where the 664 comes from, one site per line, and it is
-what to re-run when the tree moves; `sweep-screen.py attribute` is what checks the claim below
-against the rows, and it now exits non-zero when the claim is false. **All 664 `match=` sites under
-`cli/tests` at `426cccae` are claimed by exactly one group-1 row**, and `attribute` reports zero
-sites claimed by no row and zero claimed by more than one. Of the suite's 49 `assertRaisesRegex`
-sites under `website/tests`, group 1 claims 37 and the deferred L-402 claims the other twelve. The
-other groups were read rather than scanned, and one row there covers an assertion group of one to a
-dozen lines, so no site total is claimed for them. Do not add these numbers to the absorbed
-survey's: that survey counted test FUNCTIONS.
-
-**That claim is about `426cccae`, and the tree has moved since.** The counts in this section are the
-2026-08-19 cut's and are not re-derived here; the fresh cut is what re-derives them. Measured at
-`a64b1b9c` after the 2026-09-06 re-anchoring, the estate is 620 `match=` sites under `cli/tests`
-plus 58 regex-family sites under `website/tests`, `attribute` finds 595 of the 620 claimed by
-exactly one group-1 row and none claimed by two. **24 of the 25 unclaimed are sites the tree
-gained.** The twenty-fifth is not:
-`test_create_failure_cleans_session_slice_then_unwinds_ephemerals`'s `RuntimeError::5df21f` at
-`cli/tests/sessions/test_create_start_restart_orchestrated.py:771` existed at `426cccae` under the
-file's old name and lost its owner, G1-I06, when the file was renamed.
-
-Of the 654 site groups the group-1 rows were cut against under `cli/tests`, `sweep-screen.py carry`
-finds 295 at the same line and 293 moved, 2 retargeted onto a reworded needle, 50 gone from a file
-that remains, and 14 gone with their file; its other 35 group-1 site groups are the regex family
-under `website/tests`, all 35 found. Those are groups rather than sites, which is why they are 654
-and 35 rather than the 664 and 37 the ordinal grammar counted. `carry` is how a judgment row takes
-its evidence into the fresh cut.
-
-**Corrected 2026-08-19 by the fix round.** The claim above was false when first made: rows accounted
-for 640 of the 664. Three files were re-derived (`test_resolution_lifecycle.py`, whose five cited
-lines held no site at all and whose eight real sites now split between a re-anchored L-018 and a new
-G1-156 (2026-08-19 map); `test_claude_code_integration.py`; `test_config.py`), five judgment and
-keep anchors were re-derived, six mechanical rows had range endpoints that excluded real sites, and
-25 sites sat inside a mechanical row's range while a judgment or keep row above it owned them. The
-fix is structural rather than case by case: **every mechanical row's file cell is now the explicit
-list of the sites it owns**, generated from the estate at `426cccae` minus what the rows above it
-claim, so a range can no longer sweep up a kept site and the "exactly one row" property is checkable
-rather than asserted.
+`sweep-screen.py estate` is where the site figures come from, one site per line, and
+`sweep-screen.py attribute` is what checks the ownership claim; both are run at the basis and
+`attribute` exits non-zero when the claim is false. **All 621 `match=` sites under `cli/tests` at
+`c310d05b` are claimed by exactly one group-1 row**, with none claimed by two and none unclaimed,
+and `generate` exits zero against the same estate. Of the 58 regex-family sites under
+`website/tests`, group 1 claims 35 and the deferred L-402 claims the rest. The other groups were
+read rather than scanned, and one row there covers an assertion group of one to a dozen lines, so no
+site total is claimed for them.
 
 One row is one test or one contiguous assertion group, so a file that mixes wholly-policing tests
 with prose assertions riding inside legitimate ones appears several times. Group 1's mechanical
 batch is the one exception and says so where it starts: those rows are one per FILE, because the
 sites they carry share a single shape, a single disposition, and a single justification.
-
-**File counts, ledger and executable, because they differ by enough to mis-size a PR.** The
-mechanical batch's ledger is 149 rows over 149 files and 517 sites. Its EXECUTABLE half, once the
-dead and subtracted rows come out, is **131 rows over 131 files and 454 sites**: eighteen of those
-files now belong to the secrets-preview and instance-model efforts, so an executor sizing the PR
-from the ledger figure would open eighteen files that are not the sweep's to touch. Group 1 as a
-whole is 231 rows over 163 files on the ledger and **204 rows over 144 files executable**.
 
 This file is long for the repository's 500-line guidance, deliberately. It is a ledger, it is
 temporary, and one row per line is what makes it checkable against a diff.
@@ -509,30 +424,29 @@ Every row state rides in the shape cell as a bold marker, so a mechanical count 
 executable set from the rest without reading prose, and so nothing is deleted from the ledger that
 the R4 reassessment might want to audit. An unmarked row is live and executable.
 
-Three markers take a row OUT of the executable set:
+One marker takes a row out of the executable set:
 
-- **`[dead]`**: the row's target file or site did not exist at `426cccae`, the basis this marker was
-  applied against. It is not a statement about HEAD and has not been re-derived since; twenty rows
-  over five more files have gone the same way and carry no marker, listed with the fresh cut's owed
-  work above. The row keeps its original disposition as the record of what was intended.
-- **`[subtracted: <owner>]`**: the row's estate left the sweep's scope, per the re-scope subtraction
-  section below, and the named effort inherits it.
-- **`[deferred]`**: the row is held for the R4 reassessment, per the deferred block. These rows were
-  always out of the executable set; before 2026-08-19 that was carried by the heading they sat under
-  rather than by the row.
+- **`[deferred]`**: the row is held for the R4 reassessment, per the deferred block.
 
-Three annotate a row that stays in it:
+Two annotate a row that stays in it:
 
 - **`[1-raise]`**: the callee-side raise screen verified every site this row claims as
   single-raise-path, per the screen's section above. It is carried on delete rows, which are the
   ones the screen decides; a keep row keeps its `match=` either way.
 - **`[unverified]`**: the row's disposition turns on a coverage claim that was reasoned rather than
   executed, and its justification names which claim.
-- **`[line-anchored: <cause>]`**: the row keeps literal lines, and this is why. Unlike the other
-  five it is DERIVED rather than judged: `sweep-screen.py reanchor` writes every one of them and
-  nothing else does, so it is regenerated rather than maintained and a hand edit to one is a defect
-  the parser refuses. It annotates and does not gate: a line-anchored row is live or dead by its
-  other markers, and this one leaves the executable set exactly as it found it.
+
+And one is derived rather than judged:
+
+- **`[line-anchored: <cause>]`**: the row keeps literal lines, and this is why.
+  `sweep-screen.py reanchor` writes every one of them and nothing else does, so it is regenerated
+  rather than maintained and a hand edit to one is a defect the parser refuses. It leaves the
+  executable set exactly as it found it.
+
+**`[dead]` and `[subtracted]` retired on 2026-09-06.** A row whose estate is gone is no longer in
+the ledger, so there is nothing left for `[dead]` to describe, and the subtraction `[subtracted]`
+recorded is reversed. Both are gone from the parser's vocabulary too, so one written by hand is now
+a refusal rather than silent row state.
 
 Ids say where a row came from. `RB-` marks the twelve rows the 2026-08-19 re-baseline added, and
 `G1-C`, `G1-M` and `G1-I` the rows its three screens pulled out of the mechanical batch (the callee
@@ -544,68 +458,12 @@ G1-013 (2026-08-19 map) into G1-K19, G1-062 (2026-08-19 map) into G1-C02, and G1
 map), G1-123 (2026-08-19 map), G1-135 (2026-08-19 map) and G1-140 (2026-08-19 map) into the
 injected-marker rows, those four files having held nothing but injected markers.
 
-### The estate, re-measured at `426cccae`
+### What the 2026-08-19 re-baseline measured
 
-| Estate                                           | At `c686cd6d` | At `426cccae` | What moved                                                                                 |
-| ------------------------------------------------ | ------------: | ------------: | ------------------------------------------------------------------------------------------ |
-| `pytest.raises(..., match=)` under `cli/tests`   |           663 |           664 | The Grok Build integration (`703fb625`, 2026-08-17) added one site, rowed below as RB-011  |
-| `assertRaisesRegex` under `website/tests`        |            51 |            49 | `test_site_templates.py` lost two to an unrelated `assertRaises` narrowing                 |
-| Test files under `cli/tests` and `website/tests` |           n/a |           362 | A guide rework deleted fifteen files at `4ac084cd` and added four, with two more following |
-
-Two site families in `website/tests` sit in the same suite and were never part of the 51: one
-`assertRegex` (`test_site_build.py:530`) and eight `assertNotRegex` (five in `test_lander_404.py`,
-three in `test_lander_phase4j.py`). All nine already fall inside group 5 rows (F-070, F-098 to
-F-104, F-116 to F-121), so they are mapped; only the headline count in `hla.md` omitted them.
-`hla.md` now records all nine, along with both corrected site counts, under the effort lead's
-authorization; the corrections section below marks those bullets applied.
-
-### Dead rows
-
-Sixty-seven rows over thirteen files are `[dead]`. Twelve of the files are guide tests
-`4ac084cd feat(guide): replace typed topics with markdown shells` deleted; the thirteenth is
-`website/tests/onboarding-copy.test.mjs`, replaced at `1b9bbb9b` by `onboarding.test.mjs`.
-`4ac084cd` deleted fifteen guide test files in all, three of which this map never rowed.
-
-| File                                              | Rows | Ids                            |
-| ------------------------------------------------- | ---: | ------------------------------ |
-| `cli/tests/guide/test_migration_topic.py`         |   35 | A-001 to A-035                 |
-| `cli/tests/guide/test_authored_coverage.py`       |    7 | A-036 to A-042                 |
-| `cli/tests/guide/test_json_action_contract.py`    |    6 | A-043 to A-048                 |
-| `cli/tests/guide/test_render_service.py`          |    3 | A-049 to A-051                 |
-| `cli/tests/guide/test_release_notes.py`           |    3 | A-052, A-053, A-054            |
-| `cli/tests/guide/test_probe_free_registry.py`     |    2 | A-055, A-056                   |
-| `cli/tests/guide/test_trail_sign.py`              |    2 | A-057, A-058                   |
-| `cli/tests/guide/test_source_review_offer.py`     |    2 | A-059, A-060                   |
-| `cli/tests/guide/test_installer_plugin_guides.py` |    2 | A-061, A-062                   |
-| `cli/tests/guide/test_read_only_database.py`      |    2 | L-001, G1-008 (2026-08-19 map) |
-| `cli/tests/guide/test_package_data.py`            |    1 | A-063                          |
-| `cli/tests/guide/test_power_import_boundary.py`   |    1 | L-102                          |
-| `website/tests/onboarding-copy.test.mjs`          |    1 | F-129                          |
-
-**Group 2 is entirely dead.** All 50 of its rows targeted files that `4ac084cd` deleted, so the
-guide-and-migration batch has no live row and no PR to cut. That is the single largest consequence
-of the re-scan and it is a sequencing fact the restart inherits, not a decision this map can make.
-The other dead rows are scattered: two in group 1, one in group 3, six in group 4, seven in group 5,
-one in group 6.
-
-Six guide test files stand in their place, and they arrived from three commits rather than one:
-`4ac084cd` added `test_shell_catalog.py`, `test_shell_package.py`, `test_shell_render.py` and
-`test_shell_service.py`; `908ee681` added `test_release_history.py`; `52a17d86` added
-`test_shell_commands.py`. All six were scanned and carry no in-scope site: their string assertions
-are markdown fixtures the tests author as INPUT and compare against rendered output, which is
-derivation parity rather than a pin on shipped prose.
-
-### Rows added
-
-Twelve. Ten (RB-001 to RB-010) row the two orchestrated session files the settled map missed
-entirely, `cli/tests/sessions/test_claude_code_orchestrated.py` and
-`cli/tests/sessions/test_codex_orchestrated.py`; they sit in group 3, sub-batch 3a, because the
-assertions ride inside behavioral tests rather than constituting whole tests (which is what puts
-their siblings B-068 and B-072 in group 5). RB-011 rows the one file at `426cccae` carrying a
-`match=` site with no group-1 row at that basis. RB-012 replaces F-129 with its successor file.
-
-`cli/tests/sessions/test_grok_build_orchestrated.py` was read for the same launch-note shape and has
-none: it asserts only argv (`--session-id`, `--resume`) and persisted state.
+That round's estate table, its dead-row list and its rows-added list described `426cccae` and are
+not carried forward; this cut re-derived all of it at `c310d05b`. The Basis says what moved and the
+Totals section says what the map now holds. `3c6e6d92` is the last commit that held those figures,
+and git history is where they live.
 
 ### Files with no row, and why
 
@@ -627,173 +485,17 @@ position. The remaining fifteen were read individually and are excluded for one 
 | **Value identity on the test's own input.** The literal equals a value the test seeded, so it pins nothing authored.                                                     | `resources/test_show.py` (`:192` against the description seeded at `:88`)                                                                                                                                                                                                           |
 | **Derivation parity over a fixture the test authors.** Markdown in, rendered markdown out.                                                                               | `guide/test_shell_catalog.py`, `guide/test_shell_render.py`, `guide/test_shell_service.py`, `website/tests/lander-phase4j.test.mjs`, `website/tests/lander-phase4t.test.mjs`                                                                                                        |
 
-## Re-scope subtraction, 2026-08-19
-
-[The 2026-08-19 re-scope message](message-2026-08-19-sweep-rescope.md) takes two estates out of the
-sweep's scope, because two efforts started after this map settled and will rewrite those tests
-wholesale. The trim moves INTO the owning efforts rather than behind them, so nothing here is
-cancelled: it changes owner.
-
-| Estate leaving the sweep                                                                                              | Owner                                          |
-| --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| The secret-backend contract, the three in-tree backends, and the secrets estate                                       | `2026-08-18-secret-preview-contract` (PR #619) |
-| The database and persistence layer, the resource show and inspect surfaces, and doctor's resource-attributable checks | `2026-08-19-instance-model` (seed PR #621)     |
-
-Subtracted rows keep their id, disposition and justification and gain a `**[subtracted: <owner>]**`
-marker in their shape cell. Nothing is deleted, so the R4 reassessment can audit what moved rather
-than infer it, and the owning effort inherits a decided row rather than a question.
-
-### What the estate rule is
-
-Neither owning effort's SDD is on `main` yet, so the boundary is drawn here from the re-scope
-message's own words against the file layout at HEAD, and it is stated as a path rule so a reader can
-check it rather than take it.
-
-**To `2026-08-18-secret-preview-contract`**: `cli/tests/secrets/**`, `cli/tests/test_secret*.py`,
-`cli/tests/test_secrets*.py`, `cli/tests/capabilities/test_secret_backend*.py`,
-`cli/tests/resources/test_secret_backend_kind.py`, `cli/tests/plugins/test_onepassword.py`,
-`cli/tests/orchestration/test_secrets.py`, and `cli/tests/test_doctor_env_and_secrets.py`. The
-production surfaces behind them are `cli/agentworks/capabilities/secret_backend/**` (the contract
-plus the `env_var` and `prompt` backends), `cli/agentworks/secrets/**`, and
-`cli/agentworks/plugins/onepassword/**`, which is the third backend.
-
-**To `2026-08-19-instance-model`**: `cli/tests/db/**`, `cli/tests/test_db.py`,
-`cli/tests/test_db_*.py`, `cli/tests/test_database_*.py`, `cli/tests/resources/test_show.py`,
-`cli/tests/test_resource_show.py`, and `cli/tests/test_doctor_schema.py`. The production surfaces
-are `cli/agentworks/db/**`, the resource show and inspect paths, and doctor's schema-drift checks.
-
-Three boundary calls are recorded rather than buried, because each could reasonably go the other way
-and the lead may want one back.
-
-1. **`test_doctor_env_and_secrets.py` goes to secrets-preview, not instance-model.** Its rows are
-   about which secret SOURCE doctor says it would attempt and why a source is not ready, which the
-   backend-contract rewrite changes directly. The re-scope message assigns "doctor's drift
-   reporting" to instance-model, and these rows are not drift reporting.
-2. **`test_doctor.py` and `test_doctor_cli.py` stay in the sweep.** Their rows are about the report
-   and check projection machinery, ANSI styling, and the label column over a synthetic report, none
-   of which is resource-attributable. The one row worth a second look is C-061, whose structural
-   half is the "Secret sources" group placeholder; it stays in the sweep, and if the secrets-preview
-   effort renames that group it becomes a trivial rebase rather than a collision.
-3. **`test_secrets_eager_resolve_*.py` goes to secrets-preview.** These drive VM, agent, session and
-   console creation rather than the backends, but what they assert is resolution outcomes, which is
-   exactly what the contract rewrite changes.
-
-`cli/tests/resources/test_show.py`, `cli/tests/test_resource_show.py`,
-`cli/tests/resources/test_secret_backend_kind.py`,
-`cli/tests/capabilities/test_secret_backend_relocation.py` and
-`cli/tests/plugins/test_onepassword.py` are in the subtracted estates and carry no rows, so they
-subtract nothing; they are named so the owning efforts know the sweep looked at them and found
-nothing to hand over.
-
-### Group by group
-
-| Group    | Subtracted | To secrets-preview | To instance-model | Live rows left |
-| -------- | ---------: | -----------------: | ----------------: | -------------: |
-| Group 1  |         25 |                 16 |                 9 |            182 |
-| Group 2  |          0 |                  0 |                 0 |              0 |
-| Group 3  |         59 |                 28 |                31 |            322 |
-| Group 4  |         16 |                 14 |                 2 |            228 |
-| Group 5  |          7 |                  6 |                 1 |            200 |
-| Group 6  |         10 |                  8 |                 2 |             52 |
-| Deferred |          0 |                  0 |                 0 |             25 |
-
-"Live rows left" excludes both the subtracted rows and the `[dead]` ones, so it is the executable
-set the restart actually owns. Group 2's zero is the completeness re-scan's finding, not the
-subtraction's: every one of its rows is dead.
-
-The subtracted rows, by group and owner:
-
-- **Group 1 to secrets-preview** (16): L-016, L-018, G1-K08, G1-020 (2026-08-19 map), G1-054
-  (2026-08-19 map), G1-055 (2026-08-19 map), G1-087 (2026-08-19 map), G1-104 (2026-08-19 map),
-  G1-105 (2026-08-19 map), G1-106 (2026-08-19 map), G1-107 (2026-08-19 map), G1-108 (2026-08-19
-  map), G1-109 (2026-08-19 map), G1-110 (2026-08-19 map), G1-111 (2026-08-19 map), G1-156
-  (2026-08-19 map)
-- **Group 1 to instance-model** (9): L-002, L-003, L-010, L-020, G1-K13, G1-083 (2026-08-19 map),
-  G1-084 (2026-08-19 map), G1-085 (2026-08-19 map), G1-088 (2026-08-19 map)
-- **Group 3 to secrets-preview** (28): B-049, B-050, B-051, B-060, B-061, B-093, B-094, B-095,
-  B-100, B-102, B-103, B-104, B-105, B-106, B-107, B-108, B-109, B-110, B-111, B-112, B-113, B-114,
-  B-116, C-071, C-072, C-073, C-074, C-075
-- **Group 3 to instance-model** (31): A-065, A-067, A-068, A-069, A-070, A-071, A-072, A-073, A-074,
-  A-075, A-076, A-077, A-078, A-081, A-082, A-083, A-084, A-085, A-086, A-087, A-088, A-089, A-090,
-  A-091, A-092, C-065, C-066, C-067, C-068, C-069, C-070
-- **Group 4 to secrets-preview** (14): B-059, B-062, B-063, B-064, B-065, D-141, D-142, D-143,
-  D-144, D-145, D-146, D-147, D-148, D-149
-- **Group 4 to instance-model** (2): A-064, A-079
-- **Group 5 to secrets-preview** (6): B-096, B-097, B-098, B-099, B-101, B-115
-- **Group 5 to instance-model** (1): A-066
-- **Group 6 to secrets-preview** (8): L-116, L-117, L-118, L-119, L-120, L-121, L-122, L-123
-- **Group 6 to instance-model** (2): A-080, L-113
-
-### By file, for the owning efforts
-
-Each row below is a file the owning effort inherits, with what the sweep had decided for it. This is
-the hand-off the re-scope message asks each effort's definition of done to absorb.
-
-**One finding rides with the hand-off rather than being rediscovered on the other side.** The
-injected-marker screen finds eleven sites inside subtracted DELETE rows whose matched text is a
-marker the test wrote, not prose we ship: nine `api-key` sites across the three
-`test_secrets_eager_resolve_*` files (G1-106 (2026-08-19 map), G1-107 (2026-08-19 map), G1-108
-(2026-08-19 map)) going to secrets-preview, and two `boom` and `snapshot unavailable` sites in
-`test_database_migration_safety.py` (G1-084 (2026-08-19 map)) going to instance-model. By the same
-rule that keeps G1-I01 to G1-I19 those eleven keep, so the delete disposition their rows carry is
-wrong on its own terms. Two further injected sites in these estates sit in L-010, which already
-keeps them for this reason. The owning efforts inherit the correction with the rows;
-`sweep-screen.py injected` reproduces it.
-
-**To `2026-08-18-secret-preview-contract`:**
-
-| File                                                        | Rows | delete | convert | keep |
-| ----------------------------------------------------------- | ---: | -----: | ------: | ---: |
-| `cli/tests/capabilities/test_secret_backend_conformance.py` |    9 |      0 |       9 |    0 |
-| `cli/tests/orchestration/test_secrets.py`                   |    4 |      2 |       0 |    2 |
-| `cli/tests/secrets/test_backends.py`                        |    1 |      0 |       1 |    0 |
-| `cli/tests/secrets/test_disabled_plugin_attribution.py`     |    1 |      1 |       0 |    0 |
-| `cli/tests/secrets/test_resolution_lifecycle.py`            |    3 |      3 |       0 |    0 |
-| `cli/tests/secrets/test_resolver_seed.py`                   |    1 |      1 |       0 |    0 |
-| `cli/tests/secrets/test_sources.py`                         |    7 |      3 |       1 |    3 |
-| `cli/tests/test_doctor_env_and_secrets.py`                  |    6 |      2 |       3 |    1 |
-| `cli/tests/test_secret_describe.py`                         |    8 |      5 |       0 |    3 |
-| `cli/tests/test_secret_sources_drive_harness.py`            |    3 |      1 |       0 |    2 |
-| `cli/tests/test_secret_verify.py`                           |   10 |      4 |       2 |    4 |
-| `cli/tests/test_secrets_eager_resolve_console.py`           |    1 |      1 |       0 |    0 |
-| `cli/tests/test_secrets_eager_resolve_sessions.py`          |    1 |      1 |       0 |    0 |
-| `cli/tests/test_secrets_eager_resolve_vm_agent.py`          |    9 |      1 |       8 |    0 |
-| `cli/tests/test_secrets_env_var.py`                         |    1 |      0 |       0 |    1 |
-| `cli/tests/test_secrets_inspect.py`                         |    3 |      1 |       1 |    1 |
-| `cli/tests/test_secrets_orchestration.py`                   |    2 |      2 |       0 |    0 |
-| `cli/tests/test_secrets_prompt.py`                          |    1 |      1 |       0 |    0 |
-| `cli/tests/test_secrets_resolver.py`                        |    1 |      1 |       0 |    0 |
-
-**To `2026-08-19-instance-model`:**
-
-| File                                                       | Rows | delete | convert | keep |
-| ---------------------------------------------------------- | ---: | -----: | ------: | ---: |
-| `cli/tests/test_database_backup.py`                        |    5 |      2 |       1 |    2 |
-| `cli/tests/test_database_cli.py`                           |    7 |      5 |       2 |    0 |
-| `cli/tests/test_database_migration_safety.py`              |   17 |      5 |       3 |    9 |
-| `cli/tests/test_db.py`                                     |    1 |      0 |       0 |    1 |
-| `cli/tests/test_db_migration_harness_integration_state.py` |    3 |      1 |       1 |    1 |
-| `cli/tests/test_db_migration_vm_sites.py`                  |    4 |      2 |       1 |    1 |
-| `cli/tests/test_doctor_schema.py`                          |    8 |      4 |       3 |    1 |
-
-### What is unaffected
-
-Everything in a disjoint estate: sessions, workspaces, agents, consoles, transports, VMs and
-platforms, schema and manifests, capabilities outside the secret-backend package, completions, the
-website, and the source guards. The stack topology below is stated over the groups as they were and
-needs re-cutting for the restart, which is a sequencing decision and not this map's to make.
-
 ## Group 1: mechanical `match=` narrowing
 
-204 live rows: 146 delete, 7 convert, 51 keep, out of a ledger of 231 (two `[dead]`, 25
-`[subtracted]`). The group splits into four sections, counted by `sweep-screen.py totals` and by the
-section headings below. The **40 rows immediately below** are the sites the taxonomy does NOT decide
-mechanically: 28 `L-` and one `RB-` row read by hand, the 4 `G1-C` rows the callee screen converted,
-and the 7 `G1-M` rows the mutation screen decided. Then **23 `G1-K` rows**, the sites whose matched
-text varies with the test's input; then **19 `G1-I` rows**, the ones the injected-marker screen
-pulled out; then the **149 rows of the mechanical batch**, one per file, sharing one justification.
-40 plus 23 plus 19 plus 149 is the 231 the Totals section reports. A reviewer who reads the first
-three tables has read all the judgment in this PR.
+219 rows: 155 delete, 6 convert, 58 keep, none deferred. The group splits into four sections,
+counted by `sweep-screen.py totals` and by the section headings below. The **rows immediately
+below** are the sites the taxonomy does NOT decide mechanically: 28 `L-` and one `RB-` row read by
+hand, the 4 `G1-C` rows the callee screen converted, and the 7 `G1-M` rows the mutation screen
+decided. Then **23 `G1-K` rows**, the sites whose matched text varies with the test's input; then
+**19 `G1-I` rows**, the ones the injected-marker screen pulled out; then the **149 rows of the
+mechanical batch**, one per file, sharing one justification. 40 plus 23 plus 19 plus 149 is the 231
+the Totals section reports. A reviewer who reads the first three tables has read all the judgment in
+this PR.
 
 **This group is no longer the no-judgment batch its name promises.** The callee-side raise screen
 found that four in five of the sites it can resolve are multi-raise-path, so the mechanical batch's
@@ -1150,8 +852,8 @@ executor owes it the screen per row before the edit lands.
 
 ## Group 3: report lines and hints
 
-322 live rows: 158 delete, 88 convert, 76 keep, out of a ledger of 382 (one `[dead]`, 59
-`[subtracted]`). This is the largest convert population in the map.
+343 rows: 158 delete, 91 convert, 94 keep. This is the second largest convert population in the map,
+behind group 4.
 
 **Precondition, operator disposition 2026-08-19: the recipe verification is re-run before this group
 executes.** Its recipes were verified in the #573 round, four of them carry a recorded trap, and 22
@@ -1528,8 +1230,8 @@ other three are each a full round on their own.
 
 ## Group 4: schema, manifests, capabilities and platforms
 
-228 live rows: 52 delete, 81 convert, 95 keep, out of a ledger of 250 (six `[dead]`, 16
-`[subtracted]`). Once group 3 splits into its sub-batches this is the largest single PR by converts.
+251 rows: 53 delete, 96 convert, 102 keep. Once group 3 splits into its sub-batches this is the
+largest single PR by converts.
 
 **Precondition, operator disposition 2026-08-19: the recipe verification is re-run before this group
 executes**, on the same terms as group 3's.
@@ -1791,8 +1493,8 @@ executes**, on the same terms as group 3's.
 
 ## Group 5: authored-artifact form policing
 
-200 live rows: 95 delete, 11 convert, 94 keep, out of a ledger of 214 (seven `[dead]`, seven
-`[subtracted]`).
+246 rows: 98 delete, 17 convert, 131 keep. The fresh cut grew this group most, the unsurveyed files
+and the twenty re-derived ones both landing mostly here.
 
 <!-- prettier-ignore -->
 | id | file and anchors | shape | disposition | justification |
@@ -2046,8 +1748,7 @@ executes**, on the same terms as group 3's.
 
 ## Group 6: source guards
 
-52 live rows: 25 delete, 4 convert, 23 keep, out of a ledger of 63 (one `[dead]`, ten
-`[subtracted]`).
+73 rows: 27 delete, 11 convert, 35 keep.
 
 <!-- prettier-ignore -->
 | id | file and anchors | shape | disposition | justification |
@@ -2424,6 +2125,41 @@ Each was ruled for the family rather than the row, and the rows now carry the ru
    Banned pattern 2 governs what a module may reach rather than how the reaching is spelled, and it
    has no observational twin available even in principle. That detector stays; the other three
    patterns go. Rows L-101a and L-101b carry the split, and `hla.md`'s delete bullet says so too.
+
+### Raised by the fresh cut, 2026-09-06
+
+These are the operator's, not the sweep's: each is something the re-derivation found in passing that
+no row of this map fixes.
+
+1. **Sequencing the sweep against instance-model's open gate.** The 2026-08-19 subtraction is
+   reversed, so instance-model's seven files are back in this sweep's scope. That effort is a lock
+   candidate with live VM validation still open, and its plan's own commitment was to trim these
+   tests itself. Whether the sweep's edits to those files wait on that gate, land before it, or land
+   beside it is the operator's call. 45 rows are affected.
+2. **A live coverage gap in `cli/tests/test_config.py`.** Three assertions at lines 285, 311 and 326
+   match on `does not follow the naming rules` while production says
+   `does not follow the secret naming rules` at `manifests/decode.py:367-371`. They are vacuous
+   today: the needle cannot match, so the tests pass whatever the code does. C-097's convert fixes
+   it when that row executes, but the gap exists now and is worth knowing about before then.
+3. **`cli/tests/test_subprocess_io.py:5-7` says CI runs Linux.** It has been stale since PR #760
+   added the `windows-latest` job, and a comment that tells the next reader the wrong thing about
+   the CI matrix will mislead someone deciding whether a platform-conditional test can be deleted.
+4. **A keep row's assertion was deleted from outside the sweep.** The injected-marker screen ruled
+   that `test_readiness.py`'s `match="not a rejection"` should keep, because the needle is a marker
+   the test file writes and production emits nowhere. `658ea819`, the secrets-preview effort's
+   boundary hardening, dropped the `match=` anyway; the fake that raises the marker is still there
+   at line 80 and the assertion that observed it is not. The row died with its site in this cut, so
+   nothing here records the loss except this note. Whether to restore it is the operator's call.
+5. **A convert's premise realized badly.** C-129 converts empty-state message pins because deleting
+   them outright would leave assertion-free tests. One of its sites has already gone that way:
+   `test_start_all_sessions_valid_filter_empty_result_succeeds` in
+   `cli/tests/test_name_filter_validation.py` lost its `captured_output` fixture and its assertion
+   together and now asserts nothing at all, while its `stop` and `list` siblings kept theirs.
+6. **CI cannot say which tests skip.** The suite runs without `-ra` or `-rs`, so a run's log reports
+   `8456 passed, 6 skipped` and never which six. That is why F-149's zsh and powershell halves keep
+   rather than delete: the twins those deletions rest on cannot be shown to run. One flag on the
+   Pytest step in `.github/workflows/ci.yml` would settle it, and would settle the same question for
+   every other tool-conditional test the sweep meets.
 
 ### Still open
 
