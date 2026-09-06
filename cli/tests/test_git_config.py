@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 from agentworks.git_config import ensure_safe_directory_wildcard
+from tests.conftest import requires_posix_shell
 
 
 class _LocalGitTarget:
@@ -33,6 +34,7 @@ def _safe_directories(config_path: Path) -> list[str]:
     ).stdout.splitlines()
 
 
+@requires_posix_shell
 def test_safe_directory_wildcard_repairs_duplicates_without_replacing_other_values(tmp_path: Path) -> None:
     config_path = tmp_path / "gitconfig"
     target = _LocalGitTarget(config_path)
@@ -46,6 +48,7 @@ def test_safe_directory_wildcard_repairs_duplicates_without_replacing_other_valu
     assert _safe_directories(config_path) == ["/operator/repo", "*"]
 
 
+@requires_posix_shell
 def test_safe_directory_wildcard_is_added_when_absent(tmp_path: Path) -> None:
     config_path = tmp_path / "gitconfig"
     target = _LocalGitTarget(config_path)

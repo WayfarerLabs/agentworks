@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import stat
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -87,7 +88,12 @@ class _RecordingTransport:
         del kwargs
         path = Path(local_path)
         self.local_paths.append(path)
-        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+        # The staging file's 0o600 comes from tempfile's mkstemp default, a
+        # POSIX guarantee. Windows has no Unix mode bits (mkstemp files read
+        # back as 0o666), so the host-side check only holds off Windows; the
+        # guest-side mode below is simulated by this fake and always applies.
+        if sys.platform != "win32":
+            assert stat.S_IMODE(path.stat().st_mode) == 0o600
         assert self.guest_modes[remote_path] == 0o600
         if self.copy_failure is not None:
             raise self.copy_failure

@@ -44,7 +44,7 @@ def _registry(tmp_path: Path, *manifests: ManifestDoc):  # noqa: ANN202 - test h
             ssh_public_key = "{pub}"
             ssh_private_key = "{priv}"
             """
-        ).format(pub=tmp_path / "k.pub", priv=tmp_path / "k")
+        ).format(pub=(tmp_path / "k.pub").as_posix(), priv=(tmp_path / "k").as_posix())
     )
     (tmp_path / "k.pub").write_text("ssh-ed25519 AAAA test")
     (tmp_path / "k").write_text("key")

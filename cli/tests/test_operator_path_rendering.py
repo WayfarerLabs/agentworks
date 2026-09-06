@@ -27,6 +27,7 @@ it checks how they are spelled.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from textwrap import dedent
 from typing import TYPE_CHECKING
@@ -34,6 +35,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.secret_backend import TtyInteractionAccess
+from tests.conftest import windows_home_env
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -89,7 +91,11 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     )
     (resources / "vm-templates.yaml").write_text(_BAD_MANIFEST)
 
-    monkeypatch.setenv("HOME", str(root))
+    # Path.expanduser reads HOME on POSIX but USERPROFILE (and
+    # HOMEDRIVE/HOMEPATH) on Windows, so redirect all of them or ``~`` in
+    # config.toml would expand to the developer's real home there.
+    for _name, _value in windows_home_env(root).items():
+        monkeypatch.setenv(_name, _value)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: root))
     monkeypatch.setattr(agentworks.config, "CONFIG_DIR", config_dir)
     monkeypatch.setattr(agentworks.config, "CONFIG_PATH", config_dir / "config.toml")
@@ -99,9 +105,15 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     yield root
 
 
+# The home-relative prefix is ``~`` plus the host-native separator by design
+# (format_host_path builds ``Path("~") / rel``), so ``~/`` on POSIX and ``~\``
+# on Windows. Match against the native form rather than a hardcoded slash.
+_HOME_PREFIX = f"~{os.sep}"
+
+
 def _assert_home_relative(text: str, home: Path, *, label: str) -> None:
     """``text`` names paths, and names all of them home-relative."""
-    assert "~/" in text, f"{label}: rendered no path at all, so it cannot witness the invariant: {text!r}"
+    assert _HOME_PREFIX in text, f"{label}: rendered no path at all, so it cannot witness the invariant: {text!r}"
     assert str(home) not in text, f"{label}: an absolute path under $HOME leaked into {text!r}"
 
 
@@ -131,7 +143,7 @@ def test_doctor_spells_every_path_on_one_screen_the_same_way(home: Path) -> None
 
     # And the rows that DO name a file all agree on how to spell it.
     for name in ("Config file", "SSH public key", "SSH private key", "Manifest"):
-        assert "~/" in rendered[name], f"doctor row {name!r} named no path: {rendered[name]!r}"
+        assert _HOME_PREFIX in rendered[name], f"doctor row {name!r} named no path: {rendered[name]!r}"
 
 
 # -- The commands that write the files whose errors doctor reports -------------
@@ -195,8 +207,11 @@ def test_doctor_names_a_missing_config_file_home_relative(home: Path) -> None:
 
 
 @pytest.mark.skipif(
-    getattr(os, "getuid", lambda: 1)() == 0,
-    reason="root bypasses file mode, so the not-readable branch cannot be reached",
+    getattr(os, "getuid", lambda: 1)() == 0 or sys.platform == "win32",
+    reason=(
+        "root bypasses file mode, so the not-readable branch cannot be reached; "
+        "and Windows chmod(0o000) does not make a file unreadable"
+    ),
 )
 def test_doctor_names_an_unreadable_ssh_key_home_relative(home: Path) -> None:
     """``loaders_core`` checks that the key EXISTS, not that it is

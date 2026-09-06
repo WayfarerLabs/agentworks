@@ -608,7 +608,7 @@ def backup_env(
     target = SSHTransport(host="100.64.0.9")
     target.run = lambda *a, **k: SimpleNamespace(stdout="", ok=True)  # type: ignore[method-assign, assignment]
     monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kwargs: target)
-    return make_config(f'[paths]\nbackups = "{tmp_path}/backups"\n')
+    return make_config(f'[paths]\nbackups = "{tmp_path.as_posix()}/backups"\n')
 
 
 def test_backup_reachable_vm_is_one_boundary_burst(

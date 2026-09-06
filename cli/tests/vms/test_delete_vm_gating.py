@@ -30,7 +30,7 @@ from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from tests._azure_platform_support import _RESOURCE_ID, _authorization_denied, _install_fakes
-from tests.conftest import ManifestDoc
+from tests.conftest import ManifestDoc, requires_symlinks
 from tests.orchestrated_fixtures import write_operator_config
 
 if TYPE_CHECKING:
@@ -238,7 +238,7 @@ def test_delete_removes_only_its_workspace_artifacts(
     legacy_artifact.write_text("legacy")
     other_artifact = vscode_dir / "untouched.code-workspace"
     other_artifact.write_text("other")
-    config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir}"\n')
+    config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir.as_posix()}"\n')
     _fake_backend(monkeypatch)
     monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
 
@@ -266,7 +266,7 @@ def test_delete_skips_workspace_artifacts_outside_the_managed_directory(
     vscode_dir.mkdir()
     sentinel = tmp_path / "sentinel.code-workspace"
     sentinel.write_text("outside")
-    config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir}"\n')
+    config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir.as_posix()}"\n')
     _fake_backend(monkeypatch)
     monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
 
@@ -277,6 +277,7 @@ def test_delete_skips_workspace_artifacts_outside_the_managed_directory(
     assert db.get_vm("dvm") is None
 
 
+@requires_symlinks
 def test_delete_unlinks_an_in_directory_symlink_without_touching_its_referent(
     db: Database,
     tmp_path: Path,
@@ -292,7 +293,7 @@ def test_delete_unlinks_an_in_directory_symlink_without_touching_its_referent(
     referent.write_text("outside")
     artifact = vscode_dir / "linked.code-workspace"
     artifact.symlink_to(referent)
-    config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir}"\n')
+    config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir.as_posix()}"\n')
     _fake_backend(monkeypatch)
     monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
 
@@ -303,6 +304,7 @@ def test_delete_unlinks_an_in_directory_symlink_without_touching_its_referent(
     assert db.get_vm("dvm") is None
 
 
+@requires_symlinks
 def test_delete_skips_a_trailing_separator_through_a_directory_symlink(
     db: Database,
     tmp_path: Path,
@@ -320,7 +322,7 @@ def test_delete_skips_a_trailing_separator_through_a_directory_symlink(
     outside_artifact.write_text("outside")
     directory_link = vscode_dir / "link"
     directory_link.symlink_to(outside_dir, target_is_directory=True)
-    config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir}"\n')
+    config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir.as_posix()}"\n')
     _fake_backend(monkeypatch)
     monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
 
@@ -358,7 +360,7 @@ def test_delete_skips_a_name_alias_targeting_another_vm_artifact(
     db.insert_workspace("untouched", "/srv/untouched", "other", "ws-untouched")
     other_artifact = vscode_dir / "untouched.code-workspace"
     other_artifact.write_text("other")
-    config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir}"\n')
+    config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir.as_posix()}"\n')
     _fake_backend(monkeypatch)
     monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
     # This is inert for lowercase cases and models a case-insensitive host for
@@ -476,7 +478,7 @@ def test_backend_delete_failure_keeps_the_row(
     vscode_dir.mkdir()
     artifact = vscode_dir / "kept.code-workspace"
     artifact.write_text("keep")
-    config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir}"\n')
+    config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir.as_posix()}"\n')
     counts = _fake_backend(monkeypatch)
     monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
     error = _failing_backend_delete(monkeypatch, counts)

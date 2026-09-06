@@ -28,7 +28,7 @@ from agentworks.errors import (
 )
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
-from tests.conftest import CapturedOutput, ManifestDoc, write_manifests
+from tests.conftest import CapturedOutput, ManifestDoc, pin_wsl2_unsupported, write_manifests
 from tests.orchestrated_fixtures import proxmox_site
 from tests.ssh_fixtures import TEST_SSH_PUBLIC_KEY, write_test_ssh_keypair
 
@@ -55,12 +55,17 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     write_test_ssh_keypair(key)
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "tskey-test")
     # Deterministic platform preflights: lima checks for limactl
-    # locally; pretend the tool exists regardless of the host.
+    # locally; pretend the tool exists regardless of the host. wsl2 is
+    # host-ready on a Windows test host but not on Linux, so pin it
+    # unsupported to keep exactly one site (lima-local) ready on any host.
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    pin_wsl2_unsupported(monkeypatch)
 
     def _make(extra: str = "", *, manifests: Sequence[ManifestDoc | str] = ()):
         path = tmp_path / "config.toml"
-        path.write_text(f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n' + extra)
+        path.write_text(
+            f'[operator]\nssh_public_key = "{key.as_posix()}.pub"\nssh_private_key = "{key.as_posix()}"\n' + extra
+        )
         if manifests:
             write_manifests(tmp_path, *manifests)
         return load_config(path, warn_issues=False, warn_deprecations=False)

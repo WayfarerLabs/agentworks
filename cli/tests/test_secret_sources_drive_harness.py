@@ -56,6 +56,10 @@ def test_unsupported_windows_refuses_before_environment_or_provider_work(
     assert captured.err == f"{HARNESS._UNSUPPORTED_HOST_MESSAGE}\n"
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Secret Sources drive is unsupported on Windows by design (POSIX .venv/bin layout)",
+)
 def test_cli_dir_override_selects_only_that_reviewed_tree(monkeypatch: pytest.MonkeyPatch) -> None:
     cli_dir = Path(__file__).parents[1].resolve()
     monkeypatch.setenv("AGW_CLI_DIR", str(cli_dir))
@@ -105,6 +109,10 @@ def test_child_environment_drops_inherited_home_credentials_and_import_paths(
         HARNESS._child_environment(home=home, shim=shim, path_dir=closed_bin, extra_env={"PATH": "/escape"})
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Secret Sources drive is unsupported on Windows by design (shebang + chmod fake executables)",
+)
 def test_fake_provider_path_is_closed_and_cannot_fall_through(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

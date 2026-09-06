@@ -80,7 +80,9 @@ def write_operator_config(
     key = tmp_path / "id_ed25519"
     write_test_ssh_keypair(key)
     path = tmp_path / "config.toml"
-    path.write_text(f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n' + body)
+    path.write_text(
+        f'[operator]\nssh_public_key = "{key.as_posix()}.pub"\nssh_private_key = "{key.as_posix()}"\n' + body
+    )
     if manifests:
         write_manifests(tmp_path, *manifests)
     return load_config(path, warn_issues=False, warn_deprecations=False)

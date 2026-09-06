@@ -67,10 +67,14 @@ def test_a_value_pyyaml_cannot_represent_renders_rather_than_raising() -> None:
     """These surfaces exist to teach. A plugin whose config declares an
     exotic default should get an imperfect line in its sample, not a
     traceback in place of the whole document."""
-    rendered = render_value(Path("/etc/agentworks"))
+    # A Path is rendered by its string form, which is host-native (backslashes
+    # on Windows), so build the expectation the same way rather than pinning
+    # the POSIX spelling.
+    exotic = Path("/etc/agentworks")
+    rendered = render_value(exotic)
 
-    assert rendered == "/etc/agentworks"
-    assert yaml.safe_load(rendered) == "/etc/agentworks"
+    assert rendered == str(exotic)
+    assert yaml.safe_load(rendered) == str(exotic)
 
 
 def test_a_set_renders_in_a_stable_order() -> None:
