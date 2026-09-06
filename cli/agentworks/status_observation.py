@@ -1,4 +1,4 @@
-"""Small concurrency primitive for bounded read-only observation fan-out."""
+"""Bounded read-only observation fan-out and shared guest-probe policy."""
 
 from __future__ import annotations
 

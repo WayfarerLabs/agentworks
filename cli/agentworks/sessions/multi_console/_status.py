@@ -7,7 +7,11 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import AgentworksError, ConfigError, ConnectivityError, NotFoundError, StateError, UserAbort
 from agentworks.sessions.tmux import ProbeStatus
-from agentworks.status_observation import GUEST_OBSERVATION_ATTEMPTS, GUEST_OBSERVATION_TIMEOUT_SECONDS
+from agentworks.status_observation import (
+    GUEST_OBSERVATION_ATTEMPTS,
+    GUEST_OBSERVATION_TIMEOUT_SECONDS,
+    cancelling_futures,
+)
 
 from ._helpers import tmux_session_name, tmux_staging_name
 
@@ -75,7 +79,6 @@ def observe_console_statuses(
     from concurrent.futures import as_completed
     from functools import partial
 
-    from agentworks.status_observation import cancelling_futures
     from agentworks.transports import transport
     from agentworks.vms.applied_state import VMSSHIdentityPolicyError
     from agentworks.vms.manager import require_vm_ssh_boundary

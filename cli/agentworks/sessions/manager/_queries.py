@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, cast
 import agentworks.sessions.manager as _mgr
 from agentworks import output
 from agentworks.db import SessionStatus
-from agentworks.db.projections import project_session_mode, project_session_status
+from agentworks.db.projections import project_session_mode
 from agentworks.errors import (
     AgentworksError,
     BrokenStateError,
@@ -83,7 +83,7 @@ def session_listing_data(listing: SessionListing) -> JsonObject:
                 "harness_integration": session.harness_integration,
                 "mode": session.mode,
                 "agent_name": session.agent_name,
-                "status": project_session_status(session.status, allow_unavailable=True),
+                "status": session.status,
             }
             for session in listing.sessions
         ],
@@ -101,7 +101,7 @@ def session_description_data(description: SessionDescription) -> JsonObject:
             "harness_integration": description.harness_integration,
             "mode": description.mode,
             "agent_name": description.agent_name,
-            "status": project_session_status(description.status, allow_unavailable=False),
+            "status": description.status,
             "pid": description.pid,
             "created_at": description.created_at,
             "updated_at": description.updated_at,
@@ -541,7 +541,7 @@ def _session_harness_integration(state: InstanceStateDescription) -> str | None:
 
 def render_session_description(description: SessionDescription) -> None:
     """Render session detail facts with the legacy human layout."""
-    status = project_session_status(description.status, allow_unavailable=False)
+    status = description.status
     status_label = status
     if status == "running" and description.pid is not None:
         status_label = f"running (PID {description.pid})"

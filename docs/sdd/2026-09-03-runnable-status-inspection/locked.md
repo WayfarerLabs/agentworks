@@ -116,8 +116,11 @@ See PR #737 for the code and rationale.
 
 Issue #742 narrows the HLA's structural-failure rule for one local recovery path. Plain
 `console list` preserves a saved console whose referenced VM row is missing instead of failing the
-entire inventory read. A requested console status and `console describe` still retain the typed
-missing-VM failure because live observation cannot construct a valid guest boundary. The same
-correction also centralizes the session/console guest timeout and attempt policy and makes session
-mode projection occur once when persisted rows become output facts; neither cleanup changes the
+entire inventory read. The exception is console-only and assumes the current-schema database can be
+opened; session inventory still validates its relationships, and a schema migration can reject an
+orphan before a command runs. A `console list --status` selection containing an orphan fails as a
+whole, and `console describe` fails for the orphan, because live observation cannot construct a
+valid guest boundary. The same correction centralizes the session/console guest timeout and attempt
+policy, makes persisted session mode project once when rows become output facts, and removes the
+redundant projection of service-constructed session status. None of those cleanups changes the
 locked status vocabulary or observation behavior.

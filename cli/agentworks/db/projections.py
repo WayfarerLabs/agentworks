@@ -37,17 +37,6 @@ class SessionOutputMode(StrEnum):
     UNKNOWN = "unknown"
 
 
-class SessionReportStatus(StrEnum):
-    """Closed JSON v1 vocabulary for reported session liveness."""
-
-    RUNNING = "running"
-    STOPPED = "stopped"
-    BROKEN = "broken"
-    RESIDUAL = "residual"
-    UNKNOWN = "unknown"
-    UNAVAILABLE = "unavailable"
-
-
 def _project_output_enum(value: object, enum_type: type[Enum]) -> str:
     """Map one value through an output-owned vocabulary or ``unknown``."""
     if type(value) is not str:
@@ -72,11 +61,3 @@ def project_vm_initialization_status(value: object) -> str:
 def project_session_mode(value: object) -> str:
     """Close persisted session mode to the frozen JSON v1 vocabulary."""
     return _project_output_enum(value, SessionOutputMode)
-
-
-def project_session_status(value: object, *, allow_unavailable: bool) -> str:
-    """Close session status, reserving unavailable for skipped live work."""
-    projected = _project_output_enum(value, SessionReportStatus)
-    if projected == SessionReportStatus.UNAVAILABLE and not allow_unavailable:
-        return SessionReportStatus.UNKNOWN
-    return projected

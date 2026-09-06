@@ -14,7 +14,12 @@ from agentworks.sessions.multi_console._status import (
     classify_console_status,
     observe_console_statuses,
 )
-from agentworks.sessions.multi_console.attach import ConsoleListing, console_listing, render_console_listing
+from agentworks.sessions.multi_console.attach import (
+    ConsoleListing,
+    console_description,
+    console_listing,
+    render_console_listing,
+)
 
 
 @dataclass
@@ -221,6 +226,28 @@ def test_plain_console_listing_preserves_orphaned_inventory(
     assert [(row.name, row.vm_name, row.status) for row in listing.consoles] == [
         ("orphan", "removed-vm", "unavailable")
     ]
+
+
+@pytest.mark.parametrize("operation", ["list-status", "describe"])
+def test_live_console_inspection_rejects_orphaned_inventory(
+    db,  # noqa: ANN001
+    operation: str,
+) -> None:
+    db.insert_vm("removed-vm", site="site", hostname="removed-vm")
+    db.insert_console("orphan", "removed-vm")
+    db._conn.execute("PRAGMA foreign_keys = OFF")
+    db._conn.execute("DELETE FROM vms WHERE name = 'removed-vm'")
+    db._conn.commit()
+    db._conn.execute("PRAGMA foreign_keys = ON")
+
+    with pytest.raises(NotFoundError) as caught:
+        if operation == "list-status":
+            console_listing(db, object(), include_status=True)  # type: ignore[arg-type]
+        else:
+            console_description(db, object(), name="orphan")  # type: ignore[arg-type]
+
+    assert caught.value.entity_kind == "vm"
+    assert caught.value.entity_name == "removed-vm"
 
 
 def test_console_listing_status_column_follows_explicit_render_request(
