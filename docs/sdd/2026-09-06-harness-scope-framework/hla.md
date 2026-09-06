@@ -139,18 +139,22 @@ first-party.
 ## Invocation API and execution
 
 Retain `vm_init`, `user_init`, and `workspace_init` as the method names. Each receives a typed
-invocation for its facet and returns applied facts; the base defaults perform no work and return no
-facts. `start` retains `HarnessLaunchIntent` and `HarnessStartResult`, extended with session inputs.
-The contract version increments from 3 across the descriptor and all four first-party integrations.
-`start` remains the required operation; the inherited setup defaults satisfy R3 without a supported
-scope registry. Existing session probe obligations remain on the session path.
+invocation for its facet and reports applied facts through a manager-owned checkpoint channel; the
+base defaults perform no work and report no facts. `start` retains `HarnessLaunchIntent` and
+`HarnessStartResult`, extended with session inputs. The contract version increments from 3 across
+the descriptor and all four first-party integrations. `start` remains the required operation; the
+inherited setup defaults satisfy R3 without a supported scope registry. Existing session probe
+obligations remain on the session path.
 
-Construct an integration binding for one owning resource and facet from its effective config. Give
-setup methods only the invocation that belongs to that resource: VM identity and system runner for
-vm; username, home, and user runner for user; workspace identity, root, and setup runner for
-workspace. Each also receives artifacts, previous applied facts for this integration, and an env
-view carried by the runner. Core translates its admin/agent distinction into the concrete user; an
-integration author implements one `user_init` body without an admin or agent branch.
+Construct an integration binding for one owning resource and facet. A present attachment supplies
+its effective config and contributions; an absent attachment supplies prior ownership for retirement
+without validating absent config or inventing defaults. Both use the same facet method. Give setup
+methods only the invocation that belongs to that resource: VM identity and system runner for vm;
+username, home, and user runner for user; workspace identity, root, and setup runner for workspace.
+Each also receives artifacts, previous applied facts for this integration, an applied-fact
+checkpoint channel, and an env view carried by the runner. Core translates its admin/agent
+distinction into the concrete user; an integration author implements one `user_init` body without an
+admin or agent branch.
 
 Session construction adds session identity, workspace, workload target, launch readiness cache, and
 conversation state. None of those fields is required to construct setup bindings. Conversely, a
@@ -262,17 +266,28 @@ combine fresh desired config with stale receipts and call that applied success.
 Reinit recomputes desired output and reconciles it with the prior record and live destination. It
 writes changed owned content, leaves matching content alone, and removes obsolete owned units only
 when their ownership and recorded content still match. Removed attachments must also be reconciled:
-the manager retains their records and invokes the integration with an empty desired contribution set
-before dropping confirmed removals. If its plugin is unavailable, report pending cleanup and retain
-evidence; never erase the record and pretend cleanup happened.
+the manager retains their records and invokes the same facet method with an absent-attachment
+desired state before dropping confirmed removals. This means no desired integration-owned resources,
+including config-driven plugins and marketplaces, not merely an empty artifact list. Prior applied
+facts retain the non-secret identifiers needed to undo owned work independently of current config.
+If its plugin is unavailable, report pending cleanup and retain evidence; never erase the record and
+pretend cleanup happened.
+
+Each completed mutation checkpoints its applied facts before the next mutation. The manager owns
+persistence and acknowledges the checkpoint only after it succeeds; persistence failure stops
+further writes. Thus a later exception preserves the successfully recorded prefix, without requiring
+a successful method return to recover it. Core/feature contributions become the published scope
+snapshot only on successful scope completion; partial integration receipts remain distinguishable
+from that completed snapshot. For a new workspace, the checkpoint channel buffers facts until the
+creation commit, because its failed partial work is unwound as described below.
 
 Remote writes and SQLite are not a distributed transaction. A process can die after a remote change
-and before recording it. Preserve completed receipts incrementally, and treat any unexplained
-residue on retry as unowned until the integration can prove the original claim from durable
-evidence. Do not silently adopt matching bytes. Unknown future payload versions remain uninterpreted
-evidence; malformed known records yield safe diagnostics and no trusted ownership. Neither grants
-permission to overwrite. Domain codecs migrate recognized old versions; partial replacement
-preserves unknown well-formed store keys as required by the saga ruling.
+and before recording it. Treat any unexplained residue on retry as unowned until the integration can
+prove the original claim from durable evidence. Do not silently adopt matching bytes. Unknown future
+payload versions remain uninterpreted evidence; malformed known records yield safe diagnostics and
+no trusted ownership. Neither grants permission to overwrite. Domain codecs migrate recognized old
+versions; partial replacement preserves unknown well-formed store keys as required by the saga
+ruling.
 
 Serialize setup for the same owning resource across command executions, covering observation, remote
 mutation, and receipt persistence. This prevents two reinitializations from both claiming the same
