@@ -506,6 +506,7 @@ class ProxmoxPlatform(VMPlatform):
     def _wait_for_cloud_init(self, node: str, vmid: int, ctx: RunContext, *, timeout: int = 300) -> None:
         """Wait for cloud-init to finish inside the VM."""
         deadline = time.monotonic() + timeout
+        last_provider_error: ProxmoxAPIError | None = None
         while time.monotonic() < deadline:
             try:
                 result = self._api(ctx).guest_agent_exec_wait(
@@ -515,15 +516,29 @@ class ProxmoxPlatform(VMPlatform):
                     ["status", "--wait"],
                     timeout=60,
                 )
-                if result is not None and result.get("exitcode", -1) == 0:
+                if result is None:
+                    time.sleep(5)
+                    continue
+
+                exitcode = result.get("exitcode")
+                if exitcode == 0:
                     return
-            except ProxmoxAPIError:
-                pass
+                if exitcode == 2:
+                    output.warn(f"cloud-init completed with recoverable warnings on Proxmox VMID {vmid}; continuing")
+                    return
+
+                status = f"exit {exitcode}" if exitcode is not None else f"signal {result.get('signal')}"
+                raise ProvisioningError(f"cloud-init failed on Proxmox VMID {vmid} ({status})")
+            except ProxmoxAPIError as exc:
+                last_provider_error = exc
             time.sleep(5)
-        raise ProvisioningError(
+        message = (
             f"Timed out waiting for cloud-init on Proxmox VMID {vmid}; "
             "the template must have cloud-init and the QEMU guest agent installed and enabled"
         )
+        if last_provider_error is not None:
+            message = f"{message}; last Proxmox error: {last_provider_error}"
+        raise ProvisioningError(message) from last_provider_error
 
     def _wait_for_guest_ip(self, node: str, vmid: int, ctx: RunContext, *, timeout: int = 120) -> str:
         """Poll the guest agent until it reports a non-loopback IPv4 address."""

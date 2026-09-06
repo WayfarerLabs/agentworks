@@ -37,6 +37,27 @@ TOKEN_NAME="agentworks"
 IMAGE_URL="https://cloud.debian.org/images/cloud/${RELEASE}/latest/debian-${DEBIAN_VERSION}-generic-amd64.qcow2"
 TEMPLATE_NAME="debian-${DEBIAN_VERSION}-template"
 TEMPLATE_TAGS="agentworks;debian-${RELEASE}"
+VM_LIFECYCLE_PRIVS="VM.Allocate VM.Clone VM.Config.CPU VM.Config.Memory VM.Config.Cloudinit VM.Config.Disk VM.Config.HWType VM.Config.Options VM.Config.Network VM.PowerMgmt VM.Audit"
+
+PVE_VERSION=$(pveversion 2>/dev/null || true)
+if [[ "$PVE_VERSION" =~ ^pve-manager/([0-9]+)\. ]]; then
+    PVE_MAJOR="${BASH_REMATCH[1]}"
+else
+    PVE_MAJOR=""
+fi
+
+case "$PVE_MAJOR" in
+    8)
+        VM_GUEST_AGENT_PRIVS="VM.Monitor"
+        ;;
+    9)
+        VM_GUEST_AGENT_PRIVS="VM.GuestAgent.Audit VM.GuestAgent.FileWrite VM.GuestAgent.Unrestricted"
+        ;;
+    *)
+        echo "Error: Agentworks supports Proxmox VE major versions 8 and 9; found '${PVE_VERSION:-unknown}'." >&2
+        exit 1
+        ;;
+esac
 
 echo "=== Agentworks Proxmox Setup ==="
 echo ""
@@ -85,7 +106,11 @@ else
     echo "  Installing qemu-guest-agent into image..."
     if ! command -v virt-customize >/dev/null 2>&1; then
         echo "  Installing libguestfs-tools..."
-        apt-get update -qq && apt-get install -y -qq libguestfs-tools
+        if ! apt-get update -qq; then
+            echo "  Error: apt-get update failed. Configure a working Proxmox subscription or no-subscription repository, then rerun." >&2
+            exit 1
+        fi
+        apt-get install -y -qq libguestfs-tools
     fi
     virt-customize -a "$IMAGE_FILE" --install qemu-guest-agent
 
@@ -100,7 +125,12 @@ else
     # Import and attach disk
     echo "  Importing disk..."
     qm importdisk "$VMID" "$IMAGE_FILE" "$STORAGE"
-    qm set "$VMID" --scsi0 "$STORAGE:vm-${VMID}-disk-0"
+    IMPORTED_VOLUME=$(qm config "$VMID" | sed -n 's/^unused0: \([^,]*\).*$/\1/p')
+    if [ -z "$IMPORTED_VOLUME" ]; then
+        echo "  Error: qm importdisk did not record an unused0 volume for VMID $VMID." >&2
+        exit 1
+    fi
+    qm set "$VMID" --scsi0 "$IMPORTED_VOLUME"
     qm set "$VMID" --boot order=scsi0
 
     # Cloud-init drive
@@ -154,8 +184,7 @@ ensure_role() {
     fi
 }
 
-ensure_role AgentworksVM \
-    "VM.Allocate VM.Clone VM.Config.CPU VM.Config.Memory VM.Config.Cloudinit VM.Config.Disk VM.Config.HWType VM.Config.Options VM.Config.Network VM.PowerMgmt VM.Audit VM.Monitor"
+ensure_role AgentworksVM "$VM_LIFECYCLE_PRIVS $VM_GUEST_AGENT_PRIVS"
 ensure_role AgentworksTemplate "VM.Clone VM.Audit"
 ensure_role AgentworksStorage "Datastore.AllocateSpace Datastore.Audit"
 ensure_role AgentworksSDN "SDN.Use"
