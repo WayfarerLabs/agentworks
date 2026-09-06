@@ -436,7 +436,7 @@ def _reorder_session_windows(
 
     changed = False
     failed = False
-    for target_idx, desired_name in zip(session_slots, present_desired, strict=True):
+    for target_idx, desired_name in zip(session_slots, present_desired, strict=False):
         src_idx = widx_by_name[desired_name]
         if src_idx == target_idx:
             continue
