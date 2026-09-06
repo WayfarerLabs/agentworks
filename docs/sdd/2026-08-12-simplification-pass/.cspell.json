@@ -5,6 +5,8 @@
     "backticked",
     "callees",
     "colocatable",
+    "metacharacter",
+    "metacharacters",
     "monkeypatch",
     "monkeypatches",
     "multiprocess",
