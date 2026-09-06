@@ -107,8 +107,21 @@ class Function:
         return self.start <= line <= self.end
 
 
+def _is_overload(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """A typing overload stub, which shares its name with the real definition."""
+    return any(exc_name(d) == "overload" for d in node.decorator_list)
+
+
 def functions_in(tree: Tree, path: str) -> list[Function]:
-    """Every function in one module, innermost last within a nest."""
+    """Every function in one module, innermost last within a nest.
+
+    `if`, `try`, `with`, `for`, `while` and `match` open no qualname segment, so
+    the walk passes through them rather than stopping: a test defined under
+    `if sys.platform` is a test, and `sites_in` finds its sites whether this
+    index knows the function or not. Leaving it out made such a test
+    unaddressable by a span anchor and let a duplicate name past the refusal
+    below by hiding one of the pair inside a branch.
+    """
     found: list[Function] = []
 
     def walk(node: ast.AST, prefix: str) -> None:
@@ -116,9 +129,12 @@ def functions_in(tree: Tree, path: str) -> list[Function]:
             if isinstance(child, ast.ClassDef):
                 walk(child, f"{prefix}{child.name}.")
             elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                start = min([child.lineno] + [d.lineno for d in child.decorator_list])
-                found.append(Function(f"{prefix}{child.name}", start, child.end_lineno or child.lineno))
+                if not _is_overload(child):
+                    start = min([child.lineno] + [d.lineno for d in child.decorator_list])
+                    found.append(Function(f"{prefix}{child.name}", start, child.end_lineno or child.lineno))
                 walk(child, f"{prefix}{child.name}.")
+            elif isinstance(child, ast.stmt):
+                walk(child, prefix)
 
     walk(tree.parse(path), "")
     twice = sorted({f.qualname for f in found if sum(g.qualname == f.qualname for g in found) > 1})

@@ -99,6 +99,10 @@ def main(argv: list[str] | None = None) -> None:
         )
         for group in ties:
             print(f"#   x{group.multiplicity} {group.identity} at {group.where}", file=sys.stderr)
+        excluded = here.excluded
+        print(f"# sites the per-root kind filter excludes: {sum(excluded.values())}", file=sys.stderr)
+        for name in sorted(excluded):
+            print(f"#   {name}: {excluded[name]}", file=sys.stderr)
     elif args.command == "attribute":
         reports.attribute(here)
     elif args.command == "injected":
