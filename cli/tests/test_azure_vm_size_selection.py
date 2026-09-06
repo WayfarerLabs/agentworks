@@ -30,6 +30,18 @@ if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
 
 
+@pytest.fixture(autouse=True)
+def _stub_egress_ip(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep these unit tests hermetic. Provisioning resolves the operator's
+    SSH allow-list, which otherwise makes a live HTTPS what's-my-ip request
+    (``ssh_exposure.detect_egress_ip`` -> ``checkip.amazonaws.com``); a unit
+    run must never touch the network. Matches the stub every other platform
+    test uses."""
+    from agentworks.capabilities.vm_platform import ssh_exposure
+
+    monkeypatch.setattr(ssh_exposure, "detect_egress_ip", lambda: "198.18.0.7")
+
+
 class TestSelectVMSize:
     def test_exact_match_wins(self) -> None:
         """A request that lands exactly on a SKU picks that SKU."""

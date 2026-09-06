@@ -28,7 +28,7 @@ from agentworks.sessions.manager._status import (
     _encoded_probe_field,
 )
 from agentworks.sessions.tmux import ProbeStatus, probe_tmux_server_pid
-from tests.conftest import requires_symlinks
+from tests.conftest import requires_posix_shell, requires_symlinks
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -286,6 +286,7 @@ def test_batch_command_is_valid_shell_syntax() -> None:
 
 
 @requires_symlinks
+@requires_posix_shell
 def test_batch_probe_executes_only_read_only_guest_operations(tmp_path: Path) -> None:
     """Reject unexpected PATH tools, sudo calls, tmux verbs, and temp-tree writes."""
     bin_dir = tmp_path / "bin"
