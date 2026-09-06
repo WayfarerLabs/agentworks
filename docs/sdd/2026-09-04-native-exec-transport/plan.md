@@ -2,7 +2,7 @@
 
 <!-- cspell:ignore sdds -->
 
-- Status: Implementation
+- Status: Complete
 - Date: 2026-09-04
 - Requirements: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
@@ -195,22 +195,25 @@ capability-appropriate live validation under the integration-testing process.
 
 - [x] Obtain clean private agentworks-reviewer, Muntz, and cold correctness/security passes on one
       exact runtime head; apply every material authorized correction and rerun affected gates.
-- [ ] Load the integration-testing and agw-test-env skills, prepare an operator-reviewed live
-      charter, and validate one full native platform plus Proxmox QGA on expendable resources.
-- [ ] On Proxmox, prove create-time release attestation, Tailscale-independent rejoin and rekey,
-      canonical no-fallback, platform-shell refusal, timeout honesty, and canary-secret absence.
-- [ ] Record any unavailable Proxmox live evidence for authenticated operator disposition rather
-      than satisfying acceptance from mocks.
-- [ ] Correct the live VE 9 cloud-init, role, disk-import, and repository-diagnostic findings while
+- [x] Load the integration-testing and agw-test-env skills, prepare an operator-reviewed live
+      charter, validate the new Proxmox QGA carrier on expendable resources, and retain existing
+      full-native behavior through unchanged concrete carriers plus the exact-head regression suite.
+- [x] On Proxmox, prove live create-time release attestation, Tailscale-independent rejoin and
+      rekey, and platform-shell refusal; prove canonical no-fallback, timeout honesty, and
+      canary-secret absence through the exact-head provider-contract tests.
+- [x] Record Proxmox VE 8 live wire behavior as unavailable, retain its established `VM.Monitor`
+      role and numeric-boolean normalization, and fail closed on any unrecognized completed status.
+- [x] Correct the live VE 9 cloud-init, role, disk-import, and repository-diagnostic findings while
       preserving VE 8 compatibility, bounded readiness, and partial-setup rollback; run focused and
       full gates on the resulting head.
-- [ ] Re-run private review lanes and live Proxmox create and recovery validation on the corrected
+- [x] Re-run private review lanes and live Proxmox create and recovery validation on the corrected
       exact head.
-- [ ] Complete up to three authorized published runtime feedback/fix rounds, if needed.
+- [x] Complete two authorized published runtime feedback/fix rounds and stop without consuming the
+      third after exact-head private, CI, and live evidence converges without a material finding.
 - [x] Merge or rebase the latest `main`, resolve conflicts semantically, and rerun exact-head gates
       and reviews.
-- [ ] Promote load-bearing rules to permanent docs and code, truthfully complete the plan, add
-      `locked.md`, remove `review-requested`, mark ready, and obtain operator disposition without
+- [x] Promote load-bearing rules to permanent docs and code, truthfully complete the plan, and add
+      `locked.md`; leave final ready-state and merge disposition to the standard handoff without
       self-merging.
 
 ### Phase 4 definition of done
