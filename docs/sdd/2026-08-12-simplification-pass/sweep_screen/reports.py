@@ -51,11 +51,11 @@ SHIFTED = frozenset({"grown", "shrunk"})
 def claim_rows(rows: list[Row]) -> list[Row]:
     """Group 1's judgment and keep rows: everything it holds outside the batch.
 
-    A `[dead]` row is not a claim. Its file is gone, so it can neither own a
-    site nor lose one, and gating on it would refuse forever over a row the map
-    already records as dead.
+    Every one of them is a claim. A row whose estate is gone is not in the
+    ledger any more, so there is no such thing here as a claim that cannot be
+    checked.
     """
-    return [r for r in rows if r.group == GROUP_1 and r.section != MECHANICAL_BATCH and "dead" not in r.markers]
+    return [r for r in rows if r.group == GROUP_1 and r.section != MECHANICAL_BATCH]
 
 
 def unresolved_claims(rows: list[Row], snapshot: Snapshot) -> list[tuple[str, str, str]]:
@@ -308,9 +308,8 @@ def generate(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
       resolves and covers no site is reported beside it and does not refuse; the
       comment on `barren` says why.
 
-    `claim_rows` says which rows are claims and why. `[subtracted]` and
-    `[deferred]` rows are among them, because their sites are real and must not
-    fall into the batch.
+    `claim_rows` says which rows are claims. `[deferred]` rows are among them,
+    because their sites are real and must not fall into the batch.
     """
     rows = read_rows(map_path, snapshot)
     claims = claim_rows(rows)
@@ -392,27 +391,26 @@ def totals(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
     """
     rows = read_rows(map_path, snapshot)
     groups = list(dict.fromkeys(r.group for r in rows))
-    print("| Group | Live | delete | convert | keep | Dead | Subtracted | Deferred | Ledger |")
-    print("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
+    print("| Group | Live | delete | convert | keep | Deferred | Ledger |")
+    print("| --- | ---: | ---: | ---: | ---: | ---: | ---: |")
     ledger: Counter[str] = Counter()
     for group in groups:
         here = [r for r in rows if r.group == group]
         live = [r for r in here if r.live]
         counts = Counter(r.disposition for r in live)
-        marks = Counter(m for r in here for m in r.markers if m in ("dead", "subtracted", "deferred"))
+        deferred = sum(1 for r in here if "deferred" in r.markers)
         ledger["live"] += len(live)
         for name in ("delete", "convert", "keep"):
             ledger[name] += counts[name]
-        for name in ("dead", "subtracted", "deferred"):
-            ledger[name] += marks[name]
+        ledger["deferred"] += deferred
         ledger["ledger"] += len(here)
         print(
             f"| {GROUP_TITLES.get(group, group)} | {len(live)} | {counts['delete']} | {counts['convert']} "
-            f"| {counts['keep']} | {marks['dead']} | {marks['subtracted']} | {marks['deferred']} | {len(here)} |"
+            f"| {counts['keep']} | {deferred} | {len(here)} |"
         )
     print(
         f"| **All** | {ledger['live']} | {ledger['delete']} | {ledger['convert']} | {ledger['keep']} "
-        f"| {ledger['dead']} | {ledger['subtracted']} | {ledger['deferred']} | {ledger['ledger']} |"
+        f"| {ledger['deferred']} | {ledger['ledger']} |"
     )
     print(f"\n# executable set: {ledger['live']} rows; ledger: {ledger['ledger']} rows", file=sys.stderr)
 

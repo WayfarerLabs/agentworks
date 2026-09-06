@@ -32,8 +32,8 @@ ROW_ID = re.compile(r"(?:[A-F]|L|RB|G1)-[A-Z]?\d{1,3}[a-z]?$")
 PATH_RE = re.compile(r"((?:cli|website)/[A-Za-z0-9_./-]+?\.(?:py|mjs))")
 LINE_ANCHOR = re.compile(r"L(\d+)(?:-(\d+))?$")
 SPAN_RE = re.compile(r"\d+(?:-\d+)?")
-MARKER_RE = re.compile(r"\[(dead|deferred|1-raise|unverified|subtracted:[^\]]*|line-anchored:[^\]]*)\]")
-ANY_MARKER = re.compile(r"\[(?:dead|deferred|1-raise|unverified|subtracted|line-anchored)\b[^\]]*\]")
+MARKER_RE = re.compile(r"\[(deferred|1-raise|unverified|line-anchored:[^\]]*)\]")
+ANY_MARKER = re.compile(r"\[(?:deferred|1-raise|unverified|line-anchored)\b[^\]]*\]")
 CAUSE_RE = re.compile(r"\[line-anchored:\s*([^\]]*)\]")
 
 #: Every cause a line anchor may record. `reanchor` computes these and nothing
@@ -244,7 +244,10 @@ class Row:
 
     @property
     def live(self) -> bool:
-        return not (self.markers & {"dead", "subtracted", "deferred"})
+        """In the executable set. `[deferred]` is the only marker that takes a
+        row out of it: a row whose estate is gone is no longer in the ledger at
+        all, so there is nothing left for a marker to say."""
+        return "deferred" not in self.markers
 
     def claims(self, site: Site) -> bool:
         return any(a.claims(site) for a in self.anchors)
