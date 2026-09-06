@@ -29,8 +29,9 @@ one of its rows resolved at `426cccae`, which is what that re-baseline measured 
 about HEAD; rows in other groups were re-derived only where the re-baseline touched them, so a line
 number elsewhere may still be a `c686cd6d` anchor.
 
-**Re-anchored on 2026-09-06**, mechanically, at `426cccae`. Every row now keys what it addresses by
-identity rather than by line, per the grammar below, and nothing but column 2 and the line-anchored
+**Re-anchored on 2026-09-06**, mechanically, at `426cccae`. Every row that can be now keys what it
+addresses by identity rather than by line, per the grammar below; 93 anchors could not be named and
+keep literal lines, each saying on its own row why. Nothing but column 2 and the line-anchored
 markers moved: no disposition, justification or id changed and no site was reclassified.
 
 **The rows' own basis is what limits this, and the fresh cut owes work because of it.** Group 1's
@@ -44,7 +45,8 @@ by hand because no parser could read its two-file cell) at `c686cd6d` and at `42
 comparing what each named: **987 rows agree, 144 disagree, 84 are not applicable** because the file
 is absent at a base or is not Python. That measurement is history, not a live check; the command
 that produced it was deleted with this round, because it answers a question about a map that is
-about to be replaced.
+about to be replaced. It reproduces from what survives: `Tree(ref)` for each basis, `read_rows` on
+the legacy map against each, and `Row.render_cell` to compare what the two lifts named.
 
 **Do not read the 144 as loud failures.** Of them, 125 resolve cleanly at HEAD, which is exactly the
 quiet case: the anchor names a real test, so nothing reports anything, and whether it names the
@@ -53,7 +55,8 @@ at risk, because its basis is known; the exposure is the non-group-1 rows.
 
 **Twenty rows point at files that no longer exist and say nothing about it**, which the fresh cut
 owes too. `[dead]` was applied at `426cccae` and has not been re-derived since, so these five files
-went after it and their rows still read as live:
+went after it. Seventeen of the twenty read as live; the other three (L-018, G1-156, B-061) are
+already `[subtracted]` and so are out of the executable set for a different reason.
 
 | File                                                    | Rows                                        |
 | ------------------------------------------------------- | ------------------------------------------- |
@@ -63,19 +66,22 @@ went after it and their rows still read as live:
 | `cli/tests/secrets/test_resolution_lifecycle.py`        | L-018, G1-156, B-061                        |
 | `cli/tests/test_session_resume_cli.py`                  | B-124                                       |
 
-Six of the twenty are also among the twelve claim anchors below, since a judgment row whose file is
-gone fails both ways. The sessions file was renamed rather than deleted, so its rows have a
-successor to be re-cut against; the others were deleted outright.
+Four of the twenty rows are also among the nine the twelve claim anchors below belong to, since a
+judgment row whose file is gone fails both ways; they account for six of those twelve anchors. The
+sessions file was renamed rather than deleted, so its rows have a successor to be re-cut against;
+the others were deleted outright.
 
 **The recourse is re-derivation, not repair.** The fresh cut re-derives from scratch every
 non-group-1 row in the 20 files below, rather than carrying their anchors forward, so the mixed
 basis dies with the cut instead of being audited row by row. Eight of these files disagree on every
 row asked, and four of them hold 93 of the 144.
 
-Rows anchored to a whole file are out of the table's scope, having no lines to disagree about, and
-so are group 1's, whose basis is known: `cli/tests/assistance/test_generation.py` holds two
-disagreeing group-1 rows that are therefore absent below. That is the whole of the gap between the
-144 the measurement counted and the 142 these twenty files hold.
+The table lists the files holding at least one disagreeing row that is not group 1's, which is what
+the re-derivation covers. Of the 144, **128 are non-group-1 rows and are the work**; the other 14
+are group 1's, whose basis is known. The 142 the table's own column adds to is those 128 plus 14
+group-1 rows that share a file with them. The remaining 2 of the 144 are the two group-1 rows in
+`cli/tests/assistance/test_generation.py`, absent below because that file holds no non-group-1
+disagreeing row and so earns no line.
 
 | File                                                     | Rows asked | Disagreeing |
 | -------------------------------------------------------- | ---------: | ----------: |
@@ -145,7 +151,10 @@ pytest's `::` node-id spelling, so neither can be pasted into the other. `Type` 
 exception or warning name exactly as written, or the assertion method's own name where the call
 takes no type (`assertRegex`, `assertNotRegex`). `digest` is the first six hex of sha256 over the
 needle's SKELETON: the literal with every interpolation blanked to `{}`, which covers f-strings,
-`"..." % x` from its literal left operand, and `"...".format(...)` from its literal receiver.
+`"..." % x` from its literal left operand, and `"...".format(...)` from its literal receiver. A
+needle that is not a literal at all, being a name, a call or a subscript, has no skeleton to take
+and digests as the string `<expr>`, whose digest is `d62e9a`; 20 sites at HEAD do, so such sites in
+one test asserting one type are one identity with a multiplicity.
 
 **The skeleton is deliberately blind to what is interpolated**, and that is a trade made on purpose.
 Keying on the interpolated expression would tell `f"a{x}b"` from `f"a{y}b"`, and would also mean
@@ -178,8 +187,8 @@ it now sits. `grown` and `shrunk` are a site group that changed size, with both 
 is the same test asserting the same type against a different needle, which is what a reworded
 message leaves behind. `gone` is the file present and the anchor not in it, `file-gone` is the file
 itself, and `line-anchored` is a line anchor, which resolves to nothing by construction. `carry`
-holds two trees and so adds two labels of its own on top of these, `found` and `moved`, plus four
-verdicts it gives a whole row. Those live in `carry`'s docstring in
+holds two trees and so adds two labels of its own, `found` and `moved`, plus four verdicts it gives
+a whole row. All six are defined in `carry`'s own docstring in
 [sweep_screen/reports.py](sweep_screen/reports.py), because they describe a comparison between two
 commits rather than anything a row says.
 
@@ -449,7 +458,11 @@ survey's: that survey counted test FUNCTIONS.
 2026-08-19 cut's and are not re-derived here; the fresh cut is what re-derives them. Measured at
 `a64b1b9c` after the 2026-09-06 re-anchoring, the estate is 620 `match=` sites under `cli/tests`
 plus 58 regex-family sites under `website/tests`, `attribute` finds 595 of the 620 claimed by
-exactly one group-1 row and none claimed by two, and the 25 unclaimed are sites the tree gained.
+exactly one group-1 row and none claimed by two. **24 of the 25 unclaimed are sites the tree
+gained.** The twenty-fifth is not:
+`test_create_failure_cleans_session_slice_then_unwinds_ephemerals`'s `RuntimeError::5df21f` at
+`cli/tests/sessions/test_create_start_restart_orchestrated.py:771` existed at `426cccae` under the
+file's old name and lost its owner, G1-I06, when the file was renamed.
 
 Of the 654 site groups the group-1 rows were cut against under `cli/tests`, `sweep-screen.py carry`
 finds 295 at the same line and 293 moved, 2 retargeted onto a reworded needle, 50 gone from a file
@@ -487,8 +500,8 @@ temporary, and one row per line is what makes it checkable against a diff.
 ## Completeness re-scan, 2026-08-19
 
 The tree moved between this inventory's basis (`c686cd6d`) and the re-baseline commit (`426cccae`),
-so the map was re-derived against HEAD rather than trusted. Every figure below was measured from the
-AST at HEAD, never estimated.
+so the map was re-derived against the latter rather than trusted. Every figure below was measured
+from the AST at `426cccae`, never estimated, and none of them has been re-derived since.
 
 ### Markers this file uses
 
@@ -530,7 +543,7 @@ Six rows were removed rather than marked, each because every site it claimed mov
 G1-013 into G1-K19, G1-062 into G1-C02, and G1-099, G1-123, G1-135 and G1-140 into the
 injected-marker rows, those four files having held nothing but injected markers.
 
-### The estate, re-measured at HEAD
+### The estate, re-measured at `426cccae`
 
 | Estate                                           | At `c686cd6d` | At `426cccae` | What moved                                                                                 |
 | ------------------------------------------------ | ------------: | ------------: | ------------------------------------------------------------------------------------------ |
@@ -939,11 +952,14 @@ enough the first time.
 
 ### The mechanical batch
 
-454 live `match=` sites over 131 files, one row per file, out of a ledger of 517 over 149. The gap
-is the dead and subtracted rows, and it is the number to size a PR from. Every one is `delete`, and
-the justification is shared rather than restated 149 times: the matched string is a fixed literal
-that varies with nothing, and it is prose this repository authors, which no case in the taxonomy
-licenses. The `raises` stays; only the `match=` argument goes.
+At `426cccae`, 454 live `match=` sites over 131 files, one row per file, out of a ledger of 517 over
+149; the gap is the dead and subtracted rows. Those are the figures this batch was cut to and they
+have not been re-derived. At `a64b1b9c` the live mechanical rows claim 415 sites and
+`sweep-screen.py generate` emits 142 rows over 486, which is the number to size a PR from once the
+fresh cut lands. Every one is `delete`, and the justification is shared rather than restated 149
+times: the matched string is a fixed literal that varies with nothing, and it is prose this
+repository authors, which no case in the taxonomy licenses. The `raises` stays; only the `match=`
+argument goes.
 
 Each row's cell lists the sites that row owns, generated from the estate minus the sites the
 judgment and keep rows above claim. Read it as the row's claim; there is no range to over-apply, and
