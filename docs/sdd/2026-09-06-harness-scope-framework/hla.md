@@ -177,9 +177,10 @@ Features use the existing descriptor/registration pattern as the three core-owne
 setup operation, return env/artifact contributions, and are selected in a `features` list with the
 same ordering and replacement rules as attachments. The user setup pipeline consumes the
 agent-feature API for both concrete users, so features do not introduce duplicate admin
-implementations. The first concrete feature is a harness-neutral context feature that emits
-configured env and instruction artifacts, proving that features actually feed the integration lane.
-There is no session-feature.
+implementations. A concrete test feature, registered and driven through the real CLI in the vertical
+acceptance run, proves env and artifact delivery. A production feature that only repeats direct
+template declarations would add no operator value, so it is not part of this design. There is no
+session-feature.
 
 ## The two currencies
 
