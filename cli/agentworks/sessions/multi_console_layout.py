@@ -401,6 +401,8 @@ def _reorder_session_windows(
     if malformed or not pairs:
         return _SessionWindowOrderOutcome.FAILED
     pairs.sort(key=lambda p: p[0])
+    if len({idx for idx, _name in pairs}) != len(pairs):
+        return _SessionWindowOrderOutcome.FAILED
     desired_set = set(ordered_session_windows)
 
     # Duplicate window names among the session set break the swap-by-name

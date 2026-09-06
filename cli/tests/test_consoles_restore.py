@@ -761,17 +761,26 @@ def test_restore_session_healthy_target_reconciles_live_window_order(
 
 
 @pytest.mark.parametrize(
-    "failure_command",
+    ("failure_command", "failure_result"),
     [
-        "-F '#{window_index}|#{window_name}'",
-        "swap-window",
+        pytest.param(
+            "-F '#{window_index}|#{window_name}'",
+            _FakeResult(returncode=1, stderr="tmux failed"),
+            id="list-windows",
+        ),
+        pytest.param(
+            "-F '#{window_index}|#{window_name}'",
+            _FakeResult(stdout="0|a\n0|b\n"),
+            id="duplicate-window-indices",
+        ),
+        pytest.param("swap-window", _FakeResult(returncode=1, stderr="tmux failed"), id="swap-window"),
     ],
-    ids=["list-windows", "swap-window"],
 )
 def test_restore_session_reports_incomplete_window_order_reconciliation(
     db: Database,
     console_target_factory: Callable[..., _FakeTarget],
     failure_command: str,
+    failure_result: _FakeResult,
 ) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a", "b"])
@@ -781,7 +790,7 @@ def test_restore_session_reports_incomplete_window_order_reconciliation(
     model.new_session(CON, "b")
     model.new_window(CON, "a")
     target = console_target_factory(model)
-    target.responses[failure_command] = _FakeResult(returncode=1, stderr="tmux failed")
+    target.responses[failure_command] = failure_result
 
     with pytest.raises(ExternalError) as exc_info:
         restore_session(
