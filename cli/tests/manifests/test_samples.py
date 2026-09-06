@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 import stat
+import sys
 from pathlib import Path
 
 import pytest
@@ -472,6 +473,16 @@ def test_write_sample_refuses_escapes_and_suffixes(tmp_path: Path) -> None:
         write_sample(resources, "../escape.yaml")
     with pytest.raises(ValidationError, match=".yaml or .yml"):
         write_sample(resources, "samples.txt")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="drive-relative paths are a Windows-only escape shape")
+def test_write_sample_refuses_windows_drive_relative_path(tmp_path: Path) -> None:
+    # A Windows drive-relative path (drive letter, no root) is not
+    # is_absolute() yet anchors off that drive's current directory, escaping
+    # the resources dir; the drive component must be rejected.
+    resources = tmp_path / "resources"
+    with pytest.raises(ValidationError, match="relative to the resources"):
+        write_sample(resources, "C:foo.yaml")
 
 
 def test_write_sample_refuses_unloadable_dot_paths(tmp_path: Path) -> None:

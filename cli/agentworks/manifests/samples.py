@@ -265,10 +265,13 @@ def _validated_target(resources_dir: Path, filename: str) -> Path:
     from agentworks.manifests.emit import SCHEMA_DIRNAME
 
     rel = PurePath(filename)
-    # ``rel.root`` catches a driveless-rooted path (``/abs/x.yaml``), which on
-    # Windows is NOT ``is_absolute()`` (it lacks a drive) yet still anchors
-    # ``resources_dir / rel`` to the drive root and escapes the resources dir.
-    if rel.is_absolute() or rel.root or ".." in rel.parts:
+    # On Windows a path can escape the resources dir without being
+    # ``is_absolute()``: ``rel.root`` catches a driveless-rooted path
+    # (``/abs/x.yaml``, which anchors to the drive root), and ``rel.drive``
+    # catches a drive-relative path (``C:foo.yaml``, which anchors off the
+    # current directory of that drive). Both are empty for a legitimate
+    # relative path on every platform, so this over-rejects nothing real.
+    if rel.is_absolute() or rel.drive or rel.root or ".." in rel.parts:
         raise ValidationError(
             f"--write takes a path relative to the resources directory; got {filename!r}",
             hint=f"Files land under {format_host_path(resources_dir)}.",
