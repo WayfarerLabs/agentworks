@@ -4,6 +4,8 @@
   "words": [
     "backticked",
     "colocatable",
+    "metacharacter",
+    "metacharacters",
     "monkeypatch",
     "monkeypatches",
     "multiprocess",
