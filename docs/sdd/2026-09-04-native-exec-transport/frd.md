@@ -52,8 +52,7 @@ shell support optional and honestly reported.
    are sufficient.
 8. pyinfra is design prior art and a possible future initialization layer. This effort does not add
    it as a dependency, copy its internals, or adopt its inventory, fact, or operation model.
-9. Runtime implementation must not ship in 0.18.0. The SDD may land independently because it changes
-   no runtime behavior.
+9. Runtime implementation must not ship in 0.18.0 and targets the first release after it.
 
 ## Functional requirements
 
@@ -177,3 +176,5 @@ shell support optional and honestly reported.
 - 2026-09-04: The operator chose an SDD before implementation and authorized up to three published
   feedback/fix rounds for the SDD PR.
 - 2026-09-04: The operator excluded runtime implementation from 0.18.0.
+- 2026-09-06: After approving the design, the operator authorized runtime implementation on the same
+  PR and up to three implementation feedback/fix rounds.

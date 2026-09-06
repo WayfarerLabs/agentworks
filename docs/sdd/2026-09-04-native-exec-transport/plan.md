@@ -2,7 +2,7 @@
 
 <!-- cspell:ignore sdds -->
 
-- Status: Design
+- Status: Implementation
 - Date: 2026-09-04
 - Requirements: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
@@ -10,19 +10,22 @@
 - Migration: [migration-strategy.md](./migration-strategy.md)
 - Research: [prior-art-research.md](./prior-art-research.md)
 - Source baseline: `c962f52043e9ea239197ad96d5a383f98db9164d`
-- Delivery: artifact PR now; separately authorized runtime PR after 0.18.0
+- Implementation baseline: `a64b1b9cff5449807695e6933a0e92786b24a06d`
+- Delivery: SDD and post-0.18.0 runtime implementation on PR #746
 
 ## Delivery rules
 
-- This PR contains the complete SDD artifact set and no runtime implementation. It remains draft
-  during design review and becomes ready only when design feedback converges.
-- The PR carries `sdd:native-exec-transport`. Each coherent design handoff uses `review-requested`.
-- The operator authorized up to three published SDD feedback/fix rounds. Each round waits the
-  standard minimum of one hour after handoff unless the operator sets another interval, collects one
-  complete batch, critically dispositions every material item, returns the PR to draft before
-  mutation, reruns private reviews after changes, and hands off one exact head.
-- Runtime implementation is not authorized by this plan and must not ship in 0.18.0. After a new
-  authenticated direction, it starts from the correct post-0.18 baseline on a separate PR.
+- This PR began as the complete SDD artifact set. After design approval, the operator authorized the
+  post-0.18.0 runtime implementation on the same PR. It remains draft until implementation,
+  validation, and review converge.
+- The PR carries `sdd:native-exec-transport`. Coherent draft checkpoints use `review-requested`; the
+  final handoff uses ready state.
+- The completed design-review budget was up to three published feedback/fix rounds. The operator
+  separately authorized up to three implementation feedback/fix rounds. Each round follows the
+  standard batching, critical disposition, draft-before-mutation, private-review, and exact-head
+  handoff rules.
+- Runtime implementation is authorized on the post-0.18.0 baseline recorded above and must remain
+  outside the 0.18.0 release.
 - A changed product requirement, a need for persisted state or configuration, Proxmox live evidence
   that refutes the QGA design, or non-converging material review stops for operator direction.
 - The lead does not merge its own PR. Completed plan checkboxes become immutable after merge; a
@@ -101,8 +104,9 @@ capability-appropriate live validation under the integration-testing process.
 - [x] Remove `review-requested` and promote the artifact PR to ready when design converges.
 - [x] Incorporate the operator-authorized post-ready review of the three requirement and
       architecture threads and obtain clean exact-head private reviews.
-- [ ] Publish the exact-head feedback/fix handoff, complete the remaining authorized review, and
-      promote the artifact PR again when the reopened review converges.
+- [x] Publish the exact-head feedback/fix handoff and receive authenticated design approval; the
+      operator directed implementation to continue on the same PR instead of merging artifacts
+      separately.
 
 ### Phase 0 definition of done
 
@@ -111,7 +115,8 @@ capability-appropriate live validation under the integration-testing process.
 - Required exec-only behavior and optional rich native behavior are separated without a second hook
   or factory.
 - Proxmox identity, stdin, result, timeout, ambiguity, and secret behavior is explicit.
-- No runtime implementation, lock file, 0.18 release claim, or material review finding remains.
+- Design approval preceded runtime implementation; no lock file, 0.18 release claim, or material
+  design finding remained at that boundary.
 
 ## Phase 1: Build the narrow type and Proxmox carrier
 
@@ -196,7 +201,7 @@ capability-appropriate live validation under the integration-testing process.
       canonical no-fallback, platform-shell refusal, timeout honesty, and canary-secret absence.
 - [ ] Record any unavailable Proxmox live evidence for authenticated operator disposition rather
       than satisfying acceptance from mocks.
-- [ ] Complete the separately authorized published runtime feedback/fix rounds, if any.
+- [ ] Complete up to three authorized published runtime feedback/fix rounds, if needed.
 - [ ] Merge or rebase the latest `main`, resolve conflicts semantically, and rerun exact-head gates
       and reviews.
 - [ ] Promote load-bearing rules to permanent docs and code, truthfully complete the plan, add
@@ -210,4 +215,4 @@ capability-appropriate live validation under the integration-testing process.
   finding remains.
 - The implementation SDD is locked only after runtime completion, and no permanent behavior depends
   on the SDD path.
-- The ready runtime PR is explicitly outside 0.18.0 and awaits operator merge disposition.
+- The ready runtime PR is explicitly post-0.18.0 and awaits operator merge disposition.

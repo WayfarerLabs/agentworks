@@ -72,15 +72,14 @@ exception and old claim that native transport always supports interaction.
   or recovery selection is introduced.
 - **CLI and machine output:** no grammar or schema change. Proxmox native shell remains unsupported,
   with more accurate reasoning.
-- **Runtime:** implementation begins only after 0.18.0. It does not enter the 0.18 release branch or
-  release candidate.
+- **Runtime:** implementation began only after 0.18.0 and does not enter that released version.
 
 ## Delivery ordering
 
-The SDD lands as a documentation-only PR if its review converges. Runtime implementation requires a
-separate authenticated operator direction after 0.18.0 and a fresh branch at the correct baseline.
-The runtime PR keeps the type split, all VM-platform implementations, Proxmox implementation, tests,
-and permanent documentation together. There is no useful partially compatible midpoint to release.
+After design approval, authenticated operator direction continued runtime implementation on the SDD
+PR from a post-0.18.0 `main` baseline. The PR keeps the type split, all VM-platform implementations,
+Proxmox implementation, tests, and permanent documentation together. There is no useful partially
+compatible midpoint to release.
 
 Within the runtime branch, tests may land alongside each step, but every pushed handoff must keep
 the capability registry and all VM-platform implementations internally consistent.

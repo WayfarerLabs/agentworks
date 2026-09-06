@@ -216,9 +216,8 @@ shell.
 The capability API is internal and all implementations ship together. Contract version 1 changes
 atomically. A version bump or compatibility adapter would describe consumers that do not exist.
 
-There is no database, config, CLI grammar, machine-output, or completion change. The runtime work is
-scheduled after 0.18.0. Its implementation branch must start from the post-0.18 release baseline or
-otherwise be explicitly excluded from that release before merge intent.
+There is no database, config, CLI grammar, machine-output, or completion change. Runtime work began
+from a post-0.18.0 `main` baseline and targets a later release.
 
 Provider-version compatibility remains within R22. The evidence and rejected alternatives for that
 boundary and for pyinfra are centralized in [prior-art-research.md](./prior-art-research.md).
