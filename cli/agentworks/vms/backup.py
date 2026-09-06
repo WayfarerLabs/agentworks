@@ -97,7 +97,7 @@ def backup_vm(
                 # Snapshot all DB data in a single transaction for consistency
                 output.info("Reading database (consistent snapshot)...")
                 (
-                    _vm,
+                    snapshot_vm,
                     agents,
                     workspaces,
                     sessions,
@@ -106,7 +106,7 @@ def backup_vm(
                     desired_overlays,
                     applied_slices,
                 ) = db.snapshot_vm_backup_data(vm_name)
-                if _vm is None:
+                if snapshot_vm is None:
                     raise StateError(
                         f"VM '{vm_name}' no longer exists",
                         entity_kind="vm",
@@ -117,7 +117,7 @@ def backup_vm(
 
                 # 1. VM metadata
                 output.info("Exporting VM metadata...")
-                _write_json(backup_dir / "vm.json", asdict(_vm))
+                _write_json(backup_dir / "vm.json", asdict(snapshot_vm))
 
                 # 2. Events
                 output.info(f"Exporting {len(events)} VM events...")
