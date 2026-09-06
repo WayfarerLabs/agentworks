@@ -206,6 +206,30 @@ def test_restore_session_rebuilds_missing_window(db: Database, fake_target: _Fak
     assert len(new_windows) == 1
 
 
+def test_restore_session_rebuild_reconciles_live_window_order(
+    db: Database,
+    console_target_factory: Callable[..., _FakeTarget],
+) -> None:
+    """A rebuilt window can claim tmux's lowest free index, but the complete
+    restore settles session windows back into configured member order."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a", "b"])
+
+    model = TmuxModel()
+    model.new_session(CON, "_PLACEHOLDER")
+    model.new_window(CON, "a")
+    assert model.kill_window(CON, "_PLACEHOLDER")
+    assert model.windows_with_index(CON) == [(1, "a")]
+    target = console_target_factory(model)
+
+    restore_session(db, _StubConfig(), console_name="con", session_name="b", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert model.window_names(CON) == ["a", "b"]
+    assert any("swap-window" in command for command in target.commands)
+    assert _destructive(target.commands) == []
+
+
 def test_restore_session_rebuild_focuses_session_pane_under_pane_base_index_one(
     db: Database, fake_target: _FakeTarget
 ) -> None:
@@ -704,6 +728,27 @@ def test_restore_session_is_a_noop_on_a_healthy_model(
     rows = model.pane_rows(CON, "a")
     assert rows is not None
     assert [tag for _pid, _pidx, tag in rows] == [None, 0]
+
+
+def test_restore_session_healthy_target_reconciles_live_window_order(
+    db: Database,
+    console_target_factory: Callable[..., _FakeTarget],
+) -> None:
+    """A healthy target window still repairs pre-existing console-order drift."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b"])
+    create_console(db, name="con", vm_name="vm1", session_specs=["a", "b"])
+
+    model = TmuxModel()
+    model.new_session(CON, "b")
+    model.new_window(CON, "a")
+    target = console_target_factory(model)
+
+    restore_session(db, _StubConfig(), console_name="con", session_name="a", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert model.window_names(CON) == ["a", "b"]
+    assert any("swap-window" in command for command in target.commands)
+    assert _destructive(target.commands) == []
 
 
 def test_restore_session_additively_repairs_a_missing_shell_pane(
