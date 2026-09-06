@@ -115,34 +115,44 @@ def _is_overload(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
 def functions_in(tree: Tree, path: str) -> list[Function]:
     """Every function in one module, innermost last within a nest.
 
-    `if`, `try`, `with`, `for`, `while` and `match` open no qualname segment, so
-    the walk passes through them rather than stopping: a test defined under
-    `if sys.platform` is a test, and `sites_in` finds its sites whether this
-    index knows the function or not. Leaving it out made such a test
-    unaddressable by a span anchor and let a duplicate name past the refusal
-    below by hiding one of the pair inside a branch.
+    Only `def`, `async def` and `class` open a qualname segment; the walk passes
+    through everything else, so a test under `if sys.platform`, in an `except`
+    arm or in a `match` case is found and named as though it sat at the top of
+    its enclosing scope. One name may therefore have several ranges, which is
+    the platform-conditional idiom of defining the same test in sibling
+    branches; `enclosing` resolves those by line. Two definitions of one name in
+    the SAME block are a different thing, since only the second ever runs, and
+    they are refused because a span anchor naming it cannot say which is meant.
     """
     found: list[Function] = []
 
     def walk(node: ast.AST, prefix: str) -> None:
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, ast.ClassDef):
-                walk(child, f"{prefix}{child.name}.")
-            elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        for _, value in ast.iter_fields(node):
+            block = value if isinstance(value, list) else [value]
+            here: set[str] = set()
+            for child in block:
+                if not isinstance(child, ast.AST):
+                    continue
+                if isinstance(child, ast.ClassDef):
+                    walk(child, f"{prefix}{child.name}.")
+                    continue
+                if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    walk(child, prefix)
+                    continue
+                qualname = f"{prefix}{child.name}"
                 if not _is_overload(child):
+                    if qualname in here:
+                        raise SystemExit(
+                            f"{path}:{child.lineno}: {qualname} is defined twice in one block,"
+                            " so only the second runs and a span anchor naming it cannot say which;"
+                            " rename one or the map cannot address it"
+                        )
+                    here.add(qualname)
                     start = min([child.lineno] + [d.lineno for d in child.decorator_list])
-                    found.append(Function(f"{prefix}{child.name}", start, child.end_lineno or child.lineno))
-                walk(child, f"{prefix}{child.name}.")
-            elif isinstance(child, ast.stmt):
-                walk(child, prefix)
+                    found.append(Function(qualname, start, child.end_lineno or child.lineno))
+                walk(child, f"{qualname}.")
 
     walk(tree.parse(path), "")
-    twice = sorted({f.qualname for f in found if sum(g.qualname == f.qualname for g in found) > 1})
-    if twice:
-        raise SystemExit(
-            f"{path}: {', '.join(twice)} defined more than once in one scope,"
-            " so a span anchor naming it cannot say which; rename one or the map cannot address it"
-        )
     return sorted(found)
 
 
@@ -259,11 +269,10 @@ class Snapshot:
                 self._functions[path] = functions_in(self.tree, path)
         return self._functions[path]
 
-    def function(self, path: str, qualname: str) -> Function | None:
-        for candidate in self.functions(path) or []:
-            if candidate.qualname == qualname:
-                return candidate
-        return None
+    def function(self, path: str, qualname: str) -> list[Function]:
+        """Every range this name covers here, which is more than one where the
+        same test is defined in sibling branches."""
+        return [f for f in self.functions(path) or [] if f.qualname == qualname]
 
     def enclosing(self, path: str, line: int) -> Function | None:
         """The innermost function holding `line`, or None."""
