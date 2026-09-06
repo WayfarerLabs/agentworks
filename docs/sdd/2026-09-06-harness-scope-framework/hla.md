@@ -234,8 +234,9 @@ Agentworks setup; rules and skills follow a reduced Rulesync model. None is a ta
 Core attaches immutable origin metadata: owning scope, resource identity, and producer (core or the
 named feature). Together with the producer-local name, these identify an item across delivery;
 duplicate names within a producer are errors. A facet is not an independent origin field: core's
-fixed mapping derives the corresponding facet from the origin scope. A current deferral adds the
-attempt's facet, owning resource, and reason without rewriting origin or accumulating an event log.
+fixed mapping derives the corresponding facet from the origin scope. The enclosing invocation or
+persisted result identifies the current facet and resource; each returned item adds only its reason
+to its original identity. No per-item attempt history is stored.
 
 The name and origin form a pipeline source address, not wave 6's global artifact identity. Content
 and applicability remain distinct from identity and from native destination. Skill members preserve
@@ -295,8 +296,10 @@ absence. At a session, combine the workspace branch and the selected user's bran
 item, not text equality. A VM-origin item handled by an applicable user invocation must not reappear
 merely because the workspace branch deferred it. Absence means handled only where that same item
 revision was in a completed invocation's input. Source snapshots and deferred outputs establish
-this; an additional acknowledgment table is unnecessary. Each integration's placement choices must
-also avoid installing the same inherited item through both branches.
+this; an additional acknowledgment table is unnecessary. Each integration chooses a consistent
+materialization facet for an inherited item from its kind, origin, and applicability. Sibling setup
+does not race to handle whatever appears unclaimed: the integration's other facet defers that item,
+without consulting sibling state or adding core coordination.
 
 **Core enforces final completion.** A successful session-facet result carries the same deferred
 collection as a setup result. Any remaining entry becomes a typed core error before launching the
@@ -334,7 +337,12 @@ Persist each integration's successful deferred collection together with its inpu
 references and the scope's published contributions. This identifies which outputs can still be used
 for delivery after config changes or reinit; it is not a historical record of every attempt.
 Preserve source content needed by another integration and earlier applied receipts needed for
-cleanup.
+cleanup. Before the first setup mutation, invalidate the prior completed delivery snapshot while
+retaining its content and receipts for reconciliation. A failed reinit cannot leave that old
+completion eligible, even when input revisions have not changed. Publish a new completed snapshot
+only after success. An invalidated or incomplete snapshot is an upstream setup-state failure:
+session readiness reports the owning recovery operation instead of treating it as an empty deferred
+result or manufacturing new deferrals that might duplicate partly applied content.
 
 An applied record carries its payload version, contributing source locators, destination or native
 resource, representation strategy, non-secret content hash where meaningful, and confirmed outcome.
@@ -426,13 +434,14 @@ deferred to the session can join the launch prompt without losing their original
 integration records every source contributing to a grouped rule, so reinit can remove or update one
 instruction without retaining stale text or claiming unrelated content.
 
-VM-origin artifacts are deferred where Claude cannot represent their intended applicability, and
-later facet invocations choose a suitable native representation or defer again. The session facet
-must preserve rule applicability and skill package behavior when using any session-specific
-mechanism; otherwise it returns a reason and core refuses launch. Existing `append_system_prompt`
-remains supported, but it is not a general substitute for a rule or a skill. The integration owns
-how setup instructions and any compatible session rule representation combine with that explicit
-config.
+For inherited VM-origin artifacts, Claude's user facet owns any suitable native user placement; its
+workspace facet passes them onward and materializes workspace-origin artifacts only. This choice
+holds whether user or workspace setup runs first. Items without a faithful user representation
+remain deferred for the session facet. The session facet must preserve rule applicability and skill
+package behavior when using any session-specific mechanism; otherwise it returns a reason and core
+refuses launch. Existing `append_system_prompt` remains supported, but it is not a general
+substitute for a rule or a skill. The integration owns how setup instructions and any compatible
+session rule representation combine with that explicit config.
 
 Rulesync informs the rule/skill model and separation of sources from generated destinations; it is
 not invoked at runtime. Exact file names, package delivery, available session mechanisms, and native
@@ -462,14 +471,15 @@ recreation under the same name.
 Implementation evidence must include these observable cases, through the real CLI and a live backend
 where setup changes the guest:
 
-| Requirement    | Acceptance evidence                                                                                                                                                                                                                                                              |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| R1, R2, R6     | Feature fixtures for all three kinds receive env-to-date and emit env, instructions, rules, and skills; integrations run after all producers; VM, admin, agent, and workspace ordering is observed.                                                                              |
-| R3, R4, R5, R8 | A session-only integration remains compatible; different facet schemas validate on the proper resource, invalid public plugin hooks fail at registration, and setup never carries session identity/cache/state.                                                                  |
-| R7, R12        | Instructions, rules, and skill bundles retain semantics and origin through grouping and delivery; handled payloads do not reach session, deferral is integration-specific across both ancestor branches, and any final deferral blocks launch with its reason.                   |
-| R9             | Repeated VM/admin and agent setup is unchanged; desired changes/removals converge; edited/unowned files cause drift/conflict reports; interrupted work, unknown versions, and concurrent reinit do not overwrite or lose evidence.                                               |
-| R10            | Required and recommended upstream gaps produce different outcomes with the correct owning remediation and no upstream mutation from session start/restart.                                                                                                                       |
-| R11, R13       | Fresh and existing Claude admin/agent config migrates; marketplace/plugin changes reconcile; core has no Claude-specific knowledge (the existing generic shell fallback remains); workspace create materializes real content, failure cleans partial output, and retry succeeds. |
+| Requirement                               | Acceptance evidence                                                                                                                                                                                                                                                                |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1, R2, R6                                | Feature fixtures for all three kinds receive env-to-date and emit env, instructions, rules, and skills; integrations run after all producers; VM, admin, agent, and workspace ordering is observed.                                                                                |
+| R3, R4, R5, R8                            | A session-only integration remains compatible; different facet schemas validate on the proper resource, invalid public plugin hooks fail at registration, and setup never carries session identity/cache/state.                                                                    |
+| R7, R12                                   | Instructions, rules, and skill bundles retain semantics and origin through grouping and delivery; handled payloads do not reach session, deferral is integration-specific across both ancestor branches and creation orders, and any final deferral blocks launch with its reason. |
+| R9                                        | Repeated VM/admin and agent setup is unchanged; desired changes/removals converge; edited/unowned files cause drift/conflict reports; failed same-input reinit invalidates completion; interrupted work, unknown versions, and concurrent                                          |
+| reinit do not overwrite or lose evidence. |
+| R10                                       | Required and recommended upstream gaps produce different outcomes with the correct owning remediation and no upstream mutation from session start/restart.                                                                                                                         |
+| R11, R13                                  | Fresh and existing Claude admin/agent config migrates; marketplace/plugin changes reconcile; core has no Claude-specific knowledge (the existing generic shell fallback remains); workspace create materializes real content, failure cleans partial output, and retry succeeds.   |
 
 Schema/reference checks cover manifest, config, instance overlay, explain/reference, and secret
 preflight parity for every new hosting field. Negative secret tests inspect persisted state and
