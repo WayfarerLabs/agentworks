@@ -1,6 +1,6 @@
 # Current State
 
-- Snapshot date: 2026-08-28, post-0.15.0 and post-instance-specs (update at wave boundaries)
+- Snapshot date: 2026-09-06, post-0.18.0 and post-wave-4-charter (update at wave boundaries)
 - Baseline: released Agentworks 0.14.0 (2026-08-18, live on PyPI; see `phasing.md`'s release map for
   the cut's trail) plus post-release `main`. The release itself carries everything the previous
   baseline enumerated (the phase 1 TOML sunset, the 0.14 expired-compat removals, declarative-schema
@@ -43,6 +43,23 @@
   (the schema's only `merge` key concerns combining release PRs), so the remedy is either
   squash-merging, which would destroy the always-green phased commits inside one PR that this repo
   deliberately uses, or correcting the published Release body
+- **Three releases shipped between 2026-08-28 and 2026-09-05**, and the 0.16.0 hold recorded in
+  `phasing.md` is discharged. **0.16.0 (2026-08-28)** carried the instance-spec overlays and the
+  typed instance state store, the per-session harness workload inputs that gated the cut (issue
+  #674), and the Azure SDK nested-model migrations. **0.17.0 (2026-08-31)** carried runtime Git
+  credential identities with their provider-owned structured `source` break, model-directed merge
+  strategies, and the harness-integration contract-version-2 removal of `merge_config`. **0.18.0
+  (2026-09-05)** carried the session and console lifecycle rework, standardized runnable status
+  inspection, the Debian Trixie release transition, the AWS indeterminate-outcome reconciliation,
+  and the SSH pty and stdin corrections that live Windows operation found. Three compatibility
+  surfaces ship in 0.18 and are promised for removal in 0.19 (`docs/guides/upgrading-to-0.18.md`
+  lines 29, 43, and 64): the `session resume` forms, `console attach --recreate`, and
+  `session list --no-status`
+- **The published 0.18.0 release body is known to be inaccurate** (issue #741): it advertises ten
+  managed-checkpoint and VZ-recovery entries for work the Debian effort withdrew on 2026-09-01, and
+  five subjects render twice. A published body is never regenerated, so only a manual edit corrects
+  it. This is the first case where the merge-commit duplication described above compounded with a
+  mid-window design withdrawal
 
 This document records where the system actually is, verified by code reconnaissance rather than
 assumed from the perspectives. It is the ground truth the phasing rests on; when a wave lands,
@@ -132,6 +149,31 @@ and the manifest surface has no warn-window channel (the standing consequence re
   it, and the 0.14 hard break for direct backend references. The readiness-shape choice for the
   `secret-source` kind is settled and recorded in that SDD's lock.
 
+## Harness integration surface (wave 4 groundwork)
+
+- The capability exists at the session scope only. `HarnessIntegration`
+  (`cli/agentworks/capabilities/harness_integration/base.py:202`) declares one abstract operation,
+  `start` (`:307`), and the kind descriptor's `required_operations` is `frozenset({"start"})`
+  (`cli/agentworks/capabilities/harness_integration/kinds.py:119`). There are no vm, user, or
+  workspace methods, and no facet notion: `config_schema` is one `ConfigContract` per integration
+  (`kinds.py:127`).
+- Resume is not a second method. `HarnessLaunchIntent` (`base.py:71`) carries `CREATE`,
+  `RESUME_ONLY`, `RESUME_OR_NEW`, and `FORCE_NEW` with a `starts_fresh` property, so one `start`
+  serves both paths. The kind's `contract_version` is 3 (`kinds.py:117`), matching all four in-tree
+  integrations.
+- The harness leak into core is still present and is wave 4's acceptance test: `claude_marketplaces`
+  and `claude_plugins` sit on the agent template (`cli/agentworks/agents/templates.py:42`) and on
+  admin config, with an `install_claude_plugins` VM-init step
+  (`cli/agentworks/agents/initializer.py:346`). The Claude plugin's own module docstring
+  (`cli/agentworks/plugins/claude/__init__.py:28`) already names them as core surfaces that should
+  not be Claude-specific.
+- The instance-state store is in place for applied state: `cli/agentworks/db/instance_state.py`
+  exposes `replace_applied_slices` (`:529`), `clear_applied_slice` (`:575`), and
+  `inspect_owner_state` (`:593`), with `AppliedStateKey` (`:37`) closed at two vm-only keys and
+  `_APPLIED_KEYS_BY_KIND` (`:62`) already carrying `agent`, `workspace`, and `session` as kinds that
+  own no keys yet. Wave 4 registers keys without touching the table, which is what the R2 store
+  review promised.
+
 ## Session runtime (observability groundwork)
 
 - Sessions have no run/incarnation identity. `sessions.name` is the sole key and is reusable after
@@ -164,10 +206,12 @@ its branch is deleted. Remaining unmerged drafts on remote branches, both out of
   2026-08-05), so per the development process the fresh-eyes generic pass is substituted with a
   local reviewer until quota resets.
 
-- **No CI runner covers Windows or macOS**; every gate runs on Linux. The Windows-only `vm create`
-  break that PR #677 fixed is the case in point: no gate could have caught it, and it reached a
-  published release. The exposure is structural rather than incidental: any platform-conditional
-  path is unverified until an operator hits it, and the mechanism there
-  (`subprocess.run(..., text=True)` wrapping stdin in a `TextIOWrapper` that rewrites LF to
-  `os.linesep`) was invisible on Linux by construction. Recorded as a known gap, not a scheduled
-  item.
+- **No CI runner covers Windows or macOS**; every gate runs on Linux. PR #747 is the first move
+  against this: it makes the suite pass on a Windows host (558 failures to 3) as the prerequisite
+  for adding a Windows job, and its three remaining failures are deliberate product-versus-test
+  items rather than portability defects. The Windows-only `vm create` break that PR #677 fixed is
+  the case in point: no gate could have caught it, and it reached a published release. The exposure
+  is structural rather than incidental: any platform-conditional path is unverified until an
+  operator hits it, and the mechanism there (`subprocess.run(..., text=True)` wrapping stdin in a
+  `TextIOWrapper` that rewrites LF to `os.linesep`) was invisible on Linux by construction. Recorded
+  as a known gap, not a scheduled item.

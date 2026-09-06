@@ -297,6 +297,15 @@ item shrinks to a verification sweep.
 - [ ] **Open operator decision:** the sweep was re-scoped around the live efforts after this pair
       was raised, so whether #625 and #626 are still the right vehicle or are superseded by the
       restart is unresolved. No lane should spend a re-derivation that a re-scope may discard
+- [ ] **Operator ruling, 2026-09-06: the operator takes this effort personally and is prioritizing
+      it.** The saga lead had recommended closing it rather than restarting after the 2026-08-24
+      stall; that recommendation is withdrawn by the ruling. No lane picks up #625 or #626, and the
+      saga lead does not re-derive the sweep map. The dependency worth stating once: when this pass
+      was adopted, the closeout wave's test-consolidation item shrank to a verification sweep on the
+      premise that this effort performs the actual trim (the working assumption being that the
+      accreted unit-test estate can be cut in half). The closeout item stays shrunk exactly as long
+      as that premise holds; if the pass ends without the trim, the closeout wave inherits it in
+      full, and the closeout wave gates the saga lock
 - [ ] Reassessment delivered; surviving findings proposed individually or dropped
 - [ ] Locked
 
@@ -522,14 +531,18 @@ tracked by the open boxes below until each has a delivered recipient-side artifa
       reflexive bumps until the signal stops meaning anything. The ruling depends on partial
       replacement continuing to preserve unrelated facts, and the permanent contract must state that
       dependency
-- [ ] Correction round on the assessment before it becomes the factual base: the integration lane
-      found that `insert_vm` already persists resolved cpus, memory, and disk and nothing rewrites
-      them, so the VM hardware slice is applied state on the row today. R3 must decide whether its
-      record duplicates, supersedes, or references those columns; the saga lead's lean is not to
-      duplicate, because two writable copies of one fact drift, and drift between them would be
-      indistinguishable from the drift this effort exists to detect
-- [ ] Implementation phases per the effort's plan
-- [ ] Locked
+- [x] Correction round closed by not duplicating, which is the resolution the saga lead's lean
+      argued for. `encode_hardware_provenance` (`cli/agentworks/vms/applied_state.py:88`) returns a
+      version-1 **empty** marker: the slice records that Agentworks applied the hardware, while the
+      resolved cpus, memory, and disk stay on the VM row as the single writable copy. No second copy
+      exists to drift against the first
+- [x] Implementation phases delivered; the store shipped in 0.16.0 as
+      `cli/agentworks/db/instance_state.py` with the closed `AppliedStateKey` roster and the
+      per-owner-kind matrix enforced on writes and on persisted reads
+- [x] Locked 2026-08-30 (`docs/sdd/2026-08-19-instance-model/locked.md`). The store contract is now
+      wave 4's applied-state home rather than a promise, and `agent`, `workspace`, and `session`
+      already exist as kinds owning no keys (`instance_state.py:62`), so wave 4 registers keys
+      without a table change
 
 ### Child SDD (from the non-TTY restart): 2026-08-18-secret-preview-contract
 
@@ -572,35 +585,81 @@ tracked by the open boxes below until each has a delivered recipient-side artifa
       already this codebase's pattern, in `machine_output.py` and `resources/show.py`. Needs an
       owner to decide whether it belongs in a rule or in the development principles
 
+### Wave 4 (chartered 2026-09-06): 2026-09-06-harness-scope-framework
+
+Chartered on the operator's authenticated direction, 2026-09-06. The prerequisite is discharged: the
+instance-model child locked with the applied-state store shipped in 0.16.0, so the pipeline,
+per-scope init methods, attachments, applied state, and the vertical integration all have a real
+state home rather than an interim one.
+
+- [x] Seeded (FRD, `docs/sdd/2026-09-06-harness-scope-framework/frd.md`). The FRD carries the
+      settled constraints from `scope-participation-contract.md` and `target-state.md`'s harness
+      scopes section, the five open questions that remain the effort's own, and three corrections
+      where the 2026-08-05 contract has gone stale against `main`: the instance-state store closed
+      the interim-state-home question, session start and resume are one method taking a
+      `HarnessLaunchIntent` rather than two methods, and the harness-integration contract is at
+      version 3 rather than 1
+- [ ] Picked up by an effort lead; HLA, plan, and LLDs are the lead's
+- [ ] Implementation phases per that plan
+- [ ] Locked
+
+Carried into this charter from the prior "not yet spawned" entry, so the rulings survive the move:
+
+- **Operator ruling, 2026-08-26:** the harness integration config knobs
+  ([issue #674](https://github.com/WayfarerLabs/agentworks/issues/674), per-session workload inputs
+  across the Claude Code, Codex, and Grok Build integrations) were built ahead of this charter and
+  deliberately **not** as an SDD effort: they are the obvious settings instance state makes
+  possible, not a design question, and the issue is the spec. They shipped in 0.16.0. Two parts were
+  design rather than settings and were reviewed as such: the prompt-mediated Codex shim for `goal`
+  and `agent`, which carries a disclosure obligation about what it does not carry, and the rule that
+  fresh-conversation inputs are never replayed when resuming persisted harness state, which is an
+  invariant to enforce rather than document.
+- **That work does not establish this effort's scope.** The setup pipeline, per-scope init methods,
+  attachments, applied state, and the vertical integration remain this wave's own design problem;
+  knobs landing early is not a precedent for treating any of it as settled.
+- The capability-API reevaluation is chartered into this wave, not scheduled sooner. Seed material
+  is `message-2026-08-16-capability-config-shape.md` (merged PR #562), carrying the
+  `config_at(level)` shape sketch, the three preserved `base.py` constraints, the
+  who-constructs-versus-who-calls-in caution, and the pre-design call-site discovery walk.
+
+### Efforts that ran without ledger entries (reconstructed 2026-09-06)
+
+Four efforts ran to completion between 2026-08-28 and 2026-09-05 while this ledger was not being
+updated. The saga lead reviewed their PRs at the time; what failed was the record, not the review.
+Membership was never recorded for any of them, so the classification below is the saga lead's read
+and is offered for the operator's confirmation rather than asserted.
+
+- **`2026-08-28-runtime-git-identities`** (PR #691, locked 2026-08-30, shipped in 0.17.0). Git
+  credential providers declare static HTTPS scopes and validate their own resolved inputs; core owns
+  collision detection, routing, installation, and reconciliation without knowing how a provider
+  acquires a credential. The GitHub and Azure DevOps schemas now require provider-local structured
+  `source` objects, and the new `gh-cli` and `az-cli` sources install runtime helpers that acquire
+  credentials from the target user's active CLI identity. Reads as adjacent standalone work rather
+  than a saga destination, in the same class as the gcp platform effort.
+- **`2026-08-31-session-console-lifecycle`** (PR #710, locked 2026-09-03, shipped in 0.18.0).
+  Sessions take explicit `start`, `stop`, `restart`, and `attach`; ordinary start is idempotent,
+  restart deliberately replaces, and `--force-new` asks a stopped start or a restart to reject prior
+  harness continuation state. Its compatibility wrappers are promised for removal in 0.19 (issue
+  #720). Reads as destination 1 (operator experience) work, continuous with the CLI grammar child.
+- **`2026-09-03-runnable-status-inspection`** (PR #736, locked 2026-09-04, shipped in 0.18.0). Plain
+  `vm list`, `session list`, and `console list` stay local inventory operations with an explicit
+  `--status` for live observation; describe reports live status without activating, repairing,
+  starting, stopping, or persisting managed state, and expected observation failures report
+  `unknown` rather than inferring absence. Reads as destination 1. Three complexity findings merged
+  undispositioned with it and are tracked as
+  [issue #742](https://github.com/WayfarerLabs/agentworks/issues/742).
+- **`2026-08-28-debian-release-transition`** (PR #702 and follow-ups, **not locked**, partially
+  shipped in 0.18.0). Still active at 150 of 166 plan items. Its assisted-upgrade and
+  managed-checkpoint direction was **superseded by operator direction on 2026-09-01**, and the
+  surviving design attests once in core; the Trixie release transition itself shipped. That
+  mid-window withdrawal is why the published 0.18.0 body advertises ten entries for a deleted
+  subsystem (issue #741). Reads as adjacent standalone platform work.
+
 ### Not yet spawned
 
 Planned children, seeded when their prerequisites land (see `phasing.md`):
 
-- Wave 4: harness scope framework. Its applied-state slice waits on the 2026-08-19-instance-model
-  child's store contract (see that child's section); the pipeline, per-scope init methods, and
-  vertical-integration work have no such dependency. Seed material on record: the capability config
-  shape note (`message-2026-08-16-capability-config-shape.md`, merged PR #562 with the integration
-  tester's factual corrections incorporated as a recipient's note per operator direction), carrying
-  the `config_at(level)` shape sketch, the three preserved `base.py` constraints, the
-  who-constructs-versus-who-calls-in caution, and the pre-design call-site discovery walk. The
-  capability-API reevaluation is chartered into this wave's seed, not scheduled sooner. **Operator
-  ruling, 2026-08-26:** harness integration config knobs are being built now, ahead of the wave
-  being chartered, and they are deliberately **not** an SDD effort: they are the obvious settings
-  that instance state makes possible, not a design question. The work is
-  [issue #674](https://github.com/WayfarerLabs/agentworks/issues/674), per-session workload inputs
-  (`goal`, `initial_prompt`, an agent selector, and one harness-native instruction field) across the
-  Claude Code, Codex, and Grok Build integrations. It is well specified there, with acceptance
-  criteria, which is what makes the no-SDD call sound: the issue is the spec. Two parts of it are
-  design rather than settings and are worth reviewing as such, namely the prompt-mediated Codex shim
-  for `goal` and `agent`, which carries a disclosure obligation about what it does not carry, and
-  the rule that fresh-conversation inputs are never replayed when resuming persisted harness state,
-  which is an invariant to enforce rather than document. They ship with the instance-spec work in
-  0.16.0 (see `phasing.md`'s release map), which is why that cut is held. Two things follow for
-  whoever leads this wave. First, this work does not establish wave 4's scope: the setup pipeline,
-  per-scope init methods, attachments, applied state, and the vertical integration remain the wave's
-  own design problem, and knobs landing early is not a precedent for treating that as settled.
-  Second, the saga lead reviews these PRs without an SDD to check them against, so the standard is
-  the always-on rules and this ledger rather than a plan document
+- Wave 4: harness scope framework. **Chartered 2026-09-06**; see its ledger section above.
 - Secret-delivery containment (own child, **operator ruling 2026-08-25**):
   [issue #516](https://github.com/WayfarerLabs/agentworks/issues/516), resolved secret values
   reaching `SSHError` messages. Session env values are interpolated into the tmux command as
@@ -854,3 +913,16 @@ open-ended research placeholder.
     the trail-sign message to the onboarding effort rides this PR, and the supersession note for
     #504's classifier change is on the safer-migrations lock. Each still needs a session pointed at
     it; seeding is not staffing.
+
+18. **Re-baseline and wave 4 charter (2026-09-06).** This ledger, `phasing.md`, and
+    `current-state.md` had not been updated since 2026-08-28, a gap covering three releases (0.16.0,
+    0.17.0, 0.18.0) and the four efforts now recorded above. All three artifacts are re-baselined
+    against `main` at `f1937456`. **Wave 4 is chartered** on the operator's direction and needs an
+    effort lead; its seed FRD is `docs/sdd/2026-09-06-harness-scope-framework/frd.md`, and seeding
+    is not staffing. **Wave 3's successor children remain unspawned**: the security-architecture doc
+    child (its prerequisite, wave 3, merged 2026-08-10) and secret-delivery containment (issue #516,
+    operator ruling 2026-08-25). Waves 5 through 8 and the closeout wave are untouched, and the
+    closeout wave is what gates the lock, so the saga is roughly half built by wave count with the
+    heavier half ahead. Open operator-facing items carried into this round: the published 0.18.0
+    body correction (issue #741), the 0.19 removal promise and its effect on issue #720's sequencing
+    (see `phasing.md`'s release map), and the three undispositioned findings from #736 (issue #742).

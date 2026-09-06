@@ -1,7 +1,7 @@
 # Phasing
 
 - Status: Active sequencing
-- Last updated: 2026-08-13
+- Last updated: 2026-09-06
 
 This document records only ordering: the dependency structure that forces the sequence, the waves,
 and the release mapping. What each wave builds is defined by `target-state.md`; where the system
@@ -52,11 +52,11 @@ Two things this graph deliberately does not serialize:
 - **Wave 3: secret-source instances.** The two-level model per `target-state.md`'s secrets rulings,
   including the capability mandate, the synthesized-source reference model, and the resolution-API
   evolution.
-- **Wave 4: harness scope framework, one vertical slice.** The scope-participation contract made
-  real: per-scope init methods and the setup pipeline (core, features, integrations), attachments at
-  every ownership point, applied state, one vertical integration proving create/reinit semantics,
-  workspace create-time materialization, upstream prerequisite reporting without implicit
-  remediation, and the Claude template-field migration.
+- **Wave 4: harness scope framework, one vertical slice (chartered 2026-09-06).** The
+  scope-participation contract made real: per-scope init methods and the setup pipeline (core,
+  features, integrations), attachments at every ownership point, applied state, one vertical
+  integration proving create/reinit semantics, workspace create-time materialization, upstream
+  prerequisite reporting without implicit remediation, and the Claude template-field migration.
 - **Wave 5: observability phase 1 (may start alongside waves 2 through 4).** Event vocabulary and
   session/run identity, session-level PTY observation and the input-interception investigation, one
   vertical fusion integration (Claude Code first; generalize the Codex notify channel as the push
@@ -196,9 +196,9 @@ off whenever bandwidth allows, on its own merits and its own schedule.
   `v*` tags undeletable and immovable. Until then `release.yml` treated `0.15.x` as a release line
   while nothing stopped a direct push to it.
 
-- **0.16.0 (held; operator ruling, 2026-08-26):** the release PR does not cut until the
-  `2026-08-19-instance-model` child's instance-spec overlays (PR #670, **merged 2026-08-28**) and
-  the harness integration config knobs
+- **0.16.0 (was held; operator ruling, 2026-08-26; shipped 2026-08-28):** the release PR does not
+  cut until the `2026-08-19-instance-model` child's instance-spec overlays (PR #670, **merged
+  2026-08-28**) and the harness integration config knobs
   ([issue #674](https://github.com/WayfarerLabs/agentworks/issues/674), per-session workload inputs
   across the Claude Code, Codex, and Grok Build integrations) are both on `main`. The first gate is
   satisfied; the knobs are the only one left. Instance specs and the knobs that configure them ship
@@ -209,6 +209,26 @@ off whenever bandwidth allows, on its own merits and its own schedule.
   two Azure SDK migrations and their raised floors, the cloud-identifier and name-grammar validation
   work, the terminal-restore fix, the guide and plugin documentation corrections) rides the same
   cut.
+
+- **0.16.0 shipped 2026-08-28.** Both gates were satisfied: the instance-spec overlays (PR #670) and
+  the harness integration config knobs (issue #674) merged, so the release carries the spec
+  mechanism together with the settings it exists to carry. The typed instance state store rode the
+  same cut, which is what makes wave 4's applied-state dependency real rather than promised.
+
+- **0.17.0 shipped 2026-08-31.** Three operator-visible breaks: git credential manifests require a
+  provider-owned structured `source`, existing VMs need one successful `agw vm reinit NAME` before
+  ordinary SSH operations proceed, and harness-integration contract version 2 removed
+  `merge_config`. `docs/guides/upgrading-to-0.17.md` carries the operator path.
+
+- **0.18.0 shipped 2026-09-05.** The session and console lifecycle rework and standardized runnable
+  status inspection are the operator-visible content; the Debian Trixie transition, the AWS
+  indeterminate-outcome reconciliation, and the SSH pty and stdin corrections ride with them. Its
+  published release body is inaccurate and needs a manual correction (issue #741); see
+  `current-state.md`. **0.19 carries a removal promise**: the guide states in three places that the
+  `session resume` forms, `console attach --recreate`, and `session list --no-status` are removed in
+  0.19. That promise binds the release numbered 0.19.0, so the removal (issue #720) lands before the
+  cut, not after it. Reading "once 0.19 development begins" as "once `main` declares 0.19.0" makes
+  the promise unsatisfiable and is the reason that issue stalled.
 
 - **Later:** remaining waves map to releases as they prove out; no need to pin numbers now.
 

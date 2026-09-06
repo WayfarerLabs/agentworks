@@ -370,6 +370,14 @@ or generator-owned content, applied state recorded, drift reported. The Claude-s
 fields (`claude_marketplaces`, `claude_plugins`) migrate into the Claude integration's agent-scope
 and admin-scope config. Rulesync informs the artifact design but is not a runtime dependency.
 
+**Chartered (operator, 2026-09-06).** Wave 4 is chartered and awaits an effort lead; the seed FRD is
+`docs/sdd/2026-09-06-harness-scope-framework/frd.md`. The prerequisite is discharged: the
+instance-model child locked with the applied-state store shipped in 0.16.0, so the interim
+state-home question `scope-participation-contract.md` left open is closed rather than delegated. Two
+of that contract's statements are stale against the code and the FRD corrects them: session start
+and resume are one method taking a `HarnessLaunchIntent`, and the harness-integration contract is at
+version 3.
+
 ### Observability (destinations 5 and 6)
 
 The universal event vocabulary is Agentworks-owned and independently versioned; ACP is a projection,
@@ -418,6 +426,13 @@ wave 1 deletions land first. Wave 0 leads in turn, because establishing that alw
 actually reach the agents they bind (issue #511) has to precede adding deletion criteria to those
 rules. Wave 2, the process and rule subtraction, runs in parallel rather than on that spine; the
 pass's reassessment and lock wait for both waves (`phasing.md` carries the detail).
+
+**Ownership ruling (operator, 2026-09-06):** the operator takes the simplification pass personally
+and is prioritizing it. The pass stalled on 2026-08-24 and the saga lead had recommended closing the
+effort rather than restarting it; that recommendation is withdrawn. No lane picks it up, and the
+saga lead does not re-derive its sweep map. The dependency above stands: the closeout wave's
+test-consolidation item stays shrunk to a verification sweep only while this pass performs the
+actual trim, and the closeout wave gates the saga lock.
 
 **Sequence amendment (operator, 2026-08-15):** corrected PR #548 is the only remaining
 simplification-pass prerequisite for the grammar rewrite. The onboarding-owned one-wave guide
