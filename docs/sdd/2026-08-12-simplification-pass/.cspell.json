@@ -3,6 +3,7 @@
   "import": ["../../../.cspell.json"],
   "words": [
     "backticked",
+    "callees",
     "colocatable",
     "monkeypatch",
     "monkeypatches",
