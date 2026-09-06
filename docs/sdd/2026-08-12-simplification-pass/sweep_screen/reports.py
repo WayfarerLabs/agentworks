@@ -32,6 +32,8 @@ from .tree import Tree
 
 #: Anchor states that mean the row still reaches what it was cut against.
 INTACT = frozenset({"resolved", "found", "moved"})
+#: States that mean it reaches something, but not the same number of sites.
+SHIFTED = frozenset({"grown", "shrunk"})
 
 
 def _ownership(rows: list[Row], sites: list[Site]) -> tuple[list[Site], list[Site], dict[Site, list[str]]]:
@@ -57,6 +59,7 @@ def attribute(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
 
     match_sites = [s for s in snapshot.sites if s.kind == "match="]
     print(f"estate at {snapshot.tree}: {len(snapshot.sites)} sites ({len(match_sites)} `match=`)")
+    print(f"identities: {len(snapshot.by_identity)}, of which {len(snapshot.ties)} name more than one site")
     print(f"rows: {len(rows)} total, {len(group_one)} in group 1")
 
     unowned, twice, owners = _ownership(group_one, match_sites)
@@ -126,15 +129,17 @@ def _verdict(outcomes: list[str]) -> str:
     """One row's carry verdict from its anchors' states.
 
     `carries` means every anchor that can settle reaches what it was cut
-    against. `partial` means some do and some do not. `lost` means none.
-    `no-anchor` means the row addresses nothing this parser can read.
+    against. `partial` means some do and some do not, which includes a group
+    that grew or shrank, since the row's evidence was written against a
+    different number of assertions. `lost` means none. `no-anchor` means the
+    row addresses nothing this parser can read.
     """
     settled = {o for o in outcomes if o != "line-anchored"}
     if not outcomes:
         return "no-anchor"
     if settled and settled <= INTACT:
         return "carries"
-    if settled & INTACT:
+    if settled & (INTACT | SHIFTED):
         return "partial"
     return "lost"
 
@@ -238,7 +243,8 @@ def generate(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
     print("| --- | --- | --- | --- |")
     for number, path in enumerate(sorted(by_path), start=1):
         sites = sorted(by_path[path], key=lambda s: (s.line, s.col))
-        anchors = [SiteAnchor(i) for i in dict.fromkeys(s.identity for s in sites)]
+        identities = dict.fromkeys(s.identity for s in sites)
+        anchors = [SiteAnchor(i, snapshot.by_identity[i].multiplicity) for i in identities]
         kinds = ", ".join(sorted({s.identity.type_name for s in sites}))
         shape = f"{len(sites)} `match=` site(s) over {kinds}"
         row = Row(f"G1-{number:03d}", GROUP_1, MECHANICAL_BATCH, list(anchors), shape, "delete", 0)
