@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 import stat
+import sys
 from pathlib import Path
 
 import pytest
@@ -405,10 +406,14 @@ def test_an_append_keeps_the_permission_bits_the_operator_chose(tmp_path: Path) 
     manifest = resources / "mine.yaml"
     manifest.write_text("apiVersion: agentworks/v1\nkind: secret\n", encoding="utf-8")
     manifest.chmod(0o640)
+    # The invariant is that the append preserves whatever mode the file
+    # already had, so pin the observed mode rather than a literal 0o640:
+    # Windows has no Unix mode bits and reads the file back as 0o666.
+    mode_before = stat.S_IMODE(manifest.stat().st_mode)
 
     write_sample(resources, "mine.yaml", "secret")
 
-    assert stat.S_IMODE(manifest.stat().st_mode) == 0o640
+    assert stat.S_IMODE(manifest.stat().st_mode) == mode_before
 
 
 def test_writing_into_a_file_that_exists_and_is_blank_emits_no_separator(tmp_path: Path) -> None:
@@ -468,6 +473,16 @@ def test_write_sample_refuses_escapes_and_suffixes(tmp_path: Path) -> None:
         write_sample(resources, "../escape.yaml")
     with pytest.raises(ValidationError, match=".yaml or .yml"):
         write_sample(resources, "samples.txt")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="drive-relative paths are a Windows-only escape shape")
+def test_write_sample_refuses_windows_drive_relative_path(tmp_path: Path) -> None:
+    # A Windows drive-relative path (drive letter, no root) is not
+    # is_absolute() yet anchors off that drive's current directory, escaping
+    # the resources dir; the drive component must be rejected.
+    resources = tmp_path / "resources"
+    with pytest.raises(ValidationError, match="relative to the resources"):
+        write_sample(resources, "C:foo.yaml")
 
 
 def test_write_sample_refuses_unloadable_dot_paths(tmp_path: Path) -> None:

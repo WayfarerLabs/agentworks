@@ -15,7 +15,7 @@ from agentworks.capabilities.harness_integration import HarnessLaunchIntent, Har
 from agentworks.errors import ConfigError, StateError
 from agentworks.plugins.grok.harness_integration import GrokBuildConfig, GrokBuildIntegration
 from agentworks.schema import RefOwner, merge_model
-from tests.conftest import _FakeResult, _FakeTarget
+from tests.conftest import _FakeResult, _FakeTarget, requires_posix_shell
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -305,6 +305,7 @@ class _LocalProbeTarget:
         )
 
 
+@requires_posix_shell
 def test_probe_executes_against_groks_real_filesystem_boundary(tmp_path: Path) -> None:
     grok_home = tmp_path / "grok-home"
     target = _LocalProbeTarget(grok_home)

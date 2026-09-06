@@ -19,7 +19,9 @@ import agentworks.path_rendering as path_rendering
 def test_format_host_path_uses_tilde_for_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     rendered = path_rendering.format_host_path(tmp_path / "agentworks" / "config.toml")
-    assert rendered == "~/agentworks/config.toml"
+    # The separator is the host-native one by design (see the Windows case
+    # below), so build the expectation the same way rather than pinning "/".
+    assert rendered == str(Path("~") / "agentworks" / "config.toml")
 
 
 def test_format_host_path_uses_tilde_for_home_itself(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -42,8 +44,12 @@ def test_format_host_path_uses_windows_separators_for_home(monkeypatch: pytest.M
 
 def test_format_host_path_falls_back_to_absolute_outside_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
-    rendered = path_rendering.format_host_path(Path("/etc/agentworks.toml"))
-    assert rendered == "/etc/agentworks.toml"
+    # An absolute path outside $HOME renders as the bare absolute path. Build
+    # it from the host's drive anchor so it is genuinely absolute on Windows
+    # too (a bare "/etc/..." has no drive there and reads as relative).
+    outside = Path(tmp_path.anchor) / "etc" / "agentworks.toml"
+    rendered = path_rendering.format_host_path(outside)
+    assert rendered == str(outside)
 
 
 def test_format_host_path_relative_path_renders_as_is() -> None:

@@ -28,6 +28,47 @@ from tests.ssh_fixtures import write_test_ssh_keypair
 pytest_plugins = ["tests.orchestrated_fixtures"]
 
 
+def _os_symlinks_available() -> bool:
+    """Probe whether this host can create OS symlinks.
+
+    Windows without Developer Mode (or the SeCreateSymbolicLink privilege)
+    raises OSError (WinError 1314) from os.symlink, and some environments lack
+    the call entirely. Tests that exercise real symlink behavior skip where it
+    is unavailable rather than fail on a host limitation.
+    """
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "target"
+        target.write_text("probe")
+        link = Path(tmp) / "link"
+        try:
+            link.symlink_to(target)
+        except (OSError, NotImplementedError):
+            return False
+        return True
+
+
+requires_symlinks = pytest.mark.skipif(
+    not _os_symlinks_available(),
+    reason="requires OS symlink support (Windows needs Developer Mode)",
+)
+
+
+# Gate for tests that spawn a POSIX ``sh``/``bash`` to model the Unix target a
+# probe or guest payload runs against: ``bash -n`` syntax checks, ``bash -c`` /
+# ``bash -lc`` wrapping, heredocs, and ``2>/dev/null`` stream handling. Most
+# resolve the shell by name; the marker gates on ``/bin/sh`` presence purely as
+# a host proxy. Windows has no ``/bin/sh`` (git-bash installs its shell
+# elsewhere and cannot honor the POSIX chmod/exec the scripts use), and
+# Git-for-Windows' bash diverges from the Unix target on exactly these
+# constructs, so these skip there rather than fail. Linux CI still runs each one.
+requires_posix_shell = pytest.mark.skipif(
+    not Path("/bin/sh").exists(),
+    reason="requires a POSIX shell (skipped on the Windows controller)",
+)
+
+
 @pytest.fixture
 def verified_debian_release(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make offline manager creates observe the release they requested."""
@@ -519,6 +560,35 @@ def stub_platform_support(monkeypatch: pytest.MonkeyPatch) -> None:
     for cls in VM_PLATFORM_REGISTRY.values():
         monkeypatch.setattr(cls, "unsupported_reason", classmethod(lambda c: None))
         monkeypatch.setattr(cls, "not_ready", classmethod(lambda c, config: Readiness.ready()))
+
+
+def pin_wsl2_unsupported(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the wsl2 platform unsupported so orchestrated site resolution is
+    host-independent. wsl2 is genuinely host-ready on a Windows test host but
+    not on Linux, so a test resolving a single site otherwise sees "multiple
+    sites are ready (lima-local, wsl2)" on Windows only."""
+    from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
+
+    monkeypatch.setattr(WSL2Platform, "unsupported_reason", classmethod(lambda c: "not this host"))
+
+
+def windows_home_env(home: Path) -> dict[str, str]:
+    """Env pairs that point ``Path.home()`` / ``expanduser`` at ``home`` on
+    every platform: ``HOME`` governs POSIX; ``USERPROFILE`` and
+    ``HOMEDRIVE`` + ``HOMEPATH`` govern Windows. Returned as pairs so a caller
+    applies them however it needs (``monkeypatch.setenv`` or a subprocess env
+    dict)."""
+    drive, tail = os.path.splitdrive(str(home))
+    return {"HOME": str(home), "USERPROFILE": str(home), "HOMEDRIVE": drive, "HOMEPATH": tail}
+
+
+def normalize_lf(data: bytes) -> bytes:
+    """Normalize the platform newline to LF for a human-output byte compare.
+
+    Human output goes through ``print()``, so on Windows it carries CRLF while
+    the authored expectations are written with LF. The machine (JSON) path is
+    unaffected: it writes LF straight to stdout's binary buffer."""
+    return data.replace(b"\r\n", b"\n")
 
 
 def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:

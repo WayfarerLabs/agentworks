@@ -37,7 +37,7 @@ def config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Config:
     (tmp_path / "id_ed25519.pub").write_text("public")
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
     path = tmp_path / "config.toml"
-    path.write_text(f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n')
+    path.write_text(f'[operator]\nssh_public_key = "{key.as_posix()}.pub"\nssh_private_key = "{key.as_posix()}"\n')
     return load_config(path, warn_issues=False, warn_deprecations=False)
 
 
@@ -112,6 +112,29 @@ def test_running_vm_still_reads_live_resources(
 ) -> None:
     calls = _describe(db, config, monkeypatch, status=VMStatus.RUNNING)
     assert calls == ["dvm"]
+
+
+@pytest.mark.parametrize(("status", "has_uptime"), [(VMStatus.RUNNING, True), (VMStatus.STOPPED, False)])
+def test_vm_uptime_follows_exact_observed_status(
+    db: Database,
+    config: Config,
+    monkeypatch: pytest.MonkeyPatch,
+    status: VMStatus,
+    has_uptime: bool,
+) -> None:
+    db.insert_vm("dvm", site="lima-local", hostname="dvm")
+    db._conn.execute(
+        "UPDATE vms SET last_started_at = ? WHERE name = ?",
+        ("2020-01-01T00:00:00Z", "dvm"),
+    )
+    db._conn.commit()
+    monkeypatch.setattr("agentworks.vms.sites.resolve_site", lambda name, registry: _Platform(status))
+    monkeypatch.setattr(vm_manager, "_query_live_resources", lambda *args: None)
+
+    description = vm_manager.vm_description(db, config, "dvm", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert description.last_started_at == "2020-01-01T00:00:00Z"
+    assert (description.uptime_seconds is not None) is has_uptime
 
 
 def test_unknown_vm_status_emits_one_human_warning(

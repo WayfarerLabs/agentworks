@@ -9,6 +9,7 @@ import pytest
 
 from agentworks.db import Database, InitStatus, ProvisioningStatus
 from agentworks.debian import DebianRelease
+from agentworks.errors import StateError
 
 
 def test_roundtrip_vm(db: Database) -> None:
@@ -674,6 +675,59 @@ def test_update_session_runtime_joins_explicit_transaction(db: Database) -> None
     assert session.pid is None
     assert session.boot_id is None
     assert session.tmux_server_start_ticks is None
+
+
+def test_runnable_start_observations_are_nullable_and_recorded(db: Database) -> None:
+    from datetime import datetime
+
+    from agentworks.db import SessionMode
+
+    db.insert_vm("dev-vm", site="lima", hostname="lima--dev-vm")
+    db.insert_workspace("ws", workspace_path="/tmp/ws", vm_name="dev-vm", linux_group="ws-ws")
+    db.insert_session("ws-s1", "ws", "default", SessionMode.ADMIN)
+    db.insert_console("work", "dev-vm", admin_shell=True)
+
+    assert db.get_vm("dev-vm").last_started_at is None  # type: ignore[union-attr]
+    assert db.get_session("ws-s1").last_started_at is None  # type: ignore[union-attr]
+    assert db.get_console("work").last_started_at is None  # type: ignore[union-attr]
+
+    db.record_vm_started("dev-vm")
+    db.record_session_started("ws-s1")
+    db.record_console_started("work")
+
+    observations = (
+        db.get_vm("dev-vm").last_started_at,  # type: ignore[union-attr]
+        db.get_session("ws-s1").last_started_at,  # type: ignore[union-attr]
+        db.get_console("work").last_started_at,  # type: ignore[union-attr]
+    )
+    for observation in observations:
+        assert observation is not None
+        datetime.strptime(observation, "%Y-%m-%dT%H:%M:%SZ")
+
+    db.clear_vm_start_observation("dev-vm")
+    assert db.get_vm("dev-vm").last_started_at is None  # type: ignore[union-attr]
+
+
+@pytest.mark.parametrize(
+    ("method_name", "entity_kind"),
+    [
+        ("record_vm_started", "vm"),
+        ("clear_vm_start_observation", "vm"),
+        ("record_session_started", "session"),
+        ("record_console_started", "console"),
+    ],
+)
+def test_runnable_start_observation_requires_an_existing_row(
+    db: Database,
+    method_name: str,
+    entity_kind: str,
+) -> None:
+    with pytest.raises(StateError) as raised:
+        getattr(db, method_name)("missing")
+
+    assert raised.value.entity_kind == entity_kind
+    assert raised.value.entity_name == "missing"
+    assert not db._conn.in_transaction
 
 
 def test_migration_21_adds_boot_id(tmp_path: Path) -> None:

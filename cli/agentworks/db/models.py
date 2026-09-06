@@ -99,6 +99,9 @@ class VMRow:
     # Operator intent flag: the operator explicitly stopped this VM, so
     # the activation gate's auto-start must not restart it.
     operator_stopped: bool = False
+    # The most recent successful provider create/start observed by Agentworks.
+    # NULL is retained for rows created before the observation existed.
+    last_started_at: str | None = None
 
 
 @dataclass
@@ -168,6 +171,8 @@ class SessionRow:
     # integration persists an empty one (``{"shell": {}}``); ``claude-code``
     # stores its minted Claude session id in its namespace.
     harness_integration_state: dict[str, object] = field(default_factory=dict)
+    # The most recent successful managed tmux creation observed by Agentworks.
+    last_started_at: str | None = None
 
 
 class ShellEntry(TypedDict):
@@ -184,6 +189,8 @@ class ConsoleRow:
     admin_shell: bool
     created_at: str
     updated_at: str
+    # The most recent successful canonical tmux publication observed by Agentworks.
+    last_started_at: str | None = None
 
 
 @dataclass

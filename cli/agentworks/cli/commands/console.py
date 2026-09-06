@@ -415,6 +415,8 @@ def console_restore_session(
 
     Re-adds any shell panes you killed (e.g. accidentally), restoring each one
     to its original position, and rebuilds the window if it is gone entirely.
+    A successful restore also reconciles live session-window order with the
+    console's configured member order.
     Never kills a live pane or window: if you have more panes live than
     configured, or the window's session pane itself was killed (so the console
     shows a plain shell instead of the session), it refuses and points you at

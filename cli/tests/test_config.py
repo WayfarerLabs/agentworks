@@ -740,7 +740,7 @@ def test_code_workspaces_fails_before_default_vscode_write(tmp_path: Path, monke
         ssh_private_key = "{priv.as_posix()}"
 
         [paths]
-        code_workspaces = "{tmp_path / "retired"}"
+        code_workspaces = "{(tmp_path / "retired").as_posix()}"
     """)
     )
     monkeypatch.setenv("HOME", str(home))
