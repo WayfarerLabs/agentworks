@@ -83,7 +83,7 @@ Tailscale-ordering pin whose property observational tests already covered.
 
 ### `match=` splits three ways
 
-It appears at 664 sites, and the criteria above do not decide it on their own (operator ruling 10).
+It appears widely, and the criteria above do not decide it on their own (operator ruling 10).
 Deleting it wholesale drops real branch coverage; preserving it by adding a production discriminator
 is exactly what R2.2 forbids. So:
 
@@ -110,14 +110,14 @@ This taxonomy is keyed on a pytest spelling the website suite does not use: `web
 `unittest` and carries `assertRaisesRegex` sites, which are the same three cases and which a
 `match=`-keyed scan misses entirely. Read every rule above as governing both spellings.
 
-**Corrected 2026-08-19** (map re-baseline, derived from the AST at HEAD by the inventory's
-`sweep-screen.py`). Both counts moved again. `match=` under `cli/tests` is **664**, not the 663 this
-document recorded: the Grok Build integration added one after the sweep map settled. And
-`assertRaisesRegex` under `website/tests` is **49**, not 51, `test_site_templates.py` having lost
-two to an unrelated narrowing. Nine further regex-family sites in that same suite were never in
-either count and are in the estate: one `assertRegex` in `test_site_build.py` and eight
-`assertNotRegex` across `test_lander_404.py` and `test_lander_phase4j.py`. All nine are already
-covered by group 5 rows, so nothing is unmapped; only the headline here was short.
+**Corrected 2026-09-06.** This document twice recorded a site count that a later tree made wrong,
+and both times the correction was itself a number someone would have to re-check. The counts are
+gone. `sweep-screen.py estate`, committed beside the sweep inventory, derives the estate from the
+AST of whatever tree it runs against and prints one line per site, so the size of each population is
+a question with a current answer rather than a figure this document carries. What matters here and
+does not move is the shape: the estate is `match=` under `cli/tests` plus the regex family under
+`website/tests`, and the regex family means every member, `assertRaisesRegex` along with
+`assertRegex` and `assertNotRegex`, since a `match=`-keyed scan misses the others entirely.
 
 Case 2's "where the code already offers a handle" turned out to be the common case rather than the
 rare one, which is worth stating because it sized a whole batch. Two handles already exist in
@@ -141,10 +141,14 @@ not a loosening of it.)
 
 At HEAD the suite runs on `windows-latest` in CI, in the `test-windows` job that `ci-success`
 requires, per [.github/workflows/ci.yml](../../../.github/workflows/ci.yml), after PR #747 made it
-pass there. So a test guarding a platform-conditional path is CI coverage rather than inert
-generality, and the delete criteria treat it as live coverage: the branch it guards runs on every
-pull request, and deleting the test drops real branch coverage rather than retiring an abstraction
-nothing exercises. (Effort lead, 2026-09-06.)
+pass there. That job runs `cli/tests` on Python 3.13 excluding the `integration` marker, so the
+criterion reaches the non-integration CLI suite on Windows and nothing beyond it: a
+platform-conditional path exercised only by an integration test, or only outside `cli/tests`, is not
+covered by this job and this criterion does not speak for it. Within that scope a test guarding a
+platform-conditional path is CI coverage rather than inert generality, and the delete criteria treat
+it as live coverage: the branch it guards runs on every pull request, and deleting the test drops
+real branch coverage rather than retiring an abstraction nothing exercises. (Effort lead,
+2026-09-06.)
 
 ## Guidance delivery
 

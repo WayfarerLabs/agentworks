@@ -212,11 +212,23 @@ shares no files with the website work; it waits on the sweep instead, per group 
         their groups with their dispositions and the 34 deletes among them were re-screened.
         instance-model's seven files are back in this sweep's scope and the sequencing against its
         open live-validation gate is an operator question, recorded in the inventory.
-      - **Group 1 regenerated** at the basis, and the twelve stale claim anchors decided. Nine
-        of the ten rows behind them left with the ledger, which is their answer; L-026 keeps its
-        delete on the twelve anchors that remain.
-      - **`attribute` and `generate` both exit 0**, which is the acceptance condition, and every one
-        of the map's 2,244 anchors resolves or is line-anchored.
+      - **Group 1 regenerated** at the basis, and every stale claim anchor decided. Most of the
+        rows behind them left with the ledger, which is their answer; L-026 keeps its delete on the
+        anchors that remain.
+      - **`attribute`, `generate` and `totals` all exit 0**, which is the acceptance condition:
+        every site is owned exactly once, every batched site is one the screens left alone, every
+        anchor resolves or is line-anchored, and the map carries no duplicate id, no citation of a
+        row that is neither present nor retired, and no test file the accounting leaves out.
+
+      **Three corrections to this item's own enumeration, verified at HEAD 2026-08-16.** Two of the
+      files it names for the sweep no longer exist: `test_schema_adapter.py` and
+      `guide/test_view.py` were both deleted by PR `8043d438`, "remove command-owned fact views".
+      The same commit retired **the #470 manifesto pin** that the first line of this item lists as
+      part of the estate, replacing the verbatim block-text comparison with a structural link
+      assertion, so that part of the estate was already gone before the sweep started. The
+      exclusion list itself is unaffected and still exhaustive; what changed is the inventory's
+      expected yield, and `findings.md` G12 carries the detail. The overlaps the inventory found are
+      recorded in its own overlaps section rather than restated here.
 
 - [x] Retire `reanchor` and `carry`, with the `Tree(ref)` layer under them, in the PR that lands the
       fresh cut. Both exist to move the 2026-08-19 map's evidence into that cut and neither has a
@@ -226,17 +238,6 @@ shares no files with the website work; it waits on the sweep instead, per group 
       reading a tree at a ref is gone with them. **Done, 2026-09-06**: both commands gone, `Tree`
       reads the working tree only, and the seven that remain (`estate`, `attribute`, `injected`,
       `screen`, `resolve`, `generate`, `totals`) all pass ruff, ruff format and mypy --strict.
-
-      **Three corrections to this item's own enumeration, verified at HEAD 2026-08-16.** Two of the
-      files it names for the sweep no longer exist: `test_schema_adapter.py` and
-      `guide/test_view.py` were both deleted by PR `8043d438`, "remove command-owned fact views".
-      The same commit retired **the #470 manifesto pin** that the first line of this item lists as
-      part of the estate, replacing the verbatim block-text comparison with a structural link
-      assertion, so that part of the estate was already gone before the sweep started. The
-      exclusion list itself is unaffected and still exhaustive; what changed is the inventory's
-      expected yield, and `findings.md` G12 carries the detail. The inventory found ten overlaps in
-      all, including the three website ones above, all recorded in its own overlaps section rather
-      than restated here.
 
 - [x] Delete guide dead surface and interior re-validation (G8's guide-module members and G2;
       `JsonScalar` lives in `machine_output.py` and belongs to the G6 item below); fix the vacuous
