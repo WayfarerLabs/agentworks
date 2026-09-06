@@ -5,9 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from typer.testing import CliRunner
 
-from agentworks.cli import app
 from agentworks.db import Database
 from agentworks.errors import ExternalError, SecretUnavailableError, StateError, ValidationError
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -249,25 +247,3 @@ def test_empty_console_is_rejected_before_registry_or_remote_work(
 
     assert registry_loads == []
     assert db.get_console("con") is None
-
-
-def test_deprecated_recreate_checks_nesting_before_restart(monkeypatch: pytest.MonkeyPatch) -> None:
-    import agentworks.sessions.multi_console as multi_console
-
-    calls: list[str] = []
-
-    def refuse(*, allow_nesting: bool) -> None:
-        calls.append("nesting")
-        raise StateError("nested tmux")
-
-    monkeypatch.setattr(multi_console, "refuse_console_nesting", refuse)
-    monkeypatch.setattr(
-        multi_console,
-        "restart_console",
-        lambda *args, **kwargs: calls.append("restart"),
-    )
-
-    result = CliRunner().invoke(app, ["console", "attach", "con", "--recreate"])
-
-    assert result.exit_code != 0
-    assert calls == ["nesting"]

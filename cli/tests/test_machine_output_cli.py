@@ -86,7 +86,6 @@ def test_operational_json_usage_errors_have_empty_stdout_before_work(monkeypatch
         ["agent", "list", "--names-only", "--output", "json"],
         ["session", "list", "--names-only", "--output", "json"],
         ["session", "list", "--names-only", "--status"],
-        ["session", "list", "--status", "--no-status"],
         ["console", "list", "--names-only", "--output", "json"],
         ["console", "list", "--names-only", "--status"],
     ):

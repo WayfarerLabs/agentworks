@@ -63,7 +63,7 @@ _LEGACY_FLAG_OPTIONS: dict[tuple[str, str], frozenset[str]] = {
 }
 _LEGACY_FLAG_OPTIONS.update(
     {
-        ("session", "list"): frozenset({"--admin", "--no-status"}),
+        ("session", "list"): frozenset({"--admin"}),
     }
 )
 

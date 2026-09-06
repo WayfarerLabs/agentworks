@@ -1,0 +1,92 @@
+"""CLI routing for canonical session lifecycle commands."""
+
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+from typer.testing import CliRunner
+
+from agentworks.cli import app
+from agentworks.sessions import manager as session_manager
+
+
+@pytest.fixture
+def command_calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]]:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr("agentworks.cli.commands.session.get_db", lambda: object())
+    monkeypatch.setattr("agentworks.config.load_config", lambda: object())
+    for name in ("start_session", "restart_session", "start_all_sessions", "restart_all_sessions"):
+        monkeypatch.setattr(
+            session_manager,
+            name,
+            lambda *args, _name=name, **kwargs: calls.append((_name, kwargs)),
+        )
+    return calls
+
+
+@pytest.mark.parametrize(
+    ("arguments", "operation", "selected"),
+    [
+        (["start", "coding", "--force-new"], "start_session", {"name": "coding", "force_new": True}),
+        (["start", "coding", "--resume-only"], "start_session", {"name": "coding", "resume_only": True}),
+        (["restart", "coding", "--force"], "restart_session", {"name": "coding", "force": True}),
+        (
+            ["start", "--all", "--vm", "vm1", "--workspace", "ws1"],
+            "start_all_sessions",
+            {"vm_name": "vm1", "workspace_name": "ws1"},
+        ),
+        (["restart", "--all", "--agent", "agent1"], "restart_all_sessions", {"agent_name": "agent1"}),
+        (["restart", "--all", "--resume-only"], "restart_all_sessions", {"resume_only": True}),
+    ],
+)
+def test_canonical_launch_commands_route_to_matching_service(
+    arguments: list[str],
+    operation: str,
+    selected: dict[str, object],
+    command_calls: list[tuple[str, dict[str, Any]]],
+) -> None:
+    result = CliRunner().invoke(app, ["session", *arguments])
+    assert result.exit_code == 0, result.output
+    assert len(command_calls) == 1
+    actual_operation, kwargs = command_calls[0]
+    assert actual_operation == operation
+    assert kwargs.items() >= selected.items()
+
+
+@pytest.mark.parametrize("operation", ["start", "restart"])
+def test_resume_only_and_force_new_are_mutually_exclusive(
+    operation: str,
+    command_calls: list[tuple[str, dict[str, Any]]],
+) -> None:
+    result = CliRunner().invoke(
+        app,
+        ["session", operation, "coding", "--resume-only", "--force-new"],
+    )
+
+    assert result.exit_code != 0
+    assert command_calls == []
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["session", "resume", "coding"],
+        ["session", "list", "--no-status"],
+        ["console", "attach", "coding", "--recreate"],
+    ],
+)
+def test_retired_lifecycle_forms_fail_before_state(
+    arguments: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected_state(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("retired lifecycle form reached application state")
+
+    monkeypatch.setattr("agentworks.cli.commands.session.get_db", unexpected_state)
+    monkeypatch.setattr("agentworks.cli.commands.console.get_db", unexpected_state)
+    monkeypatch.setattr("agentworks.config.load_config", unexpected_state)
+
+    result = CliRunner().invoke(app, arguments)
+
+    assert result.exit_code == 2
