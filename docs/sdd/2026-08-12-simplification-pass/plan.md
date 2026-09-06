@@ -198,6 +198,16 @@ shares no files with the website work; it waits on the sweep instead, per group 
       inventory's re-scope subtraction section; and the callee-side raise screen is now a mandatory
       step for every group's delete rows.
 
+      **Re-anchored on 2026-09-06**, so a row keys what it addresses by identity rather than by
+      line; the fresh cut itself waits on #747.
+
+- [ ] Retire `reanchor` and `carry`, with the `Tree(ref)` layer under them, in the PR that lands the
+      fresh cut. Both exist to move the 2026-08-19 map's evidence into that cut and neither has a
+      job after it: `reanchor` lifts line numbers, and the cut leaves none to lift; `carry` answers
+      whether an older map's row survives, and once the cut is the map, `resolve` answers survival
+      by identity on its own. Done when: the fresh cut is committed, neither command remains, and
+      reading a tree at a ref is gone with them.
+
       **Three corrections to this item's own enumeration, verified at HEAD 2026-08-16.** Two of the
       files it names for the sweep no longer exist: `test_schema_adapter.py` and
       `guide/test_view.py` were both deleted by PR `8043d438`, "remove command-owned fact views".
