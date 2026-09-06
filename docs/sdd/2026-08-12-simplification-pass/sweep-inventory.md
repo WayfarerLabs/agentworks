@@ -5,8 +5,9 @@ deleted when the sweep closes.** That is the effort lead's call and it is delibe
 subtraction pass, and a several-hundred-row ledger that outlives its purpose is exactly the kind of
 thing the pass exists to remove. Where a keep row's justification is durable, it belongs at the test
 site, not here. Nothing else in the repository should link to this file, and
-[sweep-screen.py](sweep-screen.py), which derives this file's group-1 estate and runs its
-callee-side raise screen, is deleted with it.
+[sweep-screen.py](sweep-screen.py) with the [sweep_screen](sweep_screen) package behind it, which
+derive this file's group-1 estate, resolve its rows' anchors, and run its two screens, are deleted
+with it.
 
 It is step one of the sweep work item in [plan.md](plan.md). It decides nothing else: no deletion
 lands with it. The deletions follow as the PRs the groups below are cut for: nine when the map
@@ -27,21 +28,96 @@ than carried forward. Every row-level correction is marked in place, so
 one of its rows now resolves at HEAD; rows in other groups were re-derived only where the
 re-baseline touched them, so a line number elsewhere may still be a `c686cd6d` anchor.
 
+**Re-anchored on 2026-09-06**, mechanically, at `426cccae`. Every row now keys what it addresses by
+identity rather than by line, per the grammar below, and nothing but column 2 moved: no disposition,
+shape, justification or id changed and no site was reclassified. The rows' own basis is what limits
+this. Group 1's line numbers were `426cccae` readings, so its anchors are exact; the other groups'
+were re-derived only where the re-baseline touched them, so some of their span anchors were derived
+from a number that was a `c686cd6d` reading. Resolving each row's lines at both candidate bases
+agrees on the enclosing test for 980 of the 1,116 rows where the question arises. The other 136 may
+name the test next to it, and that is a loud failure rather than a quiet one: `resolve` reports a
+name that is not there, where a wrong line number would have landed on something and said nothing.
+
 ### Reading this file mechanically
 
 Several passes have counted this file and disagreed, always on how it was parsed rather than on what
-it says. **[sweep-screen.py](sweep-screen.py)'s `rows()` is the reference implementation of the
-grammar**, so count with it rather than re-deriving one: it reads the id shapes, splits cells on
-unescaped pipes only, and tracks the group by `##` heading alone. Two facts a reader still needs.
+it says. **[sweep_screen/inventory.py](sweep_screen/inventory.py) is the reference implementation of
+the grammar**, so count with it rather than re-deriving one: `sweep-screen.py resolve` puts every
+anchor here at its current line, and `sweep-screen.py attribute` checks the ownership claim below.
 
-**Column 1 is the id, column 2 the file and lines, column 3 the shape, column 4 the disposition, and
-column 5 the justification.** The mechanical batch has no column 5, so it is four columns wide.
+**Column 1 is the id, column 2 what the row addresses, column 3 the shape, column 4 the disposition,
+and column 5 the justification.** The mechanical batch has no column 5, so it is four columns wide.
 Every row state lives in column 3 as a bold marker, so an audit is "split the row, read column 1 and
-column 3" with no heading state to track and no prose to read.
+column 3" with no heading state to track and no prose to read. Cells split on **unescaped** pipes
+only, since `\|` inside a code span is content and a naive split turns one row into three, and only
+a `##` heading changes the group, since the pulled-out blocks are `###` subsections of the group
+they sit in.
 
-**Two things in column 2 carry no meaning.** Backticks around the path are decoration, not a signal.
+#### Column 2 says what a row addresses, never where it sits
+
+**This map has twice been killed by line numbers.** Each cut anchored every row to a line, an
+unrelated edit above it moved every number in the file, and the map went on claiming sites it no
+longer pointed at, silently, because a stale number still lands on something. A number cannot be
+made stable, so it is no longer the key. Four anchor forms, in order of precision; a row lists as
+many as it addresses, separated by commas, in one backticked cell.
+
+| Form                             | Addresses          | Resolves to               |
+| -------------------------------- | ------------------ | ------------------------- |
+| `path::qualname::Type::digest#n` | one assertion site | that site's current line  |
+| `path::qualname`                 | one test function  | that function's line span |
+| `path::L120,L204-211`            | literal lines      | nothing; go read them     |
+| `path`                           | the whole file     | the file's existence      |
+
+`::` separates the fields of one anchor and `,` separates anchors, so a cell is one string a reader
+can copy whole. Neither separator occurs inside a path, a qualname, a type name or a hex digest,
+which is what makes the split unambiguous, and the `L` prefix is what tells a line anchor from a
+qualname, since no test is named `L` followed by digits.
+
+**The site identity is five fields, and none of them is a position.** `path` is the test file.
+`qualname` is the innermost enclosing function, dotted through any class or nesting, the way pytest
+spells a node id. `Type` is the asserted exception or warning name exactly as written, or the
+assertion method's own name where the call takes no type (`assertRegex`, `assertNotRegex`). `digest`
+is the first six hex of sha256 over the extracted match template, which is the needle with its
+interpolations blanked, so the site is keyed on what it matches. `#n` is 1-based source order among
+the sites of one file that tie on all four, and it is always written, so a second identical site
+appearing later never changes the identity of the first.
+
+**Ties are the only residue, and they are small.** At `a64b1b9c` the estate is 678 sites and the
+four fields above separate them into 669 keys; the 8 keys that need an ordinal cover 17 sites, each
+a test asserting the same needle against the same type twice in one function. `Snapshot` refuses to
+build if the five fields ever fail to be one-to-one, so this is enforced rather than asserted here.
+
+**A site anchor beats a span anchor in the same function.** Where a row addresses assertion sites in
+a test, it lists the sites and not the test: the site anchor is self-verifying, because the tree
+agrees that line holds that assertion, and a span anchor beside it would claim every other site in
+the same test for the same row. A row addressing something else in that test gets the span anchor
+instead. That is what keeps "every `match=` site is claimed by exactly one group-1 row" checkable.
+
+**A span anchor is deliberately coarser than the row.** It names the test, not the assertion inside
+it, so several rows can share one span anchor and column 3 is what tells them apart. That is the
+price of anchoring groups 3 to 6 to a name rather than a number, and it is the right price: a test
+name survives every edit above it, while the line does not.
+
+**A line anchor is a declaration that the row will go stale.** It is written only where nothing
+could be named, and there are exactly three causes: the file does not exist at the tree the anchors
+were derived from (group 2's whole estate, which the guide rework deleted), the file is not Python
+so there is no AST to read (the seventeen `.mjs` rows), or the lines sit outside any function, as
+`test_builtin_entries_parity.py`'s module-level `EXPECTED_*` constants do. 93 anchors here are line
+anchors and `resolve` reports each as `line-anchored` rather than pretending it resolved.
+
+**To write a row by hand**, run `sweep-screen.py estate` and copy the identity it prints for the
+site, or `sweep-screen.py resolve` to see what the rows around yours address. The digest is a
+tiebreaker nobody needs to read; `estate` prints the needle beside it.
+
+**Two things in column 2 carry no meaning.** Backticks around the cell are decoration, not a signal.
 And three rows (D-154, D-157, F-128) name further files by bare basename after a leading directory,
 so a scan that only matches full paths under-counts what is rowed by sixteen files.
+
+**The row tables carry `<!-- prettier-ignore -->` and are not padded.** Prettier pads every cell in
+a table to the widest cell in its column, and an identity is much wider than a line number, so
+letting it format these ten tables costs 2.2MB of trailing spaces and puts the file past what an
+executor can load or GitHub can render. The prose tables in this file are untouched and still
+padded.
 
 ## How a row was decided
 
@@ -249,6 +325,16 @@ when the tree moves; `sweep-screen.py attribute` is what checks the claim below 
 the other twelve. The other groups were read rather than scanned, and one row there covers an
 assertion group of one to a dozen lines, so no site total is claimed for them. Do not add these
 numbers to the absorbed survey's: that survey counted test FUNCTIONS.
+
+**That claim is about `426cccae`, and the tree has moved since.** The counts in this section are the
+2026-08-19 cut's and are not re-derived here; the fresh cut is what re-derives them. Measured at
+`a64b1b9c` after the 2026-09-06 re-anchoring, the estate is 620 `match=` sites under `cli/tests`
+plus 58 regex-family sites under `website/tests`, `attribute` finds 595 of the 620 claimed by
+exactly one group-1 row and none claimed by two, and the 25 unclaimed are sites the tree gained. Of
+the 664 sites the group-1 rows were cut against, 595 are still found at HEAD by identity, 2 are
+retargeted onto a reworded needle, 51 are gone from a file that remains, and 16 went with their
+file. `sweep-screen.py carry` is what produces that breakdown, and it is how a judgment row carries
+its evidence into the fresh cut.
 
 **Corrected 2026-08-19 by the fix round.** The claim above was false when first made: rows accounted
 for 640 of the 664. Three files were re-derived (`test_resolution_lifecycle.py`, whose five cited
@@ -584,7 +670,7 @@ method: a shape claim about a batch this size is checkable mechanically and shou
 way rather than asserted from reading.
 
 <!-- prettier-ignore -->
-| id | file:line | shape | disposition | justification |
+| id | file and anchors | shape | disposition | justification |
 | --- | --- | --- | --- | --- |
 | L-001 | `cli/tests/guide/test_read_only_database.py::L48` | **[dead]** `match=` on sqlite's own `readonly` text | keep | Upstream tool output, the rule's one exception. The read-only open is enforced by SQLite, not by us, and `sqlite3.OperationalError` alone does not say the refusal was the read-only attachment. |
 | L-002 | `cli/tests/test_db.py::test_migration_19_fails_with_legacy_agent_session::IntegrityError::2c1282#1,test_agent_session_requires_socket_path::IntegrityError::2c1282#1` | **[subtracted: instance-model]** `match="CHECK"` on sqlite's constraint text | keep | Upstream tool output. `IntegrityError` covers every constraint class; `CHECK` is the narrow token distinguishing a check constraint from a uniqueness or FK violation. |
@@ -646,7 +732,7 @@ Rows G1-K01 through G1-K16 are the first pass; G1-K17 through G1-K23 are the thi
 two `assertRaisesRegex` sites the second re-check added, as the group header explains.
 
 <!-- prettier-ignore -->
-| id | file:line | shape | disposition | justification |
+| id | file and anchors | shape | disposition | justification |
 | --- | --- | --- | --- | --- |
 | G1-K01 | `cli/tests/plugins/gcp/test_compute.py::test_missing_location_is_pre_mutation_config_error::ConfigError::d62e9a#1,test_required_live_machine_fields_fail_by_provider_shape_branch::ConfigError::d62e9a#1` | `match=` varying with the test's input | keep | **Rubric re-check, 2026-08-16.** `match=helper` is the parameter selecting which location lookup failed, so it proves the `ConfigError` names project versus zone correctly. |
 | G1-K02 | `cli/tests/plugins/gcp/test_platform.py::test_required_machine_shape_failure_has_zero_provider_mutations::ConfigError::d62e9a#1` | `match=` varying with the test's input | keep | **Rubric re-check, 2026-08-16.** `match=message` is parameterized per failure case. |
@@ -696,7 +782,7 @@ other two are already keeps (L-010), which is the screen agreeing with a row tha
 enough the first time.
 
 <!-- prettier-ignore -->
-| id | file:line | shape | disposition | justification |
+| id | file and anchors | shape | disposition | justification |
 | --- | --- | --- | --- | --- |
 | G1-I01 | `cli/tests/orchestration/test_activation.py::test_gate_span_closes_on_failure_in_the_body::RuntimeError::81f523#1` | 1 injected-marker site | keep | The matched text is a marker this test file writes and hands to an exception constructor (`boom`), and it appears in no string production emits, so the assertion is proof that the INJECTED failure is the one observed. That is the reason L-004 and L-008 through L-010 already keep, and it makes the mechanical batch's shared justification false here: the matched string is not prose this repository authors. Pulled out of G1-018. |
 | G1-I02 | `cli/tests/orchestration/test_readiness.py::test_skip_and_degrade_lets_non_rejections_propagate::RuntimeError::304fb2#1` | 1 injected-marker site | keep | The matched text is a marker this test file writes and hands to an exception constructor (`{}: not a rejection`), and it appears in no string production emits, so the assertion is proof that the INJECTED failure is the one observed. That is the reason L-004 and L-008 through L-010 already keep, and it makes the mechanical batch's shared justification false here: the matched string is not prose this repository authors. Pulled out of G1-019. |
@@ -726,10 +812,12 @@ the justification is shared rather than restated 152 times: the matched string i
 that varies with nothing, and it is prose this repository authors, which no case in the taxonomy
 licenses. The `raises` stays; only the `match=` argument goes.
 
-Each row's file cell lists the sites that row owns, generated from the estate at HEAD minus the
-sites the judgment and keep rows above claim. Read it as the row's claim; there is no range to
-over-apply, and `sweep-screen.py attribute` fails loudly if a site ends up owned by two rows or by
-none.
+Each row's cell lists the sites that row owns, generated from the estate minus the sites the
+judgment and keep rows above claim. Read it as the row's claim; there is no range to over-apply, and
+`sweep-screen.py attribute` fails loudly if a site ends up owned by two rows or by none.
+**`sweep-screen.py generate` is that derivation**, so a batch cut at a later tree is emitted rather
+than assembled by hand: it prints these rows in the row grammar, ready to paste, and refuses if its
+sites plus the claimed ones do not add up to the estate.
 
 **Corrected 2026-08-19 by the callee-side raise screen.** This paragraph used to say that no test
 function in the set raises the same type twice, and conclude from that that each site is `hla.md`
@@ -746,7 +834,7 @@ twelve the screen verified as genuinely single-path; the rest of the batch is un
 executor owes it the screen per row before the edit lands.
 
 <!-- prettier-ignore -->
-| id | file:line | shape | disposition |
+| id | file and anchors | shape | disposition |
 | --- | --- | --- | --- |
 | G1-001 | `cli/tests/agents/test_create_reinit_orchestrated.py::test_create_mutation_failure_cleans_up_and_leaves_no_row::ExternalError::faf476#1,test_reinit_mutation_failure_wraps_and_keeps_the_agent::ExternalError::5d8d65#1,test_reinit_unknown_update_template_raises_and_keeps_the_row::NotFoundError::788028#1,test_reinit_update_template_persists_before_convergence_so_a_mid_failure_keeps_the_new_binding::ExternalError::5d8d65#1,test_create_agent_on_disabled_plugin_recipe_refuses_before_any_work::StateError::c11533#1,test_reinit_update_template_to_disabled_recipe_refuses_before_persist::StateError::c11533#1` | 6 `match=` site(s) over ExternalError, NotFoundError, StateError | delete |
 | G1-002 | `cli/tests/agents/test_delete_grant_revoke_orchestrated.py::test_delete_sessions_guard_refuses_with_zero_resolves_and_zero_gate::StateError::54d6d7#1,test_delete_declined_confirm_aborts_with_zero_resolves_and_zero_gate::UserAbort::0cf0fb#1,test_delete_nested_rejects_a_mismatched_vm_node::StateError::207681#1` | 3 `match=` site(s) over StateError, UserAbort | delete |
@@ -906,7 +994,7 @@ for the R4 reassessment to audit, and the six guide test files that replaced the
 no in-scope site; see the completeness re-scan.
 
 <!-- prettier-ignore -->
-| id | file:line | shape | disposition | justification |
+| id | file and anchors | shape | disposition | justification |
 | --- | --- | --- | --- | --- |
 | A-001 | `cli/tests/guide/test_migration_topic.py::L19-25` | **[dead]** curated cross-topic link + block-type presence | convert | Link resolution is already production-enforced (`guide/catalog.py:133-151` raises `BrokenTopicLinkError` for trusted topics), so the curated-pair restatement is dead weight; the real unguarded invariant is that a topic declaring `related_topics` also carries a `TopicLinks` block. Verified by executing: a contribution with `related_topics` and no `TopicLinks` block parses cleanly and renders with the links silently dropped. Replacement: one catalog-wide check over `build_authored_catalog()` that `topic.related_topics` implies a `TopicLinks` block. No production change. |
 | A-002 | `cli/tests/guide/test_migration_topic.py::L32-45` | **[dead]** action id + consent ordering pin | keep | Consent boundaries and action-record identity/ordering are what the rule says to test instead of prose. Nothing in production ties an action's consent to its operation (`guide/contract.py:507-518` only checks enum membership), so reclassifying a mutating step as a read is caught only here. |
@@ -991,7 +1079,7 @@ almost entirely in 3a and 3d.
 other three are each a full round on their own.
 
 <!-- prettier-ignore -->
-| id | file:line | shape | disposition | justification |
+| id | file and anchors | shape | disposition | justification |
 | --- | --- | --- | --- | --- |
 | A-055 | `cli/tests/guide/test_probe_free_registry.py::L42` | **[dead]** verbatim readiness-reason pin | delete | An authored sentence pinned by equality. The invariant is line 41 (`not readiness.is_available`) plus the `shutil.which` trap above it, both of which stay. |
 | A-065 | `cli/tests/test_database_backup.py::test_restore_rejects_v1_with_first_committed_v2_ddl_before_destination_open,test_restore_rejects_v3_with_first_committed_v4_table_before_destination_open,test_restore_rejects_missing_column_before_destination_open` | **[subtracted: instance-model]** verbatim hint equality (three sites) | delete | The same authored remediation sentence pinned by equality in three qualification tests. The behavioral content of each test is the raise plus `not live.exists()`, both of which stay; `hint is not None` is the surviving presence form used elsewhere (for example `test_database_migration_safety.py:710`). |
@@ -1385,7 +1473,7 @@ other three are each a full round on their own.
 executes**, on the same terms as group 3's.
 
 <!-- prettier-ignore -->
-| id | file:line | shape | disposition | justification |
+| id | file and anchors | shape | disposition | justification |
 | --- | --- | --- | --- | --- |
 | A-027 | `cli/tests/guide/test_migration_topic.py::L285-289` | **[dead]** live schema-path presence | keep | Structural derivation check: the manifest field tree produced by `reference_for` must still expose the nested credential and placement paths the platforms declare. A model or reference-generator regression that stopped surfacing `auth.secret` would be caught here and nowhere in this file. |
 | A-028 | `cli/tests/guide/test_migration_topic.py::L290-293` | **[dead]** retired-spelling absence list | delete | A blacklist of pre-0.14 field paths. Reintroducing `service_principal.secret` would require re-adding a model field, which is a reviewed authored edit, and the positive assertions in A-027 already state what the schema is. |
@@ -1644,7 +1732,7 @@ executes**, on the same terms as group 3's.
 `[subtracted]`).
 
 <!-- prettier-ignore -->
-| id | file:line | shape | disposition | justification |
+| id | file and anchors | shape | disposition | justification |
 | --- | --- | --- | --- | --- |
 | A-042 | `cli/tests/guide/test_authored_coverage.py::L103-104` | **[dead]** catalog closure plus retired-id blacklist | delete | Line 103 cannot fail: the parser's discriminator set is closed to exactly those six block types (`guide/contract.py:606-616`), so every catalog block is already one of them. Line 104 is a blacklist on one retired block id. |
 | A-052 | `cli/tests/guide/test_release_notes.py::L130-137` | **[dead]** authored shell-snippet substring pins | delete | Pins that three hand-written completion snippets spell `agw guide --names-only`. Verified duplicate: `tests/test_completions.py:163-171` asserts the same four things verbatim. A derivation-based replacement would need a shared production constant, which R2.2 forbids adding for a test. |
@@ -1867,7 +1955,7 @@ executes**, on the same terms as group 3's.
 `[subtracted]`).
 
 <!-- prettier-ignore -->
-| id | file:line | shape | disposition | justification |
+| id | file and anchors | shape | disposition | justification |
 | --- | --- | --- | --- | --- |
 | A-080 | `cli/tests/test_database_migration_safety.py::test_busy_state_error_message_and_hint_are_not_caller_suppliable` | **[subtracted: instance-model]** constructor-signature pin | keep | Rubric re-check, 2026-08-16. Not text at all: `list(inspect.signature(BusyStateError.__init__).parameters) == ["self"]` varies with the real constructor shape and is the sole enforcement of an invariant `errors.py:106-107` states in prose alone, that no caller can inject remediation prose. A-081 still passes if a defaulted `message` parameter is added, so it does not carry it. Cost: any signature change, including a good one, breaks it. |
 | C-004 | `cli/tests/test_obtain_token_removed.py::test_obtain_token_method_gone_from_base` | identifier blacklist over module source | delete | Reads `git_credential/base.py` source text and asserts four identifier spellings are absent. This is the doctrine's "pins how our code is written": a rename to `fetch_token` sails through, and the in-tree threat model is accidental regression, not adversarial reintroduction. |
@@ -1956,7 +2044,7 @@ in this same file; most of those regexes sit inside tests that are now deferred,
 be executed independently of them. Reverse either if you would rather they rode with their groups.
 
 <!-- prettier-ignore -->
-| id | file:line | shape | disposition | justification |
+| id | file and anchors | shape | disposition | justification |
 | --- | --- | --- | --- | --- |
 | F-025 | `website/tests/test_site_templates.py::TemplateContractTests.test_each_template_has_only_its_closed_vocabulary` | **[deferred]** token-set pin (second copy) | delete | Asserts each template's token set equals `site_validation.TEMPLATE_TOKENS`, a production constant. Verified by execution: a token with no substitution fails the build outright (`index.html: missing substitutions for required tokens: ['{{HOME_IDENTITY}}']`), so the agreement is enforced by building, not by this restatement. |
 | F-026 | `website/tests/test_site_templates.py::TemplateContractTests.test_unknown_missing_duplicate_wrong_template_and_brace_tokens_fail` | **[deferred]** mutate-one-string-assert-raises | delete | Six template mutations proving `_validate_template` rejects unknown, missing, duplicate, foreign, and brace-like tokens. The templates live in this tree and are validated on every build; this only proves the guard fires, and the guard's own half of `site_validation.py` is the deferred W2 deletion candidate. |
