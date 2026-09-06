@@ -111,3 +111,16 @@ SSH argv changed.
 
 Nothing in the shipped observation contract (facts, classification, JSON fields, timeouts) changed.
 See PR #737 for the code and rationale.
+
+## Post-lock correction (2026-09-05)
+
+Issue #742 narrows the HLA's structural-failure rule for one local recovery path. Plain
+`console list` preserves a saved console whose referenced VM row is missing instead of failing the
+entire inventory read. The exception is console-only and assumes the current-schema database can be
+opened; session inventory still validates its relationships, and a schema migration can reject an
+orphan before a command runs. A `console list --status` selection containing an orphan fails as a
+whole, and `console describe` fails for the orphan, because live observation cannot construct a
+valid guest boundary. The same correction centralizes the session/console guest timeout and attempt
+policy, makes persisted session mode project once when rows become output facts, and removes the
+redundant projection of service-constructed session status. None of those cleanups changes the
+locked status vocabulary or observation behavior.

@@ -29,6 +29,17 @@ rows from a list.
 Corrupt or unsupported persisted applied-state is different from an unavailable or mismatched SSH
 identity: it remains a typed error because Agentworks cannot trust the structural record.
 
+Plain `console list` still reports a saved console whose referenced VM row is missing, which keeps
+console names available while recovering an inconsistent current-schema database. This exception is
+limited to plain console inventory: session inventory still validates its workspace and VM
+relationships. A schema migration can also reject an orphan before any inventory command runs.
+
+Live console inspection retains structural validation because an orphan has no valid guest boundary.
+`console describe` fails for that console, and a `console list --status` selection containing one
+fails as a whole rather than returning statuses for its otherwise healthy rows. This structural
+failure is distinct from the per-VM operational failures described above, which remain isolated as
+`unknown`.
+
 ## Status meanings
 
 | Resource | States                                                | Authority                                                                  |
