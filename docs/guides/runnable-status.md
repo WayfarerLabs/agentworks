@@ -29,6 +29,11 @@ rows from a list.
 Corrupt or unsupported persisted applied-state is different from an unavailable or mismatched SSH
 identity: it remains a typed error because Agentworks cannot trust the structural record.
 
+Plain `console list` still reports a saved console whose referenced VM row is missing, which keeps
+local recovery inventory available after a database restore. Requesting that console's live status,
+including through `console describe`, remains a typed missing-VM failure because there is no valid
+guest boundary to observe.
+
 ## Status meanings
 
 | Resource | States                                                | Authority                                                                  |
