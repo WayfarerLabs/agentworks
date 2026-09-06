@@ -80,6 +80,42 @@ jobs:
         env:
           AGENTWORKS_PACKAGE_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
 
+  # agentworks is operated from Windows, and some behavior (SSH TTY/stdin,
+  # path rendering, machine-output stream purity) is host-specific and cannot
+  # be caught on Linux. This job runs the same suite on Windows so those
+  # regressions surface in CI rather than as live operator pain.
+  test-windows:
+    name: Test (Windows, Python 3.13)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Part of the suite shells out to a POSIX `sh` (e.g. the codex recorder
+      # probes) and `bash -n`. windows-latest ships Git for Windows; putting its
+      # bin on PATH makes `sh`/`bash` resolvable. Symlink- and shell-gated tests
+      # that need more than this skip via the shared conftest markers.
+      - name: Put Git Bash on PATH (POSIX sh/bash for shell-dependent tests)
+        shell: pwsh
+        run: Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files\Git\bin'
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Pytest
+        run: uv run pytest tests/ -m 'not integration'
+        env:
+          AGENTWORKS_PACKAGE_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+
   # File-quality linters and the rulesync drift check both run via the same
   # scripts contributors use locally (./scripts/lint-files.sh, ./scripts/rulesync-upgen.sh
   # --check). That keeps CI and local behavior in lockstep; the version pins,
@@ -169,7 +205,7 @@ jobs:
   # rather than in GitHub settings that can drift silently.
   ci-success:
     if: always()
-    needs: [python-checks, test, lint-files, rulesync-drift, locked-sdds, website]
+    needs: [python-checks, test, test-windows, lint-files, rulesync-drift, locked-sdds, website]
     runs-on: ubuntu-latest
     steps:
       - name: Verify all required jobs passed
@@ -177,8 +213,8 @@ jobs:
           REQUIRED_RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
           read -r -a results <<< "$REQUIRED_RESULTS"
-          if [[ "${#results[@]}" -ne 6 ]]; then
-            echo "::error::Expected six required CI job results."
+          if [[ "${#results[@]}" -ne 7 ]]; then
+            echo "::error::Expected seven required CI job results."
             exit 1
           fi
           for result in "${results[@]}"; do
