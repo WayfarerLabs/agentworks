@@ -697,7 +697,7 @@ class EC2Platform(VMPlatform):
         ctx: RunContext,
         *,
         config: Config | None = None,
-    ) -> Transport | None:
+    ) -> Transport:
         ec2 = self._client("ec2", self._region_of(vm), ctx)
         try:
             result = ec2.describe_instances(InstanceIds=[self._instance_id(vm)])

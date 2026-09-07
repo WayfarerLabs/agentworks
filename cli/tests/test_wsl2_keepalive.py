@@ -336,6 +336,9 @@ def test_base_platform_vm_active_is_nullcontext() -> None:
         def display_backend_name(self, vm: Any) -> str:
             raise NotImplementedError
 
+        def native_transport(self, vm: Any, ctx: Any, *, config: Any = None) -> Any:
+            raise NotImplementedError
+
     # Patch Popen at the wsl2 module level; the base default must NOT touch it.
     with patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen") as popen:
         with _Stub("stub", {}).vm_active(_fake_vm()):
