@@ -16,13 +16,13 @@ shared-contract wording.
 
 ## Architecture in one view
 
-Each resource's existing lifecycle drives a small setup pipeline: core, ordered features, then
-ordered harness integrations. Core supplies the resource identity, execution target, inherited env,
-and artifacts. An integration receives the config for the facet being invoked and owns its harness's
-representation and applied facts. Each invocation returns artifacts it defers; core delivers those
-to later applicable invocations of the same integration. Sessions consume accumulated env and the
-remaining artifact payloads, diagnose missing setup, and cannot launch with unresolved deferrals.
-They do not run ancestor setup as a side effect of starting a workload.
+Each resource's existing lifecycle drives a small setup pipeline: core env and artifact preparation,
+then ordered harness integrations. Core supplies the resource identity, execution target, inherited
+env, and artifacts. An integration receives the config for the facet being invoked and owns its
+harness's representation and applied facts. Each invocation returns artifacts it defers; core
+delivers those to later applicable invocations of the same integration. Sessions consume accumulated
+env and the remaining artifact payloads, diagnose missing setup, and cannot launch with unresolved
+deferrals. They do not run ancestor setup as a side effect of starting a workload.
 
 ```mermaid
 ---
@@ -34,26 +34,23 @@ config:
 ---
 flowchart TB
     subgraph VM["VM scope / vm facet"]
-        VC["Core setup<br/>env + artifacts"] --> VF["Features<br/>env-to-date in; env + artifacts out"]
-        VF -->|"env + artifacts"| VH["Enabled integrations: vm_init"]
+        VC["Core setup<br/>env block + artifacts block"] -->|"env + artifacts"| VH["Enabled integrations: vm_init"]
         VH --> VS["Published VM state<br/>env, deferred artifacts, receipts"]
     end
     subgraph User["User resource: admin OR agent scope / user facet"]
-        UC["Core user setup<br/>env + artifacts"] --> UF["User features<br/>env-to-date in; env + artifacts out"]
-        UF -->|"env + local and pending artifacts"| UH["Enabled integrations: user_init"]
+        UC["Core user setup<br/>env block + artifacts block"] -->|"env + local and pending artifacts"| UH["Enabled integrations: user_init"]
         UH --> US["Published state<br/>env, deferred artifacts, receipts"]
         UH -.->|"handled here"| UN["Native user setup<br/>settings, plugins, rules, skills"]
     end
     subgraph Workspace["Workspace scope / workspace facet"]
-        WC["Core workspace setup<br/>env + artifacts"] --> WF["Workspace features<br/>env-to-date in; env + artifacts out"]
-        WF -->|"env + local and pending artifacts"| WH["Enabled integrations: workspace_init"]
+        WC["Core workspace setup<br/>env block + artifacts block"] -->|"env + local and pending artifacts"| WH["Enabled integrations: workspace_init"]
         WH --> WS["Published state<br/>env, deferred artifacts, receipts"]
         WH -.->|"handled here"| WN["Native project setup<br/>settings, rules, skills"]
     end
     VS -->|"VM env + pending artifacts + receipts"| UC
     VS -->|"VM env + pending artifacts + receipts"| WC
     subgraph Session["Session scope / session facet"]
-        SC["Core: join ancestor paths<br/>assemble env, pending artifacts, receipts<br/>add session inputs"]
+        SC["Core: join ancestor paths<br/>assemble env, pending artifacts, receipts<br/>add session env + artifacts blocks"]
         SC --> Ready["Selected integration<br/>upstream readiness"]
         Ready -->|"env + remaining artifacts"| SH["Selected integration<br/>start with launch intent"]
         SH --> Final{"Core: any final deferrals?"}
@@ -82,9 +79,9 @@ resource; it is not a deferred artifact or a config blob merged into session con
 The pipeline is shared orchestration code, not a registry of scopes or an extensible execution
 engine. Resource managers retain activation, preflight, secret resolution, realization, error
 framing, and rollback. Existing Python models, capability descriptors, transports, and SQLite
-instance state remain the stack. There is no new runtime service or dependency. Feature and
-integration setup use the full `Transport` after core makes it available; the native bootstrap
-channel is only an `ExecTransport` and cannot be assumed to support file transfer.
+instance state remain the stack. There is no new runtime service or dependency. Harness integration
+setup uses the full `Transport` after core makes it available; the native bootstrap channel is only
+an `ExecTransport` and cannot be assumed to support file transfer.
 
 ## Where the current code changes
 
@@ -95,7 +92,7 @@ These anchors describe the baseline, not the proposed implementation's eventual 
 | `cli/agentworks/capabilities/harness_integration/base.py:202`                 | Separate common config binding from the session-only constructor, target guard, probe cache, and conversation state. Add setup invocation methods to this one registered API. |
 | `cli/agentworks/capabilities/base.py:339` and `capabilities/config.py:517`    | Extend `config_for` and its cached model selection to preserve the facet in every downstream consumer.                                                                        |
 | `cli/agentworks/capabilities/descriptor.py:159`                               | Replace the single hosted field assumption with the concrete hosting surfaces this effort introduces.                                                                         |
-| `cli/agentworks/vms/initializer/driver.py:396` and `agents/initializer.py:31` | End each owning scope's core setup with features and integration setup; remove Claude-specific dispatch.                                                                      |
+| `cli/agentworks/vms/initializer/driver.py:396` and `agents/initializer.py:31` | Prepare declarative artifacts in core, then invoke integrations at each owning scope; remove Claude-specific dispatch.                                                        |
 | `cli/agentworks/workspaces/realize.py:50`                                     | Run workspace participants inside the shared create body, before the workspace is declared complete.                                                                          |
 | `cli/agentworks/env/entry.py:69` and `env/merge.py:19`                        | Reuse env declarations and the existing precedence ladder; incorporate producer contributions without persisting resolved secrets.                                            |
 | `cli/agentworks/db/instance_state.py:37`                                      | Register closed keys and domain codecs for setup contributions and harness applied facts; retain the existing table.                                                          |
@@ -255,6 +252,15 @@ metadata:
   name: team-claude
 spec:
   user_install_commands: [claude, codex]
+  env:
+    TEAM_REVIEW_MODE: careful
+  artifacts:
+    review-context:
+      kind: hint
+      text: This user is configured for careful code review.
+    code-review:
+      kind: skill
+      source: file::~/.config/agentworks/artifacts/code-review
   harness_integrations:
     - name: claude-code
       marketplaces: [example-org/team-plugins]
@@ -272,6 +278,11 @@ kind: workspace-template
 metadata:
   name: team-project
 spec:
+  artifacts:
+    python-conventions:
+      kind: rule
+      source: file::~/.config/agentworks/artifacts/python-conventions.md
+      paths: ["**/*.py"]
   harness_integrations:
     - name: claude-code
       settings:
@@ -288,27 +299,31 @@ kind: session-template
 metadata:
   name: team-review
 spec:
+  artifacts:
+    review-focus:
+      kind: hint
+      text: Focus this review on failure recovery and ownership.
   harness_integration:
     name: claude-code
     permission_mode: default
     initial_prompt: Review the pending changes.
 ```
 
-Creating a user from `team-claude` installs both CLIs through core setup, runs user-features, then
-invokes Claude and Codex user facets with their own marketplace/plugin lists and artifact inputs.
-The name-only shell attachment materializes its filesystem representation. Codex also maps the
-selected workstation file to its native user settings using the stated strategy. Creating a
-workspace from `team-project` runs Claude, Codex, and shell workspace facets with separate config
-and workspace artifact inputs. Claude maps its project settings file there; shell publishes its
-workspace artifact files. A name-only attachment still explicitly enables default setup; it is
-distinct from omitting the integration. A `team-review` session using those resources gets only
-session config, applicable env, deferred artifacts, and upstream readiness facts; it does not
-receive the user config as launch flags. The same user block is valid on the proposed admin-template
-attachment surface. Putting `permission_mode` in the user block or `plugins` in the session block is
-a facet-specific validation error. The user's Codex attachment does not implicitly attach Codex to
-the workspace or select it for the session. With no inherited attachment, omitting the workspace
-list selects none; an explicit empty list removes inherited selection. To use Codex for a session,
-select `name: codex` in that session's singular block.
+Creating a user from `team-claude` installs both CLIs through core setup, prepares its env and
+artifacts, then invokes Claude and Codex user facets with their own marketplace/plugin lists and
+artifact inputs. The name-only shell attachment materializes its filesystem representation. Codex
+also maps the selected workstation file to its native user settings using the stated strategy.
+Creating a workspace from `team-project` runs Claude, Codex, and shell workspace facets with
+separate config and workspace artifact inputs. Claude maps its project settings file there; shell
+publishes its workspace artifact files. A name-only attachment still explicitly enables default
+setup; it is distinct from omitting the integration. A `team-review` session using those resources
+gets only session config, applicable env, deferred artifacts, and upstream readiness facts; it does
+not receive the user config as launch flags. The same user block is valid on the proposed
+admin-template attachment surface. Putting `permission_mode` in the user block or `plugins` in the
+session block is a facet-specific validation error. The user's Codex attachment does not implicitly
+attach Codex to the workspace or select it for the session. With no inherited attachment, omitting
+the workspace list selects none; an explicit empty list removes inherited selection. To use Codex
+for a session, select `name: codex` in that session's singular block.
 
 All four integrations retain ordinary session-only use when setup is not requested. These are
 alternative `session-template.spec.harness_integration` blocks, each paired with its existing
@@ -386,12 +401,12 @@ snapshot and use the existing transport to publish its resulting native document
 transport merely to fit the old helper's signature.
 
 Acquire and validate the source before this integration's first native settings or plugin write;
-core/feature setup earlier in the pipeline keeps its existing lifecycle. Workstation paths use the
-invoking process's home and working directory, never the guest's. Keep the captured bytes stable for
-the operation, using temporary local storage where transfer requires a path, and clean it up on
-success or failure. Transfer the captured result rather than rereading a possibly changed source at
-write time. This is a snapshot, not a symlink or mount. Reinit rereads the source; session start
-uses applied state and native files and has no workstation-source dependency.
+core setup earlier in the pipeline keeps its existing lifecycle. Workstation paths use the invoking
+process's home and working directory, never the guest's. Keep the captured bytes stable for the
+operation, using temporary local storage where transfer requires a path, and clean it up on success
+or failure. Transfer the captured result rather than rereading a possibly changed source at write
+time. This is a snapshot, not a symlink or mount. Reinit rereads the source; session start uses
+applied state and native files and has no workstation-source dependency.
 
 | Integration | User settings destination             | Workspace settings destination    | Parser             |
 | ----------- | ------------------------------------- | --------------------------------- | ------------------ |
@@ -490,21 +505,21 @@ runs independently on its VM. Workspace creation is VM-owned and does not choose
 Existing orchestration orders prerequisites when session creation also creates resources; only those
 explicitly requested creations may run setup. Starting an existing session never does so.
 
-Features use the existing descriptor/registration pattern as the three core-owned kinds
-`vm-feature`, `user-feature`, and `workspace-feature`. They have one config and one idempotent setup
-operation, return env/artifact contributions, and are selected in a `features` list with the same
-ordering and replacement rules as attachments. User-features run in the user setup pipeline; the
-invocation context identifies the user. Concrete test implementations registered as vm-feature,
-user-feature (covering both user scopes), and workspace-feature exercise every lane through the real
-CLI in the vertical acceptance run, proving env and artifact delivery. There is no session-feature.
+Features are future functionality. They will slot between core preparation and harness invocation,
+consume env-to-date, and contribute env and typed artifacts before integrations run. Preserve that
+ordering and producer provenance in the design, but add no feature kinds, registration, config,
+methods, dependency system, or test feature capabilities in this effort. The future user-feature
+kind serves both admin and agent users. Automatic hint emission from env declarations,
+authentication, or other core setup is also future work; the explicit `artifacts` block supplies all
+artifacts here.
 
 ## The two currencies
 
 **Env uses the shipped `EnvEntry` shape:** a plaintext value or a declared secret reference. Core
-and feature outputs are ordered maps of those entries with producer provenance. Later producers
-replace earlier values within a scope. Reuse the shipped cross-scope precedence:
-`vm < workspace < (admin or agent) < session`; admin and agent never merge together. Pipeline order
-within one scope does not change that precedence. Core-protected identity variables win last.
+assembles the declared entries with their existing provenance. Reuse the shipped cross-scope
+precedence: `vm < workspace < (admin or agent) < session`; admin and agent never merge together.
+Pipeline order within one scope does not change that precedence. Core-protected identity variables
+win last.
 
 A user setup sees VM plus that user's env. Workspace setup sees VM plus workspace env, never an
 arbitrary user's env. A session combines VM, workspace, its actual user, and session contributions.
@@ -514,12 +529,11 @@ workspace are siblings, not ancestors of one another. Each invocation receives l
 applicable inherited items still deferred for its integration, preserving their individual origins.
 
 Template env becomes pipeline input alongside core-produced values. Existing bootstrap and core
-install commands retain their hermetic runners. The new feature and integration lanes receive the
-explicit env-to-date runner; this is the intentional extension beyond today's runtime-only env
-injection. Their secret needs join the owning operation's existing preflight and resolution
-boundary. A feature declares all secret references it may emit through its config before execution.
-Its output may use that declared set but cannot introduce a secret lookup after the boundary
-resolves. Runtime values exist only in the operation's runner and scoped secret view.
+install commands retain their hermetic runners. The harness integration lane receives the assembled
+env runner; this is the intentional extension beyond today's runtime-only env injection. Its
+declared secret needs join the owning operation's existing preflight and resolution boundary.
+Runtime values exist only in the operation's runner and scoped secret view. Automatic generation of
+hints from these env declarations is outside this effort.
 
 **Agent artifacts have three concrete kinds: hint, rule, and skill.** Hints describe Agentworks
 setup as advisory context; a producer needing stronger guidance can emit a rule or skill. The term
@@ -534,12 +548,13 @@ integrations preserve their native discovery and invocation behavior. None is a 
 | Rule  | A producer-local name, instructional text, and applicability: always applying or matching declared workspace-relative paths. The integration preserves that applicability when representing the rule.                                                     |
 | Skill | A producer-local name, discovery description, instructions, and a bundle of supporting files addressed relative to the skill root. Preserve the package and its discovery/invocation semantics; appending its instructions to a prompt is not equivalent. |
 
-Core attaches immutable origin metadata: owning scope, resource identity, and producer (core or the
-named feature). Together with the producer-local name, these identify an item across delivery;
-duplicate names within a producer are errors. A facet is not an independent origin field: core's
-fixed mapping derives the corresponding facet from the origin scope. The enclosing invocation or
-persisted result identifies the current facet and resource; each returned item adds only its reason
-to its original identity. No per-item attempt history is stored.
+Core attaches immutable origin metadata: owning scope, resource identity, and producer
+(`core.artifacts` for declarations here, with distinct producers available for future emission).
+Together with the producer-local name, these identify an item across delivery; duplicate names
+within a producer are errors. A facet is not an independent origin field: core's fixed mapping
+derives the corresponding facet from the origin scope. The enclosing invocation or persisted result
+identifies the current facet and resource; each returned item adds only its reason to its original
+identity. No per-item attempt history is stored.
 
 The name and origin form a pipeline source address, not wave 6's global artifact identity. Content
 and applicability remain distinct from identity and from native destination. Skill members preserve
@@ -547,13 +562,10 @@ relative paths and non-secret contents so references and scripts travel with the
 source paths are not destinations or permission to copy arbitrary host files. Package ingestion
 validates relative paths and refuses escapes. The LLD settles the concrete bundle carrier and codec.
 
-Core and features may emit these typed artifacts alongside env. An env declaration may be
-accompanied by a hint describing the variable; a successful user authentication feature may emit a
-hint that its tool is available. Descriptions contain no secret value. A claim about completed setup
-is emitted only after that setup succeeds. Their producer API does not depend on a manually authored
-template-artifact field, so that operator surface can follow immediately without changing delivery.
-It is not required in this effort. Session inputs may likewise come from core; this does not add a
-session-feature or change the shipped workload config knobs.
+The core declaration loader emits these typed artifacts alongside env. Manual hints carry the
+operator's asserted context; loading a hint does not prove that authentication or another setup step
+succeeded. No existing core operation gains automatic hint emission in this effort. Future core and
+feature producers will use the same typed delivery input, retaining their own producer identities.
 
 Limited hooks can later join as a distinct kind carrying explicit event and execution semantics. MCP
 server configurations are another future kind, preserving structured connection/configuration
@@ -563,17 +575,96 @@ a rule as a fallback. Global identity, attributed composition, hook execution, a
 and distillation remain wave 6 work. Simple hint grouping is native rendering, not that future
 composition system. All three kinds get concrete shapes now and are proven by the vertical.
 
-A resource publishes successful core/feature contributions and each invoked integration's deferred
-output to the instance-state store. Later operations reconstruct inputs without rerunning ancestor
-setup. Persist env declarations and non-secret artifact content, including skill members, in the
-versioned domain payload. An output schema has no resolved-secret arm. Integrations must not copy
-secret values into artifact content, logs, hashes, reasons, or state. Trusted-code review and
-negative runtime tests enforce that conduct; schema shape alone cannot. Secret env references
-resolve afresh at the consuming operation boundary.
+A resource publishes successful core contributions and each invoked integration's deferred output to
+the instance-state store. Later operations reconstruct inputs without rerunning ancestor setup.
+Persist env declarations and non-secret artifact content, including skill members, in the versioned
+domain payload. An output schema has no resolved-secret arm. Integrations must not copy secret
+values into artifact content, logs, hashes, reasons, or state. Trusted-code review and negative
+runtime tests enforce that conduct; schema shape alone cannot. Secret env references resolve afresh
+at the consuming operation boundary.
+
+## Declarative artifact sources and packages
+
+Add `artifacts` beside `env` on VM, admin, agent, workspace, and session declarations and their
+existing instance overlays. It is core configuration, not a capability selection. Use a map from
+stable local names to typed entries: `kind: hint`, `kind: rule`, or `kind: skill`. A hint or rule
+contains exactly one of inline `text` and a file `source`. A rule's optional nonempty `paths` list
+contains workspace-relative applicability globs; omission means always applying. A skill has a
+directory `source` and reads its native name, description, instructions, and metadata from
+`SKILL.md`; do not duplicate those fields in config or silently rename the skill to the map key. The
+map key is its stable source address for reconciliation, independent of the skill's native name.
+
+Within one resource's template lineage, use the same per-key merge and whole-entry replacement as
+`EnvTable` (`env/entry.py:131`). A nearer declaration replaces an entire named artifact, so changing
+kind or switching `source` to `text` cannot retain fields from the old variant. Omission and an
+empty map add no overrides. A null entry explicitly suppresses that name from the same resource's
+inherited declarations; core consumes it before producing artifacts. This is a local declaration
+tombstone, not a way to suppress artifacts inherited from another scope or an integration's deferred
+inputs. Admin templates retain their existing non-inheriting behavior. Duplicate input keys are
+errors. Cross-scope items retain their distinct immutable origins even when local names match;
+ordinary native destination conflict checks still apply. Do not apply env's precedence ladder to
+artifacts.
+
+Initial source references accept ordinary workstation paths and `file::`, reusing `SourceRef`
+spelling and path semantics (`sources.py:41`). Resolve `~` and relative paths against the invoking
+workstation user's home and working directory, as existing local sources do. A checked-out Git
+repository is an ordinary local source. Direct Git, HTTP, archive, registry, and marketplace
+artifact acquisition remain future extensions to this source boundary; harness plugin marketplace
+setup is a separate existing requirement. No new acquisition command or package manager is needed
+here.
+
+Capture a resource's own declared sources during its owning setup/reinit or session start operation,
+including restart. Validate and normalize the captured inputs before that resource's first harness
+write, then persist the successful contribution snapshot under R9. Every integration in that
+operation receives the same captured content. Do not reread files for each integration or retain a
+live symlink or mount to the workstation. Later scopes consume the published ancestor snapshots
+without accessing those ancestor source paths. A session's own file sources are acquired on its
+start/restart, so those particular paths must still be available; inline session text has no such
+dependency. A changed upstream source requires its owning reconciliation, not implicit work at
+session start. Source failure cannot reuse an old completed snapshot as current delivery evidence.
+
+Use a small shared workstation snapshot helper alongside the native-settings snapshot work. The
+existing `fetch_file`/`fetch_dir` helpers transfer to a guest; they do not capture and validate
+local packages (`sources.py:134,216`). Do not add a local transport to fit that interface. Temporary
+capture storage belongs to the operation and is removed on success and failure. The LLD must bound
+file count, individual/total size, and traversal depth, and reject observed source mutation during
+capture.
+
+A skill package is the ordinary [Agent Skills directory](https://agentskills.io/specification):
+`SKILL.md` with required name and description, plus the complete contained supporting-file tree.
+Preserve optional frontmatter, relative paths, executable-file intent, references, scripts, and
+binary assets. A skill root is explicit; do not recursively discover and install every skill in a
+repository. Validate the package rather than executing any bundled script. Refuse links and special
+files, absolute or escaping member paths, and portable-path collisions instead of following host
+paths or silently dropping members. Reject Git metadata in the selected package root rather than
+copying it or silently excluding it. These boundary checks constrain acquisition, not the workload's
+later permission to use the skill.
+
+Normalize hint/rule text and `SKILL.md` to UTF-8 with Unix LF line endings before validation,
+hashing, and delivery; convert CRLF and lone CR, without reflowing prose or formatting code. For
+supporting members, the default text classification is valid UTF-8 without NUL bytes. Normalize
+those members in the captured copy; preserve other members as opaque bytes. A skill entry may list
+exact contained member paths in `preserve_bytes` for byte-sensitive fixtures or ambiguous assets,
+overriding that classification. `SKILL.md` cannot be exempted. This explicit escape avoids treating
+every decodable asset as text by necessity. Sources themselves are never rewritten. LF normalization
+is this framework's policy, not a requirement claimed from Agent Skills.
+
+Compute reconciliation hashes from the normalized package, its relative paths, and executable-file
+intent, not source timestamps or incidental archive metadata. Thus CRLF-versus-LF source changes
+alone cause no native rewrite, while meaningful content or execution changes do. The versioned
+snapshot codec must carry both text and opaque bytes without loss, using existing instance state;
+the LLD chooses that internal carrier. This is not a new public archive format or artifact store.
+
+[The skills CLI](https://github.com/vercel-labs/skills) demonstrates local and Git acquisition into
+ordinary skill directories.
+[Rulesync sources](https://rulesync.dyoshikawa.com/guide/declarative-sources.html) separate
+acquisition from native generation and pin remote revisions. Those are useful extension points, not
+runtime dependencies: future source resolvers should produce this same validated, normalized
+snapshot and retain reproducible source identity without changing harness placement.
 
 ## Representation, ordering, and conflicts
 
-Integrations run after core and every feature that emits env or artifacts. Features consume
+Integrations run after core has prepared env and all declared artifacts. Future features consume
 env-to-date in template declaration order. Each integration receives the completed local outputs,
 all applicable env, and its own inherited deferred artifacts. Integrations run in attachment order
 but do not feed one another. A failed integration stops setup; deferral is an ordinary successful
@@ -757,7 +848,7 @@ non-secret identifiers, ownership, and removal facts needed after their original
 gone. The integration performs safe native removal where supported, checks whether the resource is
 already absent, and checkpoints each completed removal through the same instance-state path. A retry
 converges without repeating destructive work or forgetting another integration's claims. A removed
-feature's artifacts and a removed individual plugin use this reconciliation just as a removed whole
+artifact declaration and a removed individual plugin use this reconciliation just as a removed whole
 attachment does. Resource deletion consumes applicable cleanup records before discarding them when
 provisioned effects would otherwise survive that deletion.
 
@@ -787,9 +878,9 @@ never evidence of empty inputs.
 An applied record carries its payload version, contributing source locators, destination or native
 resource, representation strategy, non-secret content hash where meaningful, and confirmed outcome.
 The owning manager persists facts from completed work, using partial slice replacement so another
-scope, another integration, and unknown future keys survive. Successful feature/core contributions
-and the evidence describing their application must describe the same setup generation. Readiness
-must not combine fresh desired config with stale receipts and call that applied success.
+scope, another integration, and unknown future keys survive. Successful core contributions and the
+evidence describing their application must describe the same setup generation. Readiness must not
+combine fresh desired config with stale receipts and call that applied success.
 
 Reinit recomputes desired output and reconciles it with the prior record and live destination.
 Settings mappings use their explicit collision and retain-on-removal policy; the following removal
@@ -835,9 +926,10 @@ write transaction held across network calls is not the design.
 ## Workspace retry and session readiness
 
 Workspace setup participates in `realize_workspace`, shared by standalone create and
-`session create --new-workspace`. Run features and integrations after the directory and repository
-exist but before publishing successful creation. Commit the workspace row, desired overlay,
-contributions, deferred outputs, and initial applied facts together only after setup succeeds.
+`session create --new-workspace`. Prepare core artifacts and run integrations after the directory
+and repository exist but before publishing successful creation. Commit the workspace row, desired
+overlay, contributions, deferred outputs, and initial applied facts together only after setup
+succeeds.
 
 On a handled failure before that commit, unwind the newly created workspace directory, group, and
 local stub using the existing partial-create path. A retry is another `workspace create` with the
@@ -935,8 +1027,8 @@ Rulesync informs the rule/skill model and separation of sources from generated d
 not invoked at runtime. Exact file names, package delivery, available session mechanisms, and native
 plugin ownership probes belong in the LLD and must be verified against the actual CLI. The vertical
 acceptance includes grouped hints, native user and workspace rules/skills, downstream filtering,
-unchanged skill support files, and terminal refusal for an unrepresentable artifact. These are
-integration details, not core special cases.
+skill support files preserved except for declared text normalization, and terminal refusal for an
+unrepresentable artifact. These are integration details, not core special cases.
 
 Update first-party manifests and upgrade guidance in the implementation change. Retire old template
 fields and the two core install call sites together; do not leave two active configuration paths.
@@ -959,11 +1051,12 @@ output, dictionary resolution, and existing-session restart in this sweep.
 
 This review PR contains the FRD amendment and HLA. It contains no plan, LLD, permanent behavior
 docs, or migration file. The next artifacts must specify the storage/locking and interruption
-protocol, schema-host walk, user plugin ownership for both harnesses, settings-file parsing and
-reconciliation, the early session UUID persistence/context slice, shell index/ownership and session
-cleanup wiring, and config/overlay migration before implementation begins. Their acceptance must
-include copy, rehome, delete, and state restore handling so owner records cannot bless artifacts at
-a different destination or survive deletion and recreation under the same name.
+protocol, schema-host walk, user plugin ownership for both harnesses, settings-file parsing,
+artifact declaration/snapshot codecs and normalization, and reconciliation, the early session UUID
+persistence/context slice, shell index/ownership and session cleanup wiring, and config/overlay
+migration before implementation begins. Their acceptance must include copy, rehome, delete, and
+state restore handling so owner records cannot bless artifacts at a different destination or survive
+deletion and recreation under the same name.
 
 ## Validation and requirement coverage
 
@@ -972,7 +1065,7 @@ where setup changes the guest:
 
 | Requirement    | Acceptance evidence                                                                                                                                                                                                                                                                 |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| R1, R2, R6     | Feature fixtures for all three kinds receive env-to-date and emit env, hints, rules, and skills; integrations run after all producers; VM, admin, agent, and workspace ordering is observed.                                                                                        |
+| R1, R2, R6     | Declarative env/artifact fixtures cover hints, rules, and complete skills at all five scopes; core preparation precedes harness invocation; no feature capability is required.                                                                                                      |
 | R3, R4, R5, R8 | A session-only integration remains compatible; different facet schemas validate on the proper resource, invalid public plugin hooks fail at registration, and setup never carries session identity/cache/state.                                                                     |
 | R7, R12        | Hints, rules, and skill bundles retain semantics and origin through grouping and delivery; handled payloads do not reach session, deferral is integration-specific across both ancestor branches and creation orders, and any final deferral blocks launch with its reason.         |
 | R9             | Repeated VM/admin and agent setup is unchanged; desired changes/removals converge; edited/unowned files cause drift/conflict reports; failed same-input reinit invalidates completion; interrupted work, unknown versions, and concurrent reinit do not overwrite or lose evidence. |
@@ -988,6 +1081,16 @@ behavior, retained settings on mapping removal, and collisions with explicit plu
 portability and second-user/second-workspace cases must be observable, not inferred from manifest
 validation.
 
+R6 source acceptance covers inline text, local files, and complete Agent Skills directories at all
+five scopes. Prove template inheritance, atomic entry replacement, local null suppression, and
+cross-scope same-name identity without hiding ancestor artifacts. Exercise CRLF/LF equivalence, lone
+CR normalization, unchanged source files, binary and `preserve_bytes` fidelity, executable members,
+invalid metadata, symlinks/traversal/collisions, bounded capture, and source mutation or absence
+before harness writes. Reinit detects meaningful source changes; downstream session start uses
+ancestor snapshots without rereading them, while its own sources follow the documented start/restart
+acquisition rule. Removing a declaration feeds the existing cleanup path. These are plain data
+fixtures and injected failures, not test feature capabilities or new external services.
+
 R9 cleanup acceptance starts from recorded successful provisioning, then removes a producer
 artifact, one plugin entry, and a whole integration attachment through their owning lifecycles.
 Observe native removal and corresponding instance-state updates, rerun to prove no further change,
@@ -995,18 +1098,19 @@ and interrupt cleanup to prove retry preserves outstanding ownership. Also cover
 resources, drift or unowned content, unavailable native removal, another integration's retained
 claims, and R15's intentional settings retention. A config-only assertion is not cleanup evidence.
 
-R16 acceptance uses simple feature fixtures to prove shell delivery through the real CLI: user and
-workspace files are discoverable without downstream payload copies; a shell with no setup attachment
-publishes deferred artifacts in its actual user's session directory; hints and rule applicability
-survive indexing and skill packages retain all supporting files. Test two users, two sessions of one
-user, a custom user home, and two workspaces. Each index must expose only its applicable inputs, and
-other users must be denied access to the home-based directory. Prove that stop retains files,
-restart reconciles only owned session material, and single/cascading deletion removes owned files
-before receipts disappear. Same-name recreation, symlink escapes, drift, partial publication, and
-failed cleanup must preserve the ownership boundary and useful recovery evidence. Prove that a
-transition to no artifacts removes obsolete owned material and clears a configured stale discovery
-variable, for both the default login shell and custom/resume commands. Concurrent start/restart and
-deletion must refuse competing mutation without losing receipts or launching with deleted files.
+R16 acceptance uses explicit artifact declarations and local fixture packages to prove shell
+delivery through the real CLI: user and workspace files are discoverable without downstream payload
+copies; a shell with no setup attachment publishes deferred artifacts in its actual user's session
+directory; hints and rule applicability survive indexing and skill packages retain all supporting
+files. Test two users, two sessions of one user, a custom user home, and two workspaces. Each index
+must expose only its applicable inputs, and other users must be denied access to the home-based
+directory. Prove that stop retains files, restart reconciles only owned session material, and
+single/cascading deletion removes owned files before receipts disappear. Same-name recreation,
+symlink escapes, drift, partial publication, and failed cleanup must preserve the ownership boundary
+and useful recovery evidence. Prove that a transition to no artifacts removes obsolete owned
+material and clears a configured stale discovery variable, for both the default login shell and
+custom/resume commands. Concurrent start/restart and deletion must refuse competing mutation without
+losing receipts or launching with deleted files.
 
 R16's identity acceptance proves one stable `session_uuid` for an existing migrated session and
 across start/restart/resume, a different UUID after same-name recreation, and refusal of stale
@@ -1039,10 +1143,11 @@ collateral changes travel with the behavior that makes them true.
 
 ## Focus for architecture feedback
 
-The five FRD open questions have proposals here: typed facet invocations and existing env entries;
-no supported-scopes reporting mechanism; admin-template attachment ownership pending confirmation;
-workspace cleanup then fresh create; and ordered attachments with conflicts instead of overwrite.
-The highest-risk boundaries are facet selection through all schema consumers, rule/skill fidelity,
+The FRD open questions have proposals here: typed facet invocations and existing env entries; no
+supported-scopes reporting mechanism; admin-template attachment ownership pending confirmation;
+workspace cleanup then fresh create; ordered attachments with conflicts instead of overwrite; and
+local artifact sources with complete Agent Skills packages and LF text normalization. The
+highest-risk boundaries are facet selection through all schema consumers, rule/skill fidelity,
 merging deferred inputs across sibling ancestors without duplicate delivery, non-secret
 contributions across executions, and recovery between a remote write and a local receipt. The
 architecture does not claim those are solved by no-op defaults or by a state table alone.

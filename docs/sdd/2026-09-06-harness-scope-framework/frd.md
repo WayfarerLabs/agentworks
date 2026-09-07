@@ -472,9 +472,9 @@ Carried forward from the contract, minus the one that closed, and extended by th
    model as agent attachments).
 4. The retry contract for a partially created workspace with some artifacts already written.
 5. Ordering and conflict reporting when multiple integrations attach at one broader scope.
-6. Artifact source acquisition and package forms, including the boundary between initial local
-   sources and any Git acquisition. R6 settles preservation, normalization, and stable capture; the
-   supported source forms remain to be settled alongside the HLA.
+6. Artifact source acquisition and package forms. The HLA proposes inline text and local workstation
+   files/directories first, preserving the Agent Skills package convention; direct Git acquisition
+   follows later. R6 requires preservation, LF normalization, and stable capture.
 
 The capability-API reevaluation is chartered into this effort rather than scheduled separately. The
 seed material in `message-2026-08-16-capability-config-shape.md` carries the `config_at(level)`
