@@ -491,29 +491,6 @@ improvement; a stronger pin is the same mistake one size larger. Second, when a 
 read the prose and say whether it is right, because review is now the only thing standing behind it.
 Do not credit wording assertions as evidence of quality, and do not ask for them.
 
-#### Focused Windows coverage
-
-Linux CI runs the full non-integration suite. Windows CI selects `pytest.mark.windows` tests for
-host behavior Linux cannot reliably validate; the marker selects coverage and does not skip tests on
-other operating systems. `CONTRIBUTING.md` describes the selection and local command.
-
-For changes to host-sensitive behavior or its tests, check both missing markers and unnecessary
-selection:
-
-- Retain coverage for native paths and home expansion, local versus guest path handling, file
-  replacement and cleanup, subprocess bytes, encoding, quoting and process lifetime, SQLite locking,
-  WAL, backup/restore and migration recovery, PowerShell completion, terminal handling, and
-  installed-package or CLI startup. Name the Windows failure mode each selected test guards.
-- Follow the exercised behavior, including implicit host dependencies, rather than looking only for
-  Windows branches or filenames. Mocking a Windows branch alone does not establish native Windows
-  behavior when the risk depends on real files, streams, processes, or database connections.
-- Use the smallest coherent test, class, or module scope. Broad markers should earn their cost; pure
-  validation, model and graph logic, ordinary CRUD or historical-schema permutations, mocked cloud
-  responses, and Linux guest scripts normally rely on Linux coverage.
-- Check that new host-sensitive behavior has selected regression coverage, and that moving or
-  splitting tests preserves intentional selection. Do not add prose or workflow-pinning tests to
-  enforce marker policy; review the coverage and the behavior it exercises.
-
 ### 12b. Defects the change did not set out to fix
 
 When you find a real defect outside the work under review, apply `development-principles`, **Scope
@@ -563,6 +540,19 @@ Look for:
 - Tests pinned to the author's environment: suites that only pass where a tool exists (or doesn't),
   on one OS, or with one config shape. Environment-dependent branches need the other branches tested
   too, via deterministic stubbing.
+
+#### Windows test selection
+
+Linux CI runs the full non-integration suite; Windows selects `pytest.mark.windows`. This marker
+selects tests, not their allowed operating systems. See `CONTRIBUTING.md` for usage.
+
+Check that host-sensitive changes retain marked coverage for paths, file cleanup, subprocess I/O and
+lifetime, SQLite locking and recovery, PowerShell, terminals, and installed CLI behavior. Include
+implicit host dependencies; mocked Windows branches alone cannot prove native behavior.
+
+Use the smallest coherent test, class, or module scope. Flag missing markers and redundant selection
+of pure logic, mocked calls, or Linux guest scripts already covered on Linux. Preserve selection
+when tests move or split.
 
 ### 14. SDD process execution
 
