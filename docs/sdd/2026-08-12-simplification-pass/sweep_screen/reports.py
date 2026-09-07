@@ -184,8 +184,8 @@ def check_map(
         # A cited function resolves like an anchor, so a citation that names
         # nothing is refused rather than read and believed.
         for cited_path, qualname in sorted(set(CITED_QUALNAME.findall(line))):
-            resolved = files.get(cited_path)
-            if resolved is None or not snapshot.function(cited_path, qualname):
+            real = snapshot.tree.resolve_suffix(cited_path)
+            if real is None or not snapshot.function(real, qualname):
                 faults.append(f"{source} cites {cited_path}::{qualname}, which names no function in this tree")
         for path in sorted(set(CITED_FILE.findall(line))):
             checked += 1

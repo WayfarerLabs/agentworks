@@ -48,7 +48,7 @@ CITED_FILE = re.compile(r"([A-Za-z0-9_./+-]*[A-Za-z0-9_+-]\.(?:py|mjs)):\d+(?:-\
 #: citation that names no function is refused rather than read and believed. A
 #: line number is not: it is right when written and silently wrong afterwards,
 #: and an executor following one edits whatever moved into its place.
-CITED_QUALNAME = re.compile(r"([A-Za-z0-9_./+-]*[A-Za-z0-9_+-]\.py)::([A-Za-z_][A-Za-z0-9_.]*)")
+CITED_QUALNAME = re.compile(r"([A-Za-z0-9_./+-]*[A-Za-z0-9_+-]\.py)::(?!L\d)([A-Za-z_][A-Za-z0-9_.]*[A-Za-z0-9_])")
 
 #: A row id. Three digits, or a letter and two, which is what `G1-C05` and
 #: `G1-K14` are: reading only the three-digit form left 55 live ids and 78

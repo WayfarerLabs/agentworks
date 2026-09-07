@@ -75,6 +75,21 @@ class Tree:
                 found["/".join(parts[start:])] += 1
         return found
 
+    def resolve_suffix(self, suffix: str) -> str | None:
+        """The one tracked path a citation's suffix names, or None.
+
+        A citation names a file at whatever depth reads clearly, so resolving it
+        to something the AST can be asked about means finding the full path
+        again. None when the suffix names no file or more than one; the caller
+        refuses either way, because both leave a reader with nowhere to go.
+        """
+        for path in self._list(()):
+            if path == suffix or path.endswith("/" + suffix):
+                if self.path_suffixes()[suffix] != 1:
+                    return None
+                return path
+        return None
+
     def test_files(self) -> list[str]:
         """Every test file the sweep accounts for, sorted by path.
 
