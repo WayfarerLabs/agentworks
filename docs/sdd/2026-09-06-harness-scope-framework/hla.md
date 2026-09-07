@@ -508,6 +508,13 @@ distinct from rules and stronger launch instructions. These are inputs to the fo
 a frozen wire format, persisted schema, ingestion policy, or placeholder API in the facets
 implementation.
 
+The operator's leading follow-on proposal is a declarative `artifact-bundle` resource that owns
+ingestion and normalized contents. Other resources would consume bundles by ID rather than each
+implementing source acquisition. Bundle identity describes the source package; the consuming
+resource establishes scope and applicability, and the harness integration chooses native placement.
+The future design must distinguish bundle identity from the captured revision being consumed and
+settle update, retention, and storage semantics. No resource kind or reference field is added here.
+
 Evaluate Rulesync reuse before building a parallel converter. Its
 [canonical file formats](https://rulesync.dyoshikawa.com/reference/file-formats.html) already cover
 rules, skills, and subagents, and its
