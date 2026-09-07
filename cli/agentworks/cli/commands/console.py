@@ -148,10 +148,8 @@ def console_list(
 
         config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
     if output_format is OutputFormat.JSON:
-        from click import get_binary_stream
-
         from agentworks import output
-        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+        from agentworks.machine_output import MachineOutputCommand, write_json_stdout
         from agentworks.sessions.multi_console.attach import console_listing_data
 
         with output.suppress_presentation():
@@ -163,10 +161,9 @@ def console_list(
                 agent_name=parse_csv_filter(agent),
                 include_status=status,
             )
-        write_json_envelope(
+        write_json_stdout(
             MachineOutputCommand.CONSOLE_LIST,
             console_listing_data(listing),
-            get_binary_stream("stdout"),
         )
         return
     listing = console_listing(
@@ -194,18 +191,15 @@ def console_describe(
 
     config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
     if output_format is OutputFormat.JSON:
-        from click import get_binary_stream
-
         from agentworks import output
-        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+        from agentworks.machine_output import MachineOutputCommand, write_json_stdout
         from agentworks.sessions.multi_console.attach import console_description_data
 
         with output.suppress_presentation():
             description = console_description(get_db(), config, name=name)
-        write_json_envelope(
+        write_json_stdout(
             MachineOutputCommand.CONSOLE_DESCRIBE,
             console_description_data(description),
-            get_binary_stream("stdout"),
         )
         return
     description = console_description(get_db(), config, name=name)

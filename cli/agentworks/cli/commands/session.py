@@ -107,18 +107,15 @@ def session_describe(
 
     config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
     if output_format is OutputFormat.JSON:
-        from click import get_binary_stream
-
         from agentworks import output
-        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+        from agentworks.machine_output import MachineOutputCommand, write_json_stdout
         from agentworks.sessions.manager._queries import session_description_data
 
         with output.suppress_presentation():
             description = session_description(get_db(), config, name=name)
-        write_json_envelope(
+        write_json_stdout(
             MachineOutputCommand.SESSION_DESCRIBE,
             session_description_data(description),
-            get_binary_stream("stdout"),
         )
         return
     describe_session(get_db(), config, name=name)
@@ -166,10 +163,8 @@ def session_list(
     db = get_db()
     config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
     if output_format is OutputFormat.JSON:
-        from click import get_binary_stream
-
         from agentworks import output
-        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+        from agentworks.machine_output import MachineOutputCommand, write_json_stdout
         from agentworks.sessions.manager._queries import session_listing_data
 
         with output.suppress_presentation():
@@ -182,10 +177,9 @@ def session_list(
                 admin_only=admin,
                 include_status=status,
             )
-        write_json_envelope(
+        write_json_stdout(
             MachineOutputCommand.SESSION_LIST,
             session_listing_data(listing),
-            get_binary_stream("stdout"),
         )
         return
     list_sessions(

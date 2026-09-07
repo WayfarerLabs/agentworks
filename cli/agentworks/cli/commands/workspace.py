@@ -78,15 +78,12 @@ def workspace_list(
 
     listing = workspace_listing(get_db(), vm_name=parse_csv_filter(vm))
     if output_format is OutputFormat.JSON:
-        from click import get_binary_stream
-
-        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+        from agentworks.machine_output import MachineOutputCommand, write_json_stdout
         from agentworks.workspaces.manager.create import workspace_listing_data
 
-        write_json_envelope(
+        write_json_stdout(
             MachineOutputCommand.WORKSPACE_LIST,
             workspace_listing_data(listing),
-            get_binary_stream("stdout"),
         )
         return
     render_workspace_listing(listing, names_only=names_only)
@@ -106,18 +103,15 @@ def workspace_describe(
 
     config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
     if output_format is OutputFormat.JSON:
-        from click import get_binary_stream
-
         from agentworks import output
-        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+        from agentworks.machine_output import MachineOutputCommand, write_json_stdout
         from agentworks.workspaces.manager.create import workspace_description_data
 
         with output.suppress_presentation():
             description = workspace_description(get_db(), config, name)
-        write_json_envelope(
+        write_json_stdout(
             MachineOutputCommand.WORKSPACE_DESCRIBE,
             workspace_description_data(description),
-            get_binary_stream("stdout"),
         )
         return
     description = workspace_description(get_db(), config, name)
