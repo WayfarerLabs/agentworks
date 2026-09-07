@@ -356,7 +356,9 @@ integration API carries one init method per facet (vm, user, workspace, where `u
 the admin during VM init and for each agent during agent init) alongside the session `start`, which
 takes a launch intent rather than pairing with a separate resume, called by the per-scope
 orchestrators at the end of each setup pipeline: core first, then features in declaration order
-receiving env-to-date, then integrations receiving all env and agent artifacts for the scope.
+receiving env-to-date, then integrations receiving the scope's completed env plus its local
+artifacts and the applicable inherited artifacts still deferred for that integration (the 2026-09-06
+artifact-delivery ruling below; the filtering applies at every facet, not only at the session).
 Templates at each owning level select their integrations and may attach per-scope config, which is
 ordinary capability config belonging to the consuming resource, validated one blob at a time against
 the chosen facet's schema (`config_for(facet)`, where a facet is the level a capability is driven
@@ -383,11 +385,15 @@ enforces the contract at one point only: any entry still deferred at the session
 error before launch. Core attaches immutable origin metadata (owning scope, resource identity,
 producer), and a facet is derived from core's fixed mapping rather than authored as a second origin.
 Limited hooks and MCP server configurations are recognized as future artifact kinds this delivery
-model must not foreclose. Harness integrations are explicitly selected on the resource, even when
-their config is entirely default, and the generic shell is selected rather than silently
-substituted. This ruling supersedes the earlier wording, here and in
+model must not foreclose. This ruling supersedes the earlier wording, here and in
 `scope-participation-contract.md`, that every session receives all artifact payloads; both artifacts
 are corrected in place. Their other constraints stand.
+
+**Explicit integration enablement (operator, 2026-09-06).** A harness integration is enabled only by
+being selected on the resource, even when its config is entirely default. An available plugin, a
+default config, or an implemented method never attaches one implicitly. The generic shell stays
+selectable and is selected explicitly rather than substituted when a session's effective selection
+is absent, which is a config error instead.
 
 **Chartered (operator, 2026-09-06).** Wave 4 is chartered and awaits an effort lead; the seed FRD is
 `docs/sdd/2026-09-06-harness-scope-framework/frd.md`. The prerequisite is discharged: the
