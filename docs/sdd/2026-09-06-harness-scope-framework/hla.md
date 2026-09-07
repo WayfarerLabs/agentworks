@@ -667,11 +667,11 @@ as `AGENTWORKS_ARTIFACTS`, through a shell-owned wrapper using existing command 
 quoting. The workload can inspect the index and open the named files. Shell must set the current
 index path when artifacts exist and explicitly clear the variable when none remain, reconciling its
 previously owned index and files. Configured `AGENTWORKS_*` values currently receive an advisory but
-are not all filtered (`env/compose.py:83`), so omission would leave a stale value intact. The
-wrapper must preserve default login-shell, custom-command, and resume behavior, including the
-currently empty-command case. This wrapper behavior is new; it is not a new core artifact currency
-or an arbitrary integration-env result. A shell with no applicable artifacts needs no artifact
-directory.
+are not all filtered (`manifests/decode.py:291`, `env/compose.py:92`), so omission would leave a
+stale value intact. The wrapper must preserve default login-shell, custom-command, and resume
+behavior, including the currently empty-command case. This wrapper behavior is new; it is not a new
+core artifact currency or an arbitrary integration-env result. A shell with no applicable artifacts
+needs no artifact directory.
 
 Resolve the home through the actual workload-user target, not the workstation's home or a guessed
 `/home/<name>`. Existing target-side `$HOME` expansion is a usable seam; session contexts do not yet
@@ -682,13 +682,43 @@ running as the same user. Validate names and package paths as contained relative
 symlink escapes, unsafe roots, and unowned or modified destinations under the ordinary artifact
 ownership rules. A session index lists only that session's applicable artifacts.
 
-The directory's session name is a locator, not proof of ownership. Bind shell receipts to the
-concrete VM/user/workspace placement and an integration-local ownership token for the session
-incarnation, retained in its existing versioned applied-state payload. Shipped session rows have no
-generation UUID (`db/models.py:149`), so this ownership discriminator is new; it is not a universal
-session/run identity framework. A fresh session never adopts or deletes same-name residue lacking
-its matching durable claim. The LLD must specify token publication and crash recovery under the
-existing rule that a remote write without sufficient durable evidence remains unowned.
+Shell's workspace directory is generated runtime material, not repository content to commit. In a
+Git workspace, establish and verify effective exclusion of `/.agentworks-artifacts/` before
+publishing files. Use Git's repository-local exclude path, resolved through Git rather than assuming
+`.git` is a directory, and manage only an attributed fragment there. Preserve existing patterns; do
+not edit tracked `.gitignore`, user-global excludes, or already tracked content. The
+[Git ignore rules](https://git-scm.com/docs/gitignore) distinguish these local exclusions from
+version-controlled patterns and do not untrack files that are already in the index. A tracked or
+unowned artifact root remains an ownership conflict.
+
+Exclusion management is new integration work. Record the owned fragment through instance state and
+remove only that unchanged fragment when its generated output is safely retired. Check the actual
+effect of the exclusion; a repository rule can override a local pattern. If the needed metadata is
+not writable inside the owning workspace, the exclusion cannot be made effective without changing
+repository policy, or safe publication otherwise requires wider mutation, defer before creating
+artifact files. The session facet can deliver those workspace-origin items in its home-based
+directory. In particular, a linked worktree can resolve its exclude file outside the workspace into
+shared Git metadata; workspace setup must not mutate it and rely on workspace rollback to undo the
+change. A non-Git workspace needs no exclusion.
+
+The directory's session name is a locator, not proof of ownership. Use core's `session_uuid` from
+the
+[governing identity contract](../2026-08-04-next-steps/scope-participation-contract.md#session-and-run-identity)
+to bind session-scoped integration state and artifact receipts, together with concrete
+VM/user/workspace placement. That UUID is minted once at session creation, immutable, never reused,
+and retained across start/restart/resume. The contract's `run_id` identifies each workload
+incarnation and is not the owner of these surviving files. A fresh session under the same human name
+receives a different UUID and cannot adopt or delete residue without its matching claim.
+
+Shipped `SessionRow` has no UUID (`db/models.py:149`), so R16 consumes the contract's permitted
+early identity slice: persist `session_uuid`, assign existing rows one UUID in a migration that does
+not remint on retry, and expose it through core's session invocation context before artifact writes.
+Session-scoped integration state and receipts use this UUID as their identity; update the existing
+instance-state bindings/codecs rather than add another store. Human names remain lookup/display keys
+and cannot alone authorize mutation. The LLD must specify durable identity publication and state
+association, including partial-create recovery, before the shell implementation. This effort owns
+that prerequisite slice, coordinated with sibling consumers through the saga so there is one shared
+schema introduction; per-workload `run_id`, events, and observation remain wave 5 work.
 
 Stop retains files for the same session's later start. Start/restart reconciles session-owned files
 and its index against current inputs, using prior claims and hashes; it does not repair upstream
@@ -793,8 +823,8 @@ publication through workload launch, and for deletion from workload teardown thr
 receipt removal. Acquire it before reading ownership evidence; hold it until that operation's result
 is committed. Start, restart, stop, and deletion, including cascade callers, must participate so
 deletion cannot erase receipts while a competing launch publishes files. The session-name lock also
-excludes recreation until prior deletion finishes; the incarnation claim still protects against
-stale residue after that lock is released.
+excludes recreation until prior deletion finishes; the UUID-bound claim still protects against stale
+residue after that lock is released.
 
 This is one serialization contract for the owning resource, not a second session lock service. A
 competing operation refuses with the owning resource and retry guidance instead of queueing. The LLD
@@ -929,10 +959,10 @@ output, dictionary resolution, and existing-session restart in this sweep.
 This review PR contains the FRD amendment and HLA. It contains no plan, LLD, permanent behavior
 docs, or migration file. The next artifacts must specify the storage/locking and interruption
 protocol, schema-host walk, user plugin ownership for both harnesses, settings-file parsing and
-reconciliation, shell index/ownership and session cleanup wiring, and config/overlay migration
-before implementation begins. Their acceptance must include copy, rehome, delete, and state restore
-handling so owner records cannot bless artifacts at a different destination or survive deletion and
-recreation under the same name.
+reconciliation, the early session UUID persistence/context slice, shell index/ownership and session
+cleanup wiring, and config/overlay migration before implementation begins. Their acceptance must
+include copy, rehome, delete, and state restore handling so owner records cannot bless artifacts at
+a different destination or survive deletion and recreation under the same name.
 
 ## Validation and requirement coverage
 
@@ -976,6 +1006,17 @@ failed cleanup must preserve the ownership boundary and useful recovery evidence
 transition to no artifacts removes obsolete owned material and clears a configured stale discovery
 variable, for both the default login shell and custom/resume commands. Concurrent start/restart and
 deletion must refuse competing mutation without losing receipts or launching with deleted files.
+
+R16's identity acceptance proves one stable `session_uuid` for an existing migrated session and
+across start/restart/resume, a different UUID after same-name recreation, and refusal of stale
+UUID-bound receipts. UUID persistence precedes artifact publication, including interrupted create
+and migration retry. No run-id implementation is required to prove this session lifetime.
+
+In Git workspaces, ordinary `git status` and `git add -A` must leave generated artifacts and managed
+exclude metadata out of repository changes. Preserve pre-existing ignore patterns, refuse tracked
+content, and prove idempotent exclusion cleanup. Include overriding repository rules and linked
+worktrees whose exclude metadata is shared outside the workspace: deferral must leave their metadata
+untouched and produce usable session delivery.
 
 Readiness acceptance includes a failed config-only user setup with independently established empty
 artifact inputs: recommended warns and launches, required blocks. With artifact delivery depending
@@ -1031,3 +1072,9 @@ Additional native-config sources checked 2026-09-06:
   `codex-cli 0.153.4` help confirms marketplace add and plugin add; it does not establish project
   installation command parity with Claude. Workspace plugin installation remains follow-on work
   requiring native applicability proof, not an asserted existing `--scope` option.
+
+- [Git ignore documentation](https://git-scm.com/docs/gitignore) and
+  [Git path resolution](https://git-scm.com/docs/git-rev-parse), checked 2026-09-07: local auxiliary
+  exclusions, precedence, tracked-file behavior, and resolving metadata independently of a `.git`
+  directory assumption. An isolated Git experiment also confirmed that linked worktrees share the
+  original repository's exclude file.

@@ -269,14 +269,18 @@ integration; silently dropping content or publishing an incomplete package does 
 weaken other integrations' native discovery or invocation requirements.
 
 User and workspace facets place files at their owning resources where suitable. Session-facet
-materialization uses `~/.agentworks-artifacts/session/<session_name>/` under the actual session
-user's home, including for inherited artifacts still deferred to that invocation. Such placement
-retains their original scope and resource identity. The directory is outside shared workspace and
-harness auto-discovery paths and restricts access to its owning user. Sessions running as the same
-user can still read each other's files; this is not a secrecy boundary between them. Session
-identity governs ownership and cleanup, so reuse of a session name cannot adopt another session's
-residue. The HLA must specify discovery, restart, deletion, and failure recovery using the existing
-ownership and lifecycle contracts.
+materialization uses R7's home-based session directory, including for inherited artifacts still
+deferred to that invocation. Such placement retains their original scope and resource identity. The
+directory is outside shared workspace and harness auto-discovery paths and restricts access to its
+owning user. Sessions running as the same user can still read each other's files; this is not a
+secrecy boundary between them. Session identity governs ownership and cleanup: use the saga's
+immutable `session_uuid`, which survives start and resume, so reuse of a session name cannot adopt
+another session's residue. Its minimal persistence and invocation-context support are required here
+before artifact publication; existing sessions receive one stable UUID during migration. The HLA
+must specify discovery, restart, deletion, and failure recovery using the existing ownership and
+lifecycle contracts. Generated workspace artifacts must not enter ordinary Git status or staging as
+repository content. Establish safe repository-local exclusion or defer their publication; never
+overwrite tracked content or change repository-owned ignore rules to make delivery succeed.
 
 ## Settled constraints, not to be reopened
 
@@ -436,9 +440,10 @@ caution, and the pre-design call-site discovery walk.
 
 ## Out of scope
 
-- The universal event vocabulary, session and run identity plumbing, PTY observation, and anything
-  else on the observability track (wave 5). Note that `scope-participation-contract.md` settles the
-  identity model for both waves; this effort consumes it only if a requirement here needs it.
+- The universal event vocabulary, `run_id` and remaining identity plumbing, PTY observation, and
+  other observability work (wave 5). R16 consumes the already settled `session_uuid` model and its
+  minimal persistence/context slice here, using the contract's early-delivery allowance. This does
+  not bring run tracking or observation into this effort.
 - Global artifact identity, attributed composition, and hook execution (wave 6), beyond R12's
   obligation not to foreclose them. The hint/rule/skill shapes and origin tracking in R6/R7 are in
   scope.
