@@ -211,6 +211,35 @@ hints, native rules, and complete skill packages at user and workspace scopes, w
 materialization, downstream filtering of handled payloads, and terminal refusal for an
 unrepresentable artifact. The framework must not land with only unit-level evidence.
 
+**R14. Native harness setup config applies at its defining resource.** Claude Code and Codex both
+offer user marketplace/plugin configuration and user/workspace native settings mappings. A shared
+schema does not combine user and workspace declarations or copy one into the other. Native harness
+rules determine how separately provisioned layers compose at launch.
+
+Workspace plugin installation is deferred from this effort. A later implementation may offer it only
+with a native mechanism that preserves applicability to the originating workspace, including when
+installation needs the eventual session user's identity. A user-global installation cannot satisfy
+that promise, and a project declaration alone is not proof of usable plugins. Physical package/cache
+location and activation scope are separate facts. This effort does not add native setup requests to
+artifact deferral to support that optional follow-on.
+
+**R15. Harness integrations can provision native settings from workstation files.** User and
+workspace attachments for Claude Code and Codex accept an explicit source file and a destination
+settings role owned by that facet. The operator can choose complete replacement, merging with source
+keys winning, merging with destination keys winning, or leaving the entire destination untouched if
+it already exists. The integration owns native format parsing, scope-valid destinations, and
+application; core supplies the existing source-fetching facilities. A source names a file on the
+workstation running the owning setup operation, not an implicit path on the guest. Setup copies or
+merges a snapshot; it is not a live mount and session start never rereads workstation files.
+
+The selected policy is explicit authorization for its stated treatment of existing settings at that
+destination. It does not grant ownership of other files or override another integration's recorded
+claim. Reinit applies the same policy to current source and destination; removal must never silently
+delete pre-existing settings. Missing/unreadable sources and malformed settings produce an owning
+setup error before writes. Mapping and receipts follow the existing no-persisted-secrets contract;
+raw workstation settings are not stored in resolved config or applied-state payloads. The HLA must
+settle nested-key/array behavior, interaction with explicit plugin config, and cleanup ownership.
+
 ## Settled constraints, not to be reopened
 
 These are recorded rulings. A child SDD builds on them; changing one is an operator decision routed
@@ -231,8 +260,9 @@ through the saga lead.
   anchored-projections principle: projections govern surfaces where enforcement is real, and trusted
   in-process integration code is governed by trust, review, and disclosure.
 - **Artifact conduct is conventional and review-enforced:** claim the smallest practical ownership
-  unit; never silently adopt or overwrite repository, operator, or generator-owned content; record
-  applied state so reinit converges; secrets never enter persisted state.
+  unit; never silently adopt or overwrite repository, operator, or generator-owned content. R15
+  authorizes only the explicitly selected settings destination and policy; record applied state so
+  reinit converges; secrets never enter persisted state.
 - **Rulesync informs the artifact design but is not a runtime dependency.**
 
 ## Operator ruling: artifact delivery, 2026-09-06
@@ -266,6 +296,31 @@ R1 records `user-feature` as the single capability kind for user setup.
 
 R5 requires explicit resource selection. R11 retains the generic shell as a selectable integration
 and removes its implicit runtime fallback.
+
+## Operator refinement: native setup and workstation settings, 2026-09-06
+
+> both CC and Codex have a notion of workspace plugins ("project" scope). WE should include those
+>
+> user marketplace/plugins are installed at user scope vs workspace ones that are installed at
+> project scope
+>
+> One thing that I really want here is the ability to map settings files from the workstations.
+
+The operator then clarified:
+
+> IF those still end up scoped to a user, then we simply can't offer them. It would be a lie.
+>
+> Or maybe that would be a deferral case? The session could then install the plugin for the user in
+> the given workspace, right?
+
+The operator subsequently emphasized that workspace plugins are optional: "either we do it right or
+we don't do it at all" and "workspace plugins are not something to lose sleep over". R14 retains the
+applicability requirement for follow-on work and leaves workspace plugin installation out of this
+effort. Codex user marketplace/plugin setup remains included. R15 adds workstation file mapping with
+the four requested treatments of existing settings. The HLA proposes concrete policy names and merge
+semantics. These are native setup inputs, separate from the hint/rule/skill artifact currency. The
+operator also requested a resource-flow diagram that shows producer output entering each harness
+invocation and deferred artifacts moving along actual ancestry.
 
 ## What changed since the scope-participation contract was written
 
@@ -336,6 +391,8 @@ caution, and the pre-design call-site discovery walk.
   obligation not to foreclose them. The hint/rule/skill shapes and origin tracking in R6/R7 are in
   scope.
 - MCP server configuration delivery, beyond R12's obligation not to foreclose it.
+- Workspace plugin installation and a native deferred-setup protocol; see R14. Native project
+  settings, rules, and skills remain in scope.
 - A manually authored template-artifact surface, while preserving its immediate follow-on path.
 - External plugin distribution and its trust model (wave 8).
 - Harness integration config knobs for per-session workload inputs (issue #674), which shipped ahead
@@ -350,6 +407,8 @@ The effort is functionally complete when a harness integration can participate a
 workspace scope through its own API and its own config; when core carries no harness-specific field
 at any scope (R11 discharged); when reinit at each setup scope converges rather than accumulating,
 proven by the vertical integration; and when an integration that implements nothing beyond `start`
-behaves exactly as it does today when no artifact inputs are supplied. With artifact inputs,
+behaves exactly as it does today when no artifact inputs are supplied. User marketplace/plugin setup
+for Claude Code and Codex is proven, distinct resource config is never flattened, and workstation
+settings mappings demonstrate all four R15 policies at their owning facets. With artifact inputs,
 completion also requires faithful hint/rule/skill representation or a final deferral error, with no
 session payload duplication or widening of session-only applicability.

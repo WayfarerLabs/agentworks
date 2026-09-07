@@ -2,7 +2,7 @@
 
 - Status: Proposed architecture for draft review; no merge or implementation intent yet
 - Date: 2026-09-06
-- Requirements: [FRD](frd.md), R1 through R13
+- Requirements: [FRD](frd.md), R1 through R15
 - Saga: [next-steps](../2026-08-04-next-steps/target-state.md), wave 4
 - Governing design: [scope participation](../2026-08-04-next-steps/scope-participation-contract.md)
   and [capability descriptors](../2026-08-04-next-steps/capability-descriptor-contract.md)
@@ -25,22 +25,59 @@ remaining artifact payloads, diagnose missing setup, and cannot launch with unre
 They do not run ancestor setup as a side effect of starting a workload.
 
 ```mermaid
-flowchart TD
-    Templates[Effective resource templates] --> Graph[Existing finalize and reference walk]
-    Graph --> Owner[Owning lifecycle manager]
-    Ancestors[Ancestor contributions and applied facts] --> Owner
-    Owner --> Core[Core setup]
-    Core --> Features[Features in declaration order]
-    Features --> Harnesses[Harness integrations in declaration order]
-    Harnesses --> Store[Contributions, deferred outputs, and applied facts]
-    Core --> Contributions[Env declarations and agent artifacts]
-    Features --> Contributions
-    Contributions --> Store
-    Store --> Session[Session input assembly and readiness]
-    Session --> Start[Selected integration start with launch intent]
-    Start --> Check[Core rejects any returned deferrals]
-    Check --> Launch[Launch workload]
+---
+config:
+  flowchart:
+    subGraphTitleMargin:
+      top: 8
+      bottom: 18
+---
+flowchart TB
+    subgraph VM["VM scope / vm facet"]
+        VC["Core setup<br/>env + artifacts"] --> VF["Features<br/>env-to-date in; env + artifacts out"]
+        VF -->|"env + artifacts"| VH["Enabled integrations: vm_init"]
+        VH --> VS["Published VM state<br/>env, deferred artifacts, receipts"]
+    end
+    subgraph User["User resource: admin OR agent scope / user facet"]
+        UC["Core user setup<br/>env + artifacts"] --> UF["User features<br/>env-to-date in; env + artifacts out"]
+        UF -->|"env + local and pending artifacts"| UH["Enabled integrations: user_init"]
+        UH --> US["Published state<br/>env, deferred artifacts, receipts"]
+        UH -.->|"handled here"| UN["Native user setup<br/>settings, plugins, rules, skills"]
+    end
+    subgraph Workspace["Workspace scope / workspace facet"]
+        WC["Core workspace setup<br/>env + artifacts"] --> WF["Workspace features<br/>env-to-date in; env + artifacts out"]
+        WF -->|"env + local and pending artifacts"| WH["Enabled integrations: workspace_init"]
+        WH --> WS["Published state<br/>env, deferred artifacts, receipts"]
+        WH -.->|"handled here"| WN["Native project setup<br/>settings, rules, skills"]
+    end
+    VS -->|"VM env + pending artifacts"| UC
+    VS -->|"VM env + pending artifacts"| WC
+    subgraph Session["Session scope / session facet"]
+        SC["Core: join ancestor paths<br/>assemble env, pending artifacts, receipts<br/>add session inputs"]
+        SC --> Ready["Selected integration<br/>upstream readiness"]
+        Ready -->|"env + remaining artifacts"| SH["Selected integration<br/>start with launch intent"]
+        SH --> Final{"Core: any final deferrals?"}
+        Final -->|"yes"| Error["Error with origin + integration reason"]
+        Final -->|"no"| Launch["Launch workload<br/>env + native representations"]
+    end
+    US -->|"user env + pending artifacts + receipts"| SC
+    WS -->|"workspace env + pending artifacts + receipts"| SC
 ```
+
+Each setup arrow carries the env and artifact inputs through the integration invocation. A scope
+publishes only after its pipeline succeeds; the boxes abbreviate the existing persistent store, not
+new stores. Source contributions are retained for other integrations and input-revision checks,
+while delivery uses each integration's deferred output. Native handling removes that payload from
+later invocation inputs; it does not erase its source or applied receipts. If an integration is not
+selected at a scope, core passes its applicable artifacts through unchanged.
+
+The user and workspace branches are siblings. A session combines them by immutable origin and input
+revision, so a VM item handled on the applicable user branch does not reappear from the workspace
+branch. Env accumulates using its existing precedence and is supplied to every integration; it is
+not subject to artifact deferral. The user box is invoked once per actual user: admin setup follows
+VM setup within VM init, while agent setup has its own lifecycle. A session uses its bound user's
+branch, never both admin and agent. Native configuration, shown at the side, remains at its defining
+resource; it is not a deferred artifact or a config blob merged into session config.
 
 The pipeline is shared orchestration code, not a registry of scopes or an extensible execution
 engine. Resource managers retain activation, preflight, secret resolution, realization, error
@@ -175,15 +212,15 @@ These are the proposed facet assignments for all four shipped integrations. Exis
 keep their fields, types, defaults, merge behavior, and launch semantics. Each block still carries
 its integration's literal `name`; the hosting resource chooses the facet, so config never nests
 under a `facets` key. "No fields" below means a name-only attachment, not a claim that the facet
-cannot perform work. In particular, Claude's workspace method consumes artifacts without needing
-workspace-specific config knobs.
+cannot perform work. Claude Code and Codex now both have user and workspace setup config,
+independent of their existing session settings.
 
-| Integration name | VM config | User config                                               | Workspace config | Session config fields beyond `name`                                                                                                                                                                                                                  |
-| ---------------- | --------- | --------------------------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `claude-code`    | No fields | `marketplaces: list[str] = []`, `plugins: list[str] = []` | No fields        | `permission_mode`, `model`, `reasoning_effort`, `goal`, `initial_prompt`, `agent`, `append_system_prompt`, `remote_control`, `vim_mode`, `terminal_bell`, `extra_args`                                                                               |
-| `codex`          | No fields | No fields                                                 | No fields        | `model`, `sandbox`, `approval_policy`, `profile`, `network`, `approvals_reviewer`, `reasoning_effort`, `goal`, `initial_prompt`, `agent`, `developer_instructions`, `vim_mode`, `writable_dirs`, `web_search`, `disable_strict_config`, `extra_args` |
-| `grok-build`     | No fields | No fields                                                 | No fields        | `permission_mode`, `model`, `reasoning_effort`, `sandbox`, `goal`, `initial_prompt`, `agent`, `rules`, `extra_args`                                                                                                                                  |
-| `shell`          | No fields | No fields                                                 | No fields        | `command`, `resume_command`, `required_commands`                                                                                                                                                                                                     |
+| Integration name | VM config | User config                                                                                           | Workspace config                           | Session config fields beyond `name`                                                                                                                                                                                                                  |
+| ---------------- | --------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `claude-code`    | No fields | `marketplaces: list[str] = []`, `plugins: list[str] = []`, `settings: SettingsMapping or None = None` | `settings: SettingsMapping or None = None` | `permission_mode`, `model`, `reasoning_effort`, `goal`, `initial_prompt`, `agent`, `append_system_prompt`, `remote_control`, `vim_mode`, `terminal_bell`, `extra_args`                                                                               |
+| `codex`          | No fields | `marketplaces: list[str] = []`, `plugins: list[str] = []`, `settings: SettingsMapping or None = None` | `settings: SettingsMapping or None = None` | `model`, `sandbox`, `approval_policy`, `profile`, `network`, `approvals_reviewer`, `reasoning_effort`, `goal`, `initial_prompt`, `agent`, `developer_instructions`, `vim_mode`, `writable_dirs`, `web_search`, `disable_strict_config`, `extra_args` |
+| `grok-build`     | No fields | No fields                                                                                             | No fields                                  | `permission_mode`, `model`, `reasoning_effort`, `sandbox`, `goal`, `initial_prompt`, `agent`, `rules`, `extra_args`                                                                                                                                  |
+| `shell`          | No fields | No fields                                                                                             | No fields                                  | `command`, `resume_command`, `required_commands`                                                                                                                                                                                                     |
 
 Session defaults remain concrete: shell uses empty strings and an empty command list; the three AI
 integrations default nullable options to `None`, boolean switches to `False`, and lists to `[]`.
@@ -195,9 +232,11 @@ explicitly disables search. Existing model definitions are the field-level contr
 `cli/agentworks/`. The LLD must carry these complete schemas into reference and validation fixtures,
 preserving their defaults and their existing distinction between fresh and resumed launches.
 
-The only config moved to a setup facet here is Claude's existing marketplace/plugin configuration,
-renamed from `claude_marketplaces`/`claude_plugins`. Do not copy session knobs into user config just
-because a harness can also store them in a native user file. CLI installation still uses the
+Claude's existing marketplace/plugin configuration migrates to its user facet, renamed from
+`claude_marketplaces`/`claude_plugins`. Codex user marketplace/plugin setup and settings mappings
+for both are new in this effort. Workspace plugin installation remains follow-on work; it is not
+inferred from the existence of a project settings file. Do not copy session knobs into user config
+just because a harness can also store them in a native user file. CLI installation still uses the
 existing `user_install_commands` surface. Codex's `profile` remains a session selection of native
 config; it does not implicitly attach or run a user facet.
 
@@ -218,6 +257,11 @@ spec:
       marketplaces: [example-org/team-plugins]
       plugins: [reviewer@team-plugins]
     - name: codex
+      marketplaces: [example-org/codex-plugins]
+      plugins: [reviewer@codex-plugins]
+      settings:
+        source: file::~/.config/agentworks/codex-user.toml
+        strategy: merge-preserve
 ---
 apiVersion: agentworks/v1
 kind: workspace-template
@@ -226,6 +270,13 @@ metadata:
 spec:
   harness_integrations:
     - name: claude-code
+      settings:
+        source: file::~/.config/agentworks/claude-project.json
+        strategy: merge-overwrite
+    - name: codex
+      settings:
+        source: file::~/.config/agentworks/codex-project.toml
+        strategy: skip-existing
 ---
 apiVersion: agentworks/v1
 kind: session-template
@@ -239,21 +290,23 @@ spec:
 ```
 
 Creating a user from `team-claude` installs both CLIs through core setup, runs user-features, then
-invokes Claude's user facet with the marketplace/plugin lists and Codex's user facet with defaults,
-each receiving its own artifact inputs. The name-only Codex entry is its explicit enablement.
-Creating a workspace from `team-project` runs Claude's workspace facet with its own artifact inputs
-and no extra config fields. A `team-review` session using those resources gets only session config,
-applicable env, deferred artifacts, and upstream readiness facts; it does not receive the user
-config as launch flags. The same user block is valid on the proposed admin-template attachment
-surface. Putting `permission_mode` in the user block or `plugins` in the session block is a
-facet-specific validation error. The user's Codex attachment does not implicitly attach Codex to the
-workspace or select it for the session. With no inherited attachment, omitting the workspace list
-selects none; an explicit empty list removes inherited selection. To use Codex for a session, select
-`name: codex` in that session's singular block.
+invokes both user facets with their own marketplace/plugin lists and artifact inputs. Codex also
+maps the selected workstation file to its native user settings using the stated strategy. Creating a
+workspace from `team-project` runs both workspace facets with separate project configuration and
+workspace artifact inputs. Claude maps its project settings file there. A name-only attachment still
+explicitly enables default setup; it is distinct from omitting the integration. A `team-review`
+session using those resources gets only session config, applicable env, deferred artifacts, and
+upstream readiness facts; it does not receive the user config as launch flags. The same user block
+is valid on the proposed admin-template attachment surface. Putting `permission_mode` in the user
+block or `plugins` in the session block is a facet-specific validation error. The user's Codex
+attachment does not implicitly attach Codex to the workspace or select it for the session. With no
+inherited attachment, omitting the workspace list selects none; an explicit empty list removes
+inherited selection. To use Codex for a session, select `name: codex` in that session's singular
+block.
 
-The other shipped integrations retain ordinary session-only use. These are alternative
-`session-template.spec.harness_integration` blocks, each paired with its existing CLI-installing
-agent template where needed:
+All four integrations retain ordinary session-only use when setup is not requested. These are
+alternative `session-template.spec.harness_integration` blocks, each paired with its existing
+CLI-installing agent template where needed:
 
 ```yaml
 # With example-codex; existing session settings remain here.
@@ -271,8 +324,110 @@ name: shell
 
 Absent setup attachments do not by themselves prevent those sessions from launching. Each still
 checks its required executable and any upstream prerequisite its integration declares. A name-only
-Codex, Grok, or shell setup attachment uses the no-op default and defers artifacts; it does not make
-unsupported rule/skill delivery successful. Nonempty final deferrals still fail before launch.
+attachment uses empty setup config where offered. Grok and shell retain the no-op setup default;
+Codex gains native config setup but is not required to implement the entire artifact vertical here.
+Empty config or plugin provisioning does not make unsupported rule/skill artifact delivery
+successful. Nonempty final deferrals still fail before launch.
+
+## Same config shape, separate native scopes
+
+The integration may reuse config fields or a model across facets. Each attachment still binds a
+different instance with its own origin, lifecycle, desired state, and applied receipts. Both Claude
+Code and Codex have `settings` at user and workspace facets: the user mapping writes native user
+settings, and the workspace mapping writes native project settings. Reusing that shape does not
+merge the declarations. `marketplaces` and `plugins` are user-facet fields in this effort.
+
+Template inheritance composes config for one owning resource; settings mapping merges into one
+native file; the harness combines native user/project layers at launch. These are three separate
+operations. Agentworks never copies user marketplaces, plugins, or settings into the workspace to
+simulate inheritance. Native precedence and project trust remain the harness's responsibility. For
+example, mapping a user's settings and a project's settings writes two different native files; when
+they set the same native key, the harness decides which applies in that project. It does not cause
+Agentworks to overwrite the user's file with project values.
+
+**Workspace plugin installation is a follow-on, not an offered field.** Claude documents a project
+association in `.claude/settings.json`, but also cases where each user must install the referenced
+plugin before it loads. Codex provides marketplace/plugin commands and project TOML configuration;
+the installed CLI's plugin-add help does not establish a project install path. Neither observation
+alone proves user-independent workspace provisioning. This revision therefore offers no workspace
+`marketplaces` or `plugins` field for either integration.
+
+A follow-on must prove actual applicability with two users and two workspaces. If installation needs
+a user identity but can remain restricted to that user in the originating workspace, deferring it to
+the session could be valid. A global user install would still be wrong. That would also require a
+native setup deferral contract, with origin, applicability, per-user completion, and native
+association/cache ownership; it must not be smuggled into hint/rule/skill payloads. It is not needed
+to deliver this effort. Repository-owned project settings, rules, and skills provide the immediate
+project customization path; mapping settings alone makes no promise to install referenced plugins.
+
+## Mapping workstation settings
+
+`SettingsMapping` is a native setup config value, not a new agent artifact kind. Initially each
+attachment maps one file to the integration's ordinary settings role for that facet. The integration
+chooses the destination and native parser; no arbitrary guest destination or filesystem-sync engine
+is added. The shape is `settings: {source: <source reference>, strategy: <policy>}`. Both fields are
+required when `settings` is present; omission means no mapped settings.
+
+Reuse `SourceRef` and single-file fetching (`cli/agentworks/sources.py:41`, `:140`), including
+`file::` workstation paths and the existing Git-file reference form. A workstation path is evaluated
+by the owning setup operation with the existing local source path rules. It is never interpreted as
+a guest path. Resolve and validate the source before mutations, using temporary operation-local
+storage. Transfer a snapshot, not a symlink or mount. Reinit rereads the source; session start uses
+applied state and native files and has no workstation-source dependency.
+
+| Integration | User settings destination             | Workspace settings destination    | Parser             |
+| ----------- | ------------------------------------- | --------------------------------- | ------------------ |
+| Claude Code | That user's `~/.claude/settings.json` | Workspace `.claude/settings.json` | Native JSON object |
+| Codex       | That user's `~/.codex/config.toml`    | Workspace `.codex/config.toml`    | Native TOML table  |
+
+Paths denote native roles, respecting any supported home override in the actual invocation.
+Authentication/session files are not settings roles. Sources must be non-secret settings; declared
+secret references remain on the existing resolution path. Do not archive settings bytes or resolved
+credentials in desired/applied state, errors, or logs. Native paths embedded in settings are copied
+as values, not automatically rewritten from workstation to guest; portable source files are the
+operator's input.
+
+The four strategies govern collision with the live destination:
+
+| Strategy          | Behavior                                                                                                 |
+| ----------------- | -------------------------------------------------------------------------------------------------------- |
+| `replace`         | Replace the complete settings document with the source, including removal of destination-only keys.      |
+| `merge-overwrite` | Recursively merge objects/tables; source values win at colliding leaves. Preserve destination-only keys. |
+| `merge-preserve`  | Recursively merge objects/tables; existing values win at colliding leaves. Add absent keys.              |
+| `skip-existing`   | If any destination file exists, leave that whole file unchanged; otherwise create from the source.       |
+
+Arrays are atomic values, not concatenated or merged by position. When only one side is an
+object/table, that whole value is a collision and the strategy's winner applies. Duplicate source
+keys are rejected rather than depending on parser last-write behavior. The source must parse even
+for `skip-existing`; an existing destination need not parse when skipped or completely replaced, but
+merge requires a valid native document. A directory or unsuitable link at the destination is an
+error, not a file to replace. Missing source or parse/type failure occurs before destination writes.
+Native output must remain valid; merge is semantic and makes no promise to preserve formatting.
+
+For example, with existing `{ui: {theme: dark}, extra: true}` and source
+`{ui: {theme: light, bell: true}}`, replace removes `extra`; merge-overwrite changes the theme and
+adds the bell; merge-preserve keeps the dark theme and adds the bell; skip-existing changes nothing.
+Reapplying the same source and policy is idempotent. These policies act on current destination state
+on each reinit, including operator edits; choosing overwrite or replace expressly permits that
+behavior. It does not relax artifact ownership checks elsewhere.
+
+One invocation plans its settings changes as a unit. Explicit `marketplaces`/`plugins` config and
+mapped content must not silently fight over native keys or identities: inconsistent declarations are
+config errors before writes, while matching declarations are reconciled once. Treat native plugin
+commands that also edit settings as part of that same plan, with receipts for their actual writes.
+`skip-existing` skips the file mapping, not the separately declared plugin work. The LLD must
+specify native command ordering and protect mapped settings against subsequent plugin-command
+rewrites; attachment order is not a last-writer policy.
+
+Applied facts distinguish keys/files written by the mapping from untouched content. A skip or a
+preserved collision grants no ownership of the retained value. On removal of a mapping, leave the
+settings file and its current values in place and relinquish only this mapping's claims; there is no
+automatic restoration of overwritten workstation-independent values or deletion of an adopted file.
+Report that settings are retained. Explicit removal of managed plugin associations remains separate
+and may change their native keys. This is deliberately a provisioning policy, not a backup system.
+Changing the source or strategy reruns the mapping at the next owning setup operation, subject to
+other recorded owners and native validation. Workspace mappings retain the create-only lifecycle;
+subsequent changes require workspace recreation until an owner-authorized reinit surface exists.
 
 ## Invocation API and execution
 
@@ -445,9 +600,11 @@ remain available to session readiness for prerequisite and drift checks.
 
 For every materialization, claim the smallest practical ownership unit: a rule file, a managed
 member, or the files of a skill package, never an entire repository configuration directory. Inspect
-the live destination against recorded ownership and hashes before changing it. Unclaimed existing
-content is a conflict even when bytes match; changed owned content is drift. Neither is silently
-adopted, overwritten, or deleted. Report resource, integration, and destination without content.
+the live destination against recorded ownership and hashes before changing it. For artifacts,
+unclaimed existing content is a conflict even when bytes match; changed owned content is drift.
+Neither is silently adopted, overwritten, or deleted. Explicit native settings mappings instead
+follow their selected policy, whose bounded overwrite permission is R15; they still cannot take
+another integration's recorded claim. Report resource, integration, and destination without content.
 Core can report conflicting recorded claims across integrations; integrations still inspect actual
 destinations because state can be stale. There is no cross-integration merge policy or claim that
 these checks constrain arbitrary trusted in-process side effects.
@@ -483,15 +640,16 @@ scope, another integration, and unknown future keys survive. Successful feature/
 and the evidence describing their application must describe the same setup generation. Readiness
 must not combine fresh desired config with stale receipts and call that applied success.
 
-Reinit recomputes desired output and reconciles it with the prior record and live destination. It
-writes changed owned content, leaves matching content alone, and removes obsolete owned units only
-when their ownership and recorded content still match. Removed attachments must also be reconciled:
-the manager retains their records and invokes the same facet method with an absent-attachment
-desired state before dropping confirmed removals. This means no desired integration-owned resources,
-including config-driven plugins and marketplaces, not merely an empty artifact list. Prior applied
-facts retain the non-secret identifiers needed to undo owned work independently of current config.
-If its plugin is unavailable, report pending cleanup and retain evidence; never erase the record and
-pretend cleanup happened.
+Reinit recomputes desired output and reconciles it with the prior record and live destination.
+Settings mappings use their explicit collision and retain-on-removal policy; the following removal
+rules govern managed artifacts and plugin resources. It writes changed owned content, leaves
+matching content alone, and removes obsolete owned units only when their ownership and recorded
+content still match. Removed attachments must also be reconciled: the manager retains their records
+and invokes the same facet method with an absent-attachment desired state before dropping confirmed
+removals. This means no desired integration-owned resources, including config-driven plugins and
+marketplaces, not merely an empty artifact list. Prior applied facts retain the non-secret
+identifiers needed to undo owned work independently of current config. If its plugin is unavailable,
+report pending cleanup and retain evidence; never erase the record and pretend cleanup happened.
 
 Each completed mutation checkpoints its applied facts before the next mutation. The manager owns
 persistence and acknowledges the checkpoint only after it succeeds; persistence failure stops
@@ -590,6 +748,12 @@ state and prior ownership, handles removals only for resources it owns, and uses
 method for admin and agents. Core invokes an integration; it contains no Claude-specific field,
 import, installer branch, or default selection.
 
+Its workspace facet owns project settings, separate from user settings. Codex adds user
+marketplace/plugin setup and user/workspace settings mappings with its own native format. Workspace
+plugin installation for either integration is follow-on work under R14's applicability boundary.
+Both settings mappings exercise replacement, overwrite-merge, preserve-merge, and skip-existing
+policies using non-secret workstation fixtures.
+
 Its user and workspace facets group setup hints into owned rules where suitable and materialize
 declared rules and complete skill packages at native user and project destinations, subject to
 ownership checks. Claude documents rules under `.claude/rules/` and skills under `.claude/skills/`
@@ -636,10 +800,10 @@ output, dictionary resolution, and existing-session restart in this sweep.
 
 This review PR contains the FRD amendment and HLA. It contains no plan, LLD, permanent behavior
 docs, or migration file. The next artifacts must specify the storage/locking and interruption
-protocol, schema-host walk, Claude reconciliation, and config/overlay migration before
-implementation begins. Their acceptance must include copy, rehome, delete, and state restore
-handling so owner records cannot bless artifacts at a different destination or survive deletion and
-recreation under the same name.
+protocol, schema-host walk, user plugin ownership for both harnesses, settings-file parsing and
+reconciliation, and config/overlay migration before implementation begins. Their acceptance must
+include copy, rehome, delete, and state restore handling so owner records cannot bless artifacts at
+a different destination or survive deletion and recreation under the same name.
 
 ## Validation and requirement coverage
 
@@ -654,6 +818,15 @@ where setup changes the guest:
 | R9             | Repeated VM/admin and agent setup is unchanged; desired changes/removals converge; edited/unowned files cause drift/conflict reports; failed same-input reinit invalidates completion; interrupted work, unknown versions, and concurrent reinit do not overwrite or lose evidence. |
 | R10            | Required, recommended, and absent user-facet prerequisites block, warn, or proceed respectively for the bound user; another user's setup cannot satisfy them; missing/stale/failed setup, correct owner remediation, and no upstream mutation are covered.                          |
 | R11, R13       | Fresh and existing Claude admin/agent config migrates; marketplace/plugin changes reconcile; core has no Claude-specific knowledge (shell remains explicitly selectable); workspace create materializes real content, failure cleans partial output, and retry succeeds.            |
+
+R14/R15 acceptance proves user marketplace/plugin setup for both Claude Code and Codex, config
+reused at distinct facets without cross-resource merging, and rejection of unoffered workspace
+plugin fields. Local fixture marketplaces avoid external services. It proves settings transfer from
+the invoking workstation, all four policies with present/absent files, nested tables/objects and
+atomic arrays, invalid inputs before writes, same-input reinit, modified source/destination
+behavior, retained settings on mapping removal, and collisions with explicit plugin config. Source
+portability and second-user/second-workspace cases must be observable, not inferred from manifest
+validation.
 
 Readiness acceptance includes a failed config-only user setup with independently established empty
 artifact inputs: recommended warns and launches, required blocks. With artifact delivery depending
@@ -696,3 +869,14 @@ architecture does not claim those are solved by no-op defaults or by a state tab
 - [Rulesync CLI documentation](https://rulesync.dyoshikawa.com/reference/cli-commands.html), checked
   2026-09-06, and this repository's `CONTRIBUTING.md`: generation has source and target ownership;
   this architecture declines runtime generation or adoption of its outputs.
+
+Additional native-config sources checked 2026-09-06:
+
+- [Claude plugin scopes](https://code.claude.com/docs/en/discover-plugins): user/project association
+  and project marketplace declarations; native package caching is distinct from activation scope.
+- [Codex configuration layers](https://learn.chatgpt.com/docs/config-file/config-basic): user and
+  trusted project TOML files remain separate native layers.
+- [Codex plugins](https://learn.chatgpt.com/docs/plugins): plugin and marketplace support. Local
+  `codex-cli 0.153.4` help confirms marketplace add and plugin add; it does not establish project
+  installation command parity with Claude. Workspace plugin installation remains follow-on work
+  requiring native applicability proof, not an asserted existing `--scope` option.
