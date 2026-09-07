@@ -50,8 +50,10 @@ technique, not a smell; what decides is what the assertion protects.
 
 - **Keep** a guard enforcing a boundary the type system cannot express, that an ordinary edit can
   regress: import and layering boundaries, consent confinement
-  (`guide/test_power_import_boundary.py` is the standing example, forbidding the guide package from
-  reaching `subprocess`, sockets, or secrets), and drift against a canonical source.
+  (`cli/tests/guide/test_shell_service.py::test_static_index_list_and_selected_render_do_not_load_operator_state_modules`
+  is the standing example, forbidding the guide's static render path from importing
+  `agentworks.config`, `agentworks.db`, `agentworks.resources` or `agentworks.secrets`), and drift
+  against a canonical source.
 - **Delete** a guard pinning how our code is written rather than what it may reach: identifier
   spellings, call-graph shape, statement order. The `phase7` corpus was this family, and so are
   three of the four banned patterns in `resources/test_graph_guard.py`: the `dependencies()`

@@ -157,12 +157,15 @@ shares no files with the website work; it waits on the sweep instead, per group 
       excluded**: W1's workflow test, S1's corpus and wording-pin trims, W4/W6 in the contained
       website trims, the guide item's files `cli/tests/guide/test_contract_catalog.py` and
       `cli/tests/guide/test_assessment.py`, whose prose pins belong to that item so each file has
-      one owner, and `cli/tests/test_workflow_policy.py`, which W1 wrote and owns despite sitting
-      under `cli/tests/` (added 2026-08-16, since a path-keyed inventory would otherwise claim it).
-      Any other overlap the inventory turns up is an ordering question for the lead, not an
-      ownership one: a general rule keyed on what another item names or edits excluded the gcp
-      files, `test_schema_adapter.py`, and `test_view.py`, which `findings.md` names _for_ the
-      sweep. The sweep records each overlap it finds, keeps the file, and raises the ordering.
+      one owner (**neither is in the tree at 2026-09-06**, so those two exclusions now exclude
+      nothing; the entry stands as written because whether the guide item still needs them is that
+      item's question, not this sweep's), and `cli/tests/test_workflow_policy.py`, which W1 wrote
+      and owns despite sitting under `cli/tests/` (added 2026-08-16, since a path-keyed inventory
+      would otherwise claim it). Any other overlap the inventory turns up is an ordering question
+      for the lead, not an ownership one: a general rule keyed on what another item names or edits
+      excluded the gcp files, `test_schema_adapter.py`, and `test_view.py`, which `findings.md`
+      names _for_ the sweep. The sweep records each overlap it finds, keeps the file, and raises the
+      ordering.
 
       **Three website overlaps raised 2026-08-16 by the contained-trims work, recorded here rather
       than in a PR body so the sweep's executor finds them.** First, W5 is not on the exclusion list
@@ -170,10 +173,10 @@ shares no files with the website work; it waits on the sweep instead, per group 
       rows of its own; the W5 change rewrote about 90 lines of it by deleting duplicated fixtures,
       so the sweep should re-read it rather than inventory it from the pre-#486 basis. Second,
       `website/tests/test_site_documents.py` has two owners: the W4 palette rows and the W8 browser
-      row belong to the trims item, while the CSS declaration list and the four-word
-      `fake_terminal` blacklist in `test_shared_css_pins_tokens_reflow_focus_and_terminal_cues` are
-      sweep rows and were deliberately left untouched. That blacklist is the shape
-      `no-prose-policing-tests` calls worse than useless, so it is a delete row, not a convert row.
+      row belong to the trims item, and the rest of the file's rows are the sweep's. **Restated
+      2026-09-06**: the test and the blacklist this paragraph used to name are not in the tree, so
+      the split is recorded where it can be checked instead. `sweep-screen.py attribute` says which
+      row owns each site, so the boundary is verified on every run rather than described once here.
       Third, this plan expected the sweep's website rows in the same PR as the website work; they
       are not in it, so they remain wholly the sweep's.
 
