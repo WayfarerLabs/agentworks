@@ -205,7 +205,7 @@ def test_registration_and_later_consumers_share_one_stateful_model_selection() -
         assert StatefulPlatform.selection_calls == 1
         assert capability_config_model("vm-platform", StatefulPlatform.name) is StatefulFirstConfig
         capability_config_union("vm-platform")
-        assert offered_model(StatefulPlatform) is StatefulFirstConfig
+        assert offered_model(StatefulPlatform, facet="user") is StatefulFirstConfig
         assert StatefulPlatform.selection_calls == 1
 
 

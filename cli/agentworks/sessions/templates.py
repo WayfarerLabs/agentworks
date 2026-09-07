@@ -388,7 +388,7 @@ def _merge_session_layer(
 
     config_path = ("harness_integration_config",)
     same_integration = declared.name == target.harness.name
-    model = capability_config_model("harness-integration", declared.name)
+    model = capability_config_model("harness-integration", declared.name, facet="session")
     harness_paths: list[LayerContribution] = [LayerContribution.replacement("harness_integration")]
 
     if model is None:

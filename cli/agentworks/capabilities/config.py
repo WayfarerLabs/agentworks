@@ -52,12 +52,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Union, cast
 
-from pydantic import Field
+from pydantic import Field, create_model
 from pydantic import ValidationError as PydanticValidationError
 
 from agentworks.capabilities.descriptor import descriptor_for, descriptor_for_impl
 from agentworks.errors import StateError
 from agentworks.schema import (
+    AgwModel,
     AgwRootModel,
     config_error_from,
     extract_references,
@@ -68,7 +69,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from agentworks.capabilities.base import Capability
-    from agentworks.capabilities.descriptor import CapabilityKindDescriptor
+    from agentworks.capabilities.descriptor import CapabilityKindDescriptor, Facet
     from agentworks.declared_resource import DeclaredResource
     from agentworks.resources.reference import ConfigReference, ResourceReference
     from agentworks.schema import RefOwner
@@ -78,7 +79,7 @@ if TYPE_CHECKING:
 #: Assembled unions, keyed by ``kind`` PLUS the arms the union would be
 #: built from. Never evicts; see :func:`capability_config_union` for both
 #: choices and what bounds the size.
-_UNION_CACHE: dict[tuple[str, frozenset[tuple[str, type[BaseModel]]]], type[BaseModel]] = {}
+_UNION_CACHE: dict[tuple[str, Facet | None, frozenset[tuple[str, type[BaseModel]]]], type[BaseModel]] = {}
 
 #: Map-keyed unions, keyed by their ordered model identities and the host's
 #: opt-out declaration. Order affects emitted schema and is therefore part of
@@ -89,7 +90,9 @@ _MAPPING_UNION_CACHE: dict[tuple[str, tuple[type[BaseModel], ...], bool], type[B
 #: A deliberate class-level ``config_model`` swap overwrites the entry and selects
 #: again, preserving the union cache's production-invariant test without retaining
 #: every historical declaration.
-_OFFERED_MODEL_CACHE: dict[type, tuple[object, object]] = {}
+_OFFERED_MODEL_CACHE: dict[tuple[type, Facet | None], tuple[object, object]] = {}
+
+_TAG_MODEL_CACHE: dict[tuple[type, str], type[BaseModel]] = {}
 
 
 def selected_name(kind: str, config: object, name: str | None) -> str | None:
@@ -119,8 +122,8 @@ def selected_name(kind: str, config: object, name: str | None) -> str | None:
     return tag if isinstance(tag, str) else None
 
 
-def capability_config_model(kind: str, name: str) -> type[BaseModel] | None:
-    """The config model ``kind``/``name`` offers, or ``None`` when no such
+def capability_config_model(kind: str, name: str, *, facet: Facet | None = None) -> type[BaseModel] | None:
+    """The validation model ``kind``/``name`` offers at ``facet``, or ``None`` when no such
     implementation is seated on this host.
 
     ``None`` rather than an error, matching what every consuming resource
@@ -129,7 +132,7 @@ def capability_config_model(kind: str, name: str) -> type[BaseModel] | None:
     reporting it twice in different vocabularies would be worse than once.
     """
     impl = _seated_impl(descriptor_for(kind), name)
-    return None if impl is None else offered_model(impl)
+    return None if impl is None else config_model_for(impl, facet=facet)
 
 
 def capability_mapping_model(kind: str, name: str) -> type[BaseModel] | None:
@@ -150,6 +153,7 @@ def validate_capability_config(
     config: object,
     owner: RefOwner,
     name: str | None = None,
+    facet: Facet | None = None,
     location: SourceLocation | None = None,
     provenance: Mapping[ProvenancePath, RefOwner] | None = None,
 ) -> BaseModel | None:
@@ -179,7 +183,7 @@ def validate_capability_config(
     if impl is None:
         return None
     hint = reference_hint(kind, selected)
-    union = capability_config_union(kind)
+    union = capability_config_union(kind, facet=facet)
     validated = _validated(union, config, owner=owner, location=location, hint=hint, provenance=provenance)
     # The union is a root model, so the thing the capability was written
     # against is what it wraps, never the wrapper.
@@ -217,6 +221,7 @@ def validate_own_config(
     config: Mapping[str, object],
     *,
     owner: RefOwner,
+    facet: Facet | None = None,
 ) -> BaseModel:
     """Validate ``config`` against the config ``impl`` itself offers.
 
@@ -246,7 +251,7 @@ def validate_own_config(
                 f"pass the capability's own config here, not the host's tagged table"
             )
         payload = {**config, discriminator: own}
-    return _validated(offered_model(impl), payload, owner=owner, location=None)
+    return _validated(config_model_for(impl, facet=facet), payload, owner=owner, location=None)
 
 
 def capability_config_references(
@@ -255,6 +260,7 @@ def capability_config_references(
     config: object,
     owner: RefOwner,
     name: str | None = None,
+    facet: Facet | None = None,
 ) -> tuple[ConfigReference, ...]:
     """Every Resource reference ``config`` implies as one ``kind``
     implementation's config.
@@ -271,7 +277,7 @@ def capability_config_references(
     way.
     """
     selected = selected_name(kind, config, name)
-    model = None if selected is None else capability_config_model(kind, selected)
+    model = None if selected is None else capability_config_model(kind, selected, facet=facet)
     if model is None:
         return ()
     return extract_references(model, filled_defaults(model, config, owner))
@@ -301,6 +307,7 @@ def resolved_capability_modes(
     kind: str,
     config: object,
     name: str | None = None,
+    facet: Facet | None = None,
 ) -> tuple[tuple[str, str], ...]:
     """The tag each discriminated-union field of ``config``'s
     implementation resolves to, as ``(field, tag)`` pairs in declaration
@@ -323,7 +330,7 @@ def resolved_capability_modes(
     from agentworks.schema._shape import model_fields_of, shape_of
 
     selected = selected_name(kind, config, name)
-    model = None if selected is None else capability_config_model(kind, selected)
+    model = None if selected is None else capability_config_model(kind, selected, facet=facet)
     fields = None if model is None else model_fields_of(model)
     if fields is None:
         return ()
@@ -343,7 +350,7 @@ def resolved_capability_modes(
     return tuple(modes)
 
 
-def capability_config_union(kind: str) -> type[BaseModel]:
+def capability_config_union(kind: str, *, facet: Facet | None = None) -> type[BaseModel]:
     """The discriminated union over every registered ``kind``
     implementation's config.
 
@@ -386,8 +393,8 @@ def capability_config_union(kind: str) -> type[BaseModel]:
             f"the {kind} capability kind declares an untagged config_schema, so there is no union to "
             f"assemble; only a mapping contract may be untagged"
         )
-    arms = _arms(descriptor)
-    key = (kind, frozenset(arms.items()))
+    arms = _arms(descriptor, facet=facet)
+    key = (kind, facet, frozenset(arms.items()))
     cached = _UNION_CACHE.get(key)
     if cached is not None:
         return cached
@@ -499,7 +506,7 @@ def registered_implementation(kind: str, name: str) -> type | None:
     return _seated_impl(descriptor_for(kind), name)
 
 
-def offered_model(impl: type) -> type[BaseModel]:
+def offered_model(impl: type, *, facet: Facet | None = None) -> type[BaseModel] | None:
     """The config model ``impl`` offers.
 
     Read through ``Capability.config_for``, never off ``config_model``
@@ -514,7 +521,7 @@ def offered_model(impl: type) -> type[BaseModel]:
     too, which is the case ``descriptor_for_impl`` documents when it
     answers ``None`` rather than raising.
 
-    Selection is stable for one implementation and ``config_model`` declaration
+    Selection is stable per facet for one implementation and ``config_model`` declaration
     identity. Registration therefore checks the same offered model that later
     merging, validation, reference extraction, and union assembly consume, even if a
     third-party hook is stateful. A deliberate declaration swap selects again.
@@ -526,12 +533,40 @@ def offered_model(impl: type) -> type[BaseModel]:
     annotation does.
     """
     declaration = getattr(impl, "config_model", None)
-    cached = _OFFERED_MODEL_CACHE.get(impl)
+    descriptor = descriptor_for_impl(impl)
+    if descriptor is not None and descriptor.config_facets and facet not in descriptor.config_facets:
+        raise StateError(f"{descriptor.kind} config requires an explicit supported facet")
+    if descriptor is None or not descriptor.config_facets:
+        facet = None
+    key = (impl, facet)
+    cached = _OFFERED_MODEL_CACHE.get(key)
     if cached is not None and cached[0] is declaration:
-        return cast("type[BaseModel]", cached[1])
-    selected = cast("type[Capability]", impl).config_for()
-    _OFFERED_MODEL_CACHE[impl] = (declaration, selected)
+        return cast("type[BaseModel] | None", cached[1])
+    hook = cast("type[Capability]", impl).config_for
+    selected = hook() if facet is None else hook(facet=facet)
+    _OFFERED_MODEL_CACHE[key] = (declaration, selected)
     return selected
+
+
+def config_model_for(impl: type, *, facet: Facet | None = None) -> type[BaseModel]:
+    """The selected validation model, including a closed name-only facet.
+
+    A registered implementation offering no config is still selectable. Its
+    attachment accepts its literal tag and rejects every other key. Unknown
+    implementations are handled separately by the registry lookup.
+    """
+    model = offered_model(impl, facet=facet)
+    if model is not None:
+        return model
+    descriptor = descriptor_for_impl(impl)
+    if descriptor is None or not descriptor.config_facets:
+        raise StateError(f"{impl.__name__} offers no config model")
+    name = str(cast("type[Capability]", impl).name)
+    key = (impl, name)
+    if key not in _TAG_MODEL_CACHE:
+        tag: Any = Literal[name]
+        _TAG_MODEL_CACHE[key] = create_model(f"{impl.__name__}NoConfig", __base__=AgwModel, name=(tag, ...))
+    return _TAG_MODEL_CACHE[key]
 
 
 def _seated_impl(descriptor: CapabilityKindDescriptor, name: str) -> type | None:
@@ -540,14 +575,14 @@ def _seated_impl(descriptor: CapabilityKindDescriptor, name: str) -> type | None
     return None if seated is None else impl_class(seated)
 
 
-def _arms(descriptor: CapabilityKindDescriptor) -> dict[str, type[BaseModel]]:
+def _arms(descriptor: CapabilityKindDescriptor, *, facet: Facet | None) -> dict[str, type[BaseModel]]:
     """The config model every registered implementation of this kind
     offers, keyed by the name it is registered under.
 
     Both the cache key and the union's arms come from this one read, so the
     key cannot describe a union different from the one it would build.
     """
-    return {name: offered_model(impl_class(seated)) for name, seated in descriptor.registry().items()}
+    return {name: config_model_for(impl_class(seated), facet=facet) for name, seated in descriptor.registry().items()}
 
 
 def _mapping_arms(descriptor: CapabilityKindDescriptor) -> dict[str, type[BaseModel]]:

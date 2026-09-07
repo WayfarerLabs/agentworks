@@ -76,6 +76,7 @@ def effective_references(
         sourced_references(
             capability_config_references(
                 kind="harness-integration",
+                facet="session",
                 config={"name": integration, **integration_config},
                 owner=RefOwner(kind=source[0], name=source[1]),
             ),
@@ -129,6 +130,7 @@ def validate_effective_harness(
 
     validate_capability_config(
         kind="harness-integration",
+        facet="session",
         config={"name": name, **config},
         owner=RefOwner(kind=source[0], name=source[1]),
         location=location,

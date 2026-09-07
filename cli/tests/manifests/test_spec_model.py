@@ -17,7 +17,7 @@ from agentworks.errors import ValidationError
 from agentworks.manifests.spec_model import (
     class_name,
     declarable_kinds,
-    hosted_capability,
+    hosted_capabilities,
     row_model,
     spec_model,
 )
@@ -173,16 +173,16 @@ def test_the_plugin_platforms_are_present_in_a_FRESH_interpreter(script: str) ->
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_hosted_capability_answers_for_the_tagged_kinds_only() -> None:
-    assert hosted_capability("vm-site") is not None
-    assert hosted_capability("vm-site").kind == "vm-platform"  # type: ignore[union-attr]
-    assert hosted_capability("secret-source") is not None
-    assert hosted_capability("secret-source").kind == "secret-backend"  # type: ignore[union-attr]
+def test_hosted_capabilities_answers_for_the_tagged_kinds_only() -> None:
+    assert hosted_capabilities("vm-site") != ()
+    assert hosted_capabilities("vm-site")[0][0].kind == "vm-platform"  # type: ignore[union-attr]
+    assert hosted_capabilities("secret-source") != ()
+    assert hosted_capabilities("secret-source")[0][0].kind == "secret-backend"  # type: ignore[union-attr]
     # A kind that hosts nothing, and a kind whose capability is selected by
     # a map key (secret-backend under `backend_mappings`), which has no
     # discriminator and so no union to splice.
-    assert hosted_capability("vm-template") is None
-    assert hosted_capability("secret") is None
+    assert hosted_capabilities("vm-template") == ()
+    assert hosted_capabilities("secret") == ()
 
 
 def test_a_capability_kind_has_no_row_to_describe() -> None:

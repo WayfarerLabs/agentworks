@@ -91,9 +91,11 @@ SECRET_BACKEND_DESCRIPTOR = CapabilityKindDescriptor(
     entry_factory=_backend_entry,
     readiness=_backend_readiness,
     publisher_source="agentworks.capabilities.secret_backend",
-    manifest_section=HostSurface(
-        host_kind="secret-source",
-        naming_field="backend",
+    manifest_sections=(
+        HostSurface(
+            host_kind="secret-source",
+            naming_field="backend",
+        ),
     ),
     config_schema=ConfigContract(
         base=AgwModel,

@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from agentworks.capabilities.descriptor import (
+    FACETS,
     CapabilityKindDescriptor,
     ConfigContract,
     HostSurface,
@@ -114,7 +115,7 @@ def _readiness(name: str, impl: Any) -> Readiness:
 
 HARNESS_INTEGRATION_DESCRIPTOR = CapabilityKindDescriptor(
     kind="harness-integration",
-    contract_version=3,
+    contract_version=4,
     implementation_contract=HarnessIntegration,
     registry=_registry,
     required_operations=frozenset({"start"}),
@@ -124,10 +125,14 @@ HARNESS_INTEGRATION_DESCRIPTOR = CapabilityKindDescriptor(
     entry_factory=_entry,
     readiness=_readiness,
     publisher_source="agentworks.capabilities.harness_integration",
+    config_facets=FACETS,
     config_schema=ConfigContract(base=AgwModel, discriminator="name", layered_merge=True),
-    manifest_section=HostSurface(
-        host_kind="session-template",
-        naming_field="harness_integration",
+    manifest_sections=(
+        HostSurface(
+            host_kind="session-template",
+            naming_field="harness_integration",
+            facet="session",
+        ),
     ),
 )
 """The harness-integration record in the capability-kind descriptor table

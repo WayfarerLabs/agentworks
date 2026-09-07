@@ -39,7 +39,7 @@ from agentworks.schema._shape import unwrap_optional
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from agentworks.capabilities.descriptor import CapabilityKindDescriptor
+    from agentworks.capabilities.descriptor import CapabilityKindDescriptor, HostSurface
 
 
 def declarable_kinds() -> tuple[str, ...]:
@@ -84,13 +84,14 @@ def spec_model(kind: str) -> type[BaseModel]:
     _seat_plugin_capabilities()
     row = row_model(kind)
     projected: type[BaseModel] = row
-    descriptor = hosted_capability(kind)
-    if descriptor is not None:
+    for descriptor, host in hosted_capabilities(kind):
         from agentworks.capabilities.config import capability_config_union
 
-        field_name = descriptor.manifest_section.naming_field
+        field_name = host.naming_field
         field = projected.model_fields[field_name]
-        union: Any = capability_config_union(descriptor.kind)
+        union: Any = capability_config_union(descriptor.kind, facet=host.facet)
+        if host.cardinality == "list":
+            union = list[union]
         _declared, optional = unwrap_optional(field.annotation)
         if optional:
             union = union | None
@@ -107,17 +108,17 @@ def spec_model(kind: str) -> type[BaseModel]:
     from agentworks.capabilities.descriptor import mapping_descriptors_for_host
 
     for mapping_descriptor in mapping_descriptors_for_host(kind):
-        host = mapping_descriptor.mapping_host
-        assert host is not None
-        field = projected.model_fields[host.field_name]
-        key: Any = Annotated[NonEmptyStr, host.key_reference]
+        mapping_host = mapping_descriptor.mapping_host
+        assert mapping_host is not None
+        field = projected.model_fields[mapping_host.field_name]
+        key: Any = Annotated[NonEmptyStr, mapping_host.key_reference]
         value: Any = capability_mapping_union(mapping_descriptor.kind)
         mapping: Any = dict[key, value]
         projected = built_model(
             f"{class_name(kind)}Spec",
             base=projected,
             doc=row.__doc__,
-            fields={host.field_name: (mapping, field)},
+            fields={mapping_host.field_name: (mapping, field)},
         )
     return projected
 
@@ -192,22 +193,17 @@ def _is_skip_marker(entry: object) -> bool:
     return isinstance(entry, SkipJsonSchema)  # type: ignore[misc]
 
 
-def hosted_capability(kind: str) -> CapabilityKindDescriptor | None:
-    """The descriptor of the capability kind ``kind``'s spec selects by a
-    TAGGED table, or ``None``.
-
-    Every capability config contract is tagged, so hosting is the whole
-    question: the kind named by some descriptor's ``manifest_section`` is
-    the one whose spec carries a tagged table. Map-keyed consuming surfaces
-    are projected separately from ``mapping_host`` by :func:`spec_model`.
-    """
+def hosted_capabilities(kind: str) -> tuple[tuple[CapabilityKindDescriptor, HostSurface], ...]:
+    """Every tagged capability field in this resource, with its chosen facet."""
     from agentworks.capabilities.descriptor import capability_descriptors
 
     _seat_plugin_capabilities()
-    for descriptor in capability_descriptors():
-        if descriptor.manifest_section.host_kind == kind:
-            return descriptor
-    return None
+    return tuple(
+        (descriptor, host)
+        for descriptor in capability_descriptors()
+        for host in descriptor.manifest_sections
+        if host.host_kind == kind
+    )
 
 
 def built_model(name: str, *, base: type[BaseModel], doc: str | None, fields: dict[str, Any]) -> type[BaseModel]:

@@ -220,20 +220,24 @@ missing any of them, naming the plugin:
 - `contract_version`: the capability contract version this implementation is written against.
   Registration requires an exact match with the version its kind's descriptor declares supported, so
   a contract change is a hard cutover rather than a silent re-certification. The current contract is
-  version 3, and every shipped integration declares 3. The version number identifies this current
-  start-only contract; it does not imply compatibility with the earlier version-1 or version-2
-  shapes.
-- `config_model`: what the config IS (see below). A capability that accepts none declares a model
-  with no fields beyond its tag, which is closed-world by construction.
+  version 4, and every shipped integration declares 4. This contract requires explicit facet
+  selection for config; it does not imply compatibility with earlier shapes.
+- `config_model`: the session config when using the base selector (see below). An override of
+  `config_for` supplies its own facet answers; `None` accepts the tag alone.
 - `name` / `description`: the registry row's identity.
 
-#### Config: One Declared Model
+#### Config: Facet Selection
 
-The integration declares `config_model`, an `AgwModel` carrying its own `name` as a `Literal` tag
-plus one field per accepted key, each with its type and an attribute docstring that IS its
-operator-facing description. The core validates against it (closed-world, so an unknown key is a
-hard error naming the valid fields) and extracts whatever references it marks. No integration code
-runs for either. Two rules with teeth:
+The integration declares its session `config_model`, an `AgwModel` carrying its own `name` as a
+`Literal` tag plus one field per accepted key, each with its type and an attribute docstring that IS
+its operator-facing description. `config_for(facet="session")` selects that model. The base returns
+`None` for vm, user, and workspace; overrides may offer models at those facets. No config means a
+closed name-only selection, not a support or enablement declaration. A missing facet selector is
+refused. Resource hosts choose the facet, and capability references show all four answers.
+
+The core validates against the selected model (closed-world, so an unknown key is a hard error
+naming the valid fields) and extracts whatever references it marks. No integration code runs for
+either. Two rules with teeth:
 
 - **A required field is a claim about the whole lineage.** Validation runs at finalize on each
   template's EFFECTIVE (merged) blob, so a child may declare a partial one that its parents
@@ -269,7 +273,7 @@ instance layer:
 
 - A layer that omits the selector leaves the accumulated selector and config unchanged.
 - The same registered selector merges config through the model that integration offers via
-  `config_for()` (normally its `config_model`).
+  `config_for(facet="session")` (normally its `config_model`).
 - A different selector discards the complete accumulated config before the incoming config is
   considered, so one integration never receives another integration's fields.
 - Repeating the same unknown selector replaces the complete earlier raw config. There is no model

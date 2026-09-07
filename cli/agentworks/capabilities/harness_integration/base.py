@@ -33,7 +33,10 @@ from agentworks.errors import StateError
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from pydantic import BaseModel
+
     from agentworks.capabilities.base import OperationScope, RunContext
+    from agentworks.capabilities.descriptor import Facet
     from agentworks.resources.reference import ResourceReference
     from agentworks.transports import Transport
 
@@ -215,6 +218,13 @@ class HarnessIntegration(Capability):
 
     owner_kind: ClassVar[str] = "session-template"
 
+    @classmethod
+    def config_for(cls, facet: Facet | None = None) -> type[BaseModel] | None:
+        """Offer the session model and no setup config by default."""
+        if facet is None:
+            raise StateError("harness config requires an explicit facet")
+        return cls.config_model if facet == "session" else None
+
     def __init__(
         self,
         owner_name: str,  # the session-template name (config owner)
@@ -228,7 +238,7 @@ class HarnessIntegration(Capability):
         admin: bool,  # admin mode (uses ctx.admin_target())
         state: dict[str, object],  # this harness integration's OWN namespace of the persisted blob (mutated in place)
     ) -> None:
-        super().__init__(owner_name, config)
+        super().__init__(owner_name, config, facet="session")
         self._session_name = session_name
         self._vm_name = vm_name
         self._workspace_name = workspace_name

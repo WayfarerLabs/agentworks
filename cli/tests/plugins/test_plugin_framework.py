@@ -443,7 +443,7 @@ class _HarnessOfferingAnUnsafeMergeContract(ConformingHarnessIntegration):
     description = "offers an unsafe model instead of its safe declaration"
 
     @classmethod
-    def config_for(cls) -> type[AgwModel]:
+    def config_for(cls, facet=None) -> type[AgwModel]:
         return _OfferedUnsafeHarnessMergeConfig
 
 
@@ -855,12 +855,8 @@ def test_every_capability_switchboard_site_derives_from_the_descriptor() -> None
     for registry, descriptor in zip(snapshot, descriptors, strict=True):
         assert registry is descriptor.registry(), descriptor.kind
 
-    # The sixth site, manifest decode's fold dispatch, is NOT here. Keyed
-    # by HOST kind rather than by capability kind, it is the one site whose
-    # keys are not ``kinds``, so there is no set equality to make against
-    # the table; what pins it is the literal host-to-field map in
-    # ``test_capability_descriptors.py::test_manifest_sections_match_the_decoders_host_surfaces``,
-    # and that it reads the table is line 5 of the source-level twin below.
+    # Host dispatch is exercised by the multi-host schema and decode fixture
+    # in test_facet_config.py; adding a descriptor changes those consumers.
 
 
 _DERIVED_SITES = {
@@ -868,7 +864,6 @@ _DERIVED_SITES = {
     ("plugins/registration.py", "_capability_registries"): "capability_descriptors",
     ("resources/graph.py", "_capability_kinds"): "capability_descriptors",
     ("resources/graph.py", "_capability_registry_loaders"): "capability_descriptors",
-    ("manifests/decode.py", "_hosting_descriptors"): "capability_descriptors",
 }
 """Every switchboard site with a derived enumeration, and the symbol its body
 must reach the descriptor table through."""
