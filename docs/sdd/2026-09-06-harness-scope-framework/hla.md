@@ -582,11 +582,14 @@ composition system. All three kinds get concrete shapes now and are proven by th
 
 A resource publishes successful core contributions and each invoked integration's deferred output to
 the instance-state store. Later operations reconstruct inputs without rerunning ancestor setup.
-Persist env declarations and non-secret artifact content, including skill members, in the versioned
-domain payload. An output schema has no resolved-secret arm. Integrations must not copy secret
-values into artifact content, logs, hashes, reasons, or state. Trusted-code review and negative
-runtime tests enforce that conduct; schema shape alone cannot. Secret env references resolve afresh
-at the consuming operation boundary.
+Persist env declarations and one captured copy of each locally contributed artifact, including skill
+members, in the owning resource's versioned domain payload. Persisted deferrals reference those
+contributions; they do not duplicate member bytes per integration or descendant. Reconstruct the
+same typed artifacts for an invocation through its applicable ancestor records. The storage tradeoff
+and bounds are specified under applied state below. An output schema has no resolved-secret arm.
+Integrations must not copy secret values into artifact content, logs, hashes, reasons, or state.
+Trusted-code review and negative runtime tests enforce that conduct; schema shape alone cannot.
+Secret env references resolve afresh at the consuming operation boundary.
 
 ## Declarative artifact sources and packages
 
@@ -695,8 +698,8 @@ Compute reconciliation hashes from the normalized package, its relative paths, a
 intent, not source timestamps or incidental archive metadata. Thus CRLF-versus-LF changes to
 normalized text alone cause no native rewrite, while meaningful content or execution changes do. The
 versioned snapshot codec must carry both text and opaque bytes without loss, using existing instance
-state; the LLD chooses that internal carrier. This is not a new public archive format or artifact
-store.
+state; the LLD chooses the closed domain encoding and enforces both decoded and encoded size limits.
+This is not a new public archive format or generic blob API.
 
 [The skills CLI](https://github.com/vercel-labs/skills) demonstrates local and Git acquisition into
 ordinary skill directories.
@@ -886,6 +889,34 @@ producer outputs describe what is wanted now; the applied slices describe what t
 actually provisioned and may retire. Cleanup is not inferred from filenames, current config alone,
 or the absence of an artifact from a deferred result. There is no second cleanup database.
 
+The content storage choice is deliberate: keep bounded captured packages in the typed contribution
+payload, once per originating resource. The store's extension contract places consumer fields in
+versioned JSON and forbids a generic blob API (`db/README.md:131-133`); its compact version-1 VM
+payloads (`:55-64`) describe existing codecs, not a prohibition on a closed artifact codec. This
+choice preserves transactional snapshot/deletion behavior and database backup cohesion. Captured
+contents are durable state: downstream delivery must survive an ancestor source becoming
+unavailable. They are not a cache that can always be rebuilt from Git or workstation files.
+
+The cost is explicit. Encoding opaque bytes in JSON enlarges the payload (base64 adds about one
+third before metadata), whole-payload reads decode that content, and database backups retain it.
+There is no cross-owner content deduplication. Persisting references for deferred items prevents
+extra copies per integration and ancestor path, but a per-owner limit alone cannot bound fleet-wide
+inspection memory or backup duration. The LLD must choose and enforce decoded package, encoded
+owner-payload, and capture limits using representative multi-MiB packages and owner counts. Measure
+inspection and backup/restore as well as delivery; the existing database-copy deadline is five
+seconds (`db/backup.py:605-625`). Do not claim that a limit is adequate merely because serialization
+succeeds or because one small skill fits.
+
+Content-addressed member files are the priced alternative, not part of this design. There is no
+shared durable content-file facility at HEAD, and SQLite backup/restore does not capture adjacent
+files. Moving bytes there would require atomic publication, reference retention, missing-file
+recovery, orphan cleanup, and coordinated backup/restore. Native integration destinations cannot
+serve as the source snapshot because they can be absent, rendered differently, or changed by a
+workload. Those additional responsibilities are not supplied by ownership receipts alone. If the
+LLD's measured workloads cannot support ordinary complete skill packages within practical storage
+and backup bounds, return that evidence for an architecture decision; do not silently introduce a
+second persistence lifecycle or shrink limits merely to avoid the question.
+
 For artifacts, plugins, marketplace registrations, and other native setup resources, retain the
 non-secret identifiers, ownership, and removal facts needed after their original declaration is
 gone. The integration performs safe native removal where supported, checks whether the resource is
@@ -902,21 +933,27 @@ identify what remains and retain evidence needed for retry or operator dispositi
 retained output is distinguished from pending cleanup; neither is reported as successful removal.
 The integration owns these native decisions and core owns persistence and lifecycle dispatch.
 
-Persist each integration's successful deferred collection together with its input revision
-references and the scope's published contributions. This identifies which outputs can still be used
-for delivery after config changes or reinit; it is not a historical record of every attempt.
-Preserve source content needed by another integration and earlier applied receipts needed for
-cleanup. Before the first setup mutation, invalidate the prior completed delivery snapshot while
-retaining its content and receipts for reconciliation. A failed reinit cannot leave that old
-completion eligible, even when input revisions have not changed. Publish a new completed snapshot
-only after success. An invalidated or incomplete snapshot cannot supply delivery evidence. If
-artifact routing depends on that snapshot, session readiness reports an upstream setup-state failure
-and the owning recovery operation instead of treating it as an empty deferred result or
-manufacturing new deferrals that might duplicate partly applied content. When complete producer
-records independently establish that there are no applicable artifact inputs, no residual delivery
-result is needed; a config-only setup gap follows its declared readiness severity. A failed
-recommended config-only setup can therefore warn and permit launch. An invalid snapshot itself is
-never evidence of empty inputs.
+Persist each integration's successful deferred collection as artifact source addresses, contribution
+revision references, and reasons alongside the scope's published local contributions. The
+integration API still returns typed artifacts; this is a persistence encoding, not a different
+deferral API or a handled-item ledger. Resolve references only through the current applicable
+owning-resource graph and matching completed contribution revisions. Missing, changed, or
+invalidated contributions are stale evidence, never permission to substitute new bytes or reacquire
+an ancestor source. Retain only the current published contribution and the evidence needed during
+reconciliation, not a historical package archive or global reference-counting system. This
+identifies which outputs can still be used for delivery after config changes or reinit; it is not a
+historical record of every attempt. Preserve source content needed by another integration and
+earlier applied receipts needed for cleanup. Before the first setup mutation, invalidate the prior
+completed delivery snapshot while retaining its content and receipts for reconciliation. A failed
+reinit cannot leave that old completion eligible, even when input revisions have not changed.
+Publish a new completed snapshot only after success. An invalidated or incomplete snapshot cannot
+supply delivery evidence. If artifact routing depends on that snapshot, session readiness reports an
+upstream setup-state failure and the owning recovery operation instead of treating it as an empty
+deferred result or manufacturing new deferrals that might duplicate partly applied content. When
+complete producer records independently establish that there are no applicable artifact inputs, no
+residual delivery result is needed; a config-only setup gap follows its declared readiness severity.
+A failed recommended config-only setup can therefore warn and permit launch. An invalid snapshot
+itself is never evidence of empty inputs.
 
 An applied record carries its payload version, contributing source locators, destination or native
 resource, representation strategy, non-secret content hash where meaningful, and confirmed outcome.
@@ -1099,7 +1136,10 @@ artifact declaration/snapshot codecs and normalization, and reconciliation, the 
 persistence/context slice, shell index/ownership and session cleanup wiring, and config/overlay
 migration before implementation begins. Their acceptance must include copy, rehome, delete, and
 state restore handling so owner records cannot bless artifacts at a different destination or survive
-deletion and recreation under the same name.
+deletion and recreation under the same name. VM backup/export currently projects only VM applied
+slices (`db/database.py:1238-1239`); the new typed owner-scoped contributions and deferrals need
+explicit export/restore coverage. Restoring captured content must not establish native placement or
+readiness at a new destination without the existing identity and reconciliation checks.
 
 ## Validation and requirement coverage
 
@@ -1148,6 +1188,16 @@ Observe native removal and corresponding instance-state updates, rerun to prove 
 and interrupt cleanup to prove retry preserves outstanding ownership. Also cover already-absent
 resources, drift or unowned content, unavailable native removal, another integration's retained
 claims, and R15's intentional settings retention. A config-only assertion is not cleanup evidence.
+
+R9 storage acceptance proves that one originating package is stored once despite multiple attached
+integrations and descendant deferrals; deferred records contain references and reasons, and reject
+stale contribution revisions. Use representative multi-MiB binary packages and multiple owner counts
+to measure encoded database size, inspection memory/time, and database backup/restore within its
+existing deadline. Validate size limits before publishing the snapshot. Round-trip the new slices
+through VM export/restore as well, and show downstream reconstruction without ancestor source
+access, owner deletion without residual contribution rows, and refusal to bless restored native
+destinations from copied receipts alone. These measurements set the LLD's limits; single-record
+serialization timings alone are insufficient acceptance.
 
 R16 acceptance uses explicit artifact declarations and local fixture packages to prove shell
 delivery through the real CLI: user and workspace files are discoverable without downstream payload
