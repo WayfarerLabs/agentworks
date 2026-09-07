@@ -712,13 +712,14 @@ receives a different UUID and cannot adopt or delete residue without its matchin
 
 Shipped `SessionRow` has no UUID (`db/models.py:149`), so R16 consumes the contract's permitted
 early identity slice: persist `session_uuid`, assign existing rows one UUID in a migration that does
-not remint on retry, and expose it through core's session invocation context before artifact writes.
-Session-scoped integration state and receipts use this UUID as their identity; update the existing
-instance-state bindings/codecs rather than add another store. Human names remain lookup/display keys
-and cannot alone authorize mutation. The LLD must specify durable identity publication and state
-association, including partial-create recovery, before the shell implementation. This effort owns
-that prerequisite slice, coordinated with sibling consumers through the saga so there is one shared
-schema introduction; per-workload `run_id`, events, and observation remain wave 5 work.
+not assign another on retry, and expose it through core's session invocation context before artifact
+writes. Session-scoped integration state and receipts use this UUID as their identity; update the
+existing instance-state bindings/codecs rather than add another store. Human names remain
+lookup/display keys and cannot alone authorize mutation. The LLD must specify durable identity
+publication and state association, including partial-create recovery, before the shell
+implementation. This effort owns that prerequisite slice, coordinated with sibling consumers through
+the saga so there is one shared schema introduction; per-workload `run_id`, events, and observation
+remain wave 5 work.
 
 Stop retains files for the same session's later start. Start/restart reconciles session-owned files
 and its index against current inputs, using prior claims and hashes; it does not repair upstream
@@ -1014,8 +1015,8 @@ and migration retry. No run-id implementation is required to prove this session 
 
 In Git workspaces, ordinary `git status` and `git add -A` must leave generated artifacts and managed
 exclude metadata out of repository changes. Preserve pre-existing ignore patterns, refuse tracked
-content, and prove idempotent exclusion cleanup. Include overriding repository rules and linked
-worktrees whose exclude metadata is shared outside the workspace: deferral must leave their metadata
+content, and prove idempotent exclusion cleanup. Include overriding repository rules and a linked
+worktree whose exclude metadata is shared outside the workspace: deferral must leave their metadata
 untouched and produce usable session delivery.
 
 Readiness acceptance includes a failed config-only user setup with independently established empty
@@ -1076,5 +1077,5 @@ Additional native-config sources checked 2026-09-06:
 - [Git ignore documentation](https://git-scm.com/docs/gitignore) and
   [Git path resolution](https://git-scm.com/docs/git-rev-parse), checked 2026-09-07: local auxiliary
   exclusions, precedence, tracked-file behavior, and resolving metadata independently of a `.git`
-  directory assumption. An isolated Git experiment also confirmed that linked worktrees share the
+  directory assumption. An isolated Git experiment also confirmed that a linked worktree shares the
   original repository's exclude file.
