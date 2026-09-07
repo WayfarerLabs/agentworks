@@ -17,6 +17,7 @@ from agentworks.errors import (
     StateError,
     UserAbort,
 )
+from agentworks.list_sorting import nullable_sort_value, sort_rows
 from agentworks.runtime_time import derive_uptime_seconds, format_uptime
 from agentworks.sessions._resource_cleanup import cleanup_now_empty_resource
 from agentworks.sessions.tmux import exact_tmux_target
@@ -609,32 +610,29 @@ def list_sessions(
     admin_only: bool = False,
     include_status: bool = False,
     names_only: bool = False,
+    sort_keys: tuple[str, ...] | None = None,
 ) -> None:
     """List sessions, optionally observing live status by backing VM.
 
     With ``names_only=True``, emit one session name per line and
     skip both the SSH status batch and the table render. Used by
     shell completion (see issue #147); the order matches the table's
-    workspace-grouped order so completion stays stable.
+    selected service ordering so completion stays stable.
     """
     if names_only:
-        sessions = _mgr.filter_sessions(
+        sessions = _sorted_session_rows(
             db,
             workspace_name=workspace_name,
             vm_name=vm_name,
             agent_name=agent_name,
             admin_only=admin_only,
+            sort_keys=sort_keys,
         )
         # Empty / fully-filtered-out result prints nothing under
         # names-only; the friendly "No sessions found" line below is
-        # for human readers only. Match the table's workspace-grouped
-        # order so completion stays stable across renderers.
-        names_by_ws: dict[str, list[SessionRow]] = {}
+        # for human readers only.
         for session in sessions:
-            names_by_ws.setdefault(session.workspace_name, []).append(session)
-        for ws_name in sorted(names_by_ws):
-            for session in names_by_ws[ws_name]:
-                output.info(session.name)
+            output.info(session.name)
         return
     listing = _mgr.session_listing(
         db,
@@ -644,6 +642,7 @@ def list_sessions(
         agent_name=agent_name,
         admin_only=admin_only,
         include_status=include_status,
+        sort_keys=sort_keys,
     )
     render_session_listing(listing, include_status=include_status)
 
@@ -658,18 +657,20 @@ def session_listing(
     admin_only: bool = False,
     include_status: bool = False,
     require_vm_names: bool = False,
+    sort_keys: tuple[str, ...] | None = None,
 ) -> SessionListing:
     """Collect local session inventory, optionally enriched by live status.
 
     ``require_vm_names`` keeps closed projections from receiving the nullable
     VM fact used only by human recovery inventory.
     """
-    sessions = _mgr.filter_sessions(
+    sessions = _sorted_session_rows(
         db,
         workspace_name=workspace_name,
         vm_name=vm_name,
         agent_name=agent_name,
         admin_only=admin_only,
+        sort_keys=sort_keys,
     )
     if not sessions:
         return SessionListing(sessions=())
@@ -743,6 +744,44 @@ def session_listing(
             )
         )
     return SessionListing(sessions=tuple(facts))
+
+
+def _sorted_session_rows(
+    db: Database,
+    *,
+    workspace_name: str | list[str] | None,
+    vm_name: str | list[str] | None,
+    agent_name: str | list[str] | None,
+    admin_only: bool,
+    sort_keys: tuple[str, ...] | None,
+) -> tuple[SessionRow, ...]:
+    sessions = _mgr.filter_sessions(
+        db,
+        workspace_name=workspace_name,
+        vm_name=vm_name,
+        agent_name=agent_name,
+        admin_only=admin_only,
+    )
+    vm_names: dict[str, str | None] = {}
+
+    def session_vm_name(session: SessionRow) -> str | None:
+        if session.name not in vm_names:
+            workspace = db.get_workspace(session.workspace_name)
+            vm_names[session.name] = None if workspace is None else workspace.vm_name
+        return vm_names[session.name]
+
+    return sort_rows(
+        sessions,
+        sort_keys=sort_keys,
+        key_functions={
+            "alpha": lambda session: (session.name,),
+            "creation": lambda session: nullable_sort_value(session.created_at),
+            "vm": lambda session: nullable_sort_value(session_vm_name(session)),
+            "agent": lambda session: nullable_sort_value(session.agent_name),
+            "workspace": lambda session: nullable_sort_value(session.workspace_name),
+        },
+        entity_kind="session",
+    )
 
 
 def render_session_listing(listing: SessionListing, *, include_status: bool = False) -> None:

@@ -342,6 +342,7 @@ print -r -- __READY__
         assert complete("agw guide --human show ")[1]
         assert not complete("agw guide --agent show concept-fixture ")[1]
 
+    @pytest.mark.windows
     @pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell is not installed")
     def test_generated_powershell_guide_completion_follows_the_group_grammar(self, tmp_path: Path) -> None:
         import json
@@ -947,6 +948,7 @@ class TestUninstall:
         assert not (zfunc / "_agentworks").exists()
         assert not (zfunc / "_agw").exists()
 
+    @pytest.mark.windows
     def test_powershell_uninstall_removes_script_and_profile_line(self, monkeypatch, tmp_path) -> None:
         from typer.testing import CliRunner
 
@@ -1003,6 +1005,7 @@ class TestUninstall:
         assert result.exit_code != 0
         assert "could not determine PowerShell $PROFILE path" in result.stderr
 
+    @pytest.mark.windows
     def test_powershell_uninstall_preserves_user_lines_mentioning_filename(self, monkeypatch, tmp_path) -> None:
         """The $PROFILE strip must match the installer's exact
         dot-source-plus-quoted-path shape, not any line containing the
@@ -1313,6 +1316,7 @@ def test_marker_probe_refuses_stale_database_for_every_dynamic_path_without_side
     assert not backup_directory(database_path).exists()
 
 
+@pytest.mark.windows
 def test_direct_probe_keeps_stdout_pure_while_warning_lands_on_stderr(tmp_path: Path) -> None:
     # Unguarded on purpose: this spawns no POSIX shell. It invokes the installed
     # `agw` directly to prove the completion probe keeps stdout machine-pure (the

@@ -176,6 +176,10 @@ Focused describe and lifecycle commands remain strict. See
 [Runnable status inspection](../docs/guides/runnable-status.md) for the resource-specific states,
 time bounds, recovery behavior, and JSON v1 limit.
 
+List commands default to alphabetical order. Use `--sort KEY[,KEY...]` for the additional
+command-specific orderings documented in the
+[list-ordering reference](command-reference.md#list-ordering).
+
 ## Configuration
 
 Configuration splits into two surfaces:

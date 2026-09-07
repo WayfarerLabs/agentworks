@@ -7,7 +7,7 @@ from typing import Annotated
 import typer
 
 from agentworks.cli._app import app
-from agentworks.cli._helpers import get_db, ordinary_tty_interaction_policy, parse_csv_filter
+from agentworks.cli._helpers import get_db, ordinary_tty_interaction_policy, parse_csv_filter, parse_csv_sort
 from agentworks.machine_output import OutputFormat
 
 session_app = typer.Typer(
@@ -107,18 +107,16 @@ def session_describe(
 
     config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
     if output_format is OutputFormat.JSON:
-        from click import get_binary_stream
-
         from agentworks import output
-        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
         from agentworks.sessions.manager._queries import session_description_data
 
         with output.suppress_presentation():
             description = session_description(get_db(), config, name=name)
-        write_json_envelope(
+        write_json_stdout(
             MachineOutputCommand.SESSION_DESCRIBE,
             session_description_data(description),
-            get_binary_stream("stdout"),
         )
         return
     describe_session(get_db(), config, name=name)
@@ -134,6 +132,13 @@ def session_list(
     ] = None,
     admin: Annotated[bool, typer.Option("--admin", help="Only admin-mode sessions (no agent)")] = False,
     status: Annotated[bool, typer.Option("--status", help="Include live runtime status")] = False,
+    sort: Annotated[
+        str | None,
+        typer.Option(
+            "--sort",
+            help="Sort by comma-separated keys: alpha, creation, vm, agent, workspace. Default: alpha.",
+        ),
+    ] = None,
     names_only: Annotated[
         bool,
         typer.Option(
@@ -166,10 +171,9 @@ def session_list(
     db = get_db()
     config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
     if output_format is OutputFormat.JSON:
-        from click import get_binary_stream
-
         from agentworks import output
-        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
         from agentworks.sessions.manager._queries import session_listing_data
 
         with output.suppress_presentation():
@@ -182,11 +186,11 @@ def session_list(
                 admin_only=admin,
                 include_status=status,
                 require_vm_names=True,
+                sort_keys=parse_csv_sort(sort),
             )
-        write_json_envelope(
+        write_json_stdout(
             MachineOutputCommand.SESSION_LIST,
             session_listing_data(listing),
-            get_binary_stream("stdout"),
         )
         return
     list_sessions(
@@ -198,6 +202,7 @@ def session_list(
         admin_only=admin,
         include_status=status,
         names_only=names_only,
+        sort_keys=parse_csv_sort(sort),
     )
 
 

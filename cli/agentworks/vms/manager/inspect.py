@@ -19,6 +19,7 @@ from agentworks.errors import (
     StateError,
     UserAbort,
 )
+from agentworks.list_sorting import nullable_sort_value, sort_rows
 from agentworks.naming import MAX_VM_NAME_LENGTH
 from agentworks.runtime_time import derive_uptime_seconds
 
@@ -396,9 +397,10 @@ def vm_listing(
     *,
     include_status: bool = False,
     interaction: TtyInteractionPolicy | None = None,
+    sort_keys: tuple[str, ...] | None = None,
 ) -> VMListing:
     """Collect local VM inventory, optionally enriched by provider status."""
-    vm_rows = db.list_vms()
+    vm_rows = _sorted_vm_rows(db, sort_keys)
     statuses: dict[str, VMStatus] = {}
     if include_status and vm_rows:
         if config is None or interaction is None:
@@ -510,13 +512,30 @@ def render_vm_listing(
             output.warn(f"VM status is unknown by provider site: {groups}.")
 
 
-def list_vms(db: Database, *, names_only: bool = False) -> None:
+def _sorted_vm_rows(db: Database, sort_keys: tuple[str, ...] | None) -> tuple[VMRow, ...]:
+    return sort_rows(
+        db.list_vms(),
+        sort_keys=sort_keys,
+        key_functions={
+            "alpha": lambda vm: (vm.name,),
+            "creation": lambda vm: nullable_sort_value(vm.created_at),
+        },
+        entity_kind="vm",
+    )
+
+
+def list_vms(
+    db: Database,
+    *,
+    names_only: bool = False,
+    sort_keys: tuple[str, ...] | None = None,
+) -> None:
     """List all VMs from local inventory."""
     if names_only:
-        for vm in db.list_vms():
+        for vm in _sorted_vm_rows(db, sort_keys):
             output.info(vm.name)
         return
-    render_vm_listing(vm_listing(db))
+    render_vm_listing(vm_listing(db, sort_keys=sort_keys))
 
 
 def vm_description(

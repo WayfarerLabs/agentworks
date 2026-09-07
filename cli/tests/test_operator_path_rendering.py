@@ -120,6 +120,7 @@ def _assert_home_relative(text: str, home: Path, *, label: str) -> None:
 # -- The doctor screen ---------------------------------------------------------
 
 
+@pytest.mark.windows
 def test_doctor_spells_every_path_on_one_screen_the_same_way(home: Path) -> None:
     """The reported bug, as an assertion over the whole report.
 
@@ -159,6 +160,7 @@ _PATH_PRINTING_COMMANDS = [
 ]
 
 
+@pytest.mark.windows
 @pytest.mark.parametrize(
     ("label", "argv", "expected"),
     _PATH_PRINTING_COMMANDS,
@@ -229,6 +231,7 @@ def test_doctor_names_an_unreadable_ssh_key_home_relative(home: Path) -> None:
     _assert_home_relative(rows["SSH public key"], home, label="doctor unreadable-key row")
 
 
+@pytest.mark.windows
 def test_the_pre_cli_config_load_failures_name_the_file_home_relative(
     home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

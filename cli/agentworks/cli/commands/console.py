@@ -12,6 +12,7 @@ from agentworks.cli._helpers import (
     get_db,
     ordinary_tty_interaction_policy,
     parse_csv_filter,
+    parse_csv_sort,
     prompt_vm,
 )
 from agentworks.machine_output import OutputFormat
@@ -117,6 +118,10 @@ def console_list(
     workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace")] = None,
     agent: Annotated[str | None, typer.Option("--agent", help="Filter by agent")] = None,
     status: Annotated[bool, typer.Option("--status", help="Include live runtime status")] = False,
+    sort: Annotated[
+        str | None,
+        typer.Option("--sort", help="Sort by comma-separated keys: alpha, creation, vm. Default: alpha."),
+    ] = None,
     names_only: Annotated[
         bool,
         typer.Option(
@@ -148,10 +153,9 @@ def console_list(
 
         config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
     if output_format is OutputFormat.JSON:
-        from click import get_binary_stream
-
         from agentworks import output
-        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
         from agentworks.sessions.multi_console.attach import console_listing_data
 
         with output.suppress_presentation():
@@ -162,11 +166,11 @@ def console_list(
                 workspace_name=parse_csv_filter(workspace),
                 agent_name=parse_csv_filter(agent),
                 include_status=status,
+                sort_keys=parse_csv_sort(sort),
             )
-        write_json_envelope(
+        write_json_stdout(
             MachineOutputCommand.CONSOLE_LIST,
             console_listing_data(listing),
-            get_binary_stream("stdout"),
         )
         return
     listing = console_listing(
@@ -176,6 +180,7 @@ def console_list(
         workspace_name=parse_csv_filter(workspace),
         agent_name=parse_csv_filter(agent),
         include_status=status,
+        sort_keys=parse_csv_sort(sort),
     )
     render_console_listing(listing, names_only=names_only, include_status=status)
 
@@ -194,18 +199,16 @@ def console_describe(
 
     config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
     if output_format is OutputFormat.JSON:
-        from click import get_binary_stream
-
         from agentworks import output
-        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
         from agentworks.sessions.multi_console.attach import console_description_data
 
         with output.suppress_presentation():
             description = console_description(get_db(), config, name=name)
-        write_json_envelope(
+        write_json_stdout(
             MachineOutputCommand.CONSOLE_DESCRIBE,
             console_description_data(description),
-            get_binary_stream("stdout"),
         )
         return
     description = console_description(get_db(), config, name=name)

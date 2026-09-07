@@ -39,6 +39,7 @@ def test_simulated_console_reproduces_the_field_crash() -> None:
         stream.write(BREAKING_MARKER)
 
 
+@pytest.mark.windows
 def test_stdout_degrades_unencodable_characters_and_emits_bare_lf(monkeypatch: pytest.MonkeyPatch) -> None:
     """After reconfigure, stdout keeps its legacy encoding (no forced UTF-8
     mojibake), degrades unencodable characters to a replacement instead of
@@ -55,6 +56,7 @@ def test_stdout_degrades_unencodable_characters_and_emits_bare_lf(monkeypatch: p
     assert sys.stdout.encoding == "cp1252"
 
 
+@pytest.mark.windows
 def test_stderr_degrades_unencodable_characters_but_keeps_platform_newlines(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -85,6 +87,7 @@ def test_non_reconfigurable_streams_are_tolerated(monkeypatch: pytest.MonkeyPatc
     assert out.getvalue() == "ok\n"
 
 
+@pytest.mark.windows
 def test_main_covers_the_typer_echo_path_on_a_legacy_console(monkeypatch: pytest.MonkeyPatch) -> None:
     """Drive ``main()`` end to end with a command that echoes the marker.
 
@@ -118,6 +121,7 @@ def test_main_covers_the_typer_echo_path_on_a_legacy_console(monkeypatch: pytest
     assert raw_out.getvalue() == b"? BREAKING CHANGES\n"
 
 
+@pytest.mark.windows
 def test_guide_list_emits_bare_lf_on_a_legacy_console(monkeypatch: pytest.MonkeyPatch) -> None:
     """The report's second finding: iterating ``agw guide list`` in Git Bash
     rode Windows CRLF into the topic arguments. Through the real entrypoint

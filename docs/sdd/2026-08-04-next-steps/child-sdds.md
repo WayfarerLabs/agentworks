@@ -622,6 +622,37 @@ Carried into this charter from the prior "not yet spawned" entry, so the rulings
   `config_at(level)` shape sketch, the three preserved `base.py` constraints, the
   who-constructs-versus-who-calls-in caution, and the pre-design call-site discovery walk.
 
+### Closure bookkeeping (2026-09-07)
+
+Merged work the ledger owes a line, recorded from the merges themselves.
+
+- **`2026-09-04-native-exec-transport`** (PR #746, merged 2026-09-07). The SDD package the saga lead
+  reviewed at the design stage and found clean; it requires a native execution transport of VM
+  platforms and makes Proxmox compliant. Adjacent standalone platform work rather than a wave, on
+  the same footing as the gcp effort.
+- **Issue #742 closed by PR #756** (merged 2026-09-06). The three complexity findings that merged
+  undispositioned with #736 are disposed: plain console inventory preserves a restored console whose
+  VM row is missing, the redundant session mode and status projections are gone, and the duplicated
+  guest observation timeout is one shared policy. The saga lead's review of that PR found the same
+  orphan still hard-fails plain `session list`, which is now its own effort
+  (`docs/sdd/2026-09-06-degraded-runnable-recovery/`, PR #764, issue #763) with a better axis than
+  the console-only exception: inventory tolerates, focused operations and mutations stay strict.
+- **Windows CI exists** (PRs #747 and #760, merged 2026-09-06). See `current-state.md`; the
+  structural Linux-only gap that let a Windows `vm create` break reach a published release is closed
+  for Windows, and macOS remains uncovered.
+- **Post-lock addendum to `2026-09-03-runnable-status-inspection`** (PR #737, merged 2026-09-05).
+  The one `saga:next-steps` merge this ledger had no line for. It drops the Windows-only forced
+  `-tt` default in favor of closing ssh's stdin with `-n`, removes the nine `force_tty` sites and
+  the tmux probe advisory stripper that existed only to absorb what a forced TTY produced, and
+  closes issue #361. The reasoning now lives in ADR 0020, which is the right permanent home: a
+  forced TTY merges stderr into stdout, so the probe classifiers that effort introduced could not
+  tell the streams apart. It reached the locked SDD directory only through `locked.md`, the
+  sanctioned exception, so the 2026-09-04 lock held. This is an addendum to that effort, not a fifth
+  effort in the reconstruction below.
+
+Not recorded yet, because their PRs are open and merged PRs are this ledger's truth source: wave 4's
+pickup by an effort lead (PR #761) and the artifact-delivery reconciliation (PR #765).
+
 ### Efforts that ran without ledger entries (reconstructed 2026-09-06)
 
 Four efforts ran to completion between 2026-08-28 and 2026-09-05 while this ledger was not being

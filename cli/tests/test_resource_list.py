@@ -288,7 +288,11 @@ def test_registry_list_order_is_stable(tmp_path: Path) -> None:
     registry = build_registry(load_config(cfg_file))
     first = list_resources(registry)
     second = list_resources(registry)
-    assert tuple((row.kind, row.name) for row in first.rows) == tuple((row.kind, row.name) for row in second.rows)
+    explicit = list_resources(registry, sort_keys=("alpha",))
+    first_keys = tuple((row.kind, row.name) for row in first.rows)
+    assert first_keys == tuple(sorted(first_keys))
+    assert first_keys == tuple((row.kind, row.name) for row in second.rows)
+    assert first_keys == tuple((row.kind, row.name) for row in explicit.rows)
 
 
 @pytest.mark.parametrize(

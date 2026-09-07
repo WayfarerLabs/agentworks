@@ -90,8 +90,8 @@ def test_human_session_status_inventory_isolates_structural_orphans(
     assert db._conn.total_changes == changes_before
     assert [(row.name, row.workspace_name, row.vm_name, row.status) for row in listing.sessions] == [
         ("healthy", "healthy-ws", "healthy-vm", "running"),
-        ("stale-workspace", "removed-ws", None, "unknown"),
         ("stale-vm", "stale-vm-ws", "removed-vm", "unknown"),
+        ("stale-workspace", "removed-ws", None, "unknown"),
     ]
     assert observed == [("healthy",)]
 
@@ -120,8 +120,8 @@ def test_plain_session_inventory_is_local_and_preserves_orphans(
     assert db._conn.total_changes == changes_before
     assert [(row.name, row.status) for row in listing.sessions] == [
         ("healthy", "unavailable"),
-        ("stale-workspace", "unavailable"),
         ("stale-vm", "unavailable"),
+        ("stale-workspace", "unavailable"),
     ]
 
 
@@ -238,7 +238,27 @@ def test_names_only_retains_orphan_inventory(
         names_only=True,
     )
 
-    assert captured_output.info == ["healthy", "stale-workspace", "stale-vm"]
+    assert captured_output.info == ["healthy", "stale-vm", "stale-workspace"]
+
+
+def test_session_vm_sort_retains_orphan_inventory(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_recovery_inventory(db)
+    _stub_display(monkeypatch)
+
+    listing = session_manager.session_listing(
+        db,
+        object(),  # type: ignore[arg-type]
+        sort_keys=("vm",),
+    )
+
+    assert [(row.name, row.vm_name) for row in listing.sessions] == [
+        ("stale-workspace", None),
+        ("healthy", "healthy-vm"),
+        ("stale-vm", "removed-vm"),
+    ]
 
 
 def test_session_filters_keep_their_existing_relationship_boundaries(

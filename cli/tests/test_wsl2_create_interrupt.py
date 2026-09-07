@@ -314,6 +314,7 @@ def _stub_registry(monkeypatch: pytest.MonkeyPatch, blob: _BlobResp) -> None:
     monkeypatch.setattr(wsl2, "_blob_opener", SimpleNamespace(open=lambda req: blob))
 
 
+@pytest.mark.windows
 @pytest.mark.parametrize("error", [RuntimeError("network died"), KeyboardInterrupt("mid-download")])
 def test_failed_download_leaves_no_file_at_the_cache_path(
     monkeypatch: pytest.MonkeyPatch,
@@ -333,6 +334,7 @@ def test_failed_download_leaves_no_file_at_the_cache_path(
     assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.windows
 @pytest.mark.parametrize("error", [OSError("rename died"), KeyboardInterrupt("in the rename window")])
 def test_failed_rename_leaves_no_residue_either(
     monkeypatch: pytest.MonkeyPatch,
@@ -360,6 +362,7 @@ def test_failed_rename_leaves_no_residue_either(
     assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.windows
 def test_completed_download_lands_at_the_cache_path(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, captured_output: CapturedOutput
 ) -> None:
