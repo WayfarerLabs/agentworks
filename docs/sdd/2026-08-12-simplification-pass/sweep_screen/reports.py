@@ -186,10 +186,12 @@ def check_map(
         # Keyed on being a TABLE CELL rather than on being a parsed row: the
         # retired list and the recipe-verification table are cells a reader acts
         # on exactly like rows, and neither parses as one, so keying on the row
-        # let two citations through with every command green. Read raw, because
-        # a citation lives inside a code span and blanking spans would hide it.
+        # let two citations through with every command green. Code spans are NOT
+        # blanked, because a citation lives inside one; URLs are, like every
+        # sibling here, since the digits after a colon in a link are a port or a
+        # path and reading them as a line number is a fault nobody can fix.
         if line.startswith("| "):
-            for spelling in sorted({m.group(0) for m in CITED_LINE.finditer(line)}):
+            for spelling in sorted({m.group(0) for m in CITED_LINE.finditer(bare)}):
                 faults.append(f"{source} cites {spelling.strip()} by line; name the function instead")
         # A cited function resolves like an anchor, so a citation that names
         # nothing is refused rather than read and believed.

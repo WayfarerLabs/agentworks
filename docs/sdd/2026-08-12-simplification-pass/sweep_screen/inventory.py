@@ -43,16 +43,35 @@ ROW_ID = re.compile(rf"{ID}$")
 #: rendered `"a.yaml:2"` locations that tripped it are not source files.
 CITED_FILE = re.compile(r"([A-Za-z0-9_./+-]*[A-Za-z0-9_+-]\.(?:py|mjs)):\d+(?:-\d+)?")
 
+#: One number of a citation: a line, or a range, or a comma-joined list of
+#: either. Every spelling below shares it, because a cell that cites one line
+#: cites three the moment a second reader adds two, and refusing only the
+#: single left `:437,439,441` reading as prose.
+_LINES = r"[1-9]\d*(?:-\d+)?(?:,\d+(?:-\d+)?)*"
+
 #: Every way a cell has spelled a line number. The first form was the only one
-#: refused, so the others carried on: a bare `:412`, a range, "line 412",
-#: "lines 412-419", and "at 412" after a path or a quoted construct. They are
-#: one fault with five spellings, and refusing one taught the map to use the
-#: rest.
+#: refused, so the others carried on: a bare `:412`, a range or list, "line
+#: 412", "lines 412-419", "at 412" after a path or a quoted construct, and a
+#: NAME carrying a number (`find_registry_reads:199`), which reads as a
+#: qualname citation and is a line number wearing one. They are one fault with
+#: six spellings, and refusing one taught the map to use the rest.
+#:
+#: The name form is anchored to a whole code span, which is how this file
+#: writes a citation and is what tells one from content: `a.yaml:2` inside
+#: `assert "a.yaml:2" in message` is the message a test asserts on, not a
+#: citation of anything, and the same distinction is why CITED_FILE reads `py`
+#: and `mjs` alone.
+#:
+#: "at 412" keeps its preceding backtick in a LOOKBEHIND rather than in the
+#: match. A converter rewriting what this matches ate that backtick and left
+#: B-079 with an unbalanced code span, so what the caller is handed is the
+#: number and never the quoted construct's own delimiter.
 CITED_LINE = re.compile(
     r"(?:\.(?:py|mjs):\d+(?:-\d+)?)"
-    r"|(?:`:[1-9]\d*(?:-\d+)?`)"
+    rf"|(?:`:{_LINES}`)"
+    rf"|(?:`[A-Za-z_][A-Za-z0-9_.]*:{_LINES}`)"
     r"|(?:\blines?\s+\d+(?:\s*-\s*\d+)?\b)"
-    r"|(?:`\s+at\s+\d+\b)"
+    r"|(?:(?<=`)\s+at\s+\d+\b)"
 )
 
 #: A function cited by name, which is what a row says instead of a line number.
