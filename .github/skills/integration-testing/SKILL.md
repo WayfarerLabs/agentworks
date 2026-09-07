@@ -221,6 +221,22 @@ highest-yield test that platform will ever get. Budget for it failing, and prove
 changing one thing and re-running rather than reasoning from the error text, which on an untested
 path is itself untested and often names the wrong cause.
 
+### Cover every supported major version of a managed system
+
+Where a platform declares support for more than one major version of the system it manages, each
+supported major is its own bed and each needs exercising. One bed is not evidence about the other,
+and testing whichever bed happens to be warm is how a version-specific defect reaches an operator
+running the version nobody drove.
+
+This matters most when the code itself forks on version. A version check that selects different
+privileges, endpoints, or payload shapes is a branch, and a branch tested on one side only is half
+tested; the untested side is exactly where the drift the check exists to absorb will surface. The
+same applies to normalization written for an older release: confirm on the live system that it is
+still needed and that what it deliberately leaves alone genuinely does not need it.
+
+Record which majors a result covers. A pass that does not say which version produced it invites the
+reader to assume it covers all of them.
+
 ### A bed's toolchain is part of its result
 
 A bed missing an external binary manufactures failures that look exactly like product defects.
