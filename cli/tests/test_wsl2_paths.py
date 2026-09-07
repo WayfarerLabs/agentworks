@@ -16,6 +16,7 @@ import pytest
 from agentworks.capabilities.vm_platform import wsl2
 
 
+@pytest.mark.windows
 def test_local_app_data_resolves_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LOCALAPPDATA", r"C:\Users\test\AppData\Local")
     assert wsl2._local_app_data() == Path(r"C:\Users\test\AppData\Local")
@@ -27,6 +28,7 @@ def test_local_app_data_raises_when_missing(monkeypatch: pytest.MonkeyPatch) -> 
         wsl2._local_app_data()
 
 
+@pytest.mark.windows
 def test_wsl_base_path_is_under_local_app_data(monkeypatch: pytest.MonkeyPatch) -> None:
     # Build the expected value with the same Path semantics as the
     # implementation so the assertion is portable: on POSIX (CI) the
@@ -38,6 +40,7 @@ def test_wsl_base_path_is_under_local_app_data(monkeypatch: pytest.MonkeyPatch) 
     assert wsl2._wsl_base_path() == expected
 
 
+@pytest.mark.windows
 def test_cache_dir_is_under_local_app_data(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LOCALAPPDATA", r"C:\Users\test\AppData\Local")
     expected = Path(r"C:\Users\test\AppData\Local") / "agentworks" / "cache"

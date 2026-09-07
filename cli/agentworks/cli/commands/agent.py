@@ -11,6 +11,7 @@ from agentworks.cli._helpers import (
     get_db,
     ordinary_tty_interaction_policy,
     parse_csv_filter,
+    parse_csv_sort,
     prompt_vm,
 )
 from agentworks.machine_output import OutputFormat
@@ -60,6 +61,10 @@ def agent_create(
 @agent_app.command("list")
 def agent_list(
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,
+    sort: Annotated[
+        str | None,
+        typer.Option("--sort", help="Sort by comma-separated keys: alpha, creation, vm. Default: alpha."),
+    ] = None,
     names_only: Annotated[
         bool,
         typer.Option(
@@ -84,17 +89,25 @@ def agent_list(
     from agentworks.agents.manager import agent_listing, list_agents, render_agent_listing
 
     if names_only:
-        list_agents(get_db(), vm_name=parse_csv_filter(vm), names_only=True)
+        list_agents(
+            get_db(),
+            vm_name=parse_csv_filter(vm),
+            names_only=True,
+            sort_keys=parse_csv_sort(sort),
+        )
         return
 
-    listing = agent_listing(get_db(), vm_name=parse_csv_filter(vm))
+    listing = agent_listing(
+        get_db(),
+        vm_name=parse_csv_filter(vm),
+        sort_keys=parse_csv_sort(sort),
+    )
     if output_format is OutputFormat.JSON:
-        from click import get_binary_stream
-
         from agentworks.agents.manager.inspect import agent_listing_data
-        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
 
-        write_json_envelope(MachineOutputCommand.AGENT_LIST, agent_listing_data(listing), get_binary_stream("stdout"))
+        write_json_stdout(MachineOutputCommand.AGENT_LIST, agent_listing_data(listing))
         return
     render_agent_listing(listing, names_only=names_only)
 
@@ -113,18 +126,16 @@ def agent_describe(
 
     config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
     if output_format is OutputFormat.JSON:
-        from click import get_binary_stream
-
         from agentworks import output
         from agentworks.agents.manager.inspect import agent_description_data
-        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
 
         with output.suppress_presentation():
             description = agent_description(get_db(), config, name=name)
-        write_json_envelope(
+        write_json_stdout(
             MachineOutputCommand.AGENT_DESCRIBE,
             agent_description_data(description),
-            get_binary_stream("stdout"),
         )
         return
     description = agent_description(get_db(), config, name=name)

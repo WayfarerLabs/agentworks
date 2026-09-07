@@ -173,6 +173,10 @@ three lists for live observation. Their describe commands include the same non-a
 status by default. See [Runnable status inspection](../docs/guides/runnable-status.md) for the
 resource-specific states, time bounds, and failure behavior.
 
+List commands default to alphabetical order. Use `--sort KEY[,KEY...]` for the additional
+command-specific orderings documented in the
+[list-ordering reference](command-reference.md#list-ordering).
+
 ## Configuration
 
 Configuration splits into two surfaces:

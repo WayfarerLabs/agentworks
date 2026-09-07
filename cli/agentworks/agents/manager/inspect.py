@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, cast
 
 from agentworks import output
 from agentworks.errors import NotFoundError
+from agentworks.list_sorting import nullable_sort_value, sort_rows
 from agentworks.name_filters import validate_name_filters
 
 from ._common import MAX_AGENT_NAME_LENGTH, MAX_GRANTS_DISPLAY
@@ -133,6 +134,7 @@ def agent_listing(
     db: Database,
     *,
     vm_name: str | list[str] | None = None,
+    sort_keys: tuple[str, ...] | None = None,
 ) -> AgentListing:
     """Collect ordered agent list facts without presentation."""
     validate_name_filters(db, vm_name=vm_name)
@@ -145,8 +147,26 @@ def agent_listing(
                 grant_all=agent.grant_all,
                 grants=_grant_facts(db, agent.name),
             )
-            for agent in db.list_agents(vm_name=vm_name)
+            for agent in _sorted_agent_rows(db, vm_name=vm_name, sort_keys=sort_keys)
         )
+    )
+
+
+def _sorted_agent_rows(
+    db: Database,
+    *,
+    vm_name: str | list[str] | None,
+    sort_keys: tuple[str, ...] | None,
+) -> tuple[AgentRow, ...]:
+    return sort_rows(
+        db.list_agents(vm_name=vm_name),
+        sort_keys=sort_keys,
+        key_functions={
+            "alpha": lambda agent: (agent.name,),
+            "creation": lambda agent: nullable_sort_value(agent.created_at),
+            "vm": lambda agent: nullable_sort_value(agent.vm_name),
+        },
+        entity_kind="agent",
     )
 
 
@@ -207,6 +227,7 @@ def list_agents(
     *,
     vm_name: str | list[str] | None = None,
     names_only: bool = False,
+    sort_keys: tuple[str, ...] | None = None,
 ) -> None:
     """List agents.
 
@@ -218,10 +239,10 @@ def list_agents(
     """
     if names_only:
         validate_name_filters(db, vm_name=vm_name)
-        for agent in db.list_agents(vm_name=vm_name):
+        for agent in _sorted_agent_rows(db, vm_name=vm_name, sort_keys=sort_keys):
             output.info(agent.name)
         return
-    render_agent_listing(agent_listing(db, vm_name=vm_name))
+    render_agent_listing(agent_listing(db, vm_name=vm_name, sort_keys=sort_keys))
 
 
 def agent_description(

@@ -596,3 +596,26 @@ def test_ensure_cooked_input_is_a_noop_off_windows(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr("agentworks.terminal._kernel32", lambda: touched.append("k32"))
     ensure_cooked_input()
     assert touched == []
+
+
+@pytest.mark.windows
+def test_native_terminal_guard_preserves_redirected_streams() -> None:
+    """Real pipe handles exercise the native API without changing the runner's console."""
+    import subprocess
+    import sys
+
+    script = """
+import sys
+from agentworks.terminal import _kernel32, ensure_cooked_input, guarded_terminal
+if sys.platform == "win32":
+    assert _kernel32() is not None
+with guarded_terminal():
+    ensure_cooked_input()
+    sys.stdout.buffer.write(sys.stdin.buffer.read())
+"""
+    payload = b"pipe data\nsecond line\r\n"
+    result = subprocess.run([sys.executable, "-c", script], input=payload, capture_output=True, check=False, timeout=30)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == payload
+    assert result.stderr == b""

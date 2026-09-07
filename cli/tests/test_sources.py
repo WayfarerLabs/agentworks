@@ -64,6 +64,7 @@ def test_parse_scp_style_git_source_with_subpath() -> None:
     assert ref == SourceRef("git", "git@example.com:infra/locks.git", "nested/mise.lock", "")
 
 
+@pytest.mark.windows
 def test_fetch_file_copies_local_source(tmp_path) -> None:
     source = tmp_path / "mise.lock"
     source.write_text("lock")

@@ -16,6 +16,7 @@ import pytest
 import agentworks.path_rendering as path_rendering
 
 
+@pytest.mark.windows
 def test_format_host_path_uses_tilde_for_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     rendered = path_rendering.format_host_path(tmp_path / "agentworks" / "config.toml")
@@ -24,6 +25,7 @@ def test_format_host_path_uses_tilde_for_home(tmp_path: Path, monkeypatch: pytes
     assert rendered == str(Path("~") / "agentworks" / "config.toml")
 
 
+@pytest.mark.windows
 def test_format_host_path_uses_tilde_for_home_itself(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     assert path_rendering.format_host_path(tmp_path) == "~"
@@ -42,6 +44,7 @@ def test_format_host_path_uses_windows_separators_for_home(monkeypatch: pytest.M
     assert rendered == r"~\agentworks\config.toml"
 
 
+@pytest.mark.windows
 def test_format_host_path_falls_back_to_absolute_outside_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
     # An absolute path outside $HOME renders as the bare absolute path. Build

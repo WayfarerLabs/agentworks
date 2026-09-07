@@ -28,6 +28,7 @@ from agentworks.errors import (
     StateError,
     UserAbort,
 )
+from agentworks.list_sorting import nullable_sort_value, sort_rows
 from agentworks.name_filters import validate_name_filters
 from agentworks.resources.access import named_console_template
 from agentworks.runtime_time import derive_uptime_seconds, format_uptime
@@ -444,6 +445,7 @@ def console_listing(
     workspace_name: str | list[str] | None = None,
     agent_name: str | list[str] | None = None,
     include_status: bool = False,
+    sort_keys: tuple[str, ...] | None = None,
 ) -> ConsoleListing:
     """Collect ordered console list facts, optionally filtered by DB relationships.
 
@@ -460,10 +462,19 @@ def console_listing(
         workspace_name=workspace_name,
         agent_name=agent_name,
     )
-    consoles = db.list_consoles_with_counts(
-        vm_name=vm_name,
-        workspace_name=workspace_name,
-        agent_name=agent_name,
+    consoles = sort_rows(
+        db.list_consoles_with_counts(
+            vm_name=vm_name,
+            workspace_name=workspace_name,
+            agent_name=agent_name,
+        ),
+        sort_keys=sort_keys,
+        key_functions={
+            "alpha": lambda item: (item[0].name,),
+            "creation": lambda item: nullable_sort_value(item[0].created_at),
+            "vm": lambda item: nullable_sort_value(item[0].vm_name),
+        },
+        entity_kind="console",
     )
     statuses: dict[str, ConsoleStatus] = {}
     if include_status and consoles:
@@ -611,6 +622,7 @@ def list_consoles(
     agent_name: str | list[str] | None = None,
     names_only: bool = False,
     include_status: bool = False,
+    sort_keys: tuple[str, ...] | None = None,
 ) -> None:
     """Print the legacy console list presentation."""
     render_console_listing(
@@ -621,6 +633,7 @@ def list_consoles(
             workspace_name=workspace_name,
             agent_name=agent_name,
             include_status=include_status,
+            sort_keys=sort_keys,
         ),
         names_only=names_only,
         include_status=include_status,
