@@ -642,18 +642,23 @@ later permission to use the skill.
 
 Normalize hint/rule text and `SKILL.md` to UTF-8 with Unix LF line endings before validation,
 hashing, and delivery; convert CRLF and lone CR, without reflowing prose or formatting code. For
-supporting members, the default text classification is valid UTF-8 without NUL bytes. Normalize
-those members in the captured copy; preserve other members as opaque bytes. A skill entry may list
-exact contained member paths in `preserve_bytes` for byte-sensitive fixtures or ambiguous assets,
-overriding that classification. `SKILL.md` cannot be exempted. This explicit escape avoids treating
-every decodable asset as text by necessity. Sources themselves are never rewritten. LF normalization
-is this framework's policy, not a requirement claimed from Agent Skills.
+supporting members, normalize only recognized textual suffixes whose contents are valid UTF-8
+without NUL: `.md`, `.txt`, `.py`, `.sh`, `.bash`, `.zsh`, `.ps1`, `.js`, `.mjs`, `.cjs`, `.ts`,
+`.json`, `.jsonc`, `.yaml`, `.yml`, and `.toml`. This is a closed internal classification rule, not
+a universal binary detector. Other members, including unfamiliar text formats and scripts without a
+filename extension, remain opaque bytes even when they decode as UTF-8. An ASCII-only PDF must
+therefore remain unchanged; successful decoding alone does not authorize normalization. A skill
+entry may list exact contained member paths in `preserve_bytes` for byte-sensitive fixtures within
+the recognized text formats, overriding normalization. `SKILL.md` cannot be exempted. Sources
+themselves are never rewritten. LF normalization is this framework's policy, not a requirement
+claimed from Agent Skills.
 
 Compute reconciliation hashes from the normalized package, its relative paths, and executable-file
-intent, not source timestamps or incidental archive metadata. Thus CRLF-versus-LF source changes
-alone cause no native rewrite, while meaningful content or execution changes do. The versioned
-snapshot codec must carry both text and opaque bytes without loss, using existing instance state;
-the LLD chooses that internal carrier. This is not a new public archive format or artifact store.
+intent, not source timestamps or incidental archive metadata. Thus CRLF-versus-LF changes to
+normalized text alone cause no native rewrite, while meaningful content or execution changes do. The
+versioned snapshot codec must carry both text and opaque bytes without loss, using existing instance
+state; the LLD chooses that internal carrier. This is not a new public archive format or artifact
+store.
 
 [The skills CLI](https://github.com/vercel-labs/skills) demonstrates local and Git acquisition into
 ordinary skill directories.
@@ -1084,12 +1089,13 @@ validation.
 R6 source acceptance covers inline text, local files, and complete Agent Skills directories at all
 five scopes. Prove template inheritance, atomic entry replacement, local null suppression, and
 cross-scope same-name identity without hiding ancestor artifacts. Exercise CRLF/LF equivalence, lone
-CR normalization, unchanged source files, binary and `preserve_bytes` fidelity, executable members,
-invalid metadata, symlinks/traversal/collisions, bounded capture, and source mutation or absence
-before harness writes. Reinit detects meaningful source changes; downstream session start uses
-ancestor snapshots without rereading them, while its own sources follow the documented start/restart
-acquisition rule. Removing a declaration feeds the existing cleanup path. These are plain data
-fixtures and injected failures, not test feature capabilities or new external services.
+CR normalization, unchanged source files, binary (including ASCII-only PDF), unknown-format and
+`preserve_bytes` fidelity, executable members, invalid metadata, symlinks/traversal/collisions,
+bounded capture, and source mutation or absence before harness writes. Reinit detects meaningful
+source changes; downstream session start uses ancestor snapshots without rereading them, while its
+own sources follow the documented start/restart acquisition rule. Removing a declaration feeds the
+existing cleanup path. These are plain data fixtures and injected failures, not test feature
+capabilities or new external services.
 
 R9 cleanup acceptance starts from recorded successful provisioning, then removes a producer
 artifact, one plugin entry, and a whole integration attachment through their owning lifecycles.

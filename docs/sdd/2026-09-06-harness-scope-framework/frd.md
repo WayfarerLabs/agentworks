@@ -147,13 +147,15 @@ for shell. Converting a skill into prompt text is not equivalent handling.
 
 A declarative `artifacts` block alongside `env` is required now and supplies manually declared
 hints, rules, and skills through core. Artifact acquisition must preserve rule applicability and
-complete skill packages, including relative supporting-file structure. Text content is normalized to
-Unix LF line endings; binary files remain unchanged. Capture stable contents for delivery and
-idempotent reconciliation so downstream consumption does not silently reread a changing source.
-Concrete block schemas and source/package forms are settled in the HLA within these requirements and
-R12. Future features and automatic core hint emission may use the same artifact currency without
-rebuilding its delivery protocol; neither producer is implemented here. The runtime `hint` artifact
-kind is unrelated to the onboarding guide's agent-hint content species.
+complete skill packages, including relative supporting-file structure. Hint/rule text, `SKILL.md`,
+and recognized textual supporting files normalize to Unix LF line endings. Binary and unrecognized
+supporting formats retain their bytes; decoding successfully as text must not alone authorize
+rewriting an asset. Capture stable contents for delivery and idempotent reconciliation so downstream
+consumption does not silently reread a changing source. Concrete block schemas and source/package
+forms are settled in the HLA within these requirements and R12. Future features and automatic core
+hint emission may use the same artifact currency without rebuilding its delivery protocol; neither
+producer is implemented here. The runtime `hint` artifact kind is unrelated to the onboarding
+guide's agent-hint content species.
 
 **R7. Integrations defer what they cannot handle; core rejects final session deferral.** Native
 placement at the defining scope is the ordinary case. Each facet invocation receives local artifacts
