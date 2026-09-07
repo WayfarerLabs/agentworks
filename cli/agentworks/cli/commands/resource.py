@@ -143,7 +143,8 @@ def resource_list(
             output.info(f"{row.kind}/{row.name}")
         return
     if output_format is OutputFormat.JSON:
-        from agentworks.machine_output import MachineOutputCommand, write_json_stdout
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
 
         write_json_stdout(
             MachineOutputCommand.RESOURCE_LIST,
@@ -194,7 +195,8 @@ def resource_show(
     )
 
     if output_format is OutputFormat.JSON:
-        from agentworks.machine_output import MachineOutputCommand, write_json_stdout
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
 
         write_json_stdout(
             MachineOutputCommand.RESOURCE_SHOW,
@@ -256,7 +258,8 @@ def resource_kinds(
     )
     rows = list_kinds(registry)
     if output_format is OutputFormat.JSON:
-        from agentworks.machine_output import MachineOutputCommand, write_json_stdout
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
 
         write_json_stdout(MachineOutputCommand.RESOURCE_KINDS, resource_kinds_data(rows))
         return

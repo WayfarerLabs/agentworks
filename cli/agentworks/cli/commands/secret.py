@@ -69,7 +69,8 @@ def secret_list(
             output.info(row.name)
         return
     if output_format is OutputFormat.JSON:
-        from agentworks.machine_output import MachineOutputCommand, write_json_stdout
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
 
         write_json_stdout(MachineOutputCommand.SECRET_LIST, secret_table_data(table))
         return
@@ -124,7 +125,8 @@ def secret_describe(
     tty_access = ordinary_tty_interaction_access()
     desc = describe_secret(config, registry, name, impact=impact, tty_access=tty_access)
     if output_format is OutputFormat.JSON:
-        from agentworks.machine_output import MachineOutputCommand, write_json_stdout
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
 
         write_json_stdout(
             MachineOutputCommand.SECRET_DESCRIBE,

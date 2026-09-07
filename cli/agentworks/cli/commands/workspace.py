@@ -78,7 +78,8 @@ def workspace_list(
 
     listing = workspace_listing(get_db(), vm_name=parse_csv_filter(vm))
     if output_format is OutputFormat.JSON:
-        from agentworks.machine_output import MachineOutputCommand, write_json_stdout
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
         from agentworks.workspaces.manager.create import workspace_listing_data
 
         write_json_stdout(
@@ -104,7 +105,8 @@ def workspace_describe(
     config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
     if output_format is OutputFormat.JSON:
         from agentworks import output
-        from agentworks.machine_output import MachineOutputCommand, write_json_stdout
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
         from agentworks.workspaces.manager.create import workspace_description_data
 
         with output.suppress_presentation():

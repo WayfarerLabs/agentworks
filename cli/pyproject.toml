@@ -17,7 +17,7 @@ classifiers = [
 dependencies = [
     "typer>=0.24.1",
     # click is a direct dep because agentworks/cli imports it for choice
-    # types, binary streams, output and prompt handling, and exceptions.
+    # types, output and prompt handling, and exceptions.
     # Older typer pulled click in transitively; typer 0.26 dropped that,
     # so declaring it here keeps our imports valid.
     "click>=8.3",

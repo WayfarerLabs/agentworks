@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import math
-import sys
 import unicodedata
 from enum import StrEnum
 from pathlib import Path
@@ -120,24 +119,6 @@ def write_json_envelope(command: MachineOutputCommand, data: JsonObject, stream:
     ``write`` call is not enough.
     """
     write_all(encode_json_envelope(command, data), stream)
-
-
-def write_json_stdout(command: MachineOutputCommand, data: JsonObject) -> None:
-    """Write one JSON v1 document to stdout's binary stream.
-
-    Python's ordinary stdout and Click's test stdout are text wrappers around
-    binary streams. A caller may also install a binary stdout directly, so the
-    fallback retains that supported shape without depending on Click's private
-    stream-discovery API.
-    """
-    stream = cast("BinaryIO | None", getattr(sys.stdout, "buffer", None))
-    if stream is None:
-        stream = cast("BinaryIO", sys.stdout)
-        try:
-            stream.write(b"")
-        except Exception as error:
-            raise RuntimeError("Was not able to determine binary stream for sys.stdout.") from error
-    write_json_envelope(command, data, stream)
 
 
 def write_all(payload: bytes, stream: BinaryIO) -> None:

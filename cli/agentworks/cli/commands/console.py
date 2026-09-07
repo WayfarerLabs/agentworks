@@ -149,7 +149,8 @@ def console_list(
         config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
     if output_format is OutputFormat.JSON:
         from agentworks import output
-        from agentworks.machine_output import MachineOutputCommand, write_json_stdout
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
         from agentworks.sessions.multi_console.attach import console_listing_data
 
         with output.suppress_presentation():
@@ -192,7 +193,8 @@ def console_describe(
     config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
     if output_format is OutputFormat.JSON:
         from agentworks import output
-        from agentworks.machine_output import MachineOutputCommand, write_json_stdout
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
         from agentworks.sessions.multi_console.attach import console_description_data
 
         with output.suppress_presentation():

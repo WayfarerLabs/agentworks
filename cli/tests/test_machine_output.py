@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import json
-import sys
 import unicodedata
 from pathlib import Path
 from typing import cast
@@ -20,7 +19,6 @@ from agentworks.machine_output import (
     project_origin,
     project_references,
     write_json_envelope,
-    write_json_stdout,
 )
 from agentworks.origin import Origin
 from agentworks.resources.kind import InstanceRef
@@ -151,25 +149,6 @@ def test_writer_retries_short_writes_until_the_document_is_complete() -> None:
 
     assert bytes(stream.document) == expected
     assert stream.write_calls > 1
-
-
-def test_stdout_writer_accepts_a_direct_binary_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
-    stream = io.BytesIO()
-    monkeypatch.setattr(sys, "stdout", stream)
-
-    write_json_stdout(MachineOutputCommand.DOCTOR, {"count": 3})
-
-    assert stream.getvalue() == encode_json_envelope(MachineOutputCommand.DOCTOR, {"count": 3})
-
-
-def test_stdout_writer_rejects_text_stdout_without_a_binary_stream(monkeypatch: pytest.MonkeyPatch) -> None:
-    stream = io.StringIO()
-    monkeypatch.setattr(sys, "stdout", stream)
-
-    with pytest.raises(RuntimeError):
-        write_json_stdout(MachineOutputCommand.DOCTOR, {"count": 3})
-
-    assert stream.getvalue() == ""
 
 
 @pytest.mark.parametrize("build_stream", [_PartialThenZeroStream, _NoneWriteStream])

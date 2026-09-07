@@ -90,7 +90,8 @@ def agent_list(
     listing = agent_listing(get_db(), vm_name=parse_csv_filter(vm))
     if output_format is OutputFormat.JSON:
         from agentworks.agents.manager.inspect import agent_listing_data
-        from agentworks.machine_output import MachineOutputCommand, write_json_stdout
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
 
         write_json_stdout(MachineOutputCommand.AGENT_LIST, agent_listing_data(listing))
         return
@@ -113,7 +114,8 @@ def agent_describe(
     if output_format is OutputFormat.JSON:
         from agentworks import output
         from agentworks.agents.manager.inspect import agent_description_data
-        from agentworks.machine_output import MachineOutputCommand, write_json_stdout
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
 
         with output.suppress_presentation():
             description = agent_description(get_db(), config, name=name)

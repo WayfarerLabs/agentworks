@@ -94,7 +94,8 @@ def show(
     )
 
     if output_format is OutputFormat.JSON:
-        from agentworks.machine_output import MachineOutputCommand, write_json_stdout
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
 
         write_json_stdout(
             MachineOutputCommand.GRAPH_SHOW,

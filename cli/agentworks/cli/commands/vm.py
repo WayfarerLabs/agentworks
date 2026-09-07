@@ -119,7 +119,8 @@ def vm_list(
         interaction = ordinary_tty_interaction_policy()
     if output_format is OutputFormat.JSON:
         from agentworks import output
-        from agentworks.machine_output import MachineOutputCommand, write_json_stdout
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
         from agentworks.vms.manager.inspect import vm_listing_data
 
         with output.suppress_presentation():
@@ -184,7 +185,8 @@ def vm_describe(
     config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
     if output_format is OutputFormat.JSON:
         from agentworks import output
-        from agentworks.machine_output import MachineOutputCommand, write_json_stdout
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
         from agentworks.vms.manager.inspect import vm_description_data
 
         with output.suppress_presentation():
