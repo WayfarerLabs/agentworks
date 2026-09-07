@@ -544,13 +544,9 @@ Look for:
 Linux CI runs the full non-integration suite; Windows selects `pytest.mark.windows`. This marker
 selects tests, not their allowed operating systems. See `CONTRIBUTING.md` for usage.
 
-Check that host-sensitive changes retain marked coverage for paths, file cleanup, subprocess I/O and
-lifetime, SQLite locking and recovery, PowerShell, terminals, and installed CLI behavior. Include
-implicit host dependencies; mocked Windows branches alone cannot prove native behavior.
-
-Use the smallest coherent test, class, or module scope. Flag missing markers and redundant selection
-of pure logic, mocked calls, or Linux guest scripts already covered on Linux. Preserve selection
-when tests move or split.
+For host-sensitive changes, flag missing or redundant selection. Mark the smallest coherent scope,
+require native evidence when risk depends on the host, and preserve selection when tests move or
+split. Mocked calls and pure logic belong to Linux coverage.
 
 ### 14. SDD process execution
 

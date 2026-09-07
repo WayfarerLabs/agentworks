@@ -90,7 +90,6 @@ def test_run_check_false_returns_result() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.windows
 def test_interactive_empty_command_opens_login_shell() -> None:
     t = WSL2Transport(distro_name="my-distro", user="agentworks")
     with patch("agentworks.transports.wsl2.subprocess.call") as mock_call:
@@ -119,7 +118,6 @@ def test_interactive_with_command_wraps_in_bash_lc() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.windows
 def test_copy_to_pipes_through_wsl_cat(tmp_path: Path) -> None:
     """``wsl ... bash -c 'cat > /path'`` with the file content piped on
     stdin -- avoids Windows path translation."""
@@ -137,7 +135,6 @@ def test_copy_to_pipes_through_wsl_cat(tmp_path: Path) -> None:
         assert mock_run.call_args.kwargs["input"] == b"hello\n"
 
 
-@pytest.mark.windows
 def test_copy_from_pipes_through_wsl_cat(tmp_path: Path) -> None:
     """``copy_from`` runs ``cat <remote>`` and writes the captured bytes."""
     dst = tmp_path / "data.bin"
@@ -151,7 +148,6 @@ def test_copy_from_pipes_through_wsl_cat(tmp_path: Path) -> None:
         assert dst.read_bytes() == b"file-contents"
 
 
-@pytest.mark.windows
 def test_copy_to_raises_on_failure(tmp_path: Path) -> None:
     src = tmp_path / "x"
     src.write_bytes(b"x")

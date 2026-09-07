@@ -86,6 +86,9 @@ From `cli/`, the default pytest configuration uses all available workers:
 uv run pytest tests/ -m 'not integration'
 ```
 
+A full Windows run needs Git for Windows' `bin` and `usr\bin` directories on `PATH`; some tests
+invoke POSIX tools directly.
+
 Pass `-n 0` for a deliberately single-process debugging run. Tests that genuinely share an external
 resource must use a named `xdist_group` with a one-line comment explaining the constraint; do not
 serialize tests preemptively.

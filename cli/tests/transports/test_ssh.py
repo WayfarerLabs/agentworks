@@ -75,7 +75,6 @@ def test_run_env_coalesces_into_one_set_env_arg() -> None:
         assert 'B="two words"' in set_env_args[0]
 
 
-@pytest.mark.windows
 def test_run_default_closes_stdin_with_dash_n_and_no_tt() -> None:
     """Non-interactive ``run()`` allocates no TTY and closes stdin with
     ssh's own ``-n``: a stdin-reading remote command then cannot hang and
@@ -90,7 +89,6 @@ def test_run_default_closes_stdin_with_dash_n_and_no_tt() -> None:
         assert "-tt" not in argv
 
 
-@pytest.mark.windows
 def test_run_tty_true_forces_tt_and_omits_dash_n() -> None:
     """An explicit ``run(tty=True)`` allocates a pty with ``-tt``. ``-n``
     and ``-tt`` are mutually exclusive: ``-tt`` already attaches stdin to
@@ -117,7 +115,6 @@ def test_run_tty_false_still_closes_stdin_with_dash_n() -> None:
         assert "-T" in argv
 
 
-@pytest.mark.windows
 def test_run_default_forces_no_tty_over_operator_ssh_config() -> None:
     """A captured programmatic call never wants a pty, so the default forces
     ``-T`` rather than leaving pty allocation to the operator's ssh config: an

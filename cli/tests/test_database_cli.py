@@ -118,6 +118,7 @@ def test_database_restore_yes_uses_stderr_and_creates_no_implicit_backup(
     assert {path.name for path in backup_directory(live).glob("*.db")} == before
 
 
+@pytest.mark.windows
 def test_database_restore_decline_prompts_on_stderr_and_changes_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -167,6 +168,7 @@ def test_database_restore_non_interactive_without_yes_refuses_cleanly(
     assert not live.exists()
 
 
+@pytest.mark.windows
 @pytest.mark.parametrize("machine_output", [False, True])
 def test_interactive_migration_notice_and_prompt_keep_stdout_machine_pure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, machine_output: bool
