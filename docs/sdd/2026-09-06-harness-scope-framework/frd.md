@@ -1,6 +1,6 @@
 # Harness Scope Framework: Functional Requirements
 
-- Status: Active, architecture under review
+- Status: Active, architecture approved; implementation authorized
 - Date: 2026-09-06
 - Saga: `docs/sdd/2026-08-04-next-steps/` (wave 4)
 - Governing inputs: `scope-participation-contract.md` (the settled design), `target-state.md`

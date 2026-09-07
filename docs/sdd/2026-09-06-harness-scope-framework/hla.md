@@ -1,6 +1,6 @@
 # Harness Scope Framework: High-Level Architecture
 
-- Status: Proposed architecture for draft review; no merge or implementation intent yet
+- Status: Architecture approved by the operator; implementation authorized
 - Date: 2026-09-06
 - Requirements: [FRD](frd.md), R1 through R16
 - Saga: [next-steps](../2026-08-04-next-steps/target-state.md), wave 4
@@ -494,56 +494,13 @@ secret-derived hashes; resolve declared secret references afresh when needed.
 
 ## Future artifact work and Rulesync reuse
 
-Artifacts belong to a separate SDD, the intended next effort after this framework, rather than a
-later phase of this SDD. Complete and validate facets and native setup before settling the artifact
-architecture. This is a foundation for the broader artifact-capable integration model, whose
-completion requires the successor. The saga owns recording that sequence and establishing the next
-charter. The successor can extend these facet interfaces; the current API is not claimed to be the
-final artifact-capable API.
-
-That effort must consider hints, rules, complete skills, and subagent definitions, with limited
-hooks and MCP configuration also in view. Subagents carry their own invocation, model, and
-tool-policy semantics; they cannot be assumed to be interchangeable with skills or prompt text.
-
-Retain these design conclusions as context: core and future features can emit env and artifacts
-before harness integrations; artifacts keep their originating scope, resource, and producer; native
-placement ordinarily belongs at the defining scope; an integration decides placement and deferral;
-and a session must not silently lose unhandled input. Workstation, Git, and possible packaged
-sources should meet at one normalized artifact representation before propagation. Hints remain
-distinct from rules and stronger launch instructions. These are inputs to the follow-on design, not
-a frozen wire format, persisted schema, ingestion policy, or placeholder API in the facets
-implementation.
-
-There is no artifact or native-setup deferral protocol in this SDD. The operator's direction for the
-successor is integration-owned routing: a VM facet can apply an item or defer it toward user,
-workspace, or session, including directly to session without visiting either intermediate facet. The
-integration knows its native placement requirements; core delivers the result without choosing a
-harness-specific route. Routing names a destination facet, not an enumeration of future resource
-instances. It cannot depend on whether descendants currently exist or have that integration enabled.
-
-Each resource's facet computes from its own applicable inputs and native conditions, without
-consulting downstream resources. Its result is reusable by independently created consumers: VM setup
-does not run again for every new user or workspace, and user setup does not run again for every
-session. Recalculation remains part of the owning lifecycle when its inputs change; this is not a
-once-per-lifetime cache. In the future flow, each user invocation processes its applicable VM
-deferrals without knowledge of workspaces or sessions. A session combines VM items routed directly
-to session with applicable results from its user and workspace, then accounts for unresolved input.
-The operator reopened the earlier rule that every final deferral must error. Failure versus warning
-or another explicit disposition remains a successor decision; silent loss is not a disposition.
-
-The successor must specify how core preserves pending input when a routed intermediate integration
-is not selected, without invoking it implicitly or asking an ancestor to reroute. It must also
-distinguish origin from destination-specific applicability when paths through the diamond meet.
-Sending an item down both branches and deduplicating its ID at session start would not alone prevent
-duplicate native effects. Treating handling for Alice or workspace X as globally consumed would
-wrongly hide obligations for Bob or workspace Y. The routing representation, skipped-facet policy,
-branch reconciliation, and selection/diagnostic rules remain future design work.
-
-The current resource-bound setup invocations and owning lifecycles preserve this independence. Do
-not add downstream discovery or session-dependent ancestor setup while implementing them. The
-workspace facet earns its current place through native project settings mappings; keeping that
-surface does not require inherited VM artifacts to flow through it. No placeholder routing API or
-artifact state is introduced in this framework.
+The FRD's [future artifact direction](frd.md#future-artifact-context-not-this-efforts-contract) is
+the normative home for the intended successor SDD, artifact kinds, integration-owned routing,
+resource independence, and unresolved delivery policies. The successor may extend these interfaces;
+this framework adds no placeholder artifact API or state. Its resource-bound invocations and owning
+lifecycles must preserve that independence, without downstream discovery or session-driven ancestor
+setup. The workspace facet serves native project settings here; it does not impose a future artifact
+route.
 
 The operator's leading follow-on proposal is a declarative `artifact-bundle` resource that owns
 ingestion and normalized contents. Other resources would consume bundles by ID rather than each
@@ -735,11 +692,11 @@ option. Report the missing selection and these supported remedies. Integration s
 not authoritative selection and must not be used to guess one. The LLD must cover finalize/reference
 output, dictionary resolution, and existing-session restart in this sweep.
 
-This review PR contains only the authorized FRD amendment and HLA. The next artifacts must specify
-facet binding and the schema-host walk, invocation/runner details, typed applied-state codecs,
-locking and interruption handling, native plugin ownership and settings parsing, and config/overlay
-migration before implementation begins. Artifact APIs, content persistence, shell artifact
-publication, and early session UUID delivery are outside that work.
+The approved design checkpoint contains the authorized FRD amendment and HLA. Implementation
+planning must specify facet binding and the schema-host walk, invocation/runner details, typed
+applied-state codecs, locking and interruption handling, native plugin ownership and settings
+parsing, and config/overlay migration before implementation begins. Artifact APIs, content
+persistence, shell artifact publication, and early session UUID delivery are outside that work.
 
 ## Validation and requirement coverage
 
