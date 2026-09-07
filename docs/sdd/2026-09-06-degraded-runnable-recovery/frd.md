@@ -100,6 +100,8 @@ writes.
 
 - An automatic database repair command or inferred ownership for orphan rows.
 - Making `database restore --force` bypass file-integrity, Agentworks-schema, or version checks.
+- Refusing or warning on `database backup` when the live database has broken relationships. Backup
+  remains an unconditional evidence-preservation primitive; restore owns the later import decision.
 - Treating a missing parent as proof that a guest runtime is stopped.
 - Making describe or lifecycle operations best-effort.
 - Changing VM inventory or VM status behavior, which already observes independent VM rows.
