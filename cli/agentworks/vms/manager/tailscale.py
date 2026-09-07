@@ -282,8 +282,8 @@ def _tailscale_logout(vm: VMRow, config: Config, platform: VMPlatform, ctx: RunC
     are composed polymorphically; ``ctx`` is the caller's op-start
     context, which that lifecycle's NSG calls read their credential from
     (an SP site authenticates as itself, no ambient fallback). Platforms
-    whose factory raises (Proxmox) are surfaced as a typed StateError,
-    which we catch and warn.
+    whose factory fails are surfaced through the transport error family,
+    which this best-effort cleanup catches and warns.
     """
     from agentworks.transports import native_transport
 

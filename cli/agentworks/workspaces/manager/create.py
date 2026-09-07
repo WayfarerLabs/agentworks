@@ -10,6 +10,7 @@ from agentworks import output
 from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
 from agentworks.db.projections import project_session_mode
 from agentworks.errors import AlreadyExistsError, NotFoundError
+from agentworks.list_sorting import nullable_sort_value, sort_rows
 from agentworks.name_filters import validate_name_filters
 from agentworks.naming import validate_name
 from agentworks.workspaces.manager._common import _guard_vm_status, _resolve_vm, _workspace_scope
@@ -414,6 +415,7 @@ def workspace_listing(
     db: Database,
     *,
     vm_name: str | list[str] | None = None,
+    sort_keys: tuple[str, ...] | None = None,
 ) -> WorkspaceListing:
     """Collect the ordered workspace list facts.
 
@@ -422,8 +424,18 @@ def workspace_listing(
 
     """
     validate_name_filters(db, vm_name=vm_name)
+    rows = (WorkspaceListRow.from_row(workspace) for workspace in db.list_workspaces(vm_name=vm_name))
     return WorkspaceListing(
-        workspaces=tuple(WorkspaceListRow.from_row(workspace) for workspace in db.list_workspaces(vm_name=vm_name))
+        workspaces=sort_rows(
+            rows,
+            sort_keys=sort_keys,
+            key_functions={
+                "alpha": lambda workspace: (workspace.name,),
+                "creation": lambda workspace: nullable_sort_value(workspace.created_at),
+                "vm": lambda workspace: nullable_sort_value(workspace.vm_name),
+            },
+            entity_kind="workspace",
+        )
     )
 
 
@@ -472,6 +484,10 @@ def list_workspaces(
     *,
     vm_name: str | list[str] | None = None,
     names_only: bool = False,
+    sort_keys: tuple[str, ...] | None = None,
 ) -> None:
     """List workspaces with the legacy human renderer."""
-    render_workspace_listing(workspace_listing(db, vm_name=vm_name), names_only=names_only)
+    render_workspace_listing(
+        workspace_listing(db, vm_name=vm_name, sort_keys=sort_keys),
+        names_only=names_only,
+    )

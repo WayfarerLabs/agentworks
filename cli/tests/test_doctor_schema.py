@@ -27,6 +27,7 @@ from agentworks.errors import StateError
 from agentworks.resources.live import LIVE_RESOURCE_KINDS
 from agentworks.ssh_identity import UnverifiableSSHIdentity, VerifiedSSHIdentity
 from agentworks.vms.applied_state import encode_ssh_identity
+from tests.conftest import windows_home_env
 
 _FINGERPRINT = f"SHA256:{'A' * 43}"
 _OTHER_FINGERPRINT = f"SHA256:{'E' * 43}"
@@ -39,7 +40,10 @@ def _installed_agw() -> Path:
 
 def _run_installed_doctor(home: Path, *, output: str) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
-    environment["HOME"] = str(home)
+    # Path.home() reads HOME on POSIX but USERPROFILE (and HOMEDRIVE/HOMEPATH)
+    # on Windows, so redirect all of them; otherwise the installed doctor would
+    # resolve the developer's real config db instead of this tmp one.
+    environment.update(windows_home_env(home))
     environment.pop("AGW_DEBUG", None)
     return subprocess.run(
         [str(_installed_agw()), "doctor", "--output", output],
@@ -454,6 +458,7 @@ def test_doctor_database_errors_remain_shared_actionable_facts(monkeypatch: pyte
     assert sites.checks[0].message == f"could not check the database: {marker}"
 
 
+@pytest.mark.windows
 def test_installed_doctor_reports_malformed_schema_in_human_and_json(tmp_path: Path) -> None:
     config_dir = tmp_path / ".config" / "agentworks"
     config_dir.mkdir(parents=True)

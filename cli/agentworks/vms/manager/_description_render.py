@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.db import VMStatus
+from agentworks.runtime_time import format_uptime
 
 if TYPE_CHECKING:
     from agentworks.vms.manager.inspect import VMDescription
@@ -28,6 +29,11 @@ def render_vm_description(description: VMDescription) -> None:
 
     output.info(f"Name:           {vm.name}")
     output.info(f"Created:        {vm.created_at}")
+    output.info(f"Last Started:   {description.last_started_at or 'unknown'}")
+    output.info(
+        f"Uptime:         "
+        f"{format_uptime(description.uptime_seconds, running=description.observed_status == VMStatus.RUNNING.value)}"
+    )
     output.info(f"Site:           {vm.site}")
     output.info(f"Platform:       {site_platform}")
     output.info(f"Backend:        {backend_label}")

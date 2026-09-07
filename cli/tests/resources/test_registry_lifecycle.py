@@ -29,8 +29,8 @@ def example_config(tmp_path: Path) -> Path:
         dedent(
             f"""
             [operator]
-            ssh_public_key = "{pub}"
-            ssh_private_key = "{priv}"
+            ssh_public_key = "{pub.as_posix()}"
+            ssh_private_key = "{priv.as_posix()}"
             """
         )
     )
@@ -69,8 +69,8 @@ def test_add_rejects_names_containing_slash(tmp_path: Path) -> None:
         dedent(
             f"""
             [operator]
-            ssh_public_key = "{pub}"
-            ssh_private_key = "{priv}"
+            ssh_public_key = "{pub.as_posix()}"
+            ssh_private_key = "{priv.as_posix()}"
             """
         )
     )

@@ -6,7 +6,7 @@ verify behavior. Lifts the patterns from ``tests/test_exec_target.py``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -15,10 +15,6 @@ from agentworks.ssh import SSHError, SSHResult
 from agentworks.transports import SSHTransport
 from tests.transports.conftest import fail_completed as _fail_completed
 from tests.transports.conftest import ok_completed as _ok_completed
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
 
 # ---------------------------------------------------------------------------
 # run()
@@ -389,16 +385,25 @@ def test_run_login_shell_still_emits_fence() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.windows
 def test_write_file_uses_copy_to_under_the_hood(tmp_path: Path) -> None:
     """``write_file`` must funnel through ``copy_to`` (which is scp) rather
     than embedding multi-line content in command argv -- the Windows CRLF
     trap that motivated the helper."""
     t = SSHTransport(host="vm1", user="agentworks")
-    with patch.object(t, "copy_to") as mock_copy:
+    staged: list[Path] = []
+
+    def inspect_copy(local_path: str | Path, remote_path: str) -> None:
+        staged.append(Path(local_path))
+        # A second open must succeed while copying on Windows; the writer's
+        # handle must already be closed, and line feeds must stay byte-exact.
+        assert staged[-1].read_bytes() == b"hello\nworld\n"
+        assert remote_path == "/remote/conf"
+
+    with patch.object(t, "copy_to", side_effect=inspect_copy) as mock_copy:
         t.write_file("/remote/conf", "hello\nworld\n")
         mock_copy.assert_called_once()
-        # First positional arg is the local tempfile; second is remote_path.
-        assert mock_copy.call_args[0][1] == "/remote/conf"
+    assert not staged[0].exists()
 
 
 def test_write_file_chmods_when_mode_supplied(tmp_path: Path) -> None:

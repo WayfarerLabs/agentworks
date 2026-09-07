@@ -1,4 +1,4 @@
-"""Small concurrency primitive for bounded read-only observation fan-out."""
+"""Bounded read-only observation fan-out and shared guest-probe policy."""
 
 from __future__ import annotations
 
@@ -9,6 +9,9 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping
+
+GUEST_OBSERVATION_TIMEOUT_SECONDS = 10
+GUEST_OBSERVATION_ATTEMPTS = 1
 
 
 @contextmanager

@@ -92,7 +92,7 @@ def test_catalogs_and_manifests_have_neutral_identity_and_complete_codex_policy(
 
 
 def test_readme_projection_is_exact() -> None:
-    readme = (ROOT / "README.md").read_text()
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
     begin = readme.index("<!-- BEGIN GENERATED AGENTWORKS ASSISTANCE -->")
     end = readme.index("<!-- END GENERATED AGENTWORKS ASSISTANCE -->")
     projection = readme[begin:end]

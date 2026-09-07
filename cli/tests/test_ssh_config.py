@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 from agentworks.ssh_config import (
     _LEGACY_MARKER,
     _MANAGED_CONF,
@@ -25,6 +27,7 @@ def test_ssh_host_alias_custom_prefix() -> None:
     assert ssh_host_alias("dev-vm", "myprefix-") == "myprefix-dev-vm"
 
 
+@pytest.mark.windows
 def test_include_directive_uses_resolved_path(tmp_path: Path) -> None:
     ssh_config = tmp_path / ".ssh" / "config"
     directive = _include_directive(ssh_config)
@@ -35,6 +38,7 @@ def test_include_directive_uses_resolved_path(tmp_path: Path) -> None:
     assert "\\" not in path_part
 
 
+@pytest.mark.windows
 def test_ensure_include_creates_file(tmp_path: Path) -> None:
     ssh_config = tmp_path / ".ssh" / "config"
     _ensure_include(ssh_config)
@@ -153,6 +157,7 @@ def test_sync_ssh_config_announce_controls_the_synced_line(tmp_path: Path, captu
     assert conf.exists()  # still written for correctness
 
 
+@pytest.mark.windows
 def test_rebuild_config_dir(tmp_path: Path) -> None:
     config, ssh_dir = _mock_config(tmp_path)
     db = MagicMock()
@@ -178,6 +183,7 @@ def test_rebuild_config_dir(tmp_path: Path) -> None:
     assert _include_directive(config.operator.ssh_config) in ssh_content
 
 
+@pytest.mark.windows
 def test_rebuild_config_dir_no_vms_removes_file(tmp_path: Path) -> None:
     config, ssh_dir = _mock_config(tmp_path)
     conf_d = ssh_dir / "config.d"
@@ -212,6 +218,7 @@ def test_rebuild_config_dir_cleans_legacy(tmp_path: Path) -> None:
     assert directive in content
 
 
+@pytest.mark.windows
 def test_format_entry_quotes_spaces_in_identity_file(tmp_path: Path) -> None:
     import re
 
@@ -398,6 +405,7 @@ def test_rebuild_config_dir_uses_slug_named_file(tmp_path: Path) -> None:
     assert "Host awvm--dev-vm" in slugged.read_text()
 
 
+@pytest.mark.windows
 def test_first_sync_after_slug_removes_old_file(tmp_path: Path) -> None:
     """The pre-slug agentworks.conf must not survive to shadow fresh
     aliases (the slug arrives at first vm create, not at migration)."""

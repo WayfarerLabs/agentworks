@@ -264,6 +264,7 @@ def test_restore_session_focuses_session_pane(db: Database, fake_target: _FakeTa
 
     fake_target.commands.clear()
     fake_target.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
+    fake_target.responses["-F '#{window_index}|#{window_name}'"] = _FakeResult(stdout="0|a\n")
     fake_target.responses["list-windows -t '=aw-console-con'"] = _FakeResult(returncode=0, stdout="a\n")
     # One shell pane present (config_index=0), the second is missing.
     fake_target.responses["list-panes -t '=aw-console-con':a"] = _FakeResult(returncode=0, stdout="%5|0|\n%6|1|0\n")

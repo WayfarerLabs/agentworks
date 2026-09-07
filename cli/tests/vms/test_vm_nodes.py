@@ -479,6 +479,8 @@ def test_concurrent_start_clears_the_flag_and_resumes(
 
     ensure_active(node, lambda name: "ts-key")
     assert platform.start_calls == 1
+    refreshed = db.get_vm("gvm")
+    assert refreshed is not None and refreshed.last_started_at is not None
 
 
 def test_deallocated_auto_resumes_like_stopped(

@@ -38,7 +38,9 @@ def make_config(tmp_path: Path):
 
     def _make(extra: str = "", *, resources: str | None = None):
         path = tmp_path / "config.toml"
-        path.write_text(f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n' + extra)
+        path.write_text(
+            f'[operator]\nssh_public_key = "{key.as_posix()}.pub"\nssh_private_key = "{key.as_posix()}"\n' + extra
+        )
         if resources is not None:
             rdir = tmp_path / "resources"
             rdir.mkdir(exist_ok=True)

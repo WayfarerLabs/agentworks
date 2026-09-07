@@ -28,8 +28,10 @@ from agentworks.errors import (
     StateError,
     UserAbort,
 )
+from agentworks.list_sorting import nullable_sort_value, sort_rows
 from agentworks.name_filters import validate_name_filters
 from agentworks.resources.access import named_console_template
+from agentworks.runtime_time import derive_uptime_seconds, format_uptime
 from agentworks.sessions.tmux import ProbeStatus, exact_tmux_target, tmux_cmd
 from agentworks.vms.manager import gated_vm_boundary
 
@@ -89,6 +91,8 @@ class ConsoleDescription:
     updated_at: str
     sessions: tuple[ConsoleMember, ...]
     status: str
+    last_started_at: str | None = None
+    uptime_seconds: int | None = None
 
 
 def console_listing_data(listing: ConsoleListing) -> JsonObject:
@@ -114,6 +118,8 @@ def console_description_data(description: ConsoleDescription) -> JsonObject:
             "vm_name": description.vm_name,
             "admin_shell": description.admin_shell,
             "created_at": description.created_at,
+            "last_started_at": description.last_started_at,
+            "uptime_seconds": description.uptime_seconds,
             "updated_at": description.updated_at,
             "status": description.status,
             "sessions": [
@@ -439,6 +445,7 @@ def console_listing(
     workspace_name: str | list[str] | None = None,
     agent_name: str | list[str] | None = None,
     include_status: bool = False,
+    sort_keys: tuple[str, ...] | None = None,
 ) -> ConsoleListing:
     """Collect ordered console list facts, optionally filtered by DB relationships.
 
@@ -455,18 +462,20 @@ def console_listing(
         workspace_name=workspace_name,
         agent_name=agent_name,
     )
-    consoles = db.list_consoles_with_counts(
-        vm_name=vm_name,
-        workspace_name=workspace_name,
-        agent_name=agent_name,
+    consoles = sort_rows(
+        db.list_consoles_with_counts(
+            vm_name=vm_name,
+            workspace_name=workspace_name,
+            agent_name=agent_name,
+        ),
+        sort_keys=sort_keys,
+        key_functions={
+            "alpha": lambda item: (item[0].name,),
+            "creation": lambda item: nullable_sort_value(item[0].created_at),
+            "vm": lambda item: nullable_sort_value(item[0].vm_name),
+        },
+        entity_kind="console",
     )
-    for console, _session_count in consoles:
-        if db.get_vm(console.vm_name) is None:
-            raise NotFoundError(
-                f"VM '{console.vm_name}' not found",
-                entity_kind="vm",
-                entity_name=console.vm_name,
-            )
     statuses: dict[str, ConsoleStatus] = {}
     if include_status and consoles:
         if config is None:
@@ -545,12 +554,6 @@ def console_description(
 ) -> ConsoleDescription:
     """Collect configured console facts plus non-activating live status."""
     console = _require_console(db, name)
-    if db.get_vm(console.vm_name) is None:
-        raise NotFoundError(
-            f"VM '{console.vm_name}' not found",
-            entity_kind="vm",
-            entity_name=console.vm_name,
-        )
     members = tuple(
         ConsoleMember(
             position=member.position,
@@ -571,18 +574,30 @@ def console_description(
         updated_at=console.updated_at,
         sessions=members,
         status=status.value,
+        last_started_at=console.last_started_at,
+        uptime_seconds=derive_uptime_seconds(
+            console.last_started_at,
+            running=status is ConsoleStatus.RUNNING,
+            entity_kind="console",
+            entity_name=console.name,
+        ),
     )
 
 
 def render_console_description(description: ConsoleDescription) -> None:
     """Render console detail facts with the legacy human layout."""
 
-    output.info(f"Name:        {description.name}")
-    output.info(f"VM:          {description.vm_name}")
-    output.info(f"Admin shell: {'yes' if description.admin_shell else 'no'}")
-    output.info(f"Created:     {description.created_at}")
-    output.info(f"Updated:     {description.updated_at}")
-    output.info(f"Status:      {description.status}")
+    output.info(f"Name:           {description.name}")
+    output.info(f"VM:             {description.vm_name}")
+    output.info(f"Admin shell:    {'yes' if description.admin_shell else 'no'}")
+    output.info(f"Created:        {description.created_at}")
+    output.info(f"Last Started:   {description.last_started_at or 'unknown'}")
+    output.info(
+        f"Uptime:         "
+        f"{format_uptime(description.uptime_seconds, running=description.status == ConsoleStatus.RUNNING.value)}"
+    )
+    output.info(f"Updated:        {description.updated_at}")
+    output.info(f"Status:         {description.status}")
     output.info("")
     output.info(f"Configured sessions: {len(description.sessions)}")
 
@@ -607,6 +622,7 @@ def list_consoles(
     agent_name: str | list[str] | None = None,
     names_only: bool = False,
     include_status: bool = False,
+    sort_keys: tuple[str, ...] | None = None,
 ) -> None:
     """Print the legacy console list presentation."""
     render_console_listing(
@@ -617,6 +633,7 @@ def list_consoles(
             workspace_name=workspace_name,
             agent_name=agent_name,
             include_status=include_status,
+            sort_keys=sort_keys,
         ),
         names_only=names_only,
         include_status=include_status,

@@ -24,7 +24,10 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentworks.capabilities.base import RunContext
+from agentworks.ssh import SSHResult
+from agentworks.transports import SSHTransport
 from agentworks.vms.initializer import driver
+from tests.native_exec_support import ExecCall, ExecutionOnlyTransport
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -47,10 +50,10 @@ class _SpyPlatform:
         self.secured.append(getattr(vm, "name", "?"))
 
 
-def _stub_exec_target() -> Any:
+def _stub_exec_target() -> ExecutionOnlyTransport:
     """The provisioning transport as the driver uses it directly: it
     assigns ``.logger`` and calls ``.describe()``."""
-    return SimpleNamespace(describe=lambda: "stub-transport", logger=None)
+    return ExecutionOnlyTransport(label="stub-transport")
 
 
 @pytest.fixture
@@ -100,6 +103,39 @@ def test_bootstrap_uses_manager_owned_logger_without_closing(
 
     assert exec_target.logger is logger
     logger.close.assert_not_called()
+
+
+def test_phase_a_accepts_execution_only_transport(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Create-time IP discovery requires no interactive or file surface."""
+    db.insert_vm("hookvm", site="stub", hostname="hookvm")
+
+    def result_for(call: ExecCall) -> SSHResult:
+        assert call.command == "tailscale ip -4"
+        return SSHResult(returncode=0, stdout="100.64.0.8\n", stderr="")
+
+    target = ExecutionOnlyTransport(result_for)
+    monkeypatch.setattr(
+        "agentworks.transports.ssh.SSHTransport.run",
+        lambda *_args, **_kwargs: SSHResult(returncode=0, stdout="ok\n", stderr=""),
+    )
+    logger = MagicMock()
+    config = SimpleNamespace(operator=SimpleNamespace(ssh_private_key=None))
+
+    result = driver._phase_a_bootstrap(
+        db,
+        config,  # type: ignore[arg-type]
+        "hookvm",
+        target,
+        "agentworks",
+        logger,
+    )
+
+    assert isinstance(result, SSHTransport)
+    assert result.host == "100.64.0.8"
+    assert [call.command for call in target.calls] == ["tailscale ip -4"]
 
 
 def test_success_path_fires_on_tailscale_ready(

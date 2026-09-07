@@ -37,11 +37,10 @@ def doctor(
     )
 
     if output_format is OutputFormat.JSON:
-        from click import get_binary_stream
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
 
-        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
-
-        write_json_envelope(MachineOutputCommand.DOCTOR, health_report_data(report), get_binary_stream("stdout"))
+        write_json_stdout(MachineOutputCommand.DOCTOR, health_report_data(report))
         if report.has_failures:
             raise typer.Exit(1)
         return

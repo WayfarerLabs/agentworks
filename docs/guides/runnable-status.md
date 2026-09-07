@@ -21,6 +21,15 @@ agw session describe review
 agw console describe development
 ```
 
+Each describe view also reports the most recent successful start Agentworks observed and the current
+uptime. Uptime is available only when that resource's own status observation says `running` and a
+start time is known. Older resources keep an unknown start time until Agentworks successfully starts
+them; stopped, deallocated, residual, broken, and unknown resources have no current uptime. A future
+timestamp caused by clock skew reports zero seconds rather than a negative duration. VM uptime
+reflects starts observed by Agentworks. Provider or guest restarts performed outside Agentworks do
+not refresh that observation, so the reported uptime may be stale until Agentworks next records a
+conclusive start.
+
 These observations do not start a VM, repair a session, create or destroy tmux state, or persist an
 observed result. An expected provider, credential, identity, or transport failure keeps the local
 facts and reports status as `unknown`. One failed VM or provider boundary does not remove successful
@@ -28,6 +37,17 @@ rows from a list.
 
 Corrupt or unsupported persisted applied-state is different from an unavailable or mismatched SSH
 identity: it remains a typed error because Agentworks cannot trust the structural record.
+
+Plain `console list` still reports a saved console whose referenced VM row is missing, which keeps
+console names available while recovering an inconsistent current-schema database. This exception is
+limited to plain console inventory: session inventory still validates its workspace and VM
+relationships. A schema migration can also reject an orphan before any inventory command runs.
+
+Live console inspection retains structural validation because an orphan has no valid guest boundary.
+`console describe` fails for that console, and a `console list --status` selection containing one
+fails as a whole rather than returning statuses for its otherwise healthy rows. This structural
+failure is distinct from the per-VM operational failures described above, which remain isolated as
+`unknown`.
 
 ## Status meanings
 

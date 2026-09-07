@@ -68,8 +68,8 @@ def _configured_secret(tmp_path: Path) -> tuple[object, object]:
         dedent(
             f"""\
             [operator]
-            ssh_public_key = "{public_key}"
-            ssh_private_key = "{private_key}"
+            ssh_public_key = "{public_key.as_posix()}"
+            ssh_private_key = "{private_key.as_posix()}"
 
             [secret_config]
             sources = ["env-var", "prompt"]

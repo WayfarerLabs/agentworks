@@ -8,7 +8,7 @@ from typing import Annotated
 import typer
 
 from agentworks.cli._app import app
-from agentworks.cli._helpers import get_db, ordinary_tty_interaction_policy
+from agentworks.cli._helpers import get_db, ordinary_tty_interaction_policy, parse_csv_sort
 from agentworks.machine_output import OutputFormat
 
 vm_app = typer.Typer(
@@ -85,6 +85,10 @@ def vm_create(
 @vm_app.command("list")
 def vm_list(
     status: Annotated[bool, typer.Option("--status", help="Include live runtime status")] = False,
+    sort: Annotated[
+        str | None,
+        typer.Option("--sort", help="Sort by comma-separated keys: alpha, creation. Default: alpha."),
+    ] = None,
     names_only: Annotated[
         bool,
         typer.Option(
@@ -107,7 +111,7 @@ def vm_list(
     from agentworks.vms.manager import list_vms, render_vm_listing, vm_listing
 
     if names_only:
-        list_vms(get_db(), names_only=True)
+        list_vms(get_db(), names_only=True, sort_keys=parse_csv_sort(sort))
         return
 
     config = None
@@ -118,10 +122,9 @@ def vm_list(
         config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
         interaction = ordinary_tty_interaction_policy()
     if output_format is OutputFormat.JSON:
-        from click import get_binary_stream
-
         from agentworks import output
-        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
         from agentworks.vms.manager.inspect import vm_listing_data
 
         with output.suppress_presentation():
@@ -130,11 +133,11 @@ def vm_list(
                 config,
                 include_status=status,
                 interaction=interaction,
+                sort_keys=parse_csv_sort(sort),
             )
-        write_json_envelope(
+        write_json_stdout(
             MachineOutputCommand.VM_LIST,
             vm_listing_data(listing),
-            get_binary_stream("stdout"),
         )
         return
     listing = vm_listing(
@@ -142,6 +145,7 @@ def vm_list(
         config,
         include_status=status,
         interaction=interaction,
+        sort_keys=parse_csv_sort(sort),
     )
     render_vm_listing(listing, names_only=names_only, include_status=status)
 
@@ -186,18 +190,16 @@ def vm_describe(
 
     config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
     if output_format is OutputFormat.JSON:
-        from click import get_binary_stream
-
         from agentworks import output
-        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
         from agentworks.vms.manager.inspect import vm_description_data
 
         with output.suppress_presentation():
             description = vm_description(get_db(), config, name, interaction=interaction)
-        write_json_envelope(
+        write_json_stdout(
             MachineOutputCommand.VM_DESCRIBE,
             vm_description_data(description),
-            get_binary_stream("stdout"),
         )
         return
     describe_vm(get_db(), config, name, interaction=interaction)
@@ -348,10 +350,7 @@ def vm_shell(
         typer.Option(
             "--platform",
             help=(
-                "Use the platform-native transport (limactl shell, wsl.exe, "
-                "Azure public-IP SSH) instead of Tailscale SSH. Useful when "
-                "Tailscale itself is the thing you're trying to reach the VM "
-                "to fix."
+                "Use the platform-native interactive transport, when available, to access the VM without Tailscale SSH."
             ),
         ),
     ] = False,

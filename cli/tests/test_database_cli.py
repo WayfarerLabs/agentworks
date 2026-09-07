@@ -16,6 +16,7 @@ from agentworks.cli import app
 from agentworks.cli._typer_output import TyperHandler
 from agentworks.db import Database, backup_directory, create_manual_backup
 from agentworks.db.migrations import LATEST_VERSION, MIGRATIONS, MigrationContext
+from agentworks.path_rendering import format_host_path
 
 
 @contextmanager
@@ -64,6 +65,7 @@ def _build_stale_schema(path: Path) -> None:
     connection.close()
 
 
+@pytest.mark.windows
 def test_database_backup_stdout_is_only_the_completed_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import agentworks.db as db
 
@@ -80,10 +82,15 @@ def test_database_backup_stdout_is_only_the_completed_path(tmp_path: Path, monke
     path = Path(result.stdout.strip())
     assert result.stdout == f"{path}\n"
     assert result.stderr == "Creating database backup...\n"
-    assert path.parent == backup_directory(live)
-    assert _value(path) == "preserved"
+    # stdout carries the operator-facing rendering, which is home-relative
+    # (``~\...``) when the backup dir is under $HOME, as the tmp dir is on
+    # Windows. Expand it back before touching the filesystem or comparing.
+    resolved = path.expanduser()
+    assert resolved.parent == backup_directory(live)
+    assert _value(resolved) == "preserved"
 
 
+@pytest.mark.windows
 def test_database_restore_yes_uses_stderr_and_creates_no_implicit_backup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -103,13 +110,17 @@ def test_database_restore_yes_uses_stderr_and_creates_no_implicit_backup(
 
     assert result.exit_code == 0, result.output
     assert result.stdout == ""
-    assert f"Backup: {selected}" in result.stderr
-    assert f"Live database: {live}" in result.stderr
+    # The stderr transcript renders paths operator-facing (home-relative on
+    # Windows, where the tmp dir sits under $HOME), so frame the expectations
+    # the same way rather than against the raw absolute paths.
+    assert f"Backup: {format_host_path(selected)}" in result.stderr
+    assert f"Live database: {format_host_path(live)}" in result.stderr
     assert result.stderr.endswith("Database restore complete.\n")
     assert _value(live) == "selected"
     assert {path.name for path in backup_directory(live).glob("*.db")} == before
 
 
+@pytest.mark.windows
 def test_database_restore_decline_prompts_on_stderr_and_changes_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -159,6 +170,7 @@ def test_database_restore_non_interactive_without_yes_refuses_cleanly(
     assert not live.exists()
 
 
+@pytest.mark.windows
 @pytest.mark.parametrize("machine_output", [False, True])
 def test_interactive_migration_notice_and_prompt_keep_stdout_machine_pure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, machine_output: bool

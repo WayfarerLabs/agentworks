@@ -7,6 +7,11 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import AgentworksError, ConfigError, ConnectivityError, NotFoundError, StateError, UserAbort
 from agentworks.sessions.tmux import ProbeStatus
+from agentworks.status_observation import (
+    GUEST_OBSERVATION_ATTEMPTS,
+    GUEST_OBSERVATION_TIMEOUT_SECONDS,
+    cancelling_futures,
+)
 
 from ._helpers import tmux_session_name, tmux_staging_name
 
@@ -16,9 +21,6 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import ConsoleRow, Database
     from agentworks.transports import Transport
-
-_OBSERVATION_TIMEOUT_SECONDS = 10
-_OBSERVATION_ATTEMPTS = 1
 
 
 class ConsoleStatus(Enum):
@@ -51,8 +53,8 @@ def _enumerate_tmux_sessions(target: Transport) -> set[str] | None:
         "tmux list-sessions -F '#{session_name}'",
         check=False,
         tty=False,
-        timeout=_OBSERVATION_TIMEOUT_SECONDS,
-        retries=_OBSERVATION_ATTEMPTS,
+        timeout=GUEST_OBSERVATION_TIMEOUT_SECONDS,
+        retries=GUEST_OBSERVATION_ATTEMPTS,
     )
     raw_stdout = getattr(result, "stdout", "") or ""
     stdout, stderr = _normalized_probe_streams(result)
@@ -77,7 +79,6 @@ def observe_console_statuses(
     from concurrent.futures import as_completed
     from functools import partial
 
-    from agentworks.status_observation import cancelling_futures
     from agentworks.transports import transport
     from agentworks.vms.applied_state import VMSSHIdentityPolicyError
     from agentworks.vms.manager import require_vm_ssh_boundary

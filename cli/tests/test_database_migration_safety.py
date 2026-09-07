@@ -11,6 +11,7 @@ import sqlite3
 import stat
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -36,29 +37,7 @@ from agentworks.db import (
 from agentworks.db.migrations import _retire_vm_checkpoints
 from agentworks.errors import BusyStateError, MigrationBlockedError, StateError
 from tests.conftest import CapturedOutput, held_exclusive_lock, write_cfg
-
-
-def _build_schema(path: Path, target_version: int) -> None:
-    connection = sqlite3.connect(path)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = OFF")
-    connection.execute(
-        "CREATE TABLE schema_version ("
-        "version INTEGER NOT NULL, "
-        "applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')))"
-    )
-    context = MigrationContext()
-    for version in range(1, target_version + 1):
-        step = MIGRATIONS[version]
-        if callable(step):
-            step(connection, context)
-        else:
-            for statement in step.split(";"):
-                if statement.strip():
-                    connection.execute(statement)
-        connection.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
-        connection.commit()
-    connection.close()
+from tests.database_support import build_schema
 
 
 def _version(path: Path) -> int:
@@ -68,9 +47,28 @@ def _version(path: Path) -> int:
     return version
 
 
+@pytest.mark.windows
+def test_schema_fixture_preserves_normal_connection_durability(tmp_path: Path) -> None:
+    path = tmp_path / "fixture.db"
+    build_schema(path, LATEST_VERSION - 1)
+
+    with closing(sqlite3.connect(tmp_path / "fresh.db")) as fresh, closing(sqlite3.connect(path)) as reopened:
+        assert reopened.execute("PRAGMA synchronous").fetchone() == fresh.execute("PRAGMA synchronous").fetchone()
+        assert reopened.execute("PRAGMA journal_mode").fetchone() == ("delete",)
+
+    with closing(Database(tmp_path / "normal.db")) as normal, closing(Database(path)) as migrated:
+        assert (
+            migrated._conn.execute("PRAGMA synchronous").fetchone()[0]
+            == (normal._conn.execute("PRAGMA synchronous").fetchone()[0])
+        )
+        assert migrated._conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+        assert migrated._conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+    assert _version(path) == LATEST_VERSION
+
+
 def test_latest_schema_enforces_atomic_debian_release_observation(tmp_path: Path) -> None:
     path = tmp_path / "state.db"
-    _build_schema(path, LATEST_VERSION)
+    build_schema(path, LATEST_VERSION)
     connection = sqlite3.connect(path)
     connection.execute(
         "INSERT INTO vms (name, site, hostname, template) VALUES (?, ?, ?, ?)",
@@ -87,7 +85,7 @@ def test_latest_schema_enforces_atomic_debian_release_observation(tmp_path: Path
 
 def test_version_33_advances_through_checkpoint_retirement(tmp_path: Path) -> None:
     path = tmp_path / "state.db"
-    _build_schema(path, 33)
+    build_schema(path, 33)
     before = sqlite3.connect(path)
     assert (
         before.execute("SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'vm_checkpoints'").fetchone()
@@ -98,7 +96,7 @@ def test_version_33_advances_through_checkpoint_retirement(tmp_path: Path) -> No
     Database(path).close()
 
     after = sqlite3.connect(path)
-    assert _version(path) == 36
+    assert _version(path) == LATEST_VERSION
     assert (
         after.execute("SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'vm_checkpoints'").fetchone()
         is None
@@ -108,7 +106,7 @@ def test_version_33_advances_through_checkpoint_retirement(tmp_path: Path) -> No
 
 def test_checkpoint_retirement_refuses_to_orphan_a_record(tmp_path: Path) -> None:
     path = tmp_path / "state.db"
-    _build_schema(path, 34)
+    build_schema(path, 34)
     connection = sqlite3.connect(path)
     connection.execute(
         "INSERT INTO vms (name, site, hostname, template) VALUES (?, ?, ?, ?)",
@@ -133,9 +131,10 @@ def test_checkpoint_retirement_refuses_to_orphan_a_record(tmp_path: Path) -> Non
     after.close()
 
 
+@pytest.mark.windows
 def test_checkpoint_retirement_holds_write_lock_through_version_checkpoint(tmp_path: Path) -> None:
     path = tmp_path / "state.db"
-    _build_schema(path, 34)
+    build_schema(path, 34)
     seed = sqlite3.connect(path)
     seed.execute(
         "INSERT INTO vms (name, site, hostname, template) VALUES (?, ?, ?, ?)",
@@ -309,16 +308,17 @@ def test_busy_state_error_message_and_hint_are_not_caller_suppliable() -> None:
     assert error.entity_kind == "database"
 
 
+@pytest.mark.windows
 def test_inspection_matrix_is_non_migrating_and_wal_aware(tmp_path: Path) -> None:
     absent = tmp_path / "absent.db"
     stale = tmp_path / "stale.db"
     current = tmp_path / "current.db"
     malformed = tmp_path / "malformed.db"
     busy = tmp_path / "busy.db"
-    _build_schema(stale, LATEST_VERSION - 1)
+    build_schema(stale, LATEST_VERSION - 1)
     Database(current).close()
     malformed.write_text("not sqlite")
-    _build_schema(busy, LATEST_VERSION)
+    build_schema(busy, LATEST_VERSION)
 
     assert inspect_schema(absent).state is SchemaState.ABSENT
     assert inspect_schema(stale).state is SchemaState.STALE
@@ -347,6 +347,7 @@ def test_inspection_matrix_is_non_migrating_and_wal_aware(tmp_path: Path) -> Non
         assert inspect_schema(busy, timeout=0.1).state is SchemaState.BUSY
 
 
+@pytest.mark.windows
 def test_prepare_database_open_raises_a_distinct_busy_error_and_recovers_once_lock_clears(
     tmp_path: Path,
 ) -> None:
@@ -366,7 +367,7 @@ def test_prepare_database_open_raises_a_distinct_busy_error_and_recovers_once_lo
     completion-specific timeout (the writable path's existing, unchanged
     wait), so this exercises the real driver-default busy wait."""
     path = tmp_path / "state.db"
-    _build_schema(path, LATEST_VERSION)
+    build_schema(path, LATEST_VERSION)
 
     with held_exclusive_lock(path):
         # A short explicit-timeout probe is a faithful proxy for what
@@ -397,7 +398,7 @@ def test_prepare_database_open_raises_busy_when_the_migration_lock_is_busy(
     from agentworks.db import backup as backup_module
 
     path = tmp_path / "state.db"
-    _build_schema(path, LATEST_VERSION - 1)
+    build_schema(path, LATEST_VERSION - 1)
     monkeypatch.setattr(backup_module, "_acquire_migration_lock", lambda path, *, timeout: None)
 
     with pytest.raises(BusyStateError):
@@ -411,7 +412,7 @@ def test_open_database_safely_raises_busy_when_the_migration_lock_is_busy(
     from agentworks.db import backup as backup_module
 
     path = tmp_path / "state.db"
-    _build_schema(path, LATEST_VERSION - 1)
+    build_schema(path, LATEST_VERSION - 1)
     plan = prepare_database_open(path)
     assert plan.inspection.state is SchemaState.STALE
 
@@ -436,7 +437,7 @@ def test_check_schema_raises_a_distinct_busy_error_with_a_hint(tmp_path: Path) -
     still uses) fails the ``pytest.raises(BusyStateError)`` match below
     even though a StateError still comes out."""
     path = tmp_path / "state.db"
-    _build_schema(path, LATEST_VERSION)
+    build_schema(path, LATEST_VERSION)
 
     with held_exclusive_lock(path):
         assert inspect_schema(path, timeout=0.1).state is SchemaState.BUSY
@@ -460,7 +461,7 @@ def test_doctor_check_database_preserves_the_busy_hint(tmp_path: Path, monkeypat
     from agentworks.doctor_state import check_database
 
     path = tmp_path / "state.db"
-    _build_schema(path, LATEST_VERSION)
+    build_schema(path, LATEST_VERSION)
     monkeypatch.setattr(db_module, "DB_PATH", path)
 
     with held_exclusive_lock(path):
@@ -476,16 +477,17 @@ def test_completion_open_returns_none_for_a_busy_database_not_just_malformed_one
     inclusive by construction, so this pins that shape rather than proving
     new code is needed."""
     path = tmp_path / "state.db"
-    _build_schema(path, LATEST_VERSION)
+    build_schema(path, LATEST_VERSION)
 
     with held_exclusive_lock(path):
         assert inspect_schema(path, timeout=0.1).state is SchemaState.BUSY
         assert open_completion_database(path) is None
 
 
+@pytest.mark.windows
 def test_prepare_qualifies_stale_state_under_restrictive_persistent_lock(tmp_path: Path) -> None:
     path = tmp_path / "state.db"
-    _build_schema(path, LATEST_VERSION - 1)
+    build_schema(path, LATEST_VERSION - 1)
 
     plan = prepare_database_open(path)
 
@@ -497,9 +499,10 @@ def test_prepare_qualifies_stale_state_under_restrictive_persistent_lock(tmp_pat
         assert stat.S_IMODE(lock_path.stat().st_mode) == 0o600
 
 
+@pytest.mark.windows
 def test_two_process_safe_open_serializes_with_exactly_one_backup(tmp_path: Path) -> None:
     path = tmp_path / "state.db"
-    _build_schema(path, LATEST_VERSION - 1)
+    build_schema(path, LATEST_VERSION - 1)
     plan = prepare_database_open(path)
     context = multiprocessing.get_context("spawn")
     start = context.Event()
@@ -518,13 +521,14 @@ def test_two_process_safe_open_serializes_with_exactly_one_backup(tmp_path: Path
     assert _version(path) == LATEST_VERSION
 
 
+@pytest.mark.windows
 def test_prepare_waits_for_unchanged_lock_holder_and_qualifies_stale_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from agentworks.db import backup as backup_module
 
     path = tmp_path / "state.db"
-    _build_schema(path, LATEST_VERSION - 1)
+    build_schema(path, LATEST_VERSION - 1)
     expected = inspect_schema(path)
     context = multiprocessing.get_context("spawn")
     acquired = context.Event()
@@ -565,11 +569,12 @@ def test_prepare_waits_for_unchanged_lock_holder_and_qualifies_stale_state(
     assert not backup_directory(path).exists()
 
 
+@pytest.mark.windows
 def test_stale_inspector_waits_then_refuses_changed_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks.db import backup as backup_module
 
     path = tmp_path / "state.db"
-    _build_schema(path, LATEST_VERSION - 1)
+    build_schema(path, LATEST_VERSION - 1)
     context = multiprocessing.get_context("spawn")
     start = context.Event()
     acquired = context.Event()
@@ -598,6 +603,7 @@ def test_stale_inspector_waits_then_refuses_changed_state(tmp_path: Path, monkey
     assert not backup_directory(path).exists()
 
 
+@pytest.mark.windows
 def test_prepare_refuses_changed_stale_state_when_lock_released_before_first_acquire(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -605,7 +611,7 @@ def test_prepare_refuses_changed_stale_state_when_lock_released_before_first_acq
     from agentworks.db import backup as backup_module
 
     path = tmp_path / "state.db"
-    _build_schema(path, LATEST_VERSION - 1)
+    build_schema(path, LATEST_VERSION - 1)
     context = multiprocessing.get_context("spawn")
     start = context.Event()
     released = context.Event()
@@ -635,6 +641,7 @@ def test_prepare_refuses_changed_stale_state_when_lock_released_before_first_acq
     assert not backup_directory(path).exists()
 
 
+@pytest.mark.windows
 def test_prepare_refuses_identical_tainted_baseline_after_lock_released_before_first_acquire(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -642,7 +649,7 @@ def test_prepare_refuses_identical_tainted_baseline_after_lock_released_before_f
     from agentworks.db import backup as backup_module
 
     path = tmp_path / "state.db"
-    _build_schema(path, 1)
+    build_schema(path, 1)
     context = multiprocessing.get_context("spawn")
     committed = context.Event()
     release = context.Event()
@@ -682,7 +689,7 @@ def test_safe_open_completes_backup_before_database_construction(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = tmp_path / "state.db"
-    _build_schema(path, LATEST_VERSION - 1)
+    build_schema(path, LATEST_VERSION - 1)
     plan = prepare_database_open(path)
     observed: list[Path] = []
 
@@ -701,9 +708,10 @@ def test_safe_open_completes_backup_before_database_construction(
     assert observed == [result.backup.path]
 
 
+@pytest.mark.windows
 def test_safe_open_migrates_stale_state_and_preserves_historical_backup(tmp_path: Path) -> None:
     path = tmp_path / "state.db"
-    _build_schema(path, LATEST_VERSION - 1)
+    build_schema(path, LATEST_VERSION - 1)
 
     result = open_database_safely(path, prepare_database_open(path), create_backup=True)
     result.database.close()
@@ -711,6 +719,48 @@ def test_safe_open_migrates_stale_state_and_preserves_historical_backup(tmp_path
     assert result.backup is not None
     assert _version(result.backup.path) == LATEST_VERSION - 1
     assert _version(path) == LATEST_VERSION
+
+
+def test_start_time_migration_keeps_existing_runnables_unknown_and_backup_historical(tmp_path: Path) -> None:
+    path = tmp_path / "state.db"
+    build_schema(path, 36)
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "INSERT INTO vms (name, site, hostname) VALUES (?, ?, ?)",
+        ("box", "lima-local", "box"),
+    )
+    connection.execute(
+        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES (?, ?, ?, ?)",
+        ("work", "box", "/tmp/work", "ws-work"),
+    )
+    connection.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode) VALUES (?, ?, ?, ?)",
+        ("session", "work", "default", "admin"),
+    )
+    connection.execute(
+        "INSERT INTO consoles (name, vm_name, admin_shell) VALUES (?, ?, ?)",
+        ("console", "box", 1),
+    )
+    connection.commit()
+    connection.close()
+
+    result = open_database_safely(path, prepare_database_open(path), create_backup=True)
+    try:
+        assert result.database.get_vm("box").last_started_at is None  # type: ignore[union-attr]
+        assert result.database.get_session("session").last_started_at is None  # type: ignore[union-attr]
+        assert result.database.get_console("console").last_started_at is None  # type: ignore[union-attr]
+    finally:
+        result.database.close()
+
+    assert result.backup is not None
+    assert _version(result.backup.path) == 36
+    backup = sqlite3.connect(result.backup.path)
+    try:
+        for table in ("vms", "sessions", "consoles"):
+            columns = {str(row[1]) for row in backup.execute(f"PRAGMA table_info({table})")}
+            assert "last_started_at" not in columns
+    finally:
+        backup.close()
 
 
 @pytest.mark.parametrize("shape", ["empty-file", "empty-version-table"])
@@ -767,7 +817,7 @@ def test_ordinary_command_migrates_before_publishing_live_resources(
     from agentworks.cli import app
 
     path = tmp_path / "state.db"
-    _build_schema(path, LATEST_VERSION - 1)
+    build_schema(path, LATEST_VERSION - 1)
     connection = sqlite3.connect(path)
     connection.execute(
         "INSERT INTO vms (name, site, hostname, template) VALUES (?, ?, ?, ?)",
@@ -792,7 +842,7 @@ def test_ordinary_command_migrates_before_publishing_live_resources(
 
 def test_safe_open_refuses_changed_but_still_stale_state(tmp_path: Path) -> None:
     path = tmp_path / "state.db"
-    _build_schema(path, LATEST_VERSION - 1)
+    build_schema(path, LATEST_VERSION - 1)
     plan = prepare_database_open(path)
     connection = sqlite3.connect(path)
     connection.execute("CREATE TABLE interaction_change (value TEXT)")
@@ -826,11 +876,12 @@ def test_prepare_refuses_unopenable_state_before_writable_open(tmp_path: Path, k
     assert not (tmp_path / MIGRATION_LOCK_NAME).exists()
 
 
+@pytest.mark.windows
 def test_partial_migration_failure_reports_exact_backup_recovery(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = tmp_path / "state.db"
-    _build_schema(path, LATEST_VERSION - 1)
+    build_schema(path, LATEST_VERSION - 1)
     monkeypatch.setitem(
         MIGRATIONS,
         LATEST_VERSION,
@@ -848,7 +899,7 @@ def test_partial_migration_failure_reports_exact_backup_recovery(
 
 def test_partial_migration_failure_without_backup_says_so(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "state.db"
-    _build_schema(path, LATEST_VERSION - 1)
+    build_schema(path, LATEST_VERSION - 1)
     monkeypatch.setitem(MIGRATIONS, LATEST_VERSION, "SELECT * FROM missing_table")
 
     with pytest.raises(StateError, match="migration failed") as raised:
@@ -860,6 +911,7 @@ def test_partial_migration_failure_without_backup_says_so(tmp_path: Path, monkey
 
 
 @pytest.mark.parametrize("create_backup", [True, False])
+@pytest.mark.windows
 def test_base_exception_migration_failure_preserves_identity_and_visible_recovery(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -874,7 +926,7 @@ def test_base_exception_migration_failure_preserves_identity_and_visible_recover
 
     path = tmp_path / "state.db"
     config_path = tmp_path / "config.toml"
-    _build_schema(path, LATEST_VERSION - 1)
+    build_schema(path, LATEST_VERSION - 1)
     if not create_backup:
         config_path.write_text("[database]\nauto_backup_before_migration = false\n")
     interruption = KeyboardInterrupt("operator interrupted")
@@ -913,7 +965,7 @@ def test_completion_probe_unavailable_state_fails_before_database_caller(
     from agentworks.cli import _helpers
 
     path = tmp_path / "state.db"
-    _build_schema(path, LATEST_VERSION - 1)
+    build_schema(path, LATEST_VERSION - 1)
     before = {entry.name: entry.read_bytes() for entry in tmp_path.iterdir()}
     monkeypatch.setattr(db_module, "DB_PATH", path)
     monkeypatch.setattr(_helpers, "completion_mode_enabled", lambda: True)
@@ -954,6 +1006,7 @@ def test_completion_open_reads_committed_rows_from_a_live_writer(tmp_path: Path)
         writer.close()
 
 
+@pytest.mark.windows
 def test_completion_open_sees_uncheckpointed_wal_content_that_immutable_mode_would_miss(
     tmp_path: Path,
 ) -> None:
@@ -996,6 +1049,7 @@ def test_completion_open_of_a_nonexistent_database_creates_nothing(tmp_path: Pat
     assert tuple(tmp_path.iterdir()) == ()
 
 
+@pytest.mark.windows
 def test_completion_open_never_writes_while_sidecars_are_live(tmp_path: Path) -> None:
     """Completion open commits nothing: the main database file and the WAL's
     actual frame content are byte-identical before and after. SQLite may
@@ -1022,6 +1076,7 @@ def test_completion_open_never_writes_while_sidecars_are_live(tmp_path: Path) ->
         writer.close()
 
 
+@pytest.mark.windows
 def test_completion_open_fails_fast_under_a_held_exclusive_lock(tmp_path: Path) -> None:
     """Issue #502: a busy database must not freeze a TAB press. The
     schema-builder helper never sets WAL, so this database sits in SQLite's
@@ -1031,7 +1086,7 @@ def test_completion_open_fails_fast_under_a_held_exclusive_lock(tmp_path: Path) 
     give up within its bounded connection timeout rather than inherit the
     driver's multi-second default wait."""
     path = tmp_path / "state.db"
-    _build_schema(path, LATEST_VERSION)
+    build_schema(path, LATEST_VERSION)
 
     with held_exclusive_lock(path):
         start = time.monotonic()
@@ -1044,6 +1099,7 @@ def test_completion_open_fails_fast_under_a_held_exclusive_lock(tmp_path: Path) 
     assert elapsed < 2.0
 
 
+@pytest.mark.windows
 def test_completion_open_returns_none_when_construction_hits_a_held_lock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1058,7 +1114,7 @@ def test_completion_open_returns_none_when_construction_hits_a_held_lock(
     from agentworks.db import backup as backup_module
 
     path = tmp_path / "state.db"
-    _build_schema(path, LATEST_VERSION)
+    build_schema(path, LATEST_VERSION)
 
     def _fake_current(_database_path: Path, *, timeout: float | None = None) -> SchemaInspection:
         return SchemaInspection(SchemaState.CURRENT, LATEST_VERSION, LATEST_VERSION, 1)
@@ -1074,6 +1130,7 @@ def test_completion_open_returns_none_when_construction_hits_a_held_lock(
     assert elapsed < 2.0
 
 
+@pytest.mark.windows
 def test_recovery_command_rendering_quotes_posix_and_powershell(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1105,6 +1162,7 @@ def test_database_refuses_future_schema_without_advancing_it(tmp_path: Path) -> 
     assert _version(path) == LATEST_VERSION + 1
 
 
+@pytest.mark.windows
 def test_database_closes_connection_when_migration_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     opened: list[sqlite3.Connection] = []
     real_connect = sqlite3.connect
@@ -1159,7 +1217,7 @@ def test_get_db_interactive_default_yes_selection_and_notice(
     from agentworks.cli import _helpers
 
     path = tmp_path / "state.db"
-    _build_schema(path, LATEST_VERSION - 1)
+    build_schema(path, LATEST_VERSION - 1)
     monkeypatch.setattr(db_module, "DB_PATH", path)
     monkeypatch.setattr(output, "is_interactive", lambda: True)
     monkeypatch.setattr(
@@ -1199,7 +1257,7 @@ def test_get_db_noninteractive_uses_focused_default_or_opt_out(
 
     path = tmp_path / "state.db"
     config_path = tmp_path / "config.toml"
-    _build_schema(path, LATEST_VERSION - 1)
+    build_schema(path, LATEST_VERSION - 1)
     if setting is not None:
         config_path.write_text(f"[database]\nauto_backup_before_migration = {str(setting).lower()}\n")
     monkeypatch.setattr(db_module, "DB_PATH", path)
@@ -1228,7 +1286,7 @@ def test_get_db_invalid_focused_config_stops_before_migration(tmp_path: Path, mo
 
     path = tmp_path / "state.db"
     config_path = tmp_path / "config.toml"
-    _build_schema(path, LATEST_VERSION - 1)
+    build_schema(path, LATEST_VERSION - 1)
     config_path.write_text("[database]\nauto_backup_before_migration = 'sometimes'\n")
     monkeypatch.setattr(db_module, "DB_PATH", path)
     monkeypatch.setattr(config_module, "CONFIG_PATH", config_path)
@@ -1256,7 +1314,7 @@ def test_get_db_selected_backup_failure_prevents_migration_and_guides_retry(
 
     path = tmp_path / "state.db"
     config_path = tmp_path / "config.toml"
-    _build_schema(path, LATEST_VERSION - 1)
+    build_schema(path, LATEST_VERSION - 1)
     monkeypatch.setattr(db_module, "DB_PATH", path)
     monkeypatch.setattr(config_module, "CONFIG_PATH", config_path)
     monkeypatch.setattr(output, "is_interactive", lambda: interactive)

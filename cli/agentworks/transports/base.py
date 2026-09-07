@@ -1,17 +1,17 @@
-"""The ``Transport`` abstract base class.
+"""The execution-only and full transport abstract base classes.
 
-Each concrete subclass implements the full operator I/O surface for one
-delivery mechanism (SSH, ``limactl shell``, ``wsl.exe``, etc.). Callers
-obtain a ``Transport`` via the factory functions in this package's
+Every VM platform provides an :class:`ExecTransport` for bounded native
+administrative commands. Delivery mechanisms that also support interaction
+and file movement implement the full :class:`Transport` subtype. Callers
+obtain a transport via the factory functions in this package's
 ``__init__.py``: ``transport(vm, config)`` for the canonical admin
 path, ``agent_transport(vm, config, agent)`` for the canonical agent
 path, ``native_transport(vm, platform, config, *, ctx, stack)`` for the
-platform-native opt-in.
+platform-native bootstrap and recovery path.
 
-The ABC surface covers both command exec and file movement because
-every transport in practice supports both, sharing one delivery
-mechanism per platform (SSH carries scp; ``limactl shell`` pairs with
-``limactl copy``; ``wsl.exe`` carries both).
+The canonical Tailscale path always returns the full type. The native path
+returns only the execution contract because some provider channels, notably
+Proxmox QEMU Guest Agent, are deliberately noninteractive.
 """
 
 from __future__ import annotations
@@ -33,8 +33,8 @@ if TYPE_CHECKING:
     from agentworks.ssh import SSHLogger
 
 
-class Transport(abc.ABC):
-    """Operator I/O channel to a VM: command exec and file movement.
+class ExecTransport(abc.ABC):
+    """Tailscale-independent channel for bounded command execution.
 
     Concrete subclasses populate ``self.default_timeout`` and
     ``self.logger`` in their constructors; the ABC declares the
@@ -58,6 +58,28 @@ class Transport(abc.ABC):
         :mod:`agentworks.vms.initializer` to label transports in init
         events without isinstance branching.
         """
+
+    @abc.abstractmethod
+    def run(
+        self,
+        command: str,
+        *,
+        sudo: bool = False,
+        check: bool = True,
+        timeout: int | None = None,
+        input_text: str | None = None,
+    ) -> SSHResult:
+        """Run a command with captured output and finite sensitive stdin.
+
+        ``sudo=False`` means the VM admin identity and ``sudo=True`` means
+        root. With no ``input_text`` the guest command sees immediate EOF.
+        Sensitive input is byte-exact, absent from command arguments and
+        diagnostics, and suppresses returned and logged output.
+        """
+
+
+class Transport(ExecTransport):
+    """Full operator I/O channel: execution, interaction, and file movement."""
 
     @abc.abstractmethod
     def run(

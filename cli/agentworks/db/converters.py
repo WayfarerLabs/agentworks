@@ -97,6 +97,7 @@ def _to_vm(row: sqlite3.Row) -> VMRow:
         debian_release_observed_at=observed_at,
         platform_metadata=platform_metadata,
         operator_stopped=bool(row["operator_stopped"]),
+        last_started_at=row["last_started_at"],
     )
 
 
@@ -180,6 +181,7 @@ def _to_session(row: sqlite3.Row) -> SessionRow:
         boot_id=row["boot_id"],
         tmux_server_start_ticks=row["tmux_server_start_ticks"],
         harness_integration_state=_parse_harness_integration_state(row["harness_integration_state"], row["name"]),
+        last_started_at=row["last_started_at"],
     )
 
 
@@ -232,6 +234,7 @@ def _to_console(row: sqlite3.Row) -> ConsoleRow:
         admin_shell=bool(row["admin_shell"]),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        last_started_at=row["last_started_at"],
     )
 
 

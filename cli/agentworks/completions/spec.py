@@ -348,6 +348,14 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
 
 STATIC_COMPLETION_SUGGESTIONS: dict[tuple[str, str], tuple[str, ...]] = {
     ("graph.show", "depth"): ("1", "2", "3", "all"),
+    ("vm.list", "sort"): ("alpha", "creation"),
+    ("agent.list", "sort"): ("alpha", "creation", "vm"),
+    ("workspace.list", "sort"): ("alpha", "creation", "vm"),
+    ("session.list", "sort"): ("alpha", "creation", "vm", "agent", "workspace"),
+    ("console.list", "sort"): ("alpha", "creation", "vm"),
+    ("secret.list", "sort"): ("alpha", "source", "backend"),
+    ("resource.list", "sort"): ("alpha",),
+    ("resource.kinds", "sort"): ("alpha",),
 }
 
 # -- Introspection ---------------------------------------------------------

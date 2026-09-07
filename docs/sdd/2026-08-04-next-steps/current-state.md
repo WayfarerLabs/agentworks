@@ -217,13 +217,14 @@ its branch is deleted. Remaining unmerged drafts on remote branches, both out of
   2026-08-05), so per the development process the fresh-eyes generic pass is substituted with a
   local reviewer until quota resets.
 
-- **No CI runner covers Windows or macOS**; every gate runs on Linux. PR #747 is the first move
-  against this: it takes the suite from 558 failures to zero on a Windows host and adds the
-  `windows-latest` CI job, so the gap closes structurally rather than by one-off effort. It is no
-  longer purely test-portability: two product changes rode along, a samples guard and a
-  confirm-helper stdout fix. The Windows-only `vm create` break that PR #677 fixed is the case in
-  point: no gate could have caught it, and it reached a published release. The exposure is
-  structural rather than incidental: any platform-conditional path is unverified until an operator
-  hits it, and the mechanism there (`subprocess.run(..., text=True)` wrapping stdin in a
-  `TextIOWrapper` that rewrites LF to `os.linesep`) was invisible on Linux by construction. Recorded
-  as a known gap, not a scheduled item.
+- **Windows is now covered by CI; macOS still is not.** PR #747 took the suite from 558 failures to
+  zero on a Windows host (carrying two product fixes with it, a samples guard and a confirm-helper
+  stdout fix), and PR #760 added the job: `test-windows` runs on `windows-latest`
+  (`.github/workflows/ci.yml:87`). Both merged 2026-09-06, so the Windows half of this gap is closed
+  structurally rather than by one-off effort. The macOS half is unchanged and the reasoning below
+  still applies to it. The Windows-only `vm create` break that PR #677 fixed is why it mattered: no
+  gate could have caught it, and it reached a published release. The exposure is structural rather
+  than incidental: any platform-conditional path is unverified until an operator hits it, and the
+  mechanism there (`subprocess.run(..., text=True)` wrapping stdin in a `TextIOWrapper` that
+  rewrites LF to `os.linesep`) was invisible on Linux by construction. Recorded as a known gap, not
+  a scheduled item.
