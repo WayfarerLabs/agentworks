@@ -73,7 +73,7 @@ three go. An example that contradicts its own doctrine teaches the error to ever
 which is why this is corrected in place rather than left to the inventory.
 
 "Statement order" there means order pinned **lexically**, by reading the source. Order often matters
-behaviorally, and asserting its consequence is not the same shape: PR #523 hoisted a policy check
+behaviorally, and asserting its consequence is not the same shape: PR `#523` hoisted a policy check
 above the work it guards and pinned that with tests asserting no row was deleted and no SSH config
 rewritten. Those never read the source, they fail only when the order actually breaks something, and
 they are exactly the observational twins the paragraph below prefers. Delete the pin that says a
@@ -81,7 +81,7 @@ statement comes first; keep the test that says what goes wrong when it does not.
 
 Some guards read as both bullets at once, protecting a genuine behavioral property through
 structural inspection. There a structural guard yields to an observational twin wherever one exists
-or is cheap to write, and stays until then. PR #523 set the precedent when it deleted a lexical
+or is cheap to write, and stays until then. PR `#523` set the precedent when it deleted a lexical
 Tailscale-ordering pin whose property observational tests already covered.
 
 ### `match=` splits three ways
@@ -157,7 +157,7 @@ nothing exercises. (Effort lead, 2026-09-06.)
 
 ## Guidance delivery
 
-Wave 0 first resolves rule delivery (issue #511), then amends the two existing rules
+Wave 0 first resolves rule delivery (issue `#511`), then amends the two existing rules
 (`development-principles`, `no-prose-policing-tests`); no new files, personas, or delivery
 mechanisms. The expected delivery resolution is subtraction-shaped: the `globs`/`paths:` frontmatter
 is what forces lazy loading, so after the probes confirm the emission shape, the twelve broad
@@ -168,15 +168,19 @@ operator's to say, which the inventory records as a finding rather than correcti
 completes on one of two measurable branches (FRD R1.3): verified unconditional delivery, or an
 operator-approved fallback that places the full criteria text into every affected lane; a citation
 alone cannot supply the contents of a rule a target never loads. Wave 1 delegation charters cite the
-two amended rules regardless, which costs a sentence per charter.
+two amended rules regardless (FRD R1.3), which costs a sentence per charter. R1.3 also says citation
+is a supplement and never delivery, which is why the charters wave 0 actually wrote carry both
+criteria in full as well as citing them: a dev that loses the rule channel still has them.
 
 ## Waves and vehicle
 
 - **Wave 0**: the delivery resolution plus one small amendment PR, merged first (FRD R1).
 - **Wave 1**: independent, contained deletion work off main, each item judged locally against the
-  two doctrines, each PR green on the full suite. No ordering between items; PR batching per the
-  plan. The saga's `phasing.md` put this wave before the CLI grammar rewrite; that rewrite has since
-  merged and locked with PR `#491`, so the ordering is discharged rather than pending.
+  two doctrines, each PR green on the full suite. Unordered by design, though the plan's sequencing
+  section records four facts that constrain that freedom in practice, and the inventory adds four
+  more binding the sweep's own PRs; PR batching per the plan. The saga's `phasing.md` put this wave
+  before the CLI grammar rewrite; that rewrite has since merged and locked with PR `#491`, so the
+  ordering is discharged rather than pending.
 - **Wave 2**: process and rule subtraction PRs under the net-deletion constraint, in parallel with
   wave 1 on its own session (file-disjoint: `.rulesync/` and the skills tree versus `cli/` and
   `website/`).
@@ -199,7 +203,9 @@ The Wave 2 process rewrite has four layers, each with one kind of information:
    skill was selected.
 4. **Role and specialty artifacts** own their perspectives: `sdd` owns artifact lifecycle,
    `agentworks-reviewer` owns its rubric and consistency mode, `integration-testing` owns live
-   validation, and the developer, tester, and saga-lead definitions own only role-specific duties.
+   validation, `saga-lead` owns the saga lead's operating manual as a SKILL rather than a role
+   definition, and the four role definitions (`agentworks-dev`, `agentworks-reviewer`,
+   `agentworks-tester`, `muntz`) own only role-specific duties.
 
 `message-2026-08-18-process-semantic-inventory.md` is the rewrite checklist. Every operative
 contract has one future owner and named consumers; duplicated prose either collapses to that owner

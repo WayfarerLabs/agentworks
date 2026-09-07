@@ -4,7 +4,7 @@
 deleted when the sweep closes.** That is the effort lead's call and it is deliberate: this is a
 subtraction pass, and a several-hundred-row ledger that outlives its purpose is exactly the kind of
 thing the pass exists to remove. Where a keep row's justification is durable, it belongs at the test
-site, not here. Nothing else in the repository should link to this file, and
+site, not here. Nothing outside this SDD's own directory should link to this file, and
 [sweep-screen.py](sweep-screen.py) with the [sweep_screen](sweep_screen) package behind it, which
 derive this file's group-1 estate, resolve its rows' anchors, and run its two screens, are deleted
 with it.
@@ -204,17 +204,19 @@ different number of assertions than the row was written against.
 
 **The tie population is small and named.** `sweep-screen.py estate` reports the estate's size, the
 identities in it, and every identity that names more than one site, each of those a test asserting
-the same needle against the same type twice. The partition is total by construction rather than by a
-check: `Snapshot` groups every site into a dict keyed by its identity, so each site lands in exactly
-one group and the partition the command prints is the whole estate rather than a sample of it.
+the same needle against the same type more than once. Seven do it twice and one does it three times.
+The partition is total by construction rather than by a check: `Snapshot` groups every site into a
+dict keyed by its identity, so each site lands in exactly one group and the partition the command
+prints is the whole estate rather than a sample of it.
 
 **The states an anchor resolves to.** `resolved` is what the row was cut against, at whatever line
 it now sits. `grown` and `shrunk` are a site group that changed size, with both counts. `retargeted`
 is the same test asserting the same type against a different needle, which is what a reworded
 message leaves behind. `gone` is the file present and the anchor not in it, `file-gone` is the file
 itself, and `line-anchored` is a line anchor, which resolves to nothing by construction. `changed`
-is a span anchor whose function no longer asserts what it did, and `unstamped` is one that never
-recorded what it asserted. Those are all of them.
+is a span anchor whose function no longer asserts what it did, `unstamped` is one that never
+recorded what it asserted, and `out-of-range` is a line anchor addressing a line its file does not
+have, at either end. Those are all of them.
 
 **Only `resolved` and `line-anchored` pass.** `totals` faults on every other state, which is what
 makes a row addressing something that is not there a failure rather than a line in a listing. A line
@@ -227,8 +229,10 @@ span anchor beside them would claim every other site in the same test for the sa
 what keeps "every `match=` site is claimed by exactly one group-1 row" checkable. Every other
 group's rows address assertions the estate scan cannot see, so their enclosing function is anchored
 too, with any cited sites alongside it, unless a function the row already names encloses it: a
-helper nested inside a cited test is named by that test. Dropping the span narrowed 39 rows onto
-sites they were never about: 22 in group 5, 12 deferred and 5 in group 4.
+helper nested inside a cited test is named by that test. Dropping the span narrowed the rows
+carrying both onto sites they were never about. **Re-measured at HEAD, 2026-09-06: 23 rows**, 18 in
+group 5, 3 in group 4, one in group 1 and one deferred, which is what `sweep_screen/reports.py` has
+said all along. The 39 this read before was carried across two rebases without being re-derived.
 
 **A span anchor is deliberately coarser than the row.** It names the test, not the assertion inside
 it, so several rows can share one span anchor and column 3 is what tells them apart. That is the
@@ -252,27 +256,37 @@ outside this set. Three causes remain:
 anchors that resolve to a name, and it BOUND-CHECKS each one against its file. `line-anchored` is
 the one failing-looking state that passes, which made it the one place a number could be wrong and
 still report success: E-126 carried an `L787` into a file 351 lines long and every command stayed
-green. A line past the end is not a declaration that a row will go stale, it is a row that already
-has, so it resolves as `past-end` and `totals` refuses it. A fourth cause, **file gone**, retired
-with the rows it described: those rows are no longer in this map, so nothing can be line-anchored to
-a file that is not there and the parser refuses the cause.
+green. A line outside the file is not a declaration that a row will go stale, it is a row that
+already has, so it resolves as `out-of-range` and `totals` refuses it. Both ends are bounded,
+because only one of them had ever been wrong: `L0` is not a line any file has. A fourth cause,
+**file gone**, retired with the rows it described: those rows are no longer in this map, so nothing
+can be line-anchored to a file that is not there and the parser refuses the cause.
 
 #### A cell carries no bare number
 
-**Every line citation this map has written is a standalone integer, so that is what is refused.**
-Nine spellings were gated one at a time before this rule replaced them, and the seven that survived
-the round before it (`Keep 325-326`, `Replace 327`, `444's`, `on 243-244`, `(104)`,
-`(438, 439, 718, 719)`, `now own 125, 134, ... and 298`) differ from each other only in the
-punctuation around the digits. Enumerating punctuation is how this gate kept losing.
+**Every line citation this map has written is a standalone integer of two or more digits, so that is
+what is refused.** A one-digit citation passes, which is a floor rather than an oversight: `:2` and
+`:7` are far more often content than a place. Nine spellings were gated one at a time before this
+rule replaced them, and the seven that survived the round before it (`Keep 325-326`, `Replace 327`,
+`444's`, `on 243-244`, `(104)`, `(438, 439, 718, 719)`, `now own 125, 134, ... and 298`) differ from
+each other only in the punctuation around the digits. Enumerating punctuation is how this gate kept
+losing.
 
-Four things are not that integer and are blanked before the scan: **an anchor or identity token**,
+Seven things are not that integer and are blanked before the scan: **an anchor or identity token**,
 which includes a row id, a line anchor's `L120-211` and everything inside a code span, since that is
-where this file writes what it quotes; **a date**; **a SHA or hex digest**; and **an issue or PR
-reference**. Two more are checked at the match, because a number there is doing something other than
-pointing: it may NAME a thing (after `ruling`, `case`, `issue`, `PR`, `RFC`, `phase`, `version`,
-`wave`, `priority` or `slot`) or COUNT one (before `sites`, `tests`, `rows`, `files`, `anchors`,
+where this file writes what it quotes; **a date**; **a SHA or hex digest**; **an issue or PR
+reference**; **a thousands separator**, so `1,157 rows` is one number and not two; and **a number a
+naming word introduces**, after `ruling`, `case`, `issue`, `PR`, `RFC`, `phase`, `version`, `wave`,
+`priority` or `slot`. That last one is a blanker rather than a check at the match because what
+precedes the digits and what follows them cannot both be expressed in one lookahead. ONE thing is
+checked at the match: COUNTING something, before `sites`, `tests`, `rows`, `files`, `anchors`,
 `attempts`, `pins`, `cycles`, `commits`, `values`, `names`, `topics`, `pixels`, or `lines`, which
-counts only in that position because `line 412` with the noun first is a citation).
+counts only in that position because `line 412` with the noun first is a citation.
+
+**One spelling is not gated, deliberately.** A number glued to a name with no separator, as `l42`
+is, would take every identifier ending in digits with it, and this file is full of them:
+`test_pattern1`, `phase4j`, `L-101a`. A citation spelled that way is unreachable by any rule that
+also lets a name through, so it is the reader's to catch.
 
 **Over-selection is the intended failure.** A sentence this refuses that was citing nothing is a
 sentence to rewrite, and that costs one edit; a citation it misses is an executor editing whatever
@@ -289,10 +303,11 @@ right, and `totals` refuses an unstamped anchor so a forgotten one cannot pass q
 Every anchor names its file by full path, which is what lets the accounting be a subtraction rather
 than a recipe; a cell that named a file any other way would be refused.
 
-**The row tables carry `<!-- prettier-ignore -->` and are not padded.** Prettier pads every cell in
-a table to the widest cell in its column, and an identity is much wider than a line number, so
-letting it format these twelve tables costs 2.2MB of trailing spaces and puts the file past what an
-executor can load. The prose tables in this file are untouched and still padded.
+**Twelve tables carry `<!-- prettier-ignore -->` and are not padded:** the nine row tables, plus
+Totals, the retired list and the unrowed list, which hold the same identities. Prettier pads every
+cell in a table to the widest cell in its column, and an identity is much wider than a line number,
+so letting it format them costs 2.2MB of trailing spaces and puts the file past what an executor can
+load. The prose tables in this file are untouched and still padded.
 
 ## How a row was decided
 
@@ -406,9 +421,10 @@ what that debt looks like when it is paid.
 
 #### What it found in group 1
 
-`sweep-screen.py screen` runs over every `pytest.raises(..., match=)` site under `cli/tests` and
-prints one line per site, with its verdict, the targeted raise and the handle values behind that
-verdict. Five verdicts are possible:
+`sweep-screen.py screen` runs over all 670 sites the estate holds, the 621
+`pytest.raises(..., match=)` sites under `cli/tests` and the 49 `assertRaisesRegex` sites under
+`website/tests`, and prints one line per site, with its verdict, the targeted raise and the handle
+values behind that verdict. Five verdicts are possible:
 
 - **Multi-raise-path, a structural handle tells the targeted raise apart.** Settled: convert.
 - **Multi-raise-path, no discriminator.** Settled: delete.
@@ -944,16 +960,16 @@ mechanical batch after three screens have taken their sites out is the part that
 judgment.
 
 **Corrected 2026-08-16, during execution.** The re-check that produced the `G1-K` rows found 30
-input-varying sites. There are 42, plus two of the same shape in unittest's spelling. It had missed
-a `manifests/` and `vms/` cluster, and the misses were sitting in delete rows, described by the
-mechanical batch's shared justification as fixed literals that vary with nothing. What found them
-was not re-reading the rows: it was partitioning every site in the estate by AST and classifying
-each `match=` argument as a string literal or not. `ruff` corroborated one independently, raising
-`B007` after the deletion because the loop variable existed only to feed the assertion. Two of the
-affected tests say in their own docstrings that the label is deliberately carried into the failure
-so each case reads as its own problem rather than as one sentence covering four. The lesson is the
-method: a shape claim about a batch this size is checkable mechanically and should be checked that
-way rather than asserted from reading.
+input-varying sites. There are 42 in total, of which two are the same shape in unittest's spelling.
+It had missed a `manifests/` and `vms/` cluster, and the misses were sitting in delete rows,
+described by the mechanical batch's shared justification as fixed literals that vary with nothing.
+What found them was not re-reading the rows: it was partitioning every site in the estate by AST and
+classifying each `match=` argument as a string literal or not. `ruff` corroborated one
+independently, raising `B007` after the deletion because the loop variable existed only to feed the
+assertion. Two of the affected tests say in their own docstrings that the label is deliberately
+carried into the failure so each case reads as its own problem rather than as one sentence covering
+four. The lesson is the method: a shape claim about a batch this size is checkable mechanically and
+should be checked that way rather than asserted from reading.
 
 <!-- prettier-ignore -->
 | id | file and anchors | shape | disposition | justification |
@@ -1330,7 +1346,7 @@ other three are each a full round on their own.
 | A-092 | `cli/tests/test_database_migration_safety.py::test_notice_survives_machine_presentation_suppression@ab5972` | injected notice identity | keep | The strings are the test's own; the invariant is that `suppress_presentation()` hides info and lets notices through. |
 | B-001 | `cli/tests/sessions/test_console_attach_orchestrated.py::test_named_console_attach_holds_across_the_interactive_attach@a01d87` | report-line substring | delete | The test's subject is the hold span, carried structurally by `events == ["hold-open", "interactive", "hold-close"]` in the same test. The announce line adds nothing that can regress independently. |
 | B-002 | `cli/tests/sessions/test_console_attach_orchestrated.py::test_restore_session_stopped_vm_drives_the_real_gated_composition@5ad02b` | report-line substring | delete | The gated-composition claim is carried by the rest of the same test (`events`, `resolve_counter`, three tmux commands). The "already matches config" line is the report only. |
-| B-007 | `cli/tests/sessions/test_delete_resource_cleanup.py::test_now_empty_workspace_offered_and_deleted_interactive@a253fc,test_now_empty_agent_offered_and_deleted_interactive@6c6f9f,test_agent_becomes_candidate_once_grant_removed@a3ac1c,test_delete_session_interactive_offers_now_empty_workspace@4ef8c0` | interactive-offer wording substring | convert | The real invariant is that the operator was ASKED rather than silently acted upon; `calls`/`db.get_*` siblings cannot see a prompt. Replace with a prompt-count assertion. VERIFIED by executing: `len(prompts) == 1` passes on this row's first three anchors, while the fourth, `test_delete_resource_cleanup.py::test_delete_session_interactive_offers_now_empty_workspace`, is the end-to-end flow and issues two prompts, so that site needs `== 2`. **Which anchor each verified site is, is inferred from the row's structure**: the four numbers ran in order against a tree this map no longer matches, and their drift against these four anchors is monotonic. The verification lane executes the mapping rather than trusting it. No production change. |
+| B-007 | `cli/tests/sessions/test_delete_resource_cleanup.py::test_now_empty_workspace_offered_and_deleted_interactive@a253fc,test_now_empty_agent_offered_and_deleted_interactive@6c6f9f,test_agent_becomes_candidate_once_grant_removed@a3ac1c,test_delete_session_interactive_offers_now_empty_workspace@4ef8c0` | interactive-offer wording substring | convert | The real invariant is that the operator was ASKED rather than silently acted upon; `calls`/`db.get_*` siblings cannot see a prompt. Replace with a prompt-count assertion. VERIFIED by executing the PROPOSED assertion, which is a replacement rather than anything in the tree today: `len(prompts) == 1` passes on this row's first three anchors, while the fourth, `test_delete_resource_cleanup.py::test_delete_session_interactive_offers_now_empty_workspace`, is the end-to-end flow and issues two prompts, so that site needs `== 2`. **Which anchor each verified site is, is inferred from the row's structure**: the four numbers ran in order against a tree this map no longer matches, and their drift against these four anchors is monotonic. The verification lane executes the mapping rather than trusting it. No production change. |
 | B-008 | `cli/tests/sessions/test_delete_resource_cleanup.py::test_now_empty_workspace_created_interactive_offer_notes_provenance@7f3cfd,test_now_empty_agent_created_interactive_offer_notes_provenance@577be3` | provenance-cue wording pin | delete | The whole assertion is the sentence `(created with this session)`. The provenance branch it fronts has no other observable, so R2.4 applies; `calls == ["ws-vm1"]` beside it keeps the behavioral half. |
 | B-009 | `cli/tests/sessions/test_delete_resource_cleanup.py::test_now_empty_workspace_interactive_offer_discloses_grants@b7093e,test_now_empty_workspace_interactive_offer_plain_with_only_grant_all_row@4f962c` | disclosure wording pin plus phrase blacklist | delete | The first anchor pins a full authored sentence (`"Workspace 'ws-vm1' now has no sessions (deleting revokes explicit grant(s) held by: bot). Delete it?"`); the second is a phrase-absence blacklist (`assert all("revokes explicit grant" not in p for p in prompts)`), the shape the rule names as worse than useless. The grant-guard behavior itself is pinned structurally in `test_delete_resource_cleanup.py::test_now_empty_workspace_yes_created_kept_when_external_explicit_grant` and `test_delete_resource_cleanup.py::test_now_empty_workspace_yes_created_auto_deletes_with_only_grant_all_row`. |
 | B-010 | `cli/tests/sessions/test_delete_resource_cleanup.py::test_now_empty_workspace_yes_not_created_reports_but_keeps@9694a5,test_now_empty_workspace_yes_created_kept_when_external_explicit_grant@e4e9fd,test_now_empty_agent_yes_not_created_reports_but_keeps@7d2ebd,test_delete_session_yes_reports_now_empty_uncreated_workspace@c11fe3` | report-but-keep warning substring triples | delete | Every one of these sits directly under `calls == []` and `db.get_workspace(...) is not None` (or the agent equivalent), which is the entire report-but-keep invariant. The warning text and the suggested `agw ... delete` command are the report. |
@@ -1355,26 +1371,26 @@ other three are each a full round on their own.
 | B-032 | `cli/tests/agents/test_create_reinit_orchestrated.py::test_reinit_reconciles_grant_all_agent_via_materialized_rows@f0d028` | **[unverified]** count-in-report-line pin | delete | "Reconciled 1 workspace grant" restates the grant row the test seeded and can assert on directly. |
 | B-033 | `cli/tests/agents/test_delete_grant_revoke_orchestrated.py::test_grant_reachable_vm_is_one_boundary_burst@d9a61b,test_revoke_reachable_vm_is_one_boundary_burst@ed375c,test_delete_choreography_end_to_end_standalone@69dd1f,test_grant_all_sets_flag_and_adds_every_vm_workspace@635a69,test_grant_missing_workspace_warns_and_skips@b99352,test_revoke_named_workspace_with_implicit_access_keeps_membership@fb2fd5,test_revoke_all_warns_about_remaining_implicit_access@641375` | **[unverified]** Granted/Revoked/Deleted report-line pins | delete | Every one of these has a DB-state or call-spy sibling in the same test (grant rows, session rows, the delete spy). The rendered per-item lines and the "(still has implicit access via sessions)" parenthetical are the report. |
 | B-034 | `cli/tests/agents/test_delete_grant_revoke_orchestrated.py::test_grant_reachable_vm_is_one_boundary_burst@d9a61b,test_revoke_reachable_vm_is_one_boundary_burst@ed375c` | **[unverified]** Role.RESULT tuple equality carrying a full authored sentence | delete | Unlike B-004, the assertion here is `(Role.RESULT, 0, "Agent 'a1' granted access to 1 workspace")`: the role and level are incidental and the sentence is the payload. The role-and-level invariant is already covered by B-029 in the sibling file. |
-| B-035 | `cli/tests/agents/test_delete_grant_revoke_orchestrated.py::test_delete_socket_dir_runs_even_when_userdel_fails@ea7b46,test_grant_missing_workspace_warns_and_skips@b99352,test_revoke_all_warns_about_remaining_implicit_access@641375` | warning-wording substring | convert | Three tests where "did it warn at all" is the invariant (a failed userdel must not be silent, a missing workspace must not be silently skipped, remaining implicit access must be surfaced) and no sibling sees it. VERIFIED by executing: `assert len(captured_output.warnings) == 1` passes at all three. No production change. |
+| B-035 | `cli/tests/agents/test_delete_grant_revoke_orchestrated.py::test_delete_socket_dir_runs_even_when_userdel_fails@ea7b46,test_grant_missing_workspace_warns_and_skips@b99352,test_revoke_all_warns_about_remaining_implicit_access@641375` | warning-wording substring | convert | Three tests where "did it warn at all" is the invariant (a failed userdel must not be silent, a missing workspace must not be silently skipped, remaining implicit access must be surfaced) and no sibling sees it. VERIFIED by executing the PROPOSED assertion, which is a replacement rather than anything in the tree today: `assert len(captured_output.warnings) == 1` passes at all three. No production change. |
 | B-036 | `cli/tests/agents/test_shell_exec_orchestrated.py::test_exec_dash_prefixed_command_fails_with_zero_resolves_and_zero_gate@ea5444` | hint substring pair | keep | `"put '--' before"` and `"sh -c"` are the literal argv syntax the operator must type, and the test's subject is that a dash-prefixed command fails with a recovery instruction rather than a bare parse error. Trim to the `sh -c` token if the lead wants it narrower. Flagged: `"put '--' before"` is closer to prose than to a token. |
 | B-037 | `cli/tests/workspaces/test_create_orchestrated.py::test_create_stopped_vm_gate_resolves_once_and_seeds_the_boundary@c58c46` | count-of-report-line plus prefix blacklist | delete | `sum(... "Workspace 'ws1' created" ...) == 1` pins the sentence and its non-duplication; the no-section-header clause is a form blacklist. The create itself is a DB fact asserted beside it. |
 | B-038 | `cli/tests/workspaces/test_lifecycle_orchestrated.py::test_repair_reachable_vm_is_one_boundary_burst@a46484` | report-line pin | delete | `assert resolve_counter == [["proxmox-token"]]` and `assert any("chmod -c 2770 /srv/ws1" in c for c in target.commands)` carry the boundary-burst claim; the "Repairing workspace ..." announce line is the report. |
-| B-039 | `cli/tests/workspaces/test_lifecycle_orchestrated.py::test_repair_skips_git_identity_when_not_a_repo@4785e6` | warning-absence substring | convert | The invariant (identity on a non-repo workspace is a quiet no-op) is real and only the warning stream sees it. VERIFIED by executing: `assert captured_output.warnings == []` passes. No production change. |
-| B-040 | `cli/tests/workspaces/test_lifecycle_orchestrated.py::test_repair_git_identity_warns_on_unexpected_probe_failure@2f3b8f` | warning-presence substring | convert | Companion to B-039: the branch that must NOT be silent. VERIFIED by executing: `assert len(captured_output.warnings) == 1` passes. No production change. |
+| B-039 | `cli/tests/workspaces/test_lifecycle_orchestrated.py::test_repair_skips_git_identity_when_not_a_repo@4785e6` | warning-absence substring | convert | The invariant (identity on a non-repo workspace is a quiet no-op) is real and only the warning stream sees it. VERIFIED by executing the PROPOSED assertion, which is a replacement rather than anything in the tree today: `assert captured_output.warnings == []` passes. No production change. |
+| B-040 | `cli/tests/workspaces/test_lifecycle_orchestrated.py::test_repair_git_identity_warns_on_unexpected_probe_failure@2f3b8f` | warning-presence substring | convert | Companion to B-039: the branch that must NOT be silent. VERIFIED by executing the PROPOSED assertion, which is a replacement rather than anything in the tree today: `assert len(captured_output.warnings) == 1` passes. No production change. |
 | B-041 | `cli/tests/workspaces/test_lifecycle_orchestrated.py::test_repair_healthy_workspace_reports_ok_for_every_step@d2e75a,test_repair_fully_damaged_workspace_reports_fixed_per_step@2e5e60,test_repair_partial_damage_reports_only_the_diverged_step@13cdd6,test_repair_sgid_only_damage_reports_permissions_fixed@530851,test_repair_mode_only_damage_reports_permissions_fixed@88f0d7,test_repair_owner_only_damage_reports_permissions_fixed@88f0d7,test_repair_hardens_other_bits_on_a_pre254_workspace@d756c9` | `OK:` / `Fixed:` / `Repaired N issue(s)` report-line pins | keep | **Operator ruling, 2026-08-16**, applying the rubric that this row provoked. These assertions do not fail only on a rewording: each tracks a DETECTION OUTCOME, whether a repair step found something to converge or found the state already correct, and `workspaces/manager/repair.py::repair_workspace` returns `None` (its signature is `) -> None:`) so nothing else observes it. Convergence is idempotent, so the emitted command list is identical either way, which is what makes this the only probe. The three `*_only_damage` tests pin the owner/mode/sgid OR-collapse in `repair.py::repair_workspace` (`if owner.stdout.strip() or mode.stdout.strip() or sgid.stdout.strip():`) against an AND-collapse regression the code comments record as having really happened. **What the keep costs, stated so nobody later reads this as a prose pin nobody noticed**: these assertions break if someone rewords `OK:`, `Fixed:` or `Repaired N issue(s)`, and whoever does that must update them. That is the price of the only probe there is, not an oversight. |
 | B-042 | `cli/tests/workspaces/test_lifecycle_orchestrated.py::test_repair_acl_churn_does_not_report_false_fixed@6efe1e` | OK/Fixed report-line pins | convert | The invariant here IS separable from the report: `_acls_changed` is a module-level helper (`repair.py::_acls_changed`). VERIFIED by calling it directly at HEAD: churn-only snapshots give `False`, a real per-path ACL change gives `True`, empty-vs-empty gives `False`. Replace the whole test with a direct `_acls_changed` unit test over the three inputs. No production change. |
 | B-043 | `cli/tests/workspaces/test_lifecycle_orchestrated.py::test_repair_acls_indeterminate_when_getfacl_fails@f60f1d` | OK-absence, Fixed-prefix blacklist, warning substring, qualified closing-line pin | keep | Moves with B-041 under the same ruling: the indeterminate ACL branch must warn and must NOT report a verified `OK:`, and that outcome has no observable but the report line. The `Fixed:`-prefix blacklist half is the exception and still goes, because a blacklist cannot hold the property and the surviving `setfacl` convergence command in the same test carries what it was reaching for. Same rewording cost as B-041. |
 | B-044 | `cli/tests/workspaces/test_lifecycle_orchestrated.py::test_first_repair_after_create_is_a_noop@0a258e,test_first_repair_after_rehome_is_a_noop@527d82,test_first_repair_after_copy_is_a_noop@4a6192` | first-repair-is-a-noop report pins | keep | Moves with B-041: the claim is that the first repair after create, rehome and copy finds NOTHING to fix, which is exactly a detection outcome and is exactly what a regression in the canonical ACL spec would break. The `setfacl` assertions inside those same tests (`assert any("setfacl -R -m g::rwx -m m::rwx -m o::---" in c for c in create_acls)` and its `copy_acls` twin) prove the spec was applied, not that repair then saw it as already correct, so they are not a sibling for this. Same rewording cost as B-041. |
 | B-045 | `cli/tests/workspaces/test_lifecycle_orchestrated.py::test_delete_reachable_vm_is_one_boundary_burst@7594e0,test_delete_group_removal_failure_does_not_break_the_delete@08f033,test_copy_cross_vm_runs_two_sequential_boundaries_with_nested_holds@8c86f7,test_copy_same_vm_reuses_the_source_composition@366c4d` | **[unverified]** closing report-line pins | delete | "Workspace 'ws1' deleted" / "copied to 'ws2'" restate DB facts the same tests assert directly. |
-| B-046 | `cli/tests/workspaces/test_lifecycle_orchestrated.py::test_delete_group_removal_failure_does_not_break_the_delete@08f033,test_create_rollback_tolerates_a_groupdel_failure@4c16b2` | warning-absence blacklist | convert | The invariant (a tolerated groupdel failure does not surface as a rollback warning) is real and only the warning stream sees it. VERIFIED by executing: `assert captured_output.warnings == []` passes at both sites. No production change. |
-| B-046a | `cli/tests/workspaces/test_lifecycle_orchestrated.py::test_create_rollback_on_clone_failure_leaves_no_residue@9b28bd` | warning-absence blacklist | convert | Same invariant, different count. VERIFIED by executing: `warnings == []` FAILS here because an unrelated git-credential hint warning always fires; `assert len(captured_output.warnings) == 1` passes. This premise-check changed the replacement I would have written. |
+| B-046 | `cli/tests/workspaces/test_lifecycle_orchestrated.py::test_delete_group_removal_failure_does_not_break_the_delete@08f033,test_create_rollback_tolerates_a_groupdel_failure@4c16b2` | warning-absence blacklist | convert | The invariant (a tolerated groupdel failure does not surface as a rollback warning) is real and only the warning stream sees it. VERIFIED by executing the PROPOSED assertion, which is a replacement rather than anything in the tree today: `assert captured_output.warnings == []` passes at both sites. No production change. |
+| B-046a | `cli/tests/workspaces/test_lifecycle_orchestrated.py::test_create_rollback_on_clone_failure_leaves_no_residue@9b28bd` | warning-absence blacklist | convert | Same invariant, different count. VERIFIED by executing the PROPOSED assertion, which is a replacement rather than anything in the tree today: `warnings == []` FAILS here because an unrelated git-credential hint warning always fires; `assert len(captured_output.warnings) == 1` passes. This premise-check changed the replacement I would have written. |
 | B-046b | `cli/tests/workspaces/test_lifecycle_orchestrated.py::test_copy_without_grant_all_agents_makes_no_grant_calls@06390b` | detail-absence blacklist | delete | I expected to need a call-spy replacement; VERIFIED by executing that the test ALREADY has one, `assert calls == []` plus `assert db.list_agent_grants("dev") == []`, which is the whole invariant. (`detail == []` fails here: an unrelated VS Code workspace line is emitted.) Clean delete. |
 | B-047 | `cli/tests/workspaces/test_lifecycle_orchestrated.py::test_copy_materializes_grant_all_agents_on_the_dest_vm@c34975` | **[unverified]** count-in-report-line pin | delete | "Added 1 grant-all agent(s) to workspace" restates the grant row the test can read from the DB. |
 | B-048 | `cli/tests/orchestration/test_activation.py::test_operator_stopped_refusal_propagates_from_the_node@063903` | hint equality | keep | Rubric re-check, 2026-08-16. **The row was mistaken.** The pinned hint is authored by the test's own `_Target` double at `orchestration/test_activation.py::_Target.auto_start`, not by production, so it is an injected sentinel. It probes that `ensure_active` propagates the node's refusal untouched, which nothing else does once G1-018 (2026-08-19 map) removes the `match=`. |
 | B-052 | `cli/tests/orchestration/test_readiness.py::test_skip_and_degrade_skips_rejected_and_reports_them@9089a6` | tuple equality carrying an injected reason | keep | `rejected == [("gh", "gh: token rejected")]` pins the identity and pairing of the rejection record; the string is the fixture's own. |
-| B-053 | `cli/tests/orchestration/test_unwind.py::test_failed_teardown_warns_and_never_masks@125e91` | warning substring | convert | "a failed teardown warns and never masks the original error" is the invariant; the never-masks half is structural (the original error propagates) but the warns half only the warning stream sees. VERIFIED by executing: `assert len(captured_output.warnings) == 1` passes. No production change. |
+| B-053 | `cli/tests/orchestration/test_unwind.py::test_failed_teardown_warns_and_never_masks@125e91` | warning substring | convert | "a failed teardown warns and never masks the original error" is the invariant; the never-masks half is structural (the original error propagates) but the warns half only the warning stream sees. VERIFIED by executing the PROPOSED assertion, which is a replacement rather than anything in the tree today: `assert len(captured_output.warnings) == 1` passes. No production change. |
 | B-055 | `cli/tests/transports/test_factories.py::test_native_transport_probe_exhaustion_warns_platform_hint@3cd489` | warning list membership on an authored phrase | keep | Rubric re-check, 2026-08-16. **The row's premise was wrong.** `"scoped allow guidance"` is the test's OWN fixture value, set at `transports/test_factories.py::test_native_transport_probe_exhaustion_warns_platform_hint`, not authored prose, so it is value identity of the kind L-010 keeps, and it is the only probe that `probe_failure_hint` reaches the operator. |
-| B-058 | `cli/tests/transports/test_ssh.py::test_interactive_reports_a_dropped_connection@595c44` | warning substring pair | convert | The "dropped connection is reported, not swallowed" invariant is only visible in the warning stream. Replace with a warning-count assertion; VERIFIED by executing: `assert len(captured_output.warnings) == 1` passes. `"agentworks@vm1"` is the host/user the test injected and can stay as value identity if the lead wants the propagation kept. |
+| B-058 | `cli/tests/transports/test_ssh.py::test_interactive_reports_a_dropped_connection@595c44` | warning substring pair | convert | The "dropped connection is reported, not swallowed" invariant is only visible in the warning stream. Replace with a warning-count assertion; VERIFIED by executing the PROPOSED assertion, which is a replacement rather than anything in the tree today: `assert len(captured_output.warnings) == 1` passes. `"agentworks@vm1"` is the host/user the test injected and can stay as value identity if the lead wants the propagation kept. |
 | B-066 | `cli/tests/assistance/test_generation.py::test_command_check_exits_nonzero_without_repairing_drift@f2051a` | path-in-output substring | keep | The asserted string is a repository path (`plugins/codex/agentworks/.codex-plugin/plugin.json`), and the test's subject is that the drift check names the file that drifted while exiting nonzero without repairing. Path reference, not prose (the charter's named keep case). Recommend pairing it with a path-existence assertion. |
 | B-067 | `cli/tests/test_agents.py::test_assert_agent_ssh_works_raises_on_ssh_transport_failure@a3583f,test_assert_agent_ssh_works_wraps_ssh_error_as_connectivity@4d6cde` | **[unverified]** hint substring | delete | `"agent reinit claude" in hint` and `"alpha" in hint` pin fragments of authored recovery sentences; the typed `ConnectivityError` and its entity fields already discriminate, and the agent name is asserted through `entity_name` in the same tests' neighbors. |
 | B-069 | `cli/tests/test_codex_integration.py::test_raise_hints_name_a_recovery_the_operator_can_actually_take@21bb10` | hint substring plus wording blacklist | convert | This is the one test in the file where three same-type `StateError`s are told apart only by their hints, and a sibling delegates its discrimination to it by name. Keep the fixture-determined path fragment (`"Remove ~/.agentworks/codex/s1.thread"` names the file the test created) and replace `"nothing is orphaned" in hint` and `"reachable" not in hint` with a distinctness check over the three hints. No production change. |
@@ -1382,7 +1398,7 @@ other three are each a full round on their own.
 | B-071 | `cli/tests/test_codex_integration.py::test_recorded_thread_id_binds_a_session_that_had_nothing_stored@e1e27e,test_recorder_content_that_is_not_a_uuid_is_treated_as_unbound@2c8b22,test_single_candidate_is_adopted_and_resumed@7d4b2a,test_zero_candidates_launches_fresh@3fee5a,test_several_candidates_open_the_picker_instead_of_raising@c49f3a,test_a_candidate_whose_filename_has_no_uuid_opens_the_picker@710c45,test_discovery_without_a_sessions_dir_launches_fresh@3da5de,test_gone_rollout_drops_the_id_and_falls_through_to_a_fresh_launch@b3d34d,test_wrong_typed_stored_id_is_swept_and_treated_as_absent@76ccae,test_bound_id_is_resumed_verbatim_on_the_next_op@96671f,test_sh_probe_counts_an_unreadable_rollout_as_a_candidate_it_cannot_name@9f8e96,test_recreated_namesake_never_inherits_the_dead_binding@5e1045` | pane-echo wording substrings | delete | The `_echo(command)` assertions across twelve tests: `"resuming session s1"`, `"starting new session s1"`, `"archived or gone; starting new session s1"`, `"identified this session's codex conversation from codex's on-disk state"`, `"could not identify this session's codex conversation with confidence"`, `"press esc to start a fresh conversation"`. Every one sits beside the structural claim the test is about: `state == {}` or `state == {"session_id": _SID}`, plus `f"resume {_SID}" in command` or `"resume" not in _sh_argv(...)`. The adopted uuid already rides in the command as value identity. |
 | B-073 | `cli/tests/test_codex_integration.py::test_writable_dirs_emit_one_add_dir_each_in_order_and_quoted@7c5021` | argv token containing a space | keep | `"/data/shared dir" in argv` proves a writable directory whose name contains a space survives shell nesting as ONE argv token. The string is the path the test injected, so this is value identity, and the invariant is quoting. |
 | B-079 | `cli/tests/test_consoles_layout.py::test_apply_layout_aw_session_vertical_silent_on_single_pane@79708d,test_apply_layout_aw_session_vertical_warns_on_genuine_failure@27c1e5,test_apply_layout_aw_session_vertical_applies_under_pane_base_index_one@7be9ed` | warning substring and absence | convert | The invariant, that a genuine layout failure warns while a single-pane no-op and a `pane-base-index 1` layout do not, is real and only the warning stream sees it. VERIFIED by executing the PROPOSED assertions, which are replacements rather than anything in the tree today: `captured_output.warnings == []` in `test_consoles_layout.py::test_apply_layout_aw_session_vertical_silent_on_single_pane` and `test_consoles_layout.py::test_apply_layout_aw_session_vertical_applies_under_pane_base_index_one`, and `len(...) == 1` in `test_consoles_layout.py::test_apply_layout_aw_session_vertical_warns_on_genuine_failure`, all pass. No production change. |
-| B-080 | `cli/tests/test_consoles_live_sync.py::test_add_session_live_sync_adds_window_for_bare_spec@5ba8b4,test_reorder_sessions_live_sync_bails_on_duplicate_window_names@34c278,test_kill_session_windows_transport_failure_warns@95184d` | warning substring and absence | convert | Same shape as B-079: live-sync silently-succeeded vs bailed-with-a-reason. VERIFIED by executing: `warnings == []` and both `len(...) == 1` assertions all pass. The window names `alpha`/`beta` are the test's own and can stay as value identity. No production change. |
+| B-080 | `cli/tests/test_consoles_live_sync.py::test_add_session_live_sync_adds_window_for_bare_spec@5ba8b4,test_reorder_sessions_live_sync_bails_on_duplicate_window_names@34c278,test_kill_session_windows_transport_failure_warns@95184d` | warning substring and absence | convert | Same shape as B-079: live-sync silently-succeeded vs bailed-with-a-reason. VERIFIED by executing the PROPOSED assertion, which is a replacement rather than anything in the tree today: `warnings == []` and both `len(...) == 1` assertions all pass. The window names `alpha`/`beta` are the test's own and can stay as value identity. No production change. |
 | B-081 | `cli/tests/test_consoles_live_sync.py::test_delete_session_reports_affected_consoles@851b59,test_delete_session_yes_reports_but_keeps_empty_console@c535ef,test_remove_sessions_warns_when_offered_console_delete_raises@8255ba` | **[unverified]** report-line equality | delete | `report == ["Removed 's' from consoles: alpha, beta"]` and its two siblings pin an authored sentence that restates console membership the tests read from the DB directly. |
 | B-082 | `cli/tests/test_consoles_live_sync.py::test_delete_session_offers_and_deletes_now_empty_console@19d526,test_delete_session_does_not_offer_console_with_remaining_sessions@9ed480,test_remove_sessions_empties_console_offers_and_deletes@c50f20,test_remove_sessions_with_remaining_not_offered@63ce4e` | prompt-wording substring and absence | convert | Same invariant and same replacement as B-007 (was the operator offered the delete, or not), VERIFIED there. Replace with prompt-count assertions. No production change. |
 | B-083 | `cli/tests/test_consoles_live_sync.py::test_delete_session_yes_reports_but_keeps_empty_console@c535ef,test_delete_session_warns_when_offered_console_delete_raises@d39ece,test_remove_sessions_yes_reports_but_keeps_empty_console@b283f2,test_remove_sessions_warns_when_offered_console_delete_raises@8255ba,test_remove_sessions_non_interactive_without_yes_reports_but_keeps@b283f2` | report-but-keep warning triples | delete | Identical family to B-010: every one sits under a console-row assertion that carries the keep. |
@@ -1392,7 +1408,7 @@ other three are each a full round on their own.
 | B-087 | `cli/tests/test_consoles_restore.py::test_restore_session_rebuild_raises_when_new_window_fails@312540,test_restore_session_rebuild_raises_when_shell_split_fails@b18e5b,test_restore_session_rebuild_raises_when_shell_tag_fails@b18e5b` | report-line absence | delete | `not any("Rebuilt window" in m ...)` is a phrase blacklist standing in for "the rebuild did not complete", which the raised error and the absent tmux commands already carry. |
 | B-088 | `cli/tests/test_consoles_restore.py::test_restore_session_rebuild_raises_when_shell_split_fails@b18e5b,test_restore_session_rebuild_raises_when_shell_tag_fails@b18e5b,test_restore_session_refuses_when_session_pane_killed@864b9b` | hint substring naming a CLI command | keep | `"agw console attach con --recreate" in hint` is the literal recovery command an operator types, keyed on the console name the test seeded. Same class as B-016: a command reference, not prose about one. |
 | B-089 | `cli/tests/test_consoles_restore.py::test_restore_session_reorders_relative_to_the_session_pane@aa6865` | warning-absence blacklist | convert | Replace with `captured_output.warnings == []`. VERIFIED by executing: it passes. No production change. |
-| B-090 | `cli/tests/test_consoles_shell_panes.py::test_split_shell_pane_agent_branch_no_probe_without_composed_env@8dbbec` | phrase-filtered warning counting | delete | I expected a plain warning count to work here; VERIFIED by executing that it does not. The build emitted five warnings at one site and one unrelated warning at another, so the count only means anything through the phrase filter. With no way to identify the once-per-build warning except by its wording, and no production change permitted to give it one (R2.2), R2.4 directs deletion. This premise-check changed my disposition. **The measurement is historical**: it was taken at a tree this map no longer matches, and the two sites it counted at cannot be named here, since no test in this file asserts on warnings at HEAD. **Re-derived 2026-09-06 at `c310d05b`.** The once-per-build test is gone. The phrase-filtered warning family it belonged to survives in `test_split_shell_pane_agent_branch_warns_and_falls_back_when_setenv_missing`, which B-092 already rows, so nothing is unrowed and this row stands on its remaining anchor. |
+| B-090 | `cli/tests/test_consoles_shell_panes.py::test_split_shell_pane_agent_branch_no_probe_without_composed_env@8dbbec` | phrase-filtered warning counting | delete | I expected a plain warning count to work here; VERIFIED by executing that it does not. The build emitted five warnings at one site and one unrelated warning at another, so the count only means anything through the phrase filter. With no way to identify the once-per-build warning except by its wording, and no production change permitted to give it one (R2.2), R2.4 directs deletion. This premise-check changed my disposition. **The measurement is historical**, taken at a tree this map no longer matches, but both sites it counted at are still here: `test_consoles_shell_panes.py::test_split_shell_pane_admin_branch_never_probes` and `test_consoles_shell_panes.py::test_split_shell_pane_emits_workspace_identity_only`. **Re-derived 2026-09-06 at `c310d05b`.** The once-per-build test is gone. The phrase-filtered warning family it belonged to survives in `test_split_shell_pane_agent_branch_warns_and_falls_back_when_setenv_missing`, which B-092 already rows, so nothing is unrowed and this row stands on its remaining anchor. |
 | B-091 | `cli/tests/test_consoles_shell_panes.py::test_split_shell_pane_warns_when_split_returns_no_pane_id@661161,test_split_shell_pane_warns_when_set_option_fails@e3b0c4` | required-phrase lists in warnings | convert | Rubric re-check, 2026-08-16. **Re-derived 2026-09-06.** The phrase list is in `test_consoles_shell_panes.py::test_split_shell_pane_warns_when_split_returns_no_pane_id` (`"couldn't capture its id"`, `"untagged"` and `"restart con"` over one warning), and it is that test's only warning assertion, so deleting it leaves the no-pane-id degrade unprobed. Convert it to a warning-count assertion. No production change. **Out-of-scope finding:** the row's other anchor, `test_consoles_shell_panes.py::test_split_shell_pane_warns_when_set_option_fails`, asserts NOTHING at HEAD. It drives `add_shell` with `set-option` failing and then ends, so the tag-failure degrade its docstring describes is unprobed today and no edit of this row's making. Raising it rather than fixing it: giving a test its missing assertion is not a subtraction pass's work. |
 | B-092 | `cli/tests/test_consoles_shell_panes.py::test_split_shell_pane_agent_branch_warns_and_falls_back_when_setenv_missing@9e5a1a` | **[unverified]** required-phrase list on a warning | delete | `"Defaults:admin setenv"`, `"agw vm reinit vm1"`, `"not allowed to set the following environment variables"`: the first two are sudoers syntax and a CLI command (keepable as tokens), the third is authored prose. The fall-back behavior itself is asserted through the emitted command in the same test. |
 | B-102 | `cli/tests/test_secret_sources_drive_harness.py::test_fake_provider_path_is_closed_and_cannot_fall_through@087ab1` | injected-sentinel equality | keep | `completed.stdout == "fixture-sentinel"` proves the fake provider path is closed and cannot fall through to a real one. Value identity on a string the test injected (the charter's named keep case). |
@@ -1413,7 +1429,7 @@ other three are each a full round on their own.
 | B-130 | `cli/tests/test_templates.py::test_unknown_template@898c1a` | hint prefix pin | delete | `hint.startswith("available workspace templates: ")` pins the authored lead-in. |
 | B-131 | `cli/tests/test_templates.py::test_unknown_template@898c1a` | injected-name membership loop | keep | The loop asserts every declared template name appears in the hint; the names come from the test's own config fixture, so this is value identity and it is the substance of "the hint lists the declared names". |
 | B-132 | `cli/tests/test_templates.py::test_unknown_template_hint_when_none_declared@f87f3a` | hint verbatim equality | keep | Rubric re-check, 2026-08-16. The empty-set branch raises the same `NotFoundError` as the populated branch, so the hint is its only discriminator and the hint equality is the test's only assertion. Cost: breaks if the hint is reworded. |
-| B-134 | `cli/tests/test_tmuxinator.py::test_ensure_agent_socket_root_missing_warns_by_default@4e79ed,test_ensure_agent_socket_root_misconfigured_warns_even_when_missing_suppressed@3d75ee,test_ensure_agent_socket_root_probe_failed_warns_even_when_missing_suppressed@2d20b9,test_ensure_agent_socket_dir_missing_warns_by_default@c0afa2,test_ensure_agent_socket_dir_misconfigured_warns_even_when_missing_suppressed@3d75ee,test_ensure_agent_socket_dir_probe_failed_warns_even_when_missing_suppressed@2d20b9` | warning-classification substrings | convert | Six branches distinguished only by which word appears in the warning (`missing`, `misconfigured`, `probe failed`) plus a suppression flag. The invariant, that suppressing the missing-warning does not suppress the misconfigured or probe-failed ones, is real and structural in nature. VERIFIED by executing: `assert len(warnings) == 1` passes at all six sites, so each branch's warning is the only one in its run and the count carries the classification. No production change. |
+| B-134 | `cli/tests/test_tmuxinator.py::test_ensure_agent_socket_root_missing_warns_by_default@4e79ed,test_ensure_agent_socket_root_misconfigured_warns_even_when_missing_suppressed@3d75ee,test_ensure_agent_socket_root_probe_failed_warns_even_when_missing_suppressed@2d20b9,test_ensure_agent_socket_dir_missing_warns_by_default@c0afa2,test_ensure_agent_socket_dir_misconfigured_warns_even_when_missing_suppressed@3d75ee,test_ensure_agent_socket_dir_probe_failed_warns_even_when_missing_suppressed@2d20b9` | warning-classification substrings | convert | Six branches distinguished only by which word appears in the warning (`missing`, `misconfigured`, `probe failed`) plus a suppression flag. The invariant, that suppressing the missing-warning does not suppress the misconfigured or probe-failed ones, is real and structural in nature. VERIFIED by executing the PROPOSED assertion, which is a replacement rather than anything in the tree today: `assert len(warnings) == 1` passes at all six sites, so each branch's warning is the only one in its run and the count carries the classification. No production change. |
 | B-135 | `cli/tests/test_tmux_model.py::test_new_window_reports_the_session_pane_index_via_dispatch@03e286` | dispatch-result equality | keep | `res.stdout.strip() == "1"` is the pane index the fake tmux returned; value identity, and the invariant is that the dispatch reports the session pane index rather than a fixed 0. |
 | B-136 | `cli/tests/test_sources.py::test_fetch_file_clones_copies_and_cleans_git_source@c41fb7` | emitted-command substring | keep | `"git clone --depth 1 --branch v1"` is the command the fetcher runs at the subprocess boundary. Behavior. |
 | C-040 | `cli/tests/test_completions.py::TestUninstall.test_uninstall_when_nothing_installed_is_clean@84cdb1` | parametrized empty-state message pin | keep | `f"no {shell} completions found" in result.stdout.lower()` interpolates the parametrize value, so it proves each shell's empty-state report names the shell the operator asked about. A powershell uninstall that reported about bash passes the exit-code assertion beside it and fails only here, so the failure mode is not only a rewording. |
@@ -1445,7 +1461,7 @@ other three are each a full round on their own.
 | C-083 | `cli/tests/test_resource_list.py::test_description_populated_for_operator_and_auto_resources@be1dbe` | authored display-prefix pin | delete | `ts.description.startswith("(auto) ")` pins a display convention on synthesized descriptions. `origin.variant == "auto-declared"` is the structural fact and is asserted three times elsewhere in the same file. |
 | C-085 | `cli/tests/test_resource_list.py::test_cli_invalid_origin_filter_is_rejected@eee34e` | allowed-list echo | delete | `"operator" in str(result.exception)` asserts the rejection enumerates valid origins. The typed `ValidationError` asserted immediately above it is the invariant, and the enumeration is authored help text. |
 | C-086 | `cli/tests/test_resource_kinds.py::test_table_shows_categories_and_counts@71861a` | table layout | keep | The `KIND`/`CATEGORY`/`RESOURCES` headers and the per-row `split()` positions assert the kinds table's shape and alignment over a synthetic fixture, which is the formatting carve-out. One count is derived from production (`str(len(SECRET_BACKEND_REGISTRY))`); the other, `["secret-source", "declarable", "2"]`, carries a hand-written `2`. That literal stays because deriving it would need a production handle for the built-in secret-source count, which R2.2 forbids adding; an executor should expect it to need updating when a built-in source is added. |
-| C-087a | `cli/tests/test_resource_render.py::test_format_origin_line_handles_none@bb1aad,test_format_origin_line_operator_declared_with_file_and_line@6a5bbc,test_format_origin_line_operator_declared_without_file_returns_bare_label@2eae02,test_format_origin_line_auto_declared_with_source@3bccce,test_format_origin_line_built_in_with_source@e3d070,test_format_origin_line_system_plugin_with_source@d69f25,test_format_origin_line_system_plugin_without_source_returns_bare_label@f074fd,test_format_origin_line_system_plugin_without_plugin_degrades_gracefully@df3316` | formatter label equality | delete | **Ruled by the lead 2026-08-16** (formatter output splits on derivation): these pin the formatter's output as text (`== "unknown"`, `== "operator-declared"`, `.startswith("operator-declared (")`) with no canonical source behind the labels, so they are authored wording. The `Origin` variant contract itself keeps its own guard: `project_origin`'s variant checks were deleted and restored in PR #548 for exactly this reason. |
+| C-087a | `cli/tests/test_resource_render.py::test_format_origin_line_handles_none@bb1aad,test_format_origin_line_operator_declared_with_file_and_line@6a5bbc,test_format_origin_line_operator_declared_without_file_returns_bare_label@2eae02,test_format_origin_line_auto_declared_with_source@3bccce,test_format_origin_line_built_in_with_source@e3d070,test_format_origin_line_system_plugin_with_source@d69f25,test_format_origin_line_system_plugin_without_source_returns_bare_label@f074fd,test_format_origin_line_system_plugin_without_plugin_degrades_gracefully@df3316` | formatter label equality | delete | **Ruled by the lead 2026-08-16** (formatter output splits on derivation): these pin the formatter's output as text (`== "unknown"`, `== "operator-declared"`, `.startswith("operator-declared (")`) with no canonical source behind the labels, so they are authored wording. The `Origin` variant contract itself keeps its own guard: `project_origin`'s variant checks were deleted and restored in PR `#548` for exactly this reason. |
 | C-087b | `cli/tests/test_resource_render.py::test_format_origin_line_operator_declared_with_file_and_line@6a5bbc` | origin data projecting into the rendered cell | keep | The other half of the same ruling. `.endswith(":42)")` proves the origin's file path and line number reach the rendered cell rather than being dropped, which is derivation from a canonical source: the `Origin` record the test builds (`Origin.operator_declared(file=Path("/tmp/config.toml"), line=42)`). Keep the projection, drop the label text around it. |
 | C-088 | `cli/tests/test_list_truncation.py::_assert_truncated_and_aligned@3bdf64,test_vm_list_names_only_emits_full_name@22de9d,test_agent_list_names_only_emits_full_name@457240,test_workspace_list_names_only_emits_full_name@457240,test_console_list_names_only_emits_full_name@457240,test_agent_list_shows_legend_when_an_implicit_grant_is_marked@6a283f,test_agent_list_omits_legend_when_no_grant_is_marked@7d4b4c,test_agent_list_legend_matches_visibility_when_marker_is_truncated_away@2e9ce7` | column truncation and alignment | keep | Ellipsis placement, truncated prefix length, per-column caps, second-column offset equality across two rows, `--names-only` emitting the untruncated name in all four views, and the legend printing exactly when a marker is visible. Layout behavior over a synthetic fixture, and the `--names-only` half is the carve-out that stops a truncation change corrupting completion candidates. The old row's anchor list omitted the workspace and console tests; this one covers all four views. |
 | C-089 | `cli/tests/test_output.py::test_count_pluralizes_regular_nouns@98228c,test_count_multiword_noun@b9e56f,test_count_irregular_plural@9bd5b2,test_render_table_headers_and_rule_line@894088,test_render_table_short_column_keeps_natural_width@1f22a3,test_render_table_caps_over_width_cell_with_ellipsis@a4ef15,test_render_table_exact_cap_cell_not_truncated@65aada,test_truncate_returns_fitting_text_unchanged@42d720,test_truncate_overflow_is_exactly_width_with_ellipsis@a81b45,test_truncate_degenerate_widths_never_overflow@28cd1a,test_render_table_degenerate_max_col_width@a7d20f,test_render_table_over_cap_column_pads_short_cells_to_cap@650ec6` | pluralization, truncation, table layout | keep | Pure formatting functions whose return value is the behavior, plus header, rule and column alignment; every string is the test's own input. |
@@ -1620,7 +1636,7 @@ other three are each a full round on their own.
 | E-173 | `cli/tests/test_azure_nsg_exposure.py::TestPerOperationAllows.test_band_exhaustion_raises_typed_error@bdc4fe` | error-message substring | delete | `"no free NSG priority" in str(exc.value)` is authored; the `StateError` raise plus the `TRANSIENT_ALLOW_RULE_PREFIX` hint check (a production constant) carry the band-exhaustion claim. |
 | E-174 | `cli/tests/test_azure_vm_size_selection.py::TestCreateProvisioningOutput.test_exact_match_emits_spec_without_requested@420172,TestCreateProvisioningOutput.test_round_up_warns_and_line_shows_selected_spec@3fdc3f,TestCreateProvisioningOutput.test_non_burstable_override_selected_and_emitted@e6ba5b` | provisioning-line equality plus a wording blacklist | delete | Three tests pinning the announcement sentence. VERIFIED: the selection invariant they claim to protect is covered structurally by `TestSelectVMSize`, where `_select_vm_size` is asserted directly, including the 4/8 round-up to `Standard_B4ms`; that class runs green on its own. `"for requested" not in line` is a blacklist. |
 | E-175 | `cli/tests/test_azure_vm_size_selection.py::TestCreateProvisioningOutput.test_round_up_warns_and_line_shows_selected_spec@3fdc3f,TestCreateOSDiskClamp.test_below_floor_clamps_up_and_warns@bc4f95` | verbatim warning list equality | convert | The invariant is "warn if and only if the request was rounded up or clamped". Replace the sentence equality with `len(captured_output.warnings) == 1`, which pairs with the existing `assert not captured_output.warnings` in the no-round-up and at-or-above-floor twins. No production change. |
-| E-178 | `cli/tests/test_wsl2_create_interrupt.py::test_failure_mid_provision_cleans_up_and_reraises@2697a5,test_interrupt_during_primary_bootstrap_cleans_up_and_reraises_the_original@10a462,test_second_interrupt_abandons_cleanup_loudly@134872,test_cleanup_failure_warns_and_does_not_mask_the_original@bacce8` | phrase-selected warnings | convert | Rubric re-check, 2026-08-16. Scope corrected to include `assert not any("Interrupted" in w for w in captured_output.warnings)` in `test_wsl2_create_interrupt.py::test_failure_mid_provision_cleans_up_and_reraises`, which the duplicate C-187 row covered. A swallowed teardown failure leaving a partial distro would otherwise pass silently. Convert to a warning-count assertion. No production change. |
+| E-178 | `cli/tests/test_wsl2_create_interrupt.py::test_failure_mid_provision_cleans_up_and_reraises@2697a5,test_interrupt_during_primary_bootstrap_cleans_up_and_reraises_the_original@10a462,test_second_interrupt_abandons_cleanup_loudly@134872,test_cleanup_failure_warns_and_does_not_mask_the_original@bacce8` | phrase-selected warnings | convert | Rubric re-check, 2026-08-16. Scope corrected to include `assert not any("Interrupted" in w for w in captured_output.warnings)` in `test_wsl2_create_interrupt.py::test_failure_mid_provision_cleans_up_and_reraises`, which the duplicate C-187 row covered. Without it the interrupt messaging could appear on a plain-failure path and nothing would say so. Convert to a warning-count assertion. No production change. |
 | RB-001 | `cli/tests/sessions/test_claude_code_orchestrated.py::test_create_produces_launch_string_and_persists_the_minted_id@7a3de1` | **[unverified]** launch-note decision line riding inside a behavioral test | delete | Added by the 2026-08-19 re-baseline; the file carried no row. `"starting new session s1" in captured["command"]`. The decision the line reports is already structural in the same test: the `f"--session-id {sid}"` and `"--resume" not in` asserts are the argv `claude` actually receives (`cli/agentworks/plugins/claude/harness_integration.py`'s launch-argv assembly). What the assertion adds beyond that is the sentence we author in `claude/harness_integration.py::ClaudeCodeIntegration._resume_or_launch` (`f"agentworks harness integration (claude-code): starting new session {self._session_name}"`), so its only failure mode is a rewording. Same shape and same disposition as B-068 on the sibling `test_claude_code_integration.py`. |
 | RB-005 | `cli/tests/sessions/test_codex_orchestrated.py::test_create_launches_fresh_without_probing_any_session_state@c25981` | **[unverified]** launch-note decision line riding inside a behavioral test | delete | `"starting new session s1"` on the create path. The fresh launch is structural in the same test: `_SID not in command` proves nothing was adopted, and the `rm -f "$HOME"/.agentworks/codex/s1.thread` beside it is emitted only by `_fresh_command` (`cli/agentworks/plugins/codex/harness_integration.py`'s recorder wiring). |
 | C-039 | `cli/tests/test_completions.py::TestResolveShell.test_autodetect_failure_exits_with_message@1be167,TestCompletionCli.test_show_autodetect_failure_exits_1@8db2ff` | **[unverified]** abort-wording substring (two sites) | delete | `"unable to detect the shell" in ...err.lower()` pins our authored abort sentence at both sites. Each already asserts the behavior beside it: `exc_info.value.exit_code == 1` in the first, `result.exit_code == 1` in the second. |
@@ -1909,10 +1925,10 @@ section counts the group.
 ## Group 5: authored-artifact form policing
 
 **Precondition, operator disposition 2026-08-19: the trap-carrying recipes are re-verified before
-their rows execute.** Four recipes verified in the #573 round carry a recorded trap, and they belong
-to this group and group 6: L-202 and F-117 here, L-120 and L-121 there. The sampling is per row and
-per site, owed by the PR that carries the conversion, and the PR says how many sites it sampled. It
-was written against groups 3 and 4, which carry none of the four.
+their rows execute.** Four recipes verified in the `#573` round carry a recorded trap, and they
+belong to this group and group 6: L-202 and F-117 here, L-120 and L-121 there. The sampling is per
+row and per site, owed by the PR that carries the conversion, and the PR says how many sites it
+sampled. It was written against groups 3 and 4, which carry none of the four.
 
 The fresh cut grew this group most, the unsurveyed files and the twenty re-derived ones both landing
 mostly here.
@@ -2123,7 +2139,7 @@ mostly here.
 | F-151 | `cli/tests/test_completions.py::TestOptionFlagsInSpec.test_console_add_sessions_placement_reaches_the_completion_spec@c8a9e9,TestOptionFlagsInSpec.test_secret_preview_opt_in_reaches_describe_and_verify_completions@ec3523,TestOptionFlagsInSpec.test_instance_spec_options_reach_every_shell_completion@03e8a5,TestOptionFlagsInSpec.test_runnable_status_option_reaches_every_shell_completion@2c8e4b` | per-flag spec restatement, four more tests | delete | The same shape as C-032 and C-033 for `--to-index`, `--allow-interaction`, `--spec`/`--workspace-spec`/`--agent-spec`, and `--status`: assert the flag is among the command's options, and in three of the four also assert the flag's text appears somewhere in each generated script. Typer introspection puts a declared flag in the spec by construction, and whole-script substring presence adds nothing (C-025). Delete all four tests. **Cost, measured 2026-09-06:** after the delete the flag can leave the completion spec entirely with 111 tests still green, so nothing asserts `--to-index` is in the spec at all. It is an ordinary option with help text (`cli/commands/console.py::console_add_sessions`), not a hidden one, so the loss is completion coverage rather than a flag going quietly missing. |
 | F-152 | `cli/tests/test_completions.py::TestCompleteness.test_zsh_contains_all_commands@e3b0c4,TestCompleteness.test_powershell_contains_all_commands@e3b0c4` | derived presence sweep over a generated script | keep | `_assert_all_commands_present` walks the live spec and asserts every command and subcommand name appears in the generated script, so the expectation comes from the canonical source rather than a hand list, and a generator that dropped a whole subcommand fails here. Weak by construction (substring presence anywhere) and bash is not covered, but nothing else in the file quantifies over the whole tree. |
 | F-153 | `cli/tests/test_completions.py::TestCompletionCli.test_show_with_explicit_shell_prints_script@5b65ee` | routing probe through a shell-required directive | keep | `"#compdef" in result.stdout` with `result.exit_code == 0` is how this test proves `completion show --shell zsh` emitted the zsh script rather than another shell's. The token is zsh's own requirement, not our prose, and it is the only discriminator available on stdout. |
-| F-154 | `cli/tests/test_completions.py::TestStaticChoiceCompletion.test_sample_kind_completes_dynamically@d30210,TestStaticChoiceCompletion.test_schema_kind_completes_dynamically@f10e0f` | absence of a closed choice on a kind argument | keep | `not kind.choices` with `kind.dynamic_completer == "resource_kinds"` on `resource sample` and `resource schema`. The invariant is that a kind the operator types, including a capability kind or a typo, reaches the service layer for a domain error instead of failing click parsing (issue #276). Adding a `click.Choice` here is the plausible well-meaning edit that breaks it, and this is the only probe. The trailing option-list equality in the schema test is C-047, not this row. |
+| F-154 | `cli/tests/test_completions.py::TestStaticChoiceCompletion.test_sample_kind_completes_dynamically@d30210,TestStaticChoiceCompletion.test_schema_kind_completes_dynamically@f10e0f` | absence of a closed choice on a kind argument | keep | `not kind.choices` with `kind.dynamic_completer == "resource_kinds"` on `resource sample` and `resource schema`. The invariant is that a kind the operator types, including a capability kind or a typo, reaches the service layer for a domain error instead of failing click parsing (issue `#276`). Adding a `click.Choice` here is the plausible well-meaning edit that breaks it, and this is the only probe. The trailing option-list equality in the schema test is C-047, not this row. |
 | F-155 | `website/tests/test_site_documents.py::GeneratedDocumentTests.test_home_onboarding_preserves_both_progressively_enhanced_paths@79b75a` | script inventory and hero-mark identity | keep | `scripts == [{"type": "module", "src": "/static/onboarding.js"}]` is a closed inventory: the home page ships exactly one local module and no third-party script, which is the privacy posture the whole page is built around. Beside it, the repository link count and the hero mark's `src` and `alt` are structural facts about the one decorative image on the page. |
 | F-156 | `website/tests/test_site_documents.py::GeneratedDocumentTests.test_chromium_geometry_owns_the_devtools_process_and_cleanup@336fa8` | profile isolation | keep | The spawned browser's `HOME` must equal the throwaway profile directory passed as `--user-data-dir`, asserted by reading both back off the recorded spawn call rather than by restating either. A harness that let Chromium read the operator's real home would write into it, and this is the only assertion that says it does not. |
 | F-157 | `website/tests/test_site_documents.py::GeneratedDocumentTests.test_palette_contrast_meets_text_and_non_text_thresholds@e67089` | WCAG threshold over derived tokens | keep | The palette is read out of the BUILT stylesheet and every shipped foreground is asserted to clear WCAG's contrast ratio against the surface it is painted on: 4.5 for text, 3.0 for graphics. A threshold, not a value: adjusting a color is free until it crosses the line. `hla.md` keeps thresholds by name. |
@@ -2216,7 +2232,7 @@ applies to them on the same terms.
 | L-121 | `cli/tests/test_secrets_eager_resolve_vm_agent.py::test_vm_provisioning_runners_have_no_env_injection@7d4c15` | `getsource` scan for `env=admin_env` in `_phase_b_setup` | convert | **Recipe verification, 2026-08-16.** Same recipe and the same vacuity trap as L-120, on `_phase_b_setup`, and the same condition: the convert lands only with an assertion that each gated runner fired, otherwise this is a keep and the grep stays. Verified: adding an operator-env `env=` to `_admin_run_cmd` makes it fail. |
 | L-123 | `cli/tests/test_secrets_eager_resolve_vm_agent.py::test_create_agent_on_vm_ends_with_ensure_files_sourced@55929f` | `getsource` presence pin, agent mirror | convert | **Recipe verification, 2026-08-16.** Same recipe, agent path, and **the verification showed the replacement is strictly stronger than the grep it replaces**: with the call site replaced by `pass`, the original `test_create_agent_on_vm_ends_with_ensure_files_sourced` still PASSED, because the surviving `from ... import _ensure_agentworks_files_sourced` line inside the function body satisfies the substring scan. The grep could not tell an import from a call. Patch `vm_initializer._ensure_agentworks_files_sourced`, since this path imports the name inside the function body. |
 | L-124 | `cli/tests/vms/test_phase_a_platform_bootstrap.py::test_fallback_era_contract_shapes_are_structurally_absent@4c6ccd` | structural half: dataclass field presence/absence and the `_phase_a_bootstrap` parameter set | keep | Real structural invariant over live types: the fallback-era `bootstrap_complete` result field and the `BootstrapCompletion` attribute are gone, and Phase A's signature is exactly the seven parameters. Asserted against real objects, not source text. |
-| L-125 | `cli/tests/vms/test_phase_a_platform_bootstrap.py::test_fallback_era_contract_shapes_are_structurally_absent@4c6ccd` | `request_fields["tailscale_auth_key"].type == "str"` | delete | An annotation-equality assertion, the same shape PR #546 deleted from `secret_backend/conformance.py`. Under strict typing mypy carries this; the assertion compares an annotation STRING and breaks on a purely cosmetic re-spelling. |
+| L-125 | `cli/tests/vms/test_phase_a_platform_bootstrap.py::test_fallback_era_contract_shapes_are_structurally_absent@4c6ccd` | `request_fields["tailscale_auth_key"].type == "str"` | delete | An annotation-equality assertion, the same shape PR `#546` deleted from `secret_backend/conformance.py`. Under strict typing mypy carries this; the assertion compares an annotation STRING and breaks on a purely cosmetic re-spelling. |
 | L-126 | `cli/tests/vms/test_phase_a_platform_bootstrap.py::test_fallback_era_contract_shapes_are_structurally_absent@4c6ccd` | `"run_wsl2_bootstrap" not in driver_source`, `"generate_bootstrap_script" not in driver_source` | keep | Rubric re-check, 2026-08-16. **The row's premise was false at HEAD.** `run_wsl2_bootstrap` is genuinely gone and that half still deletes, but `generate_bootstrap_script` is a LIVE symbol, exported by `capabilities/vm_platform/bootstrap_script.py` and called by the proxmox, azure and aws platforms, so a reintroduced call in `vms/initializer/driver` would import cleanly and pass silently rather than failing to import as the row claimed. That half is the only probe and keeps. |
 | L-127 | `cli/tests/test_config_resource_read_guard.py::test_no_config_resource_reads_outside_publishers@b3acda` | regex source scan for `config.<resource-attr>` reads with an EMPTY allowlist | delete | **Verified by execution and it sharpens the row.** `Config` is a dataclass whose fields are exactly `config_issues, database, defaults, deprecation_issues, enabled_system_plugins, operator, paths, secret_config_data, session, source_path`: none of the fifteen forbidden attributes exists. A reintroduced read is a mypy error and an `AttributeError`, so the guard protects a surface the type system already closed, while its regex can still false-positive on any local named `config` or `cfg` that legitimately has a `.vm` or `.admin` attribute. |
 | L-128 | `cli/tests/resources/test_phase0_vocabulary.py::test_kind_registry_keys_are_lower_kebab@efe550` | `test_kind_registry_keys_are_lower_kebab` | keep | Structural check over the live registry, and the registry keys are the shipped manifest `kind:` vocabulary. A newly registered kind spelled `vm_template` is an ordinary edit that regresses an operator-facing contract. |
@@ -2234,7 +2250,7 @@ applies to them on the same terms.
 | L-140 | `cli/tests/assistance/test_contract.py::test_readme_projection_is_exact@fed682` | `test_readme_projection_is_exact` | keep | Derivation parity again: the README's generated block is proven to be `BODY` plus its fence. This is the canonical example the rule points at. |
 | L-141 | `cli/tests/test_shell_integration.py::test_capability_imports_neither_sessions_nor_orchestration@201600` | subprocess probe asserting `agentworks.sessions` / `agentworks.orchestration` are not imported | keep | An OBSERVATIONAL import boundary: it launches a real interpreter and reads `sys.modules` rather than reading source. This is the twin form `hla.md` prefers, not a source guard. |
 | E-199 | `cli/tests/test_doctor_env_and_secrets.py::test_manifest_issues_surface_as_doctor_rows@ae358f,test_clean_manifests_keep_config_valid_row@834fbb,test_manifest_load_failure_keeps_other_rows@faa01a` | label-keyed row selection and withheld-row assertions | keep | These select rows by their authored names (`c.name == "Manifest"`, `c.name == "Config"`) and assert the ok row is withheld when any issue exists (`not any(c.name == "Config is valid" ...)`). The invariant is real and regressable: doctor must not report a clean config beside a failing manifest. The label is the only handle a check row offers, and R2.2 forbids adding a structural row identity to replace it. Cost: renaming a row breaks these three tests. |
-| E-200 | `cli/tests/test_doctor_env_and_secrets.py::test_focused_checks_reject_non_exact_tty_access_before_resource_work@1ad95b` | caller-provenance boundary guard | keep | Passes a bare `"unavailable"` string where `TtyInteractionAccess` is declared and asserts `checks_for_resource` raises before touching config or registry. This is the boundary FRD ruling 11 and `hla.md` name: an argument from a caller the type checker does not check, which is exactly how a live `interaction="refuse"` call once resolved a real secret. Deleting it is the mistake PR #523 already made once. |
+| E-200 | `cli/tests/test_doctor_env_and_secrets.py::test_focused_checks_reject_non_exact_tty_access_before_resource_work@1ad95b` | caller-provenance boundary guard | keep | Passes a bare `"unavailable"` string where `TtyInteractionAccess` is declared and asserts `checks_for_resource` raises before touching config or registry. This is the boundary FRD ruling 11 and `hla.md` name: an argument from a caller the type checker does not check, which is exactly how a live `interaction="refuse"` call once resolved a real secret. Deleting it is the mistake PR `#523` already made once. |
 | E-201 | `cli/tests/test_doctor_env_and_secrets.py::test_secret_checks_use_only_explicit_tty_access@1335f3` | consent confinement | keep | `monkeypatch.setattr(output, "non_interactive", lambda: pytest.fail("doctor read ambient TTY policy"))` makes any read of ambient TTY policy a failure, while the assertions below prove the two explicit access values produce different preview outcomes. Doctor must decide from what it was told, not from what the terminal happens to be, and this is the only test that forbids the ambient read. |
 | E-203 | `cli/tests/test_doctor.py::test_health_group_convenience_methods@50de8a` | wire-contract enum values | keep | `[status.value for status in Status] == ["ok", "info", "warn", "fail"]`, riding beside the convenience-method assertions. Those four strings are what doctor's JSON output emits and what machine consumers branch on, so the restatement is the contract. Same reasoning as F-158 and C-034. |
 | E-204 | `cli/tests/test_doctor.py::test_run_checks_rejects_non_exact_tty_access_before_health_work@1ad95b` | caller-provenance boundary guard | keep | The `run_checks` twin of E-200: a bare string where the enum is declared must raise before any health work runs. Same boundary, same reason. |
@@ -2331,11 +2347,11 @@ Four facts it established, three of which do not depend on the counts that went 
    independent and never need to stack.
 3. **Group 6 is not independent**, which was the standing guess: it shared files with both group 5
    and group 1. Group 3c was the closest thing to independent, overlapping group 1 alone.
-4. **Group 4 carries the rework risk.** Group 3 holds more converts in total, but it lands as four
-   PRs and no one of them approaches group 4, so **group 4 is the largest single PR by converts**
-   and the likeliest to need rework. That is why the old stack put it at the top with only leaves
-   above it. Whatever order the re-cut chooses, nothing should be built on group 4 that a rework of
-   its converts would drag with it.
+4. **Group 4 carries the rework risk.** Group 4 holds more converts than group 3 (96 against 91),
+   and group 3 lands as four PRs and no one of them approaches group 4, so **group 4 is the largest
+   single PR by converts** and the likeliest to need rework. That is why the old stack put it at the
+   top with only leaves above it. Whatever order the re-cut chooses, nothing should be built on
+   group 4 that a rework of its converts would drag with it.
 
 ### Recipe verification
 
@@ -2373,7 +2389,7 @@ The nine that did not hold:
 | Consolidate the runtime-surface scan                     | F-018, F-098        | The consolidation drops `.html` coverage, and deleting the canaries removes the only non-vacuity guard (a typo'd pattern made the scan pass green)                                                                            | Settled as KEEP for both, 2026-09-06: neither the merge nor the delete is safe                                                     |
 
 **The trap-carrying recipes owe every site they cover a screening, and that debt is still open.** It
-was recorded in the #573 round as a gating condition on the PRs carrying those conversions rather
+was recorded in the `#573` round as a gating condition on the PRs carrying those conversions rather
 than something that round closed, and the re-baseline neither closed it nor carried it forward until
 now. The number of sites is not derivable here, because a recipe's coverage is a property of the
 replacement rather than of any anchor, so this is stated as the operator's precondition on those PRs
@@ -2467,9 +2483,10 @@ guide-side file held. What remains was each checked against the basis.
    `capabilities/test_conformance.py` and was never on the absorbed survey's list. Inventoried here;
    recorded so the reassessment knows the survey's file list was not exhaustive.
 7. **The website overlaps.** `test_site_documents.py` has two owners, the sweep and the website
-   trims item, and the rows here are the sweep's half; `attribute` says which row owns each site, so
-   the boundary is checked on every run rather than described once. Two orderings the plan did not
-   have:
+   trims item, and the rows here are the sweep's half. **This boundary is described, not checked:**
+   `attribute` partitions `match=` sites and this file holds none, so its 25 rows are span, file and
+   line anchors that `attribute` never sees. Nothing mechanical holds the split. Two orderings the
+   plan did not have:
    - W4's conversion did not reach
      `test_lander_404.py::StaticDocumentTests.test_fixed_color_contrast_meets_text_and_graphic_thresholds`,
      which still carries `math.isclose(antenna, 3.788, abs_tol=0.001)` and palette hex literals
@@ -2540,12 +2557,28 @@ Each was ruled for the family rather than the row, and the rows now carry the ru
    output shape rather than about wording, it is cheap, and it fails when the collapse actually
    breaks. Verified per site: three of the eight carry the cardinality claim and convert (D-127a),
    the other five carry only authored normalization and delete (D-127b).
-5. **A subtraction pass does not add coverage opportunistically.** R2.3 permits an addition only
-   where a real invariant loses its ONLY guard in the same change. The two rows this was decided
-   against, over CLI resolution, were not that case, because the invariant such a test would add has
-   no guard today and so loses none, so both became plain deletions carrying a recorded drift risk.
-   Their estates went with `146892a4` and the rows went with them, so the ruling outlives the rows
-   it was made about; it is kept because the next row of that shape gets the same answer.
+5. **A subtraction pass does not add coverage opportunistically. Re-derived 2026-09-06, and the
+   answer inverts.** This item read "R2.3 permits an addition only where a real invariant loses its
+   ONLY guard in the same change", and refused two rows over CLI resolution on the ground that the
+   invariant a new test would add "has no guard today and so loses none".
+
+   `frd.md` R2.3 says, in full: **"Real coverage gaps found beneath deleted ceremony are closed in
+   the same PR where the invariant is real (the persisted-enum parity gap, G11, is the standing
+   example)."** Neither "only guard" nor "loses" is in it, and the condition it does state is the
+   opposite of the one that was applied: a gap with no guard today is what MAKES it a coverage gap,
+   so "loses none" was the trigger being read as the disqualifying one. Under the operator's words
+   those two dispositions do not hold, and the FRD is the operator's document, so restating it more
+   narrowly and ruling from the restatement had the substance of an amendment without the grant. The
+   narrowed restatement is withdrawn.
+
+   **What replaces it is a question, not a new rule**, because R2.4 pulls the other way in the same
+   document: the absorbed prose-test-purge estate is handled "never by mandated new observables".
+   R2.3 directs closing a real gap found beneath deleted ceremony; R2.4 forbids mandating a new
+   observable over this estate. Which governs a row whose deleted ceremony sits inside that estate
+   is the operator's to say, and it is in the open questions. The two rows themselves are gone,
+   their estates having left with `146892a4`, so nothing is re-disposed here; what is recorded is
+   that the next row of that shape does NOT get the old answer.
+
 6. **The graph-guard reservation is accepted**, and it corrected `hla.md` rather than just this row.
    Banned pattern 2 governs what a module may reach rather than how the reaching is spelled, and it
    has no observational twin available even in principle. That detector stays; the other three
@@ -2577,7 +2610,7 @@ no row of this map fixes.
    `does not follow the secret naming rules` at `manifests/decode.py:367-371`. They are vacuous
    today: the needle cannot match, so the tests pass whatever the code does. C-097's convert fixes
    it when that row executes, but the gap exists now and is worth knowing about before then.
-3. **`cli/tests/test_subprocess_io.py:5-7` says CI runs Linux.** It has been stale since PR #760
+3. **`cli/tests/test_subprocess_io.py:5-7` says CI runs Linux.** It has been stale since PR `#760`
    added the `windows-latest` job, and a comment that tells the next reader the wrong thing about
    the CI matrix will mislead someone deciding whether a platform-conditional test can be deleted.
 4. **Rows whose assertions were deleted from outside the sweep.** The injected-marker screen ruled
@@ -2608,7 +2641,14 @@ no row of this map fixes.
 
 ### Still open
 
-1. **Does the synthetic-fixture carve-out cover per-row state markers?** **E-048** keeps the
+1. **Does R2.3 or R2.4 govern a coverage gap found beneath ceremony inside the absorbed estate?**
+   `frd.md` R2.3 says real coverage gaps found beneath deleted ceremony "are closed in the same PR
+   where the invariant is real". `frd.md` R2.4 says the prose-test-purge estate is handled "never by
+   mandated new observables". A row whose deleted ceremony sits inside that estate and whose
+   invariant is real satisfies both antecedents and gets opposite instructions. This map narrowed
+   R2.3 to dodge the collision and ruled two rows from the narrowing; that is withdrawn above, and
+   the collision is the operator's to resolve. No live row turns on it today, so it blocks nothing.
+2. **Does the synthetic-fixture carve-out cover per-row state markers?** **E-048** keeps the
    rendered disabled, not-ready-but-enabled and ready markers on that basis, and the marker strings
    are authored. The lead let the recorded decision stand rather than overruling it without the row
    in front of him, so it is recorded as decided-by-default rather than settled. **Corrected
@@ -2616,35 +2656,35 @@ no row of this map fixes.
    keeps a rendered state marker on the carve-out; the other carve-out keeps (C-063, C-086, C-088)
    are color and layout, not state markers. The count is replaced by the id so a reader can check
    it.
-2. **Are `agentworks-manual-*` / `agentworks-pre-migration-*` backup filenames a documented operator
+3. **Are `agentworks-manual-*` / `agentworks-pre-migration-*` backup filenames a documented operator
    interface?** If they are, one pin is a real contract check rather than a naming restatement.
-3. **CLOSED 2026-09-06: a reference record's `usage` is both, and the split is presence against
+4. **CLOSED 2026-09-06: a reference record's `usage` is both, and the split is presence against
    value.** B-021 asked whether `usage` is a shipped data field or authored prose. Execution
    answered it: the reference's identity is already pinned by its kind and name two lines above,
    every consumer displays `usage`, and the only code that tests it tests presence. So presence is
    the shipped contract and the sentence is prose we render, and B-021 converts to a non-empty
    check. Recorded here rather than deleted because the same question will be asked of the next
    record field, and this is the shape of the answer.
-4. **The digest cannot see an assertion a test hands to a helper.** Nine anchored functions digest
+5. **The digest cannot see an assertion a test hands to a helper.** Nine anchored functions digest
    as `e3b0c4` over nothing, and many more have a real digest while still delegating part of their
    assertions to an `assert*`-named helper. Following a call into a helper is a whole-program
    question this grammar declines to open, so those rows are guarded on what their test asserts
    directly and on nothing else. Whether that is worth closing is the operator's call.
-5. **`ast.unparse` stability across a Python minor is unverified.** The digests were stamped on 3.12
+6. **`ast.unparse` stability across a Python minor is unverified.** The digests were stamped on 3.12
    and `resolve`, `restamp` and `totals` refuse a newer interpreter rather than reporting every
    anchor as `changed`. Nobody has tested whether 3.13 actually spells these trees differently. If
    it does not, the ceiling can be relaxed; if it does, the upgrade is a re-stamp and the guard
    already says so.
-6. **F-018's pattern list has no canary of its own** and no pattern at all for two of the eleven
+7. **F-018's pattern list has no canary of its own** and no pattern at all for two of the eleven
    surfaces `test_lander_404.py` guards, location navigation and history mutation. The row keeps and
    names the gap; closing it is an edit to the test rather than a decision.
-7. **`frd.md` says twelve rules and the tree carries eleven.** `hla.md` and `plan.md` both say
+8. **`frd.md` says twelve rules and the tree carries eleven.** `hla.md` and `plan.md` both say
    twelve, and both take it from `frd.md`, which is the operator's document; the tree has eleven
    rule files, one of them carrying globs rather than a single rule, and there is no
    `always-consider-*` file at all. Whether the count is wrong, the file list is short, or "rules"
    means something other than files is the operator's to say; this map does not correct another
    effort's artifact and records the discrepancy instead.
-8. **Deletes whose coverage claim was reasoned rather than executed.** A delete row that says the
+9. **Deletes whose coverage claim was reasoned rather than executed.** A delete row that says the
    coverage lives elsewhere is only as good as that claim, and the verification lane executed a
    sample of them: it was wrong about one in five. So the marker is now carried by every row of that
    shape rather than by a hand-picked few, and `[unverified]` keeps the meaning it had, that the PR
@@ -2668,10 +2708,16 @@ no row of this map fixes.
    F-194, F-195, F-196 and F-197. A row not on this list and not carrying the marker is a row whose
    justification the phrase set did not catch, which is the gap this population knowingly has.
 
-   **Re-run at HEAD, 2026-09-06, reading the recipe above literally.** It selects one id MORE than
-   the map marks, not fewer, and the difference runs both ways. Four marked rows it does not select:
-   C-094 and C-108, which carried the marker before it was derived and keep it because their claims
-   are genuinely unexecuted, plus F-141 and L-133. Five rows it selects that carry no marker: A-083,
+   **The recipe is case-sensitive on its inclusion phrases and case-insensitive on its exclusions**,
+   which is the only reading that reproduces the result below: F-141 and L-133 open with capitalized
+   "Duplicates" and "Restates", and F-023 says "Verified" with a capital. Read case-sensitively
+   throughout it selects 57 and F-023 joins the second list; read case-insensitively throughout it
+   selects 58 and F-141 and L-133 leave the first.
+
+   **Re-run at HEAD, 2026-09-06, under that reading.** It selects one id MORE than the map marks,
+   not fewer, and the difference runs both ways. Four marked rows it does not select: C-094 and
+   C-108, which carried the marker before it was derived and keep it because their claims are
+   genuinely unexecuted, plus F-141 and L-133. Five rows it selects that carry no marker: A-083,
    B-001, D-062, D-126 and L-139. The phrase set over-selects on purpose, so the second list is the
    cost that buys the first; neither is a drift, and both are named so the next reader re-runs it
    rather than believing this paragraph.
@@ -2690,8 +2736,8 @@ than fixed, because those artifacts belong to the effort lead. The two marked **
 carried into `hla.md` on 2026-08-19 under the effort lead's explicit authorization for exactly those
 edits; everything else here is still a flag.
 
-- **The #470 manifesto pin, which the plan names as part of this sweep's estate, is already gone.**
-  Commit `8043d438 refactor(guide): remove command-owned fact views` replaced the verbatim
+- **The `#470` manifesto pin, which the plan names as part of this sweep's estate, is already
+  gone.** Commit `8043d438 refactor(guide): remove command-owned fact views` replaced the verbatim
   manifesto-text pin with a structural link assertion, and the file that carried it,
   `cli/tests/guide/test_authored_coverage.py`, is not in the tree at this basis either.
 - **G12's counts are stale, and its subject is gone.** The `test_migration_topic.py` required-phrase
