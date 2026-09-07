@@ -24,6 +24,7 @@ from .inventory import (
     ACCOUNTED,
     CITED_FILE,
     CITED_ID,
+    CITED_QUALNAME,
     GROUP_1,
     INVENTORY,
     MECHANICAL_BATCH,
@@ -117,7 +118,11 @@ def section_ids(map_path: str, heading: str, pattern: re.Pattern[str]) -> set[st
 
 
 def check_map(
-    rows: list[Row], retired: tuple[set[str], set[str]], files: Counter[str], map_path: str = INVENTORY
+    rows: list[Row],
+    retired: tuple[set[str], set[str]],
+    files: Counter[str],
+    snapshot: Snapshot,
+    map_path: str = INVENTORY,
 ) -> list[str]:
     """Structural faults in the map itself, as a list of complaints.
 
@@ -130,12 +135,13 @@ def check_map(
     faults: list[str] = []
     ids = [r.id for r in rows]
     live = set(ids)
-    known = live | retired[0]
+    mine, theirs = retired
+    known = live | mine
     row_at = {row.source_line: row for row in rows}
     # An id this cut retired must not also be live: that one really would
     # resolve to two rows. The 2026-08-19 map's ids are a separate namespace
     # and may collide freely, which is what qualifying a citation is for.
-    for row_id in sorted(live & retired[0]):
+    for row_id in sorted(live & mine):
         faults.append(f"{row_id} is both a live row and an id this cut retired, so a citation resolves to two rows")
     for row_id in sorted({i for i in ids if ids.count(i) > 1}):
         faults.append(f"duplicate row id {row_id}")
@@ -157,6 +163,10 @@ def check_map(
         here = row_at.get(number)
         source = f"row {here.id}" if here else f"line {number}"
         bare = URL.sub(" ", outside_code_spans(line))
+        # A qualified citation says it means the previous map's numbering, and
+        # that list is right here, so it is checked rather than waved through.
+        for name in sorted(set(QUALIFIED.findall(bare)) - theirs):
+            faults.append(f"{source} cites {name} (2026-08-19 map), which that map's retired list does not hold")
         # A qualified citation is already answered: it says the id belongs to a
         # map that no longer exists, so there is nothing here to resolve it
         # against and pointing a reader at this file would be the error. It is
@@ -164,6 +174,19 @@ def check_map(
         # a row of this cut.
         for name in sorted(set(CITED_ID.findall(QUALIFIED.sub("", bare))) - known - {here.id if here else ""}):
             faults.append(f"{source} cites {name}, which is neither a row nor an id this cut retired")
+        # A row says what it means by name. A line number in a row cell is an
+        # edit recipe that was right when written and silently wrong afterwards,
+        # and eleven of them were pointing at the wrong statement by the time
+        # anyone executed one. Prose outside a row may still carry one.
+        if here is not None:
+            for cited in sorted(set(CITED_FILE.findall(line))):
+                faults.append(f"{source} cites {cited} by line; name the function instead")
+        # A cited function resolves like an anchor, so a citation that names
+        # nothing is refused rather than read and believed.
+        for cited_path, qualname in sorted(set(CITED_QUALNAME.findall(line))):
+            resolved = files.get(cited_path)
+            if resolved is None or not snapshot.function(cited_path, qualname):
+                faults.append(f"{source} cites {cited_path}::{qualname}, which names no function in this tree")
         for path in sorted(set(CITED_FILE.findall(line))):
             checked += 1
             matches = files.get(path, 0)
@@ -536,8 +559,10 @@ def totals(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
     """
     rows = read_rows(map_path)
     groups = list(dict.fromkeys(r.group for r in rows))
-    print("| Group | Live | delete | convert | keep | Deferred | Ledger |")
-    print("| --- | ---: | ---: | ---: | ---: | ---: | ---: |")
+    emitted = [
+        "| Group | Live | delete | convert | keep | Deferred | Ledger |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
     ledger: Counter[str] = Counter()
     for group in groups:
         here = [r for r in rows if r.group == group]
@@ -549,14 +574,16 @@ def totals(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
             ledger[name] += counts[name]
         ledger["deferred"] += deferred
         ledger["ledger"] += len(here)
-        print(
+        emitted.append(
             f"| {GROUP_TITLES.get(group, group)} | {len(live)} | {counts['delete']} | {counts['convert']} "
             f"| {counts['keep']} | {deferred} | {len(here)} |"
         )
-    print(
+    emitted.append(
         f"| **All** | {ledger['live']} | {ledger['delete']} | {ledger['convert']} | {ledger['keep']} "
         f"| {ledger['deferred']} | {ledger['ledger']} |"
     )
+    for line in emitted:
+        print(line)
     # The marker means the screen verified every site the row claims. It is
     # derived for the batch, but a judgment row can carry one by hand, and a
     # hand-carried verdict goes stale the moment the code under it moves.
@@ -585,8 +612,15 @@ def totals(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
         for anchor in row.anchors
         if (outcome := anchor.resolve(snapshot)).state not in ("resolved", "line-anchored")
     ]
+    # The Totals section is a pasted copy of what this prints, and a copy is a
+    # thing that drifts: it has been a round behind twice. Comparing the two is
+    # what makes pasting it safe, and it is the only gate on a figure the map
+    # states rather than derives.
+    body = Path(map_path).read_text(encoding="utf-8")
+    absent = [line for line in emitted[2:] if line not in body]
     missing = unrowed(rows, snapshot)
-    faults = check_map(rows, retired_ids(map_path), snapshot.tree.path_suffixes(), map_path)
+    faults = check_map(rows, retired_ids(map_path), snapshot.tree.path_suffixes(), snapshot, map_path)
+    faults += [f"the Totals section does not carry {line!r}" for line in absent]
     faults += adrift
     faults += [f"{row_id} carries [1-raise] and the screen does not verify every site it claims" for row_id in stale]
     faults += check_accounting(map_path, missing)

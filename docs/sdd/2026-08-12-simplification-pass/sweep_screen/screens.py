@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from .estate import Snapshot, sites_in
-from .tree import PROD_ROOT, TEST_ROOT, Tree, call_name, exc_name, template
+from .tree import PROD_ROOT, TEST_ROOT, WEB_ROOT, Tree, call_name, exc_name, template
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -252,13 +252,21 @@ def selects(needle: str, message: str | None) -> bool:
 
 
 def raises_sites(tree: Tree, path: str) -> Iterator[tuple[int, str, str, list[ast.Call]]]:
-    """Each `pytest.raises(..., match=)` this screen can walk, with its body.
+    """Each site asserting a raise AND its message, with the body it drives.
 
-    The screen's question is what the operation under test can raise, so it
-    needs the operation, which is the `with` body. Everything this yields has
-    one; what it cannot reach is not enumerated here but subtracted from the
-    estate afterwards, so a site spelled in a way this walk does not recognise
-    is reported rather than quietly absent.
+    Two spellings, because they are one shape: `pytest.raises(X, match=...)`
+    and `assertRaisesRegex(X, ...)` both name a type and constrain the message,
+    so the screen's question, does the asserted TYPE discriminate, is the same
+    question for both. Reading only the first left the `assertRaisesRegex`
+    sites unscreened while the prose said every delete row was screened.
+
+    `assertRegex` and `assertNotRegex` are NOT here and have no exception: they
+    assert a message with no type at all, so there is no callee to ask about.
+    The screens section names them as unscreened by design.
+
+    The screen needs the operation under test, which is the `with` body, so
+    everything yielded has one; what this walk cannot reach is subtracted from
+    the estate afterwards rather than quietly absent.
     """
     for node in ast.walk(tree.parse(path)):
         if not isinstance(node, (ast.With, ast.AsyncWith)):
@@ -267,14 +275,24 @@ def raises_sites(tree: Tree, path: str) -> Iterator[tuple[int, str, str, list[as
             call = item.context_expr
             if not isinstance(call, ast.Call) or not call.args:
                 continue
-            keyword = next((k for k in call.keywords if k.arg == "match"), None)
-            if call_name(call) != "raises" or keyword is None:
+            name = call_name(call)
+            if name == "raises":
+                keyword = next((k for k in call.keywords if k.arg == "match"), None)
+                if keyword is None:
+                    continue
+                needle = keyword.value
+            elif name == "assertRaisesRegex":
+                # The same shape with the regex positional: type first, then it.
+                if len(call.args) < 2:
+                    continue
+                needle = call.args[1]
+            else:
                 continue
             asserted = exc_name(call.args[0])
             if asserted is None:
                 continue
             body = [c for stmt in node.body for c in ast.walk(stmt) if isinstance(c, ast.Call)]
-            yield call.lineno, asserted, template(keyword.value, wildcard=WILDCARD) or "<expr>", body
+            yield call.lineno, asserted, template(needle, wildcard=WILDCARD) or "<expr>", body
 
 
 def screen_verdicts(tree: Tree) -> dict[str, tuple[str, str, str]]:
@@ -287,7 +305,10 @@ def screen_verdicts(tree: Tree) -> dict[str, tuple[str, str, str]]:
     """
     world = World(tree)
     families = subclass_closure(tree)
-    test_paths = tree.files(TEST_ROOT)
+    # Both test roots. The regex-family sites this screen now reads all live
+    # under the website's, so walking only `cli/tests` left every one of them
+    # unscreened while the prose said otherwise.
+    test_paths = tree.files(TEST_ROOT, WEB_ROOT)
     for path in test_paths:
         world.add_test(path)
     facts = raise_facts(world)
@@ -331,7 +352,7 @@ def screen_verdicts(tree: Tree) -> dict[str, tuple[str, str, str]]:
     # context manager entered elsewhere, a tuple of asserted types and a
     # `raises` with no positional argument, without naming any of them.
     for site in Snapshot(tree).sites:
-        if site.kind == "match=" and site.where not in out:
+        if site.kind in ("match=", "assertRaisesRegex") and site.where not in out:
             out[site.where] = ("unscreened", "-", "no `with` body this walk could reach")
     return out
 

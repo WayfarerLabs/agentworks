@@ -42,7 +42,7 @@ import sys
 from pathlib import Path
 
 from sweep_screen import reports
-from sweep_screen.estate import DIGEST_LENGTH, Snapshot, digest_of
+from sweep_screen.estate import DIGEST_LENGTH, Snapshot, full_digest
 from sweep_screen.inventory import INVENTORY
 from sweep_screen.screens import injected, screen
 from sweep_screen.tree import Tree
@@ -95,7 +95,7 @@ def main(argv: list[str] | None = None) -> None:
         )
         needles = {s.needle for s in here.sites}
         shortest = next(
-            (n for n in range(1, 65) if len({digest_of(x)[:n] for x in needles}) == len(needles)),
+            (n for n in range(1, 65) if len({full_digest(x)[:n] for x in needles}) == len(needles)),
             64,
         )
         print(

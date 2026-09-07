@@ -34,8 +34,15 @@ REGEX_METHODS = TYPED_REGEX_METHODS | UNTYPED_REGEX_METHODS
 DIGEST_LENGTH = 6
 
 
+def full_digest(needle: str) -> str:
+    """The whole hash. `estate` searches this for the shortest prefix that
+    separates the estate; a search over the truncated one cannot look past
+    `DIGEST_LENGTH` and reports failure as 64."""
+    return hashlib.sha256(needle.encode("utf-8")).hexdigest()
+
+
 def digest_of(needle: str) -> str:
-    return hashlib.sha256(needle.encode("utf-8")).hexdigest()[:DIGEST_LENGTH]
+    return full_digest(needle)[:DIGEST_LENGTH]
 
 
 @dataclass(frozen=True, order=True)
@@ -117,7 +124,7 @@ def assertions_of(node: ast.AST) -> tuple[str, ...]:
     rename cannot orphan a row: here a reworded literal inside an anchored test
     is exactly what the row is about, so it has to be loud.
     """
-    found: list[tuple[int, int, str]] = []
+    found: dict[tuple[int, int], str] = {}
 
     def walk(here: ast.AST) -> None:
         for child in ast.iter_child_nodes(here):
@@ -127,7 +134,7 @@ def assertions_of(node: ast.AST) -> tuple[str, ...]:
                 # The whole statement, message included. Hashing `.test` alone
                 # dropped the part that distinguishes two otherwise identical
                 # scans, which is how L-131 and L-132 came to share a digest.
-                found.append((child.lineno, child.col_offset, ast.unparse(child)))
+                found[(child.lineno, child.col_offset)] = ast.unparse(child)
             elif (
                 isinstance(child, ast.Expr)
                 and isinstance(child.value, ast.Call)
@@ -135,18 +142,21 @@ def assertions_of(node: ast.AST) -> tuple[str, ...]:
             ):
                 # A bare `pytest.raises(...)` outside a `with`, which the estate
                 # counts as a site and this counted as nothing.
-                found.append((child.lineno, child.col_offset, ast.unparse(child.value)))
+                found[(child.lineno, child.col_offset)] = ast.unparse(child.value)
             elif isinstance(child, (ast.With, ast.AsyncWith)):
                 for item in child.items:
                     expr = item.context_expr
                     if isinstance(expr, ast.Call) and call_name(expr) in RAISES_CM:
-                        found.append((expr.lineno, expr.col_offset, ast.unparse(expr)))
+                        found[(expr.lineno, expr.col_offset)] = ast.unparse(expr)
             elif isinstance(child, ast.Call) and call_name(child).startswith("assert"):
-                found.append((child.lineno, child.col_offset, ast.unparse(child)))
+                found[(child.lineno, child.col_offset)] = ast.unparse(child)
             walk(child)
 
     walk(node)
-    return tuple(text for _, _, text in sorted(found))
+    # Keyed by position, because a `with self.assertRaises(X)` is reached twice:
+    # once as the `with` item and again by the walk into it. Counting it twice
+    # made a digest that was right about the test and wrong about itself.
+    return tuple(text for _, text in sorted(found.items()))
 
 
 def assertion_digest(texts: list[str]) -> str:

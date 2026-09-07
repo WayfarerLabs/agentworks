@@ -26,7 +26,12 @@ INVENTORY = "docs/sdd/2026-08-12-simplification-pass/sweep-inventory.md"
 #: or the re-baseline's, optionally with the letter suffix a split row carries.
 #: Header cells that look like ids (`Sub-batch`, `File`, `Recipe`) fail this by
 #: construction, which is why the parser needs no list of them.
-ROW_ID = re.compile(r"(?:[A-F]|L|RB|G1)-[A-Z]?\d{1,3}[a-z]?$")
+#: What a row id looks like, written once because three patterns need it and
+#: they drifted apart when they did not: a lettered family like `G1-I02` was
+#: invisible to two of them while the third read it.
+ID = r"(?:[A-F]|L|RB|G1)-(?:[A-Z]\d{2,3}|\d{3})[a-z]?"
+
+ROW_ID = re.compile(rf"{ID}$")
 
 #: A file cited with a line or a line range, in any cell. The map cites paths
 #: at whatever depth reads clearly, from a bare basename to a full repository
@@ -38,14 +43,17 @@ ROW_ID = re.compile(r"(?:[A-F]|L|RB|G1)-[A-Z]?\d{1,3}[a-z]?$")
 #: rendered `"a.yaml:2"` locations that tripped it are not source files.
 CITED_FILE = re.compile(r"([A-Za-z0-9_./+-]*[A-Za-z0-9_+-]\.(?:py|mjs)):\d+(?:-\d+)?")
 
+#: A function cited by name, which is what a row says instead of a line number.
+#: `path::qualname` resolves against the tree exactly as an anchor does, so a
+#: citation that names no function is refused rather than read and believed. A
+#: line number is not: it is right when written and silently wrong afterwards,
+#: and an executor following one edits whatever moved into its place.
+CITED_QUALNAME = re.compile(r"([A-Za-z0-9_./+-]*[A-Za-z0-9_+-]\.py)::([A-Za-z_][A-Za-z0-9_.]*)")
+
 #: A row id. Three digits, or a letter and two, which is what `G1-C05` and
 #: `G1-K14` are: reading only the three-digit form left 55 live ids and 78
 #: citations of them invisible to the check. `L-1` in a sentence about a visa
 #: is still not a citation, which is what the digit floor is for.
-#: What a row id looks like, written once because three patterns need it and
-#: they drifted apart when they did not: a lettered family like `G1-I02` was
-#: invisible to two of them while the third read it.
-ID = r"(?:[A-F]|L|RB|G1)-(?:[A-Z]\d{2,3}|\d{3})[a-z]?"
 
 CITED_ID = re.compile(rf"\b{ID}\b")
 
