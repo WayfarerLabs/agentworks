@@ -122,10 +122,9 @@ def vm_list(
         config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
         interaction = ordinary_tty_interaction_policy()
     if output_format is OutputFormat.JSON:
-        from click import get_binary_stream
-
         from agentworks import output
-        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
         from agentworks.vms.manager.inspect import vm_listing_data
 
         with output.suppress_presentation():
@@ -136,10 +135,9 @@ def vm_list(
                 interaction=interaction,
                 sort_keys=parse_csv_sort(sort),
             )
-        write_json_envelope(
+        write_json_stdout(
             MachineOutputCommand.VM_LIST,
             vm_listing_data(listing),
-            get_binary_stream("stdout"),
         )
         return
     listing = vm_listing(
@@ -192,18 +190,16 @@ def vm_describe(
 
     config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
     if output_format is OutputFormat.JSON:
-        from click import get_binary_stream
-
         from agentworks import output
-        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
         from agentworks.vms.manager.inspect import vm_description_data
 
         with output.suppress_presentation():
             description = vm_description(get_db(), config, name, interaction=interaction)
-        write_json_envelope(
+        write_json_stdout(
             MachineOutputCommand.VM_DESCRIBE,
             vm_description_data(description),
-            get_binary_stream("stdout"),
         )
         return
     describe_vm(get_db(), config, name, interaction=interaction)

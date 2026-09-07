@@ -103,12 +103,11 @@ def agent_list(
         sort_keys=parse_csv_sort(sort),
     )
     if output_format is OutputFormat.JSON:
-        from click import get_binary_stream
-
         from agentworks.agents.manager.inspect import agent_listing_data
-        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
 
-        write_json_envelope(MachineOutputCommand.AGENT_LIST, agent_listing_data(listing), get_binary_stream("stdout"))
+        write_json_stdout(MachineOutputCommand.AGENT_LIST, agent_listing_data(listing))
         return
     render_agent_listing(listing, names_only=names_only)
 
@@ -127,18 +126,16 @@ def agent_describe(
 
     config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
     if output_format is OutputFormat.JSON:
-        from click import get_binary_stream
-
         from agentworks import output
         from agentworks.agents.manager.inspect import agent_description_data
-        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
 
         with output.suppress_presentation():
             description = agent_description(get_db(), config, name=name)
-        write_json_envelope(
+        write_json_stdout(
             MachineOutputCommand.AGENT_DESCRIBE,
             agent_description_data(description),
-            get_binary_stream("stdout"),
         )
         return
     description = agent_description(get_db(), config, name=name)

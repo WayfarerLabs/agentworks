@@ -149,14 +149,12 @@ def resource_list(
             output.info(f"{row.kind}/{row.name}")
         return
     if output_format is OutputFormat.JSON:
-        from click import get_binary_stream
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
 
-        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
-
-        write_json_envelope(
+        write_json_stdout(
             MachineOutputCommand.RESOURCE_LIST,
             resource_listing_data(listing),
-            get_binary_stream("stdout"),
         )
         return
     render_resource_table(listing)
@@ -203,14 +201,12 @@ def resource_show(
     )
 
     if output_format is OutputFormat.JSON:
-        from click import get_binary_stream
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
 
-        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
-
-        write_json_envelope(
+        write_json_stdout(
             MachineOutputCommand.RESOURCE_SHOW,
             resource_show_data(shown),
-            get_binary_stream("stdout"),
         )
         return
     render_resource_show(shown)
@@ -275,11 +271,10 @@ def resource_kinds(
     )
     rows = list_kinds(registry, sort_keys=parse_csv_sort(sort))
     if output_format is OutputFormat.JSON:
-        from click import get_binary_stream
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
 
-        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
-
-        write_json_envelope(MachineOutputCommand.RESOURCE_KINDS, resource_kinds_data(rows), get_binary_stream("stdout"))
+        write_json_stdout(MachineOutputCommand.RESOURCE_KINDS, resource_kinds_data(rows))
         return
     render_kind_table(rows)
 
