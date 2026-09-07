@@ -94,8 +94,10 @@ registered by the workload may recreate its execution after the run has ended.
 
 Normal supported harness operation, terminal attachment, detached persistence, workspace grants, and
 operator inspection continue to work. Agent-side companion shells associated with a session must
-have an explicit lifetime owner; they cannot silently launch outside its protection. Admin shells
-and admin-mode sessions receive no new containment guarantee in this effort.
+have an explicit lifetime owner; they cannot silently launch outside its protection. This covers the
+existing agent shell panes created by named consoles. Their containment belongs to this effort; the
+separate companion-shell command proposal remains standalone work and is not implemented here. Admin
+shells and admin-mode sessions receive no new containment guarantee in this effort.
 
 Administrator actions remain privileged and cannot be impersonated by agent workloads. No broad
 sudo, service-manager, or cgroup-management grant is made to an agent to enable session launch.
@@ -104,10 +106,16 @@ normal development workflows demonstrated before the design is accepted for impl
 
 ### R6. Supported environments and migration
 
-Both Debian Bookworm and Trixie remain supported. Capability checks examine the actual running
-kernel and VM setup, including WSL2; the release name alone is insufficient. An unsupported or
-unsafe setup refuses a new protected launch with actionable diagnosis rather than silently falling
-back to terminal-only cleanup.
+Both Debian Bookworm and Trixie remain in the supported target while compatibility is priced. The
+operator has existing Bookworm VMs and wants support retained if cheap; a required upgrade to Trixie
+is acceptable if supporting Bookworm introduces friction. Do not remove Bookworm before reporting
+the concrete cost: required kernel/systemd features, additional implementation paths, security
+limitations, validation work, and the upgrade alternative. R7 remains required in either case;
+reducing its guarantee is not a compatibility strategy.
+
+Capability checks examine the actual running kernel and VM setup, including WSL2; the release name
+alone is insufficient. An unsupported or unsafe setup refuses a new protected launch with actionable
+diagnosis rather than silently falling back to terminal-only cleanup.
 
 Existing running sessions are not retroactively certified by moving a known parent process. The
 migration must identify legacy executions honestly, preserve control of them, and require proof that
@@ -120,7 +128,8 @@ Trusted VM-side code can resolve a live caller's execution identity without acce
 session name or environment value as proof. The lookup contract handles process exit, PID reuse,
 namespace-relative identifiers, stale runs, and unknown membership by refusing to authenticate.
 
-A test consumer must demonstrate the lookup at a Unix-domain-socket boundary. This effort does not
+The operator explicitly retains this identity-lookup deliverable for anticipated permission uses. A
+test consumer must demonstrate the lookup at a Unix-domain-socket boundary. This effort does not
 ship a general permissions service, permission vocabulary, or user-facing grant commands. A future
 service must define per-request authentication, connection/descriptor transfer, and revocation;
 connection-time credentials alone are not a complete authorization protocol.
@@ -155,3 +164,11 @@ Review should determine whether the proposed same-user boundary can meet R4 with
 workflow changes, approve the lifetime treatment of companion shells, and settle the migration
 interruption policy. These are unresolved design decisions, not permission to weaken R1-R7. The
 [HLA](hla.md) names the proof work needed to answer them.
+
+## Operator rulings (2026-09-06)
+
+The operator retained R7 and directed that Bookworm support be priced before any removal:
+
+> Ok. I read the feedback. Fwiw I'd like to keep R7 as I know we'll need it. Likewise, I have a
+> number of Bookworm VMs. If support is cheap, let's do it. If there's any friction, though, I'm
+> happy getting forced to upgrade to Trixie. But let's not strike that until we know the price.

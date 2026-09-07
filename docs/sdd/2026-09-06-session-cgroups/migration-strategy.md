@@ -9,12 +9,19 @@ The inspected session row has five runtime observations: socket path, PID, boot 
 start ticks, and last-started time (`cli/agentworks/db/models.py:149`). It has no `session_uuid` or
 `run_id`. Dedicated sockets coexist with legacy rows lacking a dedicated socket. Agent session
 launch uses direct agent SSH, with an admin transport separately available for setup. No operator
-inventory was read, so the number of live or legacy sessions on actual VMs is unknown.
+inventory was read, so the number of live or legacy sessions on actual VMs is unknown. The operator
+subsequently confirmed existing Bookworm VMs and accepts a required upgrade to Trixie if concrete
+compatibility friction warrants it; this is evidence of demand, not an inventory count.
 
 The target keeps the human session name and adds the saga's logical session/run identities, backed
 by a protected service registration on the VM. Agent runs use system-owned containment; admin runs
 retain their existing behavior. A session called `research` can be deleted and recreated without
 reusing its identity or inheriting permissions from the previous run.
+
+Before choosing a transition, price Bookworm support against upgrading existing VMs to Trixie. Keep
+Bookworm in the target until the cost is known, and preserve R7 in either outcome. If an upgrade
+becomes a prerequisite, document its interruption and recovery costs; operator acceptance of that
+possible prerequisite does not authorize this draft to upgrade or recreate live VMs.
 
 ## Transition mechanics
 

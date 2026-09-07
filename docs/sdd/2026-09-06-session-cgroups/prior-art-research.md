@@ -53,10 +53,12 @@ peer-pidfd options are present on Bookworm.
 
 ## Open research
 
-Prove a compatible restriction of same-user execution channels; select the tmux service anchor and
-startup readiness flow; design a race-safe socket lookup on Bookworm; and demonstrate a safe legacy
-transition. The [plan](plan.md) gates implementation on these results. No live VM or adversarial
-experiment was performed for this checkpoint.
+Compare restricted same-user execution with per-run users against the same requirements before
+selecting the candidate to prove. Price Bookworm support, including the retained R7 socket lookup,
+against a required Trixie upgrade; do not infer compatibility of the whole design from cgroup
+availability alone. Select the tmux service anchor and startup readiness flow, and demonstrate a
+safe legacy transition. The [plan](plan.md) gates implementation on these results. No live VM or
+adversarial experiment was performed for this checkpoint.
 
 ## Source quality
 

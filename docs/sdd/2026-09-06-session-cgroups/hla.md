@@ -7,10 +7,12 @@
 ## Architectural choice
 
 Use cgroup v2 with one system-owned transient service per agent session run. The system service
-manager owns process lifetime; tmux owns terminals and presentation. Run tmux and the workload as
-the existing agent Linux user. Do not delegate management of the enclosing run boundary to that
-user, and do not rely on a user service manager, login persistence, or a workstation process to own
-cleanup. [Prior-art research](prior-art-research.md) gives the sources and rejected alternatives.
+manager owns process lifetime; tmux owns terminals and presentation. The preferred compatibility
+candidate runs tmux and the workload as the existing agent Linux user; compare its cost with per-run
+users in the same feasibility gate before committing to either user model. Do not delegate
+management of the enclosing run boundary to that user, and do not rely on a user service manager,
+login persistence, or a workstation process to own cleanup.
+[Prior-art research](prior-art-research.md) gives the sources and rejected alternatives.
 
 This is a proposed foundation, not a claim that system-owned groups alone meet FRD R4. The same-user
 execution channels below are an implementation gate. The draft deliberately does not prescribe an
@@ -136,13 +138,27 @@ network endpoint, inherited handle, or shared configuration reaches the same ser
 creation and entry must not reopen the boundary. This needs a concrete access map and adversarial
 experiments, not a list of hardening settings taken on faith.
 
-The gate must price the compatibility effects on supported harnesses, containers, direct agent SSH,
-companion shells, and shared agent homes. If a same-user design cannot close the relevant channels,
-return a concrete alternative and its costs for operator decision, such as stronger per-run
-isolation. Per-session Linux users, broad egress restrictions, and a general container platform are
-not implicitly approved by this draft. Shared-data poisoning of a later independently authorized run
-is outside the execution-identity claim; automatic outside execution triggered by a current workload
-is not.
+Price two candidates side by side in this gate: a restricted execution view retaining the agent UID,
+and separate per-run users. Compare closure of the same execution channels, management complexity,
+and effects on supported harnesses, containers, direct agent SSH, companion shells, durable home
+state, credentials, and workspace grants. Separate UIDs are not assumed to solve indirect execution
+or shared-state exposure by themselves. Start with the access map and cost comparison before
+spending a live-test budget proving one candidate; do not require the same-user design to fail
+first. Bring the comparison to the operator before adopting either model. Pricing per-run users is
+in scope; introducing them, broad egress restrictions, or a general container platform is not
+implicitly approved by this draft. Shared-data poisoning of a later independently authorized run is
+outside the execution-identity claim; automatic outside execution triggered by a current workload is
+not.
+
+## Compatibility pricing
+
+Bookworm remains in the target because the operator has existing VMs. Compare the actual features
+needed by the candidate isolation profile, stop path, and retained R7 lookup on Bookworm and Trixie.
+Report any fallback code, security compromise, maintenance burden, and separate validation cost
+against requiring an upgrade to Trixie. A cheap shared implementation favors retaining Bookworm;
+concrete friction may justify the operator-accepted upgrade alternative. New-VM creation using
+Trixie does not establish that existing Bookworm demand is absent. Neither a fleet inventory read
+nor a completed compatibility assessment is claimed by this checkpoint.
 
 ## Unix socket identity seam
 
@@ -164,7 +180,12 @@ survive run invalidation solely because a connection remains open.
 sessions use one containment path once converted; admin sessions retain their existing lifecycle
 without receiving a new guarantee. Existing commands own the behavior, not a new family of cgroup
 commands or optional containment backends. Permanent docs, diagnostics, and any affected
-guide/completion surface ship with the code that changes them, not with this draft.
+guide/completion surface ship with the code that changes them, not with this draft. The shell scope
+here is the existing named-console agent panes
+(`cli/agentworks/sessions/multi_console/tmux_build.py:246`), including their contained launch and
+lifetime. The standalone companion-shell command excluded by the saga is not being adopted or
+implemented. Any future command that launches into a protected run must use its runtime contract;
+this draft does not assign work or rewrite requirements in that separate effort.
 
 The saga retains ownership of its ledger and shared contracts. This child references those contracts
 and requests coordination through its labeled draft; it does not edit the saga's artifacts. The
