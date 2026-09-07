@@ -6,7 +6,7 @@
 - Saga: [next-steps](../2026-08-04-next-steps/target-state.md), wave 4
 - Governing design: [scope participation](../2026-08-04-next-steps/scope-participation-contract.md)
   and [capability descriptors](../2026-08-04-next-steps/capability-descriptor-contract.md)
-- Code baseline: `0c8cf6bc77dd49a2a30440cde0326f37a3980689`
+- Code baseline: `b22cc49c984aa91e8205e035c5766b5a2aede90a`
 
 The [operator's artifact-delivery ruling](frd.md#operator-ruling-artifact-delivery-2026-09-06)
 replaces the original all-payload session rollup with typed artifacts and integration-specific
@@ -82,7 +82,9 @@ resource; it is not a deferred artifact or a config blob merged into session con
 The pipeline is shared orchestration code, not a registry of scopes or an extensible execution
 engine. Resource managers retain activation, preflight, secret resolution, realization, error
 framing, and rollback. Existing Python models, capability descriptors, transports, and SQLite
-instance state remain the stack. There is no new runtime service or dependency.
+instance state remain the stack. There is no new runtime service or dependency. Feature and
+integration setup use the full `Transport` after core makes it available; the native bootstrap
+channel is only an `ExecTransport` and cannot be assumed to support file transfer.
 
 ## Where the current code changes
 
@@ -326,8 +328,12 @@ Absent setup attachments do not by themselves prevent those sessions from launch
 checks its required executable and any upstream prerequisite its integration declares. A name-only
 attachment uses empty setup config where offered. Grok and shell retain the no-op setup default;
 Codex gains native config setup but is not required to implement the entire artifact vertical here.
-Empty config or plugin provisioning does not make unsupported rule/skill artifact delivery
-successful. Nonempty final deferrals still fail before launch.
+Empty config or plugin provisioning does not make unsupported artifact delivery successful. Nonempty
+final deferrals still fail before launch. In particular, the synthesized default shell session
+refuses launch if even one inherited hint remains unhandled. Its error identifies the origin,
+producer, selected integration, and deferral reason so the operator can choose a capable integration
+or explicitly change the originating producer config. No-op defaults neither discard artifacts nor
+provide a faithful shell representation.
 
 ## Same config shape, separate native scopes
 
@@ -848,7 +854,9 @@ Enablement acceptance covers name-only default config, two enabled integrations 
 configs and ordered calls, unavailable/disabled capabilities, duplicate entries, inherited explicit
 selection, an empty setup list, and missing effective session selection. Unselected integrations do
 no new setup; retirement of previously owned attachments still runs cleanup. A missing session
-selection never silently enables shell.
+selection never silently enables shell. The explicit default shell launches with no pending
+artifacts and refuses an otherwise valid launch when an ancestor fixture emits an unhandled hint;
+the failure retains its origin, producer, integration, and reason.
 
 Schema/reference checks cover manifest, config, instance overlay, explain/reference, and secret
 preflight parity for every new hosting field. Negative secret tests inspect persisted state and

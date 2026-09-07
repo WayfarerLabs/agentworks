@@ -140,7 +140,8 @@ discovery description, instructions, and supporting files as a package with disc
 semantics. Converting a skill into prompt text is not equivalent handling. Core and features may
 emit both env and artifacts; the producer contract must permit a later manual template-artifact
 surface without redesign, but that surface is not required now. Concrete schemas are the effort
-lead's to settle within these requirements and R12.
+lead's to settle within these requirements and R12. The runtime `hint` artifact kind is unrelated to
+the onboarding guide's agent-hint content species.
 
 **R7. Integrations defer what they cannot handle; core rejects final session deferral.** Native
 placement at the defining scope is the ordinary case. Each facet invocation receives local artifacts
@@ -169,6 +170,13 @@ acceptable fallback. If no suitable representation exists, the integration defer
 launch. This is workload isolation, not secrecy: other sessions being able to read artifacts does
 not itself violate the contract. Applied-state receipts remain available to readiness even when
 handled payloads are filtered out.
+
+This also applies to the default shell session: if its applicable ancestry emits even one hint that
+remains unhandled, shell cannot launch. Selecting shell does not discard artifacts, and a no-op
+facet does not establish delivery. The diagnostic must identify the origin and producing feature or
+core contribution, the selected integration, and its reason. Remediation is to select an integration
+that can represent the artifacts or explicitly change the originating producer config; core must not
+suppress artifacts to make the default launch succeed.
 
 **R8. Per-scope invocations are constructed for their owning resource.** An invocation never reuses
 a session instance's target identity, readiness cache, or state namespace; those stay session-bound.
@@ -371,7 +379,8 @@ inline.
 
 Carried forward from the contract, minus the one that closed:
 
-1. Init method signatures, the env and artifact currency schemas, and how env rides the run targets.
+1. Init method signatures and how env rides the run targets. R6/R7 settle the two currencies and
+   artifact-delivery model; concrete carrier and codec details belong to the LLD.
 2. Whether a supported-scopes report exists for doctor and guide output, and its mechanism.
 3. The admin attachment's spelling on the vm-template (it validates against the same user-scope
    model as agent attachments).
