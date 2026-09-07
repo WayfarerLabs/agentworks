@@ -113,6 +113,22 @@ jobs:
           Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files\Git\bin'
           Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files\Git\usr\bin'
 
+      # The suite spawns thousands of real subprocesses; Windows Defender
+      # real-time scanning each launched exe dominates this job's wall time.
+      # Exclude the runner temp and workspace, and the interpreters and tools
+      # the tests spawn, so those launches are not rescanned. Best-effort: this
+      # step never fails the job if Defender is unmanaged or already off.
+      - name: Reduce Defender interference (Windows CI speed)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'SilentlyContinue'
+          Add-MpPreference -ExclusionPath $env:RUNNER_TEMP
+          Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE
+          Add-MpPreference -ExclusionPath 'C:\Program Files\Git'
+          foreach ($proc in 'python.exe', 'agw.exe', 'uv.exe', 'sh.exe', 'bash.exe', 'grep.exe', 'sed.exe') {
+            Add-MpPreference -ExclusionProcess $proc
+          }
+
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
@@ -121,8 +137,13 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
+      # -n 8 oversubscribes the runner's 4 vCPUs on purpose: the suite is
+      # subprocess-spawn-latency-bound on Windows, so workers spend most time
+      # blocked on child processes and extra workers overlap the waits. The
+      # addopts default (-n auto) resolves to 4 here; the trailing -n wins.
+      # --durations is temporary instrumentation for the speed measurement.
       - name: Pytest
-        run: uv run pytest tests/ -m 'not integration'
+        run: uv run pytest tests/ -m 'not integration' -n 8 --durations=25
         env:
           AGENTWORKS_PACKAGE_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
 
