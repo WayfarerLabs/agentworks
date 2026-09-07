@@ -10,9 +10,9 @@ derive this file's group-1 estate, resolve its rows' anchors, and run its two sc
 with it.
 
 It is step one of the sweep work item in [plan.md](plan.md). It decides nothing else: no deletion
-lands with it. The deletions follow as the PRs the groups below are cut for. **Nine at HEAD**: group
-1 goes as two, group 3 as four, and groups 4, 5 and 6 as one each. Group 2 has no PR, its estate
-having gone entirely.
+lands with it. The deletions follow as the PRs the groups below are cut for. **At most nine at
+HEAD**: group 1 goes as two, group 3 as four, and groups 4, 5 and 6 as one each; group 3's 3c may
+collapse into 3a, which would make it eight. Group 2 has no PR, its estate having gone entirely.
 
 ## Basis
 
@@ -2456,10 +2456,12 @@ Per the plan, the sweep records an overlap, keeps the file, and raises the order
 `cli/tests/guide/test_release_notes.py`, `cli/tests/guide/test_contract_catalog.py` and
 `cli/tests/secrets/test_resolution_lifecycle.py`, none of which exists at this basis, so the
 orderings they raised have nothing left to order. The first also carried a claim that was wrong on
-its own terms: `cli/tests/test_completions.py:163-171` is not "the same four assertions" written
-twice. At this basis those lines are a loop asserting that every declared completer id has a bash
-snippet mapping, with its own failure message, which is a different property from anything the
-guide-side file held. What remains was each checked against the basis.
+its own terms: `test_completions.py::TestDynamicCompletionsMapping.test_completer_ids_are_known` is
+not "the same four assertions" written twice. Its `assert completer_id in BASH_SNIPPETS` loop, with
+its own failure message, asserts that every declared completer id has a bash snippet mapping, which
+is a different property from anything the guide-side file held. (The entry read `:163-171` before
+2026-09-06; the assertion it describes is the first three of those lines and the rest is a different
+test, which is the second thing wrong with it.) What remains was each checked against the basis.
 
 1. **P5 (gcp fixture extraction)** shares five files with this sweep's gcp rows. The plan already
    orders the sweep first. One fact for whoever runs P5: the E-093 replacement asserts through the
@@ -2471,14 +2473,14 @@ guide-side file held. What remains was each checked against the basis.
    reassessment collapses it toward the sibling shape, that branch coverage goes too. Recorded for
    R4.
 3. **D2 (deriving `SCHEMA_SENTINELS` by replaying `MIGRATIONS`)** would rewrite
-   `cli/tests/test_database_backup.py:61-79`, which this inventory keeps as derivation parity. If D2
-   ever runs, that test is its territory.
+   `test_database_backup.py::test_schema_sentinels_match_every_historical_version`, which this
+   inventory keeps as derivation parity. If D2 ever runs, that test is its territory.
 4. **The CLI grammar rewrite** (saga `phasing.md` puts it directly after wave 1) churns exactly the
    rows that pin the command tree and per-flag help. They are deletes either way, so landing them
    before the rewrite strictly reduces its diff.
-5. **`cli/tests/test_ssh_config.py:132-151`** is the unit home of the `"SSH config synced"` line
-   that a group 3 row deletes at the orchestration level. Both are inventoried; they should land
-   together.
+5. **`test_ssh_config.py::test_sync_ssh_config_announce_controls_the_synced_line`** is the unit home
+   of the `assert "SSH config synced" in captured_output.info` line that a group 3 row deletes at
+   the orchestration level. Both are inventoried; they should land together.
 6. **`cli/tests/capabilities/test_secret_backend_conformance.py`** is the same family as
    `capabilities/test_conformance.py` and was never on the absorbed survey's list. Inventoried here;
    recorded so the reassessment knows the survey's file list was not exhaustive.
@@ -2492,10 +2494,14 @@ guide-side file held. What remains was each checked against the basis.
      which still carries `math.isclose(antenna, 3.788, abs_tol=0.001)` and palette hex literals
      restated from `lander.css`. The lead may prefer this ride with W4's pattern rather than with
      the sweep.
-   - **New**: the W8/W10 boundary. The plan assigned "the W8 browser row" (singular, 636-653); the
-     three chromium-harness cleanup tests at 655-823 are separate tests from the 2026-08-15
-     reliability correction and are inventoried here. If the trims item considers the whole harness
-     family its own, those two rows move.
+   - **New**: the W8/W10 boundary. The plan assigned "the W8 browser row", singular, which is
+     `test_site_documents.py::GeneratedDocumentTests.test_chromium_geometry_keeps_wide_body_beside_toc_and_narrow_toc_inline`;
+     the three chromium-harness cleanup tests beside it
+     (`test_site_documents.py::GeneratedDocumentTests.test_chromium_geometry_owns_the_devtools_process_and_cleanup`,
+     `test_site_documents.py::GeneratedDocumentTests.test_chromium_geometry_bounds_readiness_and_kills_a_stuck_process`,
+     `test_site_documents.py::GeneratedDocumentTests.test_chromium_geometry_preserves_primary_errors_and_surfaces_cleanup_errors`)
+     are separate tests from the 2026-08-15 reliability correction and are inventoried here. If the
+     trims item considers the whole harness family its own, those two rows move.
    - **New**: W6 residue. `lander-model.js` still duplicates a status literal between two of its own
      branches, but no test asserts it, so there is no sweep row and it stays a website-source
      defect.
