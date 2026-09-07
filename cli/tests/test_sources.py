@@ -112,3 +112,56 @@ def test_fetch_file_cleanup_failure_preserves_fetch_error(captured_output) -> No
 
     assert caught.value.__cause__ is primary
     assert captured_output.warnings
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("prefix", ["", "file::"])
+def test_workstation_snapshot_uses_invoking_directory(tmp_path, monkeypatch, prefix: str) -> None:
+    from agentworks.sources import snapshot_workstation_file
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "settings.json").write_bytes(b"captured\r\nbytes")
+    snapshot = snapshot_workstation_file(f"{prefix}settings.json")
+    (tmp_path / "settings.json").write_bytes(b"changed")
+    assert snapshot == b"captured\r\nbytes"
+
+
+@pytest.mark.windows
+def test_workstation_snapshot_expands_invoking_home(tmp_path, monkeypatch) -> None:
+    from agentworks.sources import snapshot_workstation_file
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    (tmp_path / "settings.toml").write_bytes(b"a = 1")
+    assert snapshot_workstation_file("file::~/settings.toml") == b"a = 1"
+
+
+@pytest.mark.parametrize("source", ["git::https://example.com/repo.git", "git::invalid-private-input", "file::", ""])
+def test_workstation_snapshot_rejects_nonlocal_and_invalid_references(source: str) -> None:
+    from agentworks.sources import snapshot_workstation_file
+
+    with pytest.raises(SourceRefError):
+        snapshot_workstation_file(source)
+
+
+@pytest.mark.windows
+def test_workstation_snapshot_rejects_missing_and_directory_sources(tmp_path) -> None:
+    from agentworks.sources import snapshot_workstation_file
+
+    for path in (tmp_path, tmp_path / "missing"):
+        with pytest.raises(SourceRefError):
+            snapshot_workstation_file(str(path))
+
+
+@pytest.mark.windows
+def test_workstation_snapshot_error_does_not_echo_path(tmp_path) -> None:
+    import traceback
+
+    from agentworks.sources import snapshot_workstation_file
+
+    source = str(tmp_path / "external-sensitive-path")
+    with pytest.raises(SourceRefError) as caught:
+        snapshot_workstation_file(source)
+    assert "external-sensitive-path" not in "".join(traceback.format_exception(caught.value))
+    assert caught.value.__cause__ is None
+    assert caught.value.__suppress_context__
