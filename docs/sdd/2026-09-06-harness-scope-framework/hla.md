@@ -514,20 +514,36 @@ distinct from rules and stronger launch instructions. These are inputs to the fo
 a frozen wire format, persisted schema, ingestion policy, or placeholder API in the facets
 implementation.
 
-There is no artifact or native-setup deferral protocol in this SDD. The successor must address
-resources where an integration is not selected: skipping an invocation must not silently discard
-applicable input or implicitly enable the integration. It must also resolve the diamond formed by
-VM, user/workspace, and session. Sending the same VM item down both branches and deduplicating its
-ID at session start would not alone prevent duplicate native effects. Treating a user-facet result
-as globally consumed would wrongly hide work still needed for other users.
+There is no artifact or native-setup deferral protocol in this SDD. The operator's direction for the
+successor is integration-owned routing: a VM facet can apply an item or defer it toward user,
+workspace, or session, including directly to session without visiting either intermediate facet. The
+integration knows its native placement requirements; core delivers the result without choosing a
+harness-specific route. Routing names a destination facet, not an enumeration of future resource
+instances. It cannot depend on whether descendants currently exist or have that integration enabled.
 
-The open design questions are which intermediate facets receive inherited input, how origin and
-destination-specific applicability distinguish obligations from duplicate paths, and how the
-selected session integration reconciles applicable handling evidence and remaining input. Handling
-for Alice or workspace X cannot automatically satisfy Bob or workspace Y. No routing, fan-out,
-receipt-merge, or final-session selection algorithm is chosen here. The workspace facet currently
-earns its place through native project settings mappings; keeping that setup surface does not
-require inherited VM artifacts to flow through it.
+Each resource's facet computes from its own applicable inputs and native conditions, without
+consulting downstream resources. Its result is reusable by independently created consumers: VM setup
+does not run again for every new user or workspace, and user setup does not run again for every
+session. Recalculation remains part of the owning lifecycle when its inputs change; this is not a
+once-per-lifetime cache. In the future flow, each user invocation processes its applicable VM
+deferrals without knowledge of workspaces or sessions. A session combines VM items routed directly
+to session with applicable results from its user and workspace, then accounts for unresolved input.
+The operator reopened the earlier rule that every final deferral must error. Failure versus warning
+or another explicit disposition remains a successor decision; silent loss is not a disposition.
+
+The successor must specify how core preserves pending input when a routed intermediate integration
+is not selected, without invoking it implicitly or asking an ancestor to reroute. It must also
+distinguish origin from destination-specific applicability when paths through the diamond meet.
+Sending an item down both branches and deduplicating its ID at session start would not alone prevent
+duplicate native effects. Treating handling for Alice or workspace X as globally consumed would
+wrongly hide obligations for Bob or workspace Y. The routing representation, skipped-facet policy,
+branch reconciliation, and selection/diagnostic rules remain future design work.
+
+The current resource-bound setup invocations and owning lifecycles preserve this independence. Do
+not add downstream discovery or session-dependent ancestor setup while implementing them. The
+workspace facet earns its current place through native project settings mappings; keeping that
+surface does not require inherited VM artifacts to flow through it. No placeholder routing API or
+artifact state is introduced in this framework.
 
 The operator's leading follow-on proposal is a declarative `artifact-bundle` resource that owns
 ingestion and normalized contents. Other resources would consume bundles by ID rather than each

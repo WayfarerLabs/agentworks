@@ -414,14 +414,27 @@ source identity is distinct from each consumer's scope and applicability. The ki
 revision, update, and storage semantics remain future design decisions; this effort introduces no
 bundle registration or API.
 
-The successor must resolve skipped integrations and the VM-to-user/workspace-to-session diamond. An
-integration not selected at an intermediate resource cannot be implicitly activated to handle
-pending input. The design must preserve applicable unhandled input and distinguish an item's origin
-from handling for a particular user, workspace, and integration. It must decide whether inherited VM
-items visit either or both intermediate facets, how their results meet at a session without
-duplicate effects or lost obligations, and what session selection means for pending input. These are
-open artifact-design questions, not a deferral protocol delivered here. The workspace facet remains
-in this SDD for native project settings; retaining it does not decide future artifact routing.
+The operator's routing direction for the successor is that each producing integration facet chooses
+where its deferrals should next be handled. A VM facet can route to user, workspace, or directly to
+session, skipping intermediate facets. It makes that decision from its own inputs and concerns,
+without inspecting downstream instances or whether their integrations are enabled. Core preserves
+and delivers the result; it does not choose a harness-specific preferred destination.
+
+Each owning resource calculates its result independently for its current inputs. Later consumers
+reuse that result without consuming it globally: one VM can serve many users and workspaces, and one
+user can serve many sessions. Changed owning inputs can require recalculation through the owning
+lifecycle; creating or enabling a descendant must not require the producer to reconsider its route.
+A user invocation processes applicable VM deferrals without consulting workspaces or sessions. The
+session combines direct VM-to-session input with applicable user and workspace results and accounts
+for anything it cannot handle. The operator reopened the earlier mandatory-error policy: the
+successor must settle when an unresolved item blocks launch or receives another explicit treatment.
+
+The successor must still specify core handling of skipped intermediate integrations without silent
+loss or implicit activation, distinguish origin from destination-specific applicability, and avoid
+duplicate effects when paths meet. Handling for one user or workspace cannot discharge another's
+obligations. These principles guide that SDD, not a deferral protocol delivered here. The workspace
+facet remains in this SDD for native project settings; retaining it does not require VM artifacts to
+route through it.
 
 ## What changed since the scope-participation contract was written
 
