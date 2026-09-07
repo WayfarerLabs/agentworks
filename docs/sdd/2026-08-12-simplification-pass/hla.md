@@ -51,9 +51,10 @@ technique, not a smell; what decides is what the assertion protects.
 - **Keep** a guard enforcing a boundary the type system cannot express, that an ordinary edit can
   regress: import and layering boundaries, consent confinement
   (`cli/tests/guide/test_shell_service.py::test_static_index_list_and_selected_render_do_not_load_operator_state_modules`
-  is the standing example, forbidding the guide's static render path from importing
-  `agentworks.config`, `agentworks.db`, `agentworks.resources` or `agentworks.secrets`), and drift
-  against a canonical source.
+  is the standing example: it renders the index, lists topics and renders a topic in a clean
+  subprocess, then asserts that none of seven operator-state roots reached `sys.modules`,
+  `agentworks.config`, `db`, `declared_resource`, `resource_loading`, `resource_names`, `resources`
+  and `secrets`), and drift against a canonical source.
 - **Delete** a guard pinning how our code is written rather than what it may reach: identifier
   spellings, call-graph shape, statement order. The `phase7` corpus was this family, and so are
   three of the four banned patterns in `resources/test_graph_guard.py`: the `dependencies()`
@@ -144,15 +145,15 @@ not a loosening of it.)
 ### A platform-conditional path is covered, not speculative
 
 At HEAD the suite runs on `windows-latest` in CI, in the `test-windows` job that `ci-success`
-requires, per [.github/workflows/ci.yml](../../../.github/workflows/ci.yml), after PR #747 made it
-pass there. That job runs `cli/tests` on Python 3.13 excluding the `integration` marker, so the
-criterion reaches the non-integration CLI suite on Windows and nothing beyond it: a
-platform-conditional path exercised only by an integration test, or only outside `cli/tests`, is not
-covered by this job and this criterion does not speak for it. Within that scope a test guarding a
-platform-conditional path is CI coverage rather than inert generality, and the delete criteria treat
-it as live coverage: the branch it guards runs on every pull request, and deleting the test drops
-real branch coverage rather than retiring an abstraction nothing exercises. (Effort lead,
-2026-09-06.)
+requires, per [.github/workflows/ci.yml](../../../.github/workflows/ci.yml). PR `#760` added that
+job and PR `#747` is what made the suite pass on it. That job runs `cli/tests` on Python 3.13
+excluding the `integration` marker, so the criterion reaches the non-integration CLI suite on
+Windows and nothing beyond it: a platform-conditional path exercised only by an integration test, or
+only outside `cli/tests`, is not covered by this job and this criterion does not speak for it.
+Within that scope a test guarding a platform-conditional path is CI coverage rather than inert
+generality, and the delete criteria treat it as live coverage: the branch it guards runs on every
+pull request, and deleting the test drops real branch coverage rather than retiring an abstraction
+nothing exercises. (Effort lead, 2026-09-06.)
 
 ## Guidance delivery
 
@@ -160,25 +161,29 @@ Wave 0 first resolves rule delivery (issue #511), then amends the two existing r
 (`development-principles`, `no-prose-policing-tests`); no new files, personas, or delivery
 mechanisms. The expected delivery resolution is subtraction-shaped: the `globs`/`paths:` frontmatter
 is what forces lazy loading, so after the probes confirm the emission shape, the twelve broad
-always-on rules drop the filter and load eagerly, as the frontmatter-free `always-consider-*` rules
-already do. Wave 0 completes on one of two measurable branches (FRD R1.3): verified unconditional
-delivery, or an operator-approved fallback that places the full criteria text into every affected
-lane; a citation alone cannot supply the contents of a rule a target never loads. Wave 1 delegation
-charters cite the two amended rules regardless, which costs a sentence per charter.
+always-on rules drop the filter and load eagerly. This once cited frontmatter-free
+`always-consider-*` rules as the precedent; **no such file exists in the tree**, and whether the
+count is wrong, the file list is short, or "rules" means something other than files is the
+operator's to say, which the inventory records as a finding rather than correcting here. Wave 0
+completes on one of two measurable branches (FRD R1.3): verified unconditional delivery, or an
+operator-approved fallback that places the full criteria text into every affected lane; a citation
+alone cannot supply the contents of a rule a target never loads. Wave 1 delegation charters cite the
+two amended rules regardless, which costs a sentence per charter.
 
 ## Waves and vehicle
 
 - **Wave 0**: the delivery resolution plus one small amendment PR, merged first (FRD R1).
 - **Wave 1**: independent, contained deletion work off main, each item judged locally against the
   two doctrines, each PR green on the full suite. No ordering between items; PR batching per the
-  plan. Precedes the CLI grammar rewrite (saga `phasing.md`).
+  plan. The saga's `phasing.md` put this wave before the CLI grammar rewrite; that rewrite has since
+  merged and locked with PR `#491`, so the ordering is discharged rather than pending.
 - **Wave 2**: process and rule subtraction PRs under the net-deletion constraint, in parallel with
   wave 1 on its own session (file-disjoint: `.rulesync/` and the skills tree versus `cli/` and
   `website/`).
-- **Reassess**: waits for both waves and for the CLI grammar rewrite landing (the saga's
-  `phasing.md` puts the rewrite between wave 1 and this reassessment, so the effort cannot close or
-  lock early); the lead writes the reassessment and the candidate proposals; the operator decides
-  what, if anything, is promoted.
+- **Reassess**: waits for both waves; the CLI grammar rewrite it also waited for has landed (the
+  saga's `phasing.md` puts the rewrite between wave 1 and this reassessment, so the effort cannot
+  close or lock early); the lead writes the reassessment and the candidate proposals; the operator
+  decides what, if anything, is promoted.
 
 ## Clean-slate process architecture
 

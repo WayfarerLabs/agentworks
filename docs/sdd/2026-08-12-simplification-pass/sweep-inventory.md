@@ -10,8 +10,9 @@ derive this file's group-1 estate, resolve its rows' anchors, and run its two sc
 with it.
 
 It is step one of the sweep work item in [plan.md](plan.md). It decides nothing else: no deletion
-lands with it. The deletions follow as the PRs the groups below are cut for: nine when the map
-settled, eight after the 2026-08-19 re-baseline emptied group 2.
+lands with it. The deletions follow as the PRs the groups below are cut for. **Nine at HEAD**: group
+1 goes as two, group 3 as four, and groups 4, 5 and 6 as one each. Group 2 has no PR, its estate
+having gone entirely.
 
 ## Basis
 
@@ -49,13 +50,13 @@ this basis. Every row with an anchor that reached nothing was read at the basis:
 most are anchors whose assertion is gone because the work the row asked for has already landed, and
 one is a finding rather than a change.
 
-**The rows whose estate is gone.** 157 rows left the ledger because their file or their every site
-no longer exists, group 2's whole estate among them, and part 2 retired 12 more on its own reading.
-Three that looked gone were not: `test_create_resume_orchestrated.py` was renamed rather than
-deleted, so G1-I06 moved with it. B-003 and B-004 moved with it too and then retired, because the
-assertions they addressed had gone from the surviving function and only the function's name had been
-rescued. `[dead]` and `[subtracted]` retire as markers with them; a row whose estate is gone is not
-in the ledger for a marker to describe, and the subtraction those markers recorded is reversed
+**The rows whose estate is gone.** 155 rows left the ledger: 143 because their file or their every
+site no longer exists, group 2's whole estate among them, and 12 more that part 2 retired on its own
+reading. Three that looked gone were not: `test_create_resume_orchestrated.py` was renamed rather
+than deleted, so G1-I06 moved with it. B-003 and B-004 moved with it too and then retired, because
+the assertions they addressed had gone from the surviving function and only the function's name had
+been rescued. `[dead]` and `[subtracted]` retire as markers with them; a row whose estate is gone is
+not in the ledger for a marker to describe, and the subtraction those markers recorded is reversed
 below.
 
 ### The 2026-08-19 subtraction is reversed
@@ -65,8 +66,8 @@ each would take the estate into its own work. It did not hold. A scout re-check 
 still standing, and an independent cross-check by identity agreed with it on all 29 rows both said
 were gone, so the disagreement was not about method.
 
-**89 rows return to their groups with their original dispositions**: 45 that had gone to
-instance-model and 44 to secrets-preview. The other 28 left with the ledger, their estate being gone
+**88 rows return to their groups with their original dispositions**: 45 that had gone to
+instance-model and 43 to secrets-preview. The other 29 left with the ledger, their estate being gone
 on any reading. The 34 deletes among the returning rows were re-screened as the grammar requires;
 the injected-marker screen decided four of them against the batch and they are keeps now, as G1-I20
 through G1-I23.
@@ -193,9 +194,9 @@ different number of assertions than the row was written against.
 
 **The tie population is small and named.** `sweep-screen.py estate` reports the estate's size, the
 identities in it, and every identity that names more than one site, each of those a test asserting
-the same needle against the same type twice. `Snapshot` refuses to build unless the groups cover
-every site exactly once, so the partition the command prints is the whole estate rather than a
-sample of it.
+the same needle against the same type twice. The partition is total by construction rather than by a
+check: `Snapshot` groups every site into a dict keyed by its identity, so each site lands in exactly
+one group and the partition the command prints is the whole estate rather than a sample of it.
 
 **The states an anchor resolves to.** `resolved` is what the row was cut against, at whatever line
 it now sits. `grown` and `shrunk` are a site group that changed size, with both counts. `retargeted`
@@ -280,7 +281,7 @@ than a recipe; a cell that named a file any other way would be refused.
 
 **The row tables carry `<!-- prettier-ignore -->` and are not padded.** Prettier pads every cell in
 a table to the widest cell in its column, and an identity is much wider than a line number, so
-letting it format these ten tables costs 2.2MB of trailing spaces and puts the file past what an
+letting it format these twelve tables costs 2.2MB of trailing spaces and puts the file past what an
 executor can load. The prose tables in this file are untouched and still padded.
 
 ## How a row was decided
@@ -462,9 +463,10 @@ one.
 
 ## Groups
 
-The rows are batched by **shape**, not by domain, so each group can land as one PR and a review
-round matches the kind of judgment the batch needs. Batching by domain instead would put the
-no-judgment mechanical change into the same review as the sweep's riskiest deletions.
+The rows are batched by **shape**, not by domain, so a group can land as one PR and a review round
+matches the kind of judgment the batch needs, except where a group says otherwise below: group 1
+executes as two PRs and group 3 as four. Batching by domain instead would put the no-judgment
+mechanical change into the same review as the sweep's riskiest deletions.
 
 | #   | Group                                         | PR shape                                                    |
 | --- | --------------------------------------------- | ----------------------------------------------------------- |
@@ -802,12 +804,13 @@ website's, and a file is addressed when any row's anchor names it. An anchor nam
 outright, so this is a subtraction the command performs rather than a recipe a reader re-executes,
 and the command refuses if this table's membership and its own answer disagree.
 
-Each of these files was read. Every one is out of scope for one of four reasons: it has no in-scope
+Each of these files was read. Every one is out of scope for one of five reasons: it has no in-scope
 operand at all (no `match=`, no `assertRaisesRegex` family member, and no multi-word string literal
 in an assertion operand position); its literals are text the code emits to another system, which is
-behavior at a boundary; its literals are values the test itself seeded; or its assertions are
-derivation parity over a fixture the test authors. A file whose estate another effort also touches
-says which one.
+behavior at a boundary; its literals are values the test itself seeded; its assertions are
+derivation parity over a fixture the test authors; or the file belongs to another effort's estate,
+which is a question of ownership rather than of shape. A file whose estate another effort also
+touches says which one.
 
 <!-- prettier-ignore -->
 | File | Why no row |
@@ -896,18 +899,19 @@ says which one.
 | `cli/tests/vms/test_live_vm_boundary.py` | Resolve counts, call order and values the test put in the environment. |
 | `cli/tests/workspaces/test_acls.py` | Emitted command text, not prose we display: the assertion holds what the code sends to a shell, a transport, a completion script or a browser, which is behavior at a boundary. |
 | `cli/tests/workspaces/test_backend_git_identity.py` | Emitted `git config` text, including the repo-local rather than global scope. |
-| `website/tests/lander-phase4j.test.mjs` | Derivation parity over a fixture the test authors. Markdown in, rendered markdown out. |
-| `website/tests/lander-phase4t.test.mjs` | Derivation parity over a fixture the test authors. Markdown in, rendered markdown out. |
+| `website/tests/lander-phase4j.test.mjs` | The lander game's model and world modules, driven directly: flight steps, mission transitions, fuel and terrain. Values the test seeds, over no authored prose. |
+| `website/tests/lander-phase4t.test.mjs` | The same two modules over terrain profiles, site candidates and retention, against the world module's own exported constants. |
 | `website/tests/test_chromium_transport.py` | No in-scope operand, by the same scan. |
 | `website/tests/test_lander_phase4m_browser.py` | Emitted command text: `test_lander_phase4m_browser.py::Phase4MBrowserTests.test_readiness_waits_for_the_navigated_complete_document_with_a_null_safe_root` builds the JavaScript expression the browser is asked to evaluate. |
 | `website/tests/test_lander_phase4q_browser.py` | Emitted command text: `test_lander_phase4q_browser.py::Phase4QBrowserTests.test_fixed_scene_has_no_page_growth_or_scroll_across_lifecycle` is a fragment of the script under evaluation. |
 
 ## Group 1: mechanical `match=` narrowing
 
-The group splits into four sections, which `sweep-screen.py totals` counts and the headings below
-name. The **rows immediately below** are the sites the taxonomy does NOT decide mechanically: the
-`L-` and `RB-` rows read by hand, the `G1-C` rows the callee screen converted, and the `G1-M` rows
-the mutation screen decided. Then the **`G1-K` rows**, the sites whose matched text varies with the
+The group splits into four sections, which the headings below name. `sweep-screen.py totals` counts
+groups rather than sections, so the section split is a reading aid and not something it checks. The
+**rows immediately below** are the sites the taxonomy does NOT decide mechanically: the `L-` and
+`RB-` rows read by hand, the `G1-C` rows the callee screen converted, and the `G1-M` rows the
+mutation screen decided. Then the **`G1-K` rows**, the sites whose matched text varies with the
 test's input; then the **`G1-I` rows**, the ones the injected-marker screen pulled out; then the
 **mechanical batch**, one row per file, sharing one justification. A reviewer who reads the first
 three tables has read all the judgment in this PR.
@@ -926,7 +930,7 @@ mechanical batch after three screens have taken their sites out is the part that
 judgment.
 
 **Corrected 2026-08-16, during execution.** The re-check that produced the `G1-K` rows found 30
-input-varying sites. There are 43, plus two of the same shape in unittest's spelling. It had missed
+input-varying sites. There are 42, plus two of the same shape in unittest's spelling. It had missed
 a `manifests/` and `vms/` cluster, and the misses were sitting in delete rows, described by the
 mechanical batch's shared justification as fixed literals that vary with nothing. What found them
 was not re-reading the rows: it was partitioning every site in the estate by AST and classifying
@@ -1033,9 +1037,9 @@ happens to read a row closely.
 own module passes to an exception constructor AND appears in no string production emits. Both halves
 matter. Without the first it is not a marker; without the second the test may be quoting a shipped
 sentence through a fake, which is what the batch deletes. Comments and docstrings are excluded from
-the production side, because a phrase discussed in a docstring is not a phrase the code says: two
-production docstrings mention "original failure" and no production message contains it, which is the
-difference between keeping G1-M07 and deleting it.
+the production side, because a phrase discussed in a docstring is not a phrase the code says: a
+production docstring and a production comment mention "original failure" and no production message
+contains it, which is the difference between keeping G1-M07 and deleting it.
 
 <!-- prettier-ignore -->
 | id | file and anchors | shape | disposition | justification |
@@ -1507,7 +1511,7 @@ other three are each a full round on their own.
 | E-033 | `cli/tests/plugins/test_codex.py::test_doctor_roster_lists_the_codex_plugin@21e41b` | doctor-message substring | delete | Status assertions carry it. |
 | E-035 | `cli/tests/plugins/test_enablement_producer.py::test_mapping_to_an_absent_backend_reports_the_dangling_edge_not_a_shape_error@6335e1` | wording blacklist | convert | Rubric re-check, 2026-08-16. A structural handle the row assumed away: the shape error chains a pydantic `ValidationError` while the dangling-edge raise chains nothing, so assert `exc.value.__cause__ is None`. No production change. |
 | E-039 | `cli/tests/plugins/test_gcp.py::test_disabled_gcp_site_is_not_ready_and_refused_with_enable_hint@42f48d,test_doctor_roster_tracks_gcp_enablement@cc67a8` | enable-hint and doctor-message substrings | delete | Same as E-019/E-020 for gcp. |
-| E-040 | `cli/tests/plugins/test_manifest_parity.py::test_ensure_reference_enabled_refuses_disabled_row_with_enable_hint@df3884,test_ensure_recipe_enabled_refuses_disabled_contribution_in_closure@6d4557` | enable-hint substring | keep | **Corrected 2026-08-19 (map re-baseline).** Was delete, and it contradicted G1-K03, which keeps the identical expression at `test_manifest_parity.py::test_ensure_recipe_enabled_excludes_capability_nodes` of this same file. Resolved toward the keep: `f"enable plugin`{{PLUGIN}}`"` interpolates the fixture constant naming the disabled plugin, so all three sites prove the refusal names the plugin the operator must enable rather than a fixed sentence. The row also already kept the neighboring fixed literals (`assert "user-install-command" in message` and `assert "fixture-user-cmd" in message` in `test_manifest_parity.py::test_ensure_reference_enabled_refuses_disabled_row_with_enable_hint`, and `assert "fixture-user-cmd" in message` in `test_manifest_parity.py::test_ensure_recipe_enabled_refuses_disabled_contribution_in_closure`: contribution kind and name, value identity on the call's own arguments), so keeping the enable-hint assert in each of them is what makes the row internally consistent as well. |
+| E-040 | `cli/tests/plugins/test_manifest_parity.py::test_ensure_reference_enabled_refuses_disabled_row_with_enable_hint@df3884,test_ensure_recipe_enabled_refuses_disabled_contribution_in_closure@6d4557` | enable-hint substring | keep | **Corrected 2026-08-19 (map re-baseline).** Was delete, and it contradicted G1-K03, which keeps the identical expression at `test_manifest_parity.py::test_ensure_recipe_enabled_excludes_capability_nodes` of this same file. Resolved toward the keep: ``f"enable plugin `{PLUGIN}`"`` interpolates the fixture constant naming the disabled plugin, so all three sites prove the refusal names the plugin the operator must enable rather than a fixed sentence. The row also already kept the neighboring fixed literals (`assert "user-install-command" in message` and `assert "fixture-user-cmd" in message` in `test_manifest_parity.py::test_ensure_reference_enabled_refuses_disabled_row_with_enable_hint`, and `assert "fixture-user-cmd" in message` in `test_manifest_parity.py::test_ensure_recipe_enabled_refuses_disabled_contribution_in_closure`: contribution kind and name, value identity on the call's own arguments), so keeping the enable-hint assert in each of them is what makes the row internally consistent as well. |
 | E-041 | `cli/tests/plugins/test_proxmox.py::test_site_on_disabled_proxmox_is_not_ready_with_hint@bad0bf,test_resolve_site_refuses_disabled_proxmox_with_hint@521c9a,test_doctor_roster_lists_the_proxmox_plugin@21e41b` | enable-hint and doctor-message substrings | delete | Same idiom as E-019/E-020 for proxmox. |
 | E-044 | `cli/tests/plugins/test_publish.py::test_bad_plugin_manifest_anchor_raises_typed_plugin_attributed_error@dcbdd5,test_plugin_manifest_anchor_without_subdir_raises_typed_plugin_attributed_error@1c0151` | authored phrase substrings | convert | Rubric re-check, 2026-08-16. **The row's 'R2.2 forbids adding a discriminator' premise was wrong**: the handle already exists. `manifests/package.py::load_manifest_package` raises `f"manifest package {anchor!r}/{subdir} could not be resolved: {exc}"` with `from exc` and the raise below it (`f"plugin manifest package {anchor!r} declares manifests but ships no {subdir!r} "`) without, so `isinstance(__cause__, ImportError)` versus `__cause__ is None` discriminates. No production change. |
 | E-045 | `cli/tests/plugins/test_publish.py::test_plugin_manifest_anchor_without_subdir_raises_typed_plugin_attributed_error@1c0151` | wording blacklist | delete | `"no-op" not in message` tries to enforce "loud, not silent" by forbidding one word. The loudness is already proven by `pytest.raises(ConfigError)`. |
@@ -2101,7 +2105,7 @@ mostly here.
 | F-147 | `cli/tests/test_completions.py::TestDynamicCompletionsMapping.test_guide_uses_ordinary_subcommands_and_one_dynamic_show_argument@8cad18` | group-versus-subcommand option placement | keep | The first block of this test: `set(guide.subcommands) == {"list", "show"}`, `not listed.params`, the `topic` param's name, requiredness, non-multiplicity and completer, `group_options == ["--agent", "--human"]`, and `not show_options`. It states the grammar the rest of the test and its three executed shell twins depend on, that the display flags live on the group and `show` carries exactly one dynamic argument. A flag migrating from the group onto `show` silently changes what every shell offers. |
 | F-148 | `cli/tests/test_completions.py::TestDynamicCompletionsMapping.test_guide_uses_ordinary_subcommands_and_one_dynamic_show_argument@8cad18` | generated-text assertions computed from the spec, plus the invocation contract | keep | The assertions that quantify over `group_options` (every group option present in the zsh group block, absent from the zsh show block, and emitted as a powershell `CompletionResult`), the zsh positional binding `1:topic:_agentworks_guide_topics`, and `"agw guide list"` in the bash and powershell scripts. The first three are parity against values the test read from the spec rather than literals it carries, and the last is C-021's invocation contract at the generated-script level. |
 | F-149a | `cli/tests/test_completions.py::TestDynamicCompletionsMapping.test_guide_uses_ordinary_subcommands_and_one_dynamic_show_argument@8cad18` | hardcoded bash-template strings | delete | The literal pins on emitted bash: the candidate list `compgen -W "list show --agent --human --help"`, `--agent\|--human) continue ;;`, `case "$group_command" in` and `word_index=command_index + 1`. Each pins how the generator spells one line. Three tests run the real shells and assert the resulting candidate lists, which is the observational twin `hla.md` prefers, and the bash twin runs wherever bash does. The generator is pure Python and does not vary by host. |
-| F-149b | `cli/tests/test_completions.py::TestDynamicCompletionsMapping.test_guide_uses_ordinary_subcommands_and_one_dynamic_show_argument@8cad18` | hardcoded zsh and powershell template strings | keep | The same shape as F-149a over the zsh and powershell blocks: the presence of `list` and `show`, `$groupFlagOptions = @('--agent', '--human')`, `switch ($groupCommand)` and `$index = $groupCommandIndex + 1`. The delete rests on the real-shell twins covering the grammar, and those twins are host-conditional. **CI check, 2026-09-06, and it does not settle the question.** Run `34050713243` on `main` (`eebb6f91`, CI success) reports `8456 passed, 6 skipped` from each Linux Pytest job and `8321 passed, 70 skipped` from the Windows one. The suite runs without `-ra` or `-rs` (`cli/pyproject.toml` sets `addopts = ["-n", "auto", "--dist", "loadgroup"]`), so the log gives counts and never says which tests skipped. **Verified 2026-09-06 as far as a host can verify it:** on a Linux host with zsh installed the zsh twin runs and only the powershell twin skips, so the zsh half's twin does execute somewhere. What remains unknown is whether CI's hosts have zsh, which the log cannot say. So this half keeps, on the sweep's own doctrine rather than on evidence: coverage nobody has shown to run cannot carry a deletion. The cheap way to settle it is `-ra` on the Pytest step, which is a CI change and not the sweep's to make; it is in the open questions. |
+| F-149b | `cli/tests/test_completions.py::TestDynamicCompletionsMapping.test_guide_uses_ordinary_subcommands_and_one_dynamic_show_argument@8cad18` | hardcoded zsh and powershell template strings | keep | The same shape as F-149a over the zsh and powershell blocks: the presence of `list` and `show`, `$groupFlagOptions = @('--agent', '--human')`, `switch ($groupCommand)` and `$index = $groupCommandIndex + 1`. The delete rests on the real-shell twins covering the grammar, and those twins are host-conditional. **CI check, 2026-09-06, and it does not settle the question.** Run `34050713243` on `main` reports `8456 passed, 6 skipped` from each Linux Pytest job and `8321 passed, 70 skipped` from the Windows one. The suite runs without `-ra` or `-rs` (`cli/pyproject.toml` sets `addopts = ["-n", "auto", "--dist", "loadgroup"]`), so the log gives counts and never says which tests skipped. **Verified 2026-09-06 as far as a host can verify it:** on a Linux host with zsh installed the zsh twin runs and only the powershell twin skips, so the zsh half's twin does execute somewhere. What remains unknown is whether CI's hosts have zsh, which the log cannot say. So this half keeps, on the sweep's own doctrine rather than on evidence: coverage nobody has shown to run cannot carry a deletion. The cheap way to settle it is `-ra` on the Pytest step, which is a CI change and not the sweep's to make; it is in the open questions. |
 | F-150 | `cli/tests/test_completions.py::TestDynamicCompletionsMapping.test_secret_verify_variadic_completion_contract_in_every_shell@5863f1` | vacuous assertion | delete | `assert all(zsh_position.group(1) == "*" for _position in (1, 2, 6))` re-tests one already-asserted value three times: the loop variable is unused and the tuple reaches nothing. It cannot fail unless the assertion two lines above it already failed. Delete the line; the `zsh_position.group(1) == "*"` check above it stays. |
 | F-151 | `cli/tests/test_completions.py::TestOptionFlagsInSpec.test_console_add_sessions_placement_reaches_the_completion_spec@c8a9e9,TestOptionFlagsInSpec.test_secret_preview_opt_in_reaches_describe_and_verify_completions@ec3523,TestOptionFlagsInSpec.test_instance_spec_options_reach_every_shell_completion@03e8a5,TestOptionFlagsInSpec.test_runnable_status_option_reaches_every_shell_completion@2c8e4b` | per-flag spec restatement, four more tests | delete | The same shape as C-032 and C-033 for `--to-index`, `--allow-interaction`, `--spec`/`--workspace-spec`/`--agent-spec`, and `--status`: assert the flag is among the command's options, and in three of the four also assert the flag's text appears somewhere in each generated script. Typer introspection puts a declared flag in the spec by construction, and whole-script substring presence adds nothing (C-025). Delete all four tests. **Cost, measured 2026-09-06:** after the delete the flag can leave the completion spec entirely with 111 tests still green, so nothing asserts `--to-index` is in the spec at all. It is an ordinary option with help text (`cli/commands/console.py::console_add_sessions`), not a hidden one, so the loss is completion coverage rather than a flag going quietly missing. |
 | F-152 | `cli/tests/test_completions.py::TestCompleteness.test_zsh_contains_all_commands@e3b0c4,TestCompleteness.test_powershell_contains_all_commands@e3b0c4` | derived presence sweep over a generated script | keep | `_assert_all_commands_present` walks the live spec and asserts every command and subcommand name appears in the generated script, so the expectation comes from the canonical source rather than a hand list, and a generator that dropped a whole subcommand fails here. Weak by construction (substring presence anywhere) and bash is not covered, but nothing else in the file quantifies over the whole tree. |
@@ -2408,7 +2412,8 @@ the `phase7` item, the contained cli items, and P5.
    landed as `4ac084cd` and deleted the whole estate, so no group 2 row survived into this cut and
    there is no group 2 PR to order.
 3. **Group 5 carries the W2 question**, which is an ordering decision rather than something this
-   inventory can settle. See the open questions.
+   inventory can settle. W2 is deferred, and no open question below states it, so the decision is
+   still the lead's to take when W2 comes back.
 4. **Group 3 is too big for one PR.** It is the judgment-heavy batch and the largest by a wide
    margin. The natural cut is by subsystem inside the one shape (consoles and sessions; workspaces
    and agents; vms and platforms; the rest), which keeps the review's judgment uniform while making
@@ -2620,12 +2625,12 @@ no row of this map fixes.
 6. **F-018's pattern list has no canary of its own** and no pattern at all for two of the eleven
    surfaces `test_lander_404.py` guards, location navigation and history mutation. The row keeps and
    names the gap; closing it is an edit to the test rather than a decision.
-7. **The doctrine says twelve rules and `frd.md` carries eleven.** `hla.md` and `plan.md` both say
-   twelve, and both take it from `frd.md`, which is the operator's document: it lists eleven rule
-   files, one of them carrying globs rather than a single rule, and there is no `always-consider-*`
-   file at all. Whether the count is wrong, the file list is short, or "rules" means something other
-   than files is the operator's to say; this map does not correct another effort's artifact and
-   records the discrepancy instead.
+7. **`frd.md` says twelve rules and the tree carries eleven.** `hla.md` and `plan.md` both say
+   twelve, and both take it from `frd.md`, which is the operator's document; the tree has eleven
+   rule files, one of them carrying globs rather than a single rule, and there is no
+   `always-consider-*` file at all. Whether the count is wrong, the file list is short, or "rules"
+   means something other than files is the operator's to say; this map does not correct another
+   effort's artifact and records the discrepancy instead.
 8. **Deletes whose coverage claim was reasoned rather than executed.** A delete row that says the
    coverage lives elsewhere is only as good as that claim, and the verification lane executed a
    sample of them: it was wrong about one in five. So the marker is now carried by every row of that
@@ -2650,16 +2655,20 @@ no row of this map fixes.
    F-194, F-195, F-196 and F-197. A row not on this list and not carrying the marker is a row whose
    justification the phrase set did not catch, which is the gap this population knowingly has.
 
-   **Two marked rows the recipe does not select: C-094 and C-108.** They carried the marker before
-   it was derived, on the earlier hand-picked basis, and they keep it: their claims are genuinely
-   unexecuted and the phrase set simply does not reach their wording. Re-running the recipe
-   therefore returns two fewer ids than the map marks, and that difference is these two rather than
-   a drift.
+   **Re-run at HEAD, 2026-09-06, reading the recipe above literally.** It selects one id MORE than
+   the map marks, not fewer, and the difference runs both ways. Four marked rows it does not select:
+   C-094 and C-108, which carried the marker before it was derived and keep it because their claims
+   are genuinely unexecuted, plus F-141 and L-133. Five rows it selects that carry no marker: A-083,
+   B-001, D-062, D-126 and L-139. The phrase set over-selects on purpose, so the second list is the
+   cost that buys the first; neither is a drift, and both are named so the next reader re-runs it
+   rather than believing this paragraph.
 
-   **Corrected 2026-09-06.** This item read "four rows, `C-005`, `C-025`, C-094, C-108" while only
-   C-094 and C-108 ever carried the marker: `C-025` never had it and `C-005` is not a row in this
-   map at all. That is exactly the failure the fresh cut's citation check now refuses, and it is why
-   the count here is the marker count rather than a list maintained beside it.
+   **Corrected again 2026-09-06.** A previous correction here read "only C-094 and C-108 ever
+   carried the marker: `C-025` never had it and `C-005` is not a row in this map at all", and all
+   three of those claims are false. C-025 carries `**[unverified]**` in its shape cell today, C-005
+   is in the retired list, and the citation check resolves against live and retired ids alike, so it
+   would never have refused either name. The count here is the marker count because a list
+   maintained beside it drifts, which is what that correction was itself an instance of.
 
 ## Corrections to lead-owned artifacts
 
@@ -2684,9 +2693,9 @@ edits; everything else here is still a flag.
 - **C10's `test_capability_shape.py:21-32` anchor is stale.** Those lines are a helper and a
   `parametrize` opening at HEAD, and every message assertion in that file is a `match=` site, so the
   finding resolves into group 1 rather than into its own rows.
-- **APPLIED. `hla.md`'s site counts were both wrong**, and it no longer states any: `match=` is
-  under `cli/tests` and none under `website/tests`, after the wave 1 landings and the one site the
-  Grok Build integration added, where `hla.md` said 663. The website suite carries 49
+- **APPLIED. `hla.md`'s site counts were both wrong**, and it no longer states any: 621 `match=`
+  sites are under `cli/tests` and none under `website/tests`, after the wave 1 landings and the one
+  site the Grok Build integration added, where `hla.md` said 663. The website suite carries 49
   `assertRaisesRegex` sites, not the 51 it recorded. And nine further regex-family sites in that
   suite were in neither count, one `assertRegex` and eight `assertNotRegex`, all of them already
   covered by group 5 rows. All three corrections are now in `hla.md`.
@@ -2706,11 +2715,12 @@ edits; everything else here is still a flag.
 
 `carry` and `reanchor` are gone, and the `Tree(ref)` layer that let either read a historical commit
 went with them. Both existed for one job: turning a map's line numbers into identities, and moving
-an older map's evidence into a newer one. No row here addresses anything by line, and none cites
-anything by line either, so there is nothing left to lift and nothing left to carry. The eighteen
-line anchors that remain are declarations that a row could not be named, which `resolve` reports and
-`reanchor` never wrote. `resolve` answers survival on its own now, by identity, against the tree in
-front of it.
+an older map's evidence into a newer one. No row here CITES anything by line, which is now a rule
+`totals` enforces rather than a state someone maintains, so there is nothing left to lift and
+nothing left to carry. The seventeen line anchors that remain are the exception the grammar makes
+for a row that could not be named at all: `resolve` reports them, bound-checks them against their
+files, and `reanchor` never wrote one. `resolve` answers survival on its own now, by identity,
+against the tree in front of it.
 
 What remains is `estate`, `attribute`, `injected`, `screen`, `resolve`, `generate`, `restamp` and
 `totals`, and all eight read the working tree only. `restamp` also WRITES it, the only one that

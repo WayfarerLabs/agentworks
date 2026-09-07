@@ -200,7 +200,8 @@ shares no files with the website work; it waits on the sweep instead, per group 
       the guide rework deleted group 2's whole estate, so that group has no live row and no PR to
       cut; the 2026-08-19 re-scope subtraction has since been REVERSED, so those estates are back
       in this sweep's scope and the section that recorded the move is gone from the inventory; and
-      the callee-side raise screen is now a mandatory step for every group's delete rows.
+      the callee-side raise screen is now a mandatory step for every group's delete rows OVER A SITE
+      IT REACHES, which is the scope the inventory states and is narrower than all of them.
 
       **Re-anchored on 2026-09-06**, so a row keys what it addresses by identity rather than by
       line, and then **cut fresh at `c310d05b`** once #747 merged, and rebased onto `0c8cf6bc`. The map is a new document over
@@ -459,12 +460,13 @@ R3.2 requires the after number to be lower.
 
       R3.3's "no persona changes" was read as binding, matching #538's precedent of touching only
       skills, so `agentworks-reviewer`, `agentworks-tester`, and `agentworks-dev` are untouched.
-      **Two stale facts in `agentworks-reviewer` are therefore reported rather than fixed**: its
-      scope-discipline check cites `sessions/nodes.py` as today's scope consumer, where no
-      `ctx.operation_scope` read exists at all (the consumer with exactly the described loud
-      behavior is `capabilities/harness_integration/base.py:287-298`), and its consistency-review
-      section says "the fourteen checks above" over sixteen, since checks 12a and 12b are full
-      checks. Both are contradictions of the kind the consistency review hunts.
+      **Two stale facts in `agentworks-reviewer` were therefore reported rather than fixed**: its
+      scope-discipline check cited `sessions/nodes.py` as today's scope consumer, where no
+      `ctx.operation_scope` read exists at all, and its consistency-review section said "the
+      fourteen checks above" over sixteen. **Both are fixed in the persona at HEAD, 2026-09-06**,
+      so this records what was reported rather than a live defect. The consumer with the described
+      loud behavior is `capabilities/harness_integration/base.py::HarnessIntegration._run_readiness`,
+      which reads `ctx.operation_scope`.
 
       **The consistency review ran and returned three fixes on this branch**, all absorbed above.
       The principle 1 compaction had dropped a proposition rather than compressing it, and the
@@ -557,17 +559,24 @@ R3.2 requires the after number to be lower.
 
 ## Reassess (R4)
 
-The reassessment waits for waves 1 and 2 **and for the CLI grammar rewrite landing**: the saga's
-`phasing.md` orders the spine wave 0, wave 1, grammar rewrite, reassessment, so this effort does not
-close or lock while the rewrite is in flight. (The 0.14 contract-truth flagging that an earlier
-revision scheduled here was discharged before this SDD merged: the package is dispatched as its own
-task on `refactor/breaking-truth-0-14`, and the prose-test-purge absorption is recorded in the saga
-ledger.)
+The reassessment waits for waves 1 and 2. The saga's `phasing.md` orders the spine wave 0, wave 1,
+grammar rewrite, reassessment, and **the grammar rewrite has landed: it merged and locked with PR
+`#491`**, so that gate is discharged and only the two waves remain. (The 0.14 contract-truth
+flagging that an earlier revision scheduled here was discharged before this SDD merged: the package
+is dispatched as its own task on `refactor/breaking-truth-0-14`, and the prose-test-purge absorption
+is recorded in the saga ledger.)
 
 - [ ] Write the reassessment: what became simpler in concepts, paths, and contracts; the
       retrospective numbers (lines, test counts, suite wall time, always-on bytes); the surviving
       findings; and a per-subsystem proposal or an explicit drop for each. Done when: delivered to
-      the operator, after waves 1 and 2 are complete and the grammar rewrite has landed.
+      the operator, after waves 1 and 2 are complete.
+
+      **R3.2's measurable currently points the wrong way, and this item owns it.** R3.2 says
+      always-on rule bytes are reported before and after and must go DOWN. The reviewer of record
+      measured 33,920 bytes at HEAD against a 33,863 baseline, which is up rather than down. The
+      measurement basis is nowhere written down, and a byte count nobody can reproduce is not a
+      measurable, so the reassessment states the basis first and then reports against it. This
+      branch does not close R3.2.
 
       **Descriptor-generality residue**, surfaced by the C1/C5 item and left for this pass because
       each needs a decision rather than a deletion. `impl_class` (`config.py:582`) is an identity
