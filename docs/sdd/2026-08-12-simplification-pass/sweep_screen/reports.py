@@ -14,6 +14,7 @@ identity-anchored one, and the cut leaves no line numbers to move.
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -26,6 +27,7 @@ from .inventory import (
     CITED_ID,
     CITED_LINE,
     CITED_QUALNAME,
+    CITED_SHA,
     GROUP_1,
     INVENTORY,
     MECHANICAL_BATCH,
@@ -33,6 +35,7 @@ from .inventory import (
     QUALIFIED,
     RETIRED_HEADING,
     RETIRED_ROW,
+    SHA_CITING,
     URL,
     LineAnchor,
     Row,
@@ -118,6 +121,38 @@ def section_ids(map_path: str, heading: str, pattern: re.Pattern[str]) -> set[st
     return found
 
 
+def orphaned_shas(map_path: str = INVENTORY) -> list[str]:
+    """Every commit these artifacts cite that is not an ancestor of HEAD.
+
+    A rebase moves this branch's own commits and nothing moves the map's
+    citations of them, so a cited SHA survives only in the rewriting clone's
+    object store and is collected. That is not a stale number a reader can
+    correct from context; it is a citation of evidence that no longer exists
+    anywhere, and the Basis makes reachability an explicit promise.
+
+    `restamp` carries digests across a rebase for exactly this reason. Nothing
+    carried the citations, and the bare-number gate blanks hex as exempt without
+    ever asking whether it resolves, which left this the one citation family with
+    no check at all.
+    """
+    directory = Path(map_path).parent
+    faults: list[str] = []
+    for name in SHA_CITING:
+        path = directory / name
+        if not path.exists():
+            continue
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            for sha in sorted(set(CITED_SHA.findall(line))):
+                probe = subprocess.run(
+                    ["git", "merge-base", "--is-ancestor", sha, "HEAD"],
+                    capture_output=True,
+                    check=False,
+                )
+                if probe.returncode != 0:
+                    faults.append(f"{name}:{number} cites {sha}, which is not an ancestor of HEAD")
+    return faults
+
+
 def check_map(
     rows: list[Row],
     retired: tuple[set[str], set[str]],
@@ -192,16 +227,23 @@ def check_map(
         # sibling here, since the digits after a colon in a link are a port or a
         # path and reading them as a line number is a fault nobody can fix.
         if line.startswith("| "):
-            for spelling in sorted({m.group(0) for m in CITED_LINE.finditer(bare)}):
+            spelled = sorted({m.group(0) for m in CITED_LINE.finditer(bare)})
+            for spelling in spelled:
                 faults.append(f"{source} cites {spelling.strip()} by line; name the function instead")
             # And the one rule for everything outside a span: a cell carries no
             # standalone integer. Read per CELL rather than per line, so the
             # count columns of the totals tables are whole cells this skips
             # rather than digits it has to explain.
+            #
+            # A spelling the branch above already reported is not reported again.
+            # The two rules overlap wherever a citation carries both a name and
+            # digits, and one cell holding one fault was arriving as two
+            # complaints, which sends a reader looking for a second defect.
+            already = {digits for spelling in spelled for digits in re.findall(r"\d{2,}", spelling)}
             for cell in split_cells(line):
                 if cell.strip().isdigit():
                     continue
-                for spelling in sorted(set(stray_numbers(cell))):
+                for spelling in sorted(set(stray_numbers(cell)) - already):
                     faults.append(f"{source} carries the bare number {spelling}; name what is there instead")
         # A cited function resolves like an anchor, so a citation that names
         # nothing is refused rather than read and believed.
@@ -216,6 +258,8 @@ def check_map(
                 faults.append(f"{source} cites {path}, which is not a file in this tree")
             elif matches > 1:
                 faults.append(f"{source} cites {path}, which names {matches} files; add a directory segment")
+    faults.extend(orphaned_shas(map_path))
+    faults.extend(batch_drift(rows, snapshot, map_path))
     print(f"# file citations checked: {checked}", file=sys.stderr)
     return faults
 
@@ -345,6 +389,97 @@ def resolve(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
     print(f"# anchors: {sum(states.values())} over {len(rows)} rows", file=sys.stderr)
 
 
+def _batch_rows(
+    rows: list[Row],
+    snapshot: Snapshot,
+    by_path: dict[str, list[Site]],
+    screened: dict[str, tuple[str, str, str]],
+    map_path: str,
+) -> list[Row]:
+    """The mechanical batch this tree implies, as rows rather than as printing.
+
+    Extracted from `generate` so `check_map` can compare what the map COMMITS
+    against what the estate EMITS. The map says the batch "is emitted rather
+    than assembled by hand" and that `generate` writes the `[1-raise]` marker
+    from the screen's own verdicts; until this was readable twice, nothing
+    checked either sentence, and a marker went missing when a raise path left
+    production under a rebase.
+    """
+    # An id is never reused, so a file that still has sites keeps the id it
+    # was given and a new file takes the next one above every id this map has
+    # ever used. Numbering positionally, which is what this did, renamed rows
+    # under every citation of them whenever a file left the batch.
+    held = {a.path: r.id for r in rows if r.section == MECHANICAL_BATCH for a in r.anchors}
+    # Every id this cut has used, not every id it still uses: a retired id is
+    # retired, so allocating above the live maximum alone would reissue one. The
+    # sixteenth new file would have taken G1-155, which the retired table holds.
+    ever = {r.id for r in rows} | retired_ids(map_path)[0]
+    used = [int(i[3:]) for i in ever if i.startswith("G1-") and i[3:].isdigit()]
+    nxt = max(used, default=0) + 1
+    built: list[Row] = []
+    for path in sorted(by_path):
+        row_id = held.get(path)
+        if row_id is None:
+            row_id, nxt = f"G1-{nxt:03d}", nxt + 1
+        sites = sorted(by_path[path], key=lambda s: (s.line, s.col))
+        identities = dict.fromkeys(s.identity for s in sites)
+        anchors = [SiteAnchor(i, snapshot.by_identity[i].multiplicity) for i in identities]
+        kinds = ", ".join(sorted({s.identity.type_name for s in sites}))
+        # The marker is the screen's verdict, so it is derived from the screen
+        # rather than carried across by a reader. A row earns it only when every
+        # site it claims is single-raise-path, which is what the marker's entry
+        # in the map's marker section says it means.
+        verified = all(screened.get(s.where, ("", "", ""))[0] == "single-raise-path" for s in sites)
+        marker = "**[1-raise]** " if verified else ""
+        built.append(
+            Row(
+                row_id,
+                GROUP_1,
+                MECHANICAL_BATCH,
+                list(anchors),
+                f"{marker}{len(sites)} `match=` site(s) over {kinds}",
+                "delete",
+                0,
+            )
+        )
+    return built
+
+
+def batch_drift(rows: list[Row], snapshot: Snapshot, map_path: str = INVENTORY) -> list[str]:
+    """Where the committed mechanical batch differs from what `generate` emits.
+
+    The map promises the batch is emitted, not written, so any difference is a
+    fault rather than a report: it means a row in the file says something the
+    estate does not, and every command passed anyway because none of them ever
+    compared the two.
+    """
+    claims = claim_rows(rows)
+    estate = [s for s in snapshot.sites if s.kind == "match="]
+    claimed = {s for s in estate if any(r.claims(s) for r in claims)}
+    by_path: dict[str, list[Site]] = defaultdict(list)
+    for site in estate:
+        if site not in claimed:
+            by_path[site.path].append(site)
+    emitted = {
+        row.id: f"| {row.id} | {row.render_cell()} | {row.shape} | delete |"
+        for row in _batch_rows(rows, snapshot, by_path, screen_verdicts(snapshot.tree), map_path)
+    }
+    committed = {
+        row.id: f"| {row.id} | {row.render_cell()} | {row.shape} | {row.disposition} |"
+        for row in rows
+        if row.section == MECHANICAL_BATCH
+    }
+    faults: list[str] = []
+    for row_id in sorted(set(emitted) | set(committed)):
+        if row_id not in committed:
+            faults.append(f"{row_id} is emitted by generate and is not in the mechanical batch")
+        elif row_id not in emitted:
+            faults.append(f"{row_id} is in the mechanical batch and generate does not emit it")
+        elif emitted[row_id] != committed[row_id]:
+            faults.append(f"{row_id} differs from what generate emits; re-run it and paste the batch")
+    return faults
+
+
 def generate(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
     """The group-1 mechanical batch at this tree: the estate minus the claims.
 
@@ -387,39 +522,12 @@ def generate(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
     for site in remaining:
         by_path[site.path].append(site)
 
-    generated: list[Row] = []
+    generated = _batch_rows(rows, snapshot, by_path, screened, map_path)
     print("<!-- prettier-ignore -->")
     print("| id | file and anchors | shape | disposition |")
     print("| --- | --- | --- | --- |")
-    # An id is never reused, so a file that still has sites keeps the id it
-    # was given and a new file takes the next one above every id this map has
-    # ever used. Numbering positionally, which is what this did, renamed rows
-    # under every citation of them whenever a file left the batch.
-    held = {a.path: r.id for r in rows if r.section == MECHANICAL_BATCH for a in r.anchors}
-    # Every id this cut has used, not every id it still uses: a retired id is
-    # retired, so allocating above the live maximum alone would reissue one. The
-    # sixteenth new file would have taken G1-155, which the retired table holds.
-    ever = {r.id for r in rows} | retired_ids(map_path)[0]
-    used = [int(i[3:]) for i in ever if i.startswith("G1-") and i[3:].isdigit()]
-    nxt = max(used, default=0) + 1
-    for path in sorted(by_path):
-        row_id = held.get(path)
-        if row_id is None:
-            row_id, nxt = f"G1-{nxt:03d}", nxt + 1
-        sites = sorted(by_path[path], key=lambda s: (s.line, s.col))
-        identities = dict.fromkeys(s.identity for s in sites)
-        anchors = [SiteAnchor(i, snapshot.by_identity[i].multiplicity) for i in identities]
-        kinds = ", ".join(sorted({s.identity.type_name for s in sites}))
-        # The marker is the screen's verdict, so it is derived from the screen
-        # rather than carried across by a reader. A row earns it only when every
-        # site it claims is single-raise-path, which is what the marker's entry
-        # in the map's marker section says it means.
-        verified = all(screened.get(s.where, ("", "", ""))[0] == "single-raise-path" for s in sites)
-        marker = "**[1-raise]** " if verified else ""
-        shape = f"{marker}{len(sites)} `match=` site(s) over {kinds}"
-        row = Row(row_id, GROUP_1, MECHANICAL_BATCH, list(anchors), shape, "delete", 0)
-        generated.append(row)
-        print(f"| {row.id} | {row.render_cell()} | {shape} | delete |")
+    for row in generated:
+        print(f"| {row.id} | {row.render_cell()} | {row.shape} | delete |")
 
     print(f"\n# generated {len(by_path)} rows over {len(remaining)} sites", file=sys.stderr)
     print(f"# claimed by {len(claims)} judgment and keep rows: {len(claimed)} sites", file=sys.stderr)

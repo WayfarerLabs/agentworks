@@ -102,7 +102,11 @@ _COUNTED = (
 #: in the punctuation around the digits. Enumerating punctuation is how this
 #: gate kept losing; the digits are the fault.
 #:
-#: Four things are not that integer, and are blanked before the scan:
+#: TWO OR MORE digits: a one-digit citation passes, which is a deliberate floor
+#: rather than an oversight, since `:2` and `:7` are far more often content than
+#: a place.
+#:
+#: Seven things are not that integer, and are blanked before the scan:
 #:
 #: - **an anchor or identity token**: a row id, a line anchor's `L120-211`, and
 #:   everything inside a code span, which is where this file writes what it
@@ -110,17 +114,31 @@ _COUNTED = (
 #: - **a date**, which is how every dated decision on a row is written.
 #: - **a SHA or a hex digest**, six to forty hex.
 #: - **an issue or PR reference**, `#470`.
+#: - **a thousands separator**: `1,157 rows` is one number, not two.
+#: - **a number a naming word introduces** (`operator ruling 10`), which has to
+#:   be a blanker rather than a lookahead because what precedes the digits and
+#:   what follows them cannot both be expressed in one.
 #:
-#: And two things a number may be doing, checked at the match: NAMING something
-#: (`operator ruling 10`) or COUNTING something (`28 malformed values`), from
-#: the two short vocabularies above.
+#: And one thing a number may be doing, checked at the match: COUNTING something
+#: (`28 malformed values`), from the vocabulary above.
+#:
+#: One spelling is NOT gated and is left so on purpose: a number glued to a name
+#: with no separator, as `l42` is. Refusing it would take every identifier
+#: ending in digits with it, and this map is full of them (`test_pattern1`,
+#: `phase4j`, `L-101a`). A citation spelled that way is unreachable by any rule
+#: that also lets a name through, so it is the reader's to catch.
 #:
 #: Over-selection is the intended failure. A sentence this refuses that was not
 #: citing anything is a sentence to rewrite, which costs one edit; a citation it
 #: misses is an executor editing whatever moved into that line's place.
 STRAY_NUMBER = re.compile(rf"(?<![\w.\-])\d{{2,}}(?!\w)(?!\.\d)(?!(?:\s+[a-z][\w-]*){{0,3}}\s+{_COUNTED}\b)")
 
-#: The blankers, applied in this order before STRAY_NUMBER reads a cell.
+#: The blankers, applied in this order before STRAY_NUMBER reads a cell. All
+#: seven, which is what the grammar paragraph names: an identity token, a date,
+#: a hex digest, an issue or PR reference, a line anchor, a thousands separator
+#: (`1,157 rows` is one number, not two), and a number a naming word introduces.
+#: The last is a blanker rather than a match-time check because what precedes
+#: the digits cannot be expressed in a lookahead beside what follows them.
 STRAY_EXEMPT = (
     re.compile(ID),
     re.compile(r"\d{4}-\d{2}-\d{2}"),
@@ -157,6 +175,18 @@ CITED_QUALNAME = re.compile(r"([A-Za-z0-9_./+-]*[A-Za-z0-9_+-]\.py)::(?!L\d)([A-
 #: is still not a citation, which is what the digit floor is for.
 
 CITED_ID = re.compile(rf"\b{ID}\b")
+
+#: A commit this map cites, in a code span, seven to forty hex. Seven is the
+#: floor because six is a site digest and the two are otherwise the same shape;
+#: a six-hex span is read as a digest and left alone. An all-decimal span is
+#: left alone too: F-149b cites a CI run id, which is decimal and eleven digits,
+#: and a commit spelled without a single letter is rare enough to read by hand.
+CITED_SHA = re.compile(r"`(?![0-9]+`)([0-9a-f]{7,40})`")
+
+#: The artifacts a cited commit may appear in. The map is not alone: the plan
+#: and the high-level architecture cite the same commits for the same reasons,
+#: and a rebase orphans them all at once.
+SHA_CITING = ("sweep-inventory.md", "plan.md", "hla.md")
 
 #: A URL, blanked before ids are read for the same reason code spans are: the
 #: digits in `https://example/G1-999` are a path, not a citation.
@@ -380,15 +410,20 @@ class LineAnchor(Anchor):
         """`line-anchored` says the row resolves to nothing on purpose, so it is
         the one state that passes. That made it the one place a number could be
         wrong and still report success: E-126 carried `L787` into a file 351
-        lines long and every command stayed green. A line past the end is not a
-        declaration that the row will go stale, it is a row that already has.
+        lines long and every command stayed green. A line outside the file is not
+        a declaration that the row will go stale, it is a row that already has.
+
+        Bounded at BOTH ends, because only one end had ever been wrong. `L0` is
+        not a line any file has, and a span whose start is past its end is not a
+        span; neither could have been caught by asking about the end alone.
         """
         if not snapshot.tree.exists(self.path):
             return Resolution("file-gone", "")
         source = snapshot.tree.read(self.path)
         end = len(source.splitlines()) if source is not None else 0
-        if past := [f"L{lo}-{hi}" if lo != hi else f"L{lo}" for lo, hi in self.spans if hi > end]:
-            return Resolution("past-end", self.path, f"{', '.join(past)} in a file of {end} lines")
+        outside = [f"L{lo}-{hi}" if lo != hi else f"L{lo}" for lo, hi in self.spans if hi > end or lo < 1 or lo > hi]
+        if outside:
+            return Resolution("out-of-range", self.path, f"{', '.join(outside)} in a file of {end} lines")
         return Resolution("line-anchored", f"{self.path}:{self.render().replace('L', '')}")
 
     def claims(self, site: Site) -> bool:
