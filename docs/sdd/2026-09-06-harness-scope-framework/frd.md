@@ -190,6 +190,15 @@ between lifecycle operations, so session creation does not rerun ancestor setup 
 inputs. A changed input or incomplete operation must not reuse old deferral output as proof of
 handling. Secrets never enter persisted state or resolved configuration.
 
+The existing instance-state facility also drives idempotent cleanup of previously provisioned
+integration resources when desired artifacts, plugins, other setup entries, or whole attachments are
+removed. At the owning reconciliation or deletion operation, compare current desired state with
+recorded applied ownership and remove obsolete owned resources wherever the native mechanism permits
+safe removal. Repeated cleanup must converge, including when the resource is already gone. This is
+not a promise to reverse every side effect: intentional retention policies remain explicit, and
+unsupported or unsafe removal reports what remains with useful evidence. Do not discard required
+cleanup records or claim success before the disposition is known.
+
 **R10. Upstream prerequisites are reported, never repaired from a session operation.** A session
 integration checks its own upstream prerequisites during readiness using persisted applied state and
 inexpensive probes, and reports gaps through core's standard error framing with remediation pointing
@@ -358,8 +367,11 @@ selected `~/.agentworks-artifacts/session/<session_name>/` in the actual user's 
 session-specific material. The operator also agreed to user-only access, explicit workload
 discovery, ownership tied to session identity rather than name alone, and lifecycle cleanup. R16
 records this concrete shell contract. R7 still rejects any remaining final deferral; shell now has a
-representation for the initial artifact kinds. These changes were held for the next full feedback
-round at the operator's request.
+representation for the initial artifact kinds. The operator further clarified that the existing
+instance-state facility must drive idempotent cleanup of previously provisioned integration
+resources, including artifacts and plugins, wherever safe removal is possible; R9 records that
+requirement without promising reversal of every side effect. These changes were held for the next
+full feedback round at the operator's request.
 
 ## What changed since the scope-participation contract was written
 

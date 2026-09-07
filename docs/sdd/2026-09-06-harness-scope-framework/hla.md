@@ -710,7 +710,27 @@ Use the existing instance-state store, with closed keys for scope contributions 
 state. The VM payload separates VM setup from admin setup; agent, workspace, and session owners use
 their own rows. Inside each harness payload, integration names separate versioned records. The store
 schema needs no new table and no key per integration. Conversation state remains in its existing
-session namespace; an artifact record does not replace a harness conversation ID.
+session namespace; an artifact record does not replace a harness conversation ID. This existing
+instance-state facility is the basis for idempotent cleanup as well as setup. Desired config and
+producer outputs describe what is wanted now; the applied slices describe what this integration
+actually provisioned and may retire. Cleanup is not inferred from filenames, current config alone,
+or the absence of an artifact from a deferred result. There is no second cleanup database.
+
+For artifacts, plugins, marketplace registrations, and other native setup resources, retain the
+non-secret identifiers, ownership, and removal facts needed after their original declaration is
+gone. The integration performs safe native removal where supported, checks whether the resource is
+already absent, and checkpoints each completed removal through the same instance-state path. A retry
+converges without repeating destructive work or forgetting another integration's claims. A removed
+feature's artifacts and a removed individual plugin use this reconciliation just as a removed whole
+attachment does. Resource deletion consumes applicable cleanup records before discarding them when
+provisioned effects would otherwise survive that deletion.
+
+Cleanup follows each owning lifecycle; this does not add workspace reinit. It need not reverse every
+effect. Settings mappings retain their document under R15's explicit policy. For other native
+resources, an unavailable removal mechanism, ambiguous ownership, drift, or failed removal must
+identify what remains and retain evidence needed for retry or operator disposition. Intentionally
+retained output is distinguished from pending cleanup; neither is reported as successful removal.
+The integration owns these native decisions and core owns persistence and lifecycle dispatch.
 
 Persist each integration's successful deferred collection together with its input revision
 references and the scope's published contributions. This identifies which outputs can still be used
@@ -923,6 +943,13 @@ atomic arrays, invalid inputs before writes, same-input reinit, modified source/
 behavior, retained settings on mapping removal, and collisions with explicit plugin config. Source
 portability and second-user/second-workspace cases must be observable, not inferred from manifest
 validation.
+
+R9 cleanup acceptance starts from recorded successful provisioning, then removes a producer
+artifact, one plugin entry, and a whole integration attachment through their owning lifecycles.
+Observe native removal and corresponding instance-state updates, rerun to prove no further change,
+and interrupt cleanup to prove retry preserves outstanding ownership. Also cover already-absent
+resources, drift or unowned content, unavailable native removal, another integration's retained
+claims, and R15's intentional settings retention. A config-only assertion is not cleanup evidence.
 
 R16 acceptance uses simple feature fixtures to prove shell delivery through the real CLI: user and
 workspace files are discoverable without downstream payload copies; a shell with no setup attachment
