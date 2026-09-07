@@ -7,7 +7,7 @@
 - Detailed design: [session-teardown-lld.md](./session-teardown-lld.md)
 - Migration: [migration-strategy.md](./migration-strategy.md)
 - Research: [prior-art-research.md](./prior-art-research.md)
-- Source baseline: `d7dfd6986d03daaa011f1c8a1d390cf25efb04fd`
+- Source baseline: `3641ea8c0cbc7c6389535099b9678932aa972f66`
 - Delivery: one design-and-implementation PR for issue #730
 
 ## Delivery Rules
@@ -23,6 +23,8 @@
 - Every material finding receives an explicit accept, modify, decline, or defer disposition. A
   divergent contract or non-converging finding stops for operator direction.
 - The implementation lead does not merge its own PR.
+- PR #764's database-use lock is an implementation prerequisite. Rebase onto its merged result
+  before implementation so restore exclusion has one authority rather than being recreated here.
 
 ## Full Implementation Gates
 
@@ -52,28 +54,31 @@ not authored prose.
 
 ## Requirement Traceability
 
-| Requirement | Design authority                       | Planned proof                                   |
-| ----------- | -------------------------------------- | ----------------------------------------------- |
-| R1, R3      | FRD CLI/bound; HLA coordinator         | CLI regression and worker-bound tests           |
-| R2          | HLA concurrency unit/collision gate    | overlap, collision, and legacy tests            |
-| R4, R7      | HLA ownership/reconciliation; LLD      | thread-affinity and partial-evidence tests      |
-| R5, R6      | teardown LLD remote state machine      | identity, timeout, force, and no-retry tests    |
-| R8          | HLA output owner; LLD coordinator      | recording output-handler tests                  |
-| R9          | HLA/LLD interruption controller        | queued/running/repeated-interrupt tests         |
-| R10         | lifecycle lock and compare-and-set     | exclusion and stale-result tests                |
-| R11         | FRD non-goal; HLA rejected alternative | structural scope review                         |
-| R12         | this plan                              | full gates, private review, and live validation |
+| Requirement | Design authority                         | Planned proof                                   |
+| ----------- | ---------------------------------------- | ----------------------------------------------- |
+| R1, R3      | FRD CLI/bound; HLA coordinator           | CLI regression and worker-bound tests           |
+| R2          | HLA concurrency unit/collision gate      | overlap, collision, and legacy tests            |
+| R4, R7      | HLA ownership/reconciliation; LLD        | thread-affinity and partial-evidence tests      |
+| R5, R6      | teardown LLD remote state machine        | identity, timeout, force, and no-retry tests    |
+| R8          | HLA output owner; LLD coordinator        | recording output-handler tests                  |
+| R9          | HLA/LLD interruption controller          | queued/running/repeated-interrupt tests         |
+| R10         | session-runtime lock and compare-and-set | exclusion and stale-result tests                |
+| R11         | FRD non-goal; HLA rejected alternative   | structural scope review                         |
+| R12         | this plan                                | full gates, private review, and live validation |
 
 ## Phase 0: Design Checkpoint
 
-- [x] Base the effort on `main` at `d7dfd6986d03daaa011f1c8a1d390cf25efb04fd`.
+- [x] Refresh the effort on `main` at `3641ea8c0cbc7c6389535099b9678932aa972f66`.
 - [x] Inventory batch and named stop, start/restart, shared teardown, SQLite ownership, transport
       timeout/retry behavior, output, tmux socket topology, and ADR 0015.
-- [x] Research primary Python futures, SQLite, tmux, and cross-platform file-lock contracts.
+- [x] Research primary Python futures, SQLite, tmux, and sidecar-lock contracts.
 - [x] Draft the FRD, HLA, teardown LLD, migration strategy, prior-art research, and this plan in one
       coherent artifact set.
 - [x] Run documentation lint, spelling, link, locked-SDD, Rulesync, and diff checks.
-- [x] Obtain clean private project and Muntz design reviews and incorporate material findings.
+- [x] Obtain initial clean private project and Muntz design reviews and incorporate material
+      findings.
+- [ ] Obtain fresh private project and Muntz reviews after the current-main and PR #764 dependency
+      audit.
 - [ ] Publish the complete design checkpoint as a draft PR with `review-requested`.
 - [ ] Complete up to three authorized design feedback/fix cycles.
 - [ ] Record design convergence before implementation begins.
@@ -88,27 +93,38 @@ not authored prose.
 
 ## Phase 1: Extract One Phased Teardown Authority
 
-- [ ] Generalize the existing SQLite sidecar migration lock into one database mutation lock with
-      bounded migration wait and non-blocking lifecycle/restore acquisition.
+- [ ] Rebase onto the merged PR #764 database-use lock and retain its shared writable-lifetime and
+      exclusive restore semantics unchanged.
+- [ ] Generalize the existing SQLite sidecar migration lock into one session-runtime mutation lock
+      with bounded migration wait and non-blocking lifecycle acquisition. Keep unrelated SQLite
+      writers outside this lock.
 - [ ] Route absent/version-zero initialization through the lock, recheck state after acquisition,
       and prove it cannot race restore into an absent destination.
 - [ ] Centralize owner-private creation of a missing database parent before sidecar acquisition and
       retain absent-parent initialization and restore coverage.
-- [ ] Route create, start, restart, stop, direct delete, and cascading teardown through the same
-      cross-process exclusion boundary.
+- [ ] Route create, start, restart, stop, direct delete, and workspace, agent, and VM cascading
+      teardown through the same cross-process session-runtime exclusion boundary.
 - [ ] Route batch PID repair, workspace-rehome repair, and partial-create rollback through the lock
       token boundary so low-level runtime updates and row deletion cannot bypass exclusion.
-- [ ] Route validated live-database restore through the same lock and inventory other first-party
-      whole-database replacement paths.
+- [ ] Inventory first-party live-database replacement paths and prove PR #764's database-use lock
+      excludes them from every writable lifecycle `Database` lifetime.
+- [ ] Bind each session-runtime lock token to the same canonical database path and live lock handle
+      as the `Database` it authorizes; reject cross-database and released-handle tokens.
 - [ ] Validate filter names before acquisition, then reload selected or named rows and required
       relationships under the lock before status or plan derivation.
-- [ ] Add atomic runtime compare-and-set and affected-VM socket/fingerprint collision checks.
-- [ ] Add the dedicated-only immutable teardown plan and outcome in a session-domain teardown
-      module, reusing the existing tmux fingerprint value.
-- [ ] Split main-thread preparation and reconciliation from database-free remote execution.
-- [ ] Preserve missing-start-ticks refinement even when a later remote step fails.
-- [ ] Route named stop, restart, direct deletion, batch stop, and cascading deletion through the
-      synchronous dispatcher before enabling concurrency while leaving legacy teardown unchanged.
+- [ ] Add atomic runtime compare-and-set plus affected-VM socket and positive boot/PID collision
+      checks that fail closed even when start ticks are missing or differ.
+- [ ] Add dedicated-only immutable plan, probe, execution, and outcome values in a session-domain
+      teardown module, reusing the existing tmux fingerprint value.
+- [ ] Split main-thread preparation, pre-kill fingerprint checkpoint, and final reconciliation from
+      database-free remote probe and execution.
+- [ ] Persist missing-start-ticks refinement before destructive submission and prove persistence
+      failure prevents the kill.
+- [ ] Route named stop, restart, direct deletion, batch stop, and workspace, agent, and VM cascading
+      deletion through the synchronous dispatcher before enabling concurrency while leaving legacy
+      teardown unchanged.
+- [ ] Cover `last_started_at` persistence and failed-launch cleanup in the session-runtime lock
+      inventory without including that field in runtime compare-and-set identity.
 - [ ] Prove socket validation, exact tmux targeting, force recovery, absence verification, and
       stopped persistence remain unchanged.
 
@@ -126,8 +142,10 @@ not authored prose.
 - [ ] Preserve the pre-lock empty-selection no-op and skip executor construction for an empty
       dedicated plan set, including legacy-only and preparation-failure batches.
 - [ ] Construct one 10-second, one-attempt transport per dedicated plan.
-- [ ] Add the fixed, maximum-eight dedicated teardown executor.
-- [ ] Consume outcomes in completion order and reconcile each before labeled output.
+- [ ] Add the fixed, maximum-eight dedicated probe/checkpoint/teardown executor.
+- [ ] Consume probe outcomes in completion order, persist required refinement, then submit that
+      session's destructive phase.
+- [ ] Consume teardown outcomes in completion order and reconcile each before labeled output.
 - [ ] Emit a compact heartbeat after each five-second quiet interval.
 - [ ] Keep legacy exact-session teardown serial after dedicated reconciliation.
 - [ ] Preserve sibling progress and final aggregate failure when one plan fails.
@@ -142,12 +160,12 @@ not authored prose.
 
 ## Phase 3: Interruption and Failure Accounting
 
-- [ ] Cancel queued futures on first interrupt and stop submitting work.
+- [ ] Cancel queued futures on first interrupt and stop submitting destructive follow-up work.
 - [ ] Report and drain bounded in-flight work, reconciling every returned outcome.
 - [ ] Repeat the reconciliation notice after later interrupts without pretending Python can
       terminate running thread work.
-- [ ] Prove persistence failure, worker escape, timeout, partial fingerprint, and cancelled-future
-      accounting.
+- [ ] Prove pre-kill persistence failure, worker escape with durable complete identity, timeout,
+      partial fingerprint, and cancelled-future accounting.
 - [ ] Make reconciliation retry-safe when an interrupt lands after SQLite committed the desired
       state.
 - [ ] Preserve the current final aggregate command error for ordinary per-session failures.

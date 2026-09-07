@@ -2,7 +2,7 @@
 
 - Status: Design
 - Date: 2026-09-06
-- Research basis: official documentation and current Agentworks source inspected on 2026-09-06
+- Research basis: official documentation and current Agentworks source inspected through 2026-09-07
 
 ## Executive Summary
 
@@ -52,6 +52,10 @@ library's compile-time and connection threading modes.
 Design consequence: do not disable Python's guard and do not add one connection per worker. Remote
 tasks return values; the existing connection is used only by the invoking thread. This preserves a
 single persistence order and avoids inventing lock or transaction policy for a performance change.
+SQLite's [write-ahead logging documentation](https://www.sqlite.org/wal.html) further permits
+concurrent readers with one writer but still serializes writers and retains possible `SQLITE_BUSY`
+results. Separate worker connections would therefore add contention and failure ordering rather than
+remove the need for coordinator-owned persistence.
 
 ### 4. tmux socket selection creates independent servers
 
@@ -63,21 +67,36 @@ Design consequence: current sessions with distinct validated persisted `-S` sock
 mutation units, including when hosted on the same VM. Legacy rows on the default socket may share
 one server and remain serial with exact session targeting.
 
-### 5. The existing SQLite sidecar lock already supplies exclusion
+### 5. Database replacement and session mutation need distinct exclusion roles
 
 The [SQLite transaction documentation](https://www.sqlite.org/lang_transaction.html) states that
 `BEGIN IMMEDIATE` starts the write transaction immediately and fails with `SQLITE_BUSY` when another
 write transaction is active. Agentworks already uses that operation on a dedicated sidecar database
 to serialize migration across processes, with controlled timeout and release by rollback/close.
 
-Design consequence: generalize that existing helper into one database mutation lock rather than add
-a second lock package. Migration retains its bounded wait; session lifecycle and restore acquire the
-same sidecar non-blocking. Every runtime mutator and Agentworks live-database replacement must
-participate because an atomic database update alone cannot stop stale remote work from touching a
-replacement socket. One shared sidecar also prevents schema migration and lifecycle mutation from
-mistakenly proceeding under independent locks.
+PR #764 adds a separate SQLite database-use sidecar: writable `Database` objects hold it shared for
+their lifetime, while restore holds it exclusive across replacement. This directly prevents a live
+database swap beneath any writable command. It does not serialize two ordinary writable lifecycle
+commands, because both hold shared use locks.
 
-### 6. Fresh transports preserve current authentication behavior
+Design consequence: retain PR #764's database-use lock for whole-file replacement and generalize the
+existing migration sidecar into a session-runtime mutation lock. Migration retains its bounded wait;
+session lifecycle acquires that sidecar non-blocking. Every session runtime mutator participates
+because an atomic database update alone cannot stop stale remote work from touching a replacement
+socket. Unrelated SQLite writers remain outside that second lock.
+
+### 6. Current teardown has a pre-kill durability checkpoint
+
+Agentworks' current reachable dedicated teardown persists newly learned process start ticks before
+it invokes `tmux kill-server`. PID repair does not eagerly fill start ticks, so this checkpoint is
+not redundant. If the write fails, destructive work does not begin.
+
+Design consequence: parallelization splits remote work into a non-destructive probe and a
+destructive execution. The coordinator compare-and-sets learned start ticks after the probe and
+before submitting execution. A one-shot worker outcome after kill would weaken current crash and
+persistence-failure behavior.
+
+### 7. Fresh transports preserve current authentication behavior
 
 [ADR 0015](../../adrs/0015-abandon-ssh-controlmaster.md) removed SSH ControlMaster reuse because
 cached connections made current PAM, NSS, and group membership unreliable after user changes.
@@ -131,6 +150,7 @@ that rewrite.
 | [Python futures](https://docs.python.org/3/library/concurrent.futures.html) | Primary language docs    | pool bound, completion, cancellation, exit |
 | [Python SQLite module](https://docs.python.org/3/library/sqlite3.html)      | Primary language docs    | default same-thread connection rule        |
 | [SQLite threading mode](https://www.sqlite.org/threadsafe.html)             | Primary upstream docs    | library-level threading distinction        |
+| [SQLite WAL](https://www.sqlite.org/wal.html)                               | Primary upstream docs    | reader/writer concurrency and busy results |
 | [tmux manual](https://man7.org/linux/man-pages/man1/tmux.1.html)            | Primary upstream manual  | independent alternative server sockets     |
 | [SQLite transactions](https://www.sqlite.org/lang_transaction.html)         | Primary upstream docs    | `BEGIN IMMEDIATE` exclusion and contention |
 | [Agentworks ADR 0015](../../adrs/0015-abandon-ssh-controlmaster.md)         | Current project decision | no cached SSH connection optimization      |
