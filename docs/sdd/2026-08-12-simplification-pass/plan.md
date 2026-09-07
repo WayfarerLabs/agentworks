@@ -30,7 +30,7 @@ effort. The pre-wave-1 measurements the reassessment compares against are in
 
 ## Wave 1: deletion (R2)
 
-Nine work items, unordered by design: subtraction judged locally against the doctrines, full suite
+Ten work items, unordered by design: subtraction judged locally against the doctrines, full suite
 green, R2.1 provenance gate applied, no new production types or contract changes (R2.2). How many
 PRs they land as is the implementing lead's call; the saga lead's recommendation is to batch by
 domain to about three (cli core; guide and machine output; website and test scaffolding) so operator

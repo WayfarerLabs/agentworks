@@ -42,9 +42,9 @@ are accounted for as carrying nothing the criteria reach, each with its reason.
 
 **The 8 drifted files.** Nobody's re-derivation covered these, because their rows were sound when
 written; what moved was the tree under them, between `426cccae` where their anchors were taken and
-this basis. Ten rows had an anchor that reached nothing, and each was read at the basis: four are
-renames, six are anchors whose assertion is gone because the work the row asked for has already
-landed, and one is a finding rather than a change.
+this basis. Every row with an anchor that reached nothing was read at the basis: some are renames,
+most are anchors whose assertion is gone because the work the row asked for has already landed, and
+one is a finding rather than a change.
 
 **The rows whose estate is gone.** 157 rows left the ledger because their file or their every site
 no longer exists, group 2's whole estate among them, and part 2 retired 12 more on its own reading.
@@ -321,15 +321,15 @@ exception type raisable from more than one distinct path?** Three answers, three
 
 #### Method, and what it can and cannot answer
 
-Derived from the AST at `426cccae`, not from reading. Names resolve through the calling module's own
-namespace (its imports, its module aliases, its top-level definitions), so `_validate` in one module
-is not confused with `_validate` in another; a call on a value whose type is not known statically
-does not resolve at all and is reported as unresolved rather than guessed. From each `pytest.raises`
-body the walk follows every first-party function it calls, transitively, and collects every `raise`
-of the asserted type or a subclass. The targeted raise is identified by matching the `match=` text
-against each reachable raise's message template, and the handle question is then asked of that raise
-specifically: is its `entity_kind` or `entity_name` unique among the raises the same call can
-produce.
+Derived from the AST at whatever tree `screen` runs against, not from reading. Names resolve through
+the calling module's own namespace (its imports, its module aliases, its top-level definitions), so
+`_validate` in one module is not confused with `_validate` in another; a call on a value whose type
+is not known statically does not resolve at all and is reported as unresolved rather than guessed.
+From each `pytest.raises` body the walk follows every first-party function it calls, transitively,
+and collects every `raise` of the asserted type or a subclass. The targeted raise is identified by
+matching the `match=` text against each reachable raise's message template, and the handle question
+is then asked of that raise specifically: is its `entity_kind` or `entity_name` unique among the
+raises the same call can produce.
 
 **Positives are sound; negatives are not.** A site the screen calls multi-raise-path genuinely has
 more than one reachable raise of that type. A site it calls single-raise-path is single as far as
@@ -460,10 +460,10 @@ Group 1's site counts are derived exactly, because that estate is scanned rather
 `sweep-screen.py attribute` is what checks the ownership claim; both are run at the basis and
 `attribute` exits non-zero when the claim is false. **Every `match=` site under `cli/tests` is
 claimed by exactly one group-1 row**, with none claimed by two and none unclaimed, and `generate`
-exits zero against the same estate. The regex-family sites under `website/tests` are split between
-group 1 and the deferred L-402, which claims the rest. The other groups were read rather than
-scanned, and one row there covers an assertion group of one to a dozen lines, so no site total is
-claimed for them.
+exits zero against the same estate. The regex-family sites under `website/tests` are split three
+ways rather than two, between group 1, group 5 and the deferred rows; `attribute` prints which row
+owns each. The other groups were read rather than scanned, and one row there covers an assertion
+group of one to a dozen lines, so no site total is claimed for them.
 
 One row is one test or one contiguous assertion group, so a file that mixes wholly-policing tests
 with prose assertions riding inside legitimate ones appears several times. Group 1's mechanical
@@ -763,8 +763,8 @@ Each of these files was read. Every one is out of scope for one of four reasons:
 operand at all (no `match=`, no `assertRaisesRegex` family member, and no multi-word string literal
 in an assertion operand position); its literals are text the code emits to another system, which is
 behavior at a boundary; its literals are values the test itself seeded; or its assertions are
-derivation parity over a fixture the test authors. A file whose estate was subtracted to another
-effort says which one.
+derivation parity over a fixture the test authors. A file whose estate another effort also touches
+says which one.
 
 <!-- prettier-ignore -->
 | File | Why no row |
@@ -974,7 +974,7 @@ Rows G1-K01 through G1-K16 are the first pass; G1-K17 and above are the `match=`
 | G1-K19 | `cli/tests/manifests/test_kind_models.py::test_a_malformed_expiry_is_refused::ConfigError::d62e9a` | `match=` varying with the test's input | keep | **Second re-check, 2026-08-16.** `match=message` over two parametrize cases whose messages differ in kind, not wording: pydantic's own `"Input should be a valid datetime"` versus our `"must be a date or an RFC 3339 timestamp"`. The assertion is what proves the bare-int carve-out produces its own diagnosis rather than the generic one. This row is the whole of its file's group 1 content, so no mechanical row remains for it. |
 | G1-K20 | `cli/tests/manifests/test_loader_and_envelope.py::test_envelope_rejections::ConfigError::d62e9a,test_mise_inputs_fail_at_manifest_decode::ConfigError::d62e9a` | `match=` varying with the test's input | keep | **Second re-check, 2026-08-16.** Two parametrized sites taking `match=match` from their case tables: envelope mutations at `:164` and mise decode inputs at `:216`. Each table's cases share `ConfigError`, so the parameter is the only thing proving a case routes to its own diagnosis. |
 | G1-K21 | `cli/tests/sessions/test_session_template_surface.py::test_an_unknown_key_in_the_harness_block_errors_at_build::ConfigError::7f669b` | `match=` varying with the test's input | keep | **Second re-check, 2026-08-16.** `f"{field}: unknown field; expected one of:"` over the parametrized field, proving the refusal names the offending key inside `harness_integration`. |
-| G1-K22 | `cli/tests/vms/test_platform_config_contract.py::test_azure_requires_the_three_location_keys_and_defaults_auth::ConfigError::7ebb18,test_azure_service_principal_arm_is_shape_checked::ConfigError::e879d8,test_azure_rejects_malformed_service_principal::ConfigError::d62e9a,test_gcp_gce_location_auth_and_subnet_are_shape_checked::ConfigError::d27201,test_aws_ec2_rejects_malformed_credentials::ConfigError::d62e9a` | `match=` varying with the test's input | keep | **Second re-check, 2026-08-16.** Three interpolated loops (`:130` azure's three location keys, `:145` the service-principal identifiers, `:182` gcp's `project_id`/`zone`) and two parametrized tables (`:164`, `:227`) over seven and eight malformed-credential cases. This is the file L-026 covers, and L-026's finding stands for its remaining fourteen: `entity_kind` is identical on all of them. These five are the sites where the matched text is not identical, so the parameter still discriminates where the handle cannot. |
+| G1-K22 | `cli/tests/vms/test_platform_config_contract.py::test_azure_requires_the_three_location_keys_and_defaults_auth::ConfigError::7ebb18,test_azure_service_principal_arm_is_shape_checked::ConfigError::e879d8,test_azure_rejects_malformed_service_principal::ConfigError::d62e9a,test_gcp_gce_location_auth_and_subnet_are_shape_checked::ConfigError::d27201,test_aws_ec2_rejects_malformed_credentials::ConfigError::d62e9a` | `match=` varying with the test's input | keep | **Second re-check, 2026-08-16.** Three interpolated loops (`:130` azure's three location keys, `:145` the service-principal identifiers, `:182` gcp's `project_id`/`zone`) and two parametrized tables (`:164`, `:227`) over seven and eight malformed-credential cases. This is the file L-026 covers, and L-026's finding stands for its remaining every one of them: `entity_kind` is identical throughout. The sites this row claims are the ones where the matched text is not identical, so the parameter still discriminates where the handle cannot. |
 | G1-K23 | `website/tests/test_site_content.py::SourceContractTests.test_document_structure_failures_are_closed::ContractError::d62e9a,SourceContractTests.test_home_selection_still_fails_on_missing_duplicate_or_drift::ContractError::3f37a7` | `assertRaisesRegex` varying with the input | keep | **Second re-check, 2026-08-16.** The same shape in unittest's spelling, inside the range L-403 used to carry. `:270` takes `reason` from a five-case table of document-structure defects; `:329` is `rf"HOME_IDENTITY README.md .*{reason}"` over three, and additionally names the contract and source path. `ContractError` is shared by every case in both. **Corrected 2026-08-19 (map re-baseline).** Lines re-derived at HEAD from `:221,280`. |
 
 ### Sites the injected-marker screen pulled out of the mechanical batch
@@ -993,12 +993,6 @@ sentence through a fake, which is what the batch deletes. Comments and docstring
 the production side, because a phrase discussed in a docstring is not a phrase the code says: two
 production docstrings mention "original failure" and no production message contains it, which is the
 difference between keeping G1-M07 and deleting it.
-
-Thirteen further injected-marker sites sit in already-subtracted rows and are not rowed here. Eleven
-of those carry a delete disposition that this rule makes wrong, and the subtraction section's
-hand-off names them so the owning effort inherits the correction rather than rediscovering it. The
-other two are already keeps (L-010), which is the screen agreeing with a row that was read closely
-enough the first time.
 
 <!-- prettier-ignore -->
 | id | file and anchors | shape | disposition | justification |
@@ -2205,9 +2199,9 @@ R4 deletes that validator, these tests die with it at no cost, and if R4 keeps i
 permanently removes its negative-path coverage. Deferring is safe in both directions and nothing
 else is.
 
-R4 also inherits an open question with them, deliberately not chased here: whether these 22 police
-the authored form of the templates rather than the validator's rejection behavior. The answer does
-not change the deferral, which is why it was left for whoever takes W2.
+R4 also inherits an open question with them, deliberately not chased here: whether they police the
+authored form of the templates rather than the validator's rejection behavior. The answer does not
+change the deferral, which is why it was left for whoever takes W2.
 
 Two rows beyond the operator's 22 are held with them, and this is the lead's extension rather than
 the ruling: **F-030 and F-039 are converts**, and rewriting two tests in a file that R4 may delete
@@ -2261,10 +2255,11 @@ split the group 1 header records.
 ### What the overlap measurement found
 
 The matrix and the stack diagram that used to sit here were measured over nine groups with no
-re-scope subtraction, and both are gone rather than left to mislead: group 2 has no live row and 117
-rows moved to two other efforts, so every cell in them was wrong. The measurement's METHOD survives
-and is what a re-cut should repeat: count only the files a group actually EDITS, its delete and
-convert rows, since keeps need no edit, and split group 3 into its four sub-batches.
+re-scope subtraction, and both are gone rather than left to mislead: group 2 has no live row, and
+the subtraction they were measured across has since been reversed, so every cell in them was wrong
+twice over. The measurement's METHOD survives and is what a re-cut should repeat: count only the
+files a group actually EDITS, its delete and convert rows, since keeps need no edit, and split group
+3 into its four sub-batches.
 
 Four facts it established, three of which do not depend on the counts that went stale:
 
@@ -2406,20 +2401,17 @@ guide-side file held. What remains was each checked against the basis.
    that a group 3 row deletes at the orchestration level. Both are inventoried; they should land
    together.
 6. **`cli/tests/capabilities/test_secret_backend_conformance.py`** is the same family as
-   `test_conformance.py` and larger, and it was never on the absorbed survey's list. Inventoried
-   here; recorded so the reassessment knows the survey's file list was not exhaustive.
-7. **The website overlaps**, verified at HEAD rather than taken from the plan. The three the plan
-   recorded all hold, with one correction and three additions:
-   - `test_lander_404.py` (W5) has landed: line 5 is `from site_test_support import *` and no
-     duplicated fixture block remains. Inventoried entirely from HEAD.
-   - `test_site_documents.py`'s two owners confirmed. The function the plan names is alive at
-     **576-597**, not where the plan's prose implies: the nine-declaration CSS list at 578-589 and
-     the four-word `fake_terminal` blacklist at 590-597 are the sweep's, both delete. W4's palette
-     test at 825-839 and W8's browser row at 636-653 are the trims item's and are not inventoried.
-   - PR #559 merged and carries none of the sweep's website rows, so they are wholly the sweep's.
-   - **New**: W4's conversion did not reach `test_lander_404.py:425-430`, which still carries
-     `math.isclose(antenna, 3.788, abs_tol=0.001)` and three palette hex literals restated from
-     `lander.css`. The lead may prefer this ride with W4's pattern rather than with the sweep.
+   `capabilities/test_conformance.py` and was never on the absorbed survey's list. Inventoried here;
+   recorded so the reassessment knows the survey's file list was not exhaustive.
+7. **The website overlaps.** `test_site_documents.py` has two owners, the sweep and the website
+   trims item, and the rows here are the sweep's half; `attribute` says which row owns each site, so
+   the boundary is checked on every run rather than described once. Two orderings the plan did not
+   have:
+   - W4's conversion did not reach
+     `test_lander_404.py::StaticDocumentTests.test_fixed_color_contrast_meets_text_and_graphic_thresholds`,
+     which still carries `math.isclose(antenna, 3.788, abs_tol=0.001)` and palette hex literals
+     restated from `lander.css`. The lead may prefer this ride with W4's pattern rather than with
+     the sweep.
    - **New**: the W8/W10 boundary. The plan assigned "the W8 browser row" (singular, 636-653); the
      three chromium-harness cleanup tests at 655-823 are separate tests from the 2026-08-15
      reliability correction and are inventoried here. If the trims item considers the whole harness
@@ -2448,13 +2440,13 @@ recorded once in [hla.md](hla.md)'s doctrine 2, beside the `match=` taxonomy:
    idempotent, so nothing else observes it. Each row states what the keep costs, which is that it
    breaks when someone rewords `OK:` or `Fixed:`, so no later reader mistakes it for a prose pin
    nobody noticed.
-2. **The 22 `test_site_templates.py` rows defer to R4** rather than landing either way. The reason
-   is an asymmetry: if R4 deletes `site_validation.py`'s element-by-element half, these tests die
-   with it at no cost, and if R4 keeps it, deleting them now permanently removes its negative-path
-   coverage. They are moved out of the executable set into the deferred block below, so an executor
-   scanning for delete rows cannot pick them up. The operator's question about whether they police
-   authored template form rather than rejection behavior is deliberately not chased; R4 inherits it
-   with the rows.
+2. **The `test_site_templates.py` rows defer to R4** rather than landing either way, and they are
+   the whole of the deferred block the Totals table counts. The reason is an asymmetry: if R4
+   deletes `site_validation.py`'s element-by-element half, these tests die with it at no cost, and
+   if R4 keeps it, deleting them now permanently removes its negative-path coverage. They are moved
+   out of the executable set into the deferred block below, so an executor scanning for delete rows
+   cannot pick them up. The operator's question about whether they police authored template form
+   rather than rejection behavior is deliberately not chased; R4 inherits it with the rows.
 
 **Applying the rubric to every delete row, and then verifying every convert recipe, moved the
 dispositions substantially.** The split that came out of that pass was 564 delete, 225 convert, 357
@@ -2662,16 +2654,18 @@ edits; everything else here is still a flag.
   `union_path`, and `cli/tests/schema/test_errors.py` already imports and asserts on it. That is why
   group 4 carries so many converts: the structural seam the purge wanted promoted exists.
 - **The absorbed survey's file list was not exhaustive.**
-  `capabilities/test_secret_backend_conformance.py` is the same family as `test_conformance.py`,
-  larger, and unlisted.
+  `capabilities/test_secret_backend_conformance.py` is the same family as
+  `capabilities/test_conformance.py` and was unlisted; the overlaps section carries it.
 
 ## The tooling that retired with this cut
 
 `carry` and `reanchor` are gone, and the `Tree(ref)` layer that let either read a historical commit
 went with them. Both existed for one job: turning a map's line numbers into identities, and moving
-an older map's evidence into a newer one. This cut leaves no line numbers, so there is nothing left
-to lift and nothing left to carry. `resolve` answers survival on its own now, by identity, against
-the tree in front of it.
+an older map's evidence into a newer one. No row here addresses anything by line, and none cites
+anything by line either, so there is nothing left to lift and nothing left to carry. The eighteen
+line anchors that remain are declarations that a row could not be named, which `resolve` reports and
+`reanchor` never wrote. `resolve` answers survival on its own now, by identity, against the tree in
+front of it.
 
 What remains is `estate`, `attribute`, `injected`, `screen`, `resolve`, `generate`, `restamp` and
 `totals`, and all eight read the working tree only. `restamp` also WRITES it, the only one that
