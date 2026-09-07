@@ -137,11 +137,12 @@ separate from a rule, so the integration may collect such facts into a native ru
 launch prompt without manufacturing one rule per fact. A rule preserves its instructional content
 and applicability, including always-applying and path-specific rules. A skill preserves its name,
 discovery description, instructions, and supporting files as a package with discovery/invocation
-semantics. Converting a skill into prompt text is not equivalent handling. Core and features may
-emit both env and artifacts; the producer contract must permit a later manual template-artifact
-surface without redesign, but that surface is not required now. Concrete schemas are the effort
-lead's to settle within these requirements and R12. The runtime `hint` artifact kind is unrelated to
-the onboarding guide's agent-hint content species.
+semantics appropriate to the consuming integration; R16 defines explicit filesystem discovery and
+manual use for shell. Converting a skill into prompt text is not equivalent handling. Core and
+features may emit both env and artifacts; the producer contract must permit a later manual
+template-artifact surface without redesign, but that surface is not required now. Concrete schemas
+are the effort lead's to settle within these requirements and R12. The runtime `hint` artifact kind
+is unrelated to the onboarding guide's agent-hint content species.
 
 **R7. Integrations defer what they cannot handle; core rejects final session deferral.** Native
 placement at the defining scope is the ordinary case. Each facet invocation receives local artifacts
@@ -169,14 +170,15 @@ workload. Writing session-only artifacts into shared user or workspace auto-disc
 acceptable fallback. If no suitable representation exists, the integration defers and core refuses
 launch. This is workload isolation, not secrecy: other sessions being able to read artifacts does
 not itself violate the contract. Applied-state receipts remain available to readiness even when
-handled payloads are filtered out.
+handled payloads are filtered out. Session-specific files use
+`~/.agentworks-artifacts/session/<session_name>/` under the actual session user's home, with
+integration-owned contents and user-only access. The directory provides placement; each integration
+still needs a faithful way for its workload to discover and consume the files.
 
-This also applies to the default shell session: if its applicable ancestry emits even one hint that
-remains unhandled, shell cannot launch. Selecting shell does not discard artifacts, and a no-op
-facet does not establish delivery. The diagnostic must identify the origin and producing feature or
-core contribution, the selected integration, and its reason. Remediation is to select an integration
-that can represent the artifacts or explicitly change the originating producer config; core must not
-suppress artifacts to make the default launch succeed.
+Shell provides filesystem delivery under R16, so receiving a hint does not inherently prevent its
+default session from launching. If delivery fails or an artifact still cannot be represented, R7
+applies normally: report its origin, producing feature or core contribution, selected integration,
+and reason. Core must not suppress artifacts to make any integration launch successfully.
 
 **R8. Per-scope invocations are constructed for their owning resource.** An invocation never reuses
 a session instance's target identity, readiness cache, or state namespace; those stay session-bound.
@@ -248,6 +250,24 @@ policy produce an owning setup error before this integration changes native sett
 Mapping and receipts follow the existing no-persisted-secrets contract; raw workstation settings are
 not stored in resolved config or applied-state payloads. The HLA must settle nested-key/array
 behavior, interaction with explicit plugin config, and cleanup ownership.
+
+**R16. Shell handles artifacts through explicit filesystem delivery.** It makes hints and rules
+readable as files, preserves rule applicability and origin metadata, and retains complete skill
+packages with their descriptions, instructions, and supporting files. The workload can discover the
+applicable files and consume them explicitly. Shell does not automatically interpret rules or
+execute skill content. Successful publication and discoverability count as handling for this
+integration; silently dropping content or publishing an incomplete package does not. This does not
+weaken other integrations' native discovery or invocation requirements.
+
+User and workspace facets place files at their owning resources where suitable. Session-facet
+materialization uses `~/.agentworks-artifacts/session/<session_name>/` under the actual session
+user's home, including for inherited artifacts still deferred to that invocation. Such placement
+retains their original scope and resource identity. The directory is outside shared workspace and
+harness auto-discovery paths and restricts access to its owning user. Sessions running as the same
+user can still read each other's files; this is not a secrecy boundary between them. Session
+identity governs ownership and cleanup, so reuse of a session name cannot adopt another session's
+residue. The HLA must specify discovery, restart, deletion, and failure recovery using the existing
+ownership and lifecycle contracts.
 
 ## Settled constraints, not to be reopened
 
@@ -330,6 +350,16 @@ the four requested treatments of existing settings. The HLA proposes concrete po
 semantics. These are native setup inputs, separate from the hint/rule/skill artifact currency. The
 operator also requested a resource-flow diagram that shows producer output entering each harness
 invocation and deferred artifacts moving along actual ancestry.
+
+## Operator ruling: shell filesystem delivery, 2026-09-07
+
+The operator approved shell handling artifacts as files in appropriate resource locations and
+selected `~/.agentworks-artifacts/session/<session_name>/` in the actual user's home for
+session-specific material. The operator also agreed to user-only access, explicit workload
+discovery, ownership tied to session identity rather than name alone, and lifecycle cleanup. R16
+records this concrete shell contract. R7 still rejects any remaining final deferral; shell now has a
+representation for the initial artifact kinds. These changes were held for the next full feedback
+round at the operator's request.
 
 ## What changed since the scope-participation contract was written
 
@@ -421,4 +451,7 @@ behaves exactly as it does today when no artifact inputs are supplied. User mark
 for Claude Code and Codex is proven, distinct resource config is never flattened, and workstation
 settings mappings demonstrate all four R15 policies at their owning facets. With artifact inputs,
 completion also requires faithful hint/rule/skill representation or a final deferral error, with no
-session payload duplication or widening of session-only applicability.
+session payload duplication or widening of session-only applicability. Shell also proves R16
+filesystem delivery through the real CLI, including a default shell receiving an ancestor hint,
+complete skill packages, workload discovery, user-home session placement, and ownership-safe restart
+and deletion.

@@ -2,7 +2,7 @@
 
 - Status: Proposed architecture for draft review; no merge or implementation intent yet
 - Date: 2026-09-06
-- Requirements: [FRD](frd.md), R1 through R15
+- Requirements: [FRD](frd.md), R1 through R16
 - Saga: [next-steps](../2026-08-04-next-steps/target-state.md), wave 4
 - Governing design: [scope participation](../2026-08-04-next-steps/scope-participation-contract.md)
   and [capability descriptors](../2026-08-04-next-steps/capability-descriptor-contract.md)
@@ -215,7 +215,8 @@ keep their fields, types, defaults, merge behavior, and launch semantics. Each b
 its integration's literal `name`; the hosting resource chooses the facet, so config never nests
 under a `facets` key. "No fields" below means a name-only attachment, not a claim that the facet
 cannot perform work. Claude Code and Codex now both have user and workspace setup config,
-independent of their existing session settings.
+independent of their existing session settings. Shell's user and workspace facets need no config
+fields to materialize artifacts; its VM facet retains the default deferral behavior.
 
 | Integration name | VM config | User config                                                                                           | Workspace config                           | Session config fields beyond `name`                                                                                                                                                                                                                  |
 | ---------------- | --------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -264,6 +265,7 @@ spec:
       settings:
         source: file::~/.config/agentworks/codex-user.toml
         strategy: merge-preserve
+    - name: shell
 ---
 apiVersion: agentworks/v1
 kind: workspace-template
@@ -279,6 +281,7 @@ spec:
       settings:
         source: file::~/.config/agentworks/codex-project.toml
         strategy: skip-existing
+    - name: shell
 ---
 apiVersion: agentworks/v1
 kind: session-template
@@ -292,19 +295,20 @@ spec:
 ```
 
 Creating a user from `team-claude` installs both CLIs through core setup, runs user-features, then
-invokes both user facets with their own marketplace/plugin lists and artifact inputs. Codex also
-maps the selected workstation file to its native user settings using the stated strategy. Creating a
-workspace from `team-project` runs both workspace facets with separate project configuration and
-workspace artifact inputs. Claude maps its project settings file there. A name-only attachment still
-explicitly enables default setup; it is distinct from omitting the integration. A `team-review`
-session using those resources gets only session config, applicable env, deferred artifacts, and
-upstream readiness facts; it does not receive the user config as launch flags. The same user block
-is valid on the proposed admin-template attachment surface. Putting `permission_mode` in the user
-block or `plugins` in the session block is a facet-specific validation error. The user's Codex
-attachment does not implicitly attach Codex to the workspace or select it for the session. With no
-inherited attachment, omitting the workspace list selects none; an explicit empty list removes
-inherited selection. To use Codex for a session, select `name: codex` in that session's singular
-block.
+invokes Claude and Codex user facets with their own marketplace/plugin lists and artifact inputs.
+The name-only shell attachment materializes its filesystem representation. Codex also maps the
+selected workstation file to its native user settings using the stated strategy. Creating a
+workspace from `team-project` runs Claude, Codex, and shell workspace facets with separate config
+and workspace artifact inputs. Claude maps its project settings file there; shell publishes its
+workspace artifact files. A name-only attachment still explicitly enables default setup; it is
+distinct from omitting the integration. A `team-review` session using those resources gets only
+session config, applicable env, deferred artifacts, and upstream readiness facts; it does not
+receive the user config as launch flags. The same user block is valid on the proposed admin-template
+attachment surface. Putting `permission_mode` in the user block or `plugins` in the session block is
+a facet-specific validation error. The user's Codex attachment does not implicitly attach Codex to
+the workspace or select it for the session. With no inherited attachment, omitting the workspace
+list selects none; an explicit empty list removes inherited selection. To use Codex for a session,
+select `name: codex` in that session's singular block.
 
 All four integrations retain ordinary session-only use when setup is not requested. These are
 alternative `session-template.spec.harness_integration` blocks, each paired with its existing
@@ -326,14 +330,13 @@ name: shell
 
 Absent setup attachments do not by themselves prevent those sessions from launching. Each still
 checks its required executable and any upstream prerequisite its integration declares. A name-only
-attachment uses empty setup config where offered. Grok and shell retain the no-op setup default;
-Codex gains native config setup but is not required to implement the entire artifact vertical here.
-Empty config or plugin provisioning does not make unsupported artifact delivery successful. Nonempty
-final deferrals still fail before launch. In particular, the synthesized default shell session
-refuses launch if even one inherited hint remains unhandled. Its error identifies the origin,
-producer, selected integration, and deferral reason so the operator can choose a capable integration
-or explicitly change the originating producer config. No-op defaults neither discard artifacts nor
-provide a faithful shell representation.
+attachment uses empty setup config where offered. Grok retains the no-op setup default; Codex gains
+native config setup but is not required to implement the entire artifact vertical here. Shell
+implements the filesystem representation described below, including delivery at session start when
+no broader shell attachment handled the artifacts. A default shell can therefore launch with an
+inherited hint after publishing it. Empty config or plugin provisioning alone does not establish
+artifact handling for another integration. Nonempty final deferrals still fail before launch, and
+publication errors fail normally with origin, producer, integration, and reason.
 
 ## Same config shape, separate native scopes
 
@@ -458,8 +461,9 @@ result adds the same deferred collection alongside the proposed launch command. 
 before launching the workload. Ordinary execution failures and unsupported launch intents retain
 their existing error/result paths, distinct from artifact deferral. The contract version increments
 from 3 across the descriptor and all four first-party integrations. `start` remains the required
-operation; the inherited setup defaults satisfy R3 without a supported scope registry. Existing
-session probe obligations remain on the session path.
+operation; the inherited setup defaults satisfy R3 without a supported scope registry. The optional
+session cleanup operation described below also has a base default and stays outside the required
+operation set. Existing session probe obligations remain on the session path.
 
 Construct an integration binding for one owning resource and facet. A present attachment supplies
 its effective config and contributions; an absent attachment supplies prior ownership for retirement
@@ -521,7 +525,8 @@ resolves. Runtime values exist only in the operation's runner and scoped secret 
 setup as advisory context; a producer needing stronger guidance can emit a rule or skill. The term
 distinguishes this small artifact from broader harness instructions or an initial prompt. Hints
 still require handling or explicit deferral like every other kind. Rules and skills follow a reduced
-Rulesync model. None is a target filename:
+Rulesync model. Shell preserves those contents and metadata in its explicit filesystem interface; AI
+integrations preserve their native discovery and invocation behavior. None is a target filename:
 
 | Kind  | Content and behavior preserved through delivery                                                                                                                                                                                                           |
 | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -612,9 +617,12 @@ A harness may use a workload-specific input or a privately referenced package to
 artifact at the session facet, if that preserves the artifact's semantics. It must not place
 session-only content in a user or workspace auto-discovery directory shared with other sessions. If
 the harness has no suitable session mechanism, it defers with a reason and core refuses launch.
-Plain hints may be delivered through the launch prompt; that is not a universal fallback for rules
-or skills with additional semantics. Already handled payloads stay upstream; their applied receipts
-remain available to session readiness for prerequisite and drift checks.
+Session-specific files use the actual user's `~/.agentworks-artifacts/session/<session_name>/` with
+integration-owned contents; placement there alone does not satisfy native discovery. Shell provides
+the explicit filesystem interface below. Plain hints may be delivered through the launch prompt;
+that is not a universal fallback for rules or skills with additional semantics. Already handled
+payloads stay upstream; their applied receipts remain available to session readiness for
+prerequisite and drift checks.
 
 For every materialization, claim the smallest practical ownership unit: a rule file, a managed
 member, or the files of a skill package, never an entire repository configuration directory. Inspect
@@ -626,6 +634,75 @@ another integration's recorded claim. Report resource, integration, and destinat
 Core can report conflicting recorded claims across integrations; integrations still inspect actual
 destinations because state can be stale. There is no cross-integration merge policy or claim that
 these checks constrain arbitrary trusted in-process side effects.
+
+## Shell filesystem representation
+
+Shell implements R16 as a filesystem interface for explicit workload consumption. It publishes
+readable hints, rule text with applicability metadata, and complete skill directories retaining
+descriptions, instructions, and supporting-file paths. An index makes those artifacts discoverable
+and preserves their original source addresses. Shell does not source rules, execute skill scripts,
+or claim automatic AI-style selection. AI integrations still need their own faithful native
+representations; this is shell's concrete contract, not a generic fallback that makes any file dump
+count as delivery.
+
+| Invocation | Shell placement and routing                                                                                                                         |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| VM         | Defer all artifacts; no VM-wide shell artifact installation is needed.                                                                              |
+| User       | Publish local user and suitable inherited VM artifacts under `~/.agentworks-artifacts/user/` in that actual user's home.                            |
+| Workspace  | Publish workspace-origin artifacts under `<workspace>/.agentworks-artifacts/`; defer VM-origin artifacts to the user branch or session.             |
+| Session    | Publish remaining inherited and session-origin artifacts under `~/.agentworks-artifacts/session/<session_name>/` in the actual session user's home. |
+
+This fixed routing avoids competing sibling placement. User and workspace attachment membership
+remains explicit, even with name-only config. Without those attachments, complete ancestor
+contribution snapshots still reach the selected shell's session facet for delivery. Session
+materialization retains each artifact's original origin; it does not relabel inherited material as
+session-origin or run missing ancestor setup. A stale or failed upstream snapshot still blocks
+dependent delivery under the existing readiness rules.
+
+The session index combines references to this invocation's published files with the applicable
+upstream locations already recorded for shell. Obtain those references from the bound resource's
+applied facts, not by scanning other users, workspaces, or session directories. Already handled
+payloads stay upstream. When artifacts are available, shell's launch command exposes the index path
+as `AGENTWORKS_ARTIFACTS`, using existing command composition and quoting; this is new shell-owned
+launch behavior, not a new core artifact currency or an arbitrary integration-env result. The
+workload can inspect the index and open the named files. A shell with no applicable artifacts needs
+no artifact directory or discovery variable.
+
+Resolve the home through the actual workload-user target, not the workstation's home or a guessed
+`/home/<name>`. Existing target-side `$HOME` expansion is a usable seam; session contexts do not yet
+provide a discovered home field. Home-based roots and session directories restrict access to the
+owning user. Workspace-origin files follow the workspace's intended access policy. A session path is
+outside shared workspace and harness auto-discovery, but it is not secret from another session
+running as the same user. Validate names and package paths as contained relative components; refuse
+symlink escapes, unsafe roots, and unowned or modified destinations under the ordinary artifact
+ownership rules. A session index lists only that session's applicable artifacts.
+
+The directory's session name is a locator, not proof of ownership. Bind shell receipts to the
+concrete VM/user/workspace placement and an integration-local ownership token for the session
+incarnation, retained in its existing versioned applied-state payload. Shipped session rows have no
+generation UUID (`db/models.py:149`), so this ownership discriminator is new; it is not a universal
+session/run identity framework. A fresh session never adopts or deletes same-name residue lacking
+its matching durable claim. The LLD must specify token publication and crash recovery under the
+existing rule that a remote write without sufficient durable evidence remains unowned.
+
+Stop retains files for the same session's later start. Start/restart reconciles session-owned files
+and its index against current inputs, using prior claims and hashes; it does not repair upstream
+files or copy already handled payloads. Publication or discovery failure blocks launch, and any
+remaining deferral still goes through R7's core error. Partial failure keeps recovery evidence and
+never claims an incomplete package as handled.
+
+Deletion needs new integration cleanup wiring: the current harness API has no cleanup hook and
+database deletion erases session applied state (`db/database.py:929`). Add an optional session-facet
+cleanup operation (base default no-op) and invoke the recorded owner integration after workload
+teardown, before removing the session's receipts or its user. Shell removes only its unchanged,
+owned files and index; it may remove the session directory only when empty. Single-session deletion,
+agent/workspace cascades, and partial session-create rollback must use this path while the
+destination survives. The existing `_teardown_session` also serves stop and restart
+(`sessions/manager/_lifecycle.py:190`); those operations are not deletion and must not invoke
+artifact cleanup. Failed cleanup reports residue and retains the ownership evidence for retry; it
+cannot be reported as completed deletion. The LLD must cover those callers and interrupted cleanup,
+including resource removal that itself destroys the destination. No recursive deletion of a
+same-name directory is authorized merely by its name.
 
 ## Applied state and convergence
 
@@ -819,9 +896,10 @@ output, dictionary resolution, and existing-session restart in this sweep.
 This review PR contains the FRD amendment and HLA. It contains no plan, LLD, permanent behavior
 docs, or migration file. The next artifacts must specify the storage/locking and interruption
 protocol, schema-host walk, user plugin ownership for both harnesses, settings-file parsing and
-reconciliation, and config/overlay migration before implementation begins. Their acceptance must
-include copy, rehome, delete, and state restore handling so owner records cannot bless artifacts at
-a different destination or survive deletion and recreation under the same name.
+reconciliation, shell index/ownership and session cleanup wiring, and config/overlay migration
+before implementation begins. Their acceptance must include copy, rehome, delete, and state restore
+handling so owner records cannot bless artifacts at a different destination or survive deletion and
+recreation under the same name.
 
 ## Validation and requirement coverage
 
@@ -846,6 +924,16 @@ behavior, retained settings on mapping removal, and collisions with explicit plu
 portability and second-user/second-workspace cases must be observable, not inferred from manifest
 validation.
 
+R16 acceptance uses simple feature fixtures to prove shell delivery through the real CLI: user and
+workspace files are discoverable without downstream payload copies; a shell with no setup attachment
+publishes deferred artifacts in its actual user's session directory; hints and rule applicability
+survive indexing and skill packages retain all supporting files. Test two users, two sessions of one
+user, a custom user home, and two workspaces. Each index must expose only its applicable inputs, and
+other users must be denied access to the home-based directory. Prove that stop retains files,
+restart reconciles only owned session material, and single/cascading deletion removes owned files
+before receipts disappear. Same-name recreation, symlink escapes, drift, partial publication, and
+failed cleanup must preserve the ownership boundary and useful recovery evidence.
+
 Readiness acceptance includes a failed config-only user setup with independently established empty
 artifact inputs: recommended warns and launches, required blocks. With artifact delivery depending
 on an incomplete snapshot, launch fails under either readiness policy.
@@ -854,9 +942,9 @@ Enablement acceptance covers name-only default config, two enabled integrations 
 configs and ordered calls, unavailable/disabled capabilities, duplicate entries, inherited explicit
 selection, an empty setup list, and missing effective session selection. Unselected integrations do
 no new setup; retirement of previously owned attachments still runs cleanup. A missing session
-selection never silently enables shell. The explicit default shell launches with no pending
-artifacts and refuses an otherwise valid launch when an ancestor fixture emits an unhandled hint;
-the failure retains its origin, producer, integration, and reason.
+selection never silently enables shell. The explicit default shell launches with no artifact inputs
+and with an ancestor hint after filesystem delivery. Injected publication failure or a remaining
+unsupported artifact blocks launch with its origin, producer, integration, and reason.
 
 Schema/reference checks cover manifest, config, instance overlay, explain/reference, and secret
 preflight parity for every new hosting field. Negative secret tests inspect persisted state and
