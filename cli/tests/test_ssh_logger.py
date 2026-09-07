@@ -73,6 +73,7 @@ def test_ssh_logger_structurally_satisfies_bootstrap_progress(logger: SSHLogger)
     assert "bootstrap error" in text
 
 
+@pytest.mark.windows
 def test_path_retargeting_moves_subsequent_records(
     logger: SSHLogger,
     tmp_path: Path,
@@ -92,6 +93,7 @@ def test_path_retargeting_moves_subsequent_records(
     assert "# Finished:" in retargeted.read_text()
 
 
+@pytest.mark.windows
 def test_write_error_propagates_and_closes_handler(
     logger: SSHLogger,
     monkeypatch: pytest.MonkeyPatch,

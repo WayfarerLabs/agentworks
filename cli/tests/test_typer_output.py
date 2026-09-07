@@ -176,6 +176,7 @@ def _assert_all_roles_byte_plain(capsys: pytest.CaptureFixture[str]) -> None:
     assert _ANSI_RE.search(captured.err) is None
 
 
+@pytest.mark.windows
 def test_no_color_env_forces_byte_plain_even_on_a_tty(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -186,6 +187,7 @@ def test_no_color_env_forces_byte_plain_even_on_a_tty(
     _assert_all_roles_byte_plain(capsys)
 
 
+@pytest.mark.windows
 def test_non_tty_stream_is_byte_plain(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setattr(sys.stdout, "isatty", lambda: False)

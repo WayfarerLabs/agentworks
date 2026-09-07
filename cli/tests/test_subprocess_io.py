@@ -32,6 +32,7 @@ def test_decode_stream_replaces_undecodable_bytes() -> None:
     assert decode_stream(b"ok\xff") == "ok\ufffd"
 
 
+@pytest.mark.windows
 def test_stdin_reaches_the_child_byte_exact() -> None:
     """A trailing newline stays one byte, so a line-oriented reader sees one line."""
     payload = "tskey-auth-sentinel\n"
@@ -47,6 +48,7 @@ def test_stdin_reaches_the_child_byte_exact() -> None:
     assert decode_stream(result.stdout) == payload
 
 
+@pytest.mark.windows
 def test_embedded_newlines_are_not_rewritten() -> None:
     """The Lima provider YAML crosses this same pipe, multi-line."""
     payload = "images:\n- location: file\ncpus: 4\n"

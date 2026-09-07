@@ -540,6 +540,15 @@ Look for:
   on one OS, or with one config shape. Environment-dependent branches need the other branches tested
   too, via deterministic stubbing.
 
+#### Windows test selection
+
+Linux CI runs the full non-integration suite; Windows selects `pytest.mark.windows`. This marker
+selects tests, not their allowed operating systems. See `CONTRIBUTING.md` for usage.
+
+For host-sensitive changes, flag missing or redundant selection. Mark the smallest coherent scope,
+require native evidence when risk depends on the host, and preserve selection when tests move or
+split. Tests limited to mocks or pure logic belong to Linux coverage.
+
 ### 14. SDD process execution
 
 When the change belongs to an SDD effort, the process is under review alongside the code. Read the

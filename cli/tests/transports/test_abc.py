@@ -99,6 +99,7 @@ def test_concrete_transports_implement_abc(transport_cls: type[Transport]) -> No
     assert leftover == frozenset(), f"{transport_cls.__name__} missing: {leftover}"
 
 
+@pytest.mark.windows
 @pytest.mark.parametrize(
     ("delete", "setup_command"),
     [
@@ -148,6 +149,7 @@ def test_copy_dir_to_quotes_remote_archive_and_destination(
     ]
 
 
+@pytest.mark.windows
 def test_copy_dir_to_cleanup_failure_preserves_primary(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -178,6 +180,7 @@ def test_copy_dir_to_cleanup_failure_preserves_primary(
     assert captured_output.warnings
 
 
+@pytest.mark.windows
 def test_copy_dir_to_cleanup_failure_does_not_fail_completed_copy(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

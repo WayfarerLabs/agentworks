@@ -14,10 +14,8 @@ import pytest
 from agentworks.db import (
     BACKUP_DEADLINE_SECONDS,
     LATEST_VERSION,
-    MIGRATIONS,
     SCHEMA_SENTINELS,
     Database,
-    MigrationContext,
     backup_directory,
     create_manual_backup,
     create_pre_migration_backup,
@@ -25,29 +23,7 @@ from agentworks.db import (
     validate_restore_source,
 )
 from agentworks.errors import BackupError, NotFoundError, StateError, ValidationError
-
-
-def _build_schema(path: Path, target_version: int) -> None:
-    connection = sqlite3.connect(path)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = OFF")
-    connection.execute(
-        "CREATE TABLE schema_version ("
-        "version INTEGER NOT NULL, "
-        "applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')))"
-    )
-    context = MigrationContext()
-    for version in range(1, target_version + 1):
-        step = MIGRATIONS[version]
-        if callable(step):
-            step(connection, context)
-        else:
-            for statement in step.split(";"):
-                if statement.strip():
-                    connection.execute(statement)
-        connection.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
-        connection.commit()
-    connection.close()
+from tests.database_support import build_schema
 
 
 def _setting(path: Path, key: str) -> str | None:
@@ -60,7 +36,7 @@ def _setting(path: Path, key: str) -> str | None:
 @pytest.mark.parametrize("version", range(1, LATEST_VERSION + 1))
 def test_schema_sentinels_match_every_historical_version(tmp_path: Path, version: int) -> None:
     path = tmp_path / f"v{version}.db"
-    _build_schema(path, version)
+    build_schema(path, version)
 
     connection = sqlite3.connect(path)
     tables = {
@@ -79,6 +55,7 @@ def test_schema_sentinels_match_every_historical_version(tmp_path: Path, version
     assert validate_restore_source(path) == version
 
 
+@pytest.mark.windows
 def test_manual_backup_reads_committed_wal_content(tmp_path: Path) -> None:
     source = tmp_path / "live.db"
     database = Database(source)
@@ -97,6 +74,7 @@ def test_manual_backup_reads_committed_wal_content(tmp_path: Path) -> None:
     writer.close()
 
 
+@pytest.mark.windows
 def test_restore_copies_backup_into_live_database_without_changing_source(tmp_path: Path) -> None:
     source = tmp_path / "selected.db"
     live = tmp_path / "live.db"
@@ -134,7 +112,7 @@ def test_restore_accepts_final_sqlite_done_after_deadline(tmp_path: Path, monkey
 def test_restore_keeps_historical_version_without_migrating(tmp_path: Path) -> None:
     backup = tmp_path / "v1.db"
     live = tmp_path / "live.db"
-    _build_schema(backup, 1)
+    build_schema(backup, 1)
     Database(live).close()
 
     restore_backup(backup, live)
@@ -182,7 +160,7 @@ def test_restore_rejects_v1_with_first_committed_v2_ddl_before_destination_open(
 ) -> None:
     partial = tmp_path / "partial-v2.db"
     live = tmp_path / "live.db"
-    _build_schema(partial, 1)
+    build_schema(partial, 1)
     connection = sqlite3.connect(partial)
     connection.execute("ALTER TABLE vms ADD COLUMN cpus INTEGER")
     connection.commit()
@@ -205,7 +183,7 @@ def test_restore_rejects_v3_with_first_committed_v4_table_before_destination_ope
 ) -> None:
     partial = tmp_path / "partial-v4.db"
     live = tmp_path / "live.db"
-    _build_schema(partial, 3)
+    build_schema(partial, 3)
     connection = sqlite3.connect(partial)
     connection.execute(
         "CREATE TABLE agents ("
@@ -236,7 +214,7 @@ def test_restore_rejects_missing_column_before_destination_open(
 ) -> None:
     incomplete = tmp_path / "incomplete-v2.db"
     live = tmp_path / "live.db"
-    _build_schema(incomplete, 2)
+    build_schema(incomplete, 2)
     connection = sqlite3.connect(incomplete)
     connection.execute("ALTER TABLE vms DROP COLUMN disk_gib")
     connection.commit()
@@ -289,6 +267,7 @@ def test_manual_backup_preserves_future_schema(tmp_path: Path) -> None:
     connection.close()
 
 
+@pytest.mark.windows
 def test_restore_rejects_identical_paths(tmp_path: Path) -> None:
     path = tmp_path / "same.db"
     Database(path).close()
@@ -297,6 +276,7 @@ def test_restore_rejects_identical_paths(tmp_path: Path) -> None:
         restore_backup(path, path)
 
 
+@pytest.mark.windows
 def test_backup_names_are_disjoint_and_collisions_are_reserved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     source = tmp_path / "live.db"
     Database(source).close()
@@ -313,7 +293,7 @@ def test_backup_names_are_disjoint_and_collisions_are_reserved(tmp_path: Path, m
 
 def test_automatic_backup_refuses_a_version_that_does_not_match_its_source(tmp_path: Path) -> None:
     source = tmp_path / "v12.db"
-    _build_schema(source, 12)
+    build_schema(source, 12)
 
     with pytest.raises(StateError, match="expected 11, found 12"):
         create_pre_migration_backup(source, 11)
@@ -323,6 +303,7 @@ def test_automatic_backup_refuses_a_version_that_does_not_match_its_source(tmp_p
     assert backup.name.endswith("-v12.db")
 
 
+@pytest.mark.windows
 def test_automatic_retention_uses_timestamp_and_ignores_manual_and_unrelated(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -342,7 +323,7 @@ def test_automatic_retention_uses_timestamp_and_ignores_manual_and_unrelated(
     sources = []
     for version in versions:
         source = tmp_path / f"v{version}.db"
-        _build_schema(source, version)
+        build_schema(source, version)
         sources.append(source)
     created = [
         create_pre_migration_backup(source, version).path for source, version in zip(sources, versions, strict=True)
@@ -355,7 +336,7 @@ def test_automatic_retention_uses_timestamp_and_ignores_manual_and_unrelated(
         path.write_text("keep")
 
     final_source = tmp_path / "v4.db"
-    _build_schema(final_source, 4)
+    build_schema(final_source, 4)
     final = create_pre_migration_backup(final_source, 4)
 
     assert not created[0].exists()
@@ -366,6 +347,7 @@ def test_automatic_retention_uses_timestamp_and_ignores_manual_and_unrelated(
     assert final.cleanup_failures == ()
 
 
+@pytest.mark.windows
 def test_failed_backup_and_absent_restore_remove_incomplete_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -392,6 +374,7 @@ def test_failed_backup_and_absent_restore_remove_incomplete_files(
 
 
 @pytest.mark.parametrize("operation", ["manual", "automatic", "absent-restore"])
+@pytest.mark.windows
 def test_interrupted_copy_preserves_interrupt_and_removes_all_reserved_artifacts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -498,6 +481,7 @@ def test_restore_preserves_existing_destination_mode(tmp_path: Path) -> None:
     assert stat.S_IMODE(live.stat().st_mode) == 0o640
 
 
+@pytest.mark.windows
 def test_restore_held_destination_lock_honors_fixed_deadline(tmp_path: Path) -> None:
     source = tmp_path / "selected.db"
     live = tmp_path / "live.db"
