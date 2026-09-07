@@ -20,7 +20,7 @@ untested sandbox profile or silently relax containment to best-effort cleanup.
 
 | Concern                 | Current code at the inspected baseline                      | Consequence                                                                                                                              |
 | ----------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Launch                  | `cli/agentworks/sessions/tmux.py:681`, `:792`               | A dedicated server is created through the owning user's transport. Launch must enter containment before executing agent-controlled code. |
+| Launch                  | `cli/agentworks/sessions/tmux.py:682`, `:792`               | A dedicated server is created through the owning user's transport. Launch must enter containment before executing agent-controlled code. |
 | Teardown                | `cli/agentworks/sessions/manager/_lifecycle.py:190`, `:269` | Killing and proving absence of tmux does not prove absence of detached descendants.                                                      |
 | Runtime record          | `cli/agentworks/db/models.py:149`                           | Stores socket, PID, boot ID, and start ticks; no logical session UUID or run ID yet.                                                     |
 | Direct agent transport  | `cli/agentworks/sessions/manager/_pids.py:38`               | Lifecycle privilege assumptions change; preserve least privilege without granting the workload management authority.                     |
@@ -69,7 +69,9 @@ Service names are derived from validated immutable identities, with the display 
 operator readability. Names are not credentials. A protected VM record binds the logical session,
 run, owning UID, VM boot identity, and systemd unit to the observed cgroup. The workstation persists
 the reference for lifecycle operations. Raw paths or cgroup inode numbers are not everlasting
-identities; deletion/reuse and reboot invalidate a run's live binding.
+identities; deletion/reuse and reboot invalidate a run's live binding. Registration is a recovery
+contract, not a requirement for a second database: prefer protected systemd unit data where it
+satisfies pending-launch discovery and reconciliation, and justify any separate store in the LLD.
 
 Reserve a run identity before remote launch. The VM registers an independently discoverable pending
 run before starting it and records the resulting service association. A disconnected client can

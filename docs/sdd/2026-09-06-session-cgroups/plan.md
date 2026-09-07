@@ -50,6 +50,7 @@ scenarios from the FRD, failed/indeterminate operations, and selected-run isolat
 live-test skills and operator environment inventory before any experiment that changes a VM.
 
 Permanent docs, diagnostics, guide topics, and affected CLI collateral ship alongside the code that
-makes them true. Promote durable architecture and operating guidance before closeout. A final
-lockfile is appropriate only when the effort finishes or is explicitly abandoned; neither a clean
-draft review nor an exhausted feedback budget finishes this effort.
+makes them true. Record the adopted systemd lifecycle and containment decision in an ADR, and
+promote durable architecture and operating guidance before closeout. A final lockfile is appropriate
+only when the effort finishes or is explicitly abandoned; neither a clean draft review nor an
+exhausted feedback budget finishes this effort.
