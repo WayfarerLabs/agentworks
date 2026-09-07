@@ -1,6 +1,6 @@
 # Implementation Plan: Degraded Runnable Recovery
 
-- Status: Design
+- Status: Implementation
 - Date: 2026-09-06
 - Requirements: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
@@ -32,43 +32,43 @@
 
 ## Phase 2: Test-first implementation
 
-- [ ] Add current-schema fixtures for missing session workspace, missing session VM, and missing
+- [x] Add current-schema fixtures for missing session workspace, missing session VM, and missing
       console VM alongside healthy peers.
-- [ ] Add behavioral coverage for plain human inventory, internal nullable VM projection, strict
+- [x] Add behavioral coverage for plain human inventory, internal nullable VM projection, strict
       JSON v1 behavior, stable ordering, filters, names-only behavior, and no external calls or
       database writes.
-- [ ] Add behavioral coverage proving session and console status observe healthy peers, leave
+- [x] Add behavioral coverage proving session and console status observe healthy peers, leave
       orphans unknown, and construct no orphan transport.
-- [ ] Preserve shared observer strictness and focused typed failures with explicit tests.
-- [ ] Add stale-schema migration coverage for typed direct and safe-open refusal, unchanged version
+- [x] Preserve shared observer strictness and focused typed failures with explicit tests.
+- [x] Add stale-schema migration coverage for typed direct and safe-open refusal, unchanged version
       checkpoint, and backup recovery behavior.
-- [ ] Add restore-source coverage for foreign-key violation reporting, default pre-copy refusal,
+- [x] Add restore-source coverage for foreign-key violation reporting, default pre-copy refusal,
       narrow forced acceptance, unchanged validation of every other source property, and final
       snapshot identity across source commits or path replacement.
-- [ ] Add CLI coverage that `--force` and `--yes` remain independent and that a forced inconsistent
+- [x] Add CLI coverage that `--force` and `--yes` remain independent and that a forced inconsistent
       restore warns before confirmation and after successful replacement.
-- [ ] Implement the list-only session VM projection and human-list nullable VM facts.
-- [ ] Implement per-row session and console status partitioning in the list services while retaining
+- [x] Implement the list-only session VM projection and human-list nullable VM facts.
+- [x] Implement per-row session and console status partitioning in the list services while retaining
       strict shared observers.
-- [ ] Translate migration foreign-key violations at the database boundary.
-- [ ] Add a prepared-restore boundary that pins one inspected SQLite snapshot through confirmation
+- [x] Translate migration foreign-key violations at the database boundary.
+- [x] Add a prepared-restore boundary that pins one inspected SQLite snapshot through confirmation
       and copy while preserving the public validator and restore return contracts.
-- [ ] Extend restore-source validation with a narrow `allow_foreign_key_violations` policy; map CLI
+- [x] Extend restore-source validation with a narrow `allow_foreign_key_violations` policy; map CLI
       `--force` to it without weakening other checks.
 
 ## Phase 3: Permanent collateral
 
-- [ ] Update `cli/command-reference.md` for recovery inventory, status isolation, filter
+- [x] Update `cli/command-reference.md` for recovery inventory, status isolation, filter
       reachability, the JSON v1 recovery limit, and the warned restore bypass.
-- [ ] Update `docs/guides/runnable-status.md` with recovery and migration behavior.
-- [ ] Add a dated correction to the locked runnable-status SDD.
-- [ ] Update any README, completion, sample, or guide topic made stale by the implementation.
+- [x] Update `docs/guides/runnable-status.md` with recovery and migration behavior.
+- [x] Add a dated correction to the locked runnable-status SDD.
+- [x] Update any README, completion, sample, or guide topic made stale by the implementation.
 
 ## Phase 4: Verification and review
 
-- [ ] Run focused session, console, machine-output, migration, CLI, filter, renderer, and safety
+- [x] Run focused session, console, machine-output, migration, CLI, filter, renderer, and safety
       suites.
-- [ ] Run Ruff check and format, strict mypy, file lint, locked-SDD, Rulesync drift, diff, release
+- [x] Run Ruff check and format, strict mypy, file lint, locked-SDD, Rulesync drift, diff, release
       residual, and the full non-integration Python suite.
 - [ ] Build an isolated wheel and validate shipped CLI human and JSON behavior against healthy and
       synthetic degraded state without residue.

@@ -313,7 +313,13 @@ class Database:
                             self._conn.execute(stmt)
                 violations = self._conn.execute("PRAGMA foreign_key_check").fetchall()
                 if violations:
-                    raise sqlite3.IntegrityError(f"foreign key violations after migration {version}: {violations}")
+                    from agentworks.errors import StateError
+
+                    raise StateError(
+                        f"state database has foreign key violations after migration {version}",
+                        entity_kind="database",
+                        hint="Restore a backup or repair the inconsistent relationships before retrying.",
+                    )
                 self._conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
                 self._conn.commit()
         finally:

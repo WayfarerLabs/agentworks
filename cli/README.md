@@ -170,8 +170,11 @@ surfaces, valid values retain their existing human bytes and corrupt values rend
 `unknown` sentinel without echoing their stored text. Doctor diagnostics are a separate surface. VM,
 session, and console lists are local inventory reads by default; add `--status` to any of those
 three lists for live observation. Their describe commands include the same non-activating live
-status by default. See [Runnable status inspection](../docs/guides/runnable-status.md) for the
-resource-specific states, time bounds, and failure behavior.
+status by default. Session and console list inventory preserves structurally incomplete rows during
+database recovery; requested status isolates those rows as unknown while observing healthy peers.
+Focused describe and lifecycle commands remain strict. See
+[Runnable status inspection](../docs/guides/runnable-status.md) for the resource-specific states,
+time bounds, recovery behavior, and JSON v1 limit.
 
 ## Configuration
 
@@ -641,6 +644,11 @@ ordinary command owns any forward migration. A backup from a newer schema is pre
 restored by an Agentworks release that understands that schema. Before downgrading Agentworks,
 restore a backup whose schema the older release understands; do not open newer state with the older
 release first.
+
+Restore also rejects declared foreign-key violations by default. If an inconsistent backup is the
+best available recovery source, `--force` bypasses only that relationship check and emits warnings
+before confirmation and after replacement. It does not imply `--yes`, and `--yes` never hides the
+warnings. All other source validation remains mandatory.
 
 SQLite may leave user-only `-shm` and zero-byte `-wal` coordination files beside a selected backup
 after validation or restore. This is expected: the backup database remains unchanged, valid, and

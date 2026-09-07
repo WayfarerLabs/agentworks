@@ -181,6 +181,7 @@ def session_list(
                 agent_name=parsed_agent,
                 admin_only=admin,
                 include_status=status,
+                require_vm_names=True,
             )
         write_json_envelope(
             MachineOutputCommand.SESSION_LIST,

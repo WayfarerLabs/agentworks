@@ -68,6 +68,19 @@ def _version(path: Path) -> int:
     return version
 
 
+def _build_orphaned_stale_schema(path: Path) -> None:
+    _build_schema(path, LATEST_VERSION - 1)
+    connection = sqlite3.connect(path)
+    connection.execute("PRAGMA foreign_keys = OFF")
+    connection.execute(
+        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES (?, ?, ?, ?)",
+        ("orphan-workspace", "missing-vm", "/tmp/orphan-workspace", "ws--orphan-workspace"),
+    )
+    connection.commit()
+    assert connection.execute("PRAGMA foreign_key_check").fetchone() is not None
+    connection.close()
+
+
 def test_latest_schema_enforces_atomic_debian_release_observation(tmp_path: Path) -> None:
     path = tmp_path / "state.db"
     _build_schema(path, LATEST_VERSION)
@@ -83,6 +96,41 @@ def test_latest_schema_enforces_atomic_debian_release_observation(tmp_path: Path
             ("trixie", "release-witness"),
         )
     connection.close()
+
+
+def test_direct_database_open_translates_post_migration_foreign_key_violation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "state.db"
+    _build_orphaned_stale_schema(path)
+    monkeypatch.setitem(MIGRATIONS, LATEST_VERSION, "SELECT 1")
+
+    with pytest.raises(StateError) as raised:
+        Database(path)
+
+    assert raised.value.entity_kind == "database"
+    assert _version(path) == LATEST_VERSION - 1
+
+
+def test_safe_database_open_keeps_partial_migration_wrapper_for_foreign_key_violation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "state.db"
+    _build_orphaned_stale_schema(path)
+    monkeypatch.setitem(MIGRATIONS, LATEST_VERSION, "SELECT 1")
+    plan = prepare_database_open(path)
+
+    with pytest.raises(StateError) as raised:
+        open_database_safely(path, plan, create_backup=True)
+
+    backups = tuple(backup_directory(path).glob("*.db"))
+    assert len(backups) == 1
+    assert isinstance(raised.value.__cause__, StateError)
+    assert raised.value.__cause__.entity_kind == "database"
+    assert raised.value.hint == f"Restore the pre-migration backup with: {render_restore_command(backups[0])}"
+    assert _version(path) == LATEST_VERSION - 1
 
 
 def test_version_33_advances_through_checkpoint_retirement(tmp_path: Path) -> None:

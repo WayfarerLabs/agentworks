@@ -21,6 +21,7 @@ from agentworks.db import (
     backup_directory,
     create_manual_backup,
     create_pre_migration_backup,
+    prepare_restore,
     restore_backup,
     validate_restore_source,
 )
@@ -55,6 +56,26 @@ def _setting(path: Path, key: str) -> str | None:
     row = connection.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
     connection.close()
     return None if row is None else str(row[0])
+
+
+def _seed_orphan_workspace(path: Path) -> None:
+    connection = sqlite3.connect(path)
+    connection.execute("PRAGMA foreign_keys = OFF")
+    available = {str(row[1]) for row in connection.execute("PRAGMA table_info(workspaces)")}
+    if "type" in available:
+        connection.execute(
+            "INSERT INTO workspaces (name, type, vm_name, workspace_path) VALUES (?, ?, ?, ?)",
+            ("orphan-workspace", "vm", "missing-vm", "/tmp/orphan-workspace"),
+        )
+    else:
+        assert "linux_group" in available
+        connection.execute(
+            "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES (?, ?, ?, ?)",
+            ("orphan-workspace", "missing-vm", "/tmp/orphan-workspace", "ws--orphan-workspace"),
+        )
+    connection.commit()
+    assert connection.execute("PRAGMA foreign_key_check").fetchone() is not None
+    connection.close()
 
 
 @pytest.mark.parametrize("version", range(1, LATEST_VERSION + 1))
@@ -109,6 +130,136 @@ def test_restore_copies_backup_into_live_database_without_changing_source(tmp_pa
 
     assert _setting(source, "direction") == "selected"
     assert _setting(live, "direction") == "selected"
+
+
+@pytest.mark.parametrize("version", [1, LATEST_VERSION])
+def test_restore_refuses_declared_foreign_key_violations_before_destination_mutation(
+    tmp_path: Path,
+    version: int,
+) -> None:
+    source = tmp_path / f"v{version}-orphan.db"
+    live = tmp_path / "live.db"
+    _build_schema(source, version)
+    _seed_orphan_workspace(source)
+    live_database = Database(live)
+    live_database.set_setting("restore-witness", "preserved")
+    live_database.close()
+
+    with pytest.raises(StateError) as validation_error:
+        validate_restore_source(source)
+    assert validation_error.value.entity_kind == "database"
+
+    with pytest.raises(StateError) as restore_error:
+        restore_backup(source, live)
+    assert restore_error.value.entity_kind == "database"
+    assert _setting(live, "restore-witness") == "preserved"
+
+
+def test_forced_prepared_restore_reports_and_copies_foreign_key_violations(tmp_path: Path) -> None:
+    source = tmp_path / "orphan.db"
+    live = tmp_path / "live.db"
+    Database(source).close()
+    Database(live).close()
+    _seed_orphan_workspace(source)
+
+    with prepare_restore(source, live, allow_foreign_key_violations=True) as prepared:
+        assert prepared.inspection.schema_version == LATEST_VERSION
+        assert prepared.inspection.has_foreign_key_violations is True
+        assert prepared.backup_path == source.resolve()
+        assert prepared.database_path == live.resolve()
+        prepared.apply()
+
+    restored = sqlite3.connect(live)
+    assert restored.execute("PRAGMA foreign_key_check").fetchone() is not None
+    restored.close()
+
+
+@pytest.mark.parametrize("invalid_kind", ["malformed", "future", "schema-shape"])
+def test_force_does_not_bypass_other_restore_validation(tmp_path: Path, invalid_kind: str) -> None:
+    source = tmp_path / f"{invalid_kind}.db"
+    live = tmp_path / "live.db"
+    if invalid_kind == "malformed":
+        source.write_text("not sqlite")
+    else:
+        Database(source).close()
+        connection = sqlite3.connect(source)
+        if invalid_kind == "future":
+            connection.execute("INSERT INTO schema_version (version) VALUES (?)", (LATEST_VERSION + 1,))
+        else:
+            connection.execute("ALTER TABLE settings ADD COLUMN unexpected TEXT")
+        connection.commit()
+        connection.close()
+
+    with pytest.raises(StateError):
+        prepare_restore(source, live, allow_foreign_key_violations=True)
+    assert not live.exists()
+
+
+def test_prepared_restore_copies_the_snapshot_pinned_before_a_later_commit(tmp_path: Path) -> None:
+    source = tmp_path / "source.db"
+    live = tmp_path / "live.db"
+    Database(source).close()
+    _setting_connection = sqlite3.connect(source)
+    _setting_connection.execute("INSERT INTO settings (key, value) VALUES ('snapshot', 'inspected')")
+    _setting_connection.commit()
+    _setting_connection.close()
+
+    with prepare_restore(source, live) as prepared:
+        writer = sqlite3.connect(source)
+        writer.execute("UPDATE settings SET value = 'later' WHERE key = 'snapshot'")
+        writer.commit()
+        writer.close()
+        prepared.apply()
+
+    assert _setting(source, "snapshot") == "later"
+    assert _setting(live, "snapshot") == "inspected"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows does not replace an open SQLite source path")
+def test_prepared_restore_copies_the_open_snapshot_after_source_path_replacement(tmp_path: Path) -> None:
+    source = tmp_path / "source.db"
+    displaced = tmp_path / "displaced.db"
+    live = tmp_path / "live.db"
+    Database(source).close()
+    _set_connection = sqlite3.connect(source)
+    _set_connection.execute("PRAGMA journal_mode = DELETE")
+    _set_connection.execute("INSERT INTO settings (key, value) VALUES ('snapshot', 'inspected')")
+    _set_connection.commit()
+    _set_connection.close()
+
+    with prepare_restore(source, live) as prepared:
+        source.replace(displaced)
+        Database(source).close()
+        replacement = sqlite3.connect(source)
+        replacement.execute("INSERT INTO settings (key, value) VALUES ('snapshot', 'replacement')")
+        replacement.commit()
+        replacement.close()
+        prepared.apply()
+
+    assert _setting(source, "snapshot") == "replacement"
+    assert _setting(live, "snapshot") == "inspected"
+
+
+def test_prepared_restore_context_closes_its_pinned_read_transaction(tmp_path: Path) -> None:
+    source = tmp_path / "source.db"
+    live = tmp_path / "live.db"
+    Database(source).close()
+    mode = sqlite3.connect(source)
+    mode.execute("PRAGMA journal_mode = DELETE")
+    mode.close()
+
+    with prepare_restore(source, live):
+        blocked = sqlite3.connect(source, timeout=0)
+        try:
+            with pytest.raises(sqlite3.OperationalError):
+                blocked.execute("BEGIN EXCLUSIVE")
+        finally:
+            blocked.close()
+
+    writer = sqlite3.connect(source, timeout=0)
+    writer.execute("BEGIN EXCLUSIVE")
+    writer.rollback()
+    writer.close()
 
 
 def test_restore_accepts_final_sqlite_done_after_deadline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -372,7 +523,7 @@ def test_failed_backup_and_absent_restore_remove_incomplete_files(
     source = tmp_path / "live.db"
     Database(source).close()
 
-    def fail_copy(_source: Path, destination: Path) -> None:
+    def fail_copy(_source: object, destination: Path) -> None:
         destination.write_bytes(b"partial")
         destination.with_name(f"{destination.name}-wal").write_bytes(b"partial wal")
         destination.with_name(f"{destination.name}-shm").write_bytes(b"partial shm")
@@ -385,10 +536,18 @@ def test_failed_backup_and_absent_restore_remove_incomplete_files(
 
     selected = tmp_path / "selected.db"
     Database(selected).close()
+    journal = sqlite3.connect(selected)
+    journal.execute("PRAGMA journal_mode = DELETE")
+    journal.close()
     absent = tmp_path / "new" / "live.db"
+    monkeypatch.setattr("agentworks.db.backup._online_copy_from_connection", fail_copy)
     with pytest.raises(BackupError, match="forced"):
         restore_backup(selected, absent)
     assert not absent.exists()
+    writer = sqlite3.connect(selected, timeout=0)
+    writer.execute("BEGIN EXCLUSIVE")
+    writer.rollback()
+    writer.close()
 
 
 @pytest.mark.parametrize("operation", ["manual", "automatic", "absent-restore"])
@@ -402,7 +561,7 @@ def test_interrupted_copy_preserves_interrupt_and_removes_all_reserved_artifacts
     interruption = KeyboardInterrupt("copy interrupted")
     destinations: list[Path] = []
 
-    def interrupt_copy(_source: Path, destination: Path) -> None:
+    def interrupt_copy(_source: object, destination: Path) -> None:
         destinations.append(destination)
         destination.write_bytes(b"partial")
         destination.with_name(f"{destination.name}-wal").write_bytes(b"partial wal")
@@ -410,7 +569,12 @@ def test_interrupted_copy_preserves_interrupt_and_removes_all_reserved_artifacts
         destination.with_name(f"{destination.name}-journal").write_bytes(b"partial journal")
         raise interruption
 
-    monkeypatch.setattr("agentworks.db.backup._online_copy", interrupt_copy)
+    copy_target = (
+        "agentworks.db.backup._online_copy_from_connection"
+        if operation == "absent-restore"
+        else "agentworks.db.backup._online_copy"
+    )
+    monkeypatch.setattr(copy_target, interrupt_copy)
 
     with pytest.raises(KeyboardInterrupt) as raised:
         if operation == "manual":

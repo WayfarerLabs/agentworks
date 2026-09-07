@@ -193,7 +193,7 @@ def test_console_listing_is_local_until_status_is_requested(
     db.insert_console("alpha", "box")
     calls: list[tuple[str, ...]] = []
 
-    def observe(_db: object, _config: object, consoles: list[ConsoleRow]):
+    def observe(_db: object, _config: object, consoles: list[ConsoleRow]) -> dict[str, ConsoleStatus]:
         calls.append(tuple(console.name for console in consoles))
         return {"alpha": ConsoleStatus.RUNNING}
 
@@ -228,10 +228,39 @@ def test_plain_console_listing_preserves_orphaned_inventory(
     ]
 
 
-@pytest.mark.parametrize("operation", ["list-status", "describe"])
-def test_live_console_inspection_rejects_orphaned_inventory(
+def test_live_console_listing_isolates_orphaned_inventory(
     db,  # noqa: ANN001
-    operation: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db.insert_vm("box", site="site", hostname="box")
+    db.insert_console("healthy", "box")
+    db.insert_vm("removed-vm", site="site", hostname="removed-vm")
+    db.insert_console("orphan", "removed-vm")
+    db._conn.execute("PRAGMA foreign_keys = OFF")
+    db._conn.execute("DELETE FROM vms WHERE name = 'removed-vm'")
+    db._conn.commit()
+    db._conn.execute("PRAGMA foreign_keys = ON")
+    observed: list[tuple[str, ...]] = []
+
+    def observe(_db: object, _config: object, consoles: list[ConsoleRow]):
+        observed.append(tuple(console.name for console in consoles))
+        return {"healthy": ConsoleStatus.RUNNING}
+
+    monkeypatch.setattr("agentworks.sessions.multi_console.observe_console_statuses", observe)
+    changes_before = db._conn.total_changes
+
+    listing = console_listing(db, object(), include_status=True)  # type: ignore[arg-type]
+
+    assert db._conn.total_changes == changes_before
+    assert [(row.name, row.status) for row in listing.consoles] == [
+        ("healthy", "running"),
+        ("orphan", "unknown"),
+    ]
+    assert observed == [("healthy",)]
+
+
+def test_console_description_rejects_orphaned_inventory(
+    db,  # noqa: ANN001
 ) -> None:
     db.insert_vm("removed-vm", site="site", hostname="removed-vm")
     db.insert_console("orphan", "removed-vm")
@@ -241,10 +270,7 @@ def test_live_console_inspection_rejects_orphaned_inventory(
     db._conn.execute("PRAGMA foreign_keys = ON")
 
     with pytest.raises(NotFoundError) as caught:
-        if operation == "list-status":
-            console_listing(db, object(), include_status=True)  # type: ignore[arg-type]
-        else:
-            console_description(db, object(), name="orphan")  # type: ignore[arg-type]
+        console_description(db, object(), name="orphan")  # type: ignore[arg-type]
 
     assert caught.value.entity_kind == "vm"
     assert caught.value.entity_name == "removed-vm"

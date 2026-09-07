@@ -67,6 +67,20 @@ VM, session, and console describe continue to include live status, but their obs
 activate a stopped VM or repair runtime state. Expected live failures preserve local facts and show
 `unknown`. See [Runnable status inspection](./runnable-status.md) for status meanings and bounds.
 
+Session and console lists now also isolate incomplete stored relationships during recovery. Human
+inventory preserves every selected row, and requested list status marks only the structurally
+unobservable rows `unknown` while continuing with healthy peers. Focused describe and lifecycle
+commands remain strict. JSON v1 still requires a string session `vm_name`, so a selected session
+whose workspace is missing fails before observation instead of emitting a widened or partial shape.
+
+## Restore inconsistent backups explicitly
+
+`agw database restore` now checks declared foreign-key relationships and refuses violations by
+default. Use `--force` only when that inconsistent backup is the best available recovery source. It
+bypasses only the relationship check and warns both before confirmation and after replacement.
+`--force` does not imply `--yes`; non-interactive restore still needs `--yes`, and every other
+integrity, version, and schema-shape validation remains mandatory.
+
 ## Update harness integrations
 
 Harness integrations now expose one core-facing lifecycle method:

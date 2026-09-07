@@ -38,16 +38,27 @@ rows from a list.
 Corrupt or unsupported persisted applied-state is different from an unavailable or mismatched SSH
 identity: it remains a typed error because Agentworks cannot trust the structural record.
 
-Plain `console list` still reports a saved console whose referenced VM row is missing, which keeps
-console names available while recovering an inconsistent current-schema database. This exception is
-limited to plain console inventory: session inventory still validates its workspace and VM
-relationships. A schema migration can also reject an orphan before any inventory command runs.
+List inventory is also a recovery surface for incomplete database relationships. Plain session and
+console lists preserve every selected stored row without guest work. A session whose workspace is
+missing shows `-` for VM in human output; if the workspace exists but its VM is missing, the stored
+workspace VM name remains visible. A console always retains its directly stored VM name.
 
-Live console inspection retains structural validation because an orphan has no valid guest boundary.
-`console describe` fails for that console, and a `console list --status` selection containing one
-fails as a whole rather than returning statuses for its otherwise healthy rows. This structural
-failure is distinct from the per-VM operational failures described above, which remain isolated as
-`unknown`.
+Requested list status partitions those incomplete rows before observation. They remain visible as
+`unknown`, receive no guest call, and do not suppress healthy peer results. Named describe and every
+lifecycle command stay strict because they need a complete target boundary. A schema migration can
+also reject an orphan before inventory is available; direct migration refusal is a typed database
+state error and does not advance the failed version checkpoint.
+
+`agw database restore` checks declared foreign-key relationships before replacing live state and
+refuses violations by default. If an inconsistent backup is the best available recovery source,
+`--force` bypasses only that relationship check and warns before confirmation and after the copy. It
+does not imply `--yes`, and all file-integrity, version, and schema-shape validation remains
+mandatory.
+
+JSON v1 retains its existing string `sessions[].vm_name` contract. A missing VM row remains
+representable when the workspace preserves its stored VM name. A selected session whose workspace is
+missing fails atomically before requested live work because no truthful string VM name can be
+derived. Human and names-only lists remain the complete recovery inventory for that case.
 
 ## Status meanings
 

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum, auto
 from pathlib import Path
-from typing import TYPE_CHECKING, NoReturn
+from typing import TYPE_CHECKING, NoReturn, Self
 
 from agentworks.db.migrations import LATEST_VERSION, SCHEMA_SENTINELS
 from agentworks.errors import (
@@ -96,6 +96,34 @@ class SafeOpenResult:
 
     database: Database
     backup: AutomaticBackupResult | None = None
+
+
+@dataclass(frozen=True)
+class RestoreSourceInspection:
+    """Validated facts about one pinned restore-source snapshot."""
+
+    schema_version: int
+    has_foreign_key_violations: bool
+
+
+@dataclass(frozen=True)
+class PreparedRestore:
+    """A validated restore source pinned through confirmation and copy."""
+
+    inspection: RestoreSourceInspection
+    backup_path: Path
+    database_path: Path
+    _source: sqlite3.Connection
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self._source.close()
+
+    def apply(self) -> None:
+        """Copy the pinned source snapshot into its bound destination."""
+        _restore_from_connection(self._source, self.database_path)
 
 
 def backup_directory(database_path: Path) -> Path:
@@ -455,25 +483,67 @@ def validate_restore_source(backup_path: Path) -> int:
     """Validate an Agentworks backup and return its supported schema version."""
     connection = _validate_sqlite_file(backup_path, source_kind="database backup")
     try:
-        version = _read_schema_version(connection, source_kind="database backup")
-        if version > LATEST_VERSION:
-            raise StateError(
-                f"database backup schema version {version} is newer than this Agentworks release supports "
-                f"({LATEST_VERSION})",
-                hint="Preserve this backup and restore it with a release that understands its schema.",
-            )
-
-        _validate_canonical_schema(
-            connection,
-            version,
-            source_kind="database backup",
-            hint="Select an unmodified backup captured after a completed Agentworks migration.",
-        )
-        return version
+        return _inspect_restore_source(connection, allow_foreign_key_violations=False).schema_version
     except sqlite3.DatabaseError as error:
         _raise_sqlite_error(error, source_kind="database backup")
     finally:
         connection.close()
+
+
+def prepare_restore(
+    backup_path: Path,
+    database_path: Path,
+    *,
+    allow_foreign_key_violations: bool = False,
+) -> PreparedRestore:
+    """Validate and pin a restore source while binding its destination."""
+    resolved_backup = backup_path.resolve()
+    resolved_database = database_path.resolve()
+    if resolved_backup == resolved_database:
+        raise ValidationError("database backup and live database paths must be different")
+
+    connection = _validate_sqlite_file(resolved_backup, source_kind="database backup")
+    try:
+        inspection = _inspect_restore_source(
+            connection,
+            allow_foreign_key_violations=allow_foreign_key_violations,
+        )
+    except sqlite3.DatabaseError as error:
+        connection.close()
+        _raise_sqlite_error(error, source_kind="database backup")
+    except BaseException:
+        connection.close()
+        raise
+    return PreparedRestore(inspection, resolved_backup, resolved_database, connection)
+
+
+def _inspect_restore_source(
+    connection: sqlite3.Connection,
+    *,
+    allow_foreign_key_violations: bool,
+) -> RestoreSourceInspection:
+    version = _read_schema_version(connection, source_kind="database backup")
+    if version > LATEST_VERSION:
+        raise StateError(
+            f"database backup schema version {version} is newer than this Agentworks release supports "
+            f"({LATEST_VERSION})",
+            hint="Preserve this backup and restore it with a release that understands its schema.",
+        )
+
+    _validate_canonical_schema(
+        connection,
+        version,
+        source_kind="database backup",
+        hint="Select an unmodified backup captured after a completed Agentworks migration.",
+    )
+    has_foreign_key_violations = connection.execute("PRAGMA foreign_key_check").fetchone() is not None
+    if has_foreign_key_violations and not allow_foreign_key_violations:
+        raise StateError(
+            "database backup contains inconsistent relationships",
+            entity_kind="database",
+            hint="Repair the backup, or pass --force only when restoring the inconsistent state is intentional.",
+        )
+    return RestoreSourceInspection(version, has_foreign_key_violations)
 
 
 def _validate_canonical_schema(
@@ -535,10 +605,12 @@ def _read_schema_version(connection: sqlite3.Connection, *, source_kind: str) ->
 
 def restore_backup(backup_path: Path, database_path: Path) -> None:
     """Validate and copy ``backup_path`` into the live database path."""
-    if backup_path.resolve() == database_path.resolve():
-        raise ValidationError("database backup and live database paths must be different")
+    with prepare_restore(backup_path, database_path) as prepared:
+        prepared.apply()
 
-    validate_restore_source(backup_path)
+
+def _restore_from_connection(source: sqlite3.Connection, database_path: Path) -> None:
+    """Copy an open source snapshot into a destination, cleaning new files on failure."""
     created_destination = False
     if not database_path.exists():
         try:
@@ -550,7 +622,7 @@ def restore_backup(backup_path: Path, database_path: Path) -> None:
             raise BackupError(f"could not create the live state database: {error}") from error
 
     try:
-        _online_copy(backup_path, database_path)
+        _online_copy_from_connection(source, database_path)
     except BaseException:
         if created_destination:
             _remove_incomplete(database_path)
@@ -571,7 +643,9 @@ def _validate_sqlite_file(path: Path, *, source_kind: str) -> sqlite3.Connection
             f"{path.resolve().as_uri()}?mode=ro",
             uri=True,
             timeout=_BACKUP_CONNECTION_TIMEOUT_SECONDS,
+            isolation_level=None,
         )
+        connection.execute("BEGIN")
         rows = connection.execute("PRAGMA quick_check").fetchall()
         if rows != [("ok",)]:
             connection.close()
@@ -601,6 +675,24 @@ def _raise_sqlite_error(error: sqlite3.DatabaseError, *, source_kind: str) -> No
 def _online_copy(source_path: Path, destination_path: Path) -> None:
     """Copy one SQLite database into another within a fixed deadline."""
     source: sqlite3.Connection | None = None
+    try:
+        source = sqlite3.connect(
+            f"{source_path.resolve().as_uri()}?mode=ro",
+            uri=True,
+            timeout=_BACKUP_CONNECTION_TIMEOUT_SECONDS,
+        )
+        _online_copy_from_connection(source, destination_path)
+    except BackupError:
+        raise
+    except (OSError, sqlite3.DatabaseError) as error:
+        raise BackupError(f"database copy failed: {error}") from error
+    finally:
+        if source is not None:
+            source.close()
+
+
+def _online_copy_from_connection(source: sqlite3.Connection, destination_path: Path) -> None:
+    """Copy an already-open SQLite snapshot within a fixed deadline."""
     destination: sqlite3.Connection | None = None
     deadline = time.monotonic() + BACKUP_DEADLINE_SECONDS
 
@@ -612,11 +704,6 @@ def _online_copy(source_path: Path, destination_path: Path) -> None:
             )
 
     try:
-        source = sqlite3.connect(
-            f"{source_path.resolve().as_uri()}?mode=ro",
-            uri=True,
-            timeout=_BACKUP_CONNECTION_TIMEOUT_SECONDS,
-        )
         destination = sqlite3.connect(str(destination_path), timeout=_BACKUP_CONNECTION_TIMEOUT_SECONDS)
         source.backup(
             destination,
@@ -631,8 +718,6 @@ def _online_copy(source_path: Path, destination_path: Path) -> None:
     finally:
         if destination is not None:
             destination.close()
-        if source is not None:
-            source.close()
 
 
 def _reserve_backup_path(database_path: Path, *, automatic_version: int | None) -> Path:
