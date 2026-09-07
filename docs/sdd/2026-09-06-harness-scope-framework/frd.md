@@ -146,16 +146,27 @@ appropriate to the consuming integration; R16 defines explicit filesystem discov
 for shell. Converting a skill into prompt text is not equivalent handling.
 
 A declarative `artifacts` block alongside `env` is required now and supplies manually declared
-hints, rules, and skills through core. Artifact acquisition must preserve rule applicability and
-complete skill packages, including relative supporting-file structure. Hint/rule text, `SKILL.md`,
-and recognized textual supporting files normalize to Unix LF line endings. Binary and unrecognized
-supporting formats retain their bytes; decoding successfully as text must not alone authorize
-rewriting an asset. Capture stable contents for delivery and idempotent reconciliation so downstream
-consumption does not silently reread a changing source. Concrete block schemas and source/package
-forms are settled in the HLA within these requirements and R12. Future features and automatic core
-hint emission may use the same artifact currency without rebuilding its delivery protocol; neither
-producer is implemented here. The runtime `hint` artifact kind is unrelated to the onboarding
-guide's agent-hint content species.
+hints, rules, and skills through core. It supports inline text, local workstation files/directories,
+and Git sources, including references to complete skills within a repository. Acquisition is an
+input-edge concern: every supported source passes through the same validation, normalization, and
+snapshot path into one typed artifact format. Harness integrations and downstream delivery consume
+that normalized content without selecting source-specific handling. Source provenance remains
+available alongside the artifact's owning scope, resource, and producer.
+
+Acquisition must preserve rule applicability and complete skill packages, including relative
+supporting-file structure. Hint/rule text, `SKILL.md`, and recognized textual supporting files
+normalize to Unix LF line endings. Binary and unrecognized supporting formats retain their bytes;
+decoding successfully as text must not alone authorize rewriting an asset. Resolve a Git revision to
+an immutable commit and capture the selected contents before integrations run. Later consumers use
+those snapshots rather than reacquiring Git or rereading changing workstation files. Stable captured
+contents govern delivery and idempotent reconciliation for every source.
+
+Concrete block schemas and source/package forms are settled in the HLA within these requirements and
+R12. Future packaged distributions must be able to join at the acquisition boundary and produce the
+same normalized content; this effort does not implement distribution acquisition, a package manager,
+or a registry. Future features and automatic core hint emission may use the same artifact currency
+without rebuilding its delivery protocol; neither producer is implemented here. The runtime `hint`
+artifact kind is unrelated to the onboarding guide's agent-hint content species.
 
 **R7. Integrations defer what they cannot handle; core rejects final session deferral.** Native
 placement at the defining scope is the ordinary case. Each facet invocation receives local artifacts
@@ -242,9 +253,12 @@ global identity, or composition.
 `artifacts` inputs rather than feature capabilities or external service dependencies. Coverage
 includes declarations at all five owning scopes, grouped hints, native rules, and complete skill
 packages at user and workspace scopes, workspace create-time materialization, downstream filtering
-of handled payloads, and terminal refusal for an unrepresentable artifact. Source/package fixtures
-prove stable captured contents, Unix LF text normalization, and unchanged binary supporting files.
-The framework must not land with only unit-level evidence.
+of handled payloads, and terminal refusal for an unrepresentable artifact. Workstation and local Git
+repository fixtures prove that equivalent source contents yield the same normalized artifact content
+while retaining their distinct provenance. They also prove immutable Git commit capture, stable
+downstream snapshots after sources change, Unix LF text normalization, and unchanged binary and
+unrecognized supporting files. These acquisition fixtures require no external services. The
+framework must not land with only unit-level evidence.
 
 **R14. Native harness setup config applies at its defining resource.** Claude Code and Codex both
 offer user marketplace/plugin configuration and user/workspace native settings mappings. A shared
@@ -419,6 +433,18 @@ requirements for this effort. This supersedes any feature implementation require
 scope-participation contract or target-state; reconciling those shared artifacts belongs to the saga
 lead. This effort continues to own only its explicitly authorized FRD and HLA changes.
 
+## Operator refinement: artifact acquisition, 2026-09-07
+
+The operator requested support for workstation filesystem and Git skill references, with room for
+future packaged distributions. Acquisition belongs at the input edge; the pipeline must have one
+normalized format regardless of where an artifact came from. R6 includes local and Git acquisition
+now, with a shared validation, normalization, and snapshot path and retained source provenance. Git
+revisions resolve to immutable commits before integrations run, and later consumers use captured
+contents. Packaged distributions remain a future acquisition extension, without a package manager or
+registry in this effort. This supersedes the earlier local-first proposal that deferred direct Git
+acquisition. Git-backed native settings are a separate future requirement; R15 continues to accept
+workstation settings files.
+
 ## What changed since the scope-participation contract was written
 
 The contract is dated 2026-08-05. Three of its statements are stale against `main`, and a fourth
@@ -465,7 +491,7 @@ inline.
 
 ## Open questions this effort owns
 
-Carried forward from the contract, minus the one that closed, and extended by the artifact ruling:
+Carried forward from the contract, minus the questions that closed:
 
 1. Init method signatures and how env rides the run targets. R6/R7 settle the two currencies and
    artifact-delivery model; concrete carrier and codec details belong to the LLD.
@@ -474,9 +500,10 @@ Carried forward from the contract, minus the one that closed, and extended by th
    model as agent attachments).
 4. The retry contract for a partially created workspace with some artifacts already written.
 5. Ordering and conflict reporting when multiple integrations attach at one broader scope.
-6. Artifact source acquisition and package forms. The HLA proposes inline text and local workstation
-   files/directories first, preserving the Agent Skills package convention; direct Git acquisition
-   follows later. R6 requires preservation, LF normalization, and stable capture.
+
+Artifact acquisition scope is settled by R6 and the 2026-09-07 refinement: local and Git sources are
+required now, with packaged distributions left as a future input-edge extension. Concrete source
+syntax and packaging details belong to the HLA and LLD.
 
 The capability-API reevaluation is chartered into this effort rather than scheduled separately. The
 seed material in `message-2026-08-16-capability-config-shape.md` carries the `config_at(level)`
@@ -500,6 +527,11 @@ caution, and the pre-design call-site discovery walk.
   remains the future kind for both admin and agent users.
 - Automatic hint emission from other core setup behavior. Manually declared hints, rules, and skills
   through the required `artifacts` block are in scope.
+- Packaged artifact distribution acquisition, an artifact package manager, and an artifact registry.
+  R6 preserves the acquisition boundary for these future additions; local and Git artifact sources
+  are in scope.
+- Git-backed native settings acquisition. R15 retains workstation file sources, separate from the
+  artifact acquisition contract.
 - External plugin distribution and its trust model (wave 8).
 - Harness integration config knobs for per-session workload inputs (issue #674), which shipped ahead
   of this charter by operator ruling on 2026-08-26 and deliberately without an SDD. That work does
@@ -515,11 +547,12 @@ at any scope (R11 discharged); when reinit at each setup scope converges rather 
 proven by the vertical integration using core declarations without feature capabilities; and when an
 integration that implements nothing beyond `start` behaves exactly as it does today when no artifact
 inputs are supplied. All five owning scopes accept the `artifacts` block alongside `env`, and source
-fixtures prove stable package capture, Unix LF text normalization, and unchanged binary files. User
-marketplace/plugin setup for Claude Code and Codex is proven, distinct resource config is never
-flattened, and workstation settings mappings demonstrate all four R15 policies at their owning
-facets. With artifact inputs, completion also requires faithful hint/rule/skill representation or a
-final deferral error, with no session payload duplication or widening of session-only applicability.
-Shell also proves R16 filesystem delivery through the real CLI, including a default shell receiving
-an ancestor hint, complete skill packages, workload discovery, user-home session placement, and
-ownership-safe restart and deletion.
+fixtures prove that local and Git acquisition feed one normalized artifact format with retained
+provenance, immutable Git commit capture, stable downstream snapshots, Unix LF text normalization,
+and unchanged binary and unrecognized supporting files. User marketplace/plugin setup for Claude
+Code and Codex is proven, distinct resource config is never flattened, and workstation settings
+mappings demonstrate all four R15 policies at their owning facets. With artifact inputs, completion
+also requires faithful hint/rule/skill representation or a final deferral error, with no session
+payload duplication or widening of session-only applicability. Shell also proves R16 filesystem
+delivery through the real CLI, including a default shell receiving an ancestor hint, complete skill
+packages, workload discovery, user-home session placement, and ownership-safe restart and deletion.
