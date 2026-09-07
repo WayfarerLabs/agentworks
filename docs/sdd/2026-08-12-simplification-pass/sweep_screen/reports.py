@@ -24,6 +24,7 @@ from .inventory import (
     ACCOUNTED,
     CITED_FILE,
     CITED_ID,
+    CITED_LINE,
     CITED_QUALNAME,
     GROUP_1,
     INVENTORY,
@@ -37,7 +38,6 @@ from .inventory import (
     Row,
     SiteAnchor,
     SpanAnchor,
-    outside_code_spans,
     read_rows,
     split_cells,
     stamp_spans,
@@ -162,7 +162,11 @@ def check_map(
     for number, line in enumerate(Path(map_path).read_text(encoding="utf-8").splitlines(), start=1):
         here = row_at.get(number)
         source = f"row {here.id}" if here else f"line {number}"
-        bare = URL.sub(" ", outside_code_spans(line))
+        # Code spans are NOT blanked for ids. A citation is written in
+        # backticks as often as not, and blanking them left a wrong id invisible
+        # to the very check that exists to catch it. A grammar example uses a
+        # placeholder `ROW_ID` does not match, or is written in prose.
+        bare = URL.sub(" ", line)
         # A qualified citation says it means the previous map's numbering, and
         # that list is right here, so it is checked rather than waved through.
         for name in sorted(set(QUALIFIED.findall(bare)) - theirs):
@@ -185,11 +189,11 @@ def check_map(
         # let two citations through with every command green. Read raw, because
         # a citation lives inside a code span and blanking spans would hide it.
         if line.startswith("| "):
-            for cited in sorted(set(CITED_FILE.findall(line))):
-                faults.append(f"{source} cites {cited} by line; name the function instead")
+            for spelling in sorted({m.group(0) for m in CITED_LINE.finditer(line)}):
+                faults.append(f"{source} cites {spelling.strip()} by line; name the function instead")
         # A cited function resolves like an anchor, so a citation that names
         # nothing is refused rather than read and believed.
-        for cited_path, qualname in sorted(set(CITED_QUALNAME.findall(line))):
+        for cited_path, qualname in sorted(set(CITED_QUALNAME.findall(URL.sub(" ", line)))):
             real = snapshot.tree.resolve_suffix(cited_path)
             if real is None or not snapshot.function(real, qualname):
                 faults.append(f"{source} cites {cited_path}::{qualname}, which names no function in this tree")
@@ -622,11 +626,16 @@ def totals(snapshot: Snapshot, map_path: str = INVENTORY) -> None:
     # thing that drifts: it has been a round behind twice. Comparing the two is
     # what makes pasting it safe, and it is the only gate on a figure the map
     # states rather than derives.
-    body = Path(map_path).read_text(encoding="utf-8")
-    absent = [line for line in emitted[2:] if line not in body]
+    # The whole block, in order, header and alignment row included: comparing
+    # only the data rows let a reordered or re-headed table pass.
+    printed = [line.rstrip() for line in emitted]
+    pasted = [line.rstrip() for line in Path(map_path).read_text(encoding="utf-8").splitlines()]
+    absent: list[str] = []
+    if not any(pasted[i : i + len(printed)] == printed for i in range(len(pasted))):
+        absent = ["the Totals section is not this block, in this order"]
     missing = unrowed(rows, snapshot)
     faults = check_map(rows, retired_ids(map_path), snapshot.tree.path_suffixes(), snapshot, map_path)
-    faults += [f"the Totals section does not carry {line!r}" for line in absent]
+    faults += absent
     faults += adrift
     faults += [f"{row_id} carries [1-raise] and the screen does not verify every site it claims" for row_id in stale]
     faults += check_accounting(map_path, missing)

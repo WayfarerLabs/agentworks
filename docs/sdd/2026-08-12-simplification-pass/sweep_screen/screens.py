@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from .estate import Snapshot, sites_in
-from .tree import PROD_ROOT, TEST_ROOT, WEB_ROOT, Tree, call_name, exc_name, template
+from .tree import PROD_ROOT, TEST_ROOT, WEB_PROD, WEB_ROOT, Tree, call_name, exc_name, template
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -125,11 +125,22 @@ class World:
         self.tree = tree
         self.modules: dict[str, Module] = {}
         self.by_path: dict[str, Module] = {}
-        for path in tree.files(PROD_ROOT):
+        # Both production trees. Indexing `cli/agentworks` alone meant every
+        # site under `website/tests` resolved to no reachable raise by
+        # construction, so the screen reported them unresolved and said nothing.
+        for path in tree.files(PROD_ROOT) + _website_modules(tree):
             self._add(path, importable=True)
 
     def _add(self, path: str, *, importable: bool) -> Module:
-        name = path[len("cli/") :] if path.startswith(f"{PROD_ROOT}/") else path
+        # The name a test imports it by. `cli/` is a source root and so is
+        # `website/`, so both prefixes come off: a website test writes
+        # `import site_content`, not `import website.site_content`.
+        name = path
+        for root in (f"{PROD_ROOT}/", f"{WEB_PROD}/"):
+            prefix = root.split("/", 1)[0] + "/"
+            if path.startswith(root):
+                name = path[len(prefix) :]
+                break
         name = name[:-3].removesuffix("/__init__").replace("/", ".")
         module = Module(path=path, name=name)
         _Collector(module).visit(self.tree.parse(path))
@@ -178,7 +189,7 @@ class World:
 def subclass_closure(tree: Tree) -> dict[str, set[str]]:
     """Exception name -> itself plus every first-party name deriving from it."""
     parents: dict[str, list[str]] = {}
-    for path in tree.files(PROD_ROOT, TEST_ROOT):
+    for path in tree.files(PROD_ROOT, TEST_ROOT, WEB_PROD):
         for node in ast.walk(tree.parse(path)):
             if isinstance(node, ast.ClassDef):
                 parents[node.name] = [b for b in (exc_name(base) for base in node.bases) if b]
@@ -372,6 +383,15 @@ def screen(tree: Tree) -> None:
     print(f"# total\t{sum(verdicts.values())}", file=sys.stderr)
 
 
+def _website_modules(tree: Tree) -> list[str]:
+    """The website's production modules: everything under it that is not a test.
+
+    They sit beside the tests rather than under a package directory, so there is
+    no root to hand `files` and this filters instead.
+    """
+    return [p for p in tree.files(WEB_PROD) if not p.startswith(f"{WEB_ROOT}/")]
+
+
 def injected_markers(tree: Tree, path: str) -> list[str]:
     """Every string a test module hands to an exception constructor.
 
@@ -398,7 +418,7 @@ def shipped_strings(tree: Tree) -> str:
     appears only in a comment about the behavior is not that.
     """
     parts: list[str] = []
-    for path in tree.files(PROD_ROOT):
+    for path in tree.files(PROD_ROOT) + _website_modules(tree):
         module = tree.parse(path)
         docstrings = {
             id(node.body[0].value)
@@ -462,7 +482,9 @@ def injected(tree: Tree) -> None:
     hits = 0
     mixed = 0
     print("identity\tsite\tverdict\tneedle\tinjected-string\tprose-around-it")
-    for path in tree.files(TEST_ROOT):
+    # Both test roots: a marker a website test writes is the same shape as one a
+    # `cli/tests` test writes, and walking one root said nothing about the other.
+    for path in tree.files(TEST_ROOT, WEB_ROOT):
         markers = injected_markers(tree, path)
         if not markers:
             continue

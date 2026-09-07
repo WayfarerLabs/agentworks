@@ -11,16 +11,18 @@ effort. The pre-wave-1 measurements the reassessment compares against are in
       isolated-worktree delivery per configured target (Claude, Codex, Copilot), confirm the
       Rulesync emission for a rule without `globs`, then drop the filter from the twelve broad
       always-on rules, keeping `cli-conventions.md` narrow. Done when, either branch (FRD R1.3): (a)
-      the probes are recorded on issue #511 and the twelve rules are delivered unconditionally, or
-      (b) the probe shows this shape cannot work and the operator's recorded disposition places the
-      full criteria text into every affected lane (charter-carried at minimum). Escalation alone
-      completes nothing: until one branch holds, wave 0 stays open and wave 1 does not start.
-      **Closed on branch (a), 2026-08-14**: the effort lead's own session, the first started after
-      #515 merged, carried all twelve rules with full text at launch before any tool use, and
-      correctly omitted `cli-conventions.md`; a worktree-isolated subagent then carried the same
-      twelve the same way. That answers the isolated-worktree sub-question, since delivery is
-      session-start `claudeMd` rather than path-triggered injection and worktree location decides
-      nothing. Issue #511 is closed on both observations, so R1.3's gate on wave 1 is satisfied.
+      the probes are recorded on issue #511 and the twelve rules (a count `frd.md` states, which the
+      sweep inventory's open questions flag against its own eleven rule files, for the operator to
+      settle) are delivered unconditionally, or (b) the probe shows this shape cannot work and the
+      operator's recorded disposition places the full criteria text into every affected lane
+      (charter-carried at minimum). Escalation alone completes nothing: until one branch holds, wave
+      0 stays open and wave 1 does not start. **Closed on branch (a), 2026-08-14**: the effort
+      lead's own session, the first started after #515 merged, carried all twelve rules with full
+      text at launch before any tool use, and correctly omitted `cli-conventions.md`; a
+      worktree-isolated subagent then carried the same twelve the same way. That answers the
+      isolated-worktree sub-question, since delivery is session-start `claudeMd` rather than
+      path-triggered injection and worktree location decides nothing. Issue #511 is closed on both
+      observations, so R1.3's gate on wave 1 is satisfied.
 - [x] Amend `development-principles` with the trust-boundary doctrine (the four boundaries, interior
       trust, validator-names-its-boundary; ~10 lines) plus the principle-3 test-quality
       counterweight (R1.1), and `no-prose-policing-tests` with the authored-artifacts generalization

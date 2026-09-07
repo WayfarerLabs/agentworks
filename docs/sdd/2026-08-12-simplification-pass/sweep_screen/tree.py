@@ -15,6 +15,9 @@ from pathlib import Path
 PROD_ROOT = "cli/agentworks"
 TEST_ROOT = "cli/tests"
 WEB_ROOT = "website/tests"
+#: The website's own production modules, which sit beside its tests rather
+#: than under a package directory, so they are named rather than globbed.
+WEB_PROD = "website"
 
 
 class Tree:

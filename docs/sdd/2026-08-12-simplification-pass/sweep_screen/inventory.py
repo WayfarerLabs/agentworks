@@ -43,6 +43,18 @@ ROW_ID = re.compile(rf"{ID}$")
 #: rendered `"a.yaml:2"` locations that tripped it are not source files.
 CITED_FILE = re.compile(r"([A-Za-z0-9_./+-]*[A-Za-z0-9_+-]\.(?:py|mjs)):\d+(?:-\d+)?")
 
+#: Every way a cell has spelled a line number. The first form was the only one
+#: refused, so the others carried on: a bare `:412`, a range, "line 412",
+#: "lines 412-419", and "at 412" after a path or a quoted construct. They are
+#: one fault with five spellings, and refusing one taught the map to use the
+#: rest.
+CITED_LINE = re.compile(
+    r"(?:\.(?:py|mjs):\d+(?:-\d+)?)"
+    r"|(?:`:[1-9]\d*(?:-\d+)?`)"
+    r"|(?:\blines?\s+\d+(?:\s*-\s*\d+)?\b)"
+    r"|(?:`\s+at\s+\d+\b)"
+)
+
 #: A function cited by name, which is what a row says instead of a line number.
 #: `path::qualname` resolves against the tree exactly as an anchor does, so a
 #: citation that names no function is refused rather than read and believed. A
