@@ -174,11 +174,17 @@ def check_map(
         # a row of this cut.
         for name in sorted(set(CITED_ID.findall(QUALIFIED.sub("", bare))) - known - {here.id if here else ""}):
             faults.append(f"{source} cites {name}, which is neither a row nor an id this cut retired")
-        # A row says what it means by name. A line number in a row cell is an
-        # edit recipe that was right when written and silently wrong afterwards,
-        # and eleven of them were pointing at the wrong statement by the time
-        # anyone executed one. Prose outside a row may still carry one.
-        if here is not None:
+        # A cell says what it means by name. A line number in one is an edit
+        # recipe that was right when written and silently wrong afterwards, and
+        # eleven of them were pointing at the wrong statement by the time anyone
+        # executed one. Running prose may still carry a line number.
+        #
+        # Keyed on being a TABLE CELL rather than on being a parsed row: the
+        # retired list and the recipe-verification table are cells a reader acts
+        # on exactly like rows, and neither parses as one, so keying on the row
+        # let two citations through with every command green. Read raw, because
+        # a citation lives inside a code span and blanking spans would hide it.
+        if line.startswith("| "):
             for cited in sorted(set(CITED_FILE.findall(line))):
                 faults.append(f"{source} cites {cited} by line; name the function instead")
         # A cited function resolves like an anchor, so a citation that names
