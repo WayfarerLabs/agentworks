@@ -31,6 +31,7 @@ from tests.conftest import normalize_lf
 from tests.instance_state_support import stub_instance_state
 
 
+@pytest.mark.windows
 def test_operational_list_json_commands_are_closed_parseable_envelopes(monkeypatch) -> None:
     """Wire every new operational list command through its fact projection."""
     from agentworks.agents import manager as agents
@@ -68,6 +69,7 @@ def test_operational_list_json_commands_are_closed_parseable_envelopes(monkeypat
         assert document["data"] == {collection: []}
 
 
+@pytest.mark.windows
 def test_operational_json_usage_errors_have_empty_stdout_before_work(monkeypatch) -> None:
     """New local output options reject invalid or incompatible forms before services."""
     from agentworks.cli.commands import agent, console, session, vm, workspace
@@ -769,6 +771,7 @@ def test_secret_describe_json_preserves_nulls_and_source_order(monkeypatch) -> N
     assert [mapping["backend"] for mapping in described["source_mappings"]] == ["onepassword", "prompt"]
 
 
+@pytest.mark.windows
 def test_doctor_json_writes_complete_failing_report_before_exit(monkeypatch) -> None:
     from agentworks import doctor
 
@@ -913,6 +916,7 @@ def test_invalid_output_and_names_only_json_fail_before_config_or_service_work(m
     assert calls == 0
 
 
+@pytest.mark.windows
 def test_config_failure_json_writes_no_stdout_before_service_work(
     monkeypatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

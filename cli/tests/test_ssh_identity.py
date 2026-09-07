@@ -220,6 +220,7 @@ def test_private_identity_rejects_oversized_file_before_parsing(tmp_path: Path) 
     assert error.kind == "invalid"
 
 
+@pytest.mark.windows
 @pytest.mark.parametrize("target", ["missing", "directory"])
 def test_private_identity_classifies_unavailable_paths(tmp_path: Path, target: str) -> None:
     path = tmp_path / target
@@ -323,6 +324,7 @@ def test_diagnostic_errors_do_not_echo_sensitive_input(
     assert len(error.detail) <= 256
 
 
+@pytest.mark.windows
 @pytest.mark.skipif(_SSH_KEYGEN is None, reason="ssh-keygen is not installed")
 @pytest.mark.parametrize("passphrase", ["", "test-passphrase"])
 def test_real_native_openssh_key_matches_ssh_keygen_fingerprint(tmp_path: Path, passphrase: str) -> None:

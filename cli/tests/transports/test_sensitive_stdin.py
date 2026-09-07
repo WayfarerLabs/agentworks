@@ -25,6 +25,7 @@ def _completed() -> subprocess.CompletedProcess[bytes]:
     )
 
 
+@pytest.mark.windows
 def test_ssh_transport_streams_sensitive_input_without_exposing_it(monkeypatch) -> None:  # noqa: ANN001
     process = MagicMock(return_value=_completed())
     logger = MagicMock()
@@ -51,6 +52,7 @@ def test_lima_transport_streams_sensitive_input_and_logs_only_empty_output(monke
     logger.log_command.assert_called_once_with(_COMMAND, result)
 
 
+@pytest.mark.windows
 def test_wsl2_transport_streams_sensitive_input_and_logs_only_empty_output(monkeypatch) -> None:  # noqa: ANN001
     process = MagicMock(return_value=_completed())
     logger = MagicMock()
@@ -113,6 +115,7 @@ def test_remote_lima_transport_forwards_sensitive_input_to_the_safe_ssh_hop(monk
     }
 
 
+@pytest.mark.windows
 @pytest.mark.parametrize(
     ("transport", "run_path"),
     [
@@ -148,6 +151,7 @@ def test_remote_lima_forwards_non_sensitive_input_data(monkeypatch) -> None:  # 
     assert run.call_args.kwargs["tty"] is False
 
 
+@pytest.mark.windows
 def test_ssh_transport_discards_output_without_disabling_forced_tty(monkeypatch) -> None:  # noqa: ANN001
     """``discard_output`` sends both process streams to the null device but
     leaves TTY selection alone: a per-call ``tty=True`` still forces ``-tt``

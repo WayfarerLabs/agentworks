@@ -99,6 +99,7 @@ def test_concrete_transports_implement_abc(transport_cls: type[Transport]) -> No
     assert leftover == frozenset(), f"{transport_cls.__name__} missing: {leftover}"
 
 
+@pytest.mark.windows
 @pytest.mark.parametrize(
     ("delete", "setup_command"),
     [
@@ -148,6 +149,7 @@ def test_copy_dir_to_quotes_remote_archive_and_destination(
     ]
 
 
+@pytest.mark.windows
 def test_copy_dir_to_cleanup_failure_preserves_primary(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -178,6 +180,7 @@ def test_copy_dir_to_cleanup_failure_preserves_primary(
     assert captured_output.warnings
 
 
+@pytest.mark.windows
 def test_copy_dir_to_cleanup_failure_does_not_fail_completed_copy(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -261,6 +264,7 @@ def test_interactive_delegates_to_the_subclass_hook() -> None:
     assert t.calls == [("tmux attach -t s1", {"K": "V"})]
 
 
+@pytest.mark.windows
 def test_interactive_runs_inside_the_terminal_guard(monkeypatch: pytest.MonkeyPatch) -> None:
     """The whole point of the abstract/concrete split. Asserted at the
     ABC so it holds for every transport, present and future, rather than
@@ -282,6 +286,7 @@ def test_interactive_runs_inside_the_terminal_guard(monkeypatch: pytest.MonkeyPa
     assert entered == ["enter", "exit"]
 
 
+@pytest.mark.windows
 def test_interactive_guard_closes_when_the_transport_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """A dropped attach can surface as an exception rather than a
     non-zero exit; the terminal still has to be restored."""

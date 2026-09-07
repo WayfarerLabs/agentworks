@@ -94,6 +94,7 @@ def _write_config(tmp_path: Path, vm_workspaces: str) -> Path:
     return config_file
 
 
+@pytest.mark.windows
 def test_load_config_rejects_home_vm_workspaces(tmp_path: Path) -> None:
     """The guard fires through the real ``load_config`` -> ``_load_paths`` path,
     not just when called directly."""
@@ -102,6 +103,7 @@ def test_load_config_rejects_home_vm_workspaces(tmp_path: Path) -> None:
         load_config(config_file)
 
 
+@pytest.mark.windows
 def test_load_config_accepts_non_home_vm_workspaces(tmp_path: Path) -> None:
     """A valid data-volume path loads cleanly and round-trips."""
     config_file = _write_config(tmp_path, "/srv/ws")

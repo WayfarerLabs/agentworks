@@ -105,6 +105,7 @@ runtime-evaluated-base-classes = [
 # ``-n 0`` only while debugging a test that genuinely needs one process.
 addopts = ["-n", "auto", "--dist", "loadgroup"]
 markers = [
+    "windows: host-sensitive coverage required in Windows CI (also runs in the full Linux suite)",
     "integration: tests that probe the real environment (filesystem, subprocesses, database)",
     "xdist_group(name): tests that share unavoidable external state run on one worker",
 ]

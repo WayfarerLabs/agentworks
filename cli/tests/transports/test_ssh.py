@@ -6,7 +6,7 @@ verify behavior. Lifts the patterns from ``tests/test_exec_target.py``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -15,10 +15,6 @@ from agentworks.ssh import SSHError, SSHResult
 from agentworks.transports import SSHTransport
 from tests.transports.conftest import fail_completed as _fail_completed
 from tests.transports.conftest import ok_completed as _ok_completed
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
 
 # ---------------------------------------------------------------------------
 # run()
@@ -79,6 +75,7 @@ def test_run_env_coalesces_into_one_set_env_arg() -> None:
         assert 'B="two words"' in set_env_args[0]
 
 
+@pytest.mark.windows
 def test_run_default_closes_stdin_with_dash_n_and_no_tt() -> None:
     """Non-interactive ``run()`` allocates no TTY and closes stdin with
     ssh's own ``-n``: a stdin-reading remote command then cannot hang and
@@ -93,6 +90,7 @@ def test_run_default_closes_stdin_with_dash_n_and_no_tt() -> None:
         assert "-tt" not in argv
 
 
+@pytest.mark.windows
 def test_run_tty_true_forces_tt_and_omits_dash_n() -> None:
     """An explicit ``run(tty=True)`` allocates a pty with ``-tt``. ``-n``
     and ``-tt`` are mutually exclusive: ``-tt`` already attaches stdin to
@@ -119,6 +117,7 @@ def test_run_tty_false_still_closes_stdin_with_dash_n() -> None:
         assert "-T" in argv
 
 
+@pytest.mark.windows
 def test_run_default_forces_no_tty_over_operator_ssh_config() -> None:
     """A captured programmatic call never wants a pty, so the default forces
     ``-T`` rather than leaving pty allocation to the operator's ssh config: an
@@ -249,6 +248,7 @@ def test_interactive_sets_client_keepalives() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.windows
 def test_copy_to_uses_scp() -> None:
     t = SSHTransport(host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
@@ -260,6 +260,7 @@ def test_copy_to_uses_scp() -> None:
         assert "agentworks@vm1:/remote/bar" in argv
 
 
+@pytest.mark.windows
 def test_copy_from_uses_scp_with_reversed_source_dest() -> None:
     t = SSHTransport(host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
@@ -389,16 +390,25 @@ def test_run_login_shell_still_emits_fence() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.windows
 def test_write_file_uses_copy_to_under_the_hood(tmp_path: Path) -> None:
     """``write_file`` must funnel through ``copy_to`` (which is scp) rather
     than embedding multi-line content in command argv -- the Windows CRLF
     trap that motivated the helper."""
     t = SSHTransport(host="vm1", user="agentworks")
-    with patch.object(t, "copy_to") as mock_copy:
+    staged: list[Path] = []
+
+    def inspect_copy(local_path: str | Path, remote_path: str) -> None:
+        staged.append(Path(local_path))
+        # A second open must succeed while copying on Windows; the writer's
+        # handle must already be closed, and line feeds must stay byte-exact.
+        assert staged[-1].read_bytes() == b"hello\nworld\n"
+        assert remote_path == "/remote/conf"
+
+    with patch.object(t, "copy_to", side_effect=inspect_copy) as mock_copy:
         t.write_file("/remote/conf", "hello\nworld\n")
         mock_copy.assert_called_once()
-        # First positional arg is the local tempfile; second is remote_path.
-        assert mock_copy.call_args[0][1] == "/remote/conf"
+    assert not staged[0].exists()
 
 
 def test_write_file_chmods_when_mode_supplied(tmp_path: Path) -> None:

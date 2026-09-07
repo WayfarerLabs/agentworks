@@ -465,6 +465,7 @@ def test_sample_capability_kind_is_a_clean_cli_error(
     assert not (tmp_path / "logs" / "error.log").exists()
 
 
+@pytest.mark.windows
 def test_write_sample_refuses_escapes_and_suffixes(tmp_path: Path) -> None:
     resources = tmp_path / "resources"
     with pytest.raises(ValidationError, match="relative to the resources"):
@@ -475,6 +476,7 @@ def test_write_sample_refuses_escapes_and_suffixes(tmp_path: Path) -> None:
         write_sample(resources, "samples.txt")
 
 
+@pytest.mark.windows
 @pytest.mark.skipif(sys.platform != "win32", reason="drive-relative paths are a Windows-only escape shape")
 def test_write_sample_refuses_windows_drive_relative_path(tmp_path: Path) -> None:
     # A Windows drive-relative path (drive letter, no root) is not
