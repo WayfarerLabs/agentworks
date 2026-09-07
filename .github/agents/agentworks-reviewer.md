@@ -547,7 +547,7 @@ selects tests, not their allowed operating systems. See `CONTRIBUTING.md` for us
 
 For host-sensitive changes, flag missing or redundant selection. Mark the smallest coherent scope,
 require native evidence when risk depends on the host, and preserve selection when tests move or
-split. Mocked calls and pure logic belong to Linux coverage.
+split. Tests limited to mocks or pure logic belong to Linux coverage.
 
 ### 14. SDD process execution
 

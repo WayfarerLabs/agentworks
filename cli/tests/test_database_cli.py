@@ -65,6 +65,7 @@ def _build_stale_schema(path: Path) -> None:
     connection.close()
 
 
+@pytest.mark.windows
 def test_database_backup_stdout_is_only_the_completed_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import agentworks.db as db
 
@@ -89,6 +90,7 @@ def test_database_backup_stdout_is_only_the_completed_path(tmp_path: Path, monke
     assert _value(resolved) == "preserved"
 
 
+@pytest.mark.windows
 def test_database_restore_yes_uses_stderr_and_creates_no_implicit_backup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
