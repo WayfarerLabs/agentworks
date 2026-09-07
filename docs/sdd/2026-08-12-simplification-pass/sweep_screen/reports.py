@@ -33,11 +33,13 @@ from .inventory import (
     QUALIFIED,
     RETIRED_HEADING,
     RETIRED_ROW,
+    UNSPANNED_LINE,
     URL,
     LineAnchor,
     Row,
     SiteAnchor,
     SpanAnchor,
+    outside_code_spans,
     read_rows,
     split_cells,
     stamp_spans,
@@ -192,6 +194,12 @@ def check_map(
         # path and reading them as a line number is a fault nobody can fix.
         if line.startswith("| "):
             for spelling in sorted({m.group(0) for m in CITED_LINE.finditer(bare)}):
+                faults.append(f"{source} cites {spelling.strip()} by line; name the function instead")
+            # And the two spellings that read as a citation only OUTSIDE a span,
+            # so this half runs on the blanked line while the half above runs on
+            # the raw one. Both are the same fault; they differ only in where
+            # the digits have to sit to be one.
+            for spelling in sorted({m.group(0) for m in UNSPANNED_LINE.finditer(outside_code_spans(bare))}):
                 faults.append(f"{source} cites {spelling.strip()} by line; name the function instead")
         # A cited function resolves like an anchor, so a citation that names
         # nothing is refused rather than read and believed.

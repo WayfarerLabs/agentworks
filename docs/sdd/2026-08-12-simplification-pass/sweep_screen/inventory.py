@@ -54,7 +54,9 @@ _LINES = r"[1-9]\d*(?:-\d+)?(?:,\d+(?:-\d+)?)*"
 #: 412", "lines 412-419", "at 412" after a path or a quoted construct, and a
 #: NAME carrying a number (`find_registry_reads:199`), which reads as a
 #: qualname citation and is a line number wearing one. They are one fault with
-#: six spellings, and refusing one taught the map to use the rest.
+#: six spellings, and refusing one taught the map to use the rest. The "line
+#: 412" branch reads either casing, because "Line 412" opening a sentence is
+#: the same citation and five of them sat behind that one letter.
 #:
 #: The name form is anchored to a whole code span, which is how this file
 #: writes a citation and is what tells one from content: `a.yaml:2` inside
@@ -70,9 +72,21 @@ CITED_LINE = re.compile(
     r"(?:\.(?:py|mjs):\d+(?:-\d+)?)"
     rf"|(?:`:{_LINES}`)"
     rf"|(?:`[A-Za-z_][A-Za-z0-9_.]*:{_LINES}`)"
-    r"|(?:\blines?\s+\d+(?:\s*-\s*\d+)?\b)"
+    r"|(?:\b[Ll]ines?\s+\d+(?:\s*-\s*\d+)?\b)"
     r"|(?:(?<=`)\s+at\s+\d+\b)"
 )
+
+#: The two spellings that are only citations OUTSIDE a code span, which is the
+#: opposite rule to CITED_LINE's and the same opposition this file already runs
+#: between ids and paths. A bare `:468` in running text is an edit recipe; the
+#: same digits inside a span are content the map is quoting, which is why
+#: `.endswith(":42)")` and `assert "a.yaml:2" in message` must not match. The
+#: parenthesised range is the form a citation takes when it trails a path or a
+#: quoted construct, as A-082's `(520-527)` did.
+#:
+#: A date survives both: `\(\d{2,4}-\d{2,4}\)` cannot reach the closing paren
+#: of `(2026-08-19)`.
+UNSPANNED_LINE = re.compile(rf"(?<![\w:]):{_LINES}\b|\(\d{{2,4}}-\d{{2,4}}\)")
 
 #: A function cited by name, which is what a row says instead of a line number.
 #: `path::qualname` resolves against the tree exactly as an anchor does, so a
