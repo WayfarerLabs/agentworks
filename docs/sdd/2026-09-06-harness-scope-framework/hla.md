@@ -494,10 +494,16 @@ secret-derived hashes; resolve declared secret references afresh when needed.
 
 ## Future artifact work and Rulesync reuse
 
-Artifacts are a follow-on effort after facets, not a partial implementation in this one. That effort
-must consider hints, rules, complete skills, and subagent definitions, with limited hooks and MCP
-configuration also in view. Subagents carry their own invocation, model, and tool-policy semantics;
-they cannot be assumed to be interchangeable with skills or prompt text.
+Artifacts belong to a separate SDD, the intended next effort after this framework, rather than a
+later phase of this SDD. Complete and validate facets and native setup before settling the artifact
+architecture. This is a foundation for the broader artifact-capable integration model, whose
+completion requires the successor. The saga owns recording that sequence and establishing the next
+charter. The successor can extend these facet interfaces; the current API is not claimed to be the
+final artifact-capable API.
+
+That effort must consider hints, rules, complete skills, and subagent definitions, with limited
+hooks and MCP configuration also in view. Subagents carry their own invocation, model, and
+tool-policy semantics; they cannot be assumed to be interchangeable with skills or prompt text.
 
 Retain these design conclusions as context: core and future features can emit env and artifacts
 before harness integrations; artifacts keep their originating scope, resource, and producer; native
@@ -507,6 +513,21 @@ sources should meet at one normalized artifact representation before propagation
 distinct from rules and stronger launch instructions. These are inputs to the follow-on design, not
 a frozen wire format, persisted schema, ingestion policy, or placeholder API in the facets
 implementation.
+
+There is no artifact or native-setup deferral protocol in this SDD. The successor must address
+resources where an integration is not selected: skipping an invocation must not silently discard
+applicable input or implicitly enable the integration. It must also resolve the diamond formed by
+VM, user/workspace, and session. Sending the same VM item down both branches and deduplicating its
+ID at session start would not alone prevent duplicate native effects. Treating a user-facet result
+as globally consumed would wrongly hide work still needed for other users.
+
+The open design questions are which intermediate facets receive inherited input, how origin and
+destination-specific applicability distinguish obligations from duplicate paths, and how the
+selected session integration reconciles applicable handling evidence and remaining input. Handling
+for Alice or workspace X cannot automatically satisfy Bob or workspace Y. No routing, fan-out,
+receipt-merge, or final-session selection algorithm is chosen here. The workspace facet currently
+earns its place through native project settings mappings; keeping that setup surface does not
+require inherited VM artifacts to flow through it.
 
 The operator's leading follow-on proposal is a declarative `artifact-bundle` resource that owns
 ingestion and normalized contents. Other resources would consume bundles by ID rather than each

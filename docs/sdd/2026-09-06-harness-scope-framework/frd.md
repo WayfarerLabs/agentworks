@@ -387,6 +387,13 @@ ownership. Shared saga artifacts are not edited here.
 
 ### Future artifact context, not this effort's contract
 
+The operator selected a separate artifact SDD as the intended next effort after this framework,
+rather than a later phase inside this SDD. Deliver and validate facets and native setup first, then
+design artifact details against that foundation. The broader artifact-capable integration model
+remains unfinished until the successor delivers it; completing this SDD does not claim otherwise.
+The saga owns recording that sequence and establishing the successor's charter. The successor may
+extend the facet interfaces; this SDD does not freeze an artifact-ready API in advance.
+
 The follow-on includes hints, rules, skills, and subagent definitions, followed by limited hooks and
 MCP configuration. Evaluate Rulesync's canonical formats and generation machinery for reuse then;
 Agentworks still owns resource scopes, facet dispatch, applicability, and provisioned-resource
@@ -406,6 +413,15 @@ artifact ingestion and gives each bundle an ID for consuming resources to refere
 source identity is distinct from each consumer's scope and applicability. The kind, its schema, and
 revision, update, and storage semantics remain future design decisions; this effort introduces no
 bundle registration or API.
+
+The successor must resolve skipped integrations and the VM-to-user/workspace-to-session diamond. An
+integration not selected at an intermediate resource cannot be implicitly activated to handle
+pending input. The design must preserve applicable unhandled input and distinguish an item's origin
+from handling for a particular user, workspace, and integration. It must decide whether inherited VM
+items visit either or both intermediate facets, how their results meet at a session without
+duplicate effects or lost obligations, and what session selection means for pending input. These are
+open artifact-design questions, not a deferral protocol delivered here. The workspace facet remains
+in this SDD for native project settings; retaining it does not decide future artifact routing.
 
 ## What changed since the scope-participation contract was written
 
