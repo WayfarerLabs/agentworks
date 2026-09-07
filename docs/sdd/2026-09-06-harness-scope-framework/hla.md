@@ -1138,8 +1138,9 @@ migration before implementation begins. Their acceptance must include copy, reho
 state restore handling so owner records cannot bless artifacts at a different destination or survive
 deletion and recreation under the same name. VM backup/export currently projects only VM applied
 slices (`db/database.py:1238-1239`); the new typed owner-scoped contributions and deferrals need
-explicit export/restore coverage. Restoring captured content must not establish native placement or
-readiness at a new destination without the existing identity and reconciliation checks.
+explicit VM backup export coverage and database-restore validation. This does not add a VM
+restore/import workflow. Restoring captured content must not establish native placement or readiness
+at a new destination without the existing identity and reconciliation checks.
 
 ## Validation and requirement coverage
 
@@ -1193,11 +1194,12 @@ R9 storage acceptance proves that one originating package is stored once despite
 integrations and descendant deferrals; deferred records contain references and reasons, and reject
 stale contribution revisions. Use representative multi-MiB binary packages and multiple owner counts
 to measure encoded database size, inspection memory/time, and database backup/restore within its
-existing deadline. Validate size limits before publishing the snapshot. Round-trip the new slices
-through VM export/restore as well, and show downstream reconstruction without ancestor source
-access, owner deletion without residual contribution rows, and refusal to bless restored native
-destinations from copied receipts alone. These measurements set the LLD's limits; single-record
-serialization timings alone are insufficient acceptance.
+existing deadline. Validate size limits before publishing the snapshot. Include the new slices in VM
+backup exports and round-trip their exported payloads through the domain codecs; exercise database
+restore separately. Show downstream reconstruction without ancestor source access, owner deletion
+without residual contribution rows, and refusal to bless restored native destinations from copied
+receipts alone. These measurements set the LLD's limits; single-record serialization timings alone
+are insufficient acceptance.
 
 R16 acceptance uses explicit artifact declarations and local fixture packages to prove shell
 delivery through the real CLI: user and workspace files are discoverable without downstream payload
