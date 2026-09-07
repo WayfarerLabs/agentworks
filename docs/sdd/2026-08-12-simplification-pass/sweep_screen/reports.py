@@ -17,12 +17,14 @@ import re
 import subprocess
 import sys
 from collections import Counter, defaultdict
+from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .estate import assertion_digest
 from .inventory import (
     ACCOUNTED,
+    BACKTICKED,
     CITED_FILE,
     CITED_ID,
     CITED_LINE,
@@ -50,6 +52,7 @@ from .screens import screen_verdicts
 
 if TYPE_CHECKING:
     from .estate import Site, Snapshot
+    from .tree import Tree
 
 #: How the map titles its groups, so a `totals` run pastes into it unedited.
 GROUP_TITLES = {
@@ -136,21 +139,32 @@ def orphaned_shas(map_path: str = INVENTORY) -> list[str]:
     no check at all.
     """
     directory = Path(map_path).parent
-    faults: list[str] = []
+    cited: list[tuple[str, int, str]] = []
     for name in SHA_CITING:
         path = directory / name
         if not path.exists():
             continue
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-            for sha in sorted(set(CITED_SHA.findall(line))):
-                probe = subprocess.run(
-                    ["git", "merge-base", "--is-ancestor", sha, "HEAD"],
-                    capture_output=True,
-                    check=False,
-                )
-                if probe.returncode != 0:
-                    faults.append(f"{name}:{number} cites {sha}, which is not an ancestor of HEAD")
-    return faults
+            # Only inside a code span: this file writes a commit that way every
+            # time, and hex in running prose is far more often a word than an id.
+            spans = " ".join(BACKTICKED.findall(line))
+            cited.extend((name, number, sha) for sha in sorted(set(CITED_SHA.findall(spans))))
+    # One probe per distinct commit, not per citation: five commits were cited 177
+    # times and that was 177 subprocesses for five answers.
+    verdict: dict[str, bool] = {}
+    for _name, _number, sha in cited:
+        if sha not in verdict:
+            probe = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", sha, "HEAD"],
+                capture_output=True,
+                check=False,
+            )
+            verdict[sha] = probe.returncode == 0
+    return [
+        f"{name}:{number} cites {sha}, which is not an ancestor of HEAD"
+        for name, number, sha in cited
+        if not verdict[sha]
+    ]
 
 
 def check_map(
@@ -239,11 +253,15 @@ def check_map(
             # The two rules overlap wherever a citation carries both a name and
             # digits, and one cell holding one fault was arriving as two
             # complaints, which sends a reader looking for a second defect.
-            already = {digits for spelling in spelled for digits in re.findall(r"\d{2,}", spelling)}
             for cell in split_cells(line):
                 if cell.strip().isdigit():
                     continue
-                for spelling in sorted(set(stray_numbers(cell)) - already):
+                # Scoped to THIS cell: the same digits in a neighbouring cell are
+                # a different citation, and subtracting across the row hid one.
+                spelled_here = {
+                    digits for match in CITED_LINE.finditer(cell) for digits in re.findall(r"\d{2,}", match.group(0))
+                }
+                for spelling in sorted(set(stray_numbers(cell)) - spelled_here):
                     faults.append(f"{source} carries the bare number {spelling}; name what is there instead")
         # A cited function resolves like an anchor, so a citation that names
         # nothing is refused rather than read and believed.
@@ -445,6 +463,17 @@ def _batch_rows(
     return built
 
 
+@cache
+def _verdicts(tree: Tree) -> dict[str, tuple[str, str, str]]:
+    """`screen_verdicts` for one tree, computed once per run.
+
+    It walks every production module to index raise paths, which is the most
+    expensive thing this package does, and `totals` now asks for it twice: once
+    for the batch comparison and once for whatever else the run wants.
+    """
+    return screen_verdicts(tree)
+
+
 def batch_drift(rows: list[Row], snapshot: Snapshot, map_path: str = INVENTORY) -> list[str]:
     """Where the committed mechanical batch differs from what `generate` emits.
 
@@ -462,7 +491,7 @@ def batch_drift(rows: list[Row], snapshot: Snapshot, map_path: str = INVENTORY) 
             by_path[site.path].append(site)
     emitted = {
         row.id: f"| {row.id} | {row.render_cell()} | {row.shape} | delete |"
-        for row in _batch_rows(rows, snapshot, by_path, screen_verdicts(snapshot.tree), map_path)
+        for row in _batch_rows(rows, snapshot, by_path, _verdicts(snapshot.tree), map_path)
     }
     committed = {
         row.id: f"| {row.id} | {row.render_cell()} | {row.shape} | {row.disposition} |"

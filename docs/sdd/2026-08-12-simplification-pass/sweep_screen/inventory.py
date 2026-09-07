@@ -108,9 +108,11 @@ _COUNTED = (
 #:
 #: Seven things are not that integer, and are blanked before the scan:
 #:
-#: - **an anchor or identity token**: a row id, a line anchor's `L120-211`, and
-#:   everything inside a code span, which is where this file writes what it
-#:   quotes. `.endswith(":42)")` and `"10-byte"` are content, not citations.
+#: - **an anchor or identity token**: a row id, and everything inside a code
+#:   span, which is where this file writes what it quotes. `.endswith(":42)")`
+#:   and `"10-byte"` are content, not citations.
+#: - **a line anchor**, `L120-211`, which declares its own staleness and is
+#:   bound-checked by `resolve` rather than refused here.
 #: - **a date**, which is how every dated decision on a row is written.
 #: - **a SHA or a hex digest**, six to forty hex.
 #: - **an issue or PR reference**, `#470`.
@@ -176,16 +178,20 @@ CITED_QUALNAME = re.compile(r"([A-Za-z0-9_./+-]*[A-Za-z0-9_+-]\.py)::(?!L\d)([A-
 
 CITED_ID = re.compile(rf"\b{ID}\b")
 
-#: A commit this map cites, in a code span, seven to forty hex. Seven is the
-#: floor because six is a site digest and the two are otherwise the same shape;
-#: a six-hex span is read as a digest and left alone. An all-decimal span is
-#: left alone too: F-149b cites a CI run id, which is decimal and eleven digits,
-#: and a commit spelled without a single letter is rare enough to read by hand.
-CITED_SHA = re.compile(r"`(?![0-9]+`)([0-9a-f]{7,40})`")
+#: A commit this map cites: seven to forty hex, as a token ANYWHERE inside a
+#: code span. Reading only the spans that are nothing but a SHA missed the two
+#: other spellings this file uses, `git log abc1234` and `ab0a6303 feat(...)`.
+#: Seven is the floor because six is a site digest and the two are otherwise the
+#: same shape; a six-hex token is read as a digest and left alone. An all-decimal
+#: token is left alone too: F-149b cites a CI run id, which is decimal and eleven
+#: digits, and a commit spelled without a single letter is rare enough to read by
+#: hand.
+CITED_SHA = re.compile(r"(?<![0-9a-zA-Z])(?![0-9]+(?![0-9a-z]))([0-9a-f]{7,40})(?![0-9a-zA-Z])")
 
-#: The artifacts a cited commit may appear in. The map is not alone: the plan
-#: and the high-level architecture cite the same commits for the same reasons,
-#: and a rebase orphans them all at once.
+#: The artifacts a cited commit may appear in. The map and the plan both cite
+#: commits and a rebase orphans them together; `hla.md` cites none today and is
+#: scanned as prophylaxis, because it is the third artifact of this SDD and the
+#: cheapest moment to cover it is before it needs covering.
 SHA_CITING = ("sweep-inventory.md", "plan.md", "hla.md")
 
 #: A URL, blanked before ids are read for the same reason code spans are: the

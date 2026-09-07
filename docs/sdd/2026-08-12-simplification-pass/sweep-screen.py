@@ -38,6 +38,8 @@ and its totals to stderr, so a run can be piped without losing the count.
 from __future__ import annotations
 
 import argparse
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -71,6 +73,28 @@ def main(argv: list[str] | None = None) -> None:
     if not Path(INVENTORY).exists():
         raise SystemExit("run this from the repository root")
     args = build_parser().parse_args(argv)
+    if args.command == "totals":
+        # `totals` is the one command that reads the COMMIT GRAPH: every commit
+        # the map cites has to be an ancestor of HEAD, which a rebase silently
+        # breaks. Without git it cannot ask, and in a shallow clone the answer is
+        # "no" for every commit older than the fetch depth, which would report
+        # 177 faults that are all the clone's. Both refuse rather than guess.
+        if shutil.which("git") is None:
+            raise SystemExit("`totals` checks cited commits against the commit graph and git is not on PATH")
+        shallow = subprocess.run(
+            ["git", "rev-parse", "--is-shallow-repository"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if shallow.returncode != 0:
+            raise SystemExit("`totals` checks cited commits against the commit graph and this is not a git tree")
+        if shallow.stdout.strip() == "true":
+            raise SystemExit(
+                "this is a shallow clone, where a commit older than the fetch depth is unreachable"
+                " whether or not the map is wrong, so every cited commit would report as an orphan."
+                " Run `git fetch --unshallow` first."
+            )
     if sys.version_info[:2] > STAMPED_PYTHON and args.command in ("resolve", "restamp", "totals"):
         running = ".".join(str(n) for n in sys.version_info[:3])
         want = ".".join(str(n) for n in STAMPED_PYTHON)

@@ -186,7 +186,10 @@ since it shares no files with the website work; it waits on the sweep instead, p
       row per test or assertion group (a file mixing wholly-policing tests with embedded prose
       assertions gets multiple rows), each row marked delete, convert, or keep. Keep behavioral,
       structural, and security tests; delete the rest; convert to structural form only where a real
-      invariant would lose its only guard. Sentence-only observables are decided case by case,
+      invariant would lose its only guard. **That last clause is this plan's criterion for CONVERTING
+      an existing test, and is not `frd.md` R2.3**, which governs whether to ADD coverage a deletion
+      uncovered; the two ask different questions and the map's R2.3 item settles the second one.
+      Sentence-only observables are decided case by case,
       mostly by deletion (R2.4). May land as several PRs. Done when: delete rows are gone at HEAD,
       convert rows point at the landed structural replacement, and keep rows name the invariant that
       earns the assertion.
@@ -206,7 +209,8 @@ since it shares no files with the website work; it waits on the sweep instead, p
       IT REACHES, which is the scope the inventory states and is narrower than all of them.
 
       **Re-anchored on 2026-09-06**, so a row keys what it addresses by identity rather than by
-      line, and then **cut fresh at `c310d05b`** once `#747` merged, and rebased onto `b22cc49c`. The map is a new document over
+      line, and then **cut fresh at `c310d05b`** once `#747` merged, and rebased onto `b22cc49c`.
+      The map is a new document over
       five groups, every count derived from the row markup and reported by `totals`, and every
       anchor resolving at the basis. What the cut did is in the inventory's Basis and Totals
       sections rather than here, and this is the whole of what it owed:
@@ -222,9 +226,9 @@ since it shares no files with the website work; it waits on the sweep instead, p
         rows behind them left with the ledger, which is their answer; L-026 keeps its delete on the
         anchors that remain.
       - **`attribute`, `generate` and `totals` all exit 0**, which is the acceptance condition:
-        every `match=` site is owned by exactly one GROUP-1 row (sites addressed by rows in more than one
-        group are expected and reported, not refused), every batched site is one the screens left
-        alone, every
+        every `match=` site is owned by exactly one GROUP-1 row (sites addressed by rows in more
+        than one group are expected and reported, not refused), every batched site is one the
+        screens left alone, every
         anchor resolves or is line-anchored, and the map carries no duplicate id, no citation of a
         row that is neither present nor retired, and no test file the accounting leaves out.
 
@@ -353,7 +357,8 @@ since it shares no files with the website work; it waits on the sweep instead, p
 
       The classification also added two checks rather than removing them, because it found them
       missing: `preview_operation_resolution` and `predict_resolution` now check their own
-      interaction policy, which makes `#523`'s rule total instead of true by the ordering of unrelated
+      interaction policy, which makes `#523`'s rule total instead of true by the ordering of
+      unrelated
       call sites. Two undeclared drops are recorded here so the reassessment does not have to
       rediscover them: the deleted containment tests included redaction guards, whose invariant now
       holds because a backend exception escapes `resolve_batch` and ends the command instead of
@@ -584,7 +589,8 @@ is recorded in the saga ledger.)
       branch does not close R3.2.
 
       **Descriptor-generality residue**, surfaced by the C1/C5 item and left for this pass because
-      each needs a decision rather than a deletion. `impl_class` (`capabilities/config.py::impl_class`) is an identity
+      each needs a decision rather than a deletion. `impl_class`
+      (`capabilities/config.py::impl_class`) is an identity
       cast standing in for a type the registries do not declare; typing them `dict[str, type]` would
       delete it and its four call sites together, which is a signature change across the capability
       registries rather than a local subtraction. The `prepare`/`seat` split in

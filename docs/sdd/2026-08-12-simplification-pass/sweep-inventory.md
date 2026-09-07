@@ -27,7 +27,7 @@ It moved five digests: four were tests main edited and every one of those rows s
 fifth was a digest written by hand in a round's row fixes rather than by the command, and it was
 wrong, which is the argument for never writing one by hand.
 
-**The second move**, twenty-seven commits onto `b22cc49c`, touched twenty-one test files and added
+**The second move**, twenty-seven commits onto `b22cc49c`, touched seventeen test files and added
 four, of which `native_exec_support.py` is a support module outside the scan. `595386c7` is the one
 that reaches this map: requiring a native execution transport deleted the None-return path, and the
 shared `ExecutionOnlyTransport` replaced four hand-rolled recording fakes. B-054's whole estate went
@@ -39,7 +39,10 @@ one was cut at `c686cd6d`, re-derived at `426cccae`, and re-anchored by identity
 of its counts survive into this file, because a count carried forward is how it drifted twice.
 `e713a7f4` is the last commit that held it whole: the one before the rows were keyed by identity, on
 this branch and so an ancestor of this commit, which is what makes it reachable from a merge of this
-branch rather than only from a branch someone may delete.
+branch rather than only from a branch someone may delete. **That holds under a merge commit and not
+under a squash**: a squash writes one new commit with no parent on this branch, so every commit
+cited here would be orphaned at once. `totals` would say so on the next run, which is the point of
+the check, but the cheaper answer is to merge rather than squash.
 
 Four populations were re-derived to get here, and the fourth is the reason the other three were
 needed.
@@ -223,6 +226,12 @@ makes a row addressing something that is not there a failure rather than a line 
 anchor is exempt because it declares up front that it resolves to nothing; a `changed` digest is not
 exempt, because absorbing one deliberately is what `restamp` is for.
 
+**`totals` faults on two more things that are not anchor states**, both added on 2026-09-06 after a
+rebase produced one of each. A commit this SDD cites that is not an ancestor of HEAD is a fault: the
+map, the plan and hla are all scanned, because a rebase orphans their citations together. And a
+mechanical-batch row that differs from what `generate` emits is a fault, because the batch is
+emitted rather than written and nothing had ever compared the two.
+
 **A site anchor beats a span anchor in the same function, in group 1 only.** Group 1's rows address
 `match=` sites, so where a function holds sites such a row cited, those sites are the whole claim: a
 span anchor beside them would claim every other site in the same test for the same row, and that is
@@ -273,15 +282,16 @@ each other only in the punctuation around the digits. Enumerating punctuation is
 losing.
 
 Seven things are not that integer and are blanked before the scan: **an anchor or identity token**,
-which includes a row id, a line anchor's `L120-211` and everything inside a code span, since that is
-where this file writes what it quotes; **a date**; **a SHA or hex digest**; **an issue or PR
-reference**; **a thousands separator**, so `1,157 rows` is one number and not two; and **a number a
-naming word introduces**, after `ruling`, `case`, `issue`, `PR`, `RFC`, `phase`, `version`, `wave`,
-`priority` or `slot`. That last one is a blanker rather than a check at the match because what
-precedes the digits and what follows them cannot both be expressed in one lookahead. ONE thing is
-checked at the match: COUNTING something, before `sites`, `tests`, `rows`, `files`, `anchors`,
-`attempts`, `pins`, `cycles`, `commits`, `values`, `names`, `topics`, `pixels`, or `lines`, which
-counts only in that position because `line 412` with the noun first is a citation.
+which includes a row id and everything inside a code span, since that is where this file writes what
+it quotes; **a line anchor**, `L120-211`, which declares its own staleness and is bound-checked by
+`resolve` instead; **a date**; **a SHA or hex digest**; **an issue or PR reference**; **a thousands
+separator**, so `1,157 rows` is one number and not two; and **a number a naming word introduces**,
+after `ruling`, `case`, `issue`, `PR`, `RFC`, `phase`, `version`, `wave`, `priority` or `slot`. That
+last one is a blanker rather than a check at the match because what precedes the digits and what
+follows them cannot both be expressed in one lookahead. ONE thing is checked at the match: COUNTING
+something, before `sites`, `tests`, `rows`, `files`, `anchors`, `attempts`, `pins`, `cycles`,
+`commits`, `values`, `names`, `topics`, `pixels`, or `lines`, which counts only in that position
+because `line 412` with the noun first is a citation.
 
 **One spelling is not gated, deliberately.** A number glued to a name with no separator, as `l42`
 is, would take every identifier ending in digits with it, and this file is full of them:
@@ -421,10 +431,10 @@ what that debt looks like when it is paid.
 
 #### What it found in group 1
 
-`sweep-screen.py screen` runs over all 670 sites the estate holds, the 621
-`pytest.raises(..., match=)` sites under `cli/tests` and the 49 `assertRaisesRegex` sites under
-`website/tests`, and prints one line per site, with its verdict, the targeted raise and the handle
-values behind that verdict. Five verdicts are possible:
+**The estate holds 679 sites and this screen reaches 670 of them.** It runs over every site that
+asserts a TYPE, the 621 `pytest.raises(..., match=)` sites under `cli/tests` and the 49
+`assertRaisesRegex` sites under `website/tests`, and prints one line per site, with its verdict, the
+targeted raise and the handle values behind that verdict. Five verdicts are possible:
 
 - **Multi-raise-path, a structural handle tells the targeted raise apart.** Settled: convert.
 - **Multi-raise-path, no discriminator.** Settled: delete.
@@ -1130,6 +1140,11 @@ claims and adds up by construction whatever the claims are. Each refuses:
    multi-raise-path-with-a-handle is `hla.md` case 2's first arm, so it converts onto the handle and
    must not leave as a mechanical delete. This is the check that stops case 2 being decided by
    nobody noticing it, and G1-C05 is the row it produced.
+
+**And `totals` compares the committed batch to what `generate` emits**, which is the check that
+makes "emitted rather than assembled by hand" a property rather than a promise. It caught G1-116,
+which lost its `[1-raise]` marker when a rebase took a raise path out of production and the screen's
+verdict changed under a row nobody re-generated.
 
 `generate` also reports the group-1 span claims that resolve and cover no site. Those do not refuse,
 because one tree cannot tell a test that lost its sites from one that never had any.
@@ -2486,9 +2501,9 @@ test, which is the second thing wrong with it.) What remains was each checked ag
    recorded so the reassessment knows the survey's file list was not exhaustive.
 7. **The website overlaps.** `test_site_documents.py` has two owners, the sweep and the website
    trims item, and the rows here are the sweep's half. **This boundary is described, not checked:**
-   `attribute` partitions `match=` sites and this file holds none, so its 25 rows are span, file and
-   line anchors that `attribute` never sees. Nothing mechanical holds the split. Two orderings the
-   plan did not have:
+   `attribute` partitions `match=` sites and this file holds none, so its 22 rows carry span anchors
+   only, which `attribute` never sees. Nothing mechanical holds the split. Two orderings the plan
+   did not have:
    - W4's conversion did not reach
      `test_lander_404.py::StaticDocumentTests.test_fixed_color_contrast_meets_text_and_graphic_thresholds`,
      which still carries `math.isclose(antenna, 3.788, abs_tol=0.001)` and palette hex literals
@@ -2501,7 +2516,7 @@ test, which is the second thing wrong with it.) What remains was each checked ag
      `test_site_documents.py::GeneratedDocumentTests.test_chromium_geometry_bounds_readiness_and_kills_a_stuck_process`,
      `test_site_documents.py::GeneratedDocumentTests.test_chromium_geometry_preserves_primary_errors_and_surfaces_cleanup_errors`)
      are separate tests from the 2026-08-15 reliability correction and are inventoried here. If the
-     trims item considers the whole harness family its own, those two rows move.
+     trims item considers the whole harness family its own, F-023, F-024 and F-156 move with it.
    - **New**: W6 residue. `lander-model.js` still duplicates a status literal between two of its own
      branches, but no test asserts it, so there is no sweep row and it stays a website-source
      defect.
@@ -2788,7 +2803,11 @@ files, and `reanchor` never wrote one. `resolve` answers survival on its own now
 against the tree in front of it.
 
 What remains is `estate`, `attribute`, `injected`, `screen`, `resolve`, `generate`, `restamp` and
-`totals`, and all eight read the working tree only. `restamp` also WRITES it, the only one that
-does: it brings every span anchor's assertion digest up to date, which is how a PR that edits an
-anchored test carries the map with it. The commands that could read history are in git history,
-which is where a reader who needs to re-run the 2026-09-06 cut against its own basis will find them.
+`totals`. Seven of the eight read the working tree only. `totals` reads the COMMIT GRAPH as well,
+through `git merge-base --is-ancestor`, because every commit this SDD cites has to still be
+reachable and a rebase breaks that silently; it refuses without git and refuses in a shallow clone,
+where the answer would be "unreachable" for every commit whether or not the map is wrong. `restamp`
+also WRITES it, the only one that does: it brings every span anchor's assertion digest up to date,
+which is how a PR that edits an anchored test carries the map with it. The commands that could read
+history are in git history, which is where a reader who needs to re-run the 2026-09-06 cut against
+its own basis will find them.
