@@ -52,8 +52,10 @@ _LINES = r"[1-9]\d*(?:-\d+)?(?:,\d+(?:-\d+)?)*"
 #: Every way a cell has spelled a line number. The first form was the only one
 #: refused, so the others carried on: a bare `:412`, a range or list, "line
 #: 412", "lines 412-419", "at 412" after a path or a quoted construct, and a
-#: NAME carrying a number (`find_registry_reads:199`), which reads as a
-#: qualname citation and is a line number wearing one. They are one fault with
+#: NAME carrying a number: `find_registry_reads:199` as its own span, and the
+#: same thing glued to the tail of an anchor, which is where D-169b's `,890`
+#: hid. Either reads as a qualname citation and is a line number wearing one.
+#: The digits may not be hex, so a digest after `::` is not one. They are one fault with
 #: six spellings, and refusing one taught the map to use the rest. The "line
 #: 412" branch reads either casing, because "Line 412" opening a sentence is
 #: the same citation and five of them sat behind that one letter.
@@ -71,22 +73,76 @@ _LINES = r"[1-9]\d*(?:-\d+)?(?:,\d+(?:-\d+)?)*"
 CITED_LINE = re.compile(
     r"(?:\.(?:py|mjs):\d+(?:-\d+)?)"
     rf"|(?:`:{_LINES}`)"
-    rf"|(?:`[A-Za-z_][A-Za-z0-9_.]*:{_LINES}`)"
+    rf"|(?:`[A-Za-z_][A-Za-z0-9_.]*[:,]{_LINES}`)"
+    r"|(?:::[A-Za-z_][A-Za-z0-9_.]*[:,]\d+(?:-\d+)?(?![0-9a-f]))"
     r"|(?:\b[Ll]ines?\s+\d+(?:\s*-\s*\d+)?\b)"
     r"|(?:(?<=`)\s+at\s+\d+\b)"
 )
 
-#: The two spellings that are only citations OUTSIDE a code span, which is the
-#: opposite rule to CITED_LINE's and the same opposition this file already runs
-#: between ids and paths. A bare `:468` in running text is an edit recipe; the
-#: same digits inside a span are content the map is quoting, which is why
-#: `.endswith(":42)")` and `assert "a.yaml:2" in message` must not match. The
-#: parenthesised range is the form a citation takes when it trails a path or a
-#: quoted construct, as A-082's `(520-527)` did.
+#: What a number may be doing in a cell, other than citing a line. Each of these
+#: NAMES something rather than locating it, so the digits are the thing's
+#: identity and not a place to go and edit.
+_NAMING = r"(?:ruling|case|issue|PR|RFC|phase|version|wave|priority|slot)"
+
+#: What a number may be COUNTING. The list is short on purpose: it is the
+#: vocabulary this map actually counts in, and a count of anything else is
+#: written in a code span or spelled out. `lines` counts here only after a
+#: number, since `line 412` with the noun FIRST is a citation and CITED_LINE
+#: refuses it.
+_COUNTED = (
+    r"(?:sites?|tests?|rows?|files?|anchors?|attempts?|pins?|cycles?"
+    r"|commits?|values?|names?|topics?|pixels?|lines?)"
+)
+
+#: One rule where nine spellings used to be. **A cell may not carry a standalone
+#: integer of two or more digits.** Every line citation this map has ever
+#: written is one, and the seven spellings that reached HEAD after the last
+#: round refused two ("Keep 325-326", "Replace 327", "444's", "on 243-244",
+#: "(104)", "(438, 439, 718, 719)", "now own 125, 134, ... and 298") differ only
+#: in the punctuation around the digits. Enumerating punctuation is how this
+#: gate kept losing; the digits are the fault.
 #:
-#: A date survives both: `\(\d{2,4}-\d{2,4}\)` cannot reach the closing paren
-#: of `(2026-08-19)`.
-UNSPANNED_LINE = re.compile(rf"(?<![\w:]):{_LINES}\b|\(\d{{2,4}}-\d{{2,4}}\)")
+#: Four things are not that integer, and are blanked before the scan:
+#:
+#: - **an anchor or identity token**: a row id, a line anchor's `L120-211`, and
+#:   everything inside a code span, which is where this file writes what it
+#:   quotes. `.endswith(":42)")` and `"10-byte"` are content, not citations.
+#: - **a date**, which is how every dated decision on a row is written.
+#: - **a SHA or a hex digest**, six to forty hex.
+#: - **an issue or PR reference**, `#470`.
+#:
+#: And two things a number may be doing, checked at the match: NAMING something
+#: (`operator ruling 10`) or COUNTING something (`28 malformed values`), from
+#: the two short vocabularies above.
+#:
+#: Over-selection is the intended failure. A sentence this refuses that was not
+#: citing anything is a sentence to rewrite, which costs one edit; a citation it
+#: misses is an executor editing whatever moved into that line's place.
+STRAY_NUMBER = re.compile(rf"(?<![\w.\-])\d{{2,}}(?!\w)(?!\.\d)(?!(?:\s+[a-z][\w-]*){{0,3}}\s+{_COUNTED}\b)")
+
+#: The blankers, applied in this order before STRAY_NUMBER reads a cell.
+STRAY_EXEMPT = (
+    re.compile(ID),
+    re.compile(r"\d{4}-\d{2}-\d{2}"),
+    re.compile(r"\b[0-9a-f]{6,40}\b"),
+    re.compile(r"#\d+"),
+    re.compile(r"\bL\d+(?:-\d+)?\b"),
+    re.compile(r"\b\d{1,3}(?:,\d{3})+\b"),
+    re.compile(rf"\b{_NAMING}\s+\d+"),
+)
+
+
+def stray_numbers(cell: str) -> list[str]:
+    """Every standalone integer in `cell` that is neither named, counted nor exempt.
+
+    Code spans are blanked first, because a number inside one is content this
+    file is quoting rather than a place it is sending a reader.
+    """
+    blanked = outside_code_spans(cell)
+    for pattern in STRAY_EXEMPT:
+        blanked = pattern.sub(lambda m: " " * len(m.group(0)), blanked)
+    return [m.group(0) for m in STRAY_NUMBER.finditer(blanked)]
+
 
 #: A function cited by name, which is what a row says instead of a line number.
 #: `path::qualname` resolves against the tree exactly as an anchor does, so a
@@ -321,8 +377,18 @@ class LineAnchor(Anchor):
         return ",".join(f"L{lo}" if lo == hi else f"L{lo}-{hi}" for lo, hi in self.spans)
 
     def resolve(self, snapshot: Snapshot) -> Resolution:
+        """`line-anchored` says the row resolves to nothing on purpose, so it is
+        the one state that passes. That made it the one place a number could be
+        wrong and still report success: E-126 carried `L787` into a file 351
+        lines long and every command stayed green. A line past the end is not a
+        declaration that the row will go stale, it is a row that already has.
+        """
         if not snapshot.tree.exists(self.path):
             return Resolution("file-gone", "")
+        source = snapshot.tree.read(self.path)
+        end = len(source.splitlines()) if source is not None else 0
+        if past := [f"L{lo}-{hi}" if lo != hi else f"L{lo}" for lo, hi in self.spans if hi > end]:
+            return Resolution("past-end", self.path, f"{', '.join(past)} in a file of {end} lines")
         return Resolution("line-anchored", f"{self.path}:{self.render().replace('L', '')}")
 
     def claims(self, site: Site) -> bool:

@@ -33,16 +33,15 @@ from .inventory import (
     QUALIFIED,
     RETIRED_HEADING,
     RETIRED_ROW,
-    UNSPANNED_LINE,
     URL,
     LineAnchor,
     Row,
     SiteAnchor,
     SpanAnchor,
-    outside_code_spans,
     read_rows,
     split_cells,
     stamp_spans,
+    stray_numbers,
 )
 from .screens import screen_verdicts
 
@@ -195,12 +194,15 @@ def check_map(
         if line.startswith("| "):
             for spelling in sorted({m.group(0) for m in CITED_LINE.finditer(bare)}):
                 faults.append(f"{source} cites {spelling.strip()} by line; name the function instead")
-            # And the two spellings that read as a citation only OUTSIDE a span,
-            # so this half runs on the blanked line while the half above runs on
-            # the raw one. Both are the same fault; they differ only in where
-            # the digits have to sit to be one.
-            for spelling in sorted({m.group(0) for m in UNSPANNED_LINE.finditer(outside_code_spans(bare))}):
-                faults.append(f"{source} cites {spelling.strip()} by line; name the function instead")
+            # And the one rule for everything outside a span: a cell carries no
+            # standalone integer. Read per CELL rather than per line, so the
+            # count columns of the totals tables are whole cells this skips
+            # rather than digits it has to explain.
+            for cell in split_cells(line):
+                if cell.strip().isdigit():
+                    continue
+                for spelling in sorted(set(stray_numbers(cell))):
+                    faults.append(f"{source} carries the bare number {spelling}; name what is there instead")
         # A cited function resolves like an anchor, so a citation that names
         # nothing is refused rather than read and believed.
         for cited_path, qualname in sorted(set(CITED_QUALNAME.findall(URL.sub(" ", line)))):
