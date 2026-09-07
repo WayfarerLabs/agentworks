@@ -21,7 +21,6 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.windows
 def test_run_invokes_wsl_with_distro_and_user() -> None:
     t = WSL2Transport(distro_name="my-distro", user="agentworks")
     with patch("agentworks.transports.wsl2.subprocess.run") as mock_run:

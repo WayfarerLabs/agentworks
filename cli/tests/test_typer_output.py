@@ -258,7 +258,6 @@ def test_confirm_emits_no_escape_under_non_interactive_even_on_a_tty(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.windows
 def test_confirm_recooks_the_console_before_reading(monkeypatch: pytest.MonkeyPatch) -> None:
     order: list[str] = []
     monkeypatch.setattr("agentworks.cli._typer_output.ensure_cooked_input", lambda: order.append("cook"))
@@ -283,7 +282,6 @@ def test_pause_recooks_the_console_before_reading(monkeypatch: pytest.MonkeyPatc
     assert order == ["cook", "read"]
 
 
-@pytest.mark.windows
 def test_prompt_recooks_the_console_before_reading(monkeypatch: pytest.MonkeyPatch) -> None:
     order: list[str] = []
     monkeypatch.setattr("agentworks.cli._typer_output.ensure_cooked_input", lambda: order.append("cook"))
@@ -292,7 +290,6 @@ def test_prompt_recooks_the_console_before_reading(monkeypatch: pytest.MonkeyPat
     assert order == ["cook", "read"]
 
 
-@pytest.mark.windows
 def test_prompt_secret_does_not_recook_the_console(monkeypatch: pytest.MonkeyPatch) -> None:
     """The hidden secret prompt reads char by char (works in raw mode) and must
     not turn echo on, so it is deliberately left out of the re-cook."""

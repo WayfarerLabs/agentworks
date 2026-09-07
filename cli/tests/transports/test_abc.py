@@ -264,7 +264,6 @@ def test_interactive_delegates_to_the_subclass_hook() -> None:
     assert t.calls == [("tmux attach -t s1", {"K": "V"})]
 
 
-@pytest.mark.windows
 def test_interactive_runs_inside_the_terminal_guard(monkeypatch: pytest.MonkeyPatch) -> None:
     """The whole point of the abstract/concrete split. Asserted at the
     ABC so it holds for every transport, present and future, rather than
@@ -286,7 +285,6 @@ def test_interactive_runs_inside_the_terminal_guard(monkeypatch: pytest.MonkeyPa
     assert entered == ["enter", "exit"]
 
 
-@pytest.mark.windows
 def test_interactive_guard_closes_when_the_transport_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """A dropped attach can surface as an exception rather than a
     non-zero exit; the terminal still has to be restored."""

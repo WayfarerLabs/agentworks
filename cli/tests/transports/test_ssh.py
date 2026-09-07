@@ -248,7 +248,6 @@ def test_interactive_sets_client_keepalives() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.windows
 def test_copy_to_uses_scp() -> None:
     t = SSHTransport(host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
@@ -260,7 +259,6 @@ def test_copy_to_uses_scp() -> None:
         assert "agentworks@vm1:/remote/bar" in argv
 
 
-@pytest.mark.windows
 def test_copy_from_uses_scp_with_reversed_source_dest() -> None:
     t = SSHTransport(host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
