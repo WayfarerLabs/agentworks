@@ -663,10 +663,15 @@ The session index combines references to this invocation's published files with 
 upstream locations already recorded for shell. Obtain those references from the bound resource's
 applied facts, not by scanning other users, workspaces, or session directories. Already handled
 payloads stay upstream. When artifacts are available, shell's launch command exposes the index path
-as `AGENTWORKS_ARTIFACTS`, using existing command composition and quoting; this is new shell-owned
-launch behavior, not a new core artifact currency or an arbitrary integration-env result. The
-workload can inspect the index and open the named files. A shell with no applicable artifacts needs
-no artifact directory or discovery variable.
+as `AGENTWORKS_ARTIFACTS`, through a shell-owned wrapper using existing command composition and
+quoting. The workload can inspect the index and open the named files. Shell must set the current
+index path when artifacts exist and explicitly clear the variable when none remain, reconciling its
+previously owned index and files. Configured `AGENTWORKS_*` values currently receive an advisory but
+are not all filtered (`env/compose.py:83`), so omission would leave a stale value intact. The
+wrapper must preserve default login-shell, custom-command, and resume behavior, including the
+currently empty-command case. This wrapper behavior is new; it is not a new core artifact currency
+or an arbitrary integration-env result. A shell with no applicable artifacts needs no artifact
+directory.
 
 Resolve the home through the actual workload-user target, not the workstation's home or a guessed
 `/home/<name>`. Existing target-side `$HOME` expansion is a usable seam; session contexts do not yet
@@ -782,11 +787,19 @@ no trusted ownership. Neither grants permission to overwrite. Domain codecs migr
 versions; partial replacement preserves unknown well-formed store keys as required by the saga
 ruling.
 
-Serialize setup for the same owning resource across command executions, covering observation, remote
-mutation, and receipt persistence. This prevents two reinitializations from both claiming the same
-prior hash. A competing setup refuses with the owning resource and retry guidance instead of
-queueing. The LLD must choose a lock with that actual cross-process lifetime; a SQLite write
-transaction held across network calls is not the design.
+Serialize mutation for the same owning resource across command executions, covering observation,
+remote changes, and receipt persistence. Reuse this owning-resource lock for session artifact
+publication through workload launch, and for deletion from workload teardown through cleanup and
+receipt removal. Acquire it before reading ownership evidence; hold it until that operation's result
+is committed. Start, restart, stop, and deletion, including cascade callers, must participate so
+deletion cannot erase receipts while a competing launch publishes files. The session-name lock also
+excludes recreation until prior deletion finishes; the incarnation claim still protects against
+stale residue after that lock is released.
+
+This is one serialization contract for the owning resource, not a second session lock service. A
+competing operation refuses with the owning resource and retry guidance instead of queueing. The LLD
+must choose a lock with that actual cross-process lifetime and specify cascade acquisition; a SQLite
+write transaction held across network calls is not the design.
 
 ## Workspace retry and session readiness
 
@@ -959,7 +972,10 @@ user, a custom user home, and two workspaces. Each index must expose only its ap
 other users must be denied access to the home-based directory. Prove that stop retains files,
 restart reconciles only owned session material, and single/cascading deletion removes owned files
 before receipts disappear. Same-name recreation, symlink escapes, drift, partial publication, and
-failed cleanup must preserve the ownership boundary and useful recovery evidence.
+failed cleanup must preserve the ownership boundary and useful recovery evidence. Prove that a
+transition to no artifacts removes obsolete owned material and clears a configured stale discovery
+variable, for both the default login shell and custom/resume commands. Concurrent start/restart and
+deletion must refuse competing mutation without losing receipts or launching with deleted files.
 
 Readiness acceptance includes a failed config-only user setup with independently established empty
 artifact inputs: recommended warns and launches, required blocks. With artifact delivery depending
