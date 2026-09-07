@@ -267,14 +267,15 @@ omit static non-candidates. The default preview permits no backend-classified op
 
 `template`, `tailscale_host`, `debian_release`, and `debian_release_observed_at` are nullable. A
 non-null release is a codename recognized by this Agentworks build, and its timestamp records the
-last matching live observation. VMs retain name order. Provisioning is `pending`, `in_progress`,
-`complete`, `failed`, or `unknown`; initialization additionally permits `partial`. These frozen JSON
-v1 vocabularies do not expand when domain enums gain members. In this VM list JSON projection,
-`unknown` is the stable sentinel for an invalid persisted value and never echoes that stored value.
-The current producer always emits the additive nullable v1 fields `observed_status` and
-`status_disposition`; a v1 consumer must tolerate their absence from older producers. Plain list
-emits null for both. With `--status`, observed status is `running`, `stopped`, `deallocated`, or
-`unknown`; disposition is `manual` or `idle` only for stopped or deallocated VMs.
+last matching live observation. VM rows retain the selected service-layer order, alphabetical by
+name by default. Provisioning is `pending`, `in_progress`, `complete`, `failed`, or `unknown`;
+initialization additionally permits `partial`. These frozen JSON v1 vocabularies do not expand when
+domain enums gain members. In this VM list JSON projection, `unknown` is the stable sentinel for an
+invalid persisted value and never echoes that stored value. The current producer always emits the
+additive nullable v1 fields `observed_status` and `status_disposition`; a v1 consumer must tolerate
+their absence from older producers. Plain list emits null for both. With `--status`, observed status
+is `running`, `stopped`, `deallocated`, or `unknown`; disposition is `manual` or `idle` only for
+stopped or deallocated VMs.
 
 The VM, workspace, agent, and session description records append the JSON v1 `instance_state`
 object. Current producers always include it; older JSON v1 producers may omit this additive field:
@@ -363,19 +364,19 @@ agw vm describe build-vm --output json
 #### Workspace and agent JSON schemas
 
 `agw workspace list --output json` uses `workspace.list` and
-`{workspaces: [{name, vm_name, template, created_at}]}`. `template` is nullable and order remains
-workspace name order after filtering. `agw workspace describe NAME --output json` uses
-`workspace.describe` and `{workspace}`; workspace is
-`{name, vm_name, template, path, created_at, sessions, agents, instance_state}`. Session entries are
-`{name, template, mode, agent_name}` and agent entries are `{name, linux_user}`. `template` and
+`{workspaces: [{name, vm_name, template, created_at}]}`. `template` is nullable. Rows retain the
+selected service-layer order, alphabetical by name by default.
+`agw workspace describe NAME --output json` uses `workspace.describe` and `{workspace}`; workspace
+is `{name, vm_name, template, path, created_at, sessions, agents, instance_state}`. Session entries
+are `{name, template, mode, agent_name}` and agent entries are `{name, linux_user}`. `template` and
 `agent_name` are nullable, and mode is `admin`, `agent`, or `unknown`. An invalid persisted mode
 maps to `unknown` without exposing its raw value in this workspace JSON projection.
 
 `agw agent list --output json` uses `agent.list` and
 `{agents: [{name, vm_name, template, grant_all, grants}]}`. `template` is nullable, `grant_all` is
 boolean, and grant entries are `{workspace_name, grant_type}` where grant type is `explicit`,
-`implicit`, or `both`. Agents retain VM then agent name order.
-`agw agent describe NAME --output json` uses `agent.describe` and `{agent}`; agent is
+`implicit`, or `both`. Agent rows retain the selected service-layer order, alphabetical by name by
+default. `agw agent describe NAME --output json` uses `agent.describe` and `{agent}`; agent is
 `{name, vm_name, linux_user, template, grant_all, created_at, explicit_grants, sessions, instance_state}`,
 with nullable `template` and session entries `{name, template, workspace_name}`.
 
@@ -395,8 +396,9 @@ is exactly `running`, `stopped`, `residual`, `broken`, `unknown`, or `unavailabl
 inconclusive. Older JSON v1 producers may have used `unavailable` for other unavailable
 observations. A bad persisted mode maps to `unknown` without exposing its raw value in these session
 JSON projections. The frozen output mode vocabulary does not expand when the domain enum gains a
-member. Rows retain workspace then session name order. `agw session describe NAME --output json`
-uses `session.describe` and `{session}`. Session is this record:
+member. Rows retain the selected service-layer order, alphabetical by name by default.
+`agw session describe NAME --output json` uses `session.describe` and `{session}`. Session is this
+record:
 
 ```text
 {name, workspace_name, vm_name, template, harness_integration, mode, agent_name,
@@ -412,11 +414,11 @@ console associations; older v1 producers may omit this additive field under the 
 contract below.
 
 `agw console list --output json` uses `console.list` and
-`{consoles: [{name, vm_name, session_count, status}]}` in configured name order after filtering.
-Current producers always emit the additive v1 console `status` field; a v1 consumer must tolerate
-its absence from older producers. Status is `unavailable` for plain list; with `--status` it is
-`running`, `stopped`, `residual`, or `unknown`. `agw console describe NAME --output json` uses
-`console.describe` and `{console}`. Console is
+`{consoles: [{name, vm_name, session_count, status}]}`. Rows retain the selected service-layer
+order, alphabetical by name by default. Current producers always emit the additive v1 console
+`status` field; a v1 consumer must tolerate its absence from older producers. Status is
+`unavailable` for plain list; with `--status` it is `running`, `stopped`, `residual`, or `unknown`.
+`agw console describe NAME --output json` uses `console.describe` and `{console}`. Console is
 `{name, vm_name, admin_shell, created_at, last_started_at, uptime_seconds, updated_at, status, sessions}`.
 Describe status uses the console live vocabulary and never `unavailable`. Members are
 `{position, session_name, shells}` in ascending position, and shells are `{cwd, admin}` in
