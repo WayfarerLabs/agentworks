@@ -261,6 +261,9 @@ spec:
     code-review:
       kind: skill
       source: file::~/.config/agentworks/artifacts/code-review
+    release-review:
+      kind: skill
+      source: git::https://github.com/example-org/team-skills.git//skills/release-review?ref=v1.2.0
   harness_integrations:
     - name: claude-code
       marketplaces: [example-org/team-plugins]
@@ -311,19 +314,21 @@ spec:
 
 Creating a user from `team-claude` installs both CLIs through core setup, prepares its env and
 artifacts, then invokes Claude and Codex user facets with their own marketplace/plugin lists and
-artifact inputs. The name-only shell attachment materializes its filesystem representation. Codex
-also maps the selected workstation file to its native user settings using the stated strategy.
-Creating a workspace from `team-project` runs Claude, Codex, and shell workspace facets with
-separate config and workspace artifact inputs. Claude maps its project settings file there; shell
-publishes its workspace artifact files. A name-only attachment still explicitly enables default
-setup; it is distinct from omitting the integration. A `team-review` session using those resources
-gets only session config, applicable env, deferred artifacts, and upstream readiness facts; it does
-not receive the user config as launch flags. The same user block is valid on the proposed
-admin-template attachment surface. Putting `permission_mode` in the user block or `plugins` in the
-session block is a facet-specific validation error. The user's Codex attachment does not implicitly
-attach Codex to the workspace or select it for the session. With no inherited attachment, omitting
-the workspace list selects none; an explicit empty list removes inherited selection. To use Codex
-for a session, select `name: codex` in that session's singular block.
+artifact inputs. The local `code-review` directory and Git-backed `release-review` directory pass
+through the same normalized skill representation before any integration sees them; the Git tag is
+resolved to a commit for that operation. The name-only shell attachment materializes its filesystem
+representation. Codex also maps the selected workstation file to its native user settings using the
+stated strategy. Creating a workspace from `team-project` runs Claude, Codex, and shell workspace
+facets with separate config and workspace artifact inputs. Claude maps its project settings file
+there; shell publishes its workspace artifact files. A name-only attachment still explicitly enables
+default setup; it is distinct from omitting the integration. A `team-review` session using those
+resources gets only session config, applicable env, deferred artifacts, and upstream readiness
+facts; it does not receive the user config as launch flags. The same user block is valid on the
+proposed admin-template attachment surface. Putting `permission_mode` in the user block or `plugins`
+in the session block is a facet-specific validation error. The user's Codex attachment does not
+implicitly attach Codex to the workspace or select it for the session. With no inherited attachment,
+omitting the workspace list selects none; an explicit empty list removes inherited selection. To use
+Codex for a session, select `name: codex` in that session's singular block.
 
 All four integrations retain ordinary session-only use when setup is not requested. These are
 alternative `session-template.spec.harness_integration` blocks, each paired with its existing
@@ -605,30 +610,63 @@ errors. Cross-scope items retain their distinct immutable origins even when loca
 ordinary native destination conflict checks still apply. Do not apply env's precedence ladder to
 artifacts.
 
-Initial source references accept ordinary workstation paths and `file::`, reusing `SourceRef`
-spelling and path semantics (`sources.py:41`). Resolve `~` and relative paths against the invoking
-workstation user's home and working directory, as existing local sources do. A checked-out Git
-repository is an ordinary local source. Direct Git, HTTP, archive, registry, and marketplace
-artifact acquisition remain future extensions to this source boundary; harness plugin marketplace
-setup is a separate existing requirement. No new acquisition command or package manager is needed
-here.
+Source acquisition is a core boundary before the pipeline. Workstation and Git sources are concrete
+inputs in this effort; a future packaged distribution must enter through the same boundary. Reuse
+`SourceRef` spelling (`sources.py:41`): ordinary paths or `file::` for workstation
+files/directories, and `git::<repository>//<path>?ref=<revision>` for a selected file or skill
+directory. Resolve `~` and relative local paths against the invoking workstation user's home and
+working directory. Git uses the parser's existing HTTPS or SSH repository forms. A checked-out
+repository can also be an ordinary local source. Hint/rule sources select a file; skill sources
+select one directory, including the repository root when that root is itself a valid skill.
+
+Resolve a Git branch, tag, commit, or omitted default-branch reference once to an immutable commit
+per repository/reference in the owning operation. Read every selected path at that commit; a moving
+ref cannot mix revisions across artifacts in one operation. Record the credential-free repository
+identity, requested ref, selected path, and resolved commit with acquisition provenance. Reinit (or
+start/restart for session-owned sources) resolves movable refs again; an exact commit remains
+pinned. Downstream scopes use the captured ancestor content without fetching Git. This supplies
+operation consistency and an auditable revision, not a new lockfile or automatic background update
+service.
+
+Acquire Git objects on the invoking workstation using its existing Git authentication; guest env and
+authentication are not acquisition inputs. Credentials must not enter source declarations, persisted
+provenance, or diagnostics. Read committed tree members without executing repository hooks or
+checkout filters, applying export substitutions, or silently omitting export-ignored members.
+Preserve file modes and reject selected submodule entries or unresolved Git LFS pointers instead of
+claiming a complete package. Repository metadata belongs to temporary acquisition storage and is
+never a skill member. A Git resolver does not export the repository's `.git` directory; a local
+directory that actually contains Git metadata still fails the package boundary below.
+
+All source forms produce the same typed, normalized artifact: hint/rule content and applicability,
+or skill metadata and its contained relative member tree with bytes and executable-file intent. Core
+adds the same immutable origin to either result. Acquisition provenance is attached diagnostic
+metadata, separate from origin and normalized content identity. Integrations and deferral receive
+this representation, never a lazy source reference that they must fetch or interpret. Equivalent
+local and Git contents have the same content hash and native behavior; changing acquisition
+provenance alone updates the recorded source facts without forcing a native rewrite. Future
+distribution readers decode their container into this same representation before delivery. A public
+archive format, registry, dependency resolver, or acquisition command is not required here; harness
+plugin marketplaces remain a separate native setup concern.
 
 Capture a resource's own declared sources during its owning setup/reinit or session start operation,
 including restart. Validate and normalize the captured inputs before that resource's first harness
 write, then persist the successful contribution snapshot under R9. Every integration in that
 operation receives the same captured content. Do not reread files for each integration or retain a
 live symlink or mount to the workstation. Later scopes consume the published ancestor snapshots
-without accessing those ancestor source paths. A session's own file sources are acquired on its
-start/restart, so those particular paths must still be available; inline session text has no such
-dependency. A changed upstream source requires its owning reconciliation, not implicit work at
-session start. Source failure cannot reuse an old completed snapshot as current delivery evidence.
+without accessing those ancestor sources. A session's own sources are acquired on its start/restart,
+so its local paths or Git repository and authentication must still be available; inline session text
+has no such dependency. A changed upstream source requires its owning reconciliation, not implicit
+work at session start. Source failure cannot reuse an old completed snapshot as current delivery
+evidence.
 
-Use a small shared workstation snapshot helper alongside the native-settings snapshot work. The
+Use shared source acquisition and normalization alongside the native-settings snapshot work. The
 existing `fetch_file`/`fetch_dir` helpers transfer to a guest; they do not capture and validate
-local packages (`sources.py:134,216`). Do not add a local transport to fit that interface. Temporary
-capture storage belongs to the operation and is removed on success and failure. The LLD must bound
-file count, individual/total size, and traversal depth, and reject observed source mutation during
-capture.
+normalized packages (`sources.py:134,216`), and `fetch_dir` ignores Git subpaths. Reuse the parser,
+not those delivery semantics, and do not add a local transport to fit that interface. Temporary
+capture and Git storage belong to the operation and are removed on success and failure. The LLD must
+bound acquisition time and storage as well as file count, individual/total size, and traversal
+depth, and reject observed local source mutation during capture. Git-backed native settings remain
+outside R15's initial local-file mapping contract.
 
 A skill package is the ordinary [Agent Skills directory](https://agentskills.io/specification):
 `SKILL.md` with required name and description, plus the complete contained supporting-file tree.
@@ -663,9 +701,9 @@ store.
 [The skills CLI](https://github.com/vercel-labs/skills) demonstrates local and Git acquisition into
 ordinary skill directories.
 [Rulesync sources](https://rulesync.dyoshikawa.com/guide/declarative-sources.html) separate
-acquisition from native generation and pin remote revisions. Those are useful extension points, not
-runtime dependencies: future source resolvers should produce this same validated, normalized
-snapshot and retain reproducible source identity without changing harness placement.
+acquisition from native generation and pin remote revisions. They inform this separation without
+becoming runtime dependencies. Source readers produce the same validated, normalized snapshot and
+retain resolved source provenance without changing harness placement.
 
 ## Representation, ordering, and conflicts
 
@@ -1086,16 +1124,23 @@ behavior, retained settings on mapping removal, and collisions with explicit plu
 portability and second-user/second-workspace cases must be observable, not inferred from manifest
 validation.
 
-R6 source acceptance covers inline text, local files, and complete Agent Skills directories at all
-five scopes. Prove template inheritance, atomic entry replacement, local null suppression, and
-cross-scope same-name identity without hiding ancestor artifacts. Exercise CRLF/LF equivalence, lone
-CR normalization, unchanged source files, binary (including ASCII-only PDF), unknown-format and
-`preserve_bytes` fidelity, executable members, invalid metadata, symlinks/traversal/collisions,
-bounded capture, and source mutation or absence before harness writes. Reinit detects meaningful
-source changes; downstream session start uses ancestor snapshots without rereading them, while its
-own sources follow the documented start/restart acquisition rule. Removing a declaration feeds the
-existing cleanup path. These are plain data fixtures and injected failures, not test feature
-capabilities or new external services.
+R6 source acceptance covers inline text, local files, and complete local or Git-backed Agent Skills
+directories at all five scopes. Prove template inheritance, atomic entry replacement, local null
+suppression, and cross-scope same-name identity without hiding ancestor artifacts. Exercise CRLF/LF
+equivalence, lone CR normalization, unchanged source files, binary (including ASCII-only PDF),
+unknown-format and `preserve_bytes` fidelity, executable members, invalid metadata,
+symlinks/traversal/collisions, bounded capture, and source mutation or absence before harness
+writes. Reinit detects meaningful source changes; downstream session start uses ancestor snapshots
+without rereading them, while its own sources follow the documented start/restart acquisition rule.
+Removing a declaration feeds the existing cleanup path. These are plain data fixtures and injected
+failures, not test feature capabilities or new external services. Temporary Git repositories and
+controlled acquisition fixtures prove branch/tag/commit resolution, selected subdirectories and root
+skills, shared commit resolution within an operation, refresh of movable refs, and pinned-commit
+stability. Equivalent local/Git packages must yield identical normalized content hashes and native
+behavior. Cover fetch failure, unsupported submodules/LFS members, bounded acquisition,
+credential-free diagnostics, and temporary-storage cleanup; exported attributes must not omit or
+rewrite selected contents. No public repository or external credential is needed for this
+acceptance.
 
 R9 cleanup acceptance starts from recorded successful provisioning, then removes a producer
 artifact, one plugin entry, and a whole integration attachment through their owning lifecycles.
