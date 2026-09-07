@@ -401,6 +401,12 @@ subagent semantics, stable captured contents, and safe lifecycle cleanup are mat
 follow-on design and its acceptance criteria. No acquisition, format, storage, or delivery mechanism
 is committed by this facets effort.
 
+The operator's leading proposal is a future declarative `artifact-bundle` resource kind that owns
+artifact ingestion and gives each bundle an ID for consuming resources to reference. A bundle's
+source identity is distinct from each consumer's scope and applicability. The kind, its schema, and
+revision, update, and storage semantics remain future design decisions; this effort introduces no
+bundle registration or API.
+
 ## What changed since the scope-participation contract was written
 
 The contract is dated 2026-08-05. Three of its statements are stale against `main`, and a fourth
