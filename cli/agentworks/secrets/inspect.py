@@ -19,6 +19,7 @@ from agentworks import output
 from agentworks.capabilities.secret_backend import OperatorImpact, TtyInteractionAccess
 from agentworks.capabilities.secret_backend.client import safe_identity
 from agentworks.errors import StateError
+from agentworks.list_sorting import normalize_sort_keys, nullable_sort_value, sort_rows
 from agentworks.machine_output import (
     JsonObject,
     JsonValue,
@@ -32,6 +33,8 @@ from agentworks.secrets.preview import ResolutionPreview, preview_batch, preview
 from agentworks.secrets.sources import SourceProvenance, source_provenance
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentworks.config import Config
     from agentworks.origin import Origin
     from agentworks.resources import Registry
@@ -118,7 +121,43 @@ def secret_table_data(table: SecretTable) -> JsonObject:
     }
 
 
-def build_secret_table(config: Config, registry: Registry) -> SecretTable:
+def _sort_secret_rows(
+    rows: tuple[SecretRow, ...],
+    *,
+    source_backends: Mapping[str, str],
+    sort_keys: tuple[str, ...] | None = None,
+) -> tuple[SecretRow, ...]:
+    """Order secret rows by their first candidate source in chain order."""
+
+    def first_candidate_source(row: SecretRow) -> SecretSourceCell | None:
+        return next((cell for cell in row.cells if cell.candidate), None)
+
+    def source_name(row: SecretRow) -> str | None:
+        source = first_candidate_source(row)
+        return source.source if source is not None else None
+
+    def backend_name(row: SecretRow) -> str | None:
+        source = source_name(row)
+        return source_backends[source] if source is not None else None
+
+    return sort_rows(
+        rows,
+        sort_keys=sort_keys,
+        key_functions={
+            "alpha": lambda row: (row.name,),
+            "source": lambda row: nullable_sort_value(source_name(row)),
+            "backend": lambda row: nullable_sort_value(backend_name(row)),
+        },
+        entity_kind="secret",
+    )
+
+
+def build_secret_table(
+    config: Config,
+    registry: Registry,
+    *,
+    sort_keys: tuple[str, ...] | None = None,
+) -> SecretTable:
     """Build a (secrets x sources) table.
 
     The table iterates the Registry's ``"secret"`` kind so auto-declared
@@ -130,15 +169,22 @@ def build_secret_table(config: Config, registry: Registry) -> SecretTable:
     Walks active sources in precedence order and consumes only their pure
     lookup projections. No client is constructed and no value is read.
     """
+    normalized_sort_keys = normalize_sort_keys(
+        sort_keys,
+        allowed={"alpha", "source", "backend"},
+        entity_kind="secret",
+    )
+
     from agentworks.secrets.resolve import _BackendProtocolError, _lookup_projection, active_sources
 
     sources = active_sources(config, registry)
     source_names = tuple(source.name for source in sources)
+    source_backends = {source.name: source.backend_class.name for source in sources}
 
     operator_count = 0
     auto_count = 0
     rows: list[SecretRow] = []
-    for decl in sorted(registry.iter_kind(SECRET_KIND_NAME), key=lambda d: d.name):
+    for decl in registry.iter_kind(SECRET_KIND_NAME):
         # Variant-based counter; defensive on missing origin.
         variant = getattr(getattr(decl, "origin", None), "variant", None)
         if variant == "operator-declared":
@@ -174,7 +220,11 @@ def build_secret_table(config: Config, registry: Registry) -> SecretTable:
 
     return SecretTable(
         sources=source_names,
-        rows=tuple(rows),
+        rows=_sort_secret_rows(
+            tuple(rows),
+            source_backends=source_backends,
+            sort_keys=normalized_sort_keys,
+        ),
         operator_count=operator_count,
         auto_count=auto_count,
     )

@@ -11,6 +11,7 @@ from agentworks.cli._helpers import (
     get_db,
     ordinary_tty_interaction_policy,
     parse_csv_filter,
+    parse_csv_sort,
     prompt_vm,
 )
 from agentworks.machine_output import OutputFormat
@@ -57,6 +58,10 @@ def workspace_create(
 @workspace_app.command("list")
 def workspace_list(
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM")] = None,
+    sort: Annotated[
+        str | None,
+        typer.Option("--sort", help="Sort by comma-separated keys: alpha, creation, vm. Default: alpha."),
+    ] = None,
     names_only: Annotated[
         bool,
         typer.Option(
@@ -76,7 +81,11 @@ def workspace_list(
 
     from agentworks.workspaces.manager import render_workspace_listing, workspace_listing
 
-    listing = workspace_listing(get_db(), vm_name=parse_csv_filter(vm))
+    listing = workspace_listing(
+        get_db(),
+        vm_name=parse_csv_filter(vm),
+        sort_keys=parse_csv_sort(sort),
+    )
     if output_format is OutputFormat.JSON:
         from click import get_binary_stream
 

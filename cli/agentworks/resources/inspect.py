@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from agentworks import output
+from agentworks.list_sorting import sort_rows
 from agentworks.machine_output import (
     JsonObject,
     project_origin,
@@ -32,6 +33,7 @@ from agentworks.resources.graph import Enablement
 from agentworks.resources.render import format_origin_line
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from pathlib import Path
 
     from agentworks.origin import Origin
@@ -166,6 +168,7 @@ def list_resources(
     kinds: tuple[str, ...] | None = None,
     origin_filter: OriginFilter | None = None,
     include_disabled: bool = False,
+    sort_keys: tuple[str, ...] | None = None,
 ) -> ResourceListing:
     """Build a ``ResourceListing`` for ``agw resource list``.
 
@@ -213,7 +216,7 @@ def list_resources(
                 hint=f"known kinds: {', '.join(sorted(KIND_REGISTRY))}",
             )
 
-    target_kinds = tuple(kinds) if kinds else tuple(sorted(registry.iter_kinds()))
+    target_kinds = tuple(kinds) if kinds else tuple(registry.iter_kinds())
 
     rows: list[ResourceSummary] = []
     operator_count = 0
@@ -222,11 +225,7 @@ def list_resources(
     plugin_count = 0
 
     for kind in target_kinds:
-        # Sort by name within each kind so the output is stable across
-        # runs and easy to diff. Cross-kind ordering is alphabetized via
-        # ``sorted(registry.iter_kinds())`` above.
-        items = sorted(registry.iter_kind_items(kind), key=lambda item: item[0])
-        for name, resource in items:
+        for name, resource in registry.iter_kind_items(kind):
             origin = getattr(resource, "origin", None)
             if not _matches_origin(origin, origin_filter):
                 continue
@@ -249,7 +248,12 @@ def list_resources(
                 plugin_count += 1
 
     return ResourceListing(
-        rows=tuple(rows),
+        rows=sort_rows(
+            rows,
+            sort_keys=sort_keys,
+            key_functions={"alpha": lambda row: (row.kind, row.name)},
+            entity_kind="resource",
+        ),
         operator_count=operator_count,
         auto_count=auto_count,
         code_count=code_count,
@@ -295,7 +299,25 @@ class KindRow:
     description: str
 
 
-def list_kinds(registry: Registry) -> list[KindRow]:
+def sort_kind_names(
+    names: Iterable[str],
+    *,
+    sort_keys: tuple[str, ...] | None = None,
+) -> tuple[str, ...]:
+    """Order kind names through the public resource-kind sort contract."""
+    return sort_rows(
+        names,
+        sort_keys=sort_keys,
+        key_functions={"alpha": lambda name: (name,)},
+        entity_kind="resource-kind",
+    )
+
+
+def list_kinds(
+    registry: Registry,
+    *,
+    sort_keys: tuple[str, ...] | None = None,
+) -> list[KindRow]:
     """Every kind the app defines, sorted by name, with current registry
     row counts. Kinds are baked into the app -- plugins publish
     resources of existing kinds (declarable and capability alike),
@@ -303,15 +325,18 @@ def list_kinds(registry: Registry) -> list[KindRow]:
     inventory."""
     from agentworks.resources import KIND_REGISTRY
 
-    return [
-        KindRow(
-            kind=name,
-            category=handler.category,
-            resources=sum(1 for _ in registry.iter_kind(name)),
-            description=handler.description,
+    rows: list[KindRow] = []
+    for name in sort_kind_names(KIND_REGISTRY, sort_keys=sort_keys):
+        handler = KIND_REGISTRY[name]
+        rows.append(
+            KindRow(
+                kind=name,
+                category=handler.category,
+                resources=sum(1 for _ in registry.iter_kind(name)),
+                description=handler.description,
+            )
         )
-        for name, handler in sorted(KIND_REGISTRY.items())
-    ]
+    return rows
 
 
 def resource_kinds_data(rows: list[KindRow]) -> JsonObject:

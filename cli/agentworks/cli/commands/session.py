@@ -7,7 +7,7 @@ from typing import Annotated
 import typer
 
 from agentworks.cli._app import app
-from agentworks.cli._helpers import get_db, ordinary_tty_interaction_policy, parse_csv_filter
+from agentworks.cli._helpers import get_db, ordinary_tty_interaction_policy, parse_csv_filter, parse_csv_sort
 from agentworks.machine_output import OutputFormat
 
 session_app = typer.Typer(
@@ -134,6 +134,13 @@ def session_list(
     ] = None,
     admin: Annotated[bool, typer.Option("--admin", help="Only admin-mode sessions (no agent)")] = False,
     status: Annotated[bool, typer.Option("--status", help="Include live runtime status")] = False,
+    sort: Annotated[
+        str | None,
+        typer.Option(
+            "--sort",
+            help="Sort by comma-separated keys: alpha, creation, vm, agent, workspace. Default: alpha.",
+        ),
+    ] = None,
     names_only: Annotated[
         bool,
         typer.Option(
@@ -181,6 +188,7 @@ def session_list(
                 agent_name=parsed_agent,
                 admin_only=admin,
                 include_status=status,
+                sort_keys=parse_csv_sort(sort),
             )
         write_json_envelope(
             MachineOutputCommand.SESSION_LIST,
@@ -197,6 +205,7 @@ def session_list(
         admin_only=admin,
         include_status=status,
         names_only=names_only,
+        sort_keys=parse_csv_sort(sort),
     )
 
 

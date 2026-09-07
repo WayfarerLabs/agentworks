@@ -50,6 +50,33 @@ replacement instead. Run `agw resource explain vm-template`, `workspace-template
 or `session-template` for the accepted fields. Use `agw resource explain admin-template` for
 `--admin-spec` fields.
 
+### List ordering
+
+List commands default to alphabetical order and accept `--sort KEY[,KEY...]` where another useful
+ordering exists. Keys are ascending, the first supplied key is primary, and `alpha` is always the
+final tie-breaker regardless of where it appears in the option. Unknown, duplicate, empty, and
+command-inapplicable keys are errors. Missing creation times and relationship names sort before
+present values.
+
+| Command          | Sort keys                                       |
+| ---------------- | ----------------------------------------------- |
+| `vm list`        | `alpha`, `creation`                             |
+| `agent list`     | `alpha`, `creation`, `vm`                       |
+| `workspace list` | `alpha`, `creation`, `vm`                       |
+| `session list`   | `alpha`, `creation`, `vm`, `agent`, `workspace` |
+| `console list`   | `alpha`, `creation`, `vm`                       |
+| `secret list`    | `alpha`, `source`, `backend`                    |
+| `resource list`  | `alpha`                                         |
+| `resource kinds` | `alpha`                                         |
+
+For `resource list`, alphabetical order means `(kind, name)`. Human, JSON, and `--names-only` output
+use the same service ordering. `guide list` preserves its inherent catalog order and does not accept
+`--sort`.
+
+For `secret list`, `source` and `backend` mean the source name and configured backend name of the
+first candidate source in configured source-chain precedence. A secret with no candidate source
+sorts before named values.
+
 ### Machine-readable output
 
 The operational inspection commands `agw graph show`, `agw resource list`, `agw resource show`,
@@ -105,8 +132,8 @@ deduplicated, grouped, or sorted.
 ```
 
 `origin`, `used_by_count`, and `not_ready_reason` may be null. `disabled` is boolean. Resource rows
-preserve the selected kind order, then name order, and counts are post-filter values. Disabled rows
-remain hidden unless `--include-disabled` is requested.
+use the requested list ordering, defaulting to kind then name, and counts are post-filter values.
+Disabled rows remain hidden unless `--include-disabled` is requested.
 
 `agw resource show KIND/NAME --output json` uses command `resource.show` and data:
 
@@ -156,7 +183,7 @@ declaration values but never resolves a secret reference; treat its output as se
 
 `agw resource kinds --output json` uses command `resource.kinds` and data
 `{kinds: [{kind, category, resource_count, description}]}`. `category` is exactly `declarable` or
-`capability`; kinds sort lexically.
+`capability`; kinds use the requested list ordering, which is lexical for the available `alpha` key.
 
 #### Graph JSON schema
 
