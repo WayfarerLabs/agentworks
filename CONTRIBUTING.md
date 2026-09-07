@@ -90,6 +90,26 @@ Pass `-n 0` for a deliberately single-process debugging run. Tests that genuinel
 resource must use a named `xdist_group` with a one-line comment explaining the constraint; do not
 serialize tests preemptively.
 
+Linux CI runs the full non-integration suite above. Windows CI runs focused host coverage:
+
+```bash
+uv run pytest tests/ -m 'windows and not integration'
+```
+
+Apply `@pytest.mark.windows` to tests guarding behavior Linux cannot reliably validate: native paths
+and home expansion, local versus guest paths, file replacement and cleanup, subprocess bytes,
+encoding, quoting and process lifetime, SQLite locking, WAL, backup/restore and migration recovery,
+PowerShell completion, terminal handling, and installed-package or CLI startup. The marker selects
+tests for Windows CI; it does not make them Windows-only or skip them on Linux. Tests requiring a
+particular operating system still need an explicit skip condition.
+
+Choose the smallest coherent test or class scope; use `pytestmark = pytest.mark.windows` for a
+module whose tests share a Windows host risk. Pure validation, model and graph logic, ordinary CRUD
+and historical-schema permutations, mocked cloud responses, and Linux guest scripts normally rely on
+Linux coverage. A mocked Windows branch alone cannot validate a risk that depends on real host
+files, streams, processes, or database connections. When changing host-sensitive behavior, keep its
+regression coverage in the selected suite and explain the host risk when it is not obvious.
+
 ### Running the file-quality linters
 
 The npm-based linters (cspell, markdownlint-cli2, prettier) are pinned via per-tool
