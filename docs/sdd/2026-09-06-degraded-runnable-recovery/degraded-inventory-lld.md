@@ -7,19 +7,10 @@
 
 ## Session structural facts
 
-Resolve one internal list-only fact with no presentation strings:
-
-```python
-def session_list_vm(db: Database, session: SessionRow) -> tuple[str | None, bool]: ...
-```
-
-The resolver receives `Database` and `SessionRow`, uses `get_workspace` and `get_vm`, and never
-raises for a missing relation. A missing workspace yields `(None, False)`. An existing workspace
-whose VM is missing yields `(workspace.vm_name, False)`. Both rows remain selected. The stored
-workspace name stays on `SessionRow`; the helper does not duplicate it.
-
-The exact helper name may change during implementation to match the surrounding module vocabulary;
-the behavior and single source of structural classification shall not.
+`session_listing` resolves each selected `SessionRow` with non-raising `get_workspace` and `get_vm`
+lookups. A missing workspace yields no VM name and is not observable. An existing workspace whose VM
+is missing preserves `workspace.vm_name` but is not observable. Both rows remain selected. The
+stored workspace name stays on `SessionRow`; no replacement location model is introduced.
 
 `session_listing` resolves each selected row once, initializes its status to unknown when requested,
 passes only structurally complete rows to the existing strict observer, and merges those results.
@@ -29,8 +20,8 @@ is clearer. `observe_session_statuses` does not change.
 The service adds a positive `require_vm_names: bool = False` policy. The JSON v1 adapter passes
 `True`; human and names-only paths retain the default. If any selected session's workspace is
 missing, the service raises the existing typed missing-workspace error during local projection,
-before printing progress or dispatching status work. A missing VM row does not trip this policy
-because the existing workspace still supplies a truthful string VM name.
+before dispatching status work. A missing VM row does not trip this policy because the existing
+workspace still supplies a truthful string VM name.
 
 ## List and renderer types
 
@@ -95,6 +86,34 @@ commit
 The message need not include the full violation rows. Tests assert exception type, metadata,
 checkpoint behavior, and cause boundaries, never prose wording.
 
+## Restore source validation
+
+A frozen `RestoreSourceInspection` contains `schema_version` and `has_foreign_key_violations`. The
+constraint query stops after the first returned row. Validation always performs the existing SQLite,
+quick-check, version, and expected-schema-shape checks; the keyword-only
+`allow_foreign_key_violations` policy controls only whether the violation fact raises a typed
+`StateError`.
+
+`prepare_restore(backup_path, database_path, ...)` resolves and binds both paths and retains the
+existing rejection when they are equal. It opens the source in read-only autocommit mode, explicitly
+begins a read transaction, and performs all validation on that transaction's pinned snapshot. It
+returns a context-managed `PreparedRestore` carrying the inspection, bound destination, and
+still-open connection. Its argument-free `apply()` copies from that exact connection to the bound
+destination through the existing bounded online-backup mechanism. Context exit closes the source on
+success, refusal, cancellation, or failure.
+
+The existing `validate_restore_source(backup_path) -> int` opens and validates a snapshot, returns
+only its schema version, and closes it. The existing
+`restore_backup(backup_path, database_path) -> None` prepares and applies a snapshot, preserving
+both public signatures and return contracts. The additive prepared API owns the keyword-only
+`allow_foreign_key_violations=False` policy because the CLI must present risk and confirmation
+between validation and mutation without reopening or racing the source.
+
+The CLI maps `--force` to `allow_foreign_key_violations=True` during preparation. A violating
+inspection causes a warning before the existing source/destination confirmation and a second warning
+after `apply` succeeds. `--yes` continues to control only confirmation. Warnings remain visible
+under `--yes`, and force cannot bypass any other validation result.
+
 ## Test seams
 
 - Seed current-schema orphans by disabling foreign-key enforcement only inside test setup, then
@@ -108,6 +127,13 @@ checkpoint behavior, and cause boundaries, never prose wording.
   and lifecycle tests retain the broader strict contract.
 - Build an older schema, inject a relationship violation, and verify direct construction plus safe
   open type and checkpoint behavior.
+- Inject a current and historical restore-source violation. Prove default validation and restore
+  refuse before destination mutation, forced restore copies, malformed sources and invalid schemas
+  still refuse under force, and inspection reports the violation Boolean.
+- Change and replace the source path after preparation. Prove apply copies the inspected snapshot,
+  not later path content, and prove every exit path closes the prepared source.
+- Prove preparation rejects equal resolved source and destination paths and apply uses the
+  destination bound before confirmation.
+- At the CLI boundary, prove force and yes are independent control inputs and capture warnings by
+  event and stream rather than asserting authored sentences.
 - Keep table assertions structural (column alignment or parsed JSON), never exact authored prose.
-
--- agw-ns-onboard-disco

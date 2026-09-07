@@ -5,7 +5,6 @@
 - Requirements: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
 - Detailed design: [degraded-inventory-lld.md](./degraded-inventory-lld.md)
-- Migration: [migration-strategy.md](./migration-strategy.md)
 - Research: [prior-art-research.md](./prior-art-research.md)
 - Source baseline: `0c8cf6bc77dd49a2a30440cde0326f37a3980689`
 - Delivery: one design-and-implementation PR based on `main`
@@ -26,7 +25,7 @@
 - [x] Reproduce the three structural failure boundaries from source and tests.
 - [x] Confirm filter, names-only, JSON, describe, lifecycle, and migration-safe-open behavior.
 - [x] Research SQLite foreign-key diagnostics, Python exception semantics, and JSON null.
-- [x] Write the FRD, HLA, LLD, migration strategy, research record, and implementation plan.
+- [x] Write the FRD, HLA, LLD, research record, and implementation plan.
 - [x] Run file formatting, Markdown, spell, locked-SDD, and diff consistency checks.
 - [x] Run private project-values and Muntz design reviews and resolve material findings.
 - [ ] Publish the draft design PR and complete up to three design feedback/fix rounds.
@@ -43,15 +42,24 @@
 - [ ] Preserve shared observer strictness and focused typed failures with explicit tests.
 - [ ] Add stale-schema migration coverage for typed direct and safe-open refusal, unchanged version
       checkpoint, and backup recovery behavior.
+- [ ] Add restore-source coverage for foreign-key violation reporting, default pre-copy refusal,
+      narrow forced acceptance, unchanged validation of every other source property, and final
+      snapshot identity across source commits or path replacement.
+- [ ] Add CLI coverage that `--force` and `--yes` remain independent and that a forced inconsistent
+      restore warns before confirmation and after successful replacement.
 - [ ] Implement the list-only session VM projection and human-list nullable VM facts.
 - [ ] Implement per-row session and console status partitioning in the list services while retaining
       strict shared observers.
 - [ ] Translate migration foreign-key violations at the database boundary.
+- [ ] Add a prepared-restore boundary that pins one inspected SQLite snapshot through confirmation
+      and copy while preserving the public validator and restore return contracts.
+- [ ] Extend restore-source validation with a narrow `allow_foreign_key_violations` policy; map CLI
+      `--force` to it without weakening other checks.
 
 ## Phase 3: Permanent collateral
 
 - [ ] Update `cli/command-reference.md` for recovery inventory, status isolation, filter
-      reachability, and the JSON v1 recovery limit.
+      reachability, the JSON v1 recovery limit, and the warned restore bypass.
 - [ ] Update `docs/guides/runnable-status.md` with recovery and migration behavior.
 - [ ] Add a dated correction to the locked runnable-status SDD.
 - [ ] Update any README, completion, sample, or guide topic made stale by the implementation.
@@ -85,8 +93,8 @@
 - [ ] Requested status isolates incomplete structure per row and retains healthy peer results.
 - [ ] Focused and mutating operations stay strict.
 - [ ] Unsafe migration refuses through typed Agentworks errors without advancing its checkpoint.
+- [ ] Restore rejects foreign-key violations by default; `--force` accepts only those violations,
+      remains independent from `--yes`, and warns before and after replacement.
 - [ ] Human, strict JSON v1, filter, names-only, docs, and locked design records agree.
 - [ ] Local gates, private reviews, hosted CI, shipped-CLI validation, published feedback, and
       operator disposition are complete at the ready commit.
-
--- agw-ns-onboard-disco

@@ -23,6 +23,9 @@ persisted rows
 
 stale schema
     +-- migration step -- foreign_key_check -- checkpoint OR typed refusal
+
+restore candidate
+    +-- file/schema validation -- foreign_key_check -- refusal OR explicit warned bypass
 ```
 
 The design does not introduce a generic runnable abstraction. Sessions and consoles share a failure
@@ -107,6 +110,47 @@ truthful about possible partial change.
 The schema-version row is inserted only after a clean check, exactly as today. No violation is
 ignored, deleted, or auto-repaired.
 
+### Restore validation boundary
+
+Restore source inspection reports both the supported schema version and whether SQLite's declared
+foreign-key constraints are violated. It stops at the first violation because warning and refusal
+need only that classification. The restore service rejects a violating snapshot unless its caller
+explicitly allows foreign-key violations. That narrowly named service policy is the only validation
+weakened by the CLI's `--force`; SQLite readability, `quick_check`, Agentworks identity, supported
+version, and the expected table and column shape remain mandatory.
+
+Preparation binds both resolved paths, rejects a source that is also the live destination, opens the
+source read-only, begins a read transaction, pins its snapshot with the first validation query, and
+keeps that connection open across warning and confirmation. The prepared restore then copies from
+the same connection to its bound destination. A path replacement or source commit after inspection
+therefore cannot change the snapshot that reaches the live database, and confirmation cannot name a
+different destination from the one applied. The CLI emits a warning before showing the source and
+destination and asking for confirmation when `--force` allows a violating snapshot, then warns again
+after that same snapshot is successfully restored.
+
+The existing public `validate_restore_source` still returns the schema version, and the existing
+public `restore_backup` still returns `None`. Both delegate to the same snapshot-validation and copy
+internals. The additive prepared-restore API carries the richer inspection fact and owns the open
+connection through a context manager, so cancellation and failures always release it. Direct
+`restore_backup` callers retain their exact fail-closed signature and return contract; callers that
+need the bypass use the explicit prepared-restore API.
+
+Holding the snapshot across an interactive prompt can delay a writer to a rollback-journal source.
+Restore inputs are expected to be quiescent backup files, and WAL sources do not impose that writer
+delay, so avoiding a second full copy and temporary-file lifecycle is the smaller recovery design.
+
+`--force` expresses acceptance of inconsistent relationships, while `--yes` expresses confirmation
+of replacement. Neither implies the other. The warning path is presentation owned by the CLI; the
+validation and bypass policy remain service owned.
+
+## Delivery and rollback
+
+This is an in-place code transition with no stored-data migration or capability version. It adds the
+`database restore --force` modifier for explicit degraded recovery. It can be rolled back without
+transforming the database; degraded rows will again make some inventory operations fail. Any
+operator database used for live testing is backed up first, and validation never repairs or deletes
+operator state.
+
 ## Data and machine contracts
 
 No stored schema, capability contract, or JSON v1 shape changes.
@@ -151,6 +195,12 @@ derivable string VM name and fails atomically when a selected session lacks one.
 - Orphans never trigger guest work.
 - Status remains read-only and does not reconcile persisted runtime evidence.
 - Migration validation remains fail-closed.
+- Restore accepts foreign-key violations only with explicit `--force`; every other source check
+  remains fail-closed.
+- Forced inconsistent restore retains replacement confirmation and warns both before and after the
+  live database changes.
+- Restore inspection and copy use one pinned SQLite snapshot; validation cannot race a changed
+  source path or later source commit.
 - Error text may report table and relationship metadata but not row payloads or secrets.
 
 ## Permanent homes
@@ -159,5 +209,3 @@ Implementation behavior lives in the session and console query/status modules an
 The operator contract lives in `cli/command-reference.md` and `docs/guides/runnable-status.md`. The
 JSON recovery limit lives in the command reference. The prior runnable-status SDD receives a dated
 correction in its lockfile because its current post-lock limit is superseded.
-
--- agw-ns-onboard-disco

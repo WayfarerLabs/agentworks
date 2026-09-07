@@ -1,89 +1,55 @@
-# Degraded Runnable Recovery: Prior-Art Research
+# Degraded Runnable Recovery: Prior Art
 
 - Status: Design
 - Date: 2026-09-06
 
-## Executive summary
+## Governing project patterns
 
-The external standards support the narrow design: use SQLite's own foreign-key diagnostic as a
-fail-closed migration gate, translate its implementation exception at the application boundary, and
-represent an unavailable derived machine fact without coercing it into an existing string field. The
-resource-isolation behavior is already established internally by runnable status observation; this
-effort applies that policy at list selection rather than inventing a new status system.
+- The locked runnable-status design initializes requested rows to unknown, observes bounded targets
+  independently, and retains successful rows when another operational target fails. Structural
+  incompleteness joins that partition in the list service before target construction.
+- The JSON v1 contract permits optional additions but forbids changing an existing type, meaning, or
+  collection order. A missing workspace cannot truthfully populate the required string `vm_name`, so
+  v1 retains typed failure rather than using null, a sentinel, or an incomplete collection.
+- `MigrationBlockedError` promises that its precondition failed before schema or data changed. The
+  generic post-step foreign-key check cannot make that promise, so direct construction uses ordinary
+  `StateError` and the safe opener keeps its existing partial-migration wrapper.
+- Existing restore already separates source validation from destructive confirmation and repeats
+  validation inside the copy service. The new `--force` follows the CLI's established meaning of
+  bypassing one named safety refusal; `--yes` remains the independent confirmation bypass.
+- SQLite read transactions observe an unchanging snapshot, and Python's connection backup API copies
+  from an existing source connection. Holding one read-only transaction across validation,
+  confirmation, and backup binds the warned facts to the bytes restored without staging another
+  database file.
 
-## Findings and decisions
+Sources: `docs/sdd/2026-09-03-runnable-status-inspection/locked.md`, `cli/command-reference.md`,
+`cli/agentworks/errors.py`, and `cli/agentworks/db/backup.py`.
 
-### Foreign-key validation is a row-producing diagnostic
+## External source check
 
-SQLite documents `PRAGMA foreign_key_check` as returning one row for each violated constraint,
-including the child table, row identifier, referenced table, and constraint index. A non-empty
-result is therefore authoritative evidence that migration must not checkpoint the target version.
-This effort keeps the check after every migration step and changes only the application exception.
+SQLite defines `PRAGMA foreign_key_check` as a row-producing diagnostic for violated constraints,
+which supports retaining the non-empty-result migration gate. Python defines
+`sqlite3.IntegrityError` as an adapter exception for affected relational integrity, which supports
+translating the deliberately detected result at the Agentworks boundary. RFC 8259 confirms that JSON
+null is distinct from a string; the project compatibility rule, not JSON syntax, is why null cannot
+replace the existing string field.
 
-Source:
-[SQLite PRAGMA foreign_key_check](https://www.sqlite.org/pragma.html#pragma_foreign_key_check)
+Sources: [SQLite foreign-key check](https://www.sqlite.org/pragma.html#pragma_foreign_key_check),
+[SQLite transaction behavior](https://www.sqlite.org/lang_transaction.html),
+[SQLite online backup API](https://www.sqlite.org/backup.html),
+[Python sqlite3](https://docs.python.org/3/library/sqlite3.html#sqlite3.Connection.backup), and
+[RFC 8259 JSON values](https://www.rfc-editor.org/rfc/rfc8259.html#section-3).
 
-### SQLite exceptions are implementation-facing
+## Rejected approaches
 
-Python documents `sqlite3.IntegrityError` as the database exception for affected relational
-integrity, including foreign-key failures. That is useful inside the database adapter but does not
-carry Agentworks entity metadata or operator remediation. The database boundary should translate the
-deliberately detected violation into `StateError`, while preserving the original safe opener's
-stronger partial-migration warning where applicable.
-
-Source:
-[Python sqlite3 exceptions](https://docs.python.org/3/library/sqlite3.html#sqlite3.IntegrityError)
-
-### JSON supports explicit absence, but project compatibility forbids widening the old field
-
-RFC 8259 defines null as a JSON primitive distinct from strings. A session whose workspace row is
-missing has no derivable VM name, and `"unknown"`, `"-"`, or `""` would overload the existing string
-field. Agentworks JSON v1 also forbids changing an existing field type or collection meaning, so the
-compatible narrow choice is to retain typed failure when no string can be represented.
-
-Source: [RFC 8259, JSON values](https://www.rfc-editor.org/rfc/rfc8259.html#section-3)
-
-### Internal prior art favors per-target isolation
-
-The locked runnable-status design initializes every requested status to unknown, observes bounded
-targets independently, and retains successful rows when another operational target fails. Session
-and console observers already use this shape for transport and parser failures. Structural
-incompleteness should join the same partition before target construction.
-
-Source: `docs/sdd/2026-09-03-runnable-status-inspection/locked.md`
-
-### Internal error taxonomy distinguishes preflight refusal from partial migration
-
-`MigrationBlockedError` promises that its precondition failed before schema or data changes. The
-generic post-step foreign-key check runs after a migration step and cannot make that promise.
-`StateError` is therefore the honest direct-boundary type, and the safe opener retains its existing
-partial-migration recovery wrapper.
-
-Source: `cli/agentworks/errors.py` and `cli/agentworks/db/backup.py`
-
-## Refuted approaches
-
-- **Ignore violations to make inventory available.** Rejected because it advances an inconsistent
-  schema and weakens the fail-closed migration contract.
-- **Use `MigrationBlockedError` for every foreign-key result.** Rejected because the check may run
-  after DDL or data changes and that subtype explicitly promises otherwise.
-- **Use null or a display sentinel in `sessions[].vm_name`.** Rejected because null changes the v1
-  type, while a string sentinel changes its meaning and forces consumer heuristics.
-- **Move unrepresentable rows into an additive collection.** Rejected because existing consumers
-  would receive exit zero with an incomplete `{sessions}` result, changing that collection's meaning
-  even though its item type stayed stable.
-- **Make all required-relationship helpers forgiving.** Rejected because lifecycle and focused
-  operations need a valid target and authority boundary.
-- **Add a generic runnable observer.** Rejected because sessions and consoles store different
-  relationships and classify different evidence; only the failure policy is shared.
-
-## Sources
-
-| Source                                  | Quality                 | Design angle                              |
-| --------------------------------------- | ----------------------- | ----------------------------------------- |
-| SQLite PRAGMA documentation             | Primary                 | authoritative violation diagnostic        |
-| Python `sqlite3` documentation          | Primary                 | adapter exception semantics               |
-| RFC 8259                                | Primary standard        | machine representation of absence         |
-| Agentworks locked SDD and error modules | Primary project sources | established isolation and error contracts |
-
--- agw-ns-onboard-disco
+- Ignore or repair migration violations: weakens fail-closed migration and mutates operator state.
+- Make shared observers forgiving: leaks list recovery policy into five strict non-list callers.
+- Use null or a string sentinel for `sessions[].vm_name`: changes the frozen v1 type or meaning.
+- Move unrepresentable rows to a sibling collection: changes `{sessions}` from the complete result.
+- Add JSON v2 for this edge: introduces version-selection grammar and compatibility work beyond the
+  recovery need; human and names-only inventory already expose the row.
+- Add a generic runnable observer: sessions and consoles store and classify different evidence.
+- Let restore force bypass all source validation: recovery value does not justify accepting a
+  malformed, corrupt, unsupported, or schema-invalid database.
+- Make `--force` imply `--yes`: accepting inconsistent relationships and authorizing replacement are
+  distinct operator decisions.

@@ -12,8 +12,8 @@ those relationships, but an operator can still encounter incomplete state after 
 repairing a database, importing older state, or interrupting work outside Agentworks. Recovery is
 when local inventory is most valuable, yet one incomplete relationship currently prevents plain
 `session list` from showing any selected session. The same orphan prevents a status request from
-reporting healthy rows, and an older database can expose a raw SQLite exception while migration
-refuses inconsistent state.
+reporting healthy rows. Migration correctly refuses inconsistent state, but its direct database
+boundary uses a raw SQLite exception instead of the project error taxonomy.
 
 The desired contract separates three jobs:
 
@@ -35,6 +35,9 @@ writes.
 - **Maintainer diagnosing migration.** Receives an Agentworks state error with recovery guidance
   instead of an implementation exception, while the migration continues to refuse foreign-key
   violations.
+- **Operator restoring damaged state.** Is protected from unintentionally replacing the live
+  database with a referentially inconsistent backup, while retaining an explicit, visibly unsafe
+  recovery path when that backup is the best available source.
 
 ## Functional requirements
 
@@ -74,17 +77,29 @@ writes.
   tolerance shall not weaken those boundaries.
 - **R11.** Database migration shall continue checking foreign-key consistency after every migration
   step and shall refuse to advance the schema-version checkpoint when violations exist.
-- **R12.** A migration-time foreign-key refusal shall cross the database boundary as an
+- **R12.** A migration-time foreign-key refusal shall cross the direct database boundary as an
   `AgentworksError` subtype with database identity and actionable backup, restore, inspection, or
-  repair guidance. A raw `sqlite3.IntegrityError` shall not reach the CLI.
-- **R13.** This change shall not repair or delete orphan rows, mutate the database during list or
+  repair guidance. The production safe opener shall retain its existing typed partial-migration
+  wrapper and recovery command.
+- **R13.** `agw database restore` shall check the candidate backup for foreign-key violations before
+  replacing the live database. It shall refuse a violating source by default through a typed
+  Agentworks error. `--force` shall explicitly permit only that referential-integrity bypass;
+  malformed SQLite, failed quick checks, unsupported versions, and invalid schema shapes shall
+  remain unconditionally rejected.
+- **R14.** A forced restore of a backup with foreign-key violations shall warn before confirmation
+  and again after successful replacement. The warning shall state that the source is structurally
+  inconsistent and that some resources may be unavailable until repaired. `--force` shall not imply
+  `--yes`: interactive restore still requires confirmation, and non-interactive restore still
+  requires `--yes`. `--yes` shall suppress only the prompt, never either warning.
+- **R15.** This change shall not repair or delete orphan rows, mutate the database during list or
   status operations, add a database migration, or change a capability contract version.
-- **R14.** Permanent command and recovery guidance, machine-output documentation, the locked
+- **R16.** Permanent command and recovery guidance, machine-output documentation, the locked
   runnable-status record, and executable behavior shall change together.
 
 ## Non-goals
 
 - An automatic database repair command or inferred ownership for orphan rows.
+- Making `database restore --force` bypass file-integrity, Agentworks-schema, or version checks.
 - Treating a missing parent as proof that a guest runtime is stopped.
 - Making describe or lifecycle operations best-effort.
 - Changing VM inventory or VM status behavior, which already observes independent VM rows.
@@ -103,9 +118,11 @@ writes.
    while JSON v1 rejects the former before live observation and preserves the latter.
 4. Named describe and lifecycle operations still reject the same incomplete relationships through
    typed errors.
-5. An older schema with a foreign-key violation refuses migration without advancing its version and
-   surfaces a typed Agentworks error rather than a SQLite implementation exception.
-6. Filters, names-only output, empty selections, JSON v1 shapes, row ordering, table alignment,
+5. An older schema with a foreign-key violation refuses migration without advancing its version;
+   direct construction and the production safe opener both surface truthful typed Agentworks errors
+   at their respective boundaries.
+6. Restore rejects a backup with foreign-key violations before replacement unless `--force` is
+   explicit; the forced path retains confirmation semantics and emits both pre-restore and
+   post-restore warnings without weakening any other validation.
+7. Filters, names-only output, empty selections, JSON v1 shapes, row ordering, table alignment,
    timeouts, and no-write guarantees retain focused coverage.
-
--- agw-ns-onboard-disco
