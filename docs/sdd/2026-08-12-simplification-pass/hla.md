@@ -116,8 +116,10 @@ gone. `sweep-screen.py estate`, committed beside the sweep inventory, derives th
 AST of whatever tree it runs against and prints one line per site, so the size of each population is
 a question with a current answer rather than a figure this document carries. What matters here and
 does not move is the shape: the estate is `match=` under `cli/tests` plus the regex family under
-`website/tests`, and the regex family means every member, `assertRaisesRegex` along with
-`assertRegex` and `assertNotRegex`, since a `match=`-keyed scan misses the others entirely.
+`website/tests`, and the regex family means all five members `estate.py` names: `assertRaisesRegex`,
+`assertRaisesRegexp` and `assertWarnsRegex`, which assert a type as well as a message, plus
+`assertRegex` and `assertNotRegex`, which assert a message alone. A `match=`-keyed scan misses every
+one of them.
 
 Case 2's "where the code already offers a handle" turned out to be the common case rather than the
 rare one, which is worth stating because it sized a whole batch. Two handles already exist in

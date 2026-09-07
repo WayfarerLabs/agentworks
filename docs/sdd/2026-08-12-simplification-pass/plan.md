@@ -236,7 +236,9 @@ shares no files with the website work; it waits on the sweep instead, per group 
       reading a tree at a ref is gone with them. **Done, 2026-09-06**: both commands gone, `Tree`
       reads the working tree only, and the eight that remain (`estate`, `attribute`, `injected`,
       `screen`, `resolve`, `generate`, `restamp`, `totals`) all pass ruff, ruff format and mypy
-      --strict. `restamp` writes the map in place, the only one that does.
+      --strict. `restamp` writes the map in place, the only one that does. **These gates are
+      manual**: CI lints `cli/` and this tooling lives under `docs/sdd/`, so nothing runs ruff, mypy
+      or the eight commands unless a person does. Whoever moves the map runs them.
 
 - [x] Delete guide dead surface and interior re-validation (G8's guide-module members and G2;
       `JsonScalar` lives in `machine_output.py` and belongs to the G6 item below); fix the vacuous
