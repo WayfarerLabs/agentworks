@@ -12,6 +12,7 @@ from agentworks.cli._helpers import (
     get_db,
     ordinary_tty_interaction_policy,
     parse_csv_filter,
+    parse_csv_sort,
     prompt_vm,
 )
 from agentworks.machine_output import OutputFormat
@@ -117,6 +118,10 @@ def console_list(
     workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace")] = None,
     agent: Annotated[str | None, typer.Option("--agent", help="Filter by agent")] = None,
     status: Annotated[bool, typer.Option("--status", help="Include live runtime status")] = False,
+    sort: Annotated[
+        str | None,
+        typer.Option("--sort", help="Sort by comma-separated keys: alpha, creation, vm. Default: alpha."),
+    ] = None,
     names_only: Annotated[
         bool,
         typer.Option(
@@ -162,6 +167,7 @@ def console_list(
                 workspace_name=parse_csv_filter(workspace),
                 agent_name=parse_csv_filter(agent),
                 include_status=status,
+                sort_keys=parse_csv_sort(sort),
             )
         write_json_envelope(
             MachineOutputCommand.CONSOLE_LIST,
@@ -176,6 +182,7 @@ def console_list(
         workspace_name=parse_csv_filter(workspace),
         agent_name=parse_csv_filter(agent),
         include_status=status,
+        sort_keys=parse_csv_sort(sort),
     )
     render_console_listing(listing, names_only=names_only, include_status=status)
 

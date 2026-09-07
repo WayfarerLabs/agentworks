@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from textwrap import dedent
 from typing import TYPE_CHECKING
@@ -11,12 +12,14 @@ import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
+from agentworks.errors import ValidationError
 from agentworks.secrets.inspect import (
     _NAME_CELL_WIDTH,
     _SOURCE_CELL_WIDTH,
     SecretRow,
     SecretSourceCell,
     SecretTable,
+    _sort_secret_rows,
     build_secret_table,
     render_secret_table,
 )
@@ -114,6 +117,117 @@ def test_rows_sorted_alphabetically_by_secret_name(tmp_path: Path) -> None:
     operator_typed = {"a-token", "m-token", "z-token"}
     seen = [r.name for r in table.rows if r.name in operator_typed]
     assert seen == ["a-token", "m-token", "z-token"]
+
+
+def _write_sorting_config(tmp_path: Path) -> Path:
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        settings="""
+        [secret_config]
+        sources = ["z-env", "a-prompt"]
+        """,
+        admin_env={
+            "ENV": {"secret": "a-via-env"},
+            "PROMPT": {"secret": "z-via-prompt"},
+        },
+        manifests=[
+            ManifestDoc("secret-source", "z-env", {"backend": {"name": "env-var"}}),
+            ManifestDoc("secret-source", "a-prompt", {"backend": {"name": "prompt"}}),
+            ManifestDoc("secret", "a-via-env", description="first candidate is z-env"),
+            ManifestDoc(
+                "secret",
+                "z-via-prompt",
+                {"backend_mappings": {"z-env": False}},
+                description="first candidate is a-prompt",
+            ),
+        ],
+    )
+    return cfg_file
+
+
+def test_source_and_backend_sort_place_no_candidate_first() -> None:
+    rows = (
+        SecretRow(
+            "a-env",
+            "",
+            (
+                SecretSourceCell("z-env", True, None, None),
+                SecretSourceCell("a-prompt", True, None, None),
+            ),
+        ),
+        SecretRow("m-none", "", (SecretSourceCell("z-env", False, None, None),)),
+        SecretRow("z-prompt", "", (SecretSourceCell("a-prompt", True, None, None),)),
+    )
+    source_backends = {"z-env": "z-backend", "a-prompt": "a-backend"}
+
+    assert [row.name for row in _sort_secret_rows(rows, source_backends=source_backends, sort_keys=("source",))] == [
+        "m-none",
+        "z-prompt",
+        "a-env",
+    ]
+    assert [row.name for row in _sort_secret_rows(rows, source_backends=source_backends, sort_keys=("backend",))] == [
+        "m-none",
+        "z-prompt",
+        "a-env",
+    ]
+
+
+def test_secret_sort_validation_precedes_source_projection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.secrets import resolve
+
+    cfg = load_config(_write_sorting_config(tmp_path), warn_issues=False)
+    registry = build_registry(cfg)
+
+    def unexpected_sources(*_args: object) -> tuple[object, ...]:
+        raise AssertionError("sort validation must precede source projection")
+
+    monkeypatch.setattr(resolve, "active_sources", unexpected_sources)
+    with pytest.raises(ValidationError):
+        build_secret_table(cfg, registry, sort_keys=("creation",))
+
+
+@pytest.mark.parametrize(
+    ("sort_key", "expected"),
+    [
+        ("source", ["z-via-prompt", "a-via-env"]),
+        ("backend", ["a-via-env", "z-via-prompt"]),
+    ],
+)
+def test_secret_sort_is_shared_by_human_json_and_names_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    sort_key: str,
+    expected: list[str],
+) -> None:
+    from typer.testing import CliRunner
+
+    from agentworks import db
+    from agentworks.cli import app
+
+    cfg_file = _write_sorting_config(tmp_path)
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg_file)
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "state.db")
+    runner = CliRunner()
+
+    human = runner.invoke(app, ["secret", "list", "--sort", sort_key])
+    machine = runner.invoke(app, ["secret", "list", "--sort", sort_key, "--output", "json"])
+    names = runner.invoke(app, ["secret", "list", "--sort", sort_key, "--names-only"])
+
+    assert human.exit_code == machine.exit_code == names.exit_code == 0
+    selected = set(expected)
+    human_names = [
+        line.split()[0] for line in human.stdout.splitlines() if line.split()[:1] and line.split()[0] in selected
+    ]
+    machine_names = [row["name"] for row in json.loads(machine.stdout)["data"]["secrets"] if row["name"] in selected]
+    names_only = [name for name in names.stdout.splitlines() if name in selected]
+    assert human_names == machine_names == names_only == expected
+
+    invalid = runner.invoke(app, ["secret", "list", "--sort", "creation", "--names-only"])
+    assert isinstance(invalid.exception, ValidationError)
 
 
 def test_env_var_cell_shows_default_convention_identifier(tmp_path: Path) -> None:

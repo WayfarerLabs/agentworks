@@ -213,3 +213,14 @@ def parse_csv_filter(value: str | None) -> str | list[str] | None:
     if len(parts) == 1:
         return parts[0]
     return parts
+
+
+def parse_csv_sort(value: str | None) -> tuple[str, ...] | None:
+    """Parse a comma-separated sort option without weakening validation.
+
+    Empty entries are retained so the service boundary can reject malformed
+    input alongside unknown, duplicate, and command-inapplicable keys.
+    """
+    if value is None:
+        return None
+    return tuple(part.strip() for part in value.split(","))

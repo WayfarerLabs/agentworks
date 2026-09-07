@@ -672,7 +672,7 @@ def test_secret_list_json_preserves_source_precedence_without_values(monkeypatch
     )
     monkeypatch.setattr(config, "load_config", lambda **_kwargs: object())
     monkeypatch.setattr(bootstrap, "load_request_registry", lambda _config, **_kwargs: object())
-    monkeypatch.setattr(inspect, "build_secret_table", lambda *_args: table)
+    monkeypatch.setattr(inspect, "build_secret_table", lambda *_args, **_kwargs: table)
 
     result = CliRunner().invoke(app, ["secret", "list", "--output", "json"])
     _assert_human_baseline(
@@ -700,7 +700,7 @@ def test_resource_kinds_json_uses_closed_data_shape(monkeypatch) -> None:
     monkeypatch.setattr(
         inspect,
         "list_kinds",
-        lambda _registry: [KindRow("secret", "declarable", 1, "secret configuration")],
+        lambda _registry, **_kwargs: [KindRow("secret", "declarable", 1, "secret configuration")],
     )
 
     kinds = CliRunner().invoke(app, ["resource", "kinds", "--output", "json"])

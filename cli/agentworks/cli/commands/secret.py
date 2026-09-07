@@ -9,7 +9,12 @@ import typer
 from agentworks import output
 from agentworks.capabilities.secret_backend import OperatorImpact
 from agentworks.cli._app import app
-from agentworks.cli._helpers import get_db, load_completion_registry, ordinary_tty_interaction_access
+from agentworks.cli._helpers import (
+    get_db,
+    load_completion_registry,
+    ordinary_tty_interaction_access,
+    parse_csv_sort,
+)
 from agentworks.machine_output import OutputFormat
 
 secret_app = typer.Typer(
@@ -22,6 +27,11 @@ app.add_typer(secret_app)
 
 @secret_app.command("list")
 def secret_list(
+    sort: str | None = typer.Option(
+        None,
+        "--sort",
+        help="Sort by comma-separated keys: alpha, source, backend. Default: alpha.",
+    ),
     names_only: bool = typer.Option(
         False,
         "--names-only",
@@ -63,7 +73,7 @@ def secret_list(
             warn=output_format is OutputFormat.HUMAN,
             live_database=db,
         )
-    table = build_secret_table(config, registry)
+    table = build_secret_table(config, registry, sort_keys=parse_csv_sort(sort))
     if names_only:
         for row in table.rows:
             output.info(row.name)
