@@ -13,10 +13,10 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.secrets.policy import TtyInteractionPolicy
-    from agentworks.transports import Transport
+    from agentworks.transports import ExecTransport
 
 
-def verified_vm_release(db: Database, vm: VMRow, target: Transport) -> DebianRelease:
+def verified_vm_release(db: Database, vm: VMRow, target: ExecTransport) -> DebianRelease:
     """Return and persist a matching recognized live release.
 
     This ordinary service may fill an unknown row or refresh a matching

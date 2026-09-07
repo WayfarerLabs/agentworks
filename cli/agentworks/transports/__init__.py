@@ -7,8 +7,9 @@ Three named factories plus one low-level helper:
 - :func:`agent_transport` -- the canonical transport as a named agent's
   Linux user. Same mechanism as :func:`transport`, different SSH user.
 - :func:`native_transport` -- the platform-native transport
-  (``limactl shell``, ``wsl.exe``, Azure-via-public-IP, ...). Used only
-  at bootstrap and via the explicit ``vm shell --platform`` opt-in.
+  (``limactl shell``, ``wsl.exe``, cloud public-IP SSH, Proxmox QGA).
+  Used for bootstrap and recovery; full transports additionally support
+  the explicit ``vm shell --platform`` opt-in.
 - :func:`transport_for_user` -- low-level helper used by the named
   factories. Direct use is reserved for the mid-create case where the
   agent row doesn't exist yet (today's only direct caller is
@@ -26,7 +27,7 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError
-from agentworks.transports.base import Transport
+from agentworks.transports.base import ExecTransport, Transport
 from agentworks.transports.lima import LimaTransport
 from agentworks.transports.remote_lima import RemoteLimaTransport
 from agentworks.transports.ssh import SSHTransport
@@ -43,6 +44,7 @@ if TYPE_CHECKING:
 
 
 __all__ = [
+    "ExecTransport",
     "LimaTransport",
     "RemoteLimaTransport",
     "SSHTransport",
@@ -151,7 +153,7 @@ def native_transport(
     *,
     ctx: RunContext,
     stack: contextlib.ExitStack,
-) -> Transport:
+) -> ExecTransport:
     """Platform-native transport for an existing VM.
 
     Used for start-time Tailscale recovery, Tailscale rekey and logout,
@@ -176,8 +178,6 @@ def native_transport(
     arrive by delivery, not by hoping an earlier op in the same process
     warmed a cache.
 
-    A ``None`` return raises a typed :class:`StateError` with the platform
-    hint.
     Surfaces a typed error if the transport resolves to an SSH target
     with an empty host (Azure's defensive guard from PR #118).
 
@@ -197,13 +197,6 @@ def native_transport(
 
     stack.enter_context(platform.transient_route(vm, ctx, config=config))
     target = platform.native_transport(vm, ctx, config=config)
-    if target is None:
-        raise StateError(
-            f"No native transport for VM '{vm.name}' (platform '{platform.name}').",
-            entity_kind="vm",
-            entity_name=vm.name,
-            hint=platform.no_native_transport_hint,
-        )
 
     # Defensive: any SSH-backed native transport that returns an empty
     # host gets the same typed-error treatment. Azure is today's only

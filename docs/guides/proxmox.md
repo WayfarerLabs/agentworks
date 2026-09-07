@@ -17,9 +17,12 @@ cloning a Debian 13 Trixie cloud-init template that you prepare once on your Pro
 
 ## Prerequisites
 
-- A Proxmox VE 8.x server accessible from your workstation
+- A Proxmox VE 8.x or 9.x server accessible from your workstation
 - Root SSH access to the Proxmox host for one-time setup
-- A storage volume that supports VM disk images (e.g. `local-lvm`, `data`, or any LVM-thin/ZFS pool)
+- A storage volume that supports VM disk images, including directory storage such as `local` or a
+  block-backed pool such as LVM-thin or ZFS
+- A working Proxmox subscription or no-subscription package repository if `libguestfs-tools` is not
+  already installed. The setup script does not change package sources.
 
 Run Tailscale on the Proxmox host to keep the API and provisioned VMs accessible over the tailnet
 without exposing the Proxmox API or VM SSH ports to the public internet. Setting up Tailscale on the
@@ -32,7 +35,7 @@ Agentworks includes a setup script that handles all Proxmox-side configuration i
 
 - Creates a Debian 13 Trixie cloud-init VM template with `qemu-guest-agent`
 - Creates an `agentworks` resource pool for VM isolation
-- Creates least-privilege custom roles and ACLs
+- Creates Proxmox VE version-compatible, least-privilege custom roles and ACLs
 - Creates a dedicated API user and token
 
 Copy the script to your Proxmox host and run it as root:
@@ -67,7 +70,8 @@ release selector. Bookworm-era setup used VMID 9000, so the Trixie script defaul
 reuse a Bookworm template VMID: choose another unused value if 9001 is occupied. On a rerun the
 script skips an existing template only when its name and Agentworks release tags match; otherwise it
 stops before printing a misleading Trixie mapping. At the end it prints the config block and token
-secret for your agentworks config.
+secret for your agentworks config. Both file-backed directory storage and block-backed storage are
+supported; the script attaches the volume identifier that Proxmox records during import.
 
 ### Security model
 
@@ -84,6 +88,11 @@ query the guest agent, and allocate disk space on the specified storage.
 
 **The token cannot:** Manage VMs outside the pool, access other storage, take snapshots, create
 backups, migrate VMs, access the console, or manage users/nodes/cluster config.
+
+The `AgentworksVM` role uses `VM.Monitor` for QEMU Guest Agent access on Proxmox VE 8. On Proxmox VE
+9 it uses `VM.GuestAgent.Unrestricted`, which is required for guest exec and also authorizes the
+network inspection and file-write endpoints Agentworks uses. The setup script selects the matching
+role from the installed Proxmox VE major version and refuses unknown major versions.
 
 ### Manual setup
 
@@ -139,9 +148,9 @@ A site without `template_vmids.trixie` remains loadable for best-effort operatio
 New VM creation validates the concrete core-selected release during preflight and fails before the
 command's secret-resolution phase or Proxmox API authentication when that mapping is missing. After
 cloning and bootstrapping the mapped template, core verifies the live guest's `/etc/os-release`
-through the returned Tailscale SSH transport. A missing, non-Debian, or wrong-release observation
-retains an addressable failed VM row for explicit deletion. There is no configuration switch to skip
-the check.
+through the returned QEMU Guest Agent execution transport. A missing, non-Debian, or wrong-release
+observation retains an addressable failed VM row for explicit deletion. There is no configuration
+switch to skip the check.
 
 For 0.13 configuration migration, see [Upgrading to 0.14](upgrading-to-0.14.md).
 
@@ -189,13 +198,15 @@ agw vm describe test-vm
 agw vm delete test-vm
 ```
 
-### Native transport limitation
+### Native recovery and interactive access
 
-Proxmox does not currently implement the required administrative transport that works independently
-of the VM's Tailscale state. Consequently, `vm shell --platform`, start-time Tailscale rejoin, and
-`vm rekey` cannot use Proxmox to recover a broken VM registration. Use the Proxmox web UI's serial
-console for manual access. [Issue #727](https://github.com/WayfarerLabs/agentworks/issues/727)
-tracks the native execution transport.
+Agentworks uses QEMU Guest Agent for Tailscale-independent administrative commands. Start-time
+Tailscale rejoin, `vm rekey`, logout during deletion, and create-time release verification therefore
+remain available when Tailscale SSH is unavailable.
+
+QEMU Guest Agent does not provide an interactive terminal, so `vm shell --platform` is unavailable
+for Proxmox. Use the Proxmox web UI's serial console for interactive access. Normal Agentworks work
+continues to use Tailscale SSH and never falls back to QGA automatically.
 
 ## How it works
 
@@ -206,8 +217,8 @@ When you run `agw vm create <name> --site proxmox`:
 3. Starts the VM and waits for the QEMU guest agent to report an IP
 4. Waits for cloud-init and runs the private bootstrap script through QEMU Guest Agent
 5. The bootstrap installs system packages, configures the admin user, and joins Tailscale
-6. Returns Tailscale SSH to core, which verifies the live Debian release and completes
-   initialization
+6. Returns the QGA execution transport to core, which verifies the live Debian release
+7. Switches to Tailscale SSH and completes initialization
 
 After provisioning, normal operations use Tailscale SSH, as they do on Lima and Azure VMs.
 
@@ -241,9 +252,15 @@ never returns it.
 Check that all four ACLs are set (re-run the setup script if unsure):
 
 - `AgentworksVM` on `/pool/agentworks`: VM lifecycle within the pool
-- `AgentworksTemplate` on `/vms/<template_vmid>` -- clone permission on the template
-- `AgentworksStorage` on `/storage/<storage>` -- disk allocation
-- `AgentworksSDN` on `/sdn/zones/localnetwork` -- network bridge access
+- `AgentworksTemplate` on `/vms/<template_vmid>`: clone permission on the template
+- `AgentworksStorage` on `/storage/<storage>`: disk allocation
+- `AgentworksSDN` on `/sdn/zones/localnetwork`: network bridge access
+
+### Package metadata cannot be loaded during setup
+
+When `libguestfs-tools` is absent, the setup script installs it before customizing the Debian image.
+Configure either a working Proxmox subscription repository or the Proxmox no-subscription
+repository, then rerun the script. The script does not alter package sources.
 
 ### Self-signed certificate errors
 
