@@ -3,9 +3,8 @@
 Covers the three named factories (``transport``, ``agent_transport``,
 ``native_transport``), the low-level helper (``transport_for_user``),
 the no-failover invariant (polymorphic-transports SDD R3), the Azure
-``transient_route`` lifecycle, the None-return typed error, the
-reachability-probe retry loop, the defensive empty-host guard, and
-``wait_for_reconnect``.
+``transient_route`` lifecycle, the reachability-probe retry loop, the
+defensive empty-host guard, and ``wait_for_reconnect``.
 """
 
 from __future__ import annotations
@@ -32,6 +31,7 @@ from agentworks.transports import (
     transport_for_user,
     wait_for_reconnect,
 )
+from tests.native_exec_support import ExecutionOnlyTransport
 
 
 def _mock_vm(
@@ -171,7 +171,7 @@ def _fake_lima_platform() -> MagicMock:
     platform = MagicMock()
     platform.name = "lima"
     platform.transient_route.return_value = contextlib.nullcontext()
-    platform.native_transport.return_value = LimaTransport(vm_name="vm1")
+    platform.native_transport.return_value = ExecutionOnlyTransport(label="lima:vm1")
     return platform
 
 
@@ -194,30 +194,6 @@ def test_native_transport_invokes_transient_route_then_builder() -> None:
     platform.transient_route.assert_called_once_with(vm, ctx, config=config)
     platform.native_transport.assert_called_once_with(vm, ctx, config=config)
     assert t is fake_target
-
-
-def test_native_transport_none_raises_typed_state_error() -> None:
-    """A ``None`` from the platform (proxmox: one-shot guest-agent exec
-    can't host a shell) becomes a ``StateError`` carrying the platform's
-    own console hint (``no_native_transport_hint``)."""
-    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
-
-    vm = _mock_vm(site="proxmox")
-    config = _mock_config()
-    ctx = RunContext()
-    platform = MagicMock()
-    platform.name = "proxmox"
-    platform.no_native_transport_hint = ProxmoxPlatform.no_native_transport_hint
-    platform.transient_route.return_value = contextlib.nullcontext()
-    platform.native_transport.return_value = None
-
-    with (
-        contextlib.ExitStack() as stack,
-        pytest.raises(StateError) as exc_info,
-    ):
-        native_transport(vm, platform, config, ctx=ctx, stack=stack)
-    assert exc_info.value.hint is not None
-    assert "serial console" in exc_info.value.hint
 
 
 def test_native_transport_empty_ssh_host_raises_typed_state_error() -> None:

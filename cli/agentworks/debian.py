@@ -18,7 +18,7 @@ from agentworks.errors import StateError
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from agentworks.transports import Transport
+    from agentworks.transports import ExecTransport
 
 
 class DebianRelease(StrEnum):
@@ -147,7 +147,7 @@ def parse_os_release(
 
 
 def probe_debian_release(
-    transport: Transport,
+    transport: ExecTransport,
     *,
     expected: DebianRelease | None = None,
 ) -> DebianRelease:

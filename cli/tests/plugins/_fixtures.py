@@ -51,7 +51,7 @@ from agentworks.schema import AgwModel, AgwRootModel
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.db import VMRow, VMStatus
-    from agentworks.transports import Transport
+    from agentworks.transports import ExecTransport, Transport
 
 
 def config_model_for(kind: str, name: str) -> type[BaseModel]:
@@ -117,6 +117,9 @@ class ConformingVMPlatform(VMPlatform):
         raise NotImplementedError
 
     def display_backend_name(self, vm: VMRow) -> str:
+        raise NotImplementedError
+
+    def native_transport(self, vm: VMRow, ctx: RunContext, *, config: object | None = None) -> ExecTransport:
         raise NotImplementedError
 
 

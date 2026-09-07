@@ -348,10 +348,7 @@ def vm_shell(
         typer.Option(
             "--platform",
             help=(
-                "Use the platform-native transport (limactl shell, wsl.exe, "
-                "Azure public-IP SSH) instead of Tailscale SSH. Useful when "
-                "Tailscale itself is the thing you're trying to reach the VM "
-                "to fix."
+                "Use the platform-native interactive transport, when available, to access the VM without Tailscale SSH."
             ),
         ),
     ] = False,
