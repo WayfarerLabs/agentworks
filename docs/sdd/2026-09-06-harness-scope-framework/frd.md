@@ -228,17 +228,18 @@ workspace attachments for Claude Code and Codex accept an explicit source file a
 settings role owned by that facet. The operator can choose complete replacement, merging with source
 keys winning, merging with destination keys winning, or leaving the entire destination untouched if
 it already exists. The integration owns native format parsing, scope-valid destinations, and
-application; core supplies the existing source-fetching facilities. A source names a file on the
-workstation running the owning setup operation, not an implicit path on the guest. Setup copies or
-merges a snapshot; it is not a live mount and session start never rereads workstation files.
+application; core supplies the source-path and file-transfer facilities. A source names a file on
+the workstation running the owning setup operation, not an implicit path on the guest. Setup copies
+or merges a snapshot; it is not a live mount and session start never rereads workstation files.
 
 The selected policy is explicit authorization for its stated treatment of existing settings at that
 destination. It does not grant ownership of other files or override another integration's recorded
 claim. Reinit applies the same policy to current source and destination; removal must never silently
-delete pre-existing settings. Missing/unreadable sources and malformed settings produce an owning
-setup error before writes. Mapping and receipts follow the existing no-persisted-secrets contract;
-raw workstation settings are not stored in resolved config or applied-state payloads. The HLA must
-settle nested-key/array behavior, interaction with explicit plugin config, and cleanup ownership.
+delete pre-existing settings. Missing/unreadable sources or invalid inputs needed by the selected
+policy produce an owning setup error before this integration changes native settings or plugins.
+Mapping and receipts follow the existing no-persisted-secrets contract; raw workstation settings are
+not stored in resolved config or applied-state payloads. The HLA must settle nested-key/array
+behavior, interaction with explicit plugin config, and cleanup ownership.
 
 ## Settled constraints, not to be reopened
 

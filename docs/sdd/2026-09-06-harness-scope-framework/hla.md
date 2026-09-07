@@ -50,8 +50,8 @@ flowchart TB
         WH --> WS["Published state<br/>env, deferred artifacts, receipts"]
         WH -.->|"handled here"| WN["Native project setup<br/>settings, rules, skills"]
     end
-    VS -->|"VM env + pending artifacts"| UC
-    VS -->|"VM env + pending artifacts"| WC
+    VS -->|"VM env + pending artifacts + receipts"| UC
+    VS -->|"VM env + pending artifacts + receipts"| WC
     subgraph Session["Session scope / session facet"]
         SC["Core: join ancestor paths<br/>assemble env, pending artifacts, receipts<br/>add session inputs"]
         SC --> Ready["Selected integration<br/>upstream readiness"]
@@ -368,12 +368,21 @@ chooses the destination and native parser; no arbitrary guest destination or fil
 is added. The shape is `settings: {source: <source reference>, strategy: <policy>}`. Both fields are
 required when `settings` is present; omission means no mapped settings.
 
-Reuse `SourceRef` and single-file fetching (`cli/agentworks/sources.py:41`, `:140`), including
-`file::` workstation paths and the existing Git-file reference form. A workstation path is evaluated
-by the owning setup operation with the existing local source path rules. It is never interpreted as
-a guest path. Resolve and validate the source before mutations, using temporary operation-local
-storage. Transfer a snapshot, not a symlink or mount. Reinit rereads the source; session start uses
-applied state and native files and has no workstation-source dependency.
+Reuse the local-file spelling and path rules of `SourceRef` (`cli/agentworks/sources.py:41`),
+accepting `file::` or an ordinary workstation path. This settings surface initially accepts local
+files only; Git-backed settings acquisition is follow-on work. The shipped `fetch_file` writes to a
+guest transport, and its Git branch clones on that guest; it is not a workstation validation helper.
+Add a small shared workstation-file snapshot helper, then let the integration parse that captured
+snapshot and use the existing transport to publish its resulting native document. Do not add a local
+transport merely to fit the old helper's signature.
+
+Acquire and validate the source before this integration's first native settings or plugin write;
+core/feature setup earlier in the pipeline keeps its existing lifecycle. Workstation paths use the
+invoking process's home and working directory, never the guest's. Keep the captured bytes stable for
+the operation, using temporary local storage where transfer requires a path, and clean it up on
+success or failure. Transfer the captured result rather than rereading a possibly changed source at
+write time. This is a snapshot, not a symlink or mount. Reinit rereads the source; session start
+uses applied state and native files and has no workstation-source dependency.
 
 | Integration | User settings destination             | Workspace settings destination    | Parser             |
 | ----------- | ------------------------------------- | --------------------------------- | ------------------ |
@@ -397,12 +406,13 @@ The four strategies govern collision with the live destination:
 | `skip-existing`   | If any destination file exists, leave that whole file unchanged; otherwise create from the source.       |
 
 Arrays are atomic values, not concatenated or merged by position. When only one side is an
-object/table, that whole value is a collision and the strategy's winner applies. Duplicate source
-keys are rejected rather than depending on parser last-write behavior. The source must parse even
-for `skip-existing`; an existing destination need not parse when skipped or completely replaced, but
-merge requires a valid native document. A directory or unsuitable link at the destination is an
-error, not a file to replace. Missing source or parse/type failure occurs before destination writes.
-Native output must remain valid; merge is semantic and makes no promise to preserve formatting.
+object/table, that whole value is a collision and the strategy's winner applies. Duplicate keys in
+any document that must be parsed are rejected rather than depending on parser last-write behavior.
+The source must parse even for `skip-existing`; an existing destination need not parse when skipped
+or completely replaced, but merge requires a valid native document. A directory or unsuitable link
+at the destination is an error, not a file to replace. Missing source or parse/type failure occurs
+before destination writes. Native output must remain valid; merge is semantic and makes no promise
+to preserve formatting.
 
 For example, with existing `{ui: {theme: dark}, extra: true}` and source
 `{ui: {theme: light, bell: true}}`, replace removes `extra`; merge-overwrite changes the theme and
@@ -412,12 +422,14 @@ on each reinit, including operator edits; choosing overwrite or replace expressl
 behavior. It does not relax artifact ownership checks elsewhere.
 
 One invocation plans its settings changes as a unit. Explicit `marketplaces`/`plugins` config and
-mapped content must not silently fight over native keys or identities: inconsistent declarations are
-config errors before writes, while matching declarations are reconciled once. Treat native plugin
-commands that also edit settings as part of that same plan, with receipts for their actual writes.
-`skip-existing` skips the file mapping, not the separately declared plugin work. The LLD must
-specify native command ordering and protect mapped settings against subsequent plugin-command
-rewrites; attachment order is not a last-writer policy.
+the settings document produced by the selected strategy must not silently fight over native keys or
+identities: inconsistent desired declarations are config errors before writes, while matching ones
+are reconciled once. Source values discarded by `skip-existing` or `merge-preserve` are not proposed
+writes and cannot create a conflict by themselves. Treat native plugin commands that also edit
+settings as part of that same plan, with receipts for their actual writes. `skip-existing` skips the
+file mapping, not the separately declared plugin work. The LLD must specify native command ordering
+and protect mapped settings against subsequent plugin-command rewrites; attachment order is not a
+last-writer policy.
 
 Applied facts distinguish keys/files written by the mapping from untouched content. A skip or a
 preserved collision grants no ownership of the retained value. On removal of a mapping, leave the
