@@ -12,10 +12,11 @@ lookups. A missing workspace yields no VM name and is not observable. An existin
 is missing preserves `workspace.vm_name` but is not observable. Both rows remain selected. The
 stored workspace name stays on `SessionRow`; no replacement location model is introduced.
 
-`session_listing` resolves each selected row once, initializes its status to unknown when requested,
-passes only structurally complete rows to the existing strict observer, and merges those results.
-The exact implementation may use simple local dictionaries instead of retaining this helper if that
-is clearer. `observe_session_statuses` does not change.
+`session_listing` classifies each selected row once for the forgiving partition, initializes its
+status to unknown when requested, passes only structurally complete rows to the existing strict
+observer, and merges those results. The observer may repeat its own strict relationship resolution
+for the complete rows it receives. The exact implementation may use simple local dictionaries
+instead of retaining this helper if that is clearer. `observe_session_statuses` does not change.
 
 The service adds a positive `require_vm_names: bool = False` policy. The JSON v1 adapter passes
 `True`; human and names-only paths retain the default. If any selected session's workspace is

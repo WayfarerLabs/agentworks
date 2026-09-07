@@ -3,7 +3,7 @@
 - Status: Design
 - Date: 2026-09-06
 - Tracks: #763
-- Source baseline: `0c8cf6bc77dd49a2a30440cde0326f37a3980689`
+- Source baseline: `b22cc49c9827cb38fb7d8fc77522b436b318ac03`
 
 ## Why this exists
 

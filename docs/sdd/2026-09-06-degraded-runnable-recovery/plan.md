@@ -6,7 +6,7 @@
 - Architecture: [hla.md](./hla.md)
 - Detailed design: [degraded-inventory-lld.md](./degraded-inventory-lld.md)
 - Research: [prior-art-research.md](./prior-art-research.md)
-- Source baseline: `0c8cf6bc77dd49a2a30440cde0326f37a3980689`
+- Source baseline: `b22cc49c9827cb38fb7d8fc77522b436b318ac03`
 - Delivery: one design-and-implementation PR based on `main`
 
 ## Delivery rules
@@ -28,7 +28,7 @@
 - [x] Write the FRD, HLA, LLD, research record, and implementation plan.
 - [x] Run file formatting, Markdown, spell, locked-SDD, and diff consistency checks.
 - [x] Run private project-values and Muntz design reviews and resolve material findings.
-- [ ] Publish the draft design PR and complete up to three design feedback/fix rounds.
+- [x] Publish the draft design PR and complete three design feedback/fix rounds.
 
 ## Phase 2: Test-first implementation
 
