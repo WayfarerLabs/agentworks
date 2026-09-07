@@ -513,18 +513,27 @@ pre-migration backup was created. Notices and prompts stay on stderr, so JSON an
 stdout remain machine-pure.
 
 `database restore` validates SQLite integrity, the claimed supported schema version, that version's
-complete Agentworks table-and-column shape, and its declared foreign-key relationships before it
-opens the live destination. It refuses an identical path, a generic SQLite file, an incomplete
-Agentworks lookalike, a schema newer than this release understands, or a source with foreign-key
-violations. The source remains available after restore.
+complete Agentworks table-and-column shape, its expected foreign-key declarations, and violations of
+those relationships before it prepares the live destination. It refuses an identical path, a generic
+SQLite file, an incomplete Agentworks lookalike, a schema newer than this release understands, or a
+source with foreign-key violations. The source remains available after restore.
 
 Pass `--force` only when an inconsistent backup is the best available recovery source. It bypasses
 the foreign-key refusal and no other validation. Agentworks warns before confirmation and again
 after restoring that some resources may remain unavailable until their relationships are repaired.
 Confirmation is still required by default; `--force` does not imply `--yes`, and a non-interactive
 invocation must pass `--yes` (or `-y`). `--yes` skips only the prompt and never suppresses either
-warning. Validation and copy use one pinned source snapshot, so the file inspected and named before
-confirmation is the content applied afterward.
+warning. The source and any existing destination must be regular files. Agentworks compares path
+identities observed around the SQLite opens, refuses endpoint changes that remain observable, and
+requires the observed source and destination identities to differ. Validation then keeps the same
+source snapshot and any existing destination open through confirmation. After confirmation, SQLite
+copies only to a private staged file. Agentworks refuses a changed destination before installing
+that completed stage. If no live database exists, installation uses a no-overwrite link and refuses
+a file that appeared in the meantime. Replacing an existing destination takes the database-use lock
+held by writable Agentworks connections, requires its WAL to checkpoint cleanly, switches it out of
+WAL mode, and takes an exclusive SQLite writer lock. The database-use lock remains held through
+installation so another Agentworks process cannot recreate WAL state in the replacement gap. Restore
+refuses after a bounded wait when other database users prevent that safe replacement boundary.
 
 Restore does not create an implicit backup of the live destination and does not migrate the restored
 schema. Run `agw database backup` first if you want an additional recovery point before replacement.

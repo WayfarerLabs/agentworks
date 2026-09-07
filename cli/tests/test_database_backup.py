@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import stat
+import tempfile
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,6 +14,7 @@ import pytest
 
 from agentworks.db import (
     BACKUP_DEADLINE_SECONDS,
+    FOREIGN_KEY_SENTINELS,
     LATEST_VERSION,
     MIGRATIONS,
     SCHEMA_SENTINELS,
@@ -25,7 +27,7 @@ from agentworks.db import (
     restore_backup,
     validate_restore_source,
 )
-from agentworks.errors import BackupError, NotFoundError, StateError, ValidationError
+from agentworks.errors import BackupError, BusyStateError, NotFoundError, StateError, ValidationError
 
 
 def _build_schema(path: Path, target_version: int) -> None:
@@ -95,6 +97,11 @@ def test_schema_sentinels_match_every_historical_version(tmp_path: Path, version
     for table, columns in expected.items():
         actual = {str(row[1]) for row in connection.execute(f'PRAGMA table_info("{table}")')}
         assert actual == columns
+        actual_foreign_keys = {
+            (str(row[2]), str(row[3]), str(row[4]), str(row[5]), str(row[6]))
+            for row in connection.execute(f'PRAGMA foreign_key_list("{table}")')
+        }
+        assert actual_foreign_keys == FOREIGN_KEY_SENTINELS[version].get(table, frozenset())
     connection.close()
 
     assert validate_restore_source(path) == version
@@ -195,6 +202,34 @@ def test_force_does_not_bypass_other_restore_validation(tmp_path: Path, invalid_
     assert not live.exists()
 
 
+def test_force_does_not_bypass_missing_foreign_key_declaration(tmp_path: Path) -> None:
+    source = tmp_path / "missing-foreign-key.db"
+    live = tmp_path / "live.db"
+    Database(source).close()
+    live_database = Database(live)
+    live_database.set_setting("restore-witness", "preserved")
+    live_database.close()
+
+    connection = sqlite3.connect(source)
+    connection.execute("PRAGMA foreign_keys = OFF")
+    connection.execute(
+        "CREATE TABLE workspaces_new ("
+        "name TEXT PRIMARY KEY, vm_name TEXT NOT NULL, template TEXT, "
+        "workspace_path TEXT NOT NULL, linux_group TEXT NOT NULL, "
+        "created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')))"
+    )
+    connection.execute("INSERT INTO workspaces_new SELECT * FROM workspaces")
+    connection.execute("DROP TABLE workspaces")
+    connection.execute("ALTER TABLE workspaces_new RENAME TO workspaces")
+    connection.commit()
+    connection.close()
+
+    with pytest.raises(StateError):
+        prepare_restore(source, live, allow_foreign_key_violations=True)
+
+    assert _setting(live, "restore-witness") == "preserved"
+
+
 def test_prepared_restore_copies_the_snapshot_pinned_before_a_later_commit(tmp_path: Path) -> None:
     source = tmp_path / "source.db"
     live = tmp_path / "live.db"
@@ -260,6 +295,448 @@ def test_prepared_restore_context_closes_its_pinned_read_transaction(tmp_path: P
     writer.execute("BEGIN EXCLUSIVE")
     writer.rollback()
     writer.close()
+
+
+def test_prepared_restore_does_not_reserve_an_absent_destination_before_apply(tmp_path: Path) -> None:
+    source = tmp_path / "source.db"
+    live = tmp_path / "new" / "live.db"
+    Database(source).close()
+
+    with prepare_restore(source, live):
+        assert not live.exists()
+
+    assert not live.exists()
+
+
+def test_declined_restore_does_not_remove_a_destination_created_after_preparation(tmp_path: Path) -> None:
+    source = tmp_path / "source.db"
+    live = tmp_path / "live.db"
+    Database(source).close()
+
+    with prepare_restore(source, live):
+        concurrent = Database(live)
+        concurrent.set_setting("ownership", "concurrent")
+        concurrent.close()
+
+    assert _setting(live, "ownership") == "concurrent"
+
+
+def test_apply_refuses_a_destination_created_after_absent_preparation(tmp_path: Path) -> None:
+    source = tmp_path / "source.db"
+    live = tmp_path / "live.db"
+    Database(source).close()
+
+    with prepare_restore(source, live) as prepared:
+        concurrent = Database(live)
+        concurrent.set_setting("ownership", "concurrent")
+        concurrent.close()
+        with pytest.raises(BackupError):
+            prepared.apply()
+
+    assert _setting(live, "ownership") == "concurrent"
+
+
+def test_interrupted_restore_staging_removes_new_reservation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source.db"
+    live = tmp_path / "new" / "live.db"
+    Database(source).close()
+    interruption = KeyboardInterrupt("destination preparation interrupted")
+    monkeypatch.setattr(
+        "agentworks.db.backup._require_restore_stage",
+        lambda *_args: (_ for _ in ()).throw(interruption),
+    )
+
+    with prepare_restore(source, live) as prepared, pytest.raises(KeyboardInterrupt) as raised:
+        prepared.apply()
+
+    assert raised.value is interruption
+    assert not live.exists()
+    assert list(live.parent.iterdir()) == []
+
+
+def test_restore_stage_closes_descriptor_before_failure_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentworks.db.backup as backup_module
+
+    real_mkstemp = tempfile.mkstemp
+    real_remove = backup_module._remove_incomplete_if_same
+    descriptor: int | None = None
+
+    def remember_descriptor(*, prefix: str, suffix: str, dir: str | os.PathLike[str]) -> tuple[int, str]:
+        nonlocal descriptor
+        descriptor, path = real_mkstemp(prefix=prefix, suffix=suffix, dir=dir)
+        return descriptor, path
+
+    def require_closed_then_remove(path: Path, path_identity: tuple[int, int]) -> None:
+        assert descriptor is not None
+        with pytest.raises(OSError):
+            os.fstat(descriptor)
+        real_remove(path, path_identity)
+
+    monkeypatch.setattr(tempfile, "mkstemp", remember_descriptor)
+    monkeypatch.setattr(
+        backup_module,
+        "_connect_restore_destination",
+        lambda _path: (_ for _ in ()).throw(OSError("SQLite bind failed")),
+    )
+    monkeypatch.setattr(backup_module, "_remove_incomplete_if_same", require_closed_then_remove)
+
+    with pytest.raises(BackupError):
+        backup_module._create_restore_stage(tmp_path / "live.db")
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_interrupted_database_use_lock_acquisition_closes_connection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentworks.db.backup as backup_module
+
+    interruption = KeyboardInterrupt("lock acquisition interrupted")
+
+    class InterruptingConnection:
+        calls = 0
+        closed = False
+
+        def execute(self, _statement: str) -> InterruptingConnection:
+            self.calls += 1
+            if self.calls == 2:
+                raise interruption
+            return self
+
+        def fetchone(self) -> tuple[int]:
+            return (0,)
+
+        def close(self) -> None:
+            self.closed = True
+
+    connection = InterruptingConnection()
+    monkeypatch.setattr(sqlite3, "connect", lambda *_args, **_kwargs: connection)
+
+    with pytest.raises(KeyboardInterrupt) as raised:
+        backup_module._acquire_database_use_lock(
+            tmp_path / "live.db",
+            exclusive=True,
+            timeout=0.2,
+        )
+
+    assert raised.value is interruption
+    assert connection.closed is True
+
+
+def test_interrupted_migration_lock_acquisition_closes_connection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentworks.db.backup as backup_module
+
+    interruption = KeyboardInterrupt("lock acquisition interrupted")
+
+    class InterruptingConnection:
+        closed = False
+
+        def execute(self, _statement: str) -> None:
+            raise interruption
+
+        def close(self) -> None:
+            self.closed = True
+
+    connection = InterruptingConnection()
+    monkeypatch.setattr(sqlite3, "connect", lambda *_args, **_kwargs: connection)
+
+    with pytest.raises(KeyboardInterrupt) as raised:
+        backup_module._acquire_migration_lock(tmp_path / "live.db", timeout=0.2)
+
+    assert raised.value is interruption
+    assert connection.closed is True
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows does not replace an open SQLite destination path")
+def test_prepared_restore_refuses_destination_path_replacement(tmp_path: Path) -> None:
+    source = tmp_path / "source.db"
+    live = tmp_path / "live.db"
+    displaced = tmp_path / "displaced.db"
+    unrelated = tmp_path / "unrelated.db"
+    for path, value in ((source, "selected"), (live, "live"), (unrelated, "unrelated")):
+        database = Database(path)
+        database.set_setting("identity", value)
+        database.close()
+
+    with prepare_restore(source, live) as prepared:
+        live.replace(displaced)
+        live.symlink_to(unrelated)
+        with pytest.raises(BackupError):
+            prepared.apply()
+
+    assert _setting(displaced, "identity") == "live"
+    assert _setting(unrelated, "identity") == "unrelated"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows does not replace an open destination path")
+def test_destination_replacement_during_sqlite_bind_is_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentworks.db.backup as backup_module
+
+    source = tmp_path / "source.db"
+    live = tmp_path / "live.db"
+    Database(source).close()
+    Database(live).close()
+    real_connect = backup_module._connect_restore_destination
+
+    def replace_before_sqlite_bind(path: Path) -> sqlite3.Connection:
+        path.unlink()
+        replacement = Database(path)
+        replacement.set_setting("identity", "replacement")
+        replacement.close()
+        return real_connect(path)
+
+    monkeypatch.setattr(backup_module, "_connect_restore_destination", replace_before_sqlite_bind)
+
+    with pytest.raises(BackupError):
+        prepare_restore(source, live)
+
+    assert _setting(live, "identity") == "replacement"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows does not replace an open destination path")
+def test_destination_replacement_after_pre_copy_check_does_not_receive_copy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentworks.db.backup as backup_module
+
+    source = tmp_path / "source.db"
+    live = tmp_path / "live.db"
+    displaced = tmp_path / "displaced.db"
+    replacement = tmp_path / "replacement.db"
+    for path, value in ((source, "source"), (live, "live"), (replacement, "replacement")):
+        database = Database(path)
+        database.set_setting("identity", value)
+        database.close()
+    real_copy = backup_module._online_copy_to_connection
+
+    def replace_before_copy(source_connection: sqlite3.Connection, destination: sqlite3.Connection) -> None:
+        live.replace(displaced)
+        replacement.replace(live)
+        real_copy(source_connection, destination)
+
+    with prepare_restore(source, live) as prepared:
+        monkeypatch.setattr(backup_module, "_online_copy_to_connection", replace_before_copy)
+        with pytest.raises(BackupError):
+            prepared.apply()
+
+    assert _setting(displaced, "identity") == "live"
+    assert _setting(live, "identity") == "replacement"
+
+
+def test_restore_refuses_existing_destination_with_active_wal_reader(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("agentworks.db.backup.BACKUP_DEADLINE_SECONDS", 0.2)
+    source = tmp_path / "source.db"
+    live = tmp_path / "live.db"
+    source_database = Database(source)
+    source_database.set_setting("identity", "source")
+    source_database.close()
+    live_database = Database(live)
+    live_database.set_setting("identity", "live-initial")
+    live_database.close()
+
+    reader = sqlite3.connect(live)
+    reader.execute("BEGIN")
+    reader.execute("SELECT value FROM settings WHERE key = 'identity'").fetchone()
+    writer = sqlite3.connect(live)
+    writer.execute("UPDATE settings SET value = 'live-wal' WHERE key = 'identity'")
+    writer.commit()
+    writer.close()
+    try:
+        with pytest.raises(BackupError):
+            restore_backup(source, live)
+        assert _setting(live, "identity") == "live-wal"
+    finally:
+        reader.rollback()
+        reader.close()
+
+
+def test_restore_excludes_agentworks_database_open_through_replacement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentworks.db.backup as backup_module
+
+    monkeypatch.setattr(backup_module, "BACKUP_DEADLINE_SECONDS", 0.2)
+    source = tmp_path / "source.db"
+    live = tmp_path / "live.db"
+    source_database = Database(source)
+    source_database.set_setting("identity", "source")
+    source_database.close()
+    live_database = Database(live)
+    live_database.set_setting("identity", "live")
+    live_database.close()
+    real_replace = os.replace
+
+    def attempt_database_open_before_replace(staged: Path, destination: Path) -> None:
+        with pytest.raises(BusyStateError):
+            Database(live)
+        real_replace(staged, destination)
+
+    monkeypatch.setattr(os, "replace", attempt_database_open_before_replace)
+
+    restore_backup(source, live)
+
+    assert _setting(live, "identity") == "source"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows symlink creation requires optional privileges")
+def test_restore_use_lock_canonicalizes_a_writable_database_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentworks.db.backup as backup_module
+
+    monkeypatch.setattr(backup_module, "BACKUP_DEADLINE_SECONDS", 0.2)
+    source = tmp_path / "source.db"
+    live = tmp_path / "live.db"
+    alias = tmp_path / "alias.db"
+    source_database = Database(source)
+    source_database.set_setting("identity", "source")
+    source_database.close()
+    live_database = Database(live)
+    live_database.set_setting("identity", "live")
+    live_database.close()
+    alias.symlink_to(live)
+    real_replace = os.replace
+
+    def attempt_alias_open_before_replace(staged: Path, destination: Path) -> None:
+        with pytest.raises(BusyStateError):
+            Database(alias)
+        real_replace(staged, destination)
+
+    monkeypatch.setattr(os, "replace", attempt_alias_open_before_replace)
+
+    restore_backup(source, alias)
+
+    assert _setting(alias, "identity") == "source"
+
+
+def test_destination_becoming_a_source_hardlink_during_bind_is_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source.db"
+    live = tmp_path / "live.db"
+    Database(source).close()
+    Database(live).close()
+    real_open = os.open
+    replaced = False
+
+    def replace_before_open(path: Path, flags: int, mode: int = 0o777) -> int:
+        nonlocal replaced
+        if Path(path) == live and not replaced:
+            replaced = True
+            live.unlink()
+            os.link(source, live)
+        return real_open(path, flags, mode)
+
+    monkeypatch.setattr(os, "open", replace_before_open)
+
+    with pytest.raises(ValidationError):
+        prepare_restore(source, live)
+
+    assert os.path.samefile(source, live)
+
+
+def test_restore_validation_closes_source_when_interrupted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source.db"
+    source.touch()
+    interruption = KeyboardInterrupt("validation interrupted")
+
+    class InterruptingConnection:
+        closed = False
+
+        def execute(self, _statement: str) -> None:
+            raise interruption
+
+        def close(self) -> None:
+            self.closed = True
+
+    connection = InterruptingConnection()
+    monkeypatch.setattr(sqlite3, "connect", lambda *_args, **_kwargs: connection)
+
+    with pytest.raises(KeyboardInterrupt) as raised:
+        validate_restore_source(source)
+
+    assert raised.value is interruption
+    assert connection.closed is True
+
+
+@pytest.mark.skipif(not hasattr(os, "O_NONBLOCK"), reason="platform has no nonblocking file-open flag")
+def test_restore_source_probe_is_nonblocking_and_rejects_non_regular_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentworks.db.backup as backup_module
+
+    observed_flags: list[int] = []
+
+    def open_non_regular(_path: Path, flags: int) -> int:
+        observed_flags.append(flags)
+        return 12345
+
+    monkeypatch.setattr(os, "open", open_non_regular)
+    monkeypatch.setattr(os, "fstat", lambda _descriptor: SimpleNamespace(st_mode=stat.S_IFIFO))
+    monkeypatch.setattr(
+        sqlite3,
+        "connect",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("SQLite opened non-regular source")),
+    )
+
+    with pytest.raises(StateError):
+        backup_module.validate_restore_source(tmp_path / "source")
+
+    assert observed_flags[0] & os.O_NONBLOCK
+
+
+@pytest.mark.skipif(not hasattr(os, "O_NONBLOCK"), reason="platform has no nonblocking file-open flag")
+def test_restore_destination_probe_is_nonblocking_and_rejects_non_regular_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentworks.db.backup as backup_module
+
+    observed_flags: list[int] = []
+
+    def open_non_regular(_path: Path, flags: int) -> int:
+        observed_flags.append(flags)
+        return 12345
+
+    monkeypatch.setattr(os, "open", open_non_regular)
+    monkeypatch.setattr(os, "fstat", lambda _descriptor: SimpleNamespace(st_mode=stat.S_IFIFO))
+    monkeypatch.setattr(
+        backup_module,
+        "_connect_restore_destination",
+        lambda _path: (_ for _ in ()).throw(AssertionError("SQLite opened non-regular destination")),
+    )
+
+    with pytest.raises(BackupError):
+        backup_module._prepare_restore_destination(
+            tmp_path / "destination",
+            source_path_identity=(1, 1),
+        )
+
+    assert observed_flags[0] & os.O_NONBLOCK
 
 
 def test_restore_accepts_final_sqlite_done_after_deadline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -448,6 +925,16 @@ def test_restore_rejects_identical_paths(tmp_path: Path) -> None:
         restore_backup(path, path)
 
 
+def test_restore_rejects_hardlinked_source_and_destination(tmp_path: Path) -> None:
+    source = tmp_path / "source.db"
+    live = tmp_path / "live.db"
+    Database(source).close()
+    os.link(source, live)
+
+    with pytest.raises(ValidationError):
+        restore_backup(source, live)
+
+
 def test_backup_names_are_disjoint_and_collisions_are_reserved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     source = tmp_path / "live.db"
     Database(source).close()
@@ -540,7 +1027,12 @@ def test_failed_backup_and_absent_restore_remove_incomplete_files(
     journal.execute("PRAGMA journal_mode = DELETE")
     journal.close()
     absent = tmp_path / "new" / "live.db"
-    monkeypatch.setattr("agentworks.db.backup._online_copy_from_connection", fail_copy)
+
+    def fail_prepared_copy(_source: object, destination: sqlite3.Connection) -> None:
+        destination_path = Path(destination.execute("PRAGMA database_list").fetchone()[2])
+        fail_copy(_source, destination_path)
+
+    monkeypatch.setattr("agentworks.db.backup._online_copy_to_connection", fail_prepared_copy)
     with pytest.raises(BackupError, match="forced"):
         restore_backup(selected, absent)
     assert not absent.exists()
@@ -569,12 +1061,15 @@ def test_interrupted_copy_preserves_interrupt_and_removes_all_reserved_artifacts
         destination.with_name(f"{destination.name}-journal").write_bytes(b"partial journal")
         raise interruption
 
-    copy_target = (
-        "agentworks.db.backup._online_copy_from_connection"
-        if operation == "absent-restore"
-        else "agentworks.db.backup._online_copy"
-    )
-    monkeypatch.setattr(copy_target, interrupt_copy)
+    if operation == "absent-restore":
+
+        def interrupt_prepared_copy(_source: object, destination: sqlite3.Connection) -> None:
+            destination_path = Path(destination.execute("PRAGMA database_list").fetchone()[2])
+            interrupt_copy(_source, destination_path)
+
+        monkeypatch.setattr("agentworks.db.backup._online_copy_to_connection", interrupt_prepared_copy)
+    else:
+        monkeypatch.setattr("agentworks.db.backup._online_copy", interrupt_copy)
 
     with pytest.raises(KeyboardInterrupt) as raised:
         if operation == "manual":
@@ -662,7 +1157,12 @@ def test_restore_preserves_existing_destination_mode(tmp_path: Path) -> None:
     assert stat.S_IMODE(live.stat().st_mode) == 0o640
 
 
-def test_restore_held_destination_lock_honors_fixed_deadline(tmp_path: Path) -> None:
+def test_restore_held_destination_lock_honors_fixed_deadline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    deadline = 0.2
+    monkeypatch.setattr("agentworks.db.backup.BACKUP_DEADLINE_SECONDS", deadline)
     source = tmp_path / "selected.db"
     live = tmp_path / "live.db"
     Database(source).close()
@@ -671,10 +1171,10 @@ def test_restore_held_destination_lock_honors_fixed_deadline(tmp_path: Path) -> 
     blocker.execute("BEGIN EXCLUSIVE")
     started = time.monotonic()
     try:
-        with pytest.raises(BackupError, match="within 5 seconds"):
+        with pytest.raises(BackupError):
             restore_backup(source, live)
     finally:
         blocker.rollback()
         blocker.close()
     elapsed = time.monotonic() - started
-    assert 4.5 <= elapsed < 8
+    assert deadline * 0.75 <= elapsed < 2

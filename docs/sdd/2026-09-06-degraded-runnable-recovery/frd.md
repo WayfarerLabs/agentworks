@@ -84,8 +84,8 @@ writes.
 - **R13.** `agw database restore` shall check the candidate backup for foreign-key violations before
   replacing the live database. It shall refuse a violating source by default through a typed
   Agentworks error. `--force` shall explicitly permit only that referential-integrity bypass;
-  malformed SQLite, failed quick checks, unsupported versions, and invalid schema shapes shall
-  remain unconditionally rejected.
+  malformed SQLite, failed quick checks, unsupported versions, and invalid schema shapes or
+  foreign-key declarations shall remain unconditionally rejected.
 - **R14.** A forced restore of a backup with foreign-key violations shall warn before confirmation
   and again after successful replacement. The warning shall state that the source is structurally
   inconsistent and that some resources may be unavailable until repaired. `--force` shall not imply

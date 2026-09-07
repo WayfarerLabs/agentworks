@@ -678,10 +678,12 @@ def session_listing(
     observable_sessions: list[SessionRow] = []
     observable_vm_names: set[str] = set()
     for session in sessions:
-        workspace = db.get_workspace(session.workspace_name)
+        workspace = (
+            _mgr._require_workspace(db, session.workspace_name)
+            if require_vm_names
+            else db.get_workspace(session.workspace_name)
+        )
         if workspace is None:
-            if require_vm_names:
-                _mgr._require_workspace(db, session.workspace_name)
             vm_names[session.name] = None
             continue
         vm_names[session.name] = workspace.vm_name

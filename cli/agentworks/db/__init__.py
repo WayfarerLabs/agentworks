@@ -57,6 +57,7 @@ from agentworks.db.instance_state import (
     VersionedPayload,
 )
 from agentworks.db.migrations import (
+    FOREIGN_KEY_SENTINELS,
     LATEST_VERSION,
     MIGRATIONS,
     SCHEMA_SENTINELS,
@@ -92,6 +93,7 @@ __all__ = [
     "MIGRATION_LOCK_TIMEOUT_SECONDS",
     "LATEST_VERSION",
     "MIGRATIONS",
+    "FOREIGN_KEY_SENTINELS",
     "SCHEMA_SENTINELS",
     "PID_STOPPED",
     "SYSTEM_SLUG_KEY",

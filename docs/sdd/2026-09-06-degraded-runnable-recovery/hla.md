@@ -117,27 +117,55 @@ foreign-key constraints are violated. It stops at the first violation because wa
 need only that classification. The restore service rejects a violating snapshot unless its caller
 explicitly allows foreign-key violations. That narrowly named service policy is the only validation
 weakened by the CLI's `--force`; SQLite readability, `quick_check`, Agentworks identity, supported
-version, and the expected table and column shape remain mandatory.
+version, expected table and column shape, and expected foreign-key declarations remain mandatory.
 
-Preparation binds both resolved paths, rejects a source that is also the live destination, opens the
-source read-only, begins a read transaction, pins its snapshot with the first validation query, and
-keeps that connection open across warning and confirmation. The prepared restore then copies from
-the same connection to its bound destination. A path replacement or source commit after inspection
-therefore cannot change the snapshot that reaches the live database, and confirmation cannot name a
-different destination from the one applied. The CLI emits a warning before showing the source and
+Preparation resolves and observes both paths and requires regular files for existing endpoints. It
+opens the source with a non-blocking open before SQLite, records its observed path identity, begins
+a read transaction, pins its snapshot with the first validation query, and keeps that connection
+open across warning and confirmation. Only after source validation succeeds, preparation opens an
+existing live destination and records its observed path identity. The observed identities must be
+distinct. Both existing connections stay open through confirmation. An OS descriptor holds each
+observed inode across its SQLite path bind to prevent inode reuse, while checks around that bind
+refuse replacement that remains visible at either boundary.
+
+After consent, apply creates a private staged SQLite file beside the live path and copies the pinned
+source snapshot into it through the bounded online-backup mechanism. No SQLite write targets the
+live pathname during this phase. For an existing destination, apply must checkpoint its WAL cleanly,
+switch it to delete journal mode, and acquire an exclusive writer lock within the bounded wait. This
+retires old coordination state before replacement; active database users that prevent the boundary
+cause refusal. A separate cross-platform database-use lock is shared for the lifetime of every
+writable `Database` connection and held exclusively by restore from this check through installation.
+Both derive the lock and database pathname from the same resolved path, so a symlink cannot split
+coordination. Apply then verifies the observed identity again, preserves its file mode on the stage,
+closes the prepared destination, verifies that no coordination files remain, and atomically replaces
+it while retaining that exclusion. A replacement observed during the staged copy is refused without
+modifying that replacement. If the destination was absent at preparation, apply installs the stage
+with a no-overwrite link and refuses if another file appeared first. Failed or interrupted staging
+removes only the private file whose identity Agentworks created.
+
+Once the source SQLite connection is open, later source commits or path replacements cannot redirect
+or change the snapshot copied to the stage. The CLI emits a warning before showing the source and
 destination and asking for confirmation when `--force` allows a violating snapshot, then warns again
 after that same snapshot is successfully restored.
 
 The existing public `validate_restore_source` still returns the schema version, and the existing
 public `restore_backup` still returns `None`. Both delegate to the same snapshot-validation and copy
-internals. The additive prepared-restore API carries the richer inspection fact and owns the open
-connection through a context manager, so cancellation and failures always release it. Direct
+internals. The additive prepared-restore API carries the richer inspection fact and owns both open
+connections through a context manager, so cancellation and failures always release them. Direct
 `restore_backup` callers retain their exact fail-closed signature and return contract; callers that
 need the bypass use the explicit prepared-restore API.
 
+Python's SQLite API and the final atomic replacement bind by pathname rather than by an existing OS
+descriptor. Writable Agentworks connections cooperate with the database-use lock, but a same-user
+process using SQLite directly or replacing and restoring a path entirely within one such call can
+evade that coordination or the surrounding identity observations. Defending against that adversarial
+capability would require a custom SQLite VFS or platform-handle bridge and is outside this local
+recovery boundary; the same process can already mutate the user's state database directly.
+
 Holding the snapshot across an interactive prompt can delay a writer to a rollback-journal source.
 Restore inputs are expected to be quiescent backup files, and WAL sources do not impose that writer
-delay, so avoiding a second full copy and temporary-file lifecycle is the smaller recovery design.
+delay. Staging begins only after consent, performs one full bounded copy, and keeps the private
+file's lifetime limited to installation or cleanup.
 
 `--force` expresses acceptance of inconsistent relationships, while `--yes` expresses confirmation
 of replacement. Neither implies the other. The warning path is presentation owned by the CLI; the

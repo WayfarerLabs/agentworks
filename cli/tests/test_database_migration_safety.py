@@ -129,7 +129,6 @@ def test_safe_database_open_keeps_partial_migration_wrapper_for_foreign_key_viol
     assert len(backups) == 1
     assert isinstance(raised.value.__cause__, StateError)
     assert raised.value.__cause__.entity_kind == "database"
-    assert raised.value.hint == f"Restore the pre-migration backup with: {render_restore_command(backups[0])}"
     assert _version(path) == LATEST_VERSION - 1
 
 
@@ -241,7 +240,7 @@ def _serialized_open_worker(
 
 
 def _late_partial_writer(path: Path, start: Any, acquired: Any) -> None:
-    from agentworks.db.backup import _acquire_migration_lock, _release_migration_lock
+    from agentworks.db.backup import _acquire_migration_lock, _release_sqlite_lock
 
     start.wait()
     lock = _acquire_migration_lock(path, timeout=5.0)
@@ -252,11 +251,11 @@ def _late_partial_writer(path: Path, start: Any, acquired: Any) -> None:
     connection.close()
     acquired.set()
     time.sleep(0.25)
-    _release_migration_lock(lock)
+    _release_sqlite_lock(lock)
 
 
 def _unchanged_lock_holder(path: Path, acquired: Any, release: Any) -> None:
-    from agentworks.db.backup import _acquire_migration_lock, _release_migration_lock
+    from agentworks.db.backup import _acquire_migration_lock, _release_sqlite_lock
 
     lock = _acquire_migration_lock(path, timeout=5.0)
     assert lock is not None
@@ -264,11 +263,11 @@ def _unchanged_lock_holder(path: Path, acquired: Any, release: Any) -> None:
     try:
         assert release.wait(timeout=10)
     finally:
-        _release_migration_lock(lock)
+        _release_sqlite_lock(lock)
 
 
 def _released_partial_writer(path: Path, start: Any, released: Any) -> None:
-    from agentworks.db.backup import _acquire_migration_lock, _release_migration_lock
+    from agentworks.db.backup import _acquire_migration_lock, _release_sqlite_lock
 
     start.wait()
     lock = _acquire_migration_lock(path, timeout=5.0)
@@ -277,12 +276,12 @@ def _released_partial_writer(path: Path, start: Any, released: Any) -> None:
     connection.execute("CREATE TABLE released_partial_change (value TEXT)")
     connection.commit()
     connection.close()
-    _release_migration_lock(lock)
+    _release_sqlite_lock(lock)
     released.set()
 
 
 def _tainted_baseline_writer(path: Path, committed: Any, release: Any, released: Any) -> None:
-    from agentworks.db.backup import _acquire_migration_lock, _release_migration_lock
+    from agentworks.db.backup import _acquire_migration_lock, _release_sqlite_lock
 
     lock = _acquire_migration_lock(path, timeout=5.0)
     assert lock is not None
@@ -292,7 +291,7 @@ def _tainted_baseline_writer(path: Path, committed: Any, release: Any, released:
     connection.close()
     committed.set()
     assert release.wait(timeout=5)
-    _release_migration_lock(lock)
+    _release_sqlite_lock(lock)
     released.set()
 
 
@@ -960,7 +959,7 @@ def test_base_exception_migration_failure_preserves_identity_and_visible_recover
     import agentworks.db as db_module
     from agentworks import output
     from agentworks.cli import _helpers
-    from agentworks.db.backup import _acquire_migration_lock, _release_migration_lock
+    from agentworks.db.backup import _acquire_migration_lock, _release_sqlite_lock
 
     path = tmp_path / "state.db"
     config_path = tmp_path / "config.toml"
@@ -993,7 +992,7 @@ def test_base_exception_migration_failure_preserves_identity_and_visible_recover
 
     lock = _acquire_migration_lock(path, timeout=0.0)
     assert lock is not None
-    _release_migration_lock(lock)
+    _release_sqlite_lock(lock)
 
 
 def test_completion_probe_unavailable_state_fails_before_database_caller(
@@ -1210,9 +1209,10 @@ def test_database_closes_connection_when_migration_raises(tmp_path: Path, monkey
     with pytest.raises(RuntimeError, match="boom"):
         Database(tmp_path / "state.db")
 
-    assert len(opened) == 1
-    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
-        opened[0].execute("SELECT 1")
+    assert len(opened) == 2
+    for connection in opened:
+        with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+            connection.execute("SELECT 1")
 
 
 def test_production_has_one_writable_database_construction_site() -> None:

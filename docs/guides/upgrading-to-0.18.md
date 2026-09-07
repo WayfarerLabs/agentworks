@@ -75,9 +75,9 @@ whose workspace is missing fails before observation instead of emitting a widene
 
 ## Restore inconsistent backups explicitly
 
-`agw database restore` now checks declared foreign-key relationships and refuses violations by
+`agw database restore` now validates expected foreign-key declarations and refuses violating rows by
 default. Use `--force` only when that inconsistent backup is the best available recovery source. It
-bypasses only the relationship check and warns both before confirmation and after replacement.
+bypasses only the violating-row check and warns both before confirmation and after replacement.
 `--force` does not imply `--yes`; non-interactive restore still needs `--yes`, and every other
 integrity, version, and schema-shape validation remains mandatory.
 

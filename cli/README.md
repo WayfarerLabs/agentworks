@@ -645,10 +645,21 @@ restored by an Agentworks release that understands that schema. Before downgradi
 restore a backup whose schema the older release understands; do not open newer state with the older
 release first.
 
-Restore also rejects declared foreign-key violations by default. If an inconsistent backup is the
-best available recovery source, `--force` bypasses only that relationship check and emits warnings
-before confirmation and after replacement. It does not imply `--yes`, and `--yes` never hides the
-warnings. All other source validation remains mandatory.
+Restore also validates the schema's foreign-key declarations and rejects declared relationship
+violations by default. If an inconsistent backup is the best available recovery source, `--force`
+bypasses only the violating-row check and emits warnings before confirmation and after replacement.
+It does not imply `--yes`, and `--yes` never hides the warnings. All other source validation remains
+mandatory. Both endpoints must be regular files. Agentworks compares their path identities around
+the SQLite opens, requires the observed identities to be distinct, and refuses endpoint changes that
+remain observable. The open source and any existing destination stay fixed through confirmation.
+After confirmation, SQLite copies to a private staged file, then Agentworks verifies the live path
+before installing the completed stage. A destination replaced during the copy is left unchanged. An
+absent destination is installed without overwriting a file that appeared there first. Replacing an
+existing destination also takes the database-use lock held by writable Agentworks connections,
+requires its WAL to checkpoint cleanly, and takes an exclusive SQLite writer lock. The use lock
+remains held through installation so another Agentworks process cannot recreate WAL state in the
+replacement gap. If other database work prevents that safe boundary, restore refuses after a bounded
+wait so the operator can finish that work and retry.
 
 SQLite may leave user-only `-shm` and zero-byte `-wal` coordination files beside a selected backup
 after validation or restore. This is expected: the backup database remains unchanged, valid, and

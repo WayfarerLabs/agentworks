@@ -55,6 +55,17 @@
       and copy while preserving the public validator and restore return contracts.
 - [x] Extend restore-source validation with a narrow `allow_foreign_key_violations` policy; map CLI
       `--force` to it without weakening other checks.
+- [x] Harden prepared restore after cold review by pinning the destination through confirmation,
+      delaying absent-destination creation until apply, refusing destination identity changes,
+      closing interrupted validation, and validating expected foreign-key declarations independently
+      from violating rows. Require regular endpoint files, probe them in non-blocking mode, and
+      compare source and destination identities observed around their SQLite opens. Copy into a
+      private stage and verify or no-overwrite-install the live path only after that copy completes.
+      Before replacing existing state, require a clean WAL checkpoint, delete journal mode, and an
+      exclusive writer lock within the bounded wait. Hold a cross-platform database-use lock through
+      installation and make writable Agentworks database connections share it so they cannot reopen
+      the replacement gap. Resolve the database path before both lock derivation and SQLite open so
+      aliases cannot split that coordination.
 
 ## Phase 3: Permanent collateral
 

@@ -215,6 +215,9 @@ def test_session_json_cli_requests_required_vm_names(
 
     assert result.exit_code != 0
     assert result.stdout_bytes == b""
+    assert isinstance(result.exception, NotFoundError)
+    assert result.exception.entity_kind == "workspace"
+    assert result.exception.entity_name == "removed-ws"
 
 
 def test_names_only_retains_orphan_inventory(
