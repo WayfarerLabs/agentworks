@@ -1,0 +1,168 @@
+# Harness Scope Framework: Implementation Plan
+
+- Status: Implementation authorized by the operator after design review on 2026-09-07
+- Governing requirements: [FRD](frd.md)
+- Approved architecture: [HLA](hla.md)
+- Implementation baseline: `3641ea8c` on main, combined with the approved design
+
+## Delivery and ownership
+
+Finish the small PR 761 feedback correction by making the FRD the single home for successor routing
+direction. Publish the approved FRD/HLA as the design checkpoint before implementation lands. The
+implementation uses `feat/harness-facets`; commit coherent work units there while the lead
+integrates delegated changes. Start with one implementation PR. Before its handoff, reassess whether
+the substantive diff requires a stack of independently working increments; no partial runtime
+framework is represented as the completed vertical.
+
+The operator owns requirements and has approved the design and implementation. The lead owns this
+plan, architecture, integration, and implementation disposition. Delegates own only their assigned
+files and return design decisions to the lead. Shared saga corrections and the intended successor
+artifact SDD remain saga-owned. This effort delivers no artifact declarations, routing protocol,
+feature machinery, session identity work, or workspace plugin installation.
+
+Checked boxes require evidence from committed work and observed validation. Design approval does not
+mark implementation acceptance complete. Permanent collateral travels with the behavior it explains.
+Do not introduce a lockfile until the entire approved effort is complete.
+
+## Design detail before dependent implementation
+
+- [ ] Consolidate successor direction in the FRD, record operator approval, review the correction,
+      and publish the resulting approved design checkpoint.
+- [ ] Complete the config-binding design below with the concrete consumer walk and migration tests.
+- [ ] Author `native-setup-lld.md` for typed invocations, checkpoint records, native command plans,
+      operation serialization, partial failure, and readiness; review it before wiring lifecycle
+      calls.
+- [ ] Author `migration-strategy.md` for declarative fields, stored overlays, explicit session
+      selection, native ownership conflicts, and operator remediation.
+- [ ] Record native command research and local fixture observations in `prior-art-research.md`.
+      Verify both CLI formats and destructive-command scope before adopting their output as
+      evidence.
+
+## Config and schema foundation
+
+Extend the existing `config_for` hook with the fixed facet selector. Ordinary capability config
+continues to select one model without facet obligations. The harness kind enumerates four answers;
+selection, validation, secret/reference extraction, merging, constructor binding, and reference
+output use the same cached selected model. A no-config answer permits a name-only attachment and
+rejects extra keys. Harness consumers must supply their facet; they cannot default a multi-facet
+answer to session.
+
+Extend the existing hosting descriptor into a sequence of concrete surfaces, including facet and
+singular/list cardinality. Walk each setup block with its own index and origin. Preserve ordinary
+vm-platform, secret-backend and git-credential-provider behavior, including mapping models.
+
+- [ ] Implement facet selection and declaration-sensitive caches, including registration validation
+      of malformed hooks and model answers and coherent constructor secret extraction.
+- [ ] Propagate host facet/cardinality through schema emission, reference/explain output, structural
+      extraction, graph edges, defaults, merge, manifest decode, and instance overlay handling.
+- [ ] Add ordered `harness_integrations` to VM, admin, agent, and workspace templates and their
+      effective setup models. Admin and agent use the same user-facet schema.
+- [ ] Enforce duplicate-name rejection, explicit selection, name-only defaults, whole-list
+      replacement, omission inheritance, and explicit empty-list clearing.
+- [ ] Make the synthesized default session explicitly select shell; remove silent fallback from
+      dictionary resolution and effective template finalization while preserving inherited
+      selection.
+- [ ] Verify ordinary capability conformance, per-facet unknown fields, selected model cache
+      replacement/restoration, secret parity, list indexes, and all first-party sample manifests.
+
+The first internal work unit implements the selection and schema plumbing with only the existing
+session hosting enabled. Setup fields become public only together with executing lifecycle calls;
+accepting setup configuration that performs nothing is not a deliverable. The native settings
+parser/merge unit can be built independently and becomes reachable through those calls.
+
+## Resource invocation and native lifecycle evidence
+
+Keep setup bound to its owner. Session launch intent and conversation state stay session-specific.
+VM/admin calls belong to VM init/reinit, agent calls to agent init/reinit, and workspace calls to
+the shared creation body before successful commit. Existing install commands retain their hermetic
+env; the integration lane receives the resource's assembled env through its full transport runner.
+
+- [ ] Separate setup construction from session target guards, probe caches and conversation state;
+      add typed VM/user/workspace invocations with no-op defaults and one shared user method.
+- [ ] Increment the harness contract version across the descriptor and four integrations; preserve
+      the required session `start` operation and launch alternatives.
+- [ ] Bind env using existing precedence and protected identity variables; extend owning secret
+      preflight to cover setup env, including pending targets, without persisting resolved values.
+- [ ] Define versioned compact native receipt codecs under the existing instance-state facility,
+      with VM/admin separation and agent/workspace owners; preserve unknown versions and unrelated
+      keys.
+- [ ] Serialize observation, native mutation and checkpoint persistence per owning resource across
+      processes without holding a state-database transaction over remote work.
+- [ ] Invalidate completed evidence before mutation, checkpoint each successful prefix, retain
+      incomplete/failed cleanup evidence, and complete only after the facet succeeds.
+- [ ] Reconcile removed attachments using prior ownership with absent desired config, including
+      unavailable integrations, unowned conflicts and already-absent effects.
+- [ ] Integrate cleanup before owner deletion discards needed evidence. Verify cascade lock order,
+      partial failure and recovery without falsely adopting unrecorded native residue.
+- [ ] Carry typed evidence through VM backup exports, exported codec round trips, and existing
+      database backup/restore. Do not add a VM restore workflow.
+- [ ] Integrate workspace setup with existing create rollback and fresh-create retry for both
+      standalone and session-created workspaces; no workspace reinit or residue-adoption path.
+- [ ] Add typed required/recommended upstream gaps to session readiness using actual bindings,
+      current completion evidence and inexpensive native probes; report owning remediation.
+- [ ] Exercise shell no-op setup and launch through real CLI, including setup env delivery, explicit
+      enablement and absence of implicit ancestor setup during start/restart.
+
+## Claude and Codex native setup
+
+The integration owns commands, native format parsing, destination roles and observations. Core owns
+source snapshot facilities, transport context and receipt persistence. Plan settings and plugin
+changes together before the first native write; installation commands may modify native settings.
+
+- [ ] Implement local workstation file snapshots using existing SourceRef spelling and native
+      host-path rendering, with stable bytes for the operation and cleanup on success/failure.
+- [ ] Implement user/project settings mappings for Claude JSON and Codex TOML with replace,
+      merge-overwrite, merge-preserve and skip-existing policies.
+- [ ] Verify recursive objects/tables, atomic arrays, type collisions, duplicate-key rejection,
+      source validation even when skipping, invalid merge destinations, and unsuitable destination
+      links.
+- [ ] Define native plugin/marketplace query and reconciliation for both integrations; preserve
+      installation identity, scope, drift probes and safe removal facts in receipts.
+- [ ] Reject conflicting desired plugin/settings state before writes; reconcile matching entries
+      once, honoring the effective mapped document after preserve/skip policies.
+- [ ] Prove repeated setup converges, source changes take effect on owning reinit, managed removal
+      converges and settings removal retains files while relinquishing only mapping claims.
+- [ ] Migrate Claude fields and both core installer call sites into the user facet, including
+      existing desired-overlay payloads and actionable old/new conflict handling.
+- [ ] Preserve ordinary session models, fresh/resume behavior and CLI installation through existing
+      install-command configuration. Session start must need no workstation settings source.
+
+## Migration and permanent collateral
+
+- [ ] Update declarative samples and user setup guidance to explicit integration lists, including
+      administrator attachment placement and multiple configured integrations.
+- [ ] Document custom silent-session-lineage migration and existing instance recreation remedies;
+      never infer an integration from its stored conversation namespace.
+- [ ] Update capability, harness integration, env, instance-state and idempotency documentation with
+      implemented contracts; remove obsolete core-Claude ownership descriptions.
+- [ ] Update generated schema/reference/completion and guide surfaces through their owning
+      mechanisms, with behavior evidence for each new field rather than prose-pinning tests.
+- [ ] Promote load-bearing architectural conclusions into permanent homes with their implementation.
+
+## Acceptance and closeout
+
+Use local native plugin/marketplace/settings fixtures so external services cannot confound the
+vertical. Real CLI evidence must observe destinations and receipts, not merely mock the dispatch.
+Read the integration-testing and agw-test-env skills and establish the scoped inventory and budget
+before creating live resources. Native CLI research can use isolated local homes and fixtures,
+without touching the operator's installed plugins or authentication.
+
+- [ ] Prove VM, admin, agent, workspace and session env and facet mapping, explicit enablement,
+      multiple independent configurations, inherited lists and deliberate empty selections (R1-R6,
+      R8).
+- [ ] Observe two users and two workspaces for native plugin/settings applicability and all four
+      mapping policies; verify session-only compatibility (R3, R13-R15).
+- [ ] Observe required/recommended/absent prerequisites for the actual user, including stale and
+      failed setup and pending explicit resource creation (R10).
+- [ ] Exercise repeat setup, one-entry removal, whole-attachment removal, interruption, concurrent
+      mutation, native drift, unknown codec versions, failed cleanup and owner deletion (R9).
+- [ ] Prove failed workspace setup unwinds under standalone and session-created paths and retry
+      refuses unexplained residue (R13).
+- [ ] Run full repository gates and focused native Windows tests from the current CI selection;
+      record actual commands, exit codes and unreachable live surfaces.
+- [ ] Obtain independent project, complexity and generic correctness/security reviews, resolve
+      material findings, and validate the final integrated head.
+- [ ] Publish a coherent implementation handoff and consume published feedback only within operator
+      authorization. Never treat a review report as authority to widen the effort.
+- [ ] Verify cleanup independently at all layers used by testing, update the plan with evidence, and
+      complete lock/promotion only when all retained requirements are proven.
