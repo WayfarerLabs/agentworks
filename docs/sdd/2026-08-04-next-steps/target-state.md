@@ -364,13 +364,30 @@ at: vm, user, workspace, session; core owns the scope-to-facet mapping, and per-
 harness-integration specialty, not framework machinery; `config_for` already exists as the declared
 hook, and what wave 4 adds is its facet argument). Scope discipline is trust-based: core does not
 enforce harness behavior; code review and testing gate system plugins, and wave 8's
-distribution-trust model gates external ones. Sessions receive all ancestor env and artifacts, and
-the integration owns hoisted representation, deduplication, and double-provisioning avoidance
-(isolation, not security). Session operations diagnose upstream gaps but never repair them. Artifact
-conduct is conventional: smallest ownership unit, no silent overwrite of repository or
-generator-owned content, applied state recorded, drift reported. The Claude-specific template fields
-(`claude_marketplaces`, `claude_plugins`) migrate into the Claude integration's user-facet config,
-which admin and agent share. Rulesync informs the artifact design but is not a runtime dependency.
+distribution-trust model gates external ones. Sessions receive all ancestor env, and the integration
+owns hoisted representation, deduplication, and double-provisioning avoidance (isolation, not
+security); artifact delivery follows the 2026-09-06 ruling below rather than env. Session operations
+diagnose upstream gaps but never repair them. Artifact conduct is conventional: smallest ownership
+unit, no silent overwrite of repository or generator-owned content, applied state recorded, drift
+reported. The Claude-specific template fields (`claude_marketplaces`, `claude_plugins`) migrate into
+the Claude integration's user-facet config, which admin and agent share. Rulesync informs the
+artifact design but is not a runtime dependency.
+
+**Artifact delivery (operator, 2026-09-06).** Artifacts do not follow env. A session receives
+accumulated ancestor env, but only the artifact payloads still deferred for its integration and
+resource path; anything already handled upstream does not reach it. Agent artifacts are three typed
+kinds, hint, rule, and skill, on a reduced Rulesync model, with native placement at the defining
+scope as the ordinary case. An integration returns what it defers, with a reason for each, and
+omission from a successful result means handled; there is no separate acknowledgment ledger. Core
+enforces the contract at one point only: any entry still deferred at the session facet is a typed
+error before launch. Core attaches immutable origin metadata (owning scope, resource identity,
+producer), and a facet is derived from core's fixed mapping rather than authored as a second origin.
+Limited hooks and MCP server configurations are recognized as future artifact kinds this delivery
+model must not foreclose. Harness integrations are explicitly selected on the resource, even when
+their config is entirely default, and the generic shell is selected rather than silently
+substituted. This ruling supersedes the earlier wording, here and in
+`scope-participation-contract.md`, that every session receives all artifact payloads; both artifacts
+are corrected in place. Their other constraints stand.
 
 **Chartered (operator, 2026-09-06).** Wave 4 is chartered and awaits an effort lead; the seed FRD is
 `docs/sdd/2026-09-06-harness-scope-framework/frd.md`. The prerequisite is discharged: the
