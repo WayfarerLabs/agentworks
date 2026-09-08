@@ -58,7 +58,6 @@ from .shell_env import (
 )
 from .ssh_keys import (
     AuthorizedKeysApplied,
-    AuthorizedKeysOutcome,
     AuthorizedKeysUnproven,
     _apply_sve_mask,
     _preserve_ssh_host_keys,
@@ -278,7 +277,7 @@ def run_initialization(
         db.insert_vm_event(vm_name, "init_started")
 
         try:
-            authorized_keys = _phase_b_setup(
+            _phase_b_setup(
                 db,
                 config,
                 registry,
@@ -308,10 +307,12 @@ def run_initialization(
                     held=guard,
                     operation=operation.value,
                 )
+            # Terminal guest mutation follows every integration's setup.
+            authorized_keys = _reconcile_authorized_keys(ts_target, config, home, logger)
         except Exception as e:
             with db.transaction():
                 db.update_vm_init_status(vm_name, InitStatus.FAILED)
-                db.insert_vm_event(vm_name, "init_failed", str(e))
+                db.insert_vm_event(vm_name, "init_failed", logger.sanitize(str(e)))
             raise
 
         if isinstance(authorized_keys, AuthorizedKeysUnproven):
@@ -436,7 +437,7 @@ def _phase_b_setup(
     *,
     debian_release: DebianRelease,
     operation: VMInitializationOperation,
-) -> AuthorizedKeysOutcome:
+) -> None:
     """Phase B: Setup (over Tailscale SSH). Non-fatal steps warn and continue."""
     with output.section("VM Initialization"):
         from agentworks.resources.access import kind_dict
@@ -777,11 +778,6 @@ def _phase_b_setup(
             shell=admin_shell,
             logger=logger,
         )
-
-        # Final remote mutation: once this succeeds, no later Phase B work can
-        # make the identity proof stale before the local stability check and
-        # transactional terminal checkpoint.
-        return _reconcile_authorized_keys(ts_target, config, home, logger)
 
 
 RunCmd = Callable[[str, int], object]

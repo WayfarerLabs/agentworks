@@ -21,6 +21,7 @@ from agentworks.origin import Origin
 from agentworks.resources.registry import Registry
 from agentworks.schema import CapabilityBlock
 from agentworks.secrets.orchestration import SecretTarget
+from agentworks.ssh import SSHLogger as _RealSSHLogger
 from agentworks.transports import Transport
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.templates import resolve_from_dict as resolve_vm
@@ -291,7 +292,9 @@ def test_config_secret_registration_and_delivery_share_actual_owner(db, vm, nati
             observed.append(invocation)
 
     with seated_plugin(Plugin(name="lifecycle-token", capabilities={"harness-integration": (Harness,)})):
-        registry = Registry.empty()
+        from tests.conftest import registry_with_shell
+
+        registry = registry_with_shell()
         origin = Origin.built_in(source="fixture")
         registry.add("harness-integration", Harness.name, HarnessIntegrationEntry(Harness.name, origin), origin)
         registry.finalize()
@@ -389,12 +392,19 @@ def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(db, registry,
         assert db.get_vm(vm.name).init_status != InitStatus.COMPLETE.value
         events.append("admin")
         if fail_user:
-            raise RuntimeError("admin setup failed")
+            raise RuntimeError("admin setup failed: vm-private")
+
+    def final_keys(*args, **kwargs):
+        assert events == ["core", "vm", "admin"]
+        events.append("keys")
+        return AuthorizedKeysUnproven()
 
     monkeypatch.setattr("agentworks.vms.initializer.driver._phase_b_setup", core)
+    monkeypatch.setattr("agentworks.vms.initializer.driver._reconcile_authorized_keys", final_keys)
     monkeypatch.setattr(ShellIntegration, "vm_init", vm_setup)
     monkeypatch.setattr(ShellIntegration, "user_init", user_setup)
-    logger = SimpleNamespace(has_warnings=False, warnings=[])
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", db.path.parent / "logs")
+    logger = _RealSSHLogger(vm.name, "setup-fixture", redactions=("vm-private",))
 
     def run():
         run_initialization(
@@ -420,7 +430,9 @@ def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(db, registry,
             run()
     else:
         run()
-    assert events == ["core", "vm", "admin"]
+    assert events == ["core", "vm", "admin"] + ([] if fail_user else ["keys"])
+    logger.close()
+    assert all("vm-private" not in (event.detail or "") for event in db.list_vm_events(vm.name))
     records = read_native_setup(db, "vm", vm.name).records
     assert records[0].component == "vm" and records[0].complete
     assert records[1].component == "admin" and records[1].complete is not fail_user

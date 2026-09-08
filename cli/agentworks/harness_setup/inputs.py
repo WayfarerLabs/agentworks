@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
@@ -69,7 +70,7 @@ class SetupInputs:
         }
 
     def declaration(self, block: CapabilityBlock) -> dict[str, JsonValue]:
-        """Capture effective non-secret config and env declarations, never values resolved from secrets."""
+        """Capture config, reference names, and freshness hashes without storing env values."""
         model = validate_capability_config(
             kind="harness-integration",
             facet=self.facet,
@@ -85,5 +86,10 @@ class SetupInputs:
             ("workspace", self.target.workspace),
         ):
             if scope is not None:
-                env[name] = {key: entry.model_dump(mode="json") for key, entry in scope.items()}
+                env[name] = {
+                    key: {"secret": entry.secret}
+                    if entry.secret is not None
+                    else {"sha256": hashlib.sha256((entry.value or "").encode()).hexdigest()}
+                    for key, entry in scope.items()
+                }
         return cast("dict[str, JsonValue]", {"config": config, "env": env})

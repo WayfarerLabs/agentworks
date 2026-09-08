@@ -121,3 +121,27 @@ def test_changed_native_destination_refuses_before_any_mutation(setup_case, monk
     with pytest.raises(StateError):
         run_setup(db, Mock(), inputs, invocation, operation="agent-reinit")
     assert events == []
+
+
+def test_receipts_omit_env_values_but_detect_declaration_changes(setup_case):
+    from agentworks.env.entry import EnvEntry
+
+    db, inputs, invocation, _, _ = setup_case
+    inputs = replace(
+        inputs,
+        target=SecretTarget(
+            vm={}, agent={"LITERAL": EnvEntry("private-literal"), "TOKEN": EnvEntry({"secret": "token-name"})}
+        ),
+    )
+    run_setup(db, Mock(), inputs, invocation, operation="agent-reinit")
+    record = read_native_setup(db, "agent", "agent").records[0]
+    encoded = record.model_dump_json()
+    assert "private-literal" not in encoded
+    assert "token-name" in encoded
+    changed = replace(
+        inputs,
+        target=SecretTarget(
+            vm={}, agent={"LITERAL": EnvEntry("changed-literal"), "TOKEN": EnvEntry({"secret": "token-name"})}
+        ),
+    )
+    assert changed.declaration(inputs.attachments[0]) != record.declaration

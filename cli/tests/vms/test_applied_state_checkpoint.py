@@ -39,6 +39,10 @@ _SSH_KEYGEN = shutil.which("ssh-keygen")
 
 
 class _Logger:
+    @staticmethod
+    def sanitize(text: str) -> str:
+        return text
+
     def __init__(self) -> None:
         self.warnings: list[str] = []
 
@@ -81,7 +85,8 @@ def _run(
     def run_phase_b(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
         return phase_b() if phase_b is not None else outcome
 
-    monkeypatch.setattr("agentworks.vms.initializer.driver._phase_b_setup", run_phase_b)
+    monkeypatch.setattr("agentworks.vms.initializer.driver._phase_b_setup", lambda *args, **kwargs: None)
+    monkeypatch.setattr("agentworks.vms.initializer.driver._reconcile_authorized_keys", run_phase_b)
     active_logger = logger or _Logger()
     run_initialization(
         db,
