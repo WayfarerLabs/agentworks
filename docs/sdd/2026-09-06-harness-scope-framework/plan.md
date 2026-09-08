@@ -173,9 +173,10 @@ without touching the operator's installed plugins or authentication.
 
 The implementation is committed on `feat/harness-facets`. Private review and local validation cover
 the implementation boxes above; the acceptance section remains open for the complete live surface.
-The approved design correction is committed locally as `beef3668` but has not been published. GitHub
-authentication and the operator's scoped live-backend inventory/budget are unavailable in this
-environment, so publication, live VM acceptance and final locking remain pending.
+The approved design correction `beef3668` is published on PR 761. GitHub authentication was restored
+through the configured Git credential helper on operator direction. The implementation checkpoint
+can now be published. Live VM acceptance still requires the operator's scoped backend inventory and
+budget; native Windows validation is pending CI. Final locking remains pending acceptance.
 
 At `bb99e9eb`, the final Linux unit selection passed 8,847 tests with three skips. Ruff lint and
 format passed; strict mypy passed across production and tests (801 files). The isolated native CLI
