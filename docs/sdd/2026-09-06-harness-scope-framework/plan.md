@@ -162,7 +162,7 @@ without touching the operator's installed plugins or authentication.
       refuses unexplained residue (R13).
 - [ ] Run full repository gates and focused native Windows tests from the current CI selection;
       record actual commands, exit codes and unreachable live surfaces.
-- [ ] Obtain independent project, complexity and generic correctness/security reviews, resolve
+- [x] Obtain independent project, complexity and generic correctness/security reviews, resolve
       material findings, and validate the final integrated head.
 - [ ] Publish a coherent implementation handoff and consume published feedback only within operator
       authorization. Never treat a review report as authority to widen the effort.
@@ -177,15 +177,21 @@ The approved design correction is committed locally as `beef3668` but has not be
 authentication and the operator's scoped live-backend inventory/budget are unavailable in this
 environment, so publication, live VM acceptance and final locking remain pending.
 
-At `701a4d7a`, the complete Linux unit selection passed 8,842 tests with three skips. The isolated
-native CLI suite passed 48 tests against actual Codex and Claude commands; independent project
-review passed 136 focused cases and generic security review independently passed the 48 native
+At `bb99e9eb`, the final Linux unit selection passed 8,847 tests with three skips. Ruff lint and
+format passed; strict mypy passed across production and tests (801 files). The isolated native CLI
+suite includes 48 cases against actual Codex and Claude commands. Independent project review passed
+136 focused cases at `701a4d7a`, and generic security review independently passed the 48 native
 cases. Both marketplace identity findings, the reinit intent race, executable discovery and
-retirement config-root findings were resolved. The complexity pass accepted the architecture and
-requested three local reductions; their final integration and validation remain in progress.
+retirement config-root findings were resolved. The complexity reductions in `bb99e9eb` remove unused
+deletion parameters, a duplicate rehome check and unnecessary agent template walks; all three
+independent lanes reviewed this final delta clean. Project review passed 128 focused cases, while
+complexity and generic security review each passed 51.
 
-Test fixture typing was corrected in `002d7cb7`: strict mypy covers both production and tests (800
-files), and all 289 affected tests passed. Website Python (160 cases) and Node tests, file linters,
-rulesync drift, locked-SDD checks and business-layer typer isolation have passed locally. Final
-integrated validation and the deterministic website builds are still pending. These results do not
-substitute for native Windows or remote VM acceptance.
+Website Python (160 cases) and Node (103 cases) tests, file linters, rulesync drift, locked-SDD
+checks and business-layer typer isolation passed locally. Deterministic website double builds passed
+for `/` and `/agentworks/`, with scratch outputs removed. An isolated real `agw` drive passed config
+initialization, manifest loading, resolved inheritance and empty-list checks, all five facet-host
+schemas and samples, all four integration references, and duplicate-name refusal. Guide examples
+also passed registry validation and six CLI inspections. Fixture homes and completed scratch
+checkouts were removed; the committed design and implementation checkouts remain for publication.
+These results do not substitute for native Windows or remote VM acceptance.
