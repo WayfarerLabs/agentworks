@@ -46,6 +46,7 @@ AGENT_MANIFESTS = [
 @pytest.fixture(autouse=True)
 def _stub_ssh_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     stub_vm_ssh_identity(monkeypatch)
+    monkeypatch.setattr(agent_initializer, "create_exclusive_agent_user", lambda *args, **kwargs: None)
 
 
 @pytest.fixture
@@ -1214,3 +1215,50 @@ def test_reinit_reconciles_grant_all_agent_via_materialized_rows(
     assert group_adds == [("agt-dev", "ws1")]  # reconciled via the materialized row
     # Summary line present when grants were reconciled (N > 0).
     assert "Reconciled 1 workspace grant" in captured_output.info
+
+
+@pytest.mark.parametrize("operation", ["create", "reinit"])
+def test_active_user_setup_joins_eager_env_and_runs_after_core(
+    db,
+    make_config,
+    mutation,
+    monkeypatch,
+    operation,
+    resolve_counter,
+):
+    from agentworks.capabilities.harness_integration.shell import ShellIntegration
+    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+    from agentworks.harness_setup.state import read_native_setup
+    from agentworks.transports import Transport
+
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    monkeypatch.setenv("AW_SECRET_SETUP_TOKEN", "setup-private")
+    if operation == "reinit":
+        db.insert_agent("dev", "box", "agt-dev", template="default")
+    target = MagicMock(spec=Transport)
+    target.run.return_value.stdout = "native-identity"
+    monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: target)
+    calls = []
+
+    def setup(self, invocation):
+        assert mutation["agent_name"] == "dev"
+        assert invocation.environment["SETUP_TOKEN"] == "setup-private"
+        assert invocation.environment["AGENTWORKS_AGENT"] == "dev"
+        assert "AGENTWORKS_WORKSPACE" not in invocation.environment
+        with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "box"):
+            pass
+        calls.append(invocation)
+
+    monkeypatch.setattr(ShellIntegration, "user_init", setup)
+    spec = '{"harness_integrations":[{"name":"shell"}],"env":{"SETUP_TOKEN":{"secret":"setup-token"}}}'
+    if operation == "create":
+        agent_manager.create_agent(
+            db, config, name="dev", vm_name="box", spec=spec, interaction=TtyInteractionPolicy.REFUSE
+        )
+    else:
+        agent_manager.reinit_agent(db, config, name="dev", spec=spec, interaction=TtyInteractionPolicy.REFUSE)
+    assert len(calls) == 1
+    assert len(resolve_counter) == 1 and "setup-token" in resolve_counter[0]
+    assert read_native_setup(db, "agent", "dev").records[0].complete

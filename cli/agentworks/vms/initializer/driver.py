@@ -67,12 +67,16 @@ from .ssh_keys import (
 from .workspaces_dir import _setup_workspaces_directory
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database
     from agentworks.debian import DebianRelease
     from agentworks.git_credentials import CredentialRequest
+    from agentworks.harness_setup.inputs import SetupInputs
+    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.resources.registry import Registry
     from agentworks.vms.admin import AdminConfig
     from agentworks.vms.templates import ResolvedVMTemplate
@@ -254,6 +258,9 @@ def run_initialization(
     *,
     debian_release: DebianRelease,
     operation: VMInitializationOperation,
+    setup_inputs: tuple[SetupInputs, ...] = (),
+    setup_guard: NativeMutationGuard | None = None,
+    setup_values: Mapping[str, str] | None = None,
 ) -> None:
     """Run Phase B (initialization) with status tracking and event logging.
 
@@ -262,79 +269,100 @@ def run_initialization(
     ``operation`` value also drives create-only setup behavior.
     Each credential request carries the provider's scoped context assembler.
     """
-    db.insert_vm_event(vm_name, "init_started")
+    from agentworks.harness_setup.locking import native_mutation_guard
 
-    try:
-        authorized_keys = _phase_b_setup(
-            db,
-            config,
-            registry,
-            vm_template,
-            admin,
-            vm_name,
-            ts_target,
-            credential_requests,
-            home,
-            admin_username,
-            logger,
-            debian_release=debian_release,
-            operation=operation,
+    with native_mutation_guard(db.path, vm_name, held=setup_guard) as guard:
+        from agentworks.harness_setup.lifecycle import require_prepared_setup
+
+        require_prepared_setup(db, "vm", vm_name, ("vm", "admin"), setup_inputs)
+        db.insert_vm_event(vm_name, "init_started")
+
+        try:
+            authorized_keys = _phase_b_setup(
+                db,
+                config,
+                registry,
+                vm_template,
+                admin,
+                vm_name,
+                ts_target,
+                credential_requests,
+                home,
+                admin_username,
+                logger,
+                debian_release=debian_release,
+                operation=operation,
+            )
+            if setup_inputs:
+                from agentworks.harness_setup.lifecycle import apply_vm_setup
+
+                vm = db.get_vm(vm_name)
+                assert vm is not None
+                apply_vm_setup(
+                    db,
+                    registry,
+                    inputs=setup_inputs,
+                    vm=vm,
+                    target=ts_target,
+                    values=setup_values or {},
+                    held=guard,
+                    operation=operation.value,
+                )
+        except Exception as e:
+            with db.transaction():
+                db.update_vm_init_status(vm_name, InitStatus.FAILED)
+                db.insert_vm_event(vm_name, "init_failed", str(e))
+            raise
+
+        if isinstance(authorized_keys, AuthorizedKeysUnproven):
+            output.warn(
+                f"SSH identity evidence for VM '{vm_name}' is unknown, so ordinary SSH commands "
+                "will refuse to connect. If the configured key still works, retry with "
+                f"'agw vm reinit {vm_name}'. Otherwise, use "
+                f"'agw vm shell {vm_name} --platform' where supported to restore access before "
+                "reinitializing. If platform recovery is unavailable, recreate the VM."
+            )
+
+        from agentworks.db.instance_state import AppliedStateKey
+        from agentworks.vms.applied_state import build_vm_initialization_slices
+
+        applied_proof = authorized_keys if isinstance(authorized_keys, AuthorizedKeysApplied) else None
+        slices = build_vm_initialization_slices(
+            applied_proof,
+            include_hardware=operation is VMInitializationOperation.VM_CREATE,
         )
-    except Exception as e:
+        ssh_identity_proven = AppliedStateKey.SSH_IDENTITY in slices
+        if applied_proof is not None and not ssh_identity_proven:
+            # File-system identity cannot be checkpointed atomically with the
+            # remote write. A changed or unreadable carrier leaves the remote
+            # result unknown, so remove any older proof.
+            msg = "configured SSH identity changed or became unavailable after authorized_keys update"
+            logger.warning(msg)
+            output.warn(msg)
+
+        final_status = InitStatus.PARTIAL if logger.has_warnings else InitStatus.COMPLETE
+        final_event = "init_partial" if logger.has_warnings else "init_complete"
+        final_detail = f"{len(logger.warnings)} warning(s)" if logger.has_warnings else None
+
+        # Do not include this checkpoint in the Phase B exception arm above: a
+        # local database failure must roll back the complete terminal result and
+        # propagate, leaving the earlier in-progress evidence intact.
         with db.transaction():
-            db.update_vm_init_status(vm_name, InitStatus.FAILED)
-            db.insert_vm_event(vm_name, "init_failed", str(e))
-        raise
-
-    if isinstance(authorized_keys, AuthorizedKeysUnproven):
-        output.warn(
-            f"SSH identity evidence for VM '{vm_name}' is unknown, so ordinary SSH commands "
-            "will refuse to connect. If the configured key still works, retry with "
-            f"'agw vm reinit {vm_name}'. Otherwise, use "
-            f"'agw vm shell {vm_name} --platform' where supported to restore access before "
-            "reinitializing. If platform recovery is unavailable, recreate the VM."
-        )
-
-    from agentworks.db.instance_state import AppliedStateKey
-    from agentworks.vms.applied_state import build_vm_initialization_slices
-
-    applied_proof = authorized_keys if isinstance(authorized_keys, AuthorizedKeysApplied) else None
-    slices = build_vm_initialization_slices(
-        applied_proof,
-        include_hardware=operation is VMInitializationOperation.VM_CREATE,
-    )
-    ssh_identity_proven = AppliedStateKey.SSH_IDENTITY in slices
-    if applied_proof is not None and not ssh_identity_proven:
-        # File-system identity cannot be checkpointed atomically with the
-        # remote write. A changed or unreadable carrier leaves the remote
-        # result unknown, so remove any older proof.
-        msg = "configured SSH identity changed or became unavailable after authorized_keys update"
-        logger.warning(msg)
-        output.warn(msg)
-
-    final_status = InitStatus.PARTIAL if logger.has_warnings else InitStatus.COMPLETE
-    final_event = "init_partial" if logger.has_warnings else "init_complete"
-    final_detail = f"{len(logger.warnings)} warning(s)" if logger.has_warnings else None
-
-    # Do not include this checkpoint in the Phase B exception arm above: a
-    # local database failure must roll back the complete terminal result and
-    # propagate, leaving the earlier in-progress evidence intact.
-    with db.transaction():
-        db.update_vm_init_status(vm_name, final_status)
-        db.insert_vm_event(vm_name, final_event, final_detail)
-        if slices:
-            db.instance_state.replace_applied_slices(
-                "vm",
-                vm_name,
-                operation.value,
-                slices,
-            )
-        if not ssh_identity_proven:
-            db.instance_state.clear_applied_slice(
-                "vm",
-                vm_name,
-                AppliedStateKey.SSH_IDENTITY,
-            )
+            db.update_vm_init_status(vm_name, final_status)
+            db.insert_vm_event(vm_name, final_event, final_detail)
+            if slices:
+                db.instance_state.replace_applied_slices(
+                    "vm",
+                    vm_name,
+                    operation.value,
+                    slices,
+                )
+            if not ssh_identity_proven:
+                db.instance_state.clear_applied_slice(
+                    "vm",
+                    vm_name,
+                    AppliedStateKey.SSH_IDENTITY,
+                )
 
 
 def _phase_a_bootstrap(

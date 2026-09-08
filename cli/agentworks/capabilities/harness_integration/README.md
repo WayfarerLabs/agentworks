@@ -246,6 +246,30 @@ arguments and stores them in a `SessionBinding`; setup access to session identit
 `StateError`. An integration's setup methods read their bound facet model through `_config_as`; its
 existing session `config` property may continue narrowing to the session model.
 
+Owning lifecycles run setup after core provisioning: VM and admin during VM initialization, agent
+during create or reinit, and workspace after its directory and repository are created. Explicitly
+selected setup consumes its owning scope's environment: VM only; VM plus the actual admin or agent;
+or VM plus workspace. Existing receipts also activate this path when attachments are removed. With
+neither selections nor receipts, setup does not resolve unused environment secrets. Install commands
+keep their existing environment behavior.
+
+The command registers setup environment and config secrets before its single secret-resolution pass
+and before constructing its SSH logger. An invocation receives the complete scope environment with
+protected `AGENTWORKS_*` identity, plus a secret mapping restricted to that integration's config
+references. VM/admin setup binds references to the live VM owner; agent and workspace setup bind to
+their respective live owners, including resources still pending during session creation.
+
+A VM-family mutation guard spans core provisioning, integration setup, and failed-create cleanup.
+Setup checkpoints record confirmed native claims through instance state. Fresh agent and workspace
+receipts remain buffered until the owner row and desired overlay commit atomically; failed creation
+cleans up the newly owned native resource. Fresh agent creation refuses an existing unowned Linux
+account or home before arming rollback. Existing agents retain the create-or-converge reinit path.
+VM/admin setup finishes before the final VM initialization and SSH-identity checkpoint.
+
+Session create, start, and restart check the integration's declared setup prerequisites before
+session mutation. These checks inspect evidence and native placement; they do not provision an
+ancestor or resolve additional setup secrets.
+
 #### Config: Facet Selection
 
 The integration declares its session `config_model`, an `AgwModel` carrying its own `name` as a

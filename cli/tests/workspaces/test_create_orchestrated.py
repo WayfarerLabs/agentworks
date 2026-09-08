@@ -379,3 +379,44 @@ def test_workspace_scope_reaches_node_readiness(
     assert scope.level is ScopeLevel.WORKSPACE
     assert scope.vm == "box" and scope.workspace == "ws1"
     assert scope.agent is None and scope.session is None
+
+
+def test_workspace_setup_joins_eager_env_and_follows_directory_creation(
+    db, make_config, mutation, monkeypatch, resolve_counter
+):
+    from unittest.mock import Mock
+
+    from agentworks.capabilities.harness_integration.shell import ShellIntegration
+    from agentworks.harness_setup.state import read_native_setup
+    from agentworks.transports import Transport
+
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    monkeypatch.setenv("AW_SECRET_PROJECT_TOKEN", "project-private")
+    target = Mock(spec=Transport)
+    target.run.return_value.stdout = "native-identity"
+    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
+    calls = []
+
+    def setup(self, invocation):
+        assert mutation["ws_name"] == "project"
+        assert db.get_workspace("project") is None
+        assert invocation.environment["PROJECT_TOKEN"] == "project-private"
+        assert invocation.environment["AGENTWORKS_WORKSPACE"] == "project"
+        assert "AGENTWORKS_AGENT" not in invocation.environment
+        assert invocation.root == "/srv/project"
+        calls.append(invocation)
+
+    monkeypatch.setattr(ShellIntegration, "workspace_init", setup)
+    workspace_manager.create_workspace(
+        db,
+        config,
+        name="project",
+        vm_name="box",
+        spec='{"harness_integrations":[{"name":"shell"}],"env":{"PROJECT_TOKEN":{"secret":"project-token"}}}',
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+    assert len(calls) == 1
+    assert len(resolve_counter) == 1 and "project-token" in resolve_counter[0]
+    assert read_native_setup(db, "workspace", "project").records[0].complete

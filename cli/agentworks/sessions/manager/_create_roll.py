@@ -86,6 +86,8 @@ def _realize_ephemerals(
                     name=plan.workspace_name,
                     vm=vm,
                     template=graph.workspace_tmpl,
+                    setup_inputs=graph.pending_workspace.setup_inputs,
+                    setup_values=secret_values,
                     overlay=graph.workspace_overlay,
                     defer_overlay_report=True,
                 )
@@ -118,6 +120,8 @@ def _realize_ephemerals(
                     template=graph.agent_tmpl,
                     credential_requests=credential_ops,
                     credential_redactions=git_redactions,
+                    setup_inputs=graph.pending_agent.setup_inputs,
+                    setup_values=secret_values,
                     overlay=graph.agent_overlay,
                     defer_overlay_report=True,
                 )
@@ -221,6 +225,18 @@ def _start_session_slice(
             admin_target=target,
             agent_target=agent_target,
         )
+    )
+
+    from agentworks.harness_setup.readiness import require_setup_ready
+
+    require_setup_ready(
+        db,
+        registry,
+        session_node.harness_integration,
+        vm=vm,
+        workspace=ws,
+        agent_name=resolved_agent_name,
+        runner=agent_target or target,
     )
 
     # Compute socket path up front (deterministic from linux_user +

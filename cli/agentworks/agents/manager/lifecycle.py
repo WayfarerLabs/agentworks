@@ -172,11 +172,16 @@ def create_agent(
     )
     nodes = walk(pending_agent)
     # The walk supplies the boundary union (the credential tokens plus
-    # the site's config secrets). Provisioning is hermetic: no
-    # operator-env secrets join here; they get prompted at the use
-    # site (agent shell, session create, etc.).
+    # the site's config secrets). Setup adds its env separately below;
+    # install commands retain their existing hermetic execution.
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
+
+    from agentworks.harness_setup.lifecycle import prepare_agent_setup
+
+    setup_inputs = prepare_agent_setup(db, registry, vm=vm, name=name, template=agent_tmpl)
+    if setup_inputs is not None:
+        setup_inputs.register(resolver, registry)
 
     scope = OperationScope(
         level=ScopeLevel.AGENT,
@@ -244,6 +249,8 @@ def create_agent(
                 template=agent_tmpl,
                 credential_requests=credential_ops,
                 credential_redactions=git_redactions,
+                setup_inputs=setup_inputs,
+                setup_values=resolver.values,
                 grant_all_workspaces=grant_all_workspaces,
                 overlay=overlay,
             )
@@ -578,6 +585,12 @@ def reinit_agent(
         for secret_name in secret_union(nodes):
             resolver.register_name(secret_name)
 
+        from agentworks.harness_setup.lifecycle import prepare_agent_setup
+
+        setup_inputs = prepare_agent_setup(db, registry, vm=vm, name=name, template=agent_tmpl)
+        if setup_inputs is not None:
+            setup_inputs.register(resolver, registry)
+
         scope = OperationScope(
             level=ScopeLevel.AGENT,
             system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
@@ -601,9 +614,9 @@ def reinit_agent(
                 gate_secret_resolver(config, registry, resolver),
             )
         )
-        # The preflight boundary: git tokens and any site config secret
-        # resolve in one prompt session. Provisioning is hermetic: no
-        # operator-env secrets are prompted at reinit.
+        # Git tokens, site config, and active setup inputs resolve in one pass.
+        # Setup env is delivered only to integration methods; install commands
+        # retain their existing hermetic runners.
         with output.section("Preflight"):
             output.info(f"Checking agent-template/{agent_tmpl.name}...")
             announce_git_credentials(tmpl_node.credentials)
@@ -639,11 +652,21 @@ def reinit_agent(
         credential_ops = credential_requests(tmpl_node.credentials, scoped_ctx)
         git_redactions = credential_redactions(tmpl_node.credentials, resolver.values)
 
+        from agentworks.harness_setup.locking import native_mutation_guard
+
+        guard = stack.enter_context(native_mutation_guard(db.path, vm.name))
+        from agentworks.harness_setup.lifecycle import require_prepared_setup
+
+        require_prepared_setup(db, "agent", name, ("agent",), () if setup_inputs is None else (setup_inputs,))
         with output.section("Agent Initialization"):
             from agentworks.agents.initializer import create_agent_on_vm
             from agentworks.ssh import SSHLogger
 
-            ssh_logger = SSHLogger(vm.name, "agent-reinit", redactions=git_redactions)
+            ssh_logger = SSHLogger(
+                vm.name,
+                "agent-reinit",
+                redactions=tuple(dict.fromkeys((*git_redactions, *(resolver.values.values() if setup_inputs else ())))),
+            )
             try:
                 try:
                     from agentworks.vms.admin_templates import resolve_live_template as resolve_admin_template
@@ -664,6 +687,22 @@ def reinit_agent(
                             vm.admin_template,
                         ).git_force_safe_directory,
                     )
+
+                    if setup_inputs is not None:
+                        from agentworks.harness_setup.lifecycle import apply_agent_setup
+
+                        apply_agent_setup(
+                            db,
+                            config,
+                            registry,
+                            inputs=setup_inputs,
+                            vm=vm,
+                            username=agent.linux_user,
+                            values=resolver.values,
+                            logger=ssh_logger,
+                            held=guard,
+                            operation="agent-reinit",
+                        )
 
                     # Reconcile the agent's recorded workspace grants onto the
                     # VM. reinit shares create_agent_on_vm with the create path

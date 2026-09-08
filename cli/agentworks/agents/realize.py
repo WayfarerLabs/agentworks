@@ -42,11 +42,14 @@ from agentworks import output
 from agentworks.errors import ExternalError
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from pydantic import BaseModel
 
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, VMRow
     from agentworks.git_credentials import CredentialRequest
+    from agentworks.harness_setup.inputs import SetupInputs
     from agentworks.instance_specs import InstanceOverlay
     from agentworks.resources.registry import Registry
 
@@ -66,6 +69,8 @@ def realize_agent(
     grant_all_workspaces: bool = False,
     overlay: InstanceOverlay[BaseModel] | None = None,
     defer_overlay_report: bool = False,
+    setup_inputs: SetupInputs | None = None,
+    setup_values: Mapping[str, str] | None = None,
 ) -> AgentRow:
     """Make agent ``name`` real on ``vm``: create and configure the
     Linux user (including the git-credential materials, their write-step
@@ -81,7 +86,7 @@ def realize_agent(
     # ENTRY that reaches it (agent create, session create --new-agent). If you
     # add a NEW caller of ``realize_agent``, add its command-entry gate and
     # update tests/agents/test_recipe_gate_drift.py's enumerated caller set.
-    from agentworks.agents.initializer import create_agent_on_vm, delete_agent_on_vm
+    from agentworks.agents.initializer import create_agent_on_vm, create_exclusive_agent_user, delete_agent_on_vm
     from agentworks.agents.manager import derive_linux_user
     from agentworks.ssh import SSHLogger
 
@@ -89,7 +94,6 @@ def realize_agent(
     # Supply every declared secret input when the logger is constructed. A logger's
     # redaction set is immutable because adding a secret after the first
     # incremental write cannot protect bytes already persisted.
-    ssh_logger = SSHLogger(vm.name, "agent-create", redactions=credential_redactions)
 
     def _safe_rollback() -> None:
         # Best-effort: rollback failures must not mask the original KI or
@@ -104,79 +108,114 @@ def realize_agent(
                 f"SSH log: {ssh_logger.display_path}"
             )
 
-    # The logger's close() writes a "Finished" footer; defer it via finally so
-    # rollback commands are logged BEFORE the footer, not after.
-    try:
-        try:
-            from agentworks.vms.admin_templates import resolve_live_template as resolve_admin_template
+    from agentworks.harness_setup.lifecycle import require_prepared_setup
+    from agentworks.harness_setup.locking import native_mutation_guard
 
-            create_agent_on_vm(
-                vm,
-                config,
-                registry,
-                template,
-                linux_user,
-                agent_name=name,
-                credential_requests=credential_requests,
-                logger=ssh_logger,
-                admin_git_force_safe_directory=resolve_admin_template(
-                    db,
+    with native_mutation_guard(db.path, vm.name) as guard:
+        require_prepared_setup(db, "agent", name, ("agent",), () if setup_inputs is None else (setup_inputs,))
+        ssh_logger = SSHLogger(
+            vm.name,
+            "agent-create",
+            redactions=tuple(
+                dict.fromkeys((*credential_redactions, *((setup_values or {}).values() if setup_inputs else ())))
+            ),
+        )
+        # The logger's close() writes a "Finished" footer; defer it via finally so
+        # rollback commands are logged BEFORE the footer, not after.
+        try:
+            create_exclusive_agent_user(vm, config, linux_user, shell=template.shell, logger=ssh_logger)
+            try:
+                from agentworks.vms.admin_templates import resolve_live_template as resolve_admin_template
+
+                create_agent_on_vm(
+                    vm,
+                    config,
                     registry,
-                    vm.name,
-                    vm.admin_template,
-                ).git_force_safe_directory,
-            )
-
-            from agentworks.instance_specs import persist_creation_overlay, refuse_orphan_creation_state
-
-            with db.transaction():
-                refuse_orphan_creation_state(db, "agent", name)
-                agent = db.insert_agent(
-                    name,
-                    vm.name,
+                    template,
                     linux_user,
-                    template=template.name,
-                    grant_all=grant_all_workspaces,
+                    agent_name=name,
+                    credential_requests=credential_requests,
+                    logger=ssh_logger,
+                    admin_git_force_safe_directory=resolve_admin_template(
+                        db,
+                        registry,
+                        vm.name,
+                        vm.admin_template,
+                    ).git_force_safe_directory,
                 )
-                overlay_outcome = persist_creation_overlay(db, "agent", name, overlay)
-        except KeyboardInterrupt:
-            output.warn(f"Cancelling agent create '{name}'... rolling back.")
-            _safe_rollback()
-            raise
-        except Exception as e:
-            _safe_rollback()
-            raise ExternalError(
-                f"creating agent: {e}",
-                entity_kind="agent",
-                entity_name=name,
-                hint=f"SSH log: {ssh_logger.display_path}",
-            ) from e
-    finally:
-        try:
-            ssh_logger.close()
-        except BaseException:
-            if not defer_overlay_report:
-                from agentworks.instance_specs import render_retained_creation_overlay
 
-                render_retained_creation_overlay(db, "agent", name)
-            raise
+                native_setup = None
+                if setup_inputs is not None:
+                    from agentworks.harness_setup.lifecycle import apply_agent_setup
 
-    from agentworks.instance_specs import report_overlay_outcome
+                    native_setup = apply_agent_setup(
+                        db,
+                        config,
+                        registry,
+                        inputs=setup_inputs,
+                        vm=vm,
+                        username=linux_user,
+                        values=setup_values or {},
+                        logger=ssh_logger,
+                        held=guard,
+                        operation="agent-create",
+                        buffered=True,
+                    )
 
-    with report_overlay_outcome(None if defer_overlay_report else overlay_outcome):
-        # If grant_all, add to all existing workspace groups
-        if grant_all_workspaces:
-            from agentworks.agents.grants import add_to_workspace_group
+                from agentworks.instance_specs import persist_creation_overlay, refuse_orphan_creation_state
 
-            for ws in db.list_workspaces(vm_name=vm.name):
-                add_to_workspace_group(vm, config, db, linux_user, ws.name, logger=None)
-                db.insert_agent_grant(name, ws.name, "explicit")
+                with db.transaction():
+                    refuse_orphan_creation_state(db, "agent", name)
+                    agent = db.insert_agent(
+                        name,
+                        vm.name,
+                        linux_user,
+                        template=template.name,
+                        grant_all=grant_all_workspaces,
+                    )
+                    overlay_outcome = persist_creation_overlay(db, "agent", name, overlay)
+                    if native_setup is not None:
+                        from agentworks.harness_setup.state import write_native_setup
 
-        # Refresh operator SSH config so `ssh <prefix><vm>--<agent>` works.
-        # Declarative rebuild from DB state picks up the new agent row.
-        from agentworks.ssh_config import sync_ssh_config
+                        write_native_setup(db, "agent", name, native_setup, operation="agent-create")
+            except KeyboardInterrupt:
+                output.warn(f"Cancelling agent create '{name}'... rolling back.")
+                _safe_rollback()
+                raise
+            except Exception as e:
+                _safe_rollback()
+                raise ExternalError(
+                    f"creating agent: {e}",
+                    entity_kind="agent",
+                    entity_name=name,
+                    hint=f"SSH log: {ssh_logger.display_path}",
+                ) from e
+        finally:
+            try:
+                ssh_logger.close()
+            except BaseException:
+                if not defer_overlay_report:
+                    from agentworks.instance_specs import render_retained_creation_overlay
 
-        sync_ssh_config(config, db)
+                    render_retained_creation_overlay(db, "agent", name)
+                raise
 
-        output.info(f"Agent '{name}' created on VM '{vm.name}' (user: {agent.linux_user})")
-    return agent
+        from agentworks.instance_specs import report_overlay_outcome
+
+        with report_overlay_outcome(None if defer_overlay_report else overlay_outcome):
+            # If grant_all, add to all existing workspace groups
+            if grant_all_workspaces:
+                from agentworks.agents.grants import add_to_workspace_group
+
+                for ws in db.list_workspaces(vm_name=vm.name):
+                    add_to_workspace_group(vm, config, db, linux_user, ws.name, logger=None)
+                    db.insert_agent_grant(name, ws.name, "explicit")
+
+            # Refresh operator SSH config so `ssh <prefix><vm>--<agent>` works.
+            # Declarative rebuild from DB state picks up the new agent row.
+            from agentworks.ssh_config import sync_ssh_config
+
+            sync_ssh_config(config, db)
+
+            output.info(f"Agent '{name}' created on VM '{vm.name}' (user: {agent.linux_user})")
+        return agent
