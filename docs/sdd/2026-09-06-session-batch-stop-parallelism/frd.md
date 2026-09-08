@@ -118,8 +118,13 @@ teardown. Workers MUST NOT receive the database object, call output helpers, pro
 secrets, activate VMs, alter provider state, or regenerate shared configuration.
 
 Before submission, the coordinator MUST convert each eligible selected session into immutable work
-containing only its complete validated runtime identity, target, privilege policy, and teardown
-policy. After completion, the coordinator MUST apply returned evidence and render output.
+containing only its canonical database VM name, complete validated runtime identity, target,
+privilege policy, and teardown policy. After completion, the coordinator MUST apply returned
+evidence and render output.
+
+The only mutable object shared across workers MAY be the batch-local submission gate required by R7.
+It carries no session data or result and can only release a worker into execute or no-mutation
+abort.
 
 ### R5: Remote teardown invariants
 
@@ -170,6 +175,15 @@ be reported as failure even if the remote runtime was already stopped. A worker-
 `BaseException` drains sibling work and then propagates; it MUST NOT be misreported as a reconciled
 stopped outcome.
 
+If executor submission fails or is interrupted before every plan receives a future, the coordinator
+MUST stop submitting. Every submitted callable MUST wait at a batch-local pre-mutation gate that is
+released for remote execution only after every future has returned and been mapped. A partial
+submission MUST mark that gate aborted before releasing it, cancel queued work, wait for running
+callables to leave through the no-mutation branch, and then propagate the original coordinator
+failure or interruption. This rule covers work that an executor may have enqueued even though
+`submit()` did not return its future. Every plan in a partially submitted batch MUST remain
+persisted and remotely untouched and be accounted as not started.
+
 One session failure MUST NOT cancel sibling sessions. The final command failure MUST retain the
 existing aggregate behavior after all eligible work and reconciliation complete.
 
@@ -197,6 +211,11 @@ On the first operator interrupt after submission, the coordinator MUST:
 3. continue consuming already-completed and in-flight bounded futures;
 4. apply successful stopped evidence on the main thread; and
 5. propagate interruption after reconciliation.
+
+When interruption lands before the complete future map exists, the aborted submission gate makes the
+entire concurrent lane a no-mutation attempt. Once the complete map exists, the coordinator MUST
+release the gate and apply the ordinary cancellation and reconciliation rules even if interruption
+lands at the release boundary.
 
 Running thread work cannot be cancelled safely and MUST NOT be described as cancelled. A second or
 later interrupt MUST repeat the visible reconciliation notice and continue draining. The command

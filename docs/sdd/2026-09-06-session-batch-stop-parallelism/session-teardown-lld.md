@@ -61,6 +61,7 @@ A frozen dataclass with value fields:
 @dataclass(frozen=True)
 class DedicatedTeardownPlan:
     session_name: str
+    vm_name: str
     socket_path: str
     stored_pid: int
     stored_boot_id: str
@@ -70,14 +71,16 @@ class DedicatedTeardownPlan:
     force: bool
 ```
 
-Every identity field is complete and validated before construction. The values form the expected
-identity for later compare-and-set persistence. Each plan owns a distinct transport instance. No two
-concurrently running plans share it.
+Every identity field is complete and validated before construction. `vm_name` is the canonical
+database VM key resolved from the already-validated session graph on the invoking thread; it is not
+derived from transport addressing. The values form the expected identity for later compare-and-set
+persistence. Each plan owns a distinct transport instance. No two concurrently running plans share
+it.
 
 ## Preparation
 
-`prepare_concurrent_dedicated_teardown(db, session, *, target, target_owns_session, force)` runs
-only on the invoking thread.
+`prepare_concurrent_dedicated_teardown(db, session, *, vm_name, target, target_owns_session, force)`
+runs only on the invoking thread.
 
 1. Reject the stopped sentinel as no work.
 2. Require a dedicated socket and validate it as an exact managed path through the current database
@@ -85,7 +88,8 @@ only on the invoking thread.
 3. Require a positive persisted PID, canonical boot ID, and positive start ticks.
 4. If any fingerprint field is missing, classify the row for synchronous teardown instead of
    constructing a concurrent plan.
-5. Construct the plan with `sudo=not target_owns_session`.
+5. Require `vm_name` to equal the canonical VM key already resolved by batch graph validation.
+6. Construct the plan with `sudo=not target_owns_session`.
 
 Preparation performs no remote mutation. An invalid stored value retains the current per-session
 failure behavior; a merely incomplete fingerprint is not an error and stays serial.
@@ -164,6 +168,19 @@ named mutation constants because it cannot share the read-only helper's cancella
 Named stop and other synchronous teardown consumers use their existing transport instances and
 timeout policy.
 
+## Pre-mutation Submission Gate
+
+The concurrent coordinator owns one batch-local gate with two thread-safe signals: aborted and
+released. The gated worker wrapper waits for released, reads aborted, and returns without calling
+the remote helper when aborted is set. The coordinator is the only writer and sets aborted before
+released on every partial-submission exit. The gate carries no plan, result, database, transport, or
+output state.
+
+After the complete future-to-plan map exists, the coordinator records that boundary before setting
+released without aborted. An exception at or after that release boundary therefore cannot create an
+untracked mutation: every plan already has a mapped future and enters the ordinary drain and
+reconciliation state machine.
+
 ## Batch Coordinator
 
 `execute_concurrent_dedicated_teardowns(plans, *, db)` accepts complete-fingerprint dedicated plans
@@ -173,23 +190,36 @@ An empty plan sequence returns immediately without constructing an executor. Thi
 serial-only lane and lets a batch containing only preparation failures continue to its normal
 failure accounting.
 
-1. Create a `ThreadPoolExecutor` with `min(8, len(plans))` workers.
-2. Submit `execute_dedicated_teardown` once for every plan; no context copy is needed.
-3. Map each future to its plan.
-4. Use `wait(..., timeout=5, return_when=FIRST_COMPLETED)` so the invoking thread can emit a
+1. Create a batch-local submission gate and a `ThreadPoolExecutor` with `min(8, len(plans))`
+   workers.
+2. Submit a gated wrapper once for every plan in deterministic plan order; no context copy is
+   needed. The wrapper waits and cannot call `execute_dedicated_teardown` before the gate resolves.
+3. As each `submit` returns, map that future to its plan. Only after every future is mapped, mark
+   the map complete and release the gate for execution.
+4. If submission raises before the map is complete, mark the gate aborted before releasing it, call
+   executor shutdown with queued-future cancellation and waiting enabled, and propagate the original
+   failure or interruption. A running wrapper observes abort and returns without remote mutation;
+   queued work, including an enqueued work item whose future was never returned, is cancelled or
+   takes the same no-mutation branch.
+5. Use `wait(..., timeout=5, return_when=FIRST_COMPLETED)` so the invoking thread can emit a
    heartbeat after a quiet interval.
-5. Call `future.result()` and collect an ordinary exception as that plan's failure.
-6. On normal return, compare-and-set verified stopped state before labeled success output.
-7. Repeat until every submitted future is completed or cancelled.
-8. Shut down and return all failures.
+6. Call `future.result()` and collect an ordinary exception as that plan's failure.
+7. On normal return, compare-and-set verified stopped state before labeled success output.
+8. Repeat until every submitted future is completed or cancelled.
+9. Shut down and return all failures.
 
 An ordinary per-session `Exception` does not cancel siblings. A `BaseException` escaping a worker, a
-broken executor, or another coordinator-level failure enters the abort-and-drain path. Sibling
-mutations are drained and reconciled before failure propagates. The maximum active remote-task count
-is eight, and every eligible session has exactly one future.
+broken executor after gate release, or another coordinator-level failure enters the abort-and-drain
+path. Successfully released sibling mutations are drained and reconciled before failure propagates.
+Failure before a complete future map instead takes the submission-abort path, which guarantees that
+every plan remains remotely and persistently untouched. The implementation does not infer that a
+raised `submit()` call failed to enqueue: CPython enqueues a work item before thread adjustment and
+before returning its future, so the gate covers that otherwise-unowned boundary. The maximum active
+remote-task count is eight, and every plan has exactly one mapped future before remote execution is
+authorized.
 
-The heartbeat reports completed, active, and queued counts. A completion resets the quiet interval,
-so fast batches emit only their ordinary session outcomes.
+The heartbeat reports completed, active, and queued counts after the gate releases. A completion
+resets the quiet interval, so fast batches emit only their ordinary session outcomes.
 
 A completed future remains in coordinator bookkeeping until reconciliation and outcome rendering
 finish. If `KeyboardInterrupt` lands during that main-thread work, interruption mode retries the
@@ -220,7 +250,12 @@ file replacement remains outside Agentworks' guarantees.
 
 ## Interruption State Machine
 
-The first `KeyboardInterrupt` that escapes future collection becomes the stored primary
+Before the complete future map exists, `KeyboardInterrupt` marks the submission gate aborted,
+releases its waiting wrappers into the no-mutation branch, cancels queued executor work, waits for
+shutdown, and re-raises. No reconciliation is needed because remote execution was never authorized.
+
+After the complete future map exists, the gate is always released for execution. A
+`KeyboardInterrupt` at that release boundary or during future collection becomes the stored primary
 interruption. The coordinator then:
 
 1. invokes `future.cancel()` for every unfinished future;
@@ -231,6 +266,10 @@ interruption. The coordinator then:
 
 Cancelled futures produce no session failure because their mutation did not start. Those sessions
 remain eligible for a future retry.
+
+Every plan in a partially submitted batch is counted as not started and remains eligible for retry.
+This includes a callable already running in the executor but still waiting at the aborted gate and a
+work item enqueued by a `submit()` call that raised before returning its future.
 
 A later interrupt during reconciliation repeats the notice and returns to the wait loop. Python
 cannot terminate running executor threads, and interpreter shutdown joins them. The command

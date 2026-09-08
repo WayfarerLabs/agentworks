@@ -80,6 +80,8 @@ not authored prose.
 - [x] Obtain fresh private project and Muntz reviews after the current-main and PR #764 dependency
       audit.
 - [x] Publish the complete design checkpoint as a draft PR with `review-requested`.
+- [x] Audit implementation readiness against PR #764 head `5199bae9f` and close the canonical-VM
+      plan field and partial-submission ownership gaps before implementation.
 - [ ] Complete up to three authorized design feedback/fix cycles.
 - [ ] Record design convergence before implementation begins.
 
@@ -121,7 +123,8 @@ not authored prose.
 - [ ] Preserve the empty-selection no-op and skip executor construction for an empty concurrent plan
       set, including serial-only and preparation-failure batches.
 - [ ] Construct one 10-second, one-attempt transport per dedicated plan.
-- [ ] Add the fixed, maximum-eight dedicated teardown executor with one future per plan.
+- [ ] Add the fixed, maximum-eight dedicated teardown executor with a pre-mutation submission gate,
+      one mapped future per plan before release, and untouched accounting for a partial submission.
 - [ ] Consume futures in completion order and reconcile successful stopped state before labeled
       output.
 - [ ] Emit a compact heartbeat after each five-second quiet interval.
@@ -142,7 +145,8 @@ not authored prose.
 - [ ] Report and drain bounded in-flight work, reconciling every normally returned future.
 - [ ] Repeat the reconciliation notice after later interrupts without pretending Python can
       terminate running thread work.
-- [ ] Prove worker escape, timeout, incomplete-row serialization, and cancelled-future accounting.
+- [ ] Prove worker escape, timeout, incomplete-row serialization, cancelled-future accounting, and
+      partial-submission abort when `submit()` enqueues work but raises before returning its future.
 - [ ] Make reconciliation retry-safe when an interrupt lands after SQLite committed the desired
       state.
 - [ ] Preserve the current final aggregate command error for ordinary per-session failures.

@@ -8,7 +8,8 @@
 
 Python's futures API supports the desired bounded worker pool and completion-order collection, but
 its cancellation contract is narrower than it first appears: queued futures can be cancelled while
-running futures cannot, and executor threads are joined before Python exits. That makes explicit
+running futures cannot, executor threads are joined before Python exits, and work is enqueued before
+`submit()` returns its future. That makes a pre-mutation submission barrier, explicit
 reconciliation, finite remote calls, and honest interruption output requirements rather than
 implementation details.
 
@@ -34,7 +35,23 @@ read-only status observation. Those values are the initial teardown precedent, n
 teardown implementation keeps its policy independently named because destructive calls require
 different cancellation, retry, and reconciliation behavior.
 
-### 2. Cancellation cannot stop a running teardown
+### 2. Submission is not atomic with future handoff
+
+The official
+[CPython 3.12.13 `ThreadPoolExecutor` source](https://github.com/python/cpython/blob/v3.12.13/Lib/concurrent/futures/thread.py#L165-L181)
+enqueues the work item and adjusts the thread count before `submit()` returns its future. Thread
+adjustment may start a new thread. An exception or `KeyboardInterrupt` can therefore escape after
+the executor owns runnable work but before the caller owns the future needed to attribute and
+reconcile it. The corresponding
+[shutdown implementation](https://github.com/python/cpython/blob/v3.12.13/Lib/concurrent/futures/thread.py#L220-L239)
+can cancel queued futures but must wait for already-running work.
+
+Design consequence: every callable waits at a batch-local barrier before remote mutation. The
+coordinator releases the execute path only after every future is returned and mapped. Partial
+submission first marks the barrier aborted, then releases and shuts down the executor; even an
+enqueued work item with no returned future can only exit without touching the VM.
+
+### 3. Cancellation cannot stop a running teardown
 
 The same futures documentation states that `Future.cancel()` does not cancel a call that is already
 executing. `Executor.shutdown(cancel_futures=True)` cancels only pending work; running futures
@@ -46,7 +63,7 @@ CLI must not claim active teardown was cancelled or offer a second-interrupt esc
 runtime cannot provide. Finite remote calls and visible heartbeats make draining bounded and
 observable.
 
-### 3. SQLite connection ownership should not cross workers
+### 4. SQLite connection ownership should not cross workers
 
 The [Python `sqlite3` documentation](https://docs.python.org/3/library/sqlite3.html) documents
 `check_same_thread=True` as the default: using a connection from another thread raises
@@ -62,7 +79,7 @@ concurrent readers with one writer but still serializes writers and retains poss
 results. Separate worker connections would therefore add contention and failure ordering rather than
 remove the need for coordinator-owned persistence.
 
-### 4. tmux socket selection creates independent servers
+### 5. tmux socket selection creates independent servers
 
 The [tmux manual](https://man7.org/linux/man-pages/man1/tmux.1.html) documents `-S socket-path` as a
 full alternative server socket and `-L socket-name` as selecting a separate server socket. One tmux
@@ -72,7 +89,7 @@ Design consequence: current sessions with distinct validated persisted `-S` sock
 mutation units, including when hosted on the same VM. Legacy rows on the default socket may share
 one server and remain serial with exact session targeting.
 
-### 5. PR #764 prevents live-database replacement
+### 6. PR #764 prevents live-database replacement
 
 PR #764 adds a separate SQLite database-use sidecar: writable `Database` objects hold it shared for
 their lifetime, while restore holds it exclusive across replacement. This directly prevents a live
@@ -82,7 +99,7 @@ commands, because both hold shared use locks.
 Design consequence: keep the writable database open through worker reconciliation and retain pull
 request #764's whole-file replacement boundary. Issue #730 needs no second cross-process lock.
 
-### 6. Current teardown has a pre-kill durability checkpoint
+### 7. Current teardown has a pre-kill durability checkpoint
 
 Agentworks' current reachable dedicated teardown persists newly learned process start ticks before
 it invokes `tmux kill-server`. PID repair does not eagerly fill start ticks, so this checkpoint is
@@ -92,7 +109,7 @@ Design consequence: only rows that already have complete fingerprints enter the 
 Incomplete rows stay synchronous and retain the checkpoint. Eligible workers can preserve the
 current immediate capture-to-kill sequence without a staged protocol.
 
-### 7. Fresh transports preserve current authentication behavior
+### 8. Fresh transports preserve current authentication behavior
 
 [ADR 0015](../../adrs/0015-abandon-ssh-controlmaster.md) removed SSH ControlMaster reuse because
 cached connections made current PAM, NSS, and group membership unreliable after user changes.

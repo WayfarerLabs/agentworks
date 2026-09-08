@@ -44,10 +44,13 @@ complete valid fingerprint become immutable concurrent plans. Incomplete dedicat
 stay on the existing synchronous dispatcher.
 
 For dedicated work, the coordinator creates one transport per task with an initially 10-second
-finite default timeout and submits one future per plan with at most eight active. It consumes
-futures in completion order, applies verified stopped evidence to SQLite through compare-and-set,
-and emits a labeled line. Ordinary failures accumulate without cancelling siblings. A five-second
-quiet wait emits a compact progress heartbeat.
+finite default timeout and submits one future per plan with at most eight active. If submission is
+interrupted or fails partway, a batch-local start gate makes every submitted callable exit without
+remote mutation, including work enqueued before `submit()` raised without returning its future. Only
+after the complete future map exists does the coordinator release the gate for execution. It then
+consumes futures in completion order, applies verified stopped evidence to SQLite through
+compare-and-set, and emits a labeled line. Ordinary failures accumulate without cancelling siblings.
+A five-second quiet wait emits a compact progress heartbeat.
 
 The initial eight-worker, ten-second, one-attempt policy matches the shipped read-only guest
 observation policy as precedent. Teardown owns separately named constants and a different executor
@@ -64,6 +67,7 @@ Preparation is the only worker-adjacent phase allowed to consult the database fo
 socket-path validation. It produces a dedicated-only frozen value containing:
 
 - session name;
+- canonical database VM name;
 - exact validated socket path;
 - complete stored boot ID, PID, and start ticks;
 - target and sudo policy; and
@@ -108,6 +112,12 @@ The first interrupt changes coordinator state from ordinary collection to reconc
 - pending futures are cancelled;
 - a visible reconciliation notice is emitted; and
 - running futures continue under finite per-call timeouts.
+
+If the interrupt or a coordinator failure occurs before the complete future map exists, the
+coordinator marks the submission gate aborted before releasing it, cancels queued work, and waits
+for already-running wrappers to take the no-mutation branch. All plans remain untouched and are
+reported as not started. Once the complete map exists, the gate is released and the ordinary
+cancellation and reconciliation state applies, including an interrupt at the release boundary.
 
 The coordinator reconciles every normally completed future that becomes available, then propagates
 the original interrupt. Later interrupts repeat the reconciliation notice and do not abandon running
