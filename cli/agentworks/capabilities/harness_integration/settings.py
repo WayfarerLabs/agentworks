@@ -97,8 +97,32 @@ class PreparedSettings:
         if destination is not None and self.strategy in ("merge-overwrite", "merge-preserve"):
             existing = parse_settings(destination, format=self.format)
             document = _merge(existing, document) if self.strategy == "merge-overwrite" else _merge(document, existing)
-        content = _serialize(document, format=self.format)
+        content = serialize_settings(document, format=self.format)
         return SettingsResult(content, changed=content != destination, skipped=False)
+
+    def contributions(self, destination: bytes | None) -> SettingsObject:
+        """Source values surviving this policy, for native declaration conflicts.
+
+        Retained destination values are not a new request from the source.
+        Arrays and type collisions follow the same atomic policy as apply().
+        """
+        if destination is None or self.strategy in ("replace", "merge-overwrite"):
+            return dict(self._document)
+        if self.strategy == "skip-existing":
+            return {}
+        return _absent_source(self._document, parse_settings(destination, format=self.format))
+
+
+def _absent_source(source: SettingsObject, existing: SettingsObject) -> SettingsObject:
+    result: SettingsObject = {}
+    for key, value in source.items():
+        if key not in existing:
+            result[key] = value
+        elif isinstance(value, dict) and isinstance(existing[key], dict):
+            children = _absent_source(value, cast("SettingsObject", existing[key]))
+            if children:
+                result[key] = children
+    return result
 
 
 def prepare_settings(mapping: SettingsMapping, *, format: SettingsFormat) -> PreparedSettings:
@@ -161,7 +185,8 @@ def _merge(losing: SettingsObject, winning: SettingsObject) -> SettingsObject:
     return result
 
 
-def _serialize(document: SettingsObject, *, format: SettingsFormat) -> bytes:
+def serialize_settings(document: SettingsObject, *, format: SettingsFormat) -> bytes:
+    """Serialize a parsed native document for transient publication."""
     if format == "json":
         return (json.dumps(document, indent=2, ensure_ascii=True, allow_nan=False) + "\n").encode("utf-8")
     return tomli_w.dumps(document).encode("utf-8")

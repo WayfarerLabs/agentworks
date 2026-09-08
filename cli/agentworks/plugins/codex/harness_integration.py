@@ -116,14 +116,34 @@ from agentworks.capabilities.harness_integration.base import (
     quote_literal_argv,
     require_commands,
 )
+from agentworks.capabilities.harness_integration.native import setup_user, setup_workspace
+from agentworks.capabilities.harness_integration.native_config import NativeUserConfig, NativeWorkspaceConfig
 from agentworks.errors import StateError
 from agentworks.plugins.codex.recorder import home_word, notify_value_word, provision_fragment, thread_tail
 from agentworks.schema import AgwModel, MergeStrategy
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
+    from pydantic import BaseModel
+
     from agentworks.capabilities.base import RunContext
+    from agentworks.capabilities.descriptor import Facet
+    from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, WorkspaceSetupInvocation
     from agentworks.transports import Transport
+
+
+class CodexUserConfig(NativeUserConfig):
+    """Native Codex setup for one actual user."""
+
+    name: Literal["codex"]
+    """The harness integration this user attachment enables."""
+
+
+class CodexWorkspaceConfig(NativeWorkspaceConfig):
+    """Native Codex project settings."""
+
+    name: Literal["codex"]
+    """The harness integration this workspace attachment enables."""
 
 
 class CodexConfig(AgwModel):
@@ -403,6 +423,25 @@ class CodexIntegration(HarnessIntegration):
     # taking effect, and it is why the pane may come up in a different
     # conversation than last time.
     _dropped_stale: bool = False
+
+    @classmethod
+    def config_for(cls, facet: Facet | None = None) -> type[BaseModel] | None:
+        """Select independent config for user, workspace, or session setup."""
+        if facet == "user":
+            return CodexUserConfig
+        if facet == "workspace":
+            return CodexWorkspaceConfig
+        return super().config_for(facet)
+
+    def user_init(self, invocation: UserSetupInvocation) -> None:
+        """Reconcile this actual user's native setup and ownership receipts."""
+        config = None if self.retiring else self._config_as(CodexUserConfig)
+        setup_user("codex", config, invocation)
+
+    def workspace_init(self, invocation: WorkspaceSetupInvocation) -> None:
+        """Map project settings without installing user-scoped plugins."""
+        config = None if self.retiring else self._config_as(CodexWorkspaceConfig)
+        setup_workspace("codex", config, invocation)
 
     @property
     def config(self) -> CodexConfig:

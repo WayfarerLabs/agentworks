@@ -41,13 +41,33 @@ from agentworks.capabilities.harness_integration.base import (
     quote_literal_argv,
     require_commands,
 )
+from agentworks.capabilities.harness_integration.native import setup_user, setup_workspace
+from agentworks.capabilities.harness_integration.native_config import NativeUserConfig, NativeWorkspaceConfig
 from agentworks.errors import StateError
 from agentworks.schema import AgwModel, MergeStrategy
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
+    from pydantic import BaseModel
+
     from agentworks.capabilities.base import RunContext
+    from agentworks.capabilities.descriptor import Facet
+    from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, WorkspaceSetupInvocation
     from agentworks.transports import Transport
+
+
+class ClaudeCodeUserConfig(NativeUserConfig):
+    """Native ClaudeCode setup for one actual user."""
+
+    name: Literal["claude-code"]
+    """The harness integration this user attachment enables."""
+
+
+class ClaudeCodeWorkspaceConfig(NativeWorkspaceConfig):
+    """Native ClaudeCode project settings."""
+
+    name: Literal["claude-code"]
+    """The harness integration this workspace attachment enables."""
 
 
 class ClaudeCodeConfig(AgwModel):
@@ -149,6 +169,25 @@ class ClaudeCodeIntegration(HarnessIntegration):
     # Set by _resume_or_launch on each start/restart; drives the ordinary
     # HarnessStart note. None until the op runs (nothing decided yet).
     _resumed: bool | None = None
+
+    @classmethod
+    def config_for(cls, facet: Facet | None = None) -> type[BaseModel] | None:
+        """Select independent config for user, workspace, or session setup."""
+        if facet == "user":
+            return ClaudeCodeUserConfig
+        if facet == "workspace":
+            return ClaudeCodeWorkspaceConfig
+        return super().config_for(facet)
+
+    def user_init(self, invocation: UserSetupInvocation) -> None:
+        """Reconcile this actual user's native setup and ownership receipts."""
+        config = None if self.retiring else self._config_as(ClaudeCodeUserConfig)
+        setup_user("claude", config, invocation)
+
+    def workspace_init(self, invocation: WorkspaceSetupInvocation) -> None:
+        """Map project settings without installing user-scoped plugins."""
+        config = None if self.retiring else self._config_as(ClaudeCodeWorkspaceConfig)
+        setup_workspace("claude", config, invocation)
 
     @property
     def config(self) -> ClaudeCodeConfig:
