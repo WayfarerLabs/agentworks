@@ -33,12 +33,16 @@ coordinator's stopped-state update; atomic compare-and-set fences that gap.
 After preparation, batch stop indexes only the selected plans eligible for concurrent execution:
 
 - `(vm_name, socket_path)` for every non-null dedicated socket; and
-- `(vm_name, canonical_boot_id, pid, start_ticks)` for every complete process identity.
+- `(vm_name, canonical_boot_id, positive_pid)` for every complete process identity.
 
 Any key claimed by more than one concurrent plan produces a typed whole-batch failure listing the
 conflicting sessions. Rows with missing or invalid fingerprint fields never enter these indexes or
 the pool; they stay on the synchronous compatibility path. Unselected rows and serial rows cannot
 create two overlapping workers and therefore do not add a new batch refusal.
+
+Start ticks remain part of each plan and the worker's exact process-incarnation comparison. They are
+not part of the collision key because two plans that claim the same live PID on one VM boot are not
+safe to mutate concurrently merely because one stored start-ticks value is stale.
 
 This gate runs after PID repair and before the first destructive submission.
 

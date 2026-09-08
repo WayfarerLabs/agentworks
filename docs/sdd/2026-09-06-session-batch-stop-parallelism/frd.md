@@ -86,9 +86,10 @@ Eligible sessions MAY run concurrently even when they share a VM because each `-
 selects an independent tmux server.
 
 Before mutation, Agentworks MUST inspect the concurrent plans and fail closed if two selected plans
-claim the same dedicated socket or the same complete VM/boot/PID/start-time fingerprint. The
-parallelism invariant MUST be proved from validated persisted facts, not inferred from a non-null
-socket.
+claim the same dedicated socket or the same VM/boot/PID process key. Start ticks remain part of each
+worker's exact incarnation check, but differing stored start ticks do not make one live PID safe for
+two workers to mutate. The parallelism invariant MUST be proved from validated persisted facts, not
+inferred from a non-null socket.
 
 A dedicated row with an incomplete fingerprint MUST keep the existing synchronous teardown path,
 including its pre-kill persistence of newly observed start ticks. A legacy row with no dedicated

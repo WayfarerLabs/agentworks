@@ -26,9 +26,7 @@ At source baseline `3641ea8c0cbc7c6389535099b9678932aa972f66`:
 - missing start ticks are persisted before the current reachable-runtime kill;
 - dedicated sessions use independent persisted tmux socket paths;
 - legacy rows may share the default tmux server;
-- session runtime mutators have no cross-process exclusion boundary;
 - runtime persistence updates by name without comparing prepared identity;
-- schema version 37 records `last_started_at` immediately after tmux creation;
 - named stop, restart, and deletion reuse the same teardown authority; and
 - batch start and restart remain serial orchestration with interaction and shared-file mutation.
 
@@ -80,16 +78,16 @@ effort captures the implemented head after live validation.
 
 ## Compatibility
 
-| Surface                        | Before 0.19                 | 0.19 result                   |
-| ------------------------------ | --------------------------- | ----------------------------- |
-| `session stop NAME`            | synchronous exact teardown  | unchanged                     |
-| `session stop --all [filters]` | serial exact teardown       | bounded dedicated parallelism |
-| `session start --all`          | serial                      | unchanged                     |
-| `session restart --all`        | serial                      | unchanged                     |
-| legacy shared-server stop      | serial exact `kill-session` | unchanged                     |
-| schema and runtime fingerprint | current persisted fields    | unchanged                     |
-| harness and VM capability APIs | version 1                   | unchanged                     |
-| Python runtime dependencies    | current set                 | unchanged                     |
+| Surface                        | Before 0.19                 | 0.19 result                  |
+| ------------------------------ | --------------------------- | ---------------------------- |
+| `session stop NAME`            | synchronous exact teardown  | unchanged                    |
+| `session stop --all [filters]` | serial exact teardown       | bounded complete-row overlap |
+| `session start --all`          | serial                      | unchanged                    |
+| `session restart --all`        | serial                      | unchanged                    |
+| legacy shared-server stop      | serial exact `kill-session` | unchanged                    |
+| schema and runtime fingerprint | current persisted fields    | unchanged                    |
+| harness and VM capability APIs | version 1                   | unchanged                    |
+| Python runtime dependencies    | current set                 | unchanged                    |
 
 Output ordering for per-session batch lines may change from selection order to completion order.
 Every line remains self-identifying, and the final aggregate success/failure contract is unchanged.
@@ -133,9 +131,10 @@ and an idempotent retry. Concurrent plans already contain complete persisted fin
 
 ### Shared tmux state is mutated concurrently
 
-Control: a pre-mutation collision scan proves unique socket and complete process identity among
-concurrent plans. Only complete-fingerprint dedicated plans enter the pool. Incomplete dedicated and
-legacy work remains serial.
+Control: a pre-mutation collision scan proves unique socket and VM/boot/PID process keys among
+concurrent plans. Start ticks remain part of each worker's exact incarnation check, not evidence
+that two plans claiming one live PID are independent. Only complete-fingerprint dedicated plans
+enter the pool. Incomplete dedicated and legacy work remains serial.
 
 ### A concurrent lifecycle command replaces the prepared runtime
 

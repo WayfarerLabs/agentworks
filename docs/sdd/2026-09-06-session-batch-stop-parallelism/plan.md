@@ -101,8 +101,7 @@ not authored prose.
 - [ ] Extract database-free remote execution while keeping reconciliation on the invoking thread.
 - [ ] Partition incomplete dedicated rows into the existing synchronous path and prove their
       missing-start-ticks persistence still precedes `kill-server`.
-- [ ] Add collision checks for duplicate socket or complete fingerprint identities among concurrent
-      plans.
+- [ ] Add collision checks for duplicate socket or VM/boot/PID process keys among concurrent plans.
 - [ ] Keep named stop, restart, direct and cascading deletion on the synchronous dispatcher and run
       their existing regression suites.
 - [ ] Prove socket validation, exact tmux targeting, force recovery, absence verification, and

@@ -120,8 +120,10 @@ overwriting a row whose runtime identity changed through another command.
 ### Collision gate
 
 Before submission, batch stop indexes the selected complete-fingerprint plans by `(VM, socket_path)`
-and `(VM, canonical boot ID, PID, start ticks)`. A duplicate key causes a typed whole-batch refusal.
-Incomplete rows never enter the pool, and unselected rows cannot create two overlapping workers.
+and `(VM, canonical boot ID, positive PID)`. A duplicate key causes a typed whole-batch refusal.
+Start ticks still distinguish process incarnations during each worker's exact identity check, but
+cannot establish that two plans claiming one live PID are independent. Incomplete rows never enter
+the pool, and unselected rows cannot create two overlapping workers.
 
 ## Boundaries and Ownership
 
