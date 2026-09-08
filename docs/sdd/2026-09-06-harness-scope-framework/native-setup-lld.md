@@ -53,12 +53,12 @@ components of the same VM-owned native slice; neither overwrites the existing SS
 
 New agents and workspaces have no database owner until native creation succeeds. Their initial
 receipts are buffered with the creation operation and inserted atomically with the owner and desired
-overlay. Workspace creation retains its existing refusal to adopt unexplained native residue.
-Fresh agent creation must first refuse an existing unowned Linux user or home, before mutation or
-rollback is armed; the current initializer instead converges such a user, so this boundary requires
-an implementation change. After that check, handled creation failure cleans up only the native
-owner created by this operation and drops its receipt buffer. A process crash leaves residue that a
-new create refuses to adopt. Reinit of a database-owned agent retains convergence and checkpoints
+overlay. Workspace creation retains its existing refusal to adopt unexplained native residue. Fresh
+agent creation must first refuse an existing unowned Linux user or home, before mutation or rollback
+is armed; the current initializer instead converges such a user, so this boundary requires an
+implementation change. After that check, handled creation failure cleans up only the native owner
+created by this operation and drops its receipt buffer. A process crash leaves residue that a new
+create refuses to adopt. Reinit of a database-owned agent retains convergence and checkpoints
 directly into its existing instance-state row. This does not add partial-create rows or a workspace
 repair/reinit command.
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 from typing import TYPE_CHECKING
 
 from agentworks.transports import Transport
@@ -50,13 +51,17 @@ class SetupRunner(Transport):
         retries: int | None = None,
         on_retry: Callable[[int, int], None] | None = None,
     ) -> SSHResult:
+        environment = self._env(env)
+        if sudo:
+            preserve = f" --preserve-env={shlex.quote(','.join(environment))}" if environment else ""
+            command = f"sudo -n{preserve} bash -c {shlex.quote(command)}"
         return self._target.run(
             command,
-            sudo=sudo,
+            sudo=False,
             tty=tty,
             check=check,
             timeout=timeout,
-            env=self._env(env),
+            env=environment,
             input_text=input_text,
             input_data=input_data,
             discard_output=discard_output,
