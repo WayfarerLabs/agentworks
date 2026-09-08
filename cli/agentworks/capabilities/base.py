@@ -297,7 +297,7 @@ class Capability(ABC):
     reference), which is why nothing authors a second one-liner beside
     ``prose``."""
 
-    owner_kind: ClassVar[str]
+    owner_kind: str
 
     prose: ClassVar[TopicProse | None] = None
     """The authored paragraphs about this implementation: what it needs,
@@ -349,7 +349,14 @@ class Capability(ABC):
         """
         return cls.config_model
 
-    def __init__(self, owner_name: str, config: Mapping[str, object], *, facet: Facet | None = None) -> None:
+    def __init__(
+        self,
+        owner_name: str,
+        config: Mapping[str, object] | None,
+        *,
+        facet: Facet | None = None,
+        owner_kind: str | None = None,
+    ) -> None:
         """Bind to ``(owner_name, config)``, validated.
 
         Config validity is a construct-time invariant: the blob is
@@ -367,11 +374,25 @@ class Capability(ABC):
         What is validated is whatever :meth:`config_for` answers with, so a
         capability that overrides the hook is bound to the model it
         actually offers rather than to its ``config_model`` declaration.
+        ``owner_kind`` can identify the actual config host for a facet; the
+        capability kind supplies the ordinary default. Absent config binds a
+        retiring setup attachment only and never derives new defaults.
         """
         from agentworks.capabilities.config import config_model_for, validate_own_config
         from agentworks.schema import extract_references, filled_defaults
 
         self.owner_name = owner_name
+        if owner_kind is not None:
+            self.owner_kind = owner_kind
+        self._config: BaseModel | None = None
+        self._secret_refs: tuple[ConfigReference, ...] = ()
+        if config is None:
+            from agentworks.capabilities.descriptor import descriptor_for_impl
+
+            descriptor = descriptor_for_impl(type(self))
+            if descriptor is None or not descriptor.config_facets or facet not in ("vm", "user", "workspace"):
+                raise StateError("absent config is reserved for retiring setup attachments")
+            return
         owner = RefOwner(kind=self.owner_kind, name=owner_name)
         model = config_model_for(type(self), facet=facet)
         self._config = validate_own_config(type(self), config, owner=owner, facet=facet)
@@ -380,7 +401,7 @@ class Capability(ABC):
         # defaults (validation above applies the same fill), so an
         # instance's declared secrets are the same set the graph carries
         # for it.
-        self._secret_refs: tuple[ConfigReference, ...] = tuple(
+        self._secret_refs = tuple(
             ref for ref in extract_references(model, filled_defaults(model, config, owner)) if ref.kind == "secret"
         )
 
@@ -393,6 +414,12 @@ class Capability(ABC):
         :meth:`_config_as`, so an operation reads a typed field and mypy
         checks it.
         """
+        return self._require_config()
+
+    def _require_config(self) -> BaseModel:
+        """Read bound config without invoking a subclass's narrowing property."""
+        if self._config is None:
+            raise StateError("a retiring integration has no desired config")
         return self._config
 
     def _config_as[M: BaseModel](self, model: type[M]) -> M:
@@ -406,12 +433,13 @@ class Capability(ABC):
         surface as an ``AttributeError`` somewhere in an operation
         instead.
         """
-        if not isinstance(self._config, model):
+        config = self._require_config()
+        if not isinstance(config, model):
             raise StateError(
-                f"{type(self).__name__} bound a {type(self._config).__name__} config "
+                f"{type(self).__name__} bound a {type(config).__name__} config "
                 f"where its own declared model is {model.__name__}"
             )
-        return self._config
+        return config
 
     @property
     def _owner_display(self) -> str:

@@ -98,8 +98,14 @@ def project_agent_live_resource(
 ) -> LiveResource:
     """Project one agent from its identity and typed effective declaration."""
     from agentworks.agents.template import effective_references
+    from agentworks.capabilities.harness_integration.attachments import validate_attachments
 
     source = ("agent", name)
+
+    if layered is not None:
+        validate_attachments(
+            layered.value.harness_integrations, facet="user", source=source, provenance=layered.provenance
+        )
     desired = (
         *(
             ()
@@ -120,9 +126,15 @@ def project_workspace_live_resource(
     layered: LayeredResolution[ResolvedWorkspaceTemplate] | None,
 ) -> LiveResource:
     """Project one workspace from its identity and typed effective declaration."""
+    from agentworks.capabilities.harness_integration.attachments import validate_attachments
     from agentworks.workspaces.template import effective_references
 
     source = ("workspace", name)
+
+    if layered is not None:
+        validate_attachments(
+            layered.value.harness_integrations, facet="workspace", source=source, provenance=layered.provenance
+        )
     desired = (
         *(
             ()
@@ -174,10 +186,20 @@ def project_vm_live_resource(
     layered_admin: LayeredResolution[AdminConfig] | None,
 ) -> LiveResource:
     """Project one VM from its identity and paired effective declarations."""
+    from agentworks.capabilities.harness_integration.attachments import validate_attachments
     from agentworks.vms.admin import effective_references as admin_effective_references
     from agentworks.vms.template import effective_references as vm_effective_references
 
     source = ("vm", name)
+
+    if layered_vm is not None:
+        validate_attachments(
+            layered_vm.value.harness_integrations, facet="vm", source=source, provenance=layered_vm.provenance
+        )
+    if layered_admin is not None:
+        validate_attachments(
+            layered_admin.value.harness_integrations, facet="user", source=source, provenance=layered_admin.provenance
+        )
     vm_desired = (
         *(
             ()

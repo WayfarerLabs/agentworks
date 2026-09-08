@@ -24,7 +24,7 @@ import shlex
 from abc import abstractmethod
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, ClassVar, Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol, Self
 
 from agentworks.capabilities.base import Capability, ScopeLevel
 from agentworks.command_checks import check_required_commands
@@ -37,6 +37,11 @@ if TYPE_CHECKING:
 
     from agentworks.capabilities.base import OperationScope, RunContext
     from agentworks.capabilities.descriptor import Facet
+    from agentworks.capabilities.harness_integration.setup import (
+        UserSetupInvocation,
+        VMSetupInvocation,
+        WorkspaceSetupInvocation,
+    )
     from agentworks.resources.reference import ResourceReference
     from agentworks.transports import Transport
 
@@ -202,6 +207,19 @@ def quote_literal_argv(value: str) -> str:
     return "".join(shlex.quote(chunk) for chunk in chunks)
 
 
+@dataclass(frozen=True, kw_only=True)
+class SessionBinding:
+    """The existing session identity and mutable conversation namespace."""
+
+    session_name: str
+    vm_name: str
+    workspace_name: str
+    workspace_path: str
+    target: _Target | None
+    admin: bool
+    state: dict[str, object]
+
+
 class HarnessIntegration(Capability):
     """Capability: configures, runs, and manages one session's workload.
 
@@ -216,7 +234,7 @@ class HarnessIntegration(Capability):
     every member shares one copy.
     """
 
-    owner_kind: ClassVar[str] = "session-template"
+    owner_kind: str = "session-template"
 
     @classmethod
     def config_for(cls, facet: Facet | None = None) -> type[BaseModel] | None:
@@ -239,14 +257,87 @@ class HarnessIntegration(Capability):
         state: dict[str, object],  # this harness integration's OWN namespace of the persisted blob (mutated in place)
     ) -> None:
         super().__init__(owner_name, config, facet="session")
-        self._session_name = session_name
-        self._vm_name = vm_name
-        self._workspace_name = workspace_name
-        self._workspace_path = workspace_path
-        self._target = target
-        self._admin = admin
-        self._state = state  # mutated in place by the ops; the manager persists it
-        self._probed = False  # single-fire guard: the probe runs once per operation
+        self._session: SessionBinding | None = SessionBinding(
+            session_name=session_name,
+            vm_name=vm_name,
+            workspace_name=workspace_name,
+            workspace_path=workspace_path,
+            target=target,
+            admin=admin,
+            state=state,
+        )
+        self._probed = False
+
+    @classmethod
+    def for_setup(
+        cls,
+        *,
+        owner_kind: str,
+        owner_name: str,
+        facet: Literal["vm", "user", "workspace"],
+        config: Mapping[str, object] | None,
+    ) -> Self:
+        """Bind one setup attachment without inventing a session identity.
+
+        The core passes absent desired config only when retiring a previous
+        attachment. Retirement neither validates an empty config nor supplies
+        defaults for fields that are no longer desired.
+        """
+        if facet not in ("vm", "user", "workspace"):
+            raise StateError("setup construction requires a setup facet")
+        instance = cls.__new__(cls)
+        Capability.__init__(instance, owner_name, config, facet=facet, owner_kind=owner_kind)
+        instance._session = None
+        instance._probed = False
+        return instance
+
+    @property
+    def retiring(self) -> bool:
+        """Whether the owning resource removed this previously applied attachment."""
+        return self._config is None
+
+    def vm_init(self, invocation: VMSetupInvocation) -> None:
+        """Default VM setup has no native effects or ownership claims."""
+
+    def user_init(self, invocation: UserSetupInvocation) -> None:
+        """Default user setup has no native effects or ownership claims."""
+
+    def workspace_init(self, invocation: WorkspaceSetupInvocation) -> None:
+        """Default workspace setup has no native effects or ownership claims."""
+
+    @property
+    def _session_binding(self) -> SessionBinding:
+        if self._session is None:
+            raise StateError("session identity and conversation state are unavailable during setup")
+        return self._session
+
+    @property
+    def _session_name(self) -> str:
+        return self._session_binding.session_name
+
+    @property
+    def _vm_name(self) -> str:
+        return self._session_binding.vm_name
+
+    @property
+    def _workspace_name(self) -> str:
+        return self._session_binding.workspace_name
+
+    @property
+    def _workspace_path(self) -> str:
+        return self._session_binding.workspace_path
+
+    @property
+    def _target(self) -> _Target | None:
+        return self._session_binding.target
+
+    @property
+    def _admin(self) -> bool:
+        return self._session_binding.admin
+
+    @property
+    def _state(self) -> dict[str, object]:
+        return self._session_binding.state
 
     @property
     def state(self) -> dict[str, object]:
@@ -287,10 +378,11 @@ class HarnessIntegration(Capability):
 
         from agentworks.resources.reference import sourced_references
 
+        field_name = "harness_integration" if self._session is not None else "harness_integrations"
         enriched = tuple(
             replace(
                 ref,
-                usage=f"{ref.usage}, from the harness_integration of {self.owner_kind} '{self.owner_name}'",
+                usage=f"{ref.usage}, from the {field_name} of {self.owner_kind} '{self.owner_name}'",
             )
             for ref in self._secret_refs
         )

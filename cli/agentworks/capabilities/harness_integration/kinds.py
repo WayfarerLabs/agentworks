@@ -118,7 +118,7 @@ HARNESS_INTEGRATION_DESCRIPTOR = CapabilityKindDescriptor(
     contract_version=4,
     implementation_contract=HarnessIntegration,
     registry=_registry,
-    required_operations=frozenset({"start"}),
+    required_operations=frozenset({"start", "vm_init", "user_init", "workspace_init"}),
     # Empty: HarnessIntegration supplies every non-operation member a
     # subclass needs.
     required_attributes=frozenset(),
@@ -128,6 +128,12 @@ HARNESS_INTEGRATION_DESCRIPTOR = CapabilityKindDescriptor(
     config_facets=FACETS,
     config_schema=ConfigContract(base=AgwModel, discriminator="name", layered_merge=True),
     manifest_sections=(
+        HostSurface(host_kind="vm-template", naming_field="harness_integrations", facet="vm", cardinality="list"),
+        HostSurface(host_kind="admin-template", naming_field="harness_integrations", facet="user", cardinality="list"),
+        HostSurface(host_kind="agent-template", naming_field="harness_integrations", facet="user", cardinality="list"),
+        HostSurface(
+            host_kind="workspace-template", naming_field="harness_integrations", facet="workspace", cardinality="list"
+        ),
         HostSurface(
             host_kind="session-template",
             naming_field="harness_integration",

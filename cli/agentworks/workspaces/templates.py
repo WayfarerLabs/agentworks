@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from agentworks.env.entry import EnvEntry
     from agentworks.resources.inheritance import LayeredResolution
     from agentworks.resources.registry import Registry
+    from agentworks.schema import CapabilityBlock
     from agentworks.workspaces.template import WorkspaceTemplate
 
 
@@ -31,6 +32,7 @@ class ResolvedTemplate:
     tmuxinator: bool = True
     git_user_name: str | None = None
     git_user_email: str | None = None
+    harness_integrations: list[CapabilityBlock] = field(default_factory=list)
     env: dict[str, EnvEntry] = field(default_factory=dict)
 
 

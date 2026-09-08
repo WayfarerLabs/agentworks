@@ -210,7 +210,7 @@ A new harness integration implements this surface (see `base.py` for the full do
 
 #### Class Identity
 
-`name` and `description` ClassVars (the registry row), inherited `owner_kind = "session-template"`
+`name` and `description` ClassVars (the registry row), default `owner_kind = "session-template"`
 (error framing: config errors render as `session-template/<name>`).
 
 Four class-level declarations are REQUIRED and none is defaulted, because a default would let an
@@ -225,6 +225,26 @@ missing any of them, naming the plugin:
 - `config_model`: the session config when using the base selector (see below). An override of
   `config_for` supplies its own facet answers; `None` accepts the tag alone.
 - `name` / `description`: the registry row's identity.
+
+#### Setup Binding
+
+VM, admin, agent, and workspace templates explicitly select native setup integrations through
+`harness_integrations`, an ordered list of tagged capability blocks. Admin and agent select the same
+user facet. An omitted list inherits; an authored list replaces the whole inherited list, and `[]`
+selects none. Duplicate integration names are invalid. Each block is validated against its hosting
+facet, and its capability and secret references participate in the usual graph gates.
+
+`HarnessIntegration.for_setup(owner_kind=..., owner_name=..., facet=..., config=...)` binds one
+setup attachment without session identity or conversation state. The instance's owner identifies its
+config and secret references. A removed attachment binds with `config=None`, exposes
+`retiring=True`, and refuses config access instead of synthesizing new defaults. Active setup with
+`{}` still selects the integration's defaults or its name-only config.
+
+`vm_init`, `user_init`, and `workspace_init` receive their corresponding typed setup invocations.
+The base methods have no native effects or claims. Session construction retains its existing
+arguments and stores them in a `SessionBinding`; setup access to session identity or state raises
+`StateError`. An integration's setup methods read their bound facet model through `_config_as`; its
+existing session `config` property may continue narrowing to the session model.
 
 #### Config: Facet Selection
 

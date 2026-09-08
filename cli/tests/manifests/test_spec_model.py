@@ -181,7 +181,7 @@ def test_hosted_capabilities_answers_for_the_tagged_kinds_only() -> None:
     # A kind that hosts nothing, and a kind whose capability is selected by
     # a map key (secret-backend under `backend_mappings`), which has no
     # discriminator and so no union to splice.
-    assert hosted_capabilities("vm-template") == ()
+    assert hosted_capabilities("env-var") == ()
     assert hosted_capabilities("secret") == ()
 
 

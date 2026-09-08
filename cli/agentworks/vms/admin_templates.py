@@ -153,7 +153,7 @@ def _merge_template(
     """Merge only fields explicitly authored by this admin declaration."""
     from agentworks.env.entry import EnvEntry
     from agentworks.instance_overlay_codec import OVERLAY_EXCLUDED_FIELDS
-    from agentworks.schema import merge_model
+    from agentworks.schema import CapabilityBlock, merge_model
 
     previous = target.model_dump(
         mode="python",
@@ -172,4 +172,7 @@ def _merge_template(
     )
     raw = {**defaults, **raw}
     raw["env"] = {key: EnvEntry.model_validate(value) for key, value in cast("dict[str, object]", raw["env"]).items()}
+    raw["harness_integrations"] = [
+        CapabilityBlock.model_validate(value) for value in cast("list[object]", raw["harness_integrations"])
+    ]
     return target.model_copy(update=raw), operations

@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from agentworks.env.entry import EnvEntry
     from agentworks.resources.inheritance import LayeredResolution
     from agentworks.resources.registry import Registry
+    from agentworks.schema import CapabilityBlock
 
 
 @dataclass
@@ -41,6 +42,7 @@ class ResolvedAgentTemplate:
     mise_prune_on_reinit: bool = True
     claude_marketplaces: list[str] = field(default_factory=list)
     claude_plugins: list[str] = field(default_factory=list)
+    harness_integrations: list[CapabilityBlock] = field(default_factory=list)
     env: dict[str, EnvEntry] = field(default_factory=dict)
 
 

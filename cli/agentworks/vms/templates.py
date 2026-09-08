@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from agentworks.env.entry import EnvEntry
     from agentworks.resources.inheritance import LayeredResolution
     from agentworks.resources.registry import Registry
+    from agentworks.schema import CapabilityBlock
     from agentworks.vms.template import VMTemplate
 
 
@@ -40,6 +41,7 @@ class ResolvedVMTemplate:
     snap: list[str] = field(default_factory=list)
     system_install_commands: list[str] = field(default_factory=list)
     # Env (declared per-template; merged child-overrides-parent)
+    harness_integrations: list[CapabilityBlock] = field(default_factory=list)
     env: dict[str, EnvEntry] = field(default_factory=dict)
     # Secret name for the Tailscale auth key (default ``"tailscale-auth-key"``).
     # Inheritance applies like other scalar fields: child overrides parent.
