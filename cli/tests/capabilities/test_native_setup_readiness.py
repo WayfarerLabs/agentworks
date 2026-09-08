@@ -9,10 +9,11 @@ from agentworks.capabilities.harness_integration.setup import (
     SetupEvidence,
     SetupGap,
     SetupReadiness,
-    UserSetupInvocation,
 )
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
 from agentworks.db import Database
+from agentworks.errors import StateError
+from agentworks.harness_setup.dispatch import destination_id
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.model import NativeSetupState, SetupRecord
 from agentworks.harness_setup.readiness import (
@@ -76,9 +77,7 @@ def test_only_actual_user_current_receipt_satisfies_evidence(tmp_path, monkeypat
             attachments=(CapabilityBlock.of("shell"),),
             target=SecretTarget(vm={}, agent={}),
         )
-        invocation = UserSetupInvocation(
-            vm=vm, runner=Mock(), prior=None, checkpoint=lambda claims: None, username="user", home="/home/user"
-        )
+        runner = Mock()
         record = SetupRecord(
             component="agent",
             integration="shell",
@@ -87,13 +86,75 @@ def test_only_actual_user_current_receipt_satisfies_evidence(tmp_path, monkeypat
             complete=True,
         )
         write_native_setup(db, "agent", "one", NativeSetupState(records=(record,)), operation="agent-reinit")
-        monkeypatch.setattr("agentworks.harness_setup.readiness.destination_id", lambda invocation: "a" * 64)
-        assert evaluate_setup(db, inputs, "shell", invocation, remediation="repair").current
-        other = evaluate_setup(db, replace(inputs, name="two"), "shell", invocation, remediation="repair")
+        monkeypatch.setattr("agentworks.harness_setup.readiness.destination_id", lambda *args, **kwargs: "a" * 64)
+        assert evaluate_setup(
+            db, inputs, "shell", vm=vm, runner=runner, location="/home/user", username="user", remediation="repair"
+        ).current
+        other = evaluate_setup(
+            db,
+            replace(inputs, name="two"),
+            "shell",
+            vm=vm,
+            runner=runner,
+            location="/home/user",
+            username="user",
+            remediation="repair",
+        )
         assert other.status == "absent"
         for update, expected in (({"complete": False}, "incomplete"), ({"destination_id": "b" * 64}, "stale")):
             changed = record.model_copy(update=update)
             write_native_setup(db, "agent", "one", NativeSetupState(records=(changed,)), operation="agent-reinit")
-            assert evaluate_setup(db, inputs, "shell", invocation, remediation="repair").status == expected
+            assert (
+                evaluate_setup(
+                    db,
+                    inputs,
+                    "shell",
+                    vm=vm,
+                    runner=runner,
+                    location="/home/user",
+                    username="user",
+                    remediation="repair",
+                ).status
+                == expected
+            )
     finally:
         db.close()
+
+
+@pytest.mark.parametrize(
+    "malformed_gap", [object(), SetupGap(SetupEvidence("absent", "agent", "one", "repair"), "misspelled", "invalid")]
+)
+def test_invalid_plugin_prerequisite_never_permits_launch(malformed_gap, captured_output, monkeypatch):
+    integration = ShellIntegration(
+        "default",
+        {},
+        session_name="s",
+        vm_name="vm",
+        workspace_name="w",
+        workspace_path="/w",
+        target=None,
+        admin=True,
+        state={},
+    )
+    monkeypatch.setattr(integration, "check_setup", Mock(return_value=(malformed_gap,)))
+    with pytest.raises(StateError):
+        require_setup_ready(Mock(), Mock(), integration, vm=Mock(), workspace=Mock(), agent_name=None, runner=Mock())
+    assert captured_output.warnings == []
+
+
+@pytest.mark.parametrize(
+    ("location", "username", "recorded"),
+    [
+        (None, None, "47722e928296ee2a77034faecef2937ab49068c9b2ee6e4fbd9bf6a3abdbb655"),
+        ("/home/alice", "alice", "8c2ae87c0e6661337de37bc6ee57132aa93410a083b40401752459b4be41fa85"),
+        ("/work/project", None, "1a4d8d9b6541c3cfc2f6a550d0257aa906988dea5a1e846950833b1412ac6b02"),
+    ],
+)
+def test_destination_probe_preserves_previously_recorded_identities(db, location, username, recorded):
+    # Receipt identities captured from the prior invocation-based API.
+    vm = replace(db.insert_vm("fixture", site="local", hostname="fixture"), created_at="2026-01-01T00:00:00Z")
+    runner = Mock()
+    runner.run.side_effect = lambda command, **kwargs: Mock(
+        stdout="machine-fixture\n" if command == "cat /etc/machine-id" else "1:2:1000\n"
+    )
+    assert destination_id(vm, runner, location=location, username=username) == recorded

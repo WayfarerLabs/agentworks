@@ -24,35 +24,28 @@ from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupR
 from agentworks.harness_setup.state import read_native_setup, replace_setup_record, write_native_setup
 
 if TYPE_CHECKING:
-    from agentworks.db import Database
+    from agentworks.db import Database, VMRow
     from agentworks.harness_setup.inputs import SetupInputs
     from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.resources.registry import Registry
+    from agentworks.transports import Transport
 
 
-def destination_id(invocation: SetupInvocation) -> str:
+def destination_id(vm: VMRow, runner: Transport, *, location: str | None = None, username: str | None = None) -> str:
     """Fingerprint actual native placement and its owning VM generation.
 
     Native filesystem identity distinguishes a recreated user home or workspace.
     This contains no env or resolved secret values and performs only probes.
     """
-    location: str | None = None
-    user: str | None = None
-    if isinstance(invocation, UserSetupInvocation):
-        location = invocation.home
-        user = invocation.username
-    elif isinstance(invocation, WorkspaceSetupInvocation):
-        location = invocation.root
-    machine = invocation.runner.run("cat /etc/machine-id", timeout=15).stdout.strip()
+    machine = runner.run("cat /etc/machine-id", timeout=15).stdout.strip()
     if not machine:
         raise StateError("native setup could not establish the VM identity")
     directory = None
     if location is not None:
-        directory = invocation.runner.run(f"stat -Lc '%d:%i:%u' -- {shlex.quote(location)}", timeout=15).stdout.strip()
+        directory = runner.run(f"stat -Lc '%d:%i:%u' -- {shlex.quote(location)}", timeout=15).stdout.strip()
         if not directory:
             raise StateError("native setup could not establish the destination identity")
-    vm = invocation.vm
-    payload = (vm.name, vm.site, vm.created_at, vm.platform_metadata, machine, user, location, directory)
+    payload = (vm.name, vm.site, vm.created_at, vm.platform_metadata, machine, username, location, directory)
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
@@ -80,7 +73,19 @@ def run_setup(
         prior = {record.integration: record for record in state.records if record.component == inputs.component}
         if not inputs.attachments and not prior:
             return state
-        destination = destination_id(invocation)
+        location = (
+            invocation.home
+            if isinstance(invocation, UserSetupInvocation)
+            else invocation.root
+            if isinstance(invocation, WorkspaceSetupInvocation)
+            else None
+        )
+        destination = destination_id(
+            invocation.vm,
+            invocation.runner,
+            location=location,
+            username=invocation.username if isinstance(invocation, UserSetupInvocation) else None,
+        )
         desired = {block.name: block for block in inputs.attachments}
         # Validate and bind the complete active list before its first mutation.
         bound = {}

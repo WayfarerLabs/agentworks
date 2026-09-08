@@ -76,7 +76,7 @@ class ShellIntegration(HarnessIntegration):
         title="Shell sessions",
         overview="""
         Runs whatever you tell it to. With no `command`, the session is a bare login
-        shell, which is what a session-template that selects no integration gets.
+        shell. Select `shell` explicitly or inherit the built-in default session template.
 
         `resume_command` is what ordinary `agw session start` and `restart` run, falling back to
         `command` when it is empty. That pair is enough to drive a harness with no

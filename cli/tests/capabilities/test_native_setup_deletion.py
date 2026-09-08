@@ -53,7 +53,7 @@ def deletion(db, tmp_path, monkeypatch):
     monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
     monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: target)
     monkeypatch.setattr("agentworks.harness_setup.lifecycle.site_platform_name", lambda *a: "fixture")
-    monkeypatch.setattr("agentworks.harness_setup.dispatch.destination_id", lambda *a: "a" * 64)
+    monkeypatch.setattr("agentworks.harness_setup.dispatch.destination_id", lambda *a, **kw: "a" * 64)
     monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.agents.grants.revoke_workspace_grants", lambda *a, **k: None)
     removed = []
@@ -115,7 +115,7 @@ def test_retirement_precedes_native_owner_destruction_and_preserves_failures(
 
         monkeypatch.setattr("agentworks.harness_setup.dispatch.ensure_harness_integration_enabled", disabled)
     if outcome == "changed":
-        monkeypatch.setattr("agentworks.harness_setup.dispatch.destination_id", lambda *a: "b" * 64)
+        monkeypatch.setattr("agentworks.harness_setup.dispatch.destination_id", lambda *a, **kw: "b" * 64)
 
     def delete() -> None:
         if kind == "agent":

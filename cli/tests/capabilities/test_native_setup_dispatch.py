@@ -50,7 +50,7 @@ def setup_case(tmp_path, monkeypatch):
     invocation = UserSetupInvocation(
         vm=vm, runner=Mock(), prior=None, checkpoint=lambda claims: None, username="user", home="/home/user"
     )
-    monkeypatch.setattr("agentworks.harness_setup.dispatch.destination_id", lambda call: "a" * 64)
+    monkeypatch.setattr("agentworks.harness_setup.dispatch.destination_id", lambda *args, **kwargs: "a" * 64)
     monkeypatch.setattr(
         "agentworks.harness_setup.dispatch.ensure_harness_integration_enabled", lambda registry, name: None
     )
@@ -117,7 +117,7 @@ def test_changed_native_destination_refuses_before_any_mutation(setup_case, monk
     db, inputs, invocation, events, _ = setup_case
     run_setup(db, Mock(), inputs, invocation, operation="agent-reinit")
     events.clear()
-    monkeypatch.setattr("agentworks.harness_setup.dispatch.destination_id", lambda call: "b" * 64)
+    monkeypatch.setattr("agentworks.harness_setup.dispatch.destination_id", lambda *args, **kwargs: "b" * 64)
     with pytest.raises(StateError):
         run_setup(db, Mock(), inputs, invocation, operation="agent-reinit")
     assert events == []

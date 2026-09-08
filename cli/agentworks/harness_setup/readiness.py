@@ -8,11 +8,7 @@ from agentworks import output
 from agentworks.capabilities.harness_integration.setup import (
     SetupEvidence,
     SetupGap,
-    SetupInvocation,
     SetupReadiness,
-    UserSetupInvocation,
-    VMSetupInvocation,
-    WorkspaceSetupInvocation,
 )
 from agentworks.errors import StateError
 from agentworks.harness_setup.dispatch import destination_id
@@ -37,9 +33,12 @@ def evaluate_setup(
     db: Database,
     inputs: SetupInputs,
     integration_name: str,
-    invocation: SetupInvocation,
     *,
+    vm: VMRow,
+    runner: Transport,
     remediation: str,
+    location: str | None = None,
+    username: str | None = None,
 ) -> SetupEvidence:
     """Compare declarations and actual placement without acquiring source files."""
 
@@ -62,7 +61,7 @@ def evaluate_setup(
     if block is None or inputs.declaration(block) != record.declaration:
         return result("stale", record)
     try:
-        if destination_id(invocation) != record.destination_id:
+        if destination_id(vm, runner, location=location, username=username) != record.destination_id:
             return result("stale", record)
     except (SSHError, StateError):
         return result("unavailable", record)
@@ -116,7 +115,8 @@ def _applicable_evidence(
 
     vm_template = resolve_vm(db, registry, vm.name, vm.template)
     inputs: SetupInputs
-    invocation: SetupInvocation
+    location = None
+    username = None
     if facet == "vm":
         inputs = SetupInputs(
             kind="vm",
@@ -125,7 +125,6 @@ def _applicable_evidence(
             attachments=tuple(vm_template.harness_integrations),
             target=SecretTarget(vm=vm_template.env),
         )
-        invocation = VMSetupInvocation(vm=vm, runner=runner, prior=None, checkpoint=lambda claims: None)
         remedy = f"Enable the attachment and run 'agw vm reinit {vm.name}'."
     elif facet == "user":
         if agent_name is None:
@@ -153,14 +152,7 @@ def _applicable_evidence(
             )
             username = agent.linux_user
             remedy = f"Enable the attachment and run 'agw agent reinit {agent.name}'."
-        invocation = UserSetupInvocation(
-            vm=vm,
-            runner=runner,
-            prior=None,
-            checkpoint=lambda claims: None,
-            username=username,
-            home=f"/home/{username}",
-        )
+        location = f"/home/{username}"
     else:
         if workspace.vm_name != vm.name:
             raise StateError("setup readiness requires the session's workspace on this VM")
@@ -172,21 +164,26 @@ def _applicable_evidence(
             attachments=tuple(project.harness_integrations),
             target=SecretTarget(vm=vm_template.env, workspace=project.env),
         )
-        invocation = WorkspaceSetupInvocation(
-            vm=vm,
-            runner=runner,
-            prior=None,
-            checkpoint=lambda claims: None,
-            workspace_name=workspace.name,
-            root=workspace.workspace_path,
-            linux_group=workspace.linux_group,
-        )
+        location = workspace.workspace_path
         remedy = f"Inspect {workspace.workspace_path} and explicitly recreate workspace '{workspace.name}' with setup."
-    return evaluate_setup(db, inputs, integration_name, invocation, remediation=remedy)
+    return evaluate_setup(
+        db,
+        inputs,
+        integration_name,
+        vm=vm,
+        runner=runner,
+        location=location,
+        username=username,
+        remediation=remedy,
+    )
 
 
 def enforce_setup_gaps(gaps: tuple[SetupGap, ...]) -> None:
-    """Apply severity at the capability output boundary, preserving native reasons."""
+    """Validate plugin hook results before enforcing their prerequisite severity.
+
+    Third-party integrations need not run our type checker; dataclass annotations
+    alone cannot prevent an invalid severity from silently permitting launch.
+    """
     for gap in gaps:
         if not isinstance(gap, SetupGap) or gap.severity not in ("required", "recommended"):
             raise StateError("harness integration returned an invalid setup prerequisite")
