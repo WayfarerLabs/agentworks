@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import sys
@@ -575,3 +576,49 @@ def test_retirement_uses_recorded_override_root_without_current_env(transport, t
     setup_user(tool, None, invocation(transport, claims, prior=record(claims[-1], tool)))
     assert claims[-1] == ()
     assert default_file.read_bytes() == b"unrelated-default-settings"
+
+
+@pytest.mark.parametrize("field", ['ref = "unrequested-ref"', 'sparse_paths = ["unexpected"]'])
+def test_codex_mapping_cannot_add_unrequested_source_identity(transport: LocalFixtureTransport, field: str) -> None:
+    market = market_fixture(transport, "codex")
+    source = transport.root / "mapping.toml"
+    source.write_text("[marketplaces.fixture-market]\n" + field + "\n")
+    claims = []
+    config = NativeUserConfig(
+        marketplaces=[str(market)],
+        plugins=["one@fixture-market"],
+        settings=SettingsMapping(source=str(source), strategy="merge-overwrite"),
+    )
+    with pytest.raises(ConfigError):
+        setup_user("codex", config, invocation(transport, claims))
+    assert claims == []
+    assert not (transport.home / ".codex").exists()
+
+
+def test_codex_relative_source_named_local_does_not_match_source_type(transport: LocalFixtureTransport) -> None:
+    market = market_fixture(transport, "codex")
+    claims = []
+    setup_user("codex", NativeUserConfig(marketplaces=[str(market)], plugins=["one"]), invocation(transport, claims))
+    local = transport.home / "local"
+    shutil.copytree(market, local)
+    manifest = local / ".agents/plugins/marketplace.json"
+    data = json.loads(manifest.read_text())
+    data["name"] = "other-market"
+    manifest.write_text(json.dumps(data))
+    updated = []
+    setup_user(
+        "codex",
+        NativeUserConfig(marketplaces=["local"], plugins=["one@other-market"]),
+        invocation(transport, updated, prior=record(claims[-1], "codex")),
+    )
+    assert {(claim.role, claim.identifier) for claim in updated[-1]} == {
+        ("marketplace", "other-market"),
+        ("plugin", "one@other-market"),
+    }
+    repeated = []
+    setup_user(
+        "codex",
+        NativeUserConfig(marketplaces=["local"], plugins=["one@other-market"]),
+        invocation(transport, repeated, prior=record(updated[-1], "codex")),
+    )
+    assert repeated[-1] == updated[-1]

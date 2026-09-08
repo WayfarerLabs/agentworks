@@ -7,7 +7,6 @@ Matching registrations without a prior claim remain unowned and are refused.
 from __future__ import annotations
 
 import hashlib
-import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -63,6 +62,20 @@ def _market_fields(market: NativeMarket) -> SettingsObject:
     if market.source is None:
         raise ConfigError("native marketplace source identity is unavailable; register an explicit source first")
     return parse_settings(market.source.encode(), format="json")
+
+
+def _market_location(tool: NativeTool, market: NativeMarket) -> SettingsValue:
+    fields = _market_fields(market)
+    if tool == "codex":
+        return fields.get("source")
+    source = fields.get("source")
+    if not isinstance(source, dict):
+        return None
+    kind = source.get("source")
+    if not isinstance(kind, str):
+        return None
+    location_key = {"directory": "path", "github": "repo", "git": "url", "url": "url"}.get(kind)
+    return source.get(location_key) if location_key else None
 
 
 def _overlay_fields(existing: SettingsValue, desired: SettingsValue) -> SettingsValue:
@@ -234,8 +247,10 @@ def _check_contributions(
         if name in table:
             value = table[name]
             expected = _market_fields(market)
+            identity_fields = ("source",) if tool == "claude" else ("source_type", "source", "ref", "sparse_paths")
             if not isinstance(value, dict) or any(
-                field in value and value[field] != expected_value for field, expected_value in expected.items()
+                field in value and (field not in expected or value[field] != expected[field])
+                for field in identity_fields
             ):
                 raise ConfigError("mapped settings conflict with an explicitly requested marketplace source")
     for claim in obsolete:
@@ -308,13 +323,7 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                 (
                     market
                     for market in markets
-                    if market.source is not None
-                    and source
-                    in (
-                        json.loads(market.source)["source"].values()
-                        if tool == "claude"
-                        else json.loads(market.source).values()
-                    )
+                    if market.source is not None and source == _market_location(tool, market)
                 ),
                 None,
             )
