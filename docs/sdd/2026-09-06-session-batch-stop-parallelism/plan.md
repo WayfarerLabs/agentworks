@@ -79,7 +79,7 @@ not authored prose.
       findings.
 - [x] Obtain fresh private project and Muntz reviews after the current-main and PR #764 dependency
       audit.
-- [ ] Publish the complete design checkpoint as a draft PR with `review-requested`.
+- [x] Publish the complete design checkpoint as a draft PR with `review-requested`.
 - [ ] Complete up to three authorized design feedback/fix cycles.
 - [ ] Record design convergence before implementation begins.
 
