@@ -221,7 +221,8 @@ Automated tests MUST prove:
 - same-VM dedicated sessions may overlap;
 - incomplete dedicated and legacy work stay serial after the concurrent lane;
 - workers do not access SQLite or output;
-- duplicate socket or complete process identities among concurrent plans refuse before mutation;
+- duplicate socket or VM/boot/PID process keys among concurrent plans refuse before mutation,
+  including when duplicate process keys carry different stored start ticks;
 - successful results persist despite sibling failure;
 - incomplete-fingerprint teardown retains the synchronous pre-kill persistence checkpoint;
 - queued work is cancelled and running work reconciled on first interrupt;

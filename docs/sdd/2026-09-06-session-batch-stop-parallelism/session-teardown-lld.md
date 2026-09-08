@@ -257,7 +257,8 @@ invoke continues through the one dispatcher and never enters the concurrent coor
 ### Unit and service tests
 
 - PR #764 shared database-use and exclusive restore-lock behavior remains unchanged;
-- collision refusal for duplicate socket and complete fingerprint identities among concurrent plans;
+- collision refusal for duplicate socket or VM/boot/PID process keys among concurrent plans,
+  including duplicate process keys with different stored start ticks;
 - dedicated plan validation for admin, agent, force, and stopped rows;
 - missing fingerprint fields select the synchronous compatibility path;
 - synchronous missing-start-ticks persistence still precedes `kill-server`;
