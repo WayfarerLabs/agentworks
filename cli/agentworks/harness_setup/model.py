@@ -29,7 +29,8 @@ class NativeClaim(AgwModel):
     source: str | None = None
     sha256: _Hash | None = None
     strategy: str | None = None
-    written_keys: tuple[tuple[str, ...], ...] = ()
+    # JSON carries tuples as arrays; only sequence representation is lenient.
+    written_keys: Annotated[tuple[Annotated[tuple[str, ...], Field(strict=False)], ...], Field(strict=False)] = ()
 
 
 class SetupRecord(AgwModel):
@@ -41,7 +42,7 @@ class SetupRecord(AgwModel):
     declaration: dict[str, JsonValue]
     complete: bool = False
     pending_cleanup: bool = False
-    claims: tuple[NativeClaim, ...] = ()
+    claims: Annotated[tuple[NativeClaim, ...], Field(strict=False)] = ()
 
     @model_validator(mode="after")
     def _unique_claims(self) -> SetupRecord:
@@ -57,7 +58,7 @@ class SetupRecord(AgwModel):
 class NativeSetupState(AgwModel):
     """Ordered integration evidence within one instance-state slice."""
 
-    records: tuple[SetupRecord, ...] = ()
+    records: Annotated[tuple[SetupRecord, ...], Field(strict=False)] = ()
 
     @model_validator(mode="after")
     def _unique_records(self) -> NativeSetupState:

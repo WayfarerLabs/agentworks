@@ -39,6 +39,7 @@ class AppliedStateKey(StrEnum):
 
     HARDWARE_PROVENANCE = "hardware-provenance"
     SSH_IDENTITY = "ssh-identity"
+    HARNESS_NATIVE_SETUP = "harness-native-setup"
 
 
 class InstanceRecordDiagnostic(StrEnum):
@@ -64,10 +65,11 @@ _APPLIED_KEYS_BY_KIND: dict[InstanceKind, frozenset[AppliedStateKey]] = {
         {
             AppliedStateKey.HARDWARE_PROVENANCE,
             AppliedStateKey.SSH_IDENTITY,
+            AppliedStateKey.HARNESS_NATIVE_SETUP,
         }
     ),
-    "workspace": frozenset(),
-    "agent": frozenset(),
+    "workspace": frozenset({AppliedStateKey.HARNESS_NATIVE_SETUP}),
+    "agent": frozenset({AppliedStateKey.HARNESS_NATIVE_SETUP}),
     "session": frozenset(),
 }
 _INSTANCE_KINDS = frozenset(_APPLIED_KEYS_BY_KIND)

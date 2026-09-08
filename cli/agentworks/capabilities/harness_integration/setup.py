@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from agentworks.db import VMRow
     from agentworks.harness_setup.model import NativeClaim, SetupRecord
@@ -26,6 +26,7 @@ class SetupInvocation:
     runner: Transport
     prior: SetupRecord | None
     checkpoint: Callable[[tuple[NativeClaim, ...]], None]
+    environment: Mapping[str, str] = field(default_factory=dict, repr=False)
 
 
 @dataclass(frozen=True, kw_only=True)
