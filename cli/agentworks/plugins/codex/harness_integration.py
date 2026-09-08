@@ -116,9 +116,9 @@ from agentworks.capabilities.harness_integration.base import (
     quote_literal_argv,
     require_commands,
 )
-from agentworks.capabilities.harness_integration.native import setup_user, setup_workspace
-from agentworks.capabilities.harness_integration.native_config import NativeUserConfig, NativeWorkspaceConfig
 from agentworks.errors import StateError
+from agentworks.plugins._harness_native.native import setup_user, setup_workspace
+from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
 from agentworks.plugins.codex.recorder import home_word, notify_value_word, provision_fragment, thread_tail
 from agentworks.schema import AgwModel, MergeStrategy
 from agentworks.topics import TopicProse

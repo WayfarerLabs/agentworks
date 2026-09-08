@@ -11,12 +11,12 @@ from pathlib import Path
 
 import pytest
 
-from agentworks.capabilities.harness_integration.native import setup_user
-from agentworks.capabilities.harness_integration.native_cli import NativeCLI, NativeTool
-from agentworks.capabilities.harness_integration.native_config import NativeUserConfig
-from agentworks.capabilities.harness_integration.native_files import NativeFiles
 from agentworks.errors import ExternalError
 from agentworks.harness_setup.model import NativeClaim
+from agentworks.plugins._harness_native.native import setup_user
+from agentworks.plugins._harness_native.native_cli import NativeCLI, NativeTool
+from agentworks.plugins._harness_native.native_config import NativeUserConfig
+from agentworks.plugins._harness_native.native_files import NativeFiles
 from tests.native_setup_fixtures import LocalFixtureTransport, invocation, market_fixture
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local execution of Linux guest setup helpers")

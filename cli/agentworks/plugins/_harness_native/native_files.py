@@ -1,4 +1,4 @@
-"""Private snapshots and atomic publication for fixed native settings roles."""
+"""Private snapshots and atomic publication for plugin-native settings roles."""
 
 from __future__ import annotations
 

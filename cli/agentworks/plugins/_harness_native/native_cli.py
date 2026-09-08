@@ -19,7 +19,7 @@ from agentworks.errors import ConfigError, ExternalError
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from agentworks.capabilities.harness_integration.native_files import NativeFiles
+    from agentworks.plugins._harness_native.native_files import NativeFiles
 
 type NativeTool = Literal["codex", "claude"]
 

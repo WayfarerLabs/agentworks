@@ -11,8 +11,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.capabilities.harness_integration.native_cli import NativeCLI, NativeMarket, NativeTool
-from agentworks.capabilities.harness_integration.native_files import NativeFiles, native_path
 from agentworks.capabilities.harness_integration.settings import (
     PreparedSettings,
     SettingsFormat,
@@ -25,10 +23,12 @@ from agentworks.capabilities.harness_integration.settings import (
 )
 from agentworks.errors import ConfigError, StateError
 from agentworks.harness_setup.model import NativeClaim
+from agentworks.plugins._harness_native.native_cli import NativeCLI, NativeMarket, NativeTool
+from agentworks.plugins._harness_native.native_files import NativeFiles, native_path
 
 if TYPE_CHECKING:
-    from agentworks.capabilities.harness_integration.native_config import NativeUserConfig, NativeWorkspaceConfig
     from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, WorkspaceSetupInvocation
+    from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
 
 
 def _format(tool: NativeTool) -> SettingsFormat:
@@ -163,8 +163,6 @@ class _MappingPlan:
         paths = _changes(before, document)
         paths = {path for path in paths if not any(path[: len(native)] == native for native in native_paths)}
         files.publish(destination, content, expected=_hash(current), group=group)
-        if files.read(destination) != content:
-            raise StateError("native settings changed before publication could be confirmed")
         return NativeClaim(
             role="settings",
             identifier="settings",
@@ -180,6 +178,20 @@ def _retain_settings(claims: list[NativeClaim]) -> list[NativeClaim]:
     if any(claim.role == "settings" for claim in claims):
         output.info("Removed settings mapping; native settings and their current values are retained.")
     return [claim for claim in claims if claim.role != "settings"]
+
+
+def _matching_settings_claims(
+    claims: list[NativeClaim], destination: str, content: bytes | None, *, skipped: bool
+) -> list[NativeClaim]:
+    """Carry every owned settings receipt forward when no publication was needed."""
+    if skipped:
+        return []
+    digest = _hash(content)
+    return [
+        claim
+        for claim in claims
+        if claim.role == "settings" and claim.destination == destination and claim.sha256 == digest
+    ]
 
 
 def setup_workspace(
@@ -200,15 +212,12 @@ def setup_workspace(
         initial = files.read(destination)
         plan = _MappingPlan.build(mapping, prepared, initial)
         claim = plan.publish(files, destination, current=initial, group=invocation.linux_group)
+        previous = _matching_settings_claims(claims, destination, initial, skipped=plan.skipped)
         claims = [old for old in claims if old.role != "settings" or old.destination != destination]
         if claim is not None:
             claims.append(claim)
-        elif invocation.prior and not plan.skipped:
-            claims.extend(
-                old
-                for old in invocation.prior.claims
-                if old.role == "settings" and old.destination == destination and old.sha256 == _hash(initial)
-            )
+        else:
+            claims.extend(previous)
         invocation.checkpoint(tuple(claims))
 
 
@@ -291,14 +300,7 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
             initial = files.read(destination)
             settings_plan = _MappingPlan.build(mapping, prepared, initial)
             claim = settings_plan.publish(files, destination, current=initial)
-            previous_claims = [
-                old
-                for old in claims
-                if old.role == "settings"
-                and old.destination == destination
-                and old.sha256 == _hash(initial)
-                and not settings_plan.skipped
-            ]
+            previous_claims = _matching_settings_claims(claims, destination, initial, skipped=settings_plan.skipped)
             invocation.checkpoint(tuple([claim] if claim else previous_claims))
         return
     with NativeFiles(invocation.runner) as files:
@@ -473,15 +475,7 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                 overlays=overlays,
                 removed=tuple(_native_key(tool, old.role, old.identifier) for old in obsolete),
             )
-            previous = next(
-                (
-                    old
-                    for old in claims
-                    if old.role == "settings"
-                    and old.destination == destination
-                    and old.sha256 == _hash(current)
-                    and not plan.skipped
-                ),
-                None,
-            )
-            checkpoint(claim or previous, "settings", "settings")
+            previous = _matching_settings_claims(claims, destination, current, skipped=plan.skipped)
+            updated = [old for old in claims if old.role != "settings"]
+            updated.extend([claim] if claim else previous)
+            invocation.checkpoint(tuple(updated))

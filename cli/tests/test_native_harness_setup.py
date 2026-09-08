@@ -14,15 +14,15 @@ from typing import cast
 
 import pytest
 
-from agentworks.capabilities.harness_integration.native import setup_user, setup_workspace
-from agentworks.capabilities.harness_integration.native_cli import NativeCLI, NativeTool
-from agentworks.capabilities.harness_integration.native_config import NativeUserConfig, NativeWorkspaceConfig
-from agentworks.capabilities.harness_integration.native_files import NativeFiles
-from agentworks.capabilities.harness_integration.settings import SettingsMapping
+from agentworks.capabilities.harness_integration.settings import SettingsMapping, parse_settings, serialize_settings
 from agentworks.capabilities.harness_integration.setup import WorkspaceSetupInvocation
 from agentworks.db import VMRow
 from agentworks.errors import ConfigError, ExternalError, StateError
 from agentworks.harness_setup.model import NativeClaim
+from agentworks.plugins._harness_native.native import setup_user, setup_workspace
+from agentworks.plugins._harness_native.native_cli import NativeCLI, NativeTool
+from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
+from agentworks.plugins._harness_native.native_files import NativeFiles
 from tests.native_setup_fixtures import (
     LocalFixtureTransport,
     invocation,
@@ -248,6 +248,46 @@ def test_skip_existing_does_not_block_explicit_install(transport: LocalFixtureTr
     assert {claim.role for claim in claims[-1]} == {"marketplace", "plugin"}
 
 
+@pytest.mark.parametrize(("strategy", "retained"), [("merge-preserve", True), ("skip-existing", False)])
+def test_unchanged_mapping_preserves_all_owned_receipts_unless_skipped(
+    transport: LocalFixtureTransport, strategy: str, retained: bool
+) -> None:
+    tool: NativeTool = "codex"
+    market = market_fixture(transport, tool)
+    initial: list[tuple[NativeClaim, ...]] = []
+    config = NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"])
+    setup_user(tool, config, invocation(transport, initial))
+    destination = transport.home / ".codex/config.toml"
+    content = serialize_settings(parse_settings(destination.read_bytes(), format="toml"), format="toml")
+    destination.write_bytes(content)
+    digest = hashlib.sha256(content).hexdigest()
+    settings_claims = tuple(
+        NativeClaim(
+            role="settings",
+            identifier=identifier,
+            destination=str(destination),
+            sha256=digest,
+            strategy="merge-preserve",
+        )
+        for identifier in ("primary", "secondary")
+    )
+    prior_claims = (*initial[-1], *settings_claims)
+    source = transport.root / "settings-source"
+    source.write_bytes(b"")
+    checkpoints: list[tuple[NativeClaim, ...]] = []
+    setup_user(
+        tool,
+        NativeUserConfig(
+            marketplaces=[str(market)],
+            plugins=["one@fixture-market"],
+            settings=SettingsMapping(source=str(source), strategy=strategy),
+        ),
+        invocation(transport, checkpoints, prior=record(prior_claims, tool)),
+    )
+    expected = prior_claims if retained else initial[-1]
+    assert checkpoints[-1] == expected
+
+
 @pytest.mark.parametrize("tool", ["codex", "claude"])
 def test_failed_plugin_step_retains_retryable_marketplace_prefix(
     transport: LocalFixtureTransport, tool: NativeTool, monkeypatch: pytest.MonkeyPatch
@@ -444,8 +484,6 @@ def test_claude_uninstall_preserves_plugin_persistent_data(transport: LocalFixtu
 
 @pytest.mark.parametrize("tool", ["codex", "claude"])
 def test_requested_owned_disabled_plugin_is_enabled(transport: LocalFixtureTransport, tool: NativeTool) -> None:
-    from agentworks.capabilities.harness_integration.settings import parse_settings, serialize_settings
-
     market = market_fixture(transport, tool)
     config = NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"])
     claims: list[tuple[NativeClaim, ...]] = []
@@ -524,8 +562,6 @@ def test_missing_guest_python_refuses_before_staging(transport: LocalFixtureTran
 def test_mapping_refuses_unrelated_changes_during_plugin_install(
     transport: LocalFixtureTransport, tool: NativeTool, inside_plugin: bool, monkeypatch
 ) -> None:
-    from agentworks.capabilities.harness_integration.settings import parse_settings, serialize_settings
-
     market = market_fixture(transport, tool)
     format = "toml" if tool == "codex" else "json"
     destination = transport.home / (".codex/config.toml" if tool == "codex" else ".claude/settings.json")

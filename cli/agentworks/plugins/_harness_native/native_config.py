@@ -1,4 +1,4 @@
-"""Shared native setup fields; each integration supplies its own name tag."""
+"""Native setup fields shared by the Claude and Codex plugins."""
 
 from __future__ import annotations
 

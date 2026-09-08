@@ -10,10 +10,10 @@ from typing import cast
 
 import pytest
 
-from agentworks.capabilities.harness_integration.native_cli import NativeTool
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
 from agentworks.db import VMRow
 from agentworks.harness_setup.model import NativeClaim, SetupRecord
+from agentworks.plugins._harness_native.native_cli import NativeTool
 from agentworks.ssh import SSHResult
 from agentworks.transports import Transport
 

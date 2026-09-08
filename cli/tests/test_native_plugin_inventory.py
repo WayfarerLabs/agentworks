@@ -6,8 +6,8 @@ from typing import cast
 
 import pytest
 
-from agentworks.capabilities.harness_integration.native_cli import NativeCLI, identity
-from agentworks.capabilities.harness_integration.native_files import NativeFiles
+from agentworks.plugins._harness_native.native_cli import NativeCLI, identity
+from agentworks.plugins._harness_native.native_files import NativeFiles
 
 
 class InventoryFiles:
