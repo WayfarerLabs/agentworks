@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
-from agentworks.agents.initializer import create_exclusive_agent_user
+from agentworks.agents.initializer import create_new_agent_user
 from agentworks.agents.realize import realize_agent
 from agentworks.agents.templates import ResolvedAgentTemplate
 from agentworks.capabilities.harness_integration.kinds import HarnessIntegrationEntry
@@ -104,7 +104,7 @@ def native(monkeypatch, tmp_path):
     monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
     monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: target)
     monkeypatch.setattr("agentworks.harness_setup.lifecycle.site_platform_name", lambda *a: "fixture")
-    monkeypatch.setattr("agentworks.agents.initializer.create_exclusive_agent_user", lambda *a, **k: None)
+    monkeypatch.setattr("agentworks.agents.initializer.create_new_agent_user", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.agents.initializer.create_agent_on_vm", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.workspaces.backends.vm.create_vm_workspace", lambda *a, **k: "/work/project")
@@ -232,13 +232,13 @@ def test_exclusive_agent_user_refuses_native_residue_and_races(vm, monkeypatch, 
     monkeypatch.setattr("agentworks.agents.initializer.transport", lambda *a, **k: target)
     if existing in {"user", "home"}:
         with pytest.raises(StateError):
-            create_exclusive_agent_user(vm, MagicMock(), "agt-a", shell="bash", logger=Mock())
+            create_new_agent_user(vm, MagicMock(), "agt-a", shell="bash", logger=Mock())
         assert not any(command.startswith("useradd") for command in commands)
     elif existing == "race":
         with pytest.raises(RuntimeError):
-            create_exclusive_agent_user(vm, MagicMock(), "agt-a", shell="bash", logger=Mock())
+            create_new_agent_user(vm, MagicMock(), "agt-a", shell="bash", logger=Mock())
     else:
-        create_exclusive_agent_user(vm, MagicMock(), "agt-a", shell="bash", logger=Mock())
+        create_new_agent_user(vm, MagicMock(), "agt-a", shell="bash", logger=Mock())
         assert commands[-1] == "useradd -m -U -s /bin/bash agt-a"
     assert not any(command.startswith("userdel") for command in commands)
 
@@ -247,7 +247,7 @@ def test_failed_exclusive_creation_never_arms_realizer_rollback(db, registry, vm
     def race(*args, **kwargs):
         raise RuntimeError("competing useradd")
 
-    monkeypatch.setattr("agentworks.agents.initializer.create_exclusive_agent_user", race)
+    monkeypatch.setattr("agentworks.agents.initializer.create_new_agent_user", race)
     with pytest.raises(RuntimeError):
         realize_agent(
             db,
@@ -340,7 +340,7 @@ def test_receipt_appearing_after_empty_preparation_refuses_before_core(db, regis
     )
     write_native_setup(db, "agent", "a", later, operation="agent-create")
     exclusive = Mock()
-    monkeypatch.setattr("agentworks.agents.initializer.create_exclusive_agent_user", exclusive)
+    monkeypatch.setattr("agentworks.agents.initializer.create_new_agent_user", exclusive)
     with pytest.raises(StateError):
         realize_agent(
             db,

@@ -86,7 +86,7 @@ def realize_agent(
     # ENTRY that reaches it (agent create, session create --new-agent). If you
     # add a NEW caller of ``realize_agent``, add its command-entry gate and
     # update tests/agents/test_recipe_gate_drift.py's enumerated caller set.
-    from agentworks.agents.initializer import create_agent_on_vm, create_exclusive_agent_user, delete_agent_on_vm
+    from agentworks.agents.initializer import create_agent_on_vm, create_new_agent_user, delete_agent_on_vm
     from agentworks.agents.manager import derive_linux_user
     from agentworks.ssh import SSHLogger
 
@@ -123,7 +123,7 @@ def realize_agent(
         # The logger's close() writes a "Finished" footer; defer it via finally so
         # rollback commands are logged BEFORE the footer, not after.
         try:
-            create_exclusive_agent_user(vm, config, linux_user, shell=template.shell, logger=ssh_logger)
+            create_new_agent_user(vm, config, linux_user, shell=template.shell, logger=ssh_logger)
             try:
                 from agentworks.vms.admin_templates import resolve_live_template as resolve_admin_template
 

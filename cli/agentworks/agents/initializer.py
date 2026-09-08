@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from agentworks.transports import Transport
 
 
-def create_exclusive_agent_user(
+def create_new_agent_user(
     vm: VMRow,
     config: Config,
     linux_user: str,

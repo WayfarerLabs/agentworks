@@ -46,7 +46,7 @@ AGENT_MANIFESTS = [
 @pytest.fixture(autouse=True)
 def _stub_ssh_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     stub_vm_ssh_identity(monkeypatch)
-    monkeypatch.setattr(agent_initializer, "create_exclusive_agent_user", lambda *args, **kwargs: None)
+    monkeypatch.setattr(agent_initializer, "create_new_agent_user", lambda *args, **kwargs: None)
 
 
 @pytest.fixture
