@@ -126,6 +126,10 @@ Do not force-remove another integration's or an operator's material.
 
 ## Native settings and plugins
 
+Claude and Codex share native implementation helpers in `agentworks.plugins._harness_native`. This
+is an internal plugin package, not a registered capability. Generic setup dispatch, receipts and
+settings-source facilities remain outside it and do not depend on the native tool branches.
+
 SettingsMapping requires source and one of the four approved policies. The shared local-source
 helper accepts SourceRef local spellings and captures bytes once on the workstation. Native JSON and
 TOML parsing and semantic merge are tested independently. The integration determines its native
@@ -158,6 +162,10 @@ The session integration receives applicable receipts and performs inexpensive na
 existing readiness boundary, before runtime teardown. It returns typed gaps with owner remediation,
 reason and required/recommended severity. Required gaps refuse launch; recommended gaps warn and
 permit it if other checks pass. Default no-gaps behavior preserves session-only use.
+
+Core validates the returned gap objects and severity at this plugin boundary. An unknown severity
+cannot silently become a recommendation. Receipt freshness probes use the actual VM, runner and
+optional user or workspace destination directly; they do not construct setup invocations.
 
 Use the actual bound user's receipt; admin or another agent cannot satisfy it. Missing, incomplete,
 stale or failed setup is not successful current setup. Keep pending-target readiness after
