@@ -29,7 +29,7 @@ from agentworks.workspaces.realize import realize_workspace
 from agentworks.workspaces.templates import ResolvedTemplate
 
 
-def _env(**values):
+def _env(**values: str) -> dict[str, EnvEntry]:
     return {key: EnvEntry.model_validate(value) for key, value in values.items()}
 
 
@@ -73,6 +73,7 @@ def test_component_inputs_keep_only_ancestors_and_retirement(db, registry, vm, m
         name="project",
         template=ResolvedTemplate("default", env=_env(PROJECT="project"), harness_integrations=selected),
     )
+    assert agent is not None and project is not None
     assert agent.target.vm == parent.env and agent.target.agent == _env(USER="agent")
     assert agent.target.admin is None and agent.target.workspace is None
     assert project.target.vm == parent.env and project.target.workspace == _env(PROJECT="project")
@@ -173,7 +174,7 @@ def test_fresh_owner_buffers_setup_until_atomic_row_commit(db, registry, vm, nat
 
         monkeypatch.setattr(db, "insert_agent" if kind == "agent" else "insert_workspace", fail)
 
-    def create():
+    def create() -> None:
         if kind == "agent":
             realize_agent(
                 db,
@@ -406,7 +407,7 @@ def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(db, registry,
     monkeypatch.setattr("agentworks.ssh.LOG_DIR", db.path.parent / "logs")
     logger = _RealSSHLogger(vm.name, "setup-fixture", redactions=("vm-private",))
 
-    def run():
+    def run() -> None:
         run_initialization(
             db,
             MagicMock(),

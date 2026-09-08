@@ -185,6 +185,7 @@ def test_multiple_hosts_project_list_and_singular_facets(seated: None, monkeypat
     from agentworks.manifests.decode import _hosted_capability_references
     from agentworks.manifests.envelope import Document
     from agentworks.resources.kind import KIND_REGISTRY
+    from agentworks.sessions.kinds import _SessionTemplateKind
     from agentworks.source_location import synthesized
 
     class Host(SessionTemplate):
@@ -195,7 +196,9 @@ def test_multiple_hosts_project_list_and_singular_facets(seated: None, monkeypat
     updated = replace(harness, manifest_sections=hosts)
     table = tuple(updated if d is harness else d for d in descriptors.capability_descriptors())
     monkeypatch.setattr(descriptors, "capability_descriptors", lambda: table)
-    monkeypatch.setitem(KIND_REGISTRY, "session-template", replace(KIND_REGISTRY["session-template"], model=Host))
+    kind = KIND_REGISTRY["session-template"]
+    assert isinstance(kind, _SessionTemplateKind)
+    monkeypatch.setitem(KIND_REGISTRY, "session-template", replace(kind, model=Host))
     model = spec_model("session-template")
     value = model.model_validate(
         {
@@ -204,17 +207,17 @@ def test_multiple_hosts_project_list_and_singular_facets(seated: None, monkeypat
             "user_integrations": [{"name": "facet-test", "user_token": "u"}],
         }
     )
-    assert value.user_integrations[0].root.user_token == "u"
+    assert value.model_dump()["user_integrations"][0]["user_token"] == "u"
     with pytest.raises(ValidationError):
         model.model_validate({"name": "host", "user_integrations": [{"name": "facet-test", "session_token": "wrong"}]})
 
     raw = Host(
         name="host",
         user_integrations=[
-            CapabilityBlock(name="facet-test", user_token="first"),
-            CapabilityBlock(name="facet-test", user_token="second"),
+            CapabilityBlock.of("facet-test", user_token="first"),
+            CapabilityBlock.of("facet-test", user_token="second"),
         ],
-        harness_integration=CapabilityBlock(name="facet-test", session_token="session"),
+        harness_integration=CapabilityBlock.of("facet-test", session_token="session"),
     )
     doc = Document(
         kind="session-template",

@@ -21,7 +21,7 @@ from tests.plugins._fixtures import ConformingHarnessIntegration
 @pytest.fixture
 def setup_case(tmp_path, monkeypatch):
     events = []
-    failures = set()
+    failures: set[str] = set()
 
     class First(ConformingHarnessIntegration):
         name = "first"
@@ -87,7 +87,7 @@ def test_retirement_follows_desired_order_and_preserves_other_records(setup_case
 
 def test_checkpoint_failure_stops_before_next_integration(setup_case, monkeypatch):
     db, inputs, invocation, events, _ = setup_case
-    from agentworks.harness_setup.dispatch import write_native_setup
+    from agentworks.harness_setup.state import write_native_setup
 
     original = write_native_setup
     writes = 0

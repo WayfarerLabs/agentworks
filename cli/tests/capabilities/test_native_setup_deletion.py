@@ -22,7 +22,7 @@ from agentworks.vms.manager import delete_vm
 from agentworks.workspaces.manager import delete_workspace
 
 
-def _record(component):
+def _record(component) -> SetupRecord:
     return SetupRecord(
         component=component,
         integration="shell",
@@ -117,7 +117,7 @@ def test_retirement_precedes_native_owner_destruction_and_preserves_failures(
     if outcome == "changed":
         monkeypatch.setattr("agentworks.harness_setup.dispatch.destination_id", lambda *a: "b" * 64)
 
-    def delete():
+    def delete() -> None:
         if kind == "agent":
             delete_agent(db, deletion.config, name=name, yes=True, interaction=TtyInteractionPolicy.REFUSE)
         else:
@@ -237,7 +237,7 @@ def test_native_removal_failure_keeps_owner_without_recreating_retired_claims(db
 
     monkeypatch.setattr(method, failed)
 
-    def delete():
+    def delete() -> None:
         if kind == "agent":
             delete_agent(db, deletion.config, name=name, yes=True, interaction=TtyInteractionPolicy.REFUSE)
         else:

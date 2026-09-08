@@ -513,6 +513,7 @@ def test_missing_guest_python_refuses_before_staging(transport: LocalFixtureTran
     monkeypatch.setattr(transport, "run", probe)
     with pytest.raises(StateError) as caught, NativeFiles(transport):
         pytest.fail("missing prerequisite must stop before staging")
+    assert caught.value.hint is not None
     assert "python3" in str(caught.value) and "apt_packages" in caught.value.hint
     assert probe.call_count == 1
     assert not list((transport.root / "tmp").iterdir())
@@ -535,14 +536,18 @@ def test_mapping_refuses_unrelated_changes_during_plugin_install(
         plugins=["one@fixture-market"],
         settings=SettingsMapping(source=str(source), strategy="merge-preserve"),
     )
-    claims = []
+    claims: list[tuple[NativeClaim, ...]] = []
     original = NativeCLI.install
 
     def concurrent_edit(self, selector):
         original(self, selector)
         document = parse_settings(destination.read_bytes(), format=format)
         if inside_plugin and tool == "codex":
-            document["plugins"][selector]["external"] = "preserve"
+            plugins = document["plugins"]
+            assert isinstance(plugins, dict)
+            plugin = plugins[selector]
+            assert isinstance(plugin, dict)
+            plugin["external"] = "preserve"
         else:
             document["external"] = "preserve"
         destination.write_bytes(serialize_settings(document, format=format))
@@ -563,7 +568,7 @@ def test_retirement_uses_recorded_override_root_without_current_env(transport, t
     market = market_fixture(transport, tool)
     override_root = transport.root / "custom-native-home"
     key = "CODEX_HOME" if tool == "codex" else "CLAUDE_CONFIG_DIR"
-    claims = []
+    claims: list[tuple[NativeClaim, ...]] = []
     setup_user(
         tool,
         NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"]),
@@ -583,7 +588,7 @@ def test_codex_mapping_cannot_add_unrequested_source_identity(transport: LocalFi
     market = market_fixture(transport, "codex")
     source = transport.root / "mapping.toml"
     source.write_text("[marketplaces.fixture-market]\n" + field + "\n")
-    claims = []
+    claims: list[tuple[NativeClaim, ...]] = []
     config = NativeUserConfig(
         marketplaces=[str(market)],
         plugins=["one@fixture-market"],
@@ -597,7 +602,7 @@ def test_codex_mapping_cannot_add_unrequested_source_identity(transport: LocalFi
 
 def test_codex_relative_source_named_local_does_not_match_source_type(transport: LocalFixtureTransport) -> None:
     market = market_fixture(transport, "codex")
-    claims = []
+    claims: list[tuple[NativeClaim, ...]] = []
     setup_user("codex", NativeUserConfig(marketplaces=[str(market)], plugins=["one"]), invocation(transport, claims))
     local = transport.home / "local"
     shutil.copytree(market, local)
@@ -605,7 +610,7 @@ def test_codex_relative_source_named_local_does_not_match_source_type(transport:
     data = json.loads(manifest.read_text())
     data["name"] = "other-market"
     manifest.write_text(json.dumps(data))
-    updated = []
+    updated: list[tuple[NativeClaim, ...]] = []
     setup_user(
         "codex",
         NativeUserConfig(marketplaces=["local"], plugins=["one@other-market"]),
@@ -615,7 +620,7 @@ def test_codex_relative_source_named_local_does_not_match_source_type(transport:
         ("marketplace", "other-market"),
         ("plugin", "one@other-market"),
     }
-    repeated = []
+    repeated: list[tuple[NativeClaim, ...]] = []
     setup_user(
         "codex",
         NativeUserConfig(marketplaces=["local"], plugins=["one@other-market"]),

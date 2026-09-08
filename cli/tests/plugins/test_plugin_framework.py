@@ -24,7 +24,7 @@ import agentworks
 import agentworks.plugins as plugins_pkg
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.conformance import conformance_error
-from agentworks.capabilities.descriptor import capability_descriptors, descriptor_for
+from agentworks.capabilities.descriptor import Facet, capability_descriptors, descriptor_for
 from agentworks.capabilities.git_credential.base import HttpsCredentialScope, StoredCredential
 from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.errors import StateError
@@ -410,7 +410,7 @@ class _PlatformOfferingAnUnsafeMergeContract(ConformingVMPlatform):
     description = "offers an unsafe model instead of its safe declaration"
 
     @classmethod
-    def config_for(cls) -> type[AgwModel]:
+    def config_for(cls, facet: Facet | None = None) -> type[AgwModel]:
         return _OfferedUnsafeMergeConfig
 
 
@@ -419,7 +419,7 @@ class _PlatformOfferingAnInvalidModel(ConformingVMPlatform):
     description = "returns a non-model from its config hook"
 
     @classmethod
-    def config_for(cls) -> type[AgwModel]:
+    def config_for(cls, facet: Facet | None = None) -> type[AgwModel]:
         return cast("type[AgwModel]", object)
 
 
@@ -428,7 +428,7 @@ class _PlatformWhoseConfigHookRaises(ConformingVMPlatform):
     description = "raises while selecting its offered model"
 
     @classmethod
-    def config_for(cls) -> type[AgwModel]:
+    def config_for(cls, facet: Facet | None = None) -> type[AgwModel]:
         raise RuntimeError("fixture hook failure")
 
 

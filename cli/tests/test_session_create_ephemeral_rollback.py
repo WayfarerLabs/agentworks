@@ -225,7 +225,7 @@ def test_realizers_receive_the_same_prepared_setup_after_one_resolve(
             lambda *args, selected=inputs, **kwargs: selected,
         )
     registered = []
-    resolved = []
+    resolved: list[dict[str, str]] = []
     original_register = SetupInputs.register
     original_resolve = Resolver.resolve
 
