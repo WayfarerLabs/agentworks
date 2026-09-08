@@ -7,7 +7,6 @@ settings content must not be copied into applied-state records or logs.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import tomllib
@@ -56,19 +55,11 @@ class SettingsMapping(AgwModel):
 class SettingsResult:
     """Effective native bytes, including untouched bytes when mapping is skipped.
 
-    ``changed`` compares bytes with the supplied destination snapshot, so a
-    semantic reserialization may count as a change. ``skipped`` means no mapping
-    ownership can be claimed. Hashes describe bytes, not semantic equivalence.
+    ``skipped`` means no mapping ownership can be claimed.
     """
 
     content: bytes = field(repr=False)
-    changed: bool
     skipped: bool
-
-    @property
-    def sha256(self) -> str:
-        """Hash of the effective bytes, including an unparsed skipped file."""
-        return hashlib.sha256(self.content).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -77,13 +68,12 @@ class PreparedSettings:
 
     format: SettingsFormat
     strategy: SettingsStrategy
-    source_sha256: str
     _document: SettingsObject = field(repr=False)
 
     @classmethod
     def from_bytes(cls, source: bytes, *, format: SettingsFormat, strategy: SettingsStrategy) -> PreparedSettings:
         """Parse captured source bytes, including for the skip-existing policy."""
-        return cls(format, strategy, hashlib.sha256(source).hexdigest(), parse_settings(source, format=format))
+        return cls(format, strategy, parse_settings(source, format=format))
 
     def apply(self, destination: bytes | None) -> SettingsResult:
         """Compute output; None denotes absence, while empty bytes denote a file.
@@ -92,13 +82,13 @@ class PreparedSettings:
         Existing bytes are parsed only when the policy merges with them.
         """
         if self.strategy == "skip-existing" and destination is not None:
-            return SettingsResult(destination, changed=False, skipped=True)
+            return SettingsResult(destination, skipped=True)
         document = self._document
         if destination is not None and self.strategy in ("merge-overwrite", "merge-preserve"):
             existing = parse_settings(destination, format=self.format)
             document = _merge(existing, document) if self.strategy == "merge-overwrite" else _merge(document, existing)
         content = serialize_settings(document, format=self.format)
-        return SettingsResult(content, changed=content != destination, skipped=False)
+        return SettingsResult(content, skipped=False)
 
     def contributions(self, destination: bytes | None) -> SettingsObject:
         """Source values surviving this policy, for native declaration conflicts.

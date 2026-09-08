@@ -26,17 +26,14 @@ type NativeTool = Literal["codex", "claude"]
 class NativeMarket:
     name: str
     source: str | None
-    root: str
 
 
 @dataclass(frozen=True)
 class NativePlugin:
     identifier: str
-    version: str
     scope: str
     enabled: bool
     source: str | None
-    project: str | None = None
 
 
 def _object(value: object) -> dict[str, object]:
@@ -130,9 +127,8 @@ class NativeCLI:
                 entry = _object(raw)
                 name = _text(entry["name"])
                 if self.tool == "codex":
-                    root = _text(entry["root"])
                     if entry.get("marketplaceSource") is None:
-                        result.append(NativeMarket(name, None, root))
+                        result.append(NativeMarket(name, None))
                         continue
                     source = _object(entry["marketplaceSource"])
                 else:
@@ -141,7 +137,6 @@ class NativeCLI:
                         for key in ("source", "repo", "url", "path", "ref", "sparsePaths")
                         if key in entry
                     }
-                    root = _text(entry["installLocation"])
                 declaration = _object(configured.get(name, {}))
                 if self.tool == "codex":
                     native_source = {"source_type": source["sourceType"], "source": source["source"]}
@@ -154,7 +149,7 @@ class NativeCLI:
                     native_source = {"source": declaration.get("source", source)}
                     if native_source["source"] != source:
                         raise ValueError
-                result.append(NativeMarket(name, identity(native_source), root))
+                result.append(NativeMarket(name, identity(native_source)))
             if len({market.name for market in result}) != len(result):
                 raise ValueError
             return tuple(result)
@@ -171,19 +166,17 @@ class NativeCLI:
                 entry = _object(raw)
                 selector = _text(entry["pluginId" if self.tool == "codex" else "id"])
                 market_name = selector.rsplit("@", 1)[1]
-                version = _text(entry["version"])
                 enabled = entry["enabled"]
                 if not isinstance(enabled, bool):
                     raise ValueError
                 market = by_name.get(market_name)
                 source = (
-                    identity({"marketplace": market.source, "version": version})
+                    identity({"marketplace": market.source, "version": _text(entry["version"])})
                     if market is not None and market.source is not None
                     else None
                 )
                 scope = "user" if self.tool == "codex" else _text(entry["scope"])
-                project = _text(entry["projectPath"]) if "projectPath" in entry else None
-                result.append(NativePlugin(selector, version, scope, enabled, source, project))
+                result.append(NativePlugin(selector, scope, enabled, source))
             return tuple(result)
         except (KeyError, IndexError, ValueError, TypeError):
             raise ExternalError(f"invalid {self.tool} native installed-plugin inventory") from None

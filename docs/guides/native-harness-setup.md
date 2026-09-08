@@ -45,9 +45,9 @@ Serialization preserves values, not comments or formatting. JSON duplicate keys 
 numbers are rejected. Destinations must be regular files reached without traversing symbolic links.
 Publication uses a private sibling temporary file, checks the observed destination hash, and renames
 atomically. Traversal respects search-only ancestors. If the settings change during plugin work
-outside the planned native keys, mapping publication refuses and retains the checkpointed plugin
-prefix for retry. User files are private; workspace files are writable by the workspace group.
-Permission failures do not trigger elevation.
+outside the planned native keys, mapping publication refuses and retains the recorded plugin prefix
+for retry. User files are private; workspace files are writable by the workspace group. Permission
+failures do not trigger elevation.
 
 Use non-secret settings sources. Authentication files are not supported settings roles. Captured
 contents and native command output are transferred privately and are not stored in receipts or logs.

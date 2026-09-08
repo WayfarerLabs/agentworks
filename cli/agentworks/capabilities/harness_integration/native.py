@@ -323,7 +323,6 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                 available.update(catalog)
             else:
                 market = known
-                available.update(cli.available())
             if market.name in source_for:
                 raise ConfigError("multiple marketplace sources resolve to the same native name")
             desired.append(market)

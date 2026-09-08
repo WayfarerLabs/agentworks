@@ -21,18 +21,17 @@ def test_codex_inventory_preserves_unknown_sources_and_complete_registered_ident
     cli = NativeCLI("codex", cast(NativeFiles, InventoryFiles()), home="/user", config_root="/user/.codex")
     markets = {
         "marketplaces": [
-            {"name": "builtin", "root": "/builtin"},
+            {"name": "builtin"},
             {
                 "name": "local",
-                "root": "/market",
                 "marketplaceSource": {"sourceType": "local", "source": "/market"},
             },
         ]
     }
     plugins = {
         "installed": [
-            {"pluginId": "remote@cloud", "version": "1", "enabled": True},
-            {"pluginId": "bundled@builtin", "version": "2", "enabled": True},
+            {"pluginId": "remote@cloud", "enabled": True},
+            {"pluginId": "bundled@builtin", "enabled": True},
             {"pluginId": "one@local", "version": "3", "enabled": False},
         ]
     }
@@ -49,3 +48,6 @@ def test_codex_inventory_preserves_unknown_sources_and_complete_registered_ident
     ]
     assert [item.identifier for item in installed] == ["remote@cloud", "bundled@builtin", "one@local"]
     assert installed[-1].enabled is False
+
+    plugins["installed"][-1]["version"] = "4"
+    assert cli.plugins(observed)[-1].source == identity({"marketplace": registered, "version": "4"})

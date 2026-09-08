@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import tomllib
 import traceback
@@ -79,13 +78,10 @@ def test_nested_merge_arrays_and_type_collisions(format: SettingsFormat, strateg
     else:
         assert actual == old
         assert result.content == destination
-    assert result.changed is (strategy != "skip-existing")
     assert result.skipped is (strategy == "skip-existing")
-    assert result.sha256 == hashlib.sha256(result.content).hexdigest()
-    assert prepared.source_sha256 == hashlib.sha256(source).hexdigest()
     # The same prepared source remains reusable and does not absorb merged keys.
     assert parse_settings(prepared.apply(None).content, format=format) == new
-    assert not prepared.apply(result.content).changed
+    assert prepared.apply(result.content).content == result.content
 
 
 @pytest.mark.parametrize("format,source", [("json", b'{"enabled": true}'), ("toml", b"enabled = true\n")])
@@ -95,7 +91,6 @@ def test_absent_destination_created_with_every_policy(
 ) -> None:
     result = PreparedSettings.from_bytes(source, format=format, strategy=strategy).apply(None)
     assert parse_settings(result.content, format=format) == {"enabled": True}
-    assert result.changed
     assert not result.skipped
 
 
@@ -108,12 +103,9 @@ def test_nonmerge_does_not_parse_existing_file(
     result = PreparedSettings.from_bytes(source, format=format, strategy=strategy).apply(destination)
     if strategy == "skip-existing":
         assert result.content == destination
-        assert result.sha256 == hashlib.sha256(destination).hexdigest()
         assert result.skipped
-        assert not result.changed
     else:
         assert parse_settings(result.content, format=format) == parse_settings(source, format=format)
-        assert result.changed
 
 
 @pytest.mark.parametrize("strategy", ["merge-overwrite", "merge-preserve"])
