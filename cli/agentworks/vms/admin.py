@@ -144,8 +144,8 @@ class AdminConfig(DeclaredResource):
     Write booleans unquoted; quoted strings such as ``"no"`` are invalid."""
 
     harness_integrations: Annotated[list[CapabilityBlock], MergeStrategy.REPLACE] = Field(default_factory=list)
-    """Ordered integrations explicitly enabled for native user setup.
-    An instance list replaces this template selection; an empty list enables none."""
+    """Ordered integrations explicitly activated for native user setup.
+    An instance list replaces this template selection; an empty list activates none."""
 
     env: EnvTable = Field(default_factory=dict)
     """Environment variables exported whenever a shell is opened as the

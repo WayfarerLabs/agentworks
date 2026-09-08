@@ -136,14 +136,14 @@ class CodexUserConfig(NativeUserConfig):
     """Native Codex setup for one actual user."""
 
     name: Literal["codex"]
-    """The harness integration enabled by this user's integration activation."""
+    """The harness integration selected for this user's facet."""
 
 
 class CodexWorkspaceConfig(NativeWorkspaceConfig):
     """Native Codex project settings."""
 
     name: Literal["codex"]
-    """The harness integration enabled by this workspace's integration activation."""
+    """The harness integration selected for this workspace's facet."""
 
 
 class CodexConfig(AgwModel):

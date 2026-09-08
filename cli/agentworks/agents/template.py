@@ -140,8 +140,8 @@ class AgentTemplate(DeclaredResource):
     Write booleans unquoted; quoted strings such as ``"no"`` are invalid."""
 
     harness_integrations: Annotated[list[CapabilityBlock], MergeStrategy.REPLACE] | None = None
-    """Ordered integrations explicitly enabled for native user setup.
-    An authored list replaces the inherited list; an empty list enables none."""
+    """Ordered integrations explicitly activated for native user setup.
+    An authored list replaces the inherited list; an empty list activates none."""
 
     env: EnvTable = Field(default_factory=dict)
     """Environment variables exported for this agent, as a plaintext value
