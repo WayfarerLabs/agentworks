@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal, cast
@@ -744,6 +745,7 @@ def _vm_instance_state(
         VMInstanceOverlays,
         decode_stored_vm_overlays,
     )
+    from agentworks.legacy_claude import LegacyClaudeContextRequired
     from agentworks.resources.access import ResourceIdentity
     from agentworks.resources.resolved_spec import (
         ResolvedSpec,
@@ -767,12 +769,23 @@ def _vm_instance_state(
     issues = list(metadata_issues)
     record = inspected_desired_record(inspection)
     overlays: VMInstanceOverlays | None = None
-    desired_unavailable: Literal["malformed", "unsupported-version"] | None = None
+    desired_unavailable: Literal["malformed", "unsupported-version", "migration-pending"] | None = None
     if malformed_desired_record_present(inspection):
         desired_unavailable = "malformed"
     elif record is not None:
         try:
-            overlays = decode_stored_vm_overlays(record)
+            from agentworks.legacy_claude import legacy_component
+
+            base = None
+            if legacy_component(record) is not None:
+                with suppress(NotFoundError):
+                    base = resolve_admin(registry, vm.admin_template).value.harness_integrations
+            overlays = decode_stored_vm_overlays(record, legacy_user_base=base)
+            if legacy_component(record) is not None:
+                issues.append(InstanceStateIssue(InstanceStateIssueCode.INSTANCE_SPEC_MIGRATION_PENDING, slot="admin"))
+        except LegacyClaudeContextRequired:
+            desired_unavailable = "migration-pending"
+            issues.append(InstanceStateIssue(InstanceStateIssueCode.INSTANCE_SPEC_MIGRATION_PENDING, slot="admin"))
         except UnsupportedStoredOverlayError:
             desired_unavailable = "unsupported-version"
             issues.append(InstanceStateIssue(InstanceStateIssueCode.INSTANCE_SPEC_UNSUPPORTED))

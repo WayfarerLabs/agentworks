@@ -28,10 +28,13 @@ from ._common import MAX_AGENT_NAME_LENGTH, _require_vm, agent_scope
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
 
+    from pydantic import BaseModel
+
     from agentworks.agents.template import AgentTemplate
     from agentworks.config import Config
     from agentworks.db import Database
     from agentworks.harness_setup.locking import NativeMutationGuard
+    from agentworks.instance_specs import InstanceOverlay
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.transports import Transport
     from agentworks.vms.nodes import LiveVMNode
@@ -511,13 +514,20 @@ def reinit_agent(
 
     # Validate both declaration inputs before persisting either one. They
     # form one candidate effective declaration and one retry state.
-    from agentworks.instance_specs import get_instance_overlay, parse_instance_spec
+    from agentworks.instance_specs import decode_stored_overlay, parse_instance_spec
     from agentworks.resources.access import ensure_recipe_enabled
 
     supplied_overlay = spec is not None
     normalized_spec = "{}" if spec == "" else spec
     parsed_overlay = None if normalized_spec is None else parse_instance_spec("agent", normalized_spec)
-    candidate_overlay = get_instance_overlay(db, "agent", name) if parsed_overlay is None else parsed_overlay
+    candidate_template = agent.template if update_template is None else update_template
+    base = resolve_template_with_provenance(registry, candidate_template).value.harness_integrations
+    original_overlay = db.instance_state.get_desired_overlay("agent", name) if parsed_overlay is None else None
+    candidate_overlay = parsed_overlay
+    if original_overlay is not None:
+        candidate_overlay = cast(
+            "InstanceOverlay[BaseModel]", decode_stored_overlay(original_overlay, legacy_user_base=base)
+        )
     if parsed_overlay is not None and not parsed_overlay.payload.value:
         candidate_overlay = None
 
@@ -530,7 +540,6 @@ def reinit_agent(
         # template (mirrors create's "gate before any DB / VM / realize work").
         # require_declared_template only checks the name is DECLARED, not enabled.
         ensure_recipe_enabled(registry, "agent-template", update_template)
-    candidate_template = agent.template if update_template is None else update_template
     layered_agent_tmpl = resolve_template_with_provenance(
         registry,
         candidate_template,
@@ -803,6 +812,12 @@ def reinit_agent(
                     # cannot report whether membership actually changed), hence
                     # "Reconciled", not "Repaired". Stay silent when there was
                     # nothing to reconcile.
+                    if candidate_overlay is not None:
+                        from agentworks.legacy_claude import checkpoint_conversion
+
+                        with db.transaction():
+                            checkpoint_conversion(db, original_overlay, candidate_overlay.payload)
+
                     if reconciled:
                         output.info(f"Reconciled {output.count(reconciled, 'workspace grant')}")
                 except KeyboardInterrupt:

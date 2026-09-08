@@ -80,6 +80,8 @@ def value_safe_model_validation_error(
             cause = context.get("error") if isinstance(context, dict) else None
             sanitized = None if custom_error_sanitizer is None else custom_error_sanitizer(cause)
             message = sanitized or "Value failed domain validation"
+        if item["type"] == "extra_forbidden" and item["loc"] in (("claude_marketplaces",), ("claude_plugins",)):
+            message += "; move Claude setup into a complete harness_integrations list with name: claude-code"
         details.append(f"{location}: {message}")
         errors_by_parent.setdefault(item["loc"][:-1], set()).add(item["type"])
     unsupported = classify_unsupported and (

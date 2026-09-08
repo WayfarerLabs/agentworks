@@ -94,7 +94,7 @@ def create_agent_on_vm(
     2. **Self-configure (agent)**: every subsequent step runs over the
        agent's own SSH session against ``agent_target``. Covers rc /
        profile, git config + credentials, dotfiles, install commands,
-       mise, claude plugins. The agent owns its home, so no sudo or
+       mise. The agent owns its home, so no sudo or
        cross-uid file writes are needed in this phase.
 
     Keeping these two phases disjoint by transport (admin_target vs.
@@ -372,28 +372,6 @@ def create_agent_on_vm(
 
     # Mise.
     _run_agent_mise_setup(agent_target=agent_target, agent_tmpl=agent_tmpl, home=home)
-
-    # Claude Code marketplaces and plugins. The probe (`command -v
-    # claude`) and the actual `claude plugin ...` invocations need the
-    # agent's PATH (mise shims, ~/.local/bin, etc.); a plain SSH command
-    # gets a non-interactive non-login shell that sources none of the
-    # rc / profile files. Wrap in `<shell> -lc` for parity with the
-    # admin caller in agentworks.vms.initializer.
-    import shlex as _shlex
-
-    from agentworks.vms.initializer import install_claude_plugins
-
-    def _agent_run_cmd(cmd: str, timeout: int) -> object:
-        return agent_target.run(
-            f"{agent_shell} -lc {_shlex.quote(cmd)}",
-            timeout=timeout,
-        )
-
-    install_claude_plugins(
-        _agent_run_cmd,
-        agent_cfg.claude_marketplaces,
-        agent_cfg.claude_plugins,
-    )
 
     # Defensive final step: re-ensure source lines in case dotfiles
     # install (or any other later step) overwrote a shell rc file in

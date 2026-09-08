@@ -23,7 +23,7 @@ from agentworks.schema import AgwModel
 from agentworks.sources import SourceRefError, parse_source_ref, snapshot_workstation_file
 
 type SettingsFormat = Literal["json", "toml"]
-type SettingsStrategy = Literal["replace", "merge-overwrite", "merge-preserve", "skip-existing"]
+SettingsStrategy = Literal["replace", "merge-overwrite", "merge-preserve", "skip-existing"]
 type SettingsValue = (
     str | int | float | bool | None | datetime | date | time | list[SettingsValue] | dict[str, SettingsValue]
 )

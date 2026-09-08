@@ -52,7 +52,7 @@ from collections.abc import Mapping, Sequence
 from collections.abc import Set as AbstractSet
 from datetime import date, datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Final, Literal, NoReturn, TypeAliasType, Union, get_args, get_origin
+from typing import TYPE_CHECKING, Any, Final, Literal, NoReturn, Union, get_args, get_origin
 
 from pydantic import BaseModel
 
@@ -90,8 +90,6 @@ def _annotation_types(annotation: object) -> frozenset[str]:
     Read with ``typing`` primitives rather than with the classifier, so
     this is an independent answer to the question the classifier answers.
     """
-    if isinstance(annotation, TypeAliasType):
-        return _annotation_types(annotation.__value__)
     if getattr(annotation, "__metadata__", None) is not None:
         return _annotation_types(get_args(annotation)[0])
     origin = get_origin(annotation)

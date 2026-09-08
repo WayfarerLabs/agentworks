@@ -37,7 +37,7 @@ def test_admin_referencing_undeclared_git_credential_errors_at_finalize(tmp_path
             ManifestDoc(
                 "admin-template",
                 "default",
-                {"git_credentials": ["githb-prod"], "claude_marketplaces": [], "claude_plugins": []},
+                {"git_credentials": ["githb-prod"]},
             )
         ],
     )
@@ -78,7 +78,7 @@ def test_declared_git_credential_does_not_error(tmp_path: Path) -> None:
             ManifestDoc(
                 "admin-template",
                 "default",
-                {"git_credentials": ["github"], "claude_marketplaces": [], "claude_plugins": []},
+                {"git_credentials": ["github"]},
             ),
         ],
     )

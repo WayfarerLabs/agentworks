@@ -71,6 +71,7 @@ def _run(
     logger: _Logger | None = None,
     private_key: Path | None = None,
     phase_b: Callable[[], AuthorizedKeysOutcome] | None = None,
+    legacy_conversion=None,
 ) -> _Logger:
     private = private_key or tmp_path / "id_ed25519"
     if not private.exists():
@@ -102,6 +103,7 @@ def _run(
         active_logger,
         debian_release=DebianRelease.TRIXIE,
         operation=operation,
+        legacy_conversion=legacy_conversion,
     )
     return active_logger
 
@@ -450,3 +452,35 @@ def test_terminal_checkpoint_failure_rolls_back_status_event_and_slices(
     assert db.get_vm("box").init_status == InitStatus.IN_PROGRESS.value
     assert [event.event for event in db.list_vm_events("box")] == ["init_started"]
     assert db.instance_state.get_applied_slices("vm", "box") == before
+
+
+@pytest.mark.parametrize("warnings", [False, True])
+def test_legacy_vm_conversion_joins_only_a_complete_terminal_checkpoint(db, monkeypatch, tmp_path, warnings):
+    from agentworks.db import VersionedPayload
+    from agentworks.instance_specs import decode_stored_vm_overlays
+
+    _insert_vm(db)
+    payload = VersionedPayload(2, {"vm": {"cpus": 8}, "admin": {"claude_plugins": []}})
+    db.instance_state.put_desired_overlay("vm", "box", payload)
+    original = db.instance_state.get_desired_overlay("vm", "box")
+    assert original is not None
+    canonical = decode_stored_vm_overlays(original, legacy_user_base=[]).payload
+    private = tmp_path / "id_ed25519"
+    write_test_ssh_keypair(private)
+    identity = read_private_ssh_identity(private)
+    assert isinstance(identity, VerifiedSSHIdentity)
+    logger = _Logger()
+    if warnings:
+        logger.warning("fixture setup warning")
+    _run(
+        db,
+        monkeypatch,
+        tmp_path,
+        VMInitializationOperation.VM_REINIT,
+        AuthorizedKeysApplied(identity, str(private)),
+        logger=logger,
+        legacy_conversion=(original, canonical),
+    )
+    current = db.instance_state.get_desired_overlay("vm", "box")
+    assert current is not None
+    assert current.payload == (payload if warnings else canonical)

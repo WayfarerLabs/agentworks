@@ -139,12 +139,6 @@ class AgentTemplate(DeclaredResource):
     """Whether re-running init removes mise tools no longer declared.
     Write booleans unquoted; quoted strings such as ``"no"`` are invalid."""
 
-    claude_marketplaces: list[str] | None = None
-    """Claude Code marketplaces to register for the agent user."""
-
-    claude_plugins: list[str] | None = None
-    """Claude Code plugins to install for the agent user."""
-
     harness_integrations: Annotated[list[CapabilityBlock], MergeStrategy.REPLACE] | None = None
     """Ordered integrations explicitly enabled for native user setup.
     An authored list replaces the inherited list; an empty list enables none."""

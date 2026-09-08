@@ -56,8 +56,12 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN20
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
     monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GH", "ghtok")
 
-    def _make():  # noqa: ANN202
-        return write_operator_config(tmp_path, PLUGINS_ENABLED, manifests=[proxmox_site(), *AGENT_MANIFESTS])
+    def _make(*, agent_manifests=None):  # noqa: ANN202
+        return write_operator_config(
+            tmp_path,
+            PLUGINS_ENABLED,
+            manifests=[proxmox_site(), *(AGENT_MANIFESTS if agent_manifests is None else agent_manifests)],
+        )
 
     return _make
 
@@ -1262,3 +1266,75 @@ def test_active_user_setup_joins_eager_env_and_runs_after_core(
     assert len(calls) == 1
     assert len(resolve_counter) == 1 and "setup-token" in resolve_counter[0]
     assert read_native_setup(db, "agent", "dev").records[0].complete
+
+
+@pytest.mark.parametrize("fail_setup", [False, True])
+@pytest.mark.parametrize("repoint", [False, True])
+def test_legacy_overlay_conversion_waits_for_successful_native_reinit(
+    db, make_config, monkeypatch, mutation, fail_setup, repoint
+):
+    from dataclasses import replace
+
+    from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
+    from agentworks.transports import Transport
+
+    manifests = [
+        *AGENT_MANIFESTS[:2],
+        ManifestDoc(
+            "agent-template",
+            "other",
+            {
+                "git_credentials": ["gh"],
+                "harness_integrations": [{"name": "shell"}, {"name": "claude-code", "marketplaces": ["new-base"]}],
+            },
+        ),
+    ]
+    config = make_config(agent_manifests=manifests)
+    config = replace(config, enabled_system_plugins=(*config.enabled_system_plugins, "claude"))
+    _seed_vm(db)
+    db.insert_agent("dev", "box", "agt-dev", template="default")
+    payload = VersionedPayload(1, {"claude_plugins": ["legacy@fixture"], "shell": "zsh"})
+    db.instance_state.put_desired_overlay("agent", "dev", payload)
+    original = db.instance_state.get_desired_overlay("agent", "dev")
+    _reachable(monkeypatch, True)
+    target = MagicMock(spec=Transport)
+    target.run.return_value.stdout = "native-identity"
+    monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: target)
+
+    def setup(self, invocation):
+        assert db.instance_state.get_desired_overlay("agent", "dev") == original
+        assert db.get_agent("dev").template == ("other" if repoint else "default")
+        assert self._config_as(type(self).config_for("user")).plugins == ["legacy@fixture"]
+        if fail_setup:
+            raise StateError("fixture native failure")
+
+    monkeypatch.setattr(ClaudeCodeIntegration, "user_init", setup)
+    if fail_setup:
+        with pytest.raises(ExternalError):
+            agent_manager.reinit_agent(
+                db,
+                config,
+                name="dev",
+                update_template="other" if repoint else None,
+                interaction=TtyInteractionPolicy.REFUSE,
+            )
+        assert db.instance_state.get_desired_overlay("agent", "dev") == original
+    else:
+        agent_manager.reinit_agent(
+            db,
+            config,
+            name="dev",
+            update_template="other" if repoint else None,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+        assert db.instance_state.get_desired_overlay("agent", "dev").payload.value == {
+            "shell": "zsh",
+            "harness_integrations": (
+                [
+                    {"name": "shell"},
+                    {"name": "claude-code", "marketplaces": ["new-base"], "plugins": ["legacy@fixture"]},
+                ]
+                if repoint
+                else [{"name": "claude-code", "plugins": ["legacy@fixture"]}]
+            ),
+        }

@@ -143,12 +143,6 @@ class AdminConfig(DeclaredResource):
     """Whether to mark checkouts as git ``safe.directory`` for this user.
     Write booleans unquoted; quoted strings such as ``"no"`` are invalid."""
 
-    claude_marketplaces: list[str] = Field(default_factory=list)
-    """Claude Code marketplaces to register for the admin user."""
-
-    claude_plugins: list[str] = Field(default_factory=list)
-    """Claude Code plugins to install for the admin user."""
-
     harness_integrations: Annotated[list[CapabilityBlock], MergeStrategy.REPLACE] = Field(default_factory=list)
     """Ordered integrations explicitly enabled for native user setup.
     An instance list replaces this template selection; an empty list enables none."""

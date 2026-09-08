@@ -241,17 +241,17 @@ def resolve_live_template(
     template_name: str | None,
 ) -> ResolvedVMTemplate:
     """Resolve a persisted VM's template chain plus its stored final layer."""
-    from typing import cast
+    from agentworks.vms.admin_templates import get_live_overlays
 
-    from agentworks.instance_specs import get_instance_overlay
-
-    overlay = get_instance_overlay(db, "vm", instance_name)
+    row = db.get_vm(instance_name)
+    overlays = get_live_overlays(db, registry, instance_name, None if row is None else row.admin_template)
+    overlay = None if overlays is None else overlays.vm
     if overlay is None:
         return resolve_template(registry, template_name)
     return resolve_template(
         registry,
         template_name,
-        overlay=cast("VMTemplate", overlay.declaration),
+        overlay=overlay.declaration,
         instance_name=instance_name,
     )
 
@@ -263,14 +263,14 @@ def resolve_live_template_with_provenance(
     template_name: str | None,
 ) -> LayeredResolution[ResolvedVMTemplate]:
     """Resolve a persisted VM and retain its template/instance provenance."""
-    from typing import cast
+    from agentworks.vms.admin_templates import get_live_overlays
 
-    from agentworks.instance_specs import get_instance_overlay
-
-    overlay = get_instance_overlay(db, "vm", instance_name)
+    row = db.get_vm(instance_name)
+    overlays = get_live_overlays(db, registry, instance_name, None if row is None else row.admin_template)
+    overlay = None if overlays is None else overlays.vm
     return resolve_template_with_provenance(
         registry,
         template_name,
-        overlay=None if overlay is None else cast("VMTemplate", overlay.declaration),
+        overlay=None if overlay is None else overlay.declaration,
         instance_name=instance_name,
     )

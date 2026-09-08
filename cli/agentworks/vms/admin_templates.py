@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.db import Database
+    from agentworks.instance_specs import VMInstanceOverlays
     from agentworks.resources.inheritance import LayerContribution, LayeredResolution
     from agentworks.resources.registry import Registry
     from agentworks.vms.admin import AdminConfig
@@ -134,15 +135,31 @@ def resolve_live_template(
     template_name: str | None,
 ) -> AdminConfig:
     """Resolve a VM's admin template plus its stored final admin layer."""
-    from agentworks.instance_specs import get_vm_instance_overlays
-
-    overlays = get_vm_instance_overlays(db, instance_name)
+    overlays = get_live_overlays(db, registry, instance_name, template_name)
     return resolve_template_with_provenance(
         registry,
         template_name,
         overlay=None if overlays is None else overlays.admin,
         instance_name=instance_name,
     ).value
+
+
+def get_live_overlays(
+    db: Database, registry: Registry, instance_name: str, template_name: str | None
+) -> VMInstanceOverlays | None:
+    """Decode stored components with the selected admin template's base context."""
+    from agentworks.instance_specs import decode_stored_vm_overlays
+    from agentworks.legacy_claude import legacy_component
+
+    record = db.instance_state.get_desired_overlay("vm", instance_name)
+    if record is None:
+        return None
+    base = (
+        resolve_template_with_provenance(registry, template_name).value.harness_integrations
+        if legacy_component(record) is not None
+        else None
+    )
+    return decode_stored_vm_overlays(record, legacy_user_base=base)
 
 
 def _merge_template(

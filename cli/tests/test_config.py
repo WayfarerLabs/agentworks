@@ -778,52 +778,11 @@ def _minimal_config(tmp_path: Path) -> Path:
     return config_file
 
 
-def test_claude_marketplaces_loads_cleanly(tmp_path: Path) -> None:
+@pytest.mark.parametrize("kind", ["admin-template", "agent-template"])
+def test_legacy_claude_fields_are_not_authored_configuration(tmp_path: Path, kind: str) -> None:
     config_file = _minimal_config(tmp_path)
-    write_manifests(
-        tmp_path,
-        ManifestDoc(
-            "admin-template",
-            "default",
-            {
-                "claude_marketplaces": ["https://github.com/example/tools#v1"],
-                "claude_plugins": ["my-plugin@my-marketplace"],
-            },
-        ),
-    )
-    registry = build_registry(load_config(config_file, warn_issues=False))
-    admin = registry.lookup("admin-template", "default")
-    assert admin.claude_marketplaces == ["https://github.com/example/tools#v1"]
-    assert admin.claude_plugins == ["my-plugin@my-marketplace"]
-
-
-def test_claude_marketplaces_agent_template(tmp_path: Path) -> None:
-    config_file = _minimal_config(tmp_path)
-    write_manifests(
-        tmp_path,
-        ManifestDoc(
-            "agent-template",
-            "claude",
-            {
-                "claude_marketplaces": ["https://github.com/example/tools#v1"],
-                "claude_plugins": ["my-plugin@my-marketplace"],
-            },
-        ),
-    )
-    registry = build_registry(load_config(config_file, warn_issues=False))
-    agent = registry.lookup("agent-template", "claude")
-    assert agent.claude_marketplaces == ["https://github.com/example/tools#v1"]
-    assert agent.claude_plugins == ["my-plugin@my-marketplace"]
-    assert not _manifest_issues(config_file)
-
-
-def test_claude_marketplaces_rejects_string(tmp_path: Path) -> None:
-    config_file = _minimal_config(tmp_path)
-    write_manifests(
-        tmp_path,
-        ManifestDoc("admin-template", "default", {"claude_marketplaces": "https://github.com/example/tools"}),
-    )
-    with pytest.raises(ConfigError, match=r"claude_marketplaces: must be a list"):
+    write_manifests(tmp_path, ManifestDoc(kind, "default", {"claude_plugins": []}))
+    with pytest.raises(ConfigError):
         build_registry(load_config(config_file, warn_issues=False))
 
 

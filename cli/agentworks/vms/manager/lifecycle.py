@@ -754,11 +754,24 @@ def reinit_vm(
     vm_node = live_vm_node(db, config, registry, vm)
 
     # Resolve the VM's template so init uses the right values
-    from agentworks.instance_specs import ensure_effective_references_enabled, get_vm_instance_overlays
+    from agentworks.instance_specs import decode_stored_vm_overlays, ensure_effective_references_enabled
+    from agentworks.legacy_claude import legacy_component
+    from agentworks.vms.admin_templates import resolve_template_with_provenance as resolve_admin_base
     from agentworks.vms.template import effective_references
     from agentworks.vms.templates import resolve_template_with_provenance
 
-    stored_overlays = get_vm_instance_overlays(db, vm.name)
+    original_overlay = db.instance_state.get_desired_overlay("vm", vm.name)
+    base = resolve_admin_base(registry, vm.admin_template).value.harness_integrations
+    stored_overlays = (
+        None if original_overlay is None else decode_stored_vm_overlays(original_overlay, legacy_user_base=base)
+    )
+    legacy_conversion = (
+        (original_overlay, stored_overlays.payload)
+        if original_overlay is not None
+        and stored_overlays is not None
+        and legacy_component(original_overlay) is not None
+        else None
+    )
     stored_vm_overlay = None if stored_overlays is None else stored_overlays.vm
     layered_reinit_vm_tmpl = resolve_template_with_provenance(
         registry,
@@ -946,6 +959,7 @@ def reinit_vm(
                     logger,
                     debian_release=verified_release,
                     operation=_mgr.VMInitializationOperation.VM_REINIT,
+                    legacy_conversion=legacy_conversion,
                     setup_inputs=setup_inputs,
                     setup_values=resolver.values,
                 )

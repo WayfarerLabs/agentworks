@@ -19,7 +19,6 @@ owns only the per-phase step sequences and status/event bookkeeping.
 from __future__ import annotations
 
 import shlex
-from collections.abc import Callable
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
@@ -66,12 +65,13 @@ from .ssh_keys import (
 from .workspaces_dir import _setup_workspaces_directory
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
-    from agentworks.db import Database
+    from agentworks.db import Database, DesiredOverlayRecord
+    from agentworks.db.instance_state import VersionedPayload
     from agentworks.debian import DebianRelease
     from agentworks.git_credentials import CredentialRequest
     from agentworks.harness_setup.inputs import SetupInputs
@@ -260,6 +260,7 @@ def run_initialization(
     setup_inputs: tuple[SetupInputs, ...] = (),
     setup_guard: NativeMutationGuard | None = None,
     setup_values: Mapping[str, str] | None = None,
+    legacy_conversion: tuple[DesiredOverlayRecord, VersionedPayload] | None = None,
 ) -> None:
     """Run Phase B (initialization) with status tracking and event logging.
 
@@ -349,6 +350,10 @@ def run_initialization(
         # local database failure must roll back the complete terminal result and
         # propagate, leaving the earlier in-progress evidence intact.
         with db.transaction():
+            if legacy_conversion is not None and final_status is InitStatus.COMPLETE:
+                from agentworks.legacy_claude import checkpoint_conversion
+
+                checkpoint_conversion(db, *legacy_conversion)
             db.update_vm_init_status(vm_name, final_status)
             db.insert_vm_event(vm_name, final_event, final_detail)
             if slices:
@@ -762,13 +767,6 @@ def _phase_b_setup(
         rc_snippets = [MISE_ACTIVATE_LINES] if admin.mise_activate else ["# mise activation disabled"]
         _write_agentworks_rc(ts_target, rc_snippets, logger)
 
-        # Non-fatal: Claude Code marketplaces and plugins for admin user
-        def _admin_run_cmd(cmd: str, timeout: int) -> object:
-            inner = shlex.quote(cmd)
-            return ts_target.run(f"{admin_shell} -lc {inner}", timeout=timeout)
-
-        install_claude_plugins(_admin_run_cmd, admin.claude_marketplaces, admin.claude_plugins, logger)
-
         # Defensive final step: re-ensure source lines in case any earlier
         # step (dotfiles install in particular) overwrote a shell rc file
         # in place. Idempotent grep-or-append.
@@ -778,59 +776,3 @@ def _phase_b_setup(
             shell=admin_shell,
             logger=logger,
         )
-
-
-RunCmd = Callable[[str, int], object]
-"""Callable that runs a shell command with a timeout. Used to abstract
-the choice of ``Transport`` (admin vs agent) at the call site."""
-
-
-def install_claude_plugins(
-    run_cmd: RunCmd,
-    marketplaces: list[str],
-    plugins: list[str],
-    logger: SSHLogger | None = None,
-) -> None:
-    """Register Claude Code marketplaces and install plugins. Non-fatal.
-
-    The caller provides a ``run_cmd`` that wraps the command in a login
-    shell (``{shell} -lc <cmd>``) so the calling user's PATH (mise shims,
-    ``~/.local/bin``, etc.) is in scope. A plain non-interactive SSH
-    invocation gets a non-login shell that sources neither ``.bashrc``
-    nor ``.profile``, so ``command -v claude`` would falsely fail. Both
-    the admin call site (``_phase_b_setup`` in this file) and the agent
-    call site (``create_agent_on_vm`` in ``agents/initializer.py``) wrap
-    accordingly; the helper itself stays transport- and user-agnostic.
-    """
-    if not marketplaces and not plugins:
-        return
-
-    if logger:
-        logger.step("Claude plugins")
-
-    try:
-        # Verify claude is available before attempting marketplace/plugin setup
-        run_cmd("command -v claude >/dev/null 2>&1", 10)
-    except SSHError as e:
-        msg = (
-            f"claude CLI not available; skipping marketplace/plugin setup ({e}). "
-            "Install claude (e.g. via user_install_commands or any other method) and rerun init."
-        )
-        if logger:
-            logger.warning(msg)
-        output.warn(msg)
-        return
-
-    try:
-        for source in marketplaces:
-            output.info(f"Registering Claude marketplace: {source}")
-            run_cmd(f"claude plugin marketplace add {shlex.quote(source)}", 60)
-
-        for plugin in plugins:
-            output.info(f"Installing Claude plugin: {plugin}")
-            run_cmd(f"claude plugin install {shlex.quote(plugin)} --scope user", 60)
-    except SSHError as e:
-        msg = f"Claude plugin install failed: {e}"
-        if logger:
-            logger.warning(msg)
-        output.warn(msg)

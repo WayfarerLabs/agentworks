@@ -161,6 +161,7 @@ def _report_instance_state(
     from agentworks.errors import StateError
     from agentworks.harness_setup.state import UnsupportedNativeSetupVersionError, decode_native_setup
     from agentworks.instance_specs import UnsupportedStoredOverlayError, decode_stored_overlay
+    from agentworks.legacy_claude import LegacyClaudeContextRequired
     from agentworks.ssh_identity import SSHIdentityReadError, read_private_ssh_identity
     from agentworks.vms.applied_state import (
         UnsupportedAppliedStateVersionError,
@@ -252,6 +253,15 @@ def _report_instance_state(
         metadata = desired_record.metadata
         try:
             decode_stored_overlay(desired_record.record)
+        except LegacyClaudeContextRequired:
+            add(
+                Status.INFO,
+                label(metadata),
+                "legacy Claude setup awaits contextual conversion",
+                InstanceStateHealthFactType.MIGRATION_PENDING,
+                metadata,
+                hint="Migrate the selected template, then run owning reinit to convert the stored overlay.",
+            )
         except UnsupportedStoredOverlayError:
             add(
                 Status.INFO,

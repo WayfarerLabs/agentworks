@@ -101,8 +101,6 @@ KINDS = {
             "mise_allow_unlocked": True,
             "mise_install_before": "30d",
             "mise_prune_on_reinit": False,
-            "claude_marketplaces": ["octocat/marketplace"],
-            "claude_plugins": ["reviewer"],
             "harness_integrations": [CapabilityBlock.of("shell")],
             "env": _ENV,
         },

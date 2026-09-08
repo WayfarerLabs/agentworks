@@ -255,7 +255,12 @@ def agent_live_resource(db: Database, registry: Registry, row: AgentRow) -> Live
     from agentworks.instance_specs import get_instance_overlay
 
     selected = "default" if row.template is None else row.template
-    overlay = _read_database(lambda: get_instance_overlay(db, "agent", row.name))
+    base = (
+        resolve_template_with_provenance(registry, selected).value.harness_integrations
+        if _is_published(registry, "agent-template", selected)
+        else None
+    )
+    overlay = _read_database(lambda: get_instance_overlay(db, "agent", row.name, legacy_user_base=base))
     if not _is_published(registry, "agent-template", selected):
         return project_agent_live_resource(
             name=row.name,
@@ -363,7 +368,12 @@ def vm_live_resource(db: Database, registry: Registry, row: VMRow) -> LiveResour
 
     selected_vm = "default" if row.template is None else row.template
     selected_admin = "default" if row.admin_template is None else row.admin_template
-    overlays = _read_database(lambda: get_vm_instance_overlays(db, row.name))
+    base = (
+        resolve_admin(registry, selected_admin).value.harness_integrations
+        if _is_published(registry, "admin-template", selected_admin)
+        else None
+    )
+    overlays = _read_database(lambda: get_vm_instance_overlays(db, row.name, legacy_user_base=base))
     vm_template_name = _published_name(registry, "vm-template", selected_vm)
     admin_template_name = _published_name(registry, "admin-template", selected_admin)
     layered_vm = (

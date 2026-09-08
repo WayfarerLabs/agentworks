@@ -40,8 +40,6 @@ class ResolvedAgentTemplate:
     mise_allow_unlocked: bool = False
     mise_install_before: str = "7d"
     mise_prune_on_reinit: bool = True
-    claude_marketplaces: list[str] = field(default_factory=list)
-    claude_plugins: list[str] = field(default_factory=list)
     harness_integrations: list[CapabilityBlock] = field(default_factory=list)
     env: dict[str, EnvEntry] = field(default_factory=dict)
 
@@ -130,7 +128,8 @@ def resolve_live_template(
 
     from agentworks.instance_specs import get_instance_overlay
 
-    overlay = get_instance_overlay(db, "agent", instance_name)
+    base = resolve_template(registry, template_name).harness_integrations
+    overlay = get_instance_overlay(db, "agent", instance_name, legacy_user_base=base)
     if overlay is None:
         return resolve_template(registry, template_name)
     return resolve_template(
@@ -152,7 +151,8 @@ def resolve_live_template_with_provenance(
 
     from agentworks.instance_specs import get_instance_overlay
 
-    overlay = get_instance_overlay(db, "agent", instance_name)
+    base = resolve_template(registry, template_name).harness_integrations
+    overlay = get_instance_overlay(db, "agent", instance_name, legacy_user_base=base)
     return resolve_template_with_provenance(
         registry,
         template_name,
