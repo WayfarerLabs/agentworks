@@ -221,15 +221,6 @@ count. The stale `claude_plugins`/`claude_marketplaces` example in
 owner; it is outside these implementation edits. Saga conformance was clean. Live acceptance and
 final locking remain open.
 
-The activation rename passed 196 focused cases and the full CI selection (8,855 passed, three
-skipped) at `4938a36e`, with strict mypy across 802 production/test files and Ruff lint/format
-clean. The final wording correction passed 221 config/reference/plugin cases; real CLI references
-for Claude and Codex show the chosen facet terminology. Project and complexity reviews are clean at
-`97651d3f`; syntax-tree comparison confirmed the rename and subsequent prose-only refinement. File
-lint, locked-SDD, rulesync drift, typer isolation, website Python (160) and Node (103) tests, and
-deterministic builds for both site bases passed. Main's artifact-reconciliation documentation at
-`566d1819` was merged without conflicts or implementation changes before handoff.
-
 At `863dee06`, all three private round reviews were clean. Project review passed 91 native and
 readiness cases plus 159 Claude/Codex integration cases. Complexity review passed 91 changed-area
 cases and demonstrated that removing hook-boundary enforcement makes both malformed-return tests
@@ -250,3 +241,12 @@ effort's design use that name. Facet is defined generally as a scoped part of a 
 current four-facet harness contract and other capability kinds' behavior remain unchanged. Neither
 integration activation nor plugin enablement is proof of successful setup. Live acceptance and final
 locking remain open.
+
+The activation rename passed 196 focused cases and the full CI selection (8,855 passed, three
+skipped) at `4938a36e`, with strict mypy across 802 production/test files and Ruff lint/format
+clean. The final wording correction passed 221 config/reference/plugin cases; real CLI references
+for Claude and Codex show the chosen facet terminology. Project and complexity reviews are clean at
+`97651d3f`; syntax-tree comparison confirmed the rename and subsequent prose-only refinement. File
+lint, locked-SDD, rulesync drift, typer isolation, website Python (160) and Node (103) tests, and
+deterministic builds for both site bases passed. Main's artifact-reconciliation documentation at
+`566d1819` was merged without conflicts or implementation changes before handoff.
