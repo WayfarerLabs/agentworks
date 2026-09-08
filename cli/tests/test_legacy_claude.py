@@ -145,3 +145,29 @@ def test_record_only_doctor_marks_migration_pending_without_source_values(db):
     assert pending[0].status is Status.INFO
     assert "private-source" not in str(group)
     assert db.instance_state.get_desired_overlay("agent", "fixture") == original
+
+
+@pytest.mark.parametrize("replace_spec", [False, True])
+def test_competing_reinit_cannot_change_desired_state_before_guard(db, make_config, replace_spec):
+    from agentworks.agents.manager import reinit_agent
+    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+    from agentworks.secrets.policy import TtyInteractionPolicy
+    from tests.conftest import ManifestDoc
+
+    config = make_config(manifests=[ManifestDoc("agent-template", "old", {}), ManifestDoc("agent-template", "new", {})])
+    db.insert_vm("box", site="lima-local", hostname="box")
+    db.insert_agent("a", "box", "agt-a", template="old")
+    payload = VersionedPayload(1, {"claude_plugins": ["one@market"]})
+    db.instance_state.put_desired_overlay("agent", "a", payload)
+    before = db.instance_state.get_desired_overlay("agent", "a")
+    with native_mutation_guard(db.path, "box"), pytest.raises(NativeSetupBusyError):
+        reinit_agent(
+            db,
+            config,
+            name="a",
+            update_template="new",
+            spec="{}" if replace_spec else None,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+    assert db.get_agent("a").template == "old"
+    assert db.instance_state.get_desired_overlay("agent", "a") == before
