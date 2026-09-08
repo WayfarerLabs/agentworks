@@ -555,3 +555,23 @@ def test_mapping_refuses_unrelated_changes_during_plugin_install(
     setup_user(tool, config, invocation(transport, claims, prior=record(claims[-1], tool)))
     assert b"preserve" in destination.read_bytes()
     assert parse_settings(destination.read_bytes(), format=format)["mapped"] is True
+
+
+@pytest.mark.parametrize("tool", ["codex", "claude"])
+def test_retirement_uses_recorded_override_root_without_current_env(transport, tool):
+    market = market_fixture(transport, tool)
+    override_root = transport.root / "custom-native-home"
+    key = "CODEX_HOME" if tool == "codex" else "CLAUDE_CONFIG_DIR"
+    claims = []
+    setup_user(
+        tool,
+        NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"]),
+        invocation(transport, claims, env={key: str(override_root)}),
+    )
+    assert all(claim.destination == str(override_root) for claim in claims[-1])
+    default_file = transport.home / (".codex/config.toml" if tool == "codex" else ".claude/settings.json")
+    default_file.parent.mkdir(exist_ok=True)
+    default_file.write_bytes(b"unrelated-default-settings")
+    setup_user(tool, None, invocation(transport, claims, prior=record(claims[-1], tool)))
+    assert claims[-1] == ()
+    assert default_file.read_bytes() == b"unrelated-default-settings"

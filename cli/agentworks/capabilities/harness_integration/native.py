@@ -255,8 +255,13 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
     root = native_path(
         invocation.environment.get(override) or (invocation.home + ("/.claude" if tool == "claude" else "/.codex"))
     )
-    destination = root + "/" + _filename(tool)
     native_claims = [claim for claim in claims if claim.role in ("plugin", "marketplace")]
+    if config is None and native_claims:
+        roots = {native_path(claim.destination) for claim in native_claims}
+        if len(roots) != 1:
+            raise StateError("native retirement requires one recorded config home; ownership evidence was retained")
+        root = roots.pop()
+    destination = root + "/" + _filename(tool)
     if any(claim.destination != root for claim in native_claims):
         raise StateError(
             "native config home differs from existing ownership receipts; clean up the previous home first"
