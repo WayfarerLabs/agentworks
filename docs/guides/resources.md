@@ -332,6 +332,9 @@ and safe cleanup behavior.
 
 ## Harness integrations
 
+See [harness facets](harness-facets.md) for VM, user, and workspace setup attachments, explicit
+selection, ownership, and session prerequisites.
+
 What a session runs is declared as a **harness integration**: the Agentworks capability (registered
 code) that knows how a particular harness or shell is started, restarted, and what executables it
 needs. A session template pairs an integration with its configuration in one tagged table, exactly
@@ -352,8 +355,9 @@ spec:
 
 - `spec.harness_integration` is one table: its `name` key names a `harness-integration` capability
   row, and the remaining keys are the config block that integration owns and validates (unknown keys
-  are errors). A template that names no integration resolves to the built-in `shell` integration (a
-  plain login shell, or an operator command), which is the built-in `default` template.
+  are errors). Every effective session template must select an integration explicitly or inherit a
+  selection. The built-in `default` template explicitly selects `shell`; omission alone is not a
+  shell fallback.
 - `agw resource explain harness-integration` lists the integrations this build has, and
   `agw resource explain harness-integration/<name>` documents one integration's config field by
   field. That is the reference; what follows is what an operator wants to know beyond the fields

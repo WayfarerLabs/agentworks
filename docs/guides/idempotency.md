@@ -43,8 +43,11 @@ reinit reads both stored inputs again.
 
 ## VM reinit
 
-`vm reinit` re-runs Phase B (initialization) using the current config. All steps are non-fatal:
-failures produce warnings and a `partial` status.
+`vm reinit` re-runs initialization using the current config. Many core installation steps collect
+warnings and can finish with a `partial` status. Harness integration failures are fatal: VM/admin
+setup must finish before the terminal authorized-key write and successful initialization checkpoint.
+An integration failure preserves its last confirmed native claims for retry; it does not report
+complete setup.
 
 If the VM was created with `--spec` or `--admin-spec`, reinit consumes both stored final layers
 after their selected VM and admin templates. It does not accept a flag to change or clear either
@@ -153,3 +156,34 @@ Repair does revoke stale agent group memberships when database grants are remove
 | ACLs                         | Canonical setfacl (the same recursive spec `workspace create`, `copy`, `rehome`, and VM init apply, via one shared helper) re-run every time; the step snapshots the tree's ACLs with `getfacl` before and after and compares, reporting `Fixed:` only on a real change and `OK:` otherwise. Because all workspace ACL paths share the spec, a first repair of a freshly created, copied, or rehomed workspace is a no-op.                                               |
 | Parent traversal             | `chmod a+x` re-applied up each ancestor, seeded from the workspace's PARENT so the walk never touches the workspace dir's own canonical `2770` (which carries no world bits by design). Carries `-c`, so the step reports `Fixed:` when it opened a missing traversal bit and `OK:` when every ancestor was already traversable. A freshly created workspace whose ancestors are already traversable reports `OK:` here, so a first repair after create is a true no-op. |
 | Git identity                 | Template `git_user_name` / `git_user_email` stamped into the checkout's repo-local config; detection-based, so an already-correct value is left as-is. No-op when no identity is declared or the workspace has no repo.                                                                                                                                                                                                                                                  |
+
+## Harness setup reconciliation
+
+Explicit VM and admin attachments run during VM create and reinit; agent attachments run during
+agent create and reinit. Workspace attachments run after workspace directory and repository
+creation. `workspace repair` does not rerun harness setup; applying a changed workspace mapping
+requires explicit workspace recreation. Session create, start, and restart inspect declared
+prerequisites without implicitly running any ancestor setup.
+
+Owning setup receives both the effective attachment list and prior instance-state receipts. It
+reconciles matching owned effects, retires removed associations where ownership can be established,
+and preserves incomplete or pending cleanup evidence on failure. Removing an attachment from config
+therefore takes effect at the next owning setup operation, not at configuration load. List omission
+inherits, an authored list replaces the complete inherited list, and `[]` requests no attachments.
+
+Cleanup is deliberately bounded. Settings mappings retain their native document when removed and
+relinquish ownership; they do not restore overwritten values. Native plugins and marketplaces are
+removed only when their recorded identity still proves ownership, without affecting unowned or
+project dependencies. A matching pre-existing installation is not adopted. See
+[native harness setup](native-harness-setup.md) for collision and retirement behavior, and
+[migrating Claude setup](migrating-claude-setup.md) for old declarations and stored overlays.
+
+Setup and owner deletion share a VM-family mutation guard. Agent or workspace deletion stops and
+retains its database owner when native cleanup cannot complete. Successful platform VM deletion can
+remove guest-native receipts with its owner tree. Rehome refuses workspaces carrying native
+receipts; use explicit deletion with cleanup and recreation at the new location. These boundaries
+prevent repeat operations from losing ownership evidence or treating copied files as newly owned
+effects.
+
+[Harness facets](harness-facets.md) explains configuration, owning scopes, environment composition,
+and required versus recommended session prerequisites.
