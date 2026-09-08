@@ -33,7 +33,6 @@ if TYPE_CHECKING:
     from agentworks.agents.template import AgentTemplate
     from agentworks.config import Config
     from agentworks.db import Database
-    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.instance_specs import InstanceOverlay
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.transports import Transport
@@ -275,7 +274,6 @@ def delete_agent(
     yes: bool = False,
     vm_node: LiveVMNode | None = None,
     interaction: TtyInteractionPolicy,
-    native_guard: NativeMutationGuard | None = None,
 ) -> None:
     """Delete an agent from a VM.
 
@@ -334,7 +332,7 @@ def delete_agent(
     from agentworks.harness_setup.lifecycle import mark_cleanup_pending, retire_owner_setup
     from agentworks.harness_setup.locking import native_mutation_guard
 
-    with native_mutation_guard(db.path, vm.name, held=native_guard) as guard:
+    with native_mutation_guard(db.path, vm.name) as guard:
         from agentworks.ssh import SSHLogger
 
         ssh_logger = SSHLogger(vm.name, "agent-delete")

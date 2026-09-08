@@ -24,7 +24,6 @@ from .boundary import _live_vm_boundary, _platform_ops_ctx, _warn_legacy_release
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
-    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.vms.nodes import LiveVMNode
 
@@ -173,7 +172,6 @@ def delete_vm(
     force: bool = False,
     yes: bool = False,
     interaction: TtyInteractionPolicy,
-    native_guard: NativeMutationGuard | None = None,
 ) -> None:
     """Delete a VM, cleaning up all associated resources.
 
@@ -239,7 +237,7 @@ def delete_vm(
     from agentworks.harness_setup.lifecycle import mark_cleanup_pending, vm_family_setup_owners
     from agentworks.harness_setup.locking import native_mutation_guard
 
-    with native_mutation_guard(db.path, vm.name, held=native_guard):
+    with native_mutation_guard(db.path, vm.name):
         setup_owners = vm_family_setup_owners(db, vm.name)
         # Platform-specific cleanup (also handles Tailscale logout)
         vm_node: LiveVMNode | None

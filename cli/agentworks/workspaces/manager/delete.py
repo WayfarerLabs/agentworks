@@ -12,7 +12,6 @@ from agentworks.workspaces.manager._common import _workspace_scope
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
-    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.transports import Transport
     from agentworks.vms.nodes import LiveVMNode
@@ -27,7 +26,6 @@ def delete_workspace(
     yes: bool = False,
     vm_node: LiveVMNode | None = None,
     interaction: TtyInteractionPolicy,
-    native_guard: NativeMutationGuard | None = None,
 ) -> None:
     """Delete a workspace.
 
@@ -81,7 +79,7 @@ def delete_workspace(
     from agentworks.harness_setup.lifecycle import mark_cleanup_pending, retire_owner_setup
     from agentworks.harness_setup.locking import native_mutation_guard
 
-    with native_mutation_guard(db.path, ws.vm_name, held=native_guard) as guard:
+    with native_mutation_guard(db.path, ws.vm_name) as guard:
         # Create SSH logger for VM operations
         import contextlib
 

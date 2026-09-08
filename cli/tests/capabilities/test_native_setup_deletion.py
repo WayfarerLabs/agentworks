@@ -193,14 +193,6 @@ def test_deletion_refuses_vm_family_contention_before_native_mutation(db, deleti
     assert deletion.removed == [] and deletion.logs == []
 
 
-def test_nested_deletion_shares_its_explicit_guard(db, deletion):
-    with native_mutation_guard(db.path, "box") as guard:
-        delete_agent(
-            db, deletion.config, name="agent", yes=True, native_guard=guard, interaction=TtyInteractionPolicy.REFUSE
-        )
-    assert deletion.removed == ["agent"]
-
-
 def test_orphan_workspace_with_receipts_keeps_evidence_without_native_target(db, deletion):
     write_native_setup(
         db, "workspace", "project", NativeSetupState(records=(_record("workspace"),)), operation="workspace-create"
