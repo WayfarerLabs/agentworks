@@ -77,7 +77,7 @@ not authored prose.
 - [x] Run documentation lint, spelling, link, locked-SDD, Rulesync, and diff checks.
 - [x] Obtain initial clean private project and Muntz design reviews and incorporate material
       findings.
-- [ ] Obtain fresh private project and Muntz reviews after the current-main and PR #764 dependency
+- [x] Obtain fresh private project and Muntz reviews after the current-main and PR #764 dependency
       audit.
 - [ ] Publish the complete design checkpoint as a draft PR with `review-requested`.
 - [ ] Complete up to three authorized design feedback/fix cycles.
