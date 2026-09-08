@@ -89,6 +89,10 @@ def run_setup(
                 owner_kind=inputs.kind, owner_name=inputs.name, facet=inputs.facet, config=selected.config
             )
 
+        for integration in bound.values():
+            if any(ref.name not in invocation.secrets for ref in integration.config_secret_refs()):
+                raise StateError("native setup received an unresolved config secret")
+
         def persist(value: NativeSetupState) -> None:
             if not buffered:
                 write_native_setup(db, inputs.kind, inputs.name, value, operation=operation)
@@ -99,7 +103,13 @@ def run_setup(
             if previous is not None and previous.destination_id != destination:
                 raise StateError("native setup evidence belongs to a different destination; ownership was retained")
             if block is None and previous is not None and not previous.claims:
-                state = NativeSetupState(records=tuple(record for record in state.records if record is not previous))
+                state = NativeSetupState(
+                    records=tuple(
+                        record
+                        for record in state.records
+                        if (record.component, record.integration) != (inputs.component, name)
+                    )
+                )
                 persist(state)
                 continue
             if block is None:
@@ -137,7 +147,8 @@ def run_setup(
                 state = replace_setup_record(state, current)
                 persist(state)
 
-            call = replace(invocation, prior=previous, checkpoint=checkpoint)
+            scoped_secrets = {ref.name: invocation.secrets[ref.name] for ref in integration.config_secret_refs()}
+            call = replace(invocation, prior=previous, checkpoint=checkpoint, secrets=scoped_secrets)
             if isinstance(call, VMSetupInvocation):
                 integration.vm_init(call)
             elif isinstance(call, UserSetupInvocation):

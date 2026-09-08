@@ -27,6 +27,7 @@ class SetupInvocation:
     prior: SetupRecord | None
     checkpoint: Callable[[tuple[NativeClaim, ...]], None]
     environment: Mapping[str, str] = field(default_factory=dict, repr=False)
+    secrets: Mapping[str, str] = field(default_factory=dict, repr=False)
 
 
 @dataclass(frozen=True, kw_only=True)
