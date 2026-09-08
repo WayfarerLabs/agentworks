@@ -195,3 +195,27 @@ schemas and samples, all four integration references, and duplicate-name refusal
 also passed registry validation and six CLI inspections. Fixture homes and completed scratch
 checkouts were removed; the committed design and implementation checkouts remain for publication.
 These results do not substitute for native Windows or remote VM acceptance.
+
+## Implementation feedback round 1
+
+The operator authorized this round after both published lanes reported across PRs 780 and 761. The
+batch includes the repeated Muntz findings on the consolidated head. Native implementation helpers
+now live in `agentworks.plugins._harness_native`, resolving the R11 placement question without
+changing generic capability dispatch or adding a per-tool abstraction. The redundant
+post-publication settings read is removed; guarded atomic publication still compares the expected
+destination. Both user settings paths share claim matching and retain every matching receipt.
+Readiness probes now take actual destination inputs without constructing setup invocations, and the
+shell reference describes explicit selection accurately.
+
+The prerequisite severity guard remains: it validates the result of an integration hook, whose
+dataclass annotations are not runtime enforcement. New hook-boundary tests demonstrate refusal for
+malformed objects and unknown severity. Recorded VM, user and workspace destination hashes remain
+compatible. The native cleanup passed 128 focused cases and 159 Claude/Codex integration unit cases;
+the readiness change independently passed 40 focused cases in project review.
+
+The earlier suite counts used different selections: 8,847 passed with CI's `not integration`
+selection, while three additional integration-marked doctor tests account for the published 8,850
+count. The stale `claude_plugins`/`claude_marketplaces` example in
+`.rulesync/subagents/agentworks-reviewer.md` is recorded in the published feedback for its policy
+owner; it is outside these implementation edits. Saga conformance was clean. Live acceptance and
+final locking remain open.
