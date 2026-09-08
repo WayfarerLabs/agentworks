@@ -7,14 +7,12 @@
 
 ## Delivery and ownership
 
-Finish the small PR 761 feedback correction by making the FRD the single home for successor routing
-direction. Publish the approved FRD/HLA as the design checkpoint before implementation lands. The
-implementation uses `feat/harness-facets`; commit coherent work units there while the lead
-integrates delegated changes. Retain one implementation PR above the approved design checkpoint.
-Config exposure, execution, receipts and migration form one working increment; splitting them would
-expose accepted setup that does nothing or remove legacy behavior before its replacement works. The
-large diff receives separate configuration, lifecycle, native setup and migration review units
-before the combined handoff. No partial runtime framework is represented as the completed vertical.
+The operator directed the approved FRD/HLA and implementation to share PR 761. Continue on
+`sdd/harness-scope-framework-hla`; PR 780 is superseded, with its review reports retained and linked
+from the consolidated checkpoint. Config exposure, execution, receipts and migration form one
+working increment. The large diff receives separate configuration, lifecycle, native setup and
+migration review units before the combined handoff. This remains a draft implementation checkpoint
+until live acceptance is complete; the earlier design-only merge intent no longer applies.
 
 The operator owns requirements and has approved the design and implementation. The lead owns this
 plan, architecture, integration, and implementation disposition. Delegates own only their assigned
@@ -28,7 +26,7 @@ Do not introduce a lockfile until the entire approved effort is complete.
 
 ## Design detail before dependent implementation
 
-- [ ] Consolidate successor direction in the FRD, record operator approval, review the correction,
+- [x] Consolidate successor direction in the FRD, record operator approval, review the correction,
       and publish the resulting approved design checkpoint.
 - [x] Complete the config-binding design below with the concrete consumer walk and migration tests.
 - [x] Author `native-setup-lld.md` for typed invocations, checkpoint records, native command plans,
@@ -171,12 +169,13 @@ without touching the operator's installed plugins or authentication.
 
 ## Local implementation evidence
 
-The implementation is committed on `feat/harness-facets`. Private review and local validation cover
-the implementation boxes above; the acceptance section remains open for the complete live surface.
-The approved design correction `beef3668` is published on PR 761. GitHub authentication was restored
-through the configured Git credential helper on operator direction. The implementation checkpoint
-can now be published. Live VM acceptance still requires the operator's scoped backend inventory and
-budget; native Windows validation is pending CI. Final locking remains pending acceptance.
+The implementation and approved design are consolidated on `sdd/harness-scope-framework-hla` in
+PR 761. Private review and local validation cover the implementation boxes above; live acceptance
+remains open. GitHub authentication uses the configured Git credential helper. The implementation
+checkpoint `024fa2b3` passed all ten CI checks on PR 780, including native Windows (104 passed, one
+skipped); its published review reports remain part of the review record after consolidation. Live VM
+acceptance still requires the operator's scoped backend inventory and budget. Final locking remains
+pending acceptance.
 
 At `bb99e9eb`, the final Linux unit selection passed 8,847 tests with three skips. Ruff lint and
 format passed; strict mypy passed across production and tests (801 files). The isolated native CLI
