@@ -40,16 +40,20 @@ different cancellation, retry, and reconciliation behavior.
 The official
 [CPython 3.12.13 `ThreadPoolExecutor` source](https://github.com/python/cpython/blob/v3.12.13/Lib/concurrent/futures/thread.py#L165-L181)
 enqueues the work item and adjusts the thread count before `submit()` returns its future. Thread
-adjustment may start a new thread. An exception or `KeyboardInterrupt` can therefore escape after
-the executor owns runnable work but before the caller owns the future needed to attribute and
-reconcile it. The corresponding
+adjustment may
+[start a new thread before registering it with the executor](https://github.com/python/cpython/blob/v3.12.13/Lib/concurrent/futures/thread.py#L184-L205).
+An exception or `KeyboardInterrupt` can therefore escape after the executor owns runnable work but
+before the caller owns the future needed to attribute it, and even before executor shutdown can find
+the new thread. The corresponding
 [shutdown implementation](https://github.com/python/cpython/blob/v3.12.13/Lib/concurrent/futures/thread.py#L220-L239)
-can cancel queued futures but must wait for already-running work.
+can cancel queued futures and joins threads present in the executor's registered set; it cannot
+promise to join a thread interrupted before that registration.
 
 Design consequence: every callable waits at a batch-local barrier before remote mutation. The
 coordinator releases the execute path only after every future is returned and mapped. Partial
-submission first marks the barrier aborted, then releases and shuts down the executor; even an
-enqueued work item with no returned future can only exit without touching the VM.
+submission first marks the barrier aborted, then releases and requests executor shutdown. Even an
+enqueued or started work item with no returned future can only exit without touching the VM, though
+its no-mutation branch may finish after the original failure propagates.
 
 ### 3. Cancellation cannot stop a running teardown
 

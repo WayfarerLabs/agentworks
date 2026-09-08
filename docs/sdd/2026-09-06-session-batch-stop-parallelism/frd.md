@@ -179,10 +179,12 @@ If executor submission fails or is interrupted before every plan receives a futu
 MUST stop submitting. Every submitted callable MUST wait at a batch-local pre-mutation gate that is
 released for remote execution only after every future has returned and been mapped. A partial
 submission MUST mark that gate aborted before releasing it, cancel queued work, wait for running
-callables to leave through the no-mutation branch, and then propagate the original coordinator
-failure or interruption. This rule covers work that an executor may have enqueued even though
-`submit()` did not return its future. Every plan in a partially submitted batch MUST remain
-persisted and remotely untouched and be accounted as not started.
+through executor shutdown where CPython registered it, and then propagate the original coordinator
+failure or interruption. A callable whose thread or future registration was interrupted MAY finish
+its no-mutation branch after propagation, but MUST NOT invoke the remote helper. This rule covers
+work that an executor may have enqueued or started even though `submit()` did not return its future.
+Every plan in a partially submitted batch MUST remain persisted and remotely untouched and be
+accounted as not started.
 
 One session failure MUST NOT cancel sibling sessions. The final command failure MUST retain the
 existing aggregate behavior after all eligible work and reconciliation complete.

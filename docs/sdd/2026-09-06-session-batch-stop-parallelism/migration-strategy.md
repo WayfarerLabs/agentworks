@@ -64,7 +64,8 @@ lock. Keep named and cascading transports unchanged.
 Submit each complete-fingerprint plan once to the fixed worker pool. Consume futures in completion
 order and compare-and-set successful stopped state on the invoking thread. If submission stops
 partway, abort a pre-mutation start gate so even work enqueued without a returned future exits
-without touching the VM; cancel and drain the executor, then account every plan as not started. Run
+without touching the VM; request cancellation and shutdown, then account every plan as not started.
+An interrupted pre-registration wrapper may finish its no-mutation branch after propagation. Run
 incomplete dedicated and legacy rows through the existing synchronous dispatcher afterward.
 
 ### 5. Add interruption reconciliation and heartbeat

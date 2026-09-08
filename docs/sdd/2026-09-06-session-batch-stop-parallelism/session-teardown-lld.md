@@ -198,9 +198,11 @@ failure accounting.
    the map complete and release the gate for execution.
 4. If submission raises before the map is complete, mark the gate aborted before releasing it, call
    executor shutdown with queued-future cancellation and waiting enabled, and propagate the original
-   failure or interruption. A running wrapper observes abort and returns without remote mutation;
-   queued work, including an enqueued work item whose future was never returned, is cancelled or
-   takes the same no-mutation branch.
+   failure or interruption after that call returns. A running wrapper observes abort and returns
+   without remote mutation; queued work, including an enqueued work item whose future was never
+   returned, is cancelled or takes the same no-mutation branch. Shutdown waits only for threads
+   CPython registered with the executor. A thread interrupted after start but before registration
+   may take the no-mutation branch after propagation.
 5. Use `wait(..., timeout=5, return_when=FIRST_COMPLETED)` so the invoking thread can emit a
    heartbeat after a quiet interval.
 6. Call `future.result()` and collect an ordinary exception as that plan's failure.
@@ -214,9 +216,11 @@ path. Successfully released sibling mutations are drained and reconciled before 
 Failure before a complete future map instead takes the submission-abort path, which guarantees that
 every plan remains remotely and persistently untouched. The implementation does not infer that a
 raised `submit()` call failed to enqueue: CPython enqueues a work item before thread adjustment and
-before returning its future, so the gate covers that otherwise-unowned boundary. The maximum active
-remote-task count is eight, and every plan has exactly one mapped future before remote execution is
-authorized.
+before returning its future, and thread adjustment starts a worker before adding it to the
+executor's tracked set. The gate covers both otherwise-unowned boundaries. It intentionally avoids
+coordinator-owned thread tracking solely to wait for an already safe no-mutation branch. The maximum
+active remote-task count is eight, and every plan has exactly one mapped future before remote
+execution is authorized.
 
 The heartbeat reports completed, active, and queued counts after the gate releases. A completion
 resets the quiet interval, so fast batches emit only their ordinary session outcomes.
@@ -251,8 +255,11 @@ file replacement remains outside Agentworks' guarantees.
 ## Interruption State Machine
 
 Before the complete future map exists, `KeyboardInterrupt` marks the submission gate aborted,
-releases its waiting wrappers into the no-mutation branch, cancels queued executor work, waits for
-shutdown, and re-raises. No reconciliation is needed because remote execution was never authorized.
+releases its waiting wrappers into the no-mutation branch, requests queued cancellation and executor
+shutdown, and re-raises after shutdown returns. No reconciliation is needed because remote execution
+was never authorized. A wrapper thread interrupted before executor registration may finish the
+no-mutation branch after re-raise; the design promises remote safety, not a join the runtime cannot
+guarantee.
 
 After the complete future map exists, the gate is always released for execution. A
 `KeyboardInterrupt` at that release boundary or during future collection becomes the stored primary
@@ -269,7 +276,9 @@ remain eligible for a future retry.
 
 Every plan in a partially submitted batch is counted as not started and remains eligible for retry.
 This includes a callable already running in the executor but still waiting at the aborted gate and a
-work item enqueued by a `submit()` call that raised before returning its future.
+work item enqueued by a `submit()` call that raised before returning its future. Tests inject both
+post-enqueue/pre-future and post-thread-start/pre-registration interruption and prove the remote
+helper is never invoked, including after propagation.
 
 A later interrupt during reconciliation repeats the notice and returns to the wait loop. Python
 cannot terminate running executor threads, and interpreter shutdown joins them. The command

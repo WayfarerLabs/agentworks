@@ -114,10 +114,12 @@ The first interrupt changes coordinator state from ordinary collection to reconc
 - running futures continue under finite per-call timeouts.
 
 If the interrupt or a coordinator failure occurs before the complete future map exists, the
-coordinator marks the submission gate aborted before releasing it, cancels queued work, and waits
-for already-running wrappers to take the no-mutation branch. All plans remain untouched and are
-reported as not started. Once the complete map exists, the gate is released and the ordinary
-cancellation and reconciliation state applies, including an interrupt at the release boundary.
+coordinator marks the submission gate aborted before releasing it and requests queued cancellation
+and shutdown. CPython may have started a wrapper before registering its thread or returning its
+future, so that wrapper may complete its no-mutation branch after the coordinator propagates the
+original failure. All plans nevertheless remain untouched and are reported as not started. Once the
+complete map exists, the gate is released and the ordinary cancellation and reconciliation state
+applies, including an interrupt at the release boundary.
 
 The coordinator reconciles every normally completed future that becomes available, then propagates
 the original interrupt. Later interrupts repeat the reconciliation notice and do not abandon running

@@ -146,7 +146,8 @@ not authored prose.
 - [ ] Repeat the reconciliation notice after later interrupts without pretending Python can
       terminate running thread work.
 - [ ] Prove worker escape, timeout, incomplete-row serialization, cancelled-future accounting, and
-      partial-submission abort when `submit()` enqueues work but raises before returning its future.
+      partial-submission abort at both CPython ownership gaps: post-enqueue/pre-future and
+      post-thread-start/pre-registration.
 - [ ] Make reconciliation retry-safe when an interrupt lands after SQLite committed the desired
       state.
 - [ ] Preserve the current final aggregate command error for ordinary per-session failures.
