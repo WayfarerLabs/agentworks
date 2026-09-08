@@ -62,6 +62,14 @@ strings use the installed harness's native source grammar. Local marketplace pat
 guest filesystem; relative paths resolve against the actual user's home. Plugin names resolve
 against the native catalog; qualify ambiguous names as `plugin@marketplace`.
 
+Tool discovery reads the actual user's login-shell PATH once per setup invocation. An explicit PATH
+in the prepared setup environment takes precedence. Native commands use that resolved executable and
+keep the prepared environment, so login profiles cannot replace setup identities or explicit values
+during execution. Marketplace discovery reuses the same executable under its private HOME and native
+config directories. A launcher that depends on the real HOME may fail there; use a standalone CLI
+installation or a launcher compatible with an isolated HOME. Agentworks does not bypass isolation or
+guess package-manager cache paths to make such a launcher work.
+
 A newly declared marketplace is first resolved in a private temporary native home. This discovers
 its native name and validates conflicts before registration in the real user home. Native source
 acquisition may therefore happen twice, including two Git fetches. The temporary home is cleaned on

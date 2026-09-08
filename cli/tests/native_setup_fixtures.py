@@ -26,9 +26,18 @@ class LocalFixtureTransport(Transport):
         self.home = root / "home"
         self.home.mkdir(parents=True)
         (root / "tmp").mkdir()
+        # A fixture-owned login shell sources only this fixture's profile. Using
+        # the host login shell here could read the operator's startup files.
+        login_shell = root / "login-shell"
+        login_shell.write_text(
+            '#!/bin/bash\n[ "$1" = "-lc" ] || exit 9\n. "$HOME/.profile"\nexec /bin/bash --noprofile --norc -c "$2"\n'
+        )
+        login_shell.chmod(0o700)
+        (self.home / ".profile").write_text('export PATH="$HOME/.local/bin:$PATH"\n')
         self.environment = {
             "PATH": str(root / "bin") + ":/usr/bin:/bin",
             "HOME": str(self.home),
+            "SHELL": str(login_shell),
             "CODEX_HOME": str(self.home / ".codex"),
             "CLAUDE_CONFIG_DIR": str(self.home / ".claude"),
             "TMPDIR": str(root / "tmp"),

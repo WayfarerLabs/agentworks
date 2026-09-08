@@ -17,9 +17,44 @@ from agentworks.capabilities.harness_integration.settings import parse_settings
 from agentworks.errors import ConfigError, ExternalError
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentworks.capabilities.harness_integration.native_files import NativeFiles
 
 type NativeTool = Literal["codex", "claude"]
+
+
+# The login shell writes only PATH, never its full environment. Both profile
+# noise and subprocess failures stay private; prepared values arrive on stdin.
+_LOGIN_RESOLVE_PROGRAM = r"""
+import json, os, shlex, shutil, subprocess, sys
+request = json.load(sys.stdin)
+output_path = sys.argv[1]
+profile_path = output_path + '.profile'
+os.chdir(request['home'])
+shell = os.environ.get('SHELL')
+if not shell:
+    sys.exit(1)
+capture = (
+    "import json, os, sys; "
+    "fd=os.open(sys.argv[1], os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600); "
+    "json.dump(os.environ.get('PATH', ''), os.fdopen(fd, 'w'))"
+)
+subprocess.run(
+    [shell, '-lc', shlex.join([sys.executable, '-c', capture, profile_path])],
+    env={**os.environ, 'HOME': request['home']},
+    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True,
+)
+with open(profile_path) as profile:
+    login_path = json.load(profile)
+path = login_path if request['path'] is None else request['path']
+executable = shutil.which(request['tool'], path=path)
+if executable is None:
+    sys.exit(1)
+fd = os.open(output_path, os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600)
+with os.fdopen(fd, 'w') as output:
+    json.dump({'executable': os.path.abspath(executable), 'path': path}, output)
+"""
 
 
 @dataclass(frozen=True)
@@ -62,17 +97,59 @@ def identity(value: object) -> str:
 class NativeCLI:
     """Run one harness as the invoking user, optionally with an isolated home."""
 
-    def __init__(self, tool: NativeTool, files: NativeFiles, *, home: str, config_root: str, isolated: bool = False):
+    def __init__(
+        self,
+        tool: NativeTool,
+        files: NativeFiles,
+        *,
+        home: str,
+        config_root: str,
+        isolated: bool = False,
+        environment: Mapping[str, str] | None = None,
+    ):
         self.tool = tool
         self.files = files
         self.home = home
         self.config_root = config_root
         self.isolated = isolated
+        self.environment = dict(environment or {})
+        self._resolved: tuple[str, str] | None = None
+
+    def _resolve_command(self) -> tuple[str, str]:
+        """Capture the actual user's executable and login PATH once per setup."""
+        if self._resolved is not None:
+            return self._resolved
+        remote, local = self.files.slot()
+        command = shlex.join(["python3", "-c", _LOGIN_RESOLVE_PROGRAM, remote])
+        request = {"home": self.home, "tool": self.tool, "path": self.environment.get("PATH")}
+        result = self.files.runner.run(
+            command,
+            input_text=json.dumps(request),
+            env={**self.environment, "HOME": self.home},
+            check=False,
+            timeout=30,
+        )
+        if not result.ok:
+            raise ExternalError(f"could not resolve {self.tool} from the actual user's login environment")
+        try:
+            self.files.runner.copy_from(remote, local)
+            observed = json.loads(local.read_bytes())
+            executable = _text(observed["executable"])
+            path = _text(observed["path"])
+            if not executable.startswith("/") or "\x00" in executable or "\x00" in path:
+                raise ValueError
+        except Exception:
+            raise ExternalError("invalid native executable discovery result") from None
+        self._resolved = executable, path
+        return self._resolved
 
     def command(self, args: list[str], *, structured: bool = False) -> object:
+        executable, path = self._resolve_command()
         remote, local = self.files.slot()
         override = "CODEX_HOME" if self.tool == "codex" else "CLAUDE_CONFIG_DIR"
         env = {
+            **self.environment,
+            "PATH": path,
             override: self.config_root,
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
             "DISABLE_AUTOUPDATER": "1",
@@ -94,7 +171,7 @@ class NativeCLI:
         # transport logger. Only the private stdout file is subsequently read.
         script = (
             f"cd {shlex.quote(self.files.remote)} && "
-            f"{shlex.join([self.tool, *args])} > {shlex.quote(remote)} 2>/dev/null"
+            f"{shlex.join([executable, *args])} > {shlex.quote(remote)} 2>/dev/null"
         )
         result = self.files.runner.run("bash", input_text=script, env=env, check=False, timeout=180)
         if not result.ok:
@@ -236,7 +313,10 @@ class NativeCLI:
         )
         if not result.ok:
             raise ExternalError("could not create isolated native marketplace discovery directory")
-        staged = NativeCLI(self.tool, self.files, home=self.home, config_root=root, isolated=True)
+        staged = NativeCLI(
+            self.tool, self.files, home=self.home, config_root=root, isolated=True, environment=self.environment
+        )
+        staged._resolved = self._resolve_command()
         staged.add_market(self.home + source[1:] if source.startswith("~/") else source)
         markets = staged.markets()
         if len(markets) != 1 or markets[0].source is None:

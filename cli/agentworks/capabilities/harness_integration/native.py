@@ -308,7 +308,7 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
         # replacement can repair malformed input; plugin reconciliation refuses
         # it until that separate repair makes ownership observable again.
         initial_document = {} if initial is None else parse_settings(initial, format=_format(tool))
-        cli = NativeCLI(tool, files, home=invocation.home, config_root=root)
+        cli = NativeCLI(tool, files, home=invocation.home, config_root=root, environment=invocation.environment)
         root_exists = files.directory(root)
         markets = cli.markets() if root_exists else ()
         installed = cli.plugins(markets) if root_exists else ()
