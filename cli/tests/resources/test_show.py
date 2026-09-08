@@ -28,7 +28,7 @@ from agentworks.resources.show import project_declaration, resource_show_data, s
 from agentworks.schema import AgwModel
 from agentworks.topics import TopicProse
 from agentworks.vms.template import VMTemplate
-from tests.conftest import ManifestDoc, write_cfg
+from tests.conftest import ManifestDoc, registry_with_shell, write_cfg
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -112,7 +112,7 @@ def _readiness_registry(
 ) -> Registry:
     kind = _ReadinessKind()
     monkeypatch.setitem(KIND_REGISTRY, kind.kind, kind)
-    registry = Registry.empty()
+    registry = registry_with_shell()
     registry.add(
         kind.kind,
         verdict,

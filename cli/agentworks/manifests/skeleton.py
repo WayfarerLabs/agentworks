@@ -35,7 +35,7 @@ from agentworks.manifests.yaml_value import render_value
 from agentworks.schema import MAPPING_KEY, SEQUENCE_ELEMENT, UNSET
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Mapping
 
     from agentworks.manifests.field_tree import FieldEntry
     from agentworks.manifests.reference import SchemaReference
@@ -49,19 +49,24 @@ _WIDTH = 84
 _HOW_TO_USE = "Uncomment the document lines (delete one leading `#`) and edit."
 
 
-def skeleton_text(reference: SchemaReference) -> str:
+def skeleton_text(reference: SchemaReference, *, spec_values: Mapping[str, object] | None = None) -> str:
     """One kind's commented sample document, prose included."""
-    return "\n".join(_document_lines(reference)) + "\n"
+    return "\n".join(_document_lines(reference, spec_values=spec_values)) + "\n"
 
 
-def _document_lines(reference: SchemaReference) -> Iterator[str]:
+def _document_lines(reference: SchemaReference, *, spec_values: Mapping[str, object] | None) -> Iterator[str]:
     yield from _prose_lines(reference)
     yield f"#apiVersion: {API_VERSION}"
     yield f"#kind: {reference.kind}"
     yield "#metadata:"
     yield from _block(reference.metadata, target=reference.target, depth=1, commented=False)
     yield "#spec:"
-    yield from _block(reference.spec, target=reference.target, depth=1, commented=False)
+    for entry in reference.spec:
+        if spec_values is not None and entry.name in spec_values:
+            yield from _comment(_annotation_of(entry), depth=1)
+            yield _line(f"{entry.name}: {render_value(spec_values[entry.name])}", depth=1, commented=False)
+        else:
+            yield from _field_lines(entry, target=reference.target, depth=1, commented=False)
 
 
 def _prose_lines(reference: SchemaReference) -> Iterator[str]:

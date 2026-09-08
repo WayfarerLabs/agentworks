@@ -13,8 +13,8 @@ resolver want the merge at different moments and in different shapes:
   it, ``None`` and all, because "nobody named an integration" is a
   different edge set from "somebody named ``shell``".
 - :func:`resolve_template` / :func:`resolve_from_dict` are the USE view:
-  the same merge, collapsed onto :class:`ResolvedSessionTemplate` with
-  the ``shell`` default applied, which is what a session is built from.
+  the same merge, requiring an explicit effective selection before building
+  :class:`ResolvedSessionTemplate`. The synthesized default selects ``shell``.
 """
 
 from __future__ import annotations
@@ -26,9 +26,7 @@ from typing import TYPE_CHECKING, cast
 from agentworks.errors import unknown_template_error
 from agentworks.schema import merge_model
 
-#: The workload a session runs when nothing in its lineage names one: a
-#: plain login shell, which is the behavior from before harness
-#: integrations existed.
+#: The integration explicitly selected by the synthesized default template.
 DEFAULT_HARNESS_INTEGRATION = "shell"
 
 if TYPE_CHECKING:
@@ -46,8 +44,8 @@ class ResolvedSessionTemplate:
     """A fully resolved session template with all inheritance applied.
 
     The workload is the ``(harness_integration, harness_integration_config)`` pair:
-    ``harness_integration`` is always a concrete name (defaulting to ``shell``, the
-    plain login shell) and ``harness_integration_config`` is the merged blob the
+    ``harness_integration`` is always a concrete, explicitly selected name.
+    ``harness_integration_config`` is the merged blob the
     session node hands the harness integration. ``description`` stays an
     independently merged display field with a "Login shell" default, unaffected by the pair.
     """
@@ -243,9 +241,8 @@ def _resolve(
     """Depth-first, left-to-right resolution.
 
     The USE view over :func:`_resolve_walk`: it collapses the walk's
-    ``(harness_integration | None, config)`` pair onto the dataclass, an
-    undeclared pair becoming the ``shell`` default. No validation happens
-    here: the merged blob's shape check runs at finalize over this same
+    ``(harness_integration | None, config)`` pair onto the dataclass, rejecting
+    an undeclared selection. The merged blob's shape check runs at finalize over this same
     merge, with the rest of hard validation (FR12), and construction
     re-validates the blob it binds.
     """
@@ -273,7 +270,14 @@ def _resolve_with_provenance(
         instance_name=instance_name,
     )
     result = layered.value.resolved
-    result.harness_integration = layered.value.harness.name or DEFAULT_HARNESS_INTEGRATION
+    if layered.value.harness.name is None:
+        from agentworks.errors import ConfigError
+
+        raise ConfigError(
+            f"session-template/{name} has no selected harness integration",
+            hint="Set harness_integration: {name: shell}, select another integration, or inherit a selection.",
+        )
+    result.harness_integration = layered.value.harness.name
     result.harness_integration_config = dict(layered.value.harness.config)
     return LayeredResolution(result, layered.provenance)
 
@@ -345,6 +349,14 @@ def _resolve_walk_with_provenance(
     )
     from agentworks.resources.resolved_spec import resolved_spec_default_paths
 
+    if "default" not in templates:
+        from agentworks.schema import CapabilityBlock
+        from agentworks.sessions.template import SessionTemplate
+
+        templates = {
+            **templates,
+            "default": SessionTemplate(name="default", harness_integration=CapabilityBlock.of("shell")),
+        }
     layers = [
         DeclarationLayer(
             LayerSource(LayerSourceKind.TEMPLATE, "session-template", layer.name),

@@ -72,8 +72,8 @@ class _HarnessIntegrationKind:
 
         Integrations are code, and a session-template selects one by writing its name
         inside `spec.harness_integration`. The keys allowed beside that name are the
-        integration's own, which is why each documents its own config. A template that
-        selects none gets `shell`.
+        integration's own, which is why each documents its own config. Every template
+        lineage must select an integration; the synthesized default selects `shell`.
         """,
     )
     miss_policy: Literal["auto-declare", "error"] = "error"

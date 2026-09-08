@@ -27,6 +27,7 @@ from agentworks.resources.inspect import list_resources, render_resource_table
 from agentworks.resources.registry import Registry
 from agentworks.schema import CapabilityBlock
 from agentworks.vms.sites import VMSiteDecl
+from tests.conftest import registry_with_shell
 from tests.plugins._fixtures import ConformingVMPlatform
 
 if TYPE_CHECKING:
@@ -116,7 +117,7 @@ def _seat_and_publish(monkeypatch: pytest.MonkeyPatch, config: Config) -> Regist
     # while impls are seated), so reads after the context tears seating down
     # touch only frozen state.
     with seated_plugin(alpha), seated_plugin(beta):
-        registry = Registry.empty()
+        registry = registry_with_shell()
         publish_plugins(registry, config)
         registry.add(
             "vm-site",
@@ -305,7 +306,7 @@ def test_reserved_fields_do_not_affect_publication(monkeypatch: pytest.MonkeyPat
     def _published(plugin: Plugin) -> set[tuple[str, str]]:
         monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
         with seated_plugin(plugin):
-            registry = Registry.empty()
+            registry = registry_with_shell()
             publish_plugins(registry, _config(plugin.name))
             return {(kind, name) for kind in registry.iter_kinds() for name, _ in registry.iter_kind_items(kind)}
 

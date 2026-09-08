@@ -124,9 +124,13 @@ def validate_effective_harness(
         name = effective.harness_integration
         config = effective.harness_integration_config
     if name is None:
-        from agentworks.sessions.templates import DEFAULT_HARNESS_INTEGRATION
+        from agentworks.errors import ConfigError
+        from agentworks.schema.errors import located
 
-        name = DEFAULT_HARNESS_INTEGRATION
+        raise ConfigError(
+            located(location, f"{source[0]}/{source[1]} has no selected harness integration"),
+            hint="Set harness_integration: {name: shell}, select another integration, or inherit a selection.",
+        )
 
     validate_capability_config(
         kind="harness-integration",
@@ -159,8 +163,8 @@ class SessionTemplate(DeclaredResource):
     means "not declared here", never "off".
 
     ``harness_integration.name`` selects the workload capability and its
-    remaining keys configure it. ``None`` inherits and ultimately defaults
-    to the ``shell`` integration.
+    remaining keys configure it. ``None`` inherits a selection; a complete
+    lineage must select an integration. The synthesized default selects ``shell``.
     """
 
     inherits: list[
@@ -233,10 +237,8 @@ class SessionTemplate(DeclaredResource):
         provenance rides along so an error on an inherited key names the
         template that declared it.
 
-        Unlike ``dependencies``, this uses the ``shell`` DEFAULT when the
-        lineage names no integration, and the asymmetry is deliberate: an
-        edge records what the operator named, while validation checks what
-        the session will actually run.
+        A lineage without a selection fails here. Dependency discovery remains
+        total so it can report the authored graph before validation.
         """
         from agentworks.sessions.templates import effective_template_with_provenance
 

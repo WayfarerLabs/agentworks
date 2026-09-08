@@ -1387,7 +1387,11 @@ def test_restart_pane_command_uses_resume_command_and_session_workspace(
 # fakes.
 
 SESSION_ENV_MANIFESTS = [
-    ManifestDoc("session-template", "default", {"env": {"API_KEY": {"secret": "api-key"}}}),
+    ManifestDoc(
+        "session-template",
+        "default",
+        {"harness_integration": {"name": "shell"}, "env": {"API_KEY": {"secret": "api-key"}}},
+    ),
     ManifestDoc("secret", "api-key", description="session runtime input"),
 ]
 

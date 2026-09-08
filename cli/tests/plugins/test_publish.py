@@ -37,6 +37,7 @@ from agentworks.schema import CapabilityBlock
 from agentworks.sessions.manager._env import _resolve_template
 from agentworks.sessions.template import SessionTemplate
 from agentworks.vms.sites import VMSiteDecl
+from tests.conftest import registry_with_shell
 from tests.plugins._fixtures import ConformingHarnessIntegration, ConformingVMPlatform
 
 if TYPE_CHECKING:
@@ -111,7 +112,7 @@ def test_enabled_plugin_publishes_capability_and_manifest(monkeypatch: pytest.Mo
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
     config = _config(PLUGIN)  # opted in
     with seated_plugin(plugin):
-        registry = Registry.empty()
+        registry = registry_with_shell()
         publish_plugins(registry, config)
         # An operator vm-site consumes the plugin's platform at its site.
         registry.add(
@@ -148,7 +149,7 @@ def test_not_enabled_plugin_row_and_manifest_present_but_disabled(monkeypatch: p
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
     config = _config()  # NOT opted in
     with seated_plugin(plugin):
-        registry = Registry.empty()
+        registry = registry_with_shell()
         publish_plugins(registry, config)
         registry.add(
             "vm-site",
@@ -181,7 +182,7 @@ def test_unknown_enabled_name_raises_config_error_before_any_publish(monkeypatch
     plugin = _fixture_plugin()
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
     with seated_plugin(plugin):
-        registry = Registry.empty()
+        registry = registry_with_shell()
         # Two unknowns plus the real one: the error lists ALL unknowns and is
         # raised (a single typed ConfigError, never a KeyError) before any add.
         with pytest.raises(ConfigError) as exc:
@@ -207,7 +208,7 @@ def test_publish_plugins_mutates_no_capability_registry(monkeypatch: pytest.Monk
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
     with seated_plugin(plugin):
         before = [dict(registry) for registry in _capability_registries()]
-        registry = Registry.empty()
+        registry = registry_with_shell()
         publish_plugins(registry, _config(PLUGIN))
         after = [dict(registry) for registry in _capability_registries()]
         assert before == after
@@ -221,7 +222,7 @@ def test_dirty_bundle_raises_config_error_not_assertion() -> None:
     never an ``AssertionError`` (the pre-Phase-5 ``assert`` that ``python -O``
     would strip). ``pytest.raises(ConfigError)`` alone proves it is not the
     stripped assert, since an ``AssertionError`` would not match."""
-    registry = Registry.empty()
+    registry = registry_with_shell()
     with pytest.raises(ConfigError, match="issue-free"):
         publish_manifest_package(
             registry,
@@ -246,7 +247,7 @@ def test_bad_plugin_manifest_anchor_raises_typed_plugin_attributed_error(monkeyp
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
     config = _config(PLUGIN)  # opted in, so its manifests are loaded
     with seated_plugin(plugin):
-        registry = Registry.empty()
+        registry = registry_with_shell()
         with pytest.raises(ConfigError) as exc:
             publish_plugins(registry, config)
         message = str(exc.value)
@@ -275,7 +276,7 @@ def test_plugin_manifest_anchor_without_subdir_raises_typed_plugin_attributed_er
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
     config = _config(PLUGIN)  # opted in, so its manifests are loaded
     with seated_plugin(plugin):
-        registry = Registry.empty()
+        registry = registry_with_shell()
         with pytest.raises(ConfigError) as exc:
             publish_plugins(registry, config)
         message = str(exc.value)
@@ -295,7 +296,7 @@ def test_plugin_path_gates_missing_subdir_but_builtin_path_does_not(
     """
     from agentworks.plugins.publish import PLUGIN_MANIFEST_KINDS
 
-    registry = Registry.empty()
+    registry = registry_with_shell()
     with pytest.raises(ConfigError, match="ships no 'manifests'"):
         publish_manifest_package(
             registry,
@@ -309,7 +310,7 @@ def test_plugin_path_gates_missing_subdir_but_builtin_path_does_not(
     # subdir does NOT raise, it loads nothing (a built-in's ``builtin/`` subdir
     # always ships, so this path never actually hits a missing dir in practice).
     publish_manifest_package(
-        Registry.empty(),
+        registry_with_shell(),
         anchor=_NO_SUBDIR_ANCHOR,
         subdir="manifests",
         origin_for=lambda file_name: Origin.built_in(source=f"nosub/{file_name}"),
@@ -330,7 +331,7 @@ def test_disabled_plugin_harness_integration_reaches_use_gate_not_unknown(monkey
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
     config = _config()  # not opted in, so the harness integration row is disabled
     with seated_plugin(plugin):
-        registry = Registry.empty()
+        registry = registry_with_shell()
         publish_plugins(registry, config)
         registry.add(
             "session-template",
