@@ -1,8 +1,9 @@
 # Harness facets
 
 Harness integrations configure native tooling at its owning resource and launch one workload per
-session. A **scope** identifies the resource and context; a **facet** identifies which part of the
-integration runs there. The four facets are `vm`, `user`, `workspace`, and `session`.
+session. A **scope** identifies the resource and context; a **facet** is a scoped part of a
+capability, pairing its operations and configuration. Facets are not specific to harness
+integrations. Harness integrations use four facets: `vm`, `user`, `workspace`, and `session`.
 
 | Owning scope | Facet       | When it runs                       | Native ownership                                      |
 | ------------ | ----------- | ---------------------------------- | ----------------------------------------------------- |
@@ -16,11 +17,11 @@ The admin and agent cases use the same user facet and config model. Configuring 
 does not configure agent users. Workspace setup likewise has no particular session user; the shipped
 workspace facets map project settings and do not install user-owned project plugins.
 
-## Explicit selections and configuration
+## Explicit integration activations
 
 There are two independent choices: enable a capability's system plugin in Agentworks config, then
-select that integration in the resource that should consume it. Enable the shipped Claude and Codex
-capabilities with this config fragment:
+activate that integration's facet on the resource that should consume it. Enable the shipped Claude
+and Codex capabilities with this config fragment:
 
 ```toml
 [plugins]
@@ -28,11 +29,15 @@ system = ["claude", "codex"]
 ```
 
 VM, admin, agent, and workspace templates accept an ordered `harness_integrations` list. Every entry
-has a `name` tag followed by that facet's config. Multiple supported integrations can coexist, each
-with its own config. Name-only entries explicitly select defaults; merely enabling the system plugin
-does not run setup anywhere.
+is an **integration activation**: a `name` tag followed by any explicit facet configuration.
+Name-only entries activate the facet with defaults. Multiple supported integrations can coexist,
+each with its own config. Merely enabling the system plugin does not run setup anywhere.
 
-This example enables both user integrations and selects Codex for a session. Install the native
+Activation describes the resource's effective declaration. It does not prove that setup has run or
+succeeded; readiness uses setup evidence separately. This is distinct from VM activation, which
+starts and holds a VM active for an operation.
+
+This example activates both user integrations and selects Codex for a session. Install the native
 harness CLIs through the existing package or user install-command configuration before running
 setup, and provide `python3` on the VM as described in
 [native harness setup](native-harness-setup.md).
@@ -60,7 +65,7 @@ A session template selects exactly one integration through singular `harness_int
 effective template must select one or inherit a selection. The built-in `default` session template
 explicitly selects `shell`; an unrelated template with no selection is invalid.
 
-Setup attachment lists use complete replacement:
+Setup activation lists use complete replacement:
 
 - Omit `harness_integrations` to inherit the effective list.
 - Supply a list to replace the complete inherited list, including each entry's config.
@@ -68,7 +73,7 @@ Setup attachment lists use complete replacement:
 - Duplicate integration names are invalid.
 
 For example, this child keeps only Claude with its default user config. It does not retain the
-parent's Codex attachment or merge a previous Claude settings mapping:
+parent's Codex activation or merge a previous Claude settings mapping:
 
 ```yaml
 apiVersion: agentworks/v1
@@ -83,7 +88,7 @@ spec:
 
 Session selection has its existing tagged-object merge semantics: restating the same name merges
 session config according to its model; selecting a different name starts that integration's config
-anew. Setup attachment config never rolls into a session's config, even when both name the same
+anew. Setup activation config never rolls into a session's config, even when both name the same
 integration. Each host validates its own facet. Claude and Codex user facets accept settings,
 marketplaces, and plugins; their workspace facets accept settings. VM facets and the shell/Grok
 setup facets currently accept name-only entries and perform no native writes.
@@ -134,7 +139,7 @@ Active setup receives environment from the scopes that already exist for that ow
 Inner values win collisions under the normal env merge rules. Core protects `AGENTWORKS_*` identity
 values. Setup environment and declared config secrets join the operation's eager resolution before
 remote mutation and logger construction. Each integration receives only its declared config secrets;
-environment arrives separately through the prepared runner. With neither selected attachments nor
+environment arrives separately through the prepared runner. With neither selected activations nor
 prior receipts, this setup path does not resolve otherwise unused environment secrets. Existing
 install commands keep their own execution behavior.
 
@@ -151,7 +156,7 @@ warns and permits launch. Integrations supply the reason, and core adds the owni
 These are integration policies, not a generic operator-authored list of required facets.
 
 The shipped integrations currently declare no ancestor requirement, so session-only use is valid
-when the tool is otherwise installed and ready. Selecting a user attachment does not select a
+when the tool is otherwise installed and ready. Selecting a user activation does not select a
 session integration, and selecting a session integration does not implicitly enable or run user
 setup.
 
@@ -173,7 +178,7 @@ lifecycle evidence. The summary includes completion, pending cleanup, and claim 
 native I/O or settings values. Doctor also checks stored evidence; it does not complete setup or
 repair native drift.
 
-After editing VM/admin or agent attachments, run `agw vm reinit <name>` or
+After editing VM/admin or agent activations, run `agw vm reinit <name>` or
 `agw agent reinit <name>`. Removing a declaration becomes native cleanup during the owning
 operation, using its previous receipts. Workspace mappings require explicit recreation to apply
 changes; `workspace repair` only repairs its existing access and Git identity responsibilities.

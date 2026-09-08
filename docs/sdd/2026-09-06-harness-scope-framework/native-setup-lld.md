@@ -18,9 +18,9 @@ fields. Session-only properties and readiness guards require a session binding; 
 one from a setup target. Setup methods receive typed invocations for their owning facet.
 
 Each invocation supplies the actual owning instance, native destination identity, prepared runner,
-prior receipt for this integration and a core-owned checkpoint callback. An active attachment has
-validated config; retirement has absent desired config plus prior receipt. Retirement does not
-validate an empty pretend attachment or derive new defaults. Admin and agent are both user
+prior receipt for this integration and a core-owned checkpoint callback. A present integration
+activation has validated config; retirement has absent desired config plus prior receipt. Retirement
+does not validate an empty pretend activation or derive new defaults. Admin and agent are both user
 invocations, with actual username/home/transport; integration code has no separate admin operation.
 
 No-op defaults return successfully without native facts. Core may record a completed invocation, but
@@ -28,7 +28,7 @@ completion alone never proves a plugin, profile, settings file or executable exi
 
 ## Operation sequence
 
-The owning manager builds the effective attachment list and validates every selected facet before
+The owning manager builds the effective activation list and validates every selected facet before
 native setup. The same effective declarations supply capability references, eager secret needs,
 config binding and freshness comparison. The integration lane runs after existing core setup and
 uses a full canonical Transport, never the native ExecTransport bootstrap channel for file transfer.
@@ -36,7 +36,7 @@ uses a full canonical Transport, never the native ExecTransport bootstrap channe
 For one owner:
 
 1. Acquire the native mutation guard before reading prior receipts or observing native state.
-2. Read prior receipts and bind the ordered desired attachments. Include retired attachments with
+2. Read prior receipts and bind the ordered desired activations. Include retired activations with
    remaining claims after desired entries, in stable prior order.
 3. For each integration, prepare sources and native observations and reject conflicting desired
    plugin/settings changes before its first write.

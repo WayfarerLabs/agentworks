@@ -21,7 +21,7 @@ not accidentally classify known legacy fields as unknown future data or discard 
 
 ## Declarative cutover
 
-Replace old fields with one explicitly selected user attachment:
+Replace old fields with one explicitly selected user activation:
 
 ```yaml
 # Previous admin-template or agent-template spec fields
@@ -39,13 +39,13 @@ harness_integrations:
 
 The list belongs to the resource. Omission inherits where that template kind already supports
 inheritance; an authored list replaces the whole inherited list, and `[]` clears it. Converting a
-layered old setup therefore requires constructing the intended complete attachment list, including
+layered old setup therefore requires constructing the intended complete activation list, including
 other integrations and the effective Claude values. Do not translate a single old field into a
 partial replacement list that silently loses the other values.
 
 Update shipped manifests and examples with the implementation. Old authored fields receive normal
 unknown-field diagnostics plus specific migration guidance. Do not keep two live runtime dispatch
-paths. Admin attachments reside on the selected admin-template, whose user schema is the same as
+paths. Admin activations reside on the selected admin-template, whose user schema is the same as
 agent-template; no new admin selection on VM templates is introduced.
 
 ## Persisted desired overlays
@@ -53,7 +53,7 @@ agent-template; no new admin selection on VM templates is introduced.
 Retain decoding for supported old payload versions at the persisted-data boundary, separate from new
 operator-authored input validation. A legacy adapter extracts the old Claude fields before the new
 declaration model rejects them, validates their original value types, and resolves them with the
-owning template context before building the new full attachment list. Invalid or ambiguous old/new
+owning template context before building the new full activation list. Invalid or ambiguous old/new
 declarations refuse with field-only diagnostics and preserve the stored payload.
 
 A migrated effective list captures the intended current configuration under the new whole-list
@@ -79,7 +79,7 @@ and destination conflict. The supported initial remediation is explicit operator
 native CLI, followed by owning reinit to provision and record it. No automatic adoption or general
 force flag is introduced by this migration.
 
-Once new receipts exist, removal of an entry or whole attachment can safely reconcile recorded
+Once new receipts exist, removal of an entry or whole activation can safely reconcile recorded
 claims. Settings mapping policy controls explicit replacement/merge of its declared file; it does
 not claim other plugin installations. Removing a settings mapping retains the current document and
 relinquishes mapping claims, as specified by R15.
@@ -99,7 +99,7 @@ and refuse invalid selection before tearing down an existing runtime.
 
 ## Order and evidence
 
-Complete the internal facet selector/schema plumbing first. Expose setup attachment fields only when
+Complete the internal facet selector/schema plumbing first. Expose setup activation fields only when
 their owning lifecycle invokes them. Cut over the two Claude callers and legacy fields alongside
 native reconciliation, persisted-overlay handling and updated collateral. Do not claim migration
 complete until the real CLI has exercised existing stored overlays and native conflicts, as well as

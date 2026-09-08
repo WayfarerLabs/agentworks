@@ -159,17 +159,17 @@ Repair does revoke stale agent group memberships when database grants are remove
 
 ## Harness setup reconciliation
 
-Explicit VM and admin attachments run during VM create and reinit; agent attachments run during
-agent create and reinit. Workspace attachments run after workspace directory and repository
-creation. `workspace repair` does not rerun harness setup; applying a changed workspace mapping
-requires explicit workspace recreation. Session create, start, and restart inspect declared
-prerequisites without implicitly running any ancestor setup.
+Activated VM and user integration facets run during the owning VM or agent create and reinit.
+Activated workspace integration facets run after workspace directory and repository creation.
+`workspace repair` does not rerun harness setup; applying a changed workspace mapping requires
+explicit workspace recreation. Session create, start, and restart inspect declared prerequisites
+without implicitly running any ancestor setup.
 
-Owning setup receives both the effective attachment list and prior instance-state receipts. It
+Owning setup receives both the effective activation list and prior instance-state receipts. It
 reconciles matching owned effects, retires removed associations where ownership can be established,
-and preserves incomplete or pending cleanup evidence on failure. Removing an attachment from config
+and preserves incomplete or pending cleanup evidence on failure. Removing an activation from config
 therefore takes effect at the next owning setup operation, not at configuration load. List omission
-inherits, an authored list replaces the complete inherited list, and `[]` requests no attachments.
+inherits, an authored list replaces the complete inherited list, and `[]` requests no activations.
 
 Cleanup is deliberately bounded. Settings mappings retain their native document when removed and
 relinquish ownership; they do not restore overwritten values. Native plugins and marketplaces are

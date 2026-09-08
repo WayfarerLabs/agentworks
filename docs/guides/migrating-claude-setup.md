@@ -1,7 +1,7 @@
 # Migrating Claude setup
 
 Claude marketplace and plugin installation now belongs to the explicitly enabled `claude-code` user
-attachment. Remove `claude_marketplaces` and `claude_plugins` from authored agent-template and
+activation. Remove `claude_marketplaces` and `claude_plugins` from authored agent-template and
 admin-template declarations; these fields are rejected. Enable the `claude` system plugin and ensure
 the native CLI is installed for the actual user.
 
@@ -21,17 +21,17 @@ partial replacement that drops the other field or another integration.
 
 Agentworks recognizes old Claude fields only in stored agent payload version 1 and the admin
 component of stored VM payload version 2. It resolves the currently selected template without the
-stored layer, retains its full attachment list and Claude settings, then appends and deduplicates
+stored layer, retains its full activation list and Claude settings, then appends and deduplicates
 the old marketplace/plugin values in order. An old empty list adds nothing; it does not clear
 inherited values. Agent null values mean absent fields; admin null values are invalid. Empty old
-values do not enable an otherwise absent Claude attachment.
+values do not enable an otherwise absent Claude activation.
 
-The converted layer captures the resulting complete attachment list under the new replacement
+The converted layer captures the resulting complete activation list under the new replacement
 semantics. Later template changes do not flow through a converted explicit list. Review that list
 with instance inspection and adjust the owning declaration or agent instance spec when needed.
 Template repointing during agent reinit resolves the conversion against the proposed new template.
 
-Old fields and a new attachment list in the same stored component are ambiguous and refuse
+Old fields and a new activation list in the same stored component are ambiguous and refuse
 conversion. Invalid old value types, unrelated malformed fields, and unsupported future payload
 versions also refuse. Diagnostics identify fields without printing their values. Back up the state
 database before repairing a malformed record; backups preserve the original stored payload.

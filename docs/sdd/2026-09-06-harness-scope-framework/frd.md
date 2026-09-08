@@ -42,11 +42,17 @@ vm, admin, agent, workspace, session. Each names a resource core sets up and the
 it up, which is why admin and agent are separate: admin identity work rides the VM lifecycle
 (`agw vm reinit NAME`) while an agent has its own (`agw agent reinit NAME`), and the admin's
 configuration is spelled on the admin template (`cli/agentworks/vms/admin.py:66`) while agent
-configuration is spelled on agent templates. How the admin _attachment_ is spelled is open question
-3 below, and this paragraph says nothing about it.
+configuration is spelled on agent templates. How the admin _integration activation_ is spelled is
+open question 3 below, and this paragraph says nothing about it.
 
-A **facet** is the level a capability is driven at: the pairing of one level's API methods and its
-config, nothing more. Facets belong to capabilities. There are four: vm, user, workspace, session.
+A **facet** is a scoped part of a capability: the pairing of one level's API methods and its
+configuration. Facets belong to capabilities generally; the term is not specific to harness
+integrations. This effort uses four: vm, user, workspace, session.
+
+An **integration activation** is a resource's explicit selection of an integration for its
+applicable facet, with defaults or explicit configuration. The effective declaration activates the
+facet; it does not establish successful setup. Plugin enablement, integration activation and setup
+readiness remain distinct. VM activation names the separate power-state operation.
 
 Core owns the mapping between them, and it is fixed:
 
@@ -76,7 +82,7 @@ and the answer is the capability's.
 
 ## Who this is for
 
-- **Operators**, who select integrations on the template that owns each resource and attach
+- **Operators**, who activate integrations on the template that owns each resource and provide
   configuration there, and who expect VM and agent reinit to converge and workspace creation to
   apply its native harness settings without accumulating drift.
 - **Integration authors** (first-party today; external plugins are wave 8), who implement only the
@@ -86,7 +92,7 @@ and the answer is the capability's.
 ## Functional requirements
 
 **R1. A setup pipeline runs at every setup scope, in one fixed order.** Core setup runs first,
-assembling the owning resource's env with applicable inherited env. Explicitly enabled harness
+assembling the owning resource's env with applicable inherited env. Explicitly activated harness
 integrations run next, receiving that env in the owning resource's invocation context. This applies
 to all five scopes and all four facets, including the VM facet. Reinit reruns the same pipeline
 idempotently. The current model is core env, then harness integrations. Features and artifact
@@ -117,11 +123,12 @@ there is nothing to validate there.
 **R5. Integration config is ordinary capability config.** It belongs to the consuming resource (the
 vm, agent, workspace, or session template that selects the integration) and is validated the way all
 capability config is validated: by core against capability-provided schema, one blob at a time as
-the graph walk reaches each resource. Per-facet config is a harness-integration specialty, not a new
-framework mechanism. Integrations must be explicitly selected on the resource, even when all config
-uses defaults. A setup resource can select multiple integrations, each with its own config; an
-available plugin or default config never implicitly attaches one. A session has one explicit
-effective integration selection, including when it selects the generic shell.
+the graph walk reaches each resource. This effort applies per-facet config to harness integrations;
+other capability kinds retain their existing config contracts. Integrations must be explicitly
+activated on the resource, even when all config uses defaults. A setup resource can select multiple
+integrations, each with its own config; an available plugin or default config never implicitly
+activates one. A session has one explicit effective integration selection, including when it selects
+the generic shell.
 
 **R6. Env is the pipeline's shared input.** Core assembles env for each owning resource and passes
 it to the harness invocation using the existing env precedence and reserved-variable conventions.
@@ -149,7 +156,7 @@ preserve these typed receipt semantics; this adds no VM restore workflow or pers
 model.
 
 The same facility drives idempotent cleanup when provisioned plugins, other native setup entries, or
-whole attachments are removed. At the owning reconciliation or deletion operation, compare current
+whole activations are removed. At the owning reconciliation or deletion operation, compare current
 desired state with recorded applied ownership and remove obsolete owned resources wherever the
 native mechanism permits safe removal. Repeated cleanup must converge, including when the resource
 is already gone. This is not a promise to reverse every side effect: intentional retention policies,
@@ -181,7 +188,7 @@ dependency. Rulesync reuse is evaluated with that future design, not implemented
 
 **R13. One vertical integration proves create and reinit end to end** through the real CLI, using
 ordinary local native plugin, settings, and env fixtures. Coverage proves the five scopes' mapping
-to four facets, including the VM facet and shared user facet; explicit attachment and per-facet
+to four facets, including the VM facet and shared user facet; explicit activation and per-facet
 config; env delivery; workspace create-time settings; required and recommended upstream
 prerequisites for the actual user; and ownership-safe repeated setup and cleanup. Claude Code and
 Codex user marketplace/plugin setup and all four native settings policies are demonstrated without
@@ -201,7 +208,7 @@ location and activation scope are separate facts. This effort does not add a nat
 protocol to support that optional follow-on.
 
 **R15. Harness integrations can provision native settings from workstation files.** User and
-workspace attachments for Claude Code and Codex accept an explicit source file and a destination
+workspace activations for Claude Code and Codex accept an explicit source file and a destination
 settings role owned by that facet. The operator can choose complete replacement, merging with source
 keys winning, merging with destination keys winning, or leaving the entire destination untouched if
 it already exists. The integration owns native format parsing, scope-valid destinations, and
@@ -436,6 +443,14 @@ obligations. These principles guide that SDD, not a deferral protocol delivered 
 facet remains in this SDD for native project settings; retaining it does not require VM artifacts to
 route through it.
 
+## Operator terminology refinement, 2026-09-08
+
+The operator selected **integration activation** for a resource's explicit integration declaration,
+including a name-only declaration using defaults. **Facet** means a scoped part of a capability and
+may apply beyond harness integrations. These terms clarify the existing contract: they add no new
+capability kinds, config fields, lifecycle operations or setup-success guarantees. Global plugin
+enablement and VM power-state activation keep their existing meanings.
+
 ## What changed since the scope-participation contract was written
 
 The contract is dated 2026-08-05. Three of its statements are stale against `main`, and a fourth
@@ -488,10 +503,10 @@ Carried forward from the contract, minus the questions that closed:
 1. Init method signatures and how env rides the run targets. R6 settles env as the shared input;
    concrete invocation details belong to the LLD.
 2. Whether a supported-scopes report exists for doctor and guide output, and its mechanism.
-3. The admin attachment's spelling on the vm-template (it validates against the same user-scope
-   model as agent attachments).
+3. The admin activation's spelling on the vm-template (it validates against the same user-scope
+   model as agent activations).
 4. The retry contract for a partially created workspace with native setup already applied.
-5. Ordering and conflict reporting when multiple integrations attach at one broader scope.
+5. Ordering and conflict reporting when multiple integrations are activated at one broader scope.
 
 The capability-API reevaluation is chartered into this effort rather than scheduled separately. The
 seed material in `message-2026-08-16-capability-config-shape.md` carries the `config_at(level)`
@@ -518,7 +533,7 @@ caution, and the pre-design call-site discovery walk.
 - Harness integration config knobs for per-session workload inputs (issue #674), which shipped ahead
   of this charter by operator ruling on 2026-08-26 and deliberately without an SDD. That work does
   not establish this effort's scope, and knobs landing early is not a precedent for treating the
-  pipeline, per-scope init methods, attachments, applied state, or the vertical integration as
+  pipeline, per-scope init methods, activations, applied state, or the vertical integration as
   settled.
 
 ## Definition of done
@@ -534,6 +549,6 @@ Explicit selection, multiple setup integrations with separate config, and requir
 prerequisites for the actual bound user are proven. Claude Code and Codex user marketplace/plugin
 setup is demonstrated, user and workspace settings are not flattened, and workstation mappings
 exercise all four R15 policies. Metadata receipts support readiness, drift reporting, and safe
-idempotent removal or explicit retention when desired native setup changes or an attachment is
+idempotent removal or explicit retention when desired native setup changes or an activation is
 removed. The ordinary shell session retains its behavior with no-op setup facets. Deferred artifact
 requirements and the withdrawn early session identity slice do not gate this effort.

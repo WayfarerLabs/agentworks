@@ -96,7 +96,7 @@ The dispatcher invalidates prior completion before invoking setup and records ea
 mutation through the integration's checkpoint callback. Failure preserves the latest recorded prefix
 rather than claiming the whole declaration succeeded. Fresh agent and workspace setup buffer these
 records until the owner row and desired overlay can commit in the same transaction. Subsequent
-owning setup uses the prior claims to retire removed attachments and associations where the
+owning setup uses the prior claims to retire removed activations and associations where the
 integration can prove ownership. Removing a desired declaration does not itself erase its evidence.
 
 `describe` exposes sanitized integration/component names, completion, pending cleanup, and claim

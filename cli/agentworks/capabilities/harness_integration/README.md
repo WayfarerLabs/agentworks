@@ -199,7 +199,7 @@ The capability ladder, harness-integration edition:
   `spec.harness_integration` is one tagged table whose `name` key selects the integration and whose
   remaining keys are that integration's config, which is the only accepted shape; the
   operator-facing view is in `docs/guides/resources.md`) and, at runtime, the session node that
-  holds the instance. VM, admin, agent, and workspace templates host ordered setup attachments;
+  holds the instance. VM, admin, agent, and workspace templates host ordered setup activations;
   their owning lifecycles construct separate instances bound to the corresponding facet.
 
 Layering is a hard rule: this package imports neither `sessions/` nor `orchestration/` (the `target`
@@ -236,9 +236,14 @@ user facet. An omitted list inherits; an authored list replaces the whole inheri
 selects none. Duplicate integration names are invalid. Each block is validated against its hosting
 facet, and its capability and secret references participate in the usual graph gates.
 
+Each block is an **integration activation**, with defaults or explicit configuration. It activates
+the integration's facet on the owning resource; it does not prove that setup completed. A facet is a
+scoped part of a capability, a term that can apply beyond harness integrations. Global plugin
+enablement and the VM power-state activation gate remain separate concepts.
+
 `HarnessIntegration.for_setup(owner_kind=..., owner_name=..., facet=..., config=...)` binds one
-setup attachment without session identity or conversation state. The instance's owner identifies its
-config and secret references. A removed attachment binds with `config=None`, exposes
+setup activation without session identity or conversation state. The instance's owner identifies its
+config and secret references. A removed activation binds with `config=None`, exposes
 `retiring=True`, and refuses config access instead of synthesizing new defaults. Active setup with
 `{}` still selects the integration's defaults or its name-only config.
 
@@ -251,9 +256,9 @@ existing session `config` property may continue narrowing to the session model.
 Owning lifecycles run setup after core provisioning: VM and admin during VM initialization, agent
 during create or reinit, and workspace after its directory and repository are created. Explicitly
 selected setup consumes its owning scope's environment: VM only; VM plus the actual admin or agent;
-or VM plus workspace. Existing receipts also activate this path when attachments are removed. With
-neither selections nor receipts, setup does not resolve unused environment secrets. Install commands
-keep their existing environment behavior.
+or VM plus workspace. Existing receipts also invoke this path when integration activations are
+removed. With neither selections nor receipts, setup does not resolve unused environment secrets.
+Install commands keep their existing environment behavior.
 
 The command registers setup environment and config secrets before its single secret-resolution pass
 and before constructing its SSH logger. An invocation receives the complete scope environment with
@@ -288,7 +293,7 @@ capability's executable-readiness probe.
 
 Setup invocations carry prior claims and a callback for the complete remaining claim set after each
 confirmed mutation. Core persists completion and cleanup evidence in the owning instance-state
-slice; it does not infer native ownership from filenames. Removed attachments are invoked with
+slice; it does not infer native ownership from filenames. Removed activations are invoked with
 absent config for retirement, and failed retirement retains evidence for retry. See
 [native harness setup](../../../../docs/guides/native-harness-setup.md) for the shipped cleanup
 rules and the [instance-state contract](../../db/README.md) for persistence and inspection.
@@ -656,7 +661,7 @@ authority on the descriptor, registration mechanics, and the enablement model; t
    (add-if-absent) while the plugin is disabled so templates referencing it still finalize.
 4. Everything is present-but-disabled until the operator opts in with
    `[plugins] system = ["<name>"]`; `agw doctor` shows the roster. Native setup still requires
-   explicit attachments at the desired owning resources.
+   explicit activations at the desired owning resources.
 
 The checklist beyond code, per the repo rules:
 

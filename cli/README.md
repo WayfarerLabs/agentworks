@@ -496,9 +496,10 @@ Agentworks installs [mise](https://mise.jdx.dev/) by default on all VMs for mana
 
 ### Claude Code Plugins
 
-Agentworks manages native marketplaces, plugins, and settings through explicitly enabled user
-attachments. The same model serves administrators and agents. Enable the `claude` system plugin and
-install the `claude` CLI (for example through `user_install_commands`) before selecting it:
+Agentworks manages native marketplaces, plugins, and settings through explicit user-facet
+integration activations. The same model serves administrators and agents. Enable the `claude` system
+plugin and install the `claude` CLI (for example through `user_install_commands`) before selecting
+it:
 
 ```yaml
 apiVersion: agentworks/v1

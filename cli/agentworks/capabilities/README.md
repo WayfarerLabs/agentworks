@@ -279,6 +279,10 @@ against the capability's own declared model. Validating them twice, against two 
 host kind would end up encoding what its capabilities accept, which is the coupling this whole layer
 exists to avoid.
 
+A **facet** is a scoped part of a capability: the operations and configuration it offers for that
+level. The term applies to capabilities generally. Harness integrations are the current consumer of
+the four-facet contract; this does not require other capability kinds to acquire facets.
+
 `config_for(facet=None)` is how the core asks which config a capability offers. Ordinary
 capabilities declare `config_model`; their single config ignores the selector, and existing
 single-config overrides can still take no arguments. Harness integrations require an explicit

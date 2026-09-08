@@ -332,7 +332,7 @@ and safe cleanup behavior.
 
 ## Harness integrations
 
-See [harness facets](harness-facets.md) for VM, user, and workspace setup attachments, explicit
+See [harness facets](harness-facets.md) for VM, user, and workspace setup activations, explicit
 selection, ownership, and session prerequisites.
 
 What a session runs is declared as a **harness integration**: the Agentworks capability (registered

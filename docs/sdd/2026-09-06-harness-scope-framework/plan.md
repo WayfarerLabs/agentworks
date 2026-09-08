@@ -43,7 +43,7 @@ Do not introduce a lockfile until the entire approved effort is complete.
 Extend the existing `config_for` hook with the fixed facet selector. Ordinary capability config
 continues to select one model without facet obligations. The harness kind enumerates four answers;
 selection, validation, secret/reference extraction, merging, constructor binding, and reference
-output use the same cached selected model. A no-config answer permits a name-only attachment and
+output use the same cached selected model. A no-config answer permits a name-only activation and
 rejects extra keys. Harness consumers must supply their facet; they cannot default a multi-facet
 answer to session.
 
@@ -90,7 +90,7 @@ env; the integration lane receives the resource's assembled env through its full
       processes without holding a state-database transaction over remote work.
 - [x] Invalidate completed evidence before mutation, checkpoint each successful prefix, retain
       incomplete/failed cleanup evidence, and complete only after the facet succeeds.
-- [x] Reconcile removed attachments using prior ownership with absent desired config, including
+- [x] Reconcile removed activations using prior ownership with absent desired config, including
       unavailable integrations, unowned conflicts and already-absent effects.
 - [x] Integrate cleanup before owner deletion discards needed evidence. Verify cascade lock order,
       partial failure and recovery without falsely adopting unrecorded native residue.
@@ -130,7 +130,7 @@ changes together before the first native write; installation commands may modify
 ## Migration and permanent collateral
 
 - [x] Update declarative samples and user setup guidance to explicit integration lists, including
-      administrator attachment placement and multiple configured integrations.
+      administrator activation placement and multiple configured integrations.
 - [x] Document custom silent-session-lineage migration and existing instance recreation remedies;
       never infer an integration from its stored conversation namespace.
 - [x] Update capability, harness integration, env, instance-state and idempotency documentation with
@@ -154,8 +154,9 @@ without touching the operator's installed plugins or authentication.
       mapping policies; verify session-only compatibility (R3, R13-R15).
 - [ ] Observe required/recommended/absent prerequisites for the actual user, including stale and
       failed setup and pending explicit resource creation (R10).
-- [ ] Exercise repeat setup, one-entry removal, whole-attachment removal, interruption, concurrent
-      mutation, native drift, unknown codec versions, failed cleanup and owner deletion (R9).
+- [ ] Exercise repeat setup, one-entry removal, removal of an integration activation, interruption,
+      concurrent mutation, native drift, unknown codec versions, failed cleanup and owner deletion
+      (R9).
 - [ ] Prove failed workspace setup unwinds under standalone and session-created paths and retry
       refuses unexplained residue (R13).
 - [ ] Run full repository gates and focused native Windows tests from the current CI selection;
@@ -229,3 +230,14 @@ skips; strict mypy passed across 802 production/test files, and Ruff lint/format
 rulesync drift, locked-SDD and typer-isolation checks passed. Website Python (160) and Node (103)
 tests and deterministic double builds for both site bases passed. These local gates returned exit
 code zero. Native Windows remains a CI check; remote VM acceptance remains unperformed.
+
+## Operator terminology refinements
+
+The operator requested `create_new_agent_user` for fresh account creation; `6ae9dd3f` delivered the
+identifier-only rename with 56 focused tests, the full 8,855-test selection and clean project and
+complexity reviews. The subsequent terminology change names each explicit integration declaration an
+integration activation, including defaults-only declarations. Code identifiers, guides and this
+effort's design use that name. Facet is defined generally as a scoped part of a capability; the
+current four-facet harness contract and other capability kinds' behavior remain unchanged. Neither
+integration activation nor plugin enablement is proof of successful setup. Live acceptance and final
+locking remain open.

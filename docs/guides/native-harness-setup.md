@@ -1,9 +1,9 @@
 # Native harness setup
 
-Claude Code and Codex user attachments configure that actual user's marketplaces, plugins, and
-settings. The same attachment model serves administrators and agents. Workspace attachments map
-project settings. They do not install workspace plugins. An attachment must be explicitly enabled,
-including when all of its configuration fields use defaults.
+Activated Claude Code and Codex user facets configure that actual user's marketplaces, plugins, and
+settings. The same integration activation model serves administrators and agents. Activated
+workspace facets map project settings. They do not install workspace plugins. Integration activation
+must be explicit, including when all configuration fields use defaults.
 
 Native setup requires `python3` on the VM for guarded file access and atomic publication. Add
 `python3` to the VM template's `apt_packages` and run `vm reinit` before user or workspace setup. A

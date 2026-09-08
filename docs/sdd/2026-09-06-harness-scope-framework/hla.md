@@ -18,7 +18,7 @@ Rulesync reuse. The saga lead owns reconciling superseded shared-contract wordin
 ## Architecture in one view
 
 Each resource's existing lifecycle drives core setup and env preparation, then its explicitly
-enabled harness integrations in declaration order. Core supplies the resource identity, execution
+activated harness integrations in declaration order. Core supplies the resource identity, execution
 target, and applicable env. An integration receives only the config for the facet being invoked and
 owns its native setup and applied facts. Session start checks its declared upstream prerequisites
 and launches with accumulated env; it does not run ancestor setup as a side effect.
@@ -33,16 +33,16 @@ config:
 ---
 flowchart TB
     subgraph VM["VM scope / vm facet"]
-        VC["Core VM setup + env"] -->|"env + VM config"| VH["Enabled integrations: vm_init"]
+        VC["Core VM setup + env"] -->|"env + VM config"| VH["Activated integrations: vm_init"]
         VH --> VS["VM applied facts"]
     end
     subgraph User["Admin OR agent scope / user facet"]
-        UC["Core user setup + env"] -->|"env + user config"| UH["Enabled integrations: user_init"]
+        UC["Core user setup + env"] -->|"env + user config"| UH["Activated integrations: user_init"]
         UH --> US["User applied facts"]
         UH -.-> UN["Native user settings + plugins"]
     end
     subgraph Workspace["Workspace scope / workspace facet"]
-        WC["Core workspace setup + env"] -->|"env + workspace config"| WH["Enabled integrations: workspace_init"]
+        WC["Core workspace setup + env"] -->|"env + workspace config"| WH["Activated integrations: workspace_init"]
         WH --> WS["Workspace applied facts"]
         WH -.-> WN["Native project settings"]
     end
@@ -95,14 +95,15 @@ These anchors describe the baseline, not the proposed implementation's eventual 
 | `cli/agentworks/db/instance_state.py:37`                                      | Register closed keys and compact domain codecs for harness applied facts; retain the existing table.                                                                          |
 | `cli/agentworks/plugins/claude/harness_integration.py:129`                    | Own user plugin reconciliation, native user/project settings, and upstream diagnostics.                                                                                       |
 
-## Resource ownership and attachments
+## Resource ownership and integration activations
 
 The five setup/runtime scopes and four capability facets remain distinct. `OperationScope` currently
 describes the command's identity and also includes a system level. It is not the five-scope setup
 model and must not become the facet selector. Core's consuming resource chooses the facet once. A
-scope names the resource/lifecycle boundary; a facet pairs the API methods and config an integration
-implements. Each invocation belongs to a concrete resource. Admin and agent stay distinct scopes and
-both use the user facet; core supplies the actual user identity.
+scope names the resource/lifecycle boundary; a facet is a scoped part of a capability, pairing its
+API methods and configuration. Harness integrations use that general capability term here. Each
+invocation belongs to a concrete resource. Admin and agent stay distinct scopes and both use the
+user facet; core supplies the actual user identity.
 
 | Owning scope | Config and selection surface                                    | Facet and operation          | Persistent owner          |
 | ------------ | --------------------------------------------------------------- | ---------------------------- | ------------------------- |
@@ -112,13 +113,13 @@ both use the user facet; core supplies the actual user identity.
 | Workspace    | `workspace-template.harness_integrations`                       | workspace, `workspace_init`  | Workspace                 |
 | Session      | Existing `session-template.harness_integration`                 | session, `start(intent=...)` | Session                   |
 
-**List membership explicitly enables an integration at that setup resource.** Broader attachments
+**List membership explicitly activates an integration at that setup resource.** Broader activations
 are ordered lists of tagged capability config blocks. Each block has the existing `name`
-discriminator and only that facet's fields. A name-only block enables the integration with defaults;
-there is no separate `enabled` flag. Multiple entries enable multiple integrations, each bound to
-its own config and executed in list order. Duplicate names in one effective list are a config error.
-An empty effective list selects none; default config or an implemented method cannot attach
-anything.
+discriminator and only that facet's fields. A name-only block activates the integration with
+defaults; there is no separate `enabled` flag. Multiple entries activate multiple integrations, each
+bound to its own config and executed in list order. Duplicate names in one effective list are a
+config error. An empty effective list selects none; default config or an implemented method cannot
+activate anything.
 
 Session selection remains singular and explicit through `harness_integration: {name: ...}`. A
 selection declared by the selected template or inherited from a parent counts as explicit. If the
@@ -126,19 +127,20 @@ effective selection is absent, report a config error rather than silently choosi
 ordinary default shell use by giving the code-synthesized `session-template/default` an explicit
 `name: shell` block (`sessions/kinds.py:82`), not by substituting shell during resolution.
 
-An attachment does not enable its plugin globally, select a session workload, or implicitly attach
-the integration to an ancestor or descendant. Existing plugin enablement and graph miss policies
-apply, including the existing capability-enabled gate. Plugin availability is distinct from resource
-selection: making a plugin available never enables its facets on every resource. One integration's
-setup also cannot satisfy another integration's readiness prerequisite.
+A setup integration activation does not enable its plugin globally, select a session workload, or
+implicitly activate the integration on an ancestor or descendant. Existing plugin enablement and
+graph miss policies apply, including the existing capability-enabled gate. Plugin availability is
+distinct from resource selection: making a plugin available never activates its facets on every
+resource. One integration's setup also cannot satisfy another integration's readiness prerequisite.
 
-**Admin attachment proposal, for confirmation:** place selection and user config together on the
+**Admin activation proposal, for confirmation:** place selection and user config together on the
 already-selected admin-template, using the same list shape and user-facet schema as agent templates.
 The VM already records `admin_template`, selects it with `--admin-template`, and supports an
 independent `--admin-spec` overlay (`cli/agentworks/instance_specs.py:105`). This avoids a second
 admin selection/config join on the vm-template. FRD open question 3 explicitly asks about a
 vm-template spelling, so this is a proposed answer requiring confirmation, not a silent amendment.
-If a separate VM attachment is required, settle its ownership before the plan and LLD.
+If a separate integration activation on the VM is required, settle its ownership before the plan and
+LLD.
 
 This changes every silent session-template lineage, not only `default`. Remove the fallback in
 `sessions/templates.py:276` and finalize validation at `sessions/template.py:125`; the standalone
@@ -147,7 +149,7 @@ selection, including the synthesized default. Config-only child templates still 
 parent's selection. Existing named templates with no effective selection need an explicit block or
 an explicit parent selection before use.
 
-For inheriting templates, the attachment list replaces as a whole when authored by a nearer layer;
+For inheriting templates, the activation list replaces as a whole when authored by a nearer layer;
 omission inherits and an explicit empty list removes the inherited selection. Each block still uses
 its model's defaults and validation. This makes effective execution order explicit without adding
 list-item patching, dependency declarations, or integration priority knobs. The admin-template keeps
@@ -163,7 +165,7 @@ its `config_model` is the session answer and setup facets offer no config. A mul
 overrides `config_for` for the fixed vm, user, workspace, and session vocabulary. Calling a
 multi-facet selection without the consumer's facet must not silently select session config.
 
-No offered model means an attachment accepts its selection tag and no config fields. It still may
+No offered model means an activation accepts its selection tag and no config fields. It still may
 invoke a method. Offering a model is neither a support claim nor a permission to invoke anything.
 Only the harness kind enumerates the four facet answers during registration/finalize; ordinary
 capabilities do not acquire per-facet declaration tables or new obligations.
@@ -190,7 +192,7 @@ The pre-design call-site walk identifies these obligations:
 | `capabilities/conformance.py`                                                         | Validate all harness answers at registration and retain the public `register_plugin` boundary checks for non-callable hooks, invalid models, and hook failures. |
 | `capabilities/base.py` constructor                                                    | Bind config and extract secrets from the same cached selected model; do not make a second uncached hook call.                                                   |
 | `manifests/field_tree.py` and `manifests/reference.py`                                | Render the correct facet at a resource field and all facets at the harness capability root.                                                                     |
-| `manifests/spec_model.py`, `manifests/decode.py`, and schema walkers                  | Walk every attachment element with its index, facet, and owner; preserve tagged shape, shorthand policy, reference edges, and value-safe errors.                |
+| `manifests/spec_model.py`, `manifests/decode.py`, and schema walkers                  | Walk every activation element with its index, facet, and owner; preserve tagged shape, shorthand policy, reference edges, and value-safe errors.                |
 | Secret backend primary and mapping config                                             | Keep their ordinary config behavior and distinct `mapping_model` contract. They are not harness facets.                                                         |
 
 The registries themselves are already typed. Narrow the heterogeneous descriptor accessor's class
@@ -204,7 +206,7 @@ first-party.
 These are the proposed facet assignments for all four shipped integrations. Existing session models
 keep their fields, types, defaults, merge behavior, and launch semantics. Each block still carries
 its integration's literal `name`; the hosting resource chooses the facet, so config never nests
-under a `facets` key. "No fields" below means a name-only attachment, not a claim that the facet
+under a `facets` key. "No fields" below means a name-only activation, not a claim that the facet
 cannot perform work. Claude Code and Codex now both have user and workspace setup config,
 independent of their existing session settings. Shell and Grok retain no-op defaults at all setup
 facets; the VM facet remains part of the framework even when current integrations need no VM work.
@@ -232,12 +234,12 @@ for both are new in this effort. Workspace plugin installation remains follow-on
 inferred from the existence of a project settings file. Do not copy session knobs into user config
 just because a harness can also store them in a native user file. CLI installation still uses the
 existing `user_install_commands` surface. Codex's `profile` remains a session selection of native
-config; it does not implicitly attach or run a user facet.
+config; it does not implicitly activate or run a user facet.
 
 For example, these proposed manifests put plugin setup on the user, native project settings on the
 workspace, and workload policy on the session. The marketplace and plugin names are illustrative
 operator-owned values; plugin enablement and the ordinary VM/workspace selection still apply. These
-new setup attachment fields become valid when this effort implements them.
+new setup activation fields become valid when this effort implements them.
 
 ```yaml
 apiVersion: agentworks/v1
@@ -289,19 +291,19 @@ spec:
 
 Creating a user from `team-claude` installs both CLIs through core setup, prepares its env, then
 invokes Claude and Codex user facets with their own marketplace/plugin lists. The name-only shell
-attachment explicitly selects its no-op setup. Codex maps the selected workstation file to its
+activation explicitly selects its no-op setup. Codex maps the selected workstation file to its
 native user settings using the stated strategy. Creating a workspace from `team-project` runs
 Claude, Codex, and shell workspace facets with separate config; Claude and Codex map their project
-settings, while shell performs no setup work. A name-only attachment enables default behavior and is
+settings, while shell performs no setup work. A name-only activation enables default behavior and is
 distinct from omitting the integration.
 
 A `team-review` session using those resources gets session config, applicable env, and upstream
 readiness facts; user config does not become launch flags. The same user block is valid on the
-proposed admin-template attachment surface. Putting `permission_mode` in the user block or `plugins`
-in the session block is a facet-specific validation error. The user's Codex attachment does not
-implicitly attach Codex to the workspace or select it for the session. With no inherited attachment,
-omitting the workspace list selects none; an explicit empty list removes inherited selection. To use
-Codex for a session, select `name: codex` in that session's singular block.
+proposed admin-template activation surface. Putting `permission_mode` in the user block or `plugins`
+in the session block is a facet-specific validation error. The user's Codex activation does not
+implicitly activate Codex on the workspace or select it for the session. With no inherited
+activation, omitting the workspace list selects none; an explicit empty list removes inherited
+selection. To use Codex for a session, select `name: codex` in that session's singular block.
 
 All four integrations retain ordinary session-only use when setup is not requested. These are
 alternative `session-template.spec.harness_integration` blocks, each paired with its existing
@@ -317,18 +319,18 @@ approval_policy: on-request
 name: grok-build
 permission_mode: default
 ---
-# Explicit shell selection needs no plugin or setup attachment; defaults launch a login shell.
+# Explicit shell selection needs no plugin or setup activation; defaults launch a login shell.
 name: shell
 ```
 
-Absent setup attachments do not by themselves prevent these sessions from launching. Each checks its
+Absent setup activations do not by themselves prevent these sessions from launching. Each checks its
 executable and any upstream prerequisite the integration declares. Name-only shell or Grok setup
 calls remain no-ops, and the explicit default shell retains its ordinary launch behavior. No
 artifact input, deferral result, shell discovery variable, or artifact cleanup method is introduced.
 
 ## Same config shape, separate native scopes
 
-The integration may reuse config fields or a model across facets. Each attachment still binds a
+The integration may reuse config fields or a model across facets. Each activation still binds a
 different instance with its own origin, lifecycle, desired state, and applied receipts. Both Claude
 Code and Codex have `settings` at user and workspace facets: the user mapping writes native user
 settings, and the workspace mapping writes native project settings. Reusing that shape does not
@@ -360,7 +362,7 @@ project customization path; mapping settings alone makes no promise to install r
 ## Mapping workstation settings
 
 `SettingsMapping` is a native setup config value, not a new agent artifact kind. Initially each
-attachment maps one file to the integration's ordinary settings role for that facet. The integration
+activation maps one file to the integration's ordinary settings role for that facet. The integration
 chooses the destination and native parser; no arbitrary guest destination or filesystem-sync engine
 is added. The shape is `settings: {source: <source reference>, strategy: <policy>}`. Both fields are
 required when `settings` is present; omission means no mapped settings.
@@ -425,7 +427,7 @@ are reconciled once. Source values discarded by `skip-existing` or `merge-preser
 writes and cannot create a conflict by themselves. Treat native plugin commands that also edit
 settings as part of that same plan, with receipts for their actual writes. `skip-existing` skips the
 file mapping, not the separately declared plugin work. The LLD must specify native command ordering
-and protect mapped settings against subsequent plugin-command rewrites; attachment order is not a
+and protect mapped settings against subsequent plugin-command rewrites; activation order is not a
 last-writer policy.
 
 Applied facts distinguish keys/files written by the mapping from untouched content. A skip or a
@@ -453,8 +455,8 @@ The contract version increments from 3 across the descriptor and all four first-
 supported-scope registry. Existing session probe obligations remain on the session path. There is no
 new session cleanup operation for deferred artifact work.
 
-Construct an integration binding for one owning resource and facet. A present attachment supplies
-its effective config; an absent attachment supplies prior ownership for retirement without
+Construct an integration binding for one owning resource and facet. A present activation supplies
+its effective config; an absent activation supplies prior ownership for retirement without
 validating absent config or inventing defaults. Both use the same facet method. Give setup methods
 only the invocation that belongs to that resource: VM identity and system runner for vm; username,
 home, and user runner for user; workspace identity, root, and setup runner for workspace. Each
@@ -545,7 +547,7 @@ artifact contents, producer contributions, or deferred-output records.
 Record the selected facet, actual owning resource/destination identity, non-secret effective config
 and declared env references needed to assess freshness, confirmed native identifiers, representation
 strategy, hashes where meaningful, and completed or incomplete setup evidence. Source settings bytes
-and resolved secrets are not persisted. An attachment or a matching config alone cannot prove that
+and resolved secrets are not persisted. An activation or a matching config alone cannot prove that
 setup completed. Core owns persistence and lifecycle dispatch; the integration owns native probes,
 writes, removal decisions, and their evidence.
 
@@ -562,9 +564,9 @@ plugin and marketplace changes remove obsolete owned resources wherever safe rem
 leave matching resources alone, and report drift or unowned conflicts. Settings mappings follow
 their explicit overwrite/merge policy and retain their document on removal. Do not infer ownership
 from current config, a matching filename, or matching bytes. Persist the non-secret identifiers and
-removal facts needed after a plugin entry or whole attachment disappears.
+removal facts needed after a plugin entry or whole activation disappears.
 
-Removed attachments still reconcile: core invokes the same facet method with absent desired config
+Removed activations still reconcile: core invokes the same facet method with absent desired config
 and prior ownership, then drops only confirmed removals. If its plugin is unavailable or cleanup is
 unsafe, record pending cleanup and useful remediation rather than claiming success. Intentional
 settings retention differs from failed cleanup. Resource deletion consumes applicable cleanup facts
@@ -625,7 +627,7 @@ must not turn a session start into an implicit user initialization. Readiness ca
 to the same session operation and evaluated setup generation.
 
 The check names the needed condition and evaluates completed applied state and inexpensive probes. A
-selected attachment or the existence of `user_init` alone is not proof of completed setup. Missing,
+selected activation or the existence of `user_init` alone is not proof of completed setup. Missing,
 incomplete, stale, or failed setup cannot satisfy a prerequisite for successful current setup.
 
 | Session readiness policy           | User-facet state for the session's user            | Result                                                                                    |
@@ -642,7 +644,7 @@ an integration can implement; they do not add a generic template `required_facet
 frames required gaps as typed errors and recommended gaps as warnings, preserving the integration's
 reason and the owning remediation. Session operations never execute the missing setup automatically.
 
-Missing optional broader attachments are not automatically required: a session-only integration
+Missing optional broader activations are not automatically required: a session-only integration
 keeps working unless it declares a prerequisite. No supported-scopes report is introduced; schema
 output describes config, and doctor reports actual readiness rather than inferring support from
 overrides or model presence.
@@ -677,7 +679,7 @@ Update first-party manifests and upgrade guidance in the implementation change. 
 fields and the two core install call sites together; do not leave two active configuration paths.
 Old declarative input receives normal unknown-field framing with actionable migration guidance.
 Persisted desired overlays that use the old fields require an explicit codec migration into the user
-attachment, preserving existing values and rejecting ambiguous old/new combinations. Existing native
+activation, preserving existing values and rejecting ambiguous old/new combinations. Existing native
 installations are inspected, not automatically claimed as owned just because old config mentioned
 them. The migration strategy must explain how an operator deliberately establishes ownership or
 removes conflicting old material before reconciliation can manage it.
@@ -707,7 +709,7 @@ with local fixtures avoiding external service dependencies:
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | R1, R2, R6     | Core setup precedes explicitly selected facets; setup and launch observe the correct env at all five scopes, including VM and the actual admin or agent user.                                    |
 | R3, R4, R5, R8 | Session-only integrations stay compatible; no-op setup facets work; each resource validates its own facet schema; registration errors and invocation isolation are enforced.                     |
-| R9             | Unchanged reinit converges; plugin/attachment removal consumes ownership; drift, interrupted writes, failed same-input setup, version skew, deletion, and competing mutations preserve evidence. |
+| R9             | Unchanged reinit converges; plugin/activation removal consumes ownership; drift, interrupted writes, failed same-input setup, version skew, deletion, and competing mutations preserve evidence. |
 | R10            | Required, recommended, and absent prerequisites block, warn, or proceed for the bound resource; another user's setup cannot satisfy them and session start never repairs setup.                  |
 | R11, R13       | Claude's fields and persisted overlays migrate; admin and agent use the same user facet; core loses its Claude-specific paths; failed workspace setup unwinds and retry succeeds.                |
 | R14, R15       | Claude and Codex user plugin/marketplace setup and distinct user/workspace settings mappings work, including all four strategies and unsupported workspace plugin config rejection.              |
@@ -721,7 +723,7 @@ mapping removal, and collisions with explicit plugin config. Observe the destina
 and two workspaces rather than inferring applicability from parsed config. Session start must work
 without access to the workstation settings source after successful setup.
 
-Cleanup starts with recorded plugin provisioning, then removes one entry and a whole attachment.
+Cleanup starts with recorded plugin provisioning, then removes one entry and a whole activation.
 Observe native removal and corresponding state updates, repeat to prove convergence, and interrupt
 the operation to prove retry preserves outstanding ownership. Cover already-absent resources,
 unavailable native removal, unowned or drifted resources, another integration's claims, and
@@ -732,7 +734,7 @@ restored receipts cannot bless a different native destination.
 Enablement covers name-only default config, two integrations with distinct configs and ordered
 calls, disabled/unavailable capabilities, duplicates, inherited selection, an empty setup list, and
 missing effective session selection. Unselected integrations do no new setup; retirement of prior
-attachments still runs cleanup. The synthesized default explicitly selects shell, whose ordinary
+activations still runs cleanup. The synthesized default explicitly selects shell, whose ordinary
 launch and resume behavior remains unchanged.
 
 Readiness includes missing, stale, and failed user setup under both required and recommended
@@ -751,8 +753,8 @@ the implementation that makes their claims true.
 ## Focus for architecture feedback
 
 The FRD open questions have proposals here: typed facet invocations and existing env entries; no
-supported-scopes registry; admin-template attachment ownership pending confirmation; workspace
-cleanup then fresh create; and ordered attachments with native conflict reporting. The main risks
+supported-scopes registry; admin-template activation ownership pending confirmation; workspace
+cleanup then fresh create; and ordered activations with native conflict reporting. The main risks
 are retaining the facet through every schema consumer, binding setup to the actual resource,
 coordinating plugin commands with settings mappings, and recovering between native writes and local
 receipts. No-op defaults and the state table alone do not solve those boundaries.
