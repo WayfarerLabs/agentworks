@@ -34,7 +34,7 @@ class NativeClaim(AgwModel):
 
 
 class SetupRecord(AgwModel):
-    """One attachment's last confirmed mutation prefix at one destination."""
+    """One integration activation's confirmed mutation prefix at one destination."""
 
     component: SetupComponent
     integration: _Text

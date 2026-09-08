@@ -1,4 +1,4 @@
-"""Reconcile native setup owned by one user or workspace attachment.
+"""Reconcile native setup owned by one user or workspace integration activation.
 
 Native command success is followed by identity observation before a checkpoint.
 Matching registrations without a prior claim remain unowned and are refused.

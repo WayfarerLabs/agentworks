@@ -279,11 +279,11 @@ class HarnessIntegration(Capability):
         facet: Literal["vm", "user", "workspace"],
         config: Mapping[str, object] | None,
     ) -> Self:
-        """Bind one setup attachment without inventing a session identity.
+        """Bind one integration activation without inventing a session identity.
 
         The core passes absent desired config only when retiring a previous
-        attachment. Retirement neither validates an empty config nor supplies
-        defaults for fields that are no longer desired.
+        integration activation. Retirement neither validates an empty config
+        nor supplies defaults for fields that are no longer desired.
         """
         if facet not in ("vm", "user", "workspace"):
             raise StateError("setup construction requires a setup facet")
@@ -295,7 +295,7 @@ class HarnessIntegration(Capability):
 
     @property
     def retiring(self) -> bool:
-        """Whether the owning resource removed this previously applied attachment."""
+        """Whether the owner removed this previously applied integration activation."""
         return self._config is None
 
     def vm_init(self, invocation: VMSetupInvocation) -> None:

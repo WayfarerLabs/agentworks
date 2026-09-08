@@ -74,7 +74,7 @@ def test_only_actual_user_current_receipt_satisfies_evidence(tmp_path, monkeypat
             kind="agent",
             name="one",
             component="agent",
-            attachments=(CapabilityBlock.of("shell"),),
+            activations=(CapabilityBlock.of("shell"),),
             target=SecretTarget(vm={}, agent={}),
         )
         runner = Mock()
@@ -82,7 +82,7 @@ def test_only_actual_user_current_receipt_satisfies_evidence(tmp_path, monkeypat
             component="agent",
             integration="shell",
             destination_id="a" * 64,
-            declaration=inputs.declaration(inputs.attachments[0]),
+            declaration=inputs.declaration(inputs.activations[0]),
             complete=True,
         )
         write_native_setup(db, "agent", "one", NativeSetupState(records=(record,)), operation="agent-reinit")

@@ -49,12 +49,12 @@ def base() -> list[CapabilityBlock]:
 def test_conversion_retains_full_context_and_other_components(vm, legacy):
     original = stored({"shell": "zsh", **legacy}, vm=vm)
     initial = deepcopy(original.payload.value)
-    attachments = base()
-    decoded = decode_stored_overlay(original, legacy_user_base=attachments)
+    activations = base()
+    decoded = decode_stored_overlay(original, legacy_user_base=activations)
     component = cast("dict[str, Any]", decoded.payload.value["admin"] if vm else decoded.payload.value)
     entries = component["harness_integrations"]
     assert [item["name"] for item in entries] == ["codex", "claude-code", "shell"]
-    assert entries[1]["settings"] == attachments[1].config["settings"]
+    assert entries[1]["settings"] == activations[1].config["settings"]
     assert entries[1]["marketplaces"] == (["inherited", "new"] if legacy.get("claude_marketplaces") else ["inherited"])
     assert entries[1]["plugins"] == (
         ["base@inherited", "new@inherited"] if legacy.get("claude_plugins") else ["base@inherited"]
@@ -63,11 +63,11 @@ def test_conversion_retains_full_context_and_other_components(vm, legacy):
     if vm:
         assert decoded.payload.value["vm"] == {"cpus": 4}
     assert original.payload.value == initial
-    assert attachments[1].config["marketplaces"] == ["inherited"]
+    assert activations[1].config["marketplaces"] == ["inherited"]
 
 
 @pytest.mark.parametrize("raw", [{"claude_plugins": []}, {"claude_plugins": None}])
-def test_absent_legacy_agent_values_do_not_enable_an_empty_claude_attachment(raw):
+def test_absent_legacy_agent_values_do_not_enable_an_empty_claude_activation(raw):
     decoded = decode_stored_overlay(stored(raw), legacy_user_base=[])
     assert decoded.payload.value == {}
 

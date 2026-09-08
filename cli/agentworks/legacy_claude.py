@@ -1,8 +1,8 @@
-"""Finite conversion of persisted Claude fields to explicit user attachments.
+"""Finite conversion of persisted Claude fields to explicit user integration activations.
 
 Only agent payload v1 and the admin component of VM payload v2 are recognized.
 Authored declarations never pass through this adapter. Callers supply the owning
-resolved template's attachments, before applying the stored instance layer.
+resolved template's integration activations, before applying the stored instance layer.
 """
 
 from __future__ import annotations
@@ -59,16 +59,16 @@ def translate_component(raw: JsonObject, base: list[CapabilityBlock] | None, *, 
     result = deepcopy({key: value for key, value in raw.items() if key not in LEGACY_CLAUDE_FIELDS})
     if base is None:
         return result
-    attachments = [block.model_dump(mode="json") for block in base]
-    claude = next((item for item in attachments if item["name"] == "claude-code"), None)
+    activations = [block.model_dump(mode="json") for block in base]
+    claude = next((item for item in activations if item["name"] == "claude-code"), None)
     if claude is None and any(legacy.values()):
         claude = {"name": "claude-code"}
-        attachments.append(claude)
+        activations.append(claude)
     if claude is not None:
         for field, entries in legacy.items():
             claude[field] = list(dict.fromkeys([*claude.get(field, []), *entries]))
-    if attachments:
-        result["harness_integrations"] = cast("list[JsonValue]", attachments)
+    if activations:
+        result["harness_integrations"] = cast("list[JsonValue]", activations)
     return result
 
 

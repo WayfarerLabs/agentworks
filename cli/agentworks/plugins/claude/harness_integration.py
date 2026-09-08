@@ -60,14 +60,14 @@ class ClaudeCodeUserConfig(NativeUserConfig):
     """Native ClaudeCode setup for one actual user."""
 
     name: Literal["claude-code"]
-    """The harness integration this user attachment enables."""
+    """The harness integration enabled by this user's integration activation."""
 
 
 class ClaudeCodeWorkspaceConfig(NativeWorkspaceConfig):
     """Native ClaudeCode project settings."""
 
     name: Literal["claude-code"]
-    """The harness integration this workspace attachment enables."""
+    """The harness integration enabled by this workspace's integration activation."""
 
 
 class ClaudeCodeConfig(AgwModel):

@@ -59,7 +59,7 @@ def run_setup(
     buffered: bool = False,
     held: NativeMutationGuard | None = None,
 ) -> NativeSetupState:
-    """Run desired attachments, then retire removed attachments in prior order.
+    """Run desired integration activations, then retire removed activations in prior order.
 
     A fresh owner's caller buffers and commits this result with its owner row.
     It must already have refused native residue and own failed-create rollback.
@@ -71,7 +71,7 @@ def run_setup(
     with native_mutation_guard(db.path, invocation.vm.name, held=held):
         state = read_native_setup(db, inputs.kind, inputs.name)
         prior = {record.integration: record for record in state.records if record.component == inputs.component}
-        if not inputs.attachments and not prior:
+        if not inputs.activations and not prior:
             return state
         location = (
             invocation.home
@@ -86,10 +86,10 @@ def run_setup(
             location=location,
             username=invocation.username if isinstance(invocation, UserSetupInvocation) else None,
         )
-        desired = {block.name: block for block in inputs.attachments}
+        desired = {block.name: block for block in inputs.activations}
         # Validate and bind the complete active list before its first mutation.
         bound = {}
-        for selected in inputs.attachments:
+        for selected in inputs.activations:
             ensure_harness_integration_enabled(registry, selected.name)
             implementation = harness_integration_for(selected.name)
             bound[selected.name] = implementation.for_setup(

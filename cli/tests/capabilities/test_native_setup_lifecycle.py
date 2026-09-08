@@ -94,7 +94,7 @@ def test_component_inputs_keep_only_ancestors_and_retirement(db, registry, vm, m
         operation="agent-create",
     )
     retired = prepare_agent_setup(db, registry, vm=vm, name="agent", template=ResolvedAgentTemplate("default"))
-    assert retired is not None and retired.attachments == ()
+    assert retired is not None and retired.activations == ()
 
 
 @pytest.fixture

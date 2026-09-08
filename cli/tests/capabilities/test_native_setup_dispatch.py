@@ -44,7 +44,7 @@ def setup_case(tmp_path, monkeypatch):
         kind="agent",
         name="agent",
         component="agent",
-        attachments=(CapabilityBlock.of("first"), CapabilityBlock.of("second")),
+        activations=(CapabilityBlock.of("first"), CapabilityBlock.of("second")),
         target=SecretTarget(vm={}, agent={}),
     )
     invocation = UserSetupInvocation(
@@ -79,7 +79,7 @@ def test_retirement_follows_desired_order_and_preserves_other_records(setup_case
     run_setup(db, Mock(), inputs, invocation, operation="agent-reinit")
     events.clear()
     run_setup(
-        db, Mock(), replace(inputs, attachments=(CapabilityBlock.of("second"),)), invocation, operation="agent-reinit"
+        db, Mock(), replace(inputs, activations=(CapabilityBlock.of("second"),)), invocation, operation="agent-reinit"
     )
     assert events == [("second", False), ("first", True)]
     assert [record.integration for record in read_native_setup(db, "agent", "agent").records] == ["second"]
@@ -144,4 +144,4 @@ def test_receipts_omit_env_values_but_detect_declaration_changes(setup_case):
             vm={}, agent={"LITERAL": EnvEntry("changed-literal"), "TOKEN": EnvEntry({"secret": "token-name"})}
         ),
     )
-    assert changed.declaration(inputs.attachments[0]) != record.declaration
+    assert changed.declaration(inputs.activations[0]) != record.declaration

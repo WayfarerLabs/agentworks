@@ -340,12 +340,14 @@ class Capability(ABC):
     def config_for(cls, facet: Facet | None = None) -> type[BaseModel] | None:
         """The config model this capability offers.
 
-        Ordinary capabilities share one config across operations and ignore
-        the optional facet. Harness integrations select among the fixed vm,
-        user, workspace, and session facets. Consumers choose the facet;
-        implementations never receive resource kinds as config selectors.
+        A facet is a scoped part of a capability. Ordinary capabilities share
+        one config across operations and ignore the optional facet. Harness
+        integrations currently select among the fixed vm, user, workspace,
+        and session facets. Consumers choose the facet; implementations never
+        receive resource kinds as config selectors.
 
-        Offering no model means a name-only attachment, not a support claim.
+        Offering no model means a name-only integration activation, not a
+        support claim.
         """
         return cls.config_model
 
@@ -376,7 +378,7 @@ class Capability(ABC):
         actually offers rather than to its ``config_model`` declaration.
         ``owner_kind`` can identify the actual config host for a facet; the
         capability kind supplies the ordinary default. Absent config binds a
-        retiring setup attachment only and never derives new defaults.
+        retiring integration activation only and never derives new defaults.
         """
         from agentworks.capabilities.config import config_model_for, validate_own_config
         from agentworks.schema import extract_references, filled_defaults
@@ -391,7 +393,7 @@ class Capability(ABC):
 
             descriptor = descriptor_for_impl(type(self))
             if descriptor is None or not descriptor.config_facets or facet not in ("vm", "user", "workspace"):
-                raise StateError("absent config is reserved for retiring setup attachments")
+                raise StateError("absent config is reserved for retiring integration activations")
             return
         owner = RefOwner(kind=self.owner_kind, name=owner_name)
         model = config_model_for(type(self), facet=facet)

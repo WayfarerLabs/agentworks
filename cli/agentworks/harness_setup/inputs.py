@@ -29,12 +29,12 @@ _FACET: dict[SetupComponent, SetupFacet] = {"vm": "vm", "admin": "user", "agent"
 
 @dataclass(frozen=True)
 class SetupInputs:
-    """Already resolved attachment order and the owning scope's env dictionaries."""
+    """Resolved integration activation order and owning-scope env dictionaries."""
 
     kind: InstanceKind
     name: str
     component: SetupComponent
-    attachments: tuple[CapabilityBlock, ...]
+    activations: tuple[CapabilityBlock, ...]
     target: SecretTarget
 
     @property
@@ -43,14 +43,14 @@ class SetupInputs:
 
     def register(self, resolver: Resolver, registry: Registry) -> None:
         """Join the operation's eager resolution before mutation or log creation."""
-        from agentworks.capabilities.harness_integration.attachments import attachment_references, validate_attachments
+        from agentworks.capabilities.harness_integration.activations import activation_references, validate_activations
 
         source = (self.kind, self.name)
-        validate_attachments(self.attachments, facet=self.facet, source=source, provenance={})
-        for block in self.attachments:
+        validate_activations(self.activations, facet=self.facet, source=source, provenance={})
+        for block in self.activations:
             ensure_harness_integration_enabled(registry, block.name)
         resolver.register_targets([self.target])
-        for reference in attachment_references(self.attachments, facet=self.facet, source=source, provenance={}):
+        for reference in activation_references(self.activations, facet=self.facet, source=source, provenance={}):
             if reference.kind == "secret":
                 resolver.register_name(reference.name)
 

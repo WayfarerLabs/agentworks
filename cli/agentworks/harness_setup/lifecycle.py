@@ -43,9 +43,9 @@ if TYPE_CHECKING:
 
 
 def _needed(
-    db: Database, kind: InstanceKind, name: str, component: SetupComponent, attachments: Sequence[CapabilityBlock]
+    db: Database, kind: InstanceKind, name: str, component: SetupComponent, activations: Sequence[CapabilityBlock]
 ) -> bool:
-    return bool(attachments) or any(item.component == component for item in read_native_setup(db, kind, name).records)
+    return bool(activations) or any(item.component == component for item in read_native_setup(db, kind, name).records)
 
 
 def require_prepared_setup(

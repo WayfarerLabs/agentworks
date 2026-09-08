@@ -57,7 +57,7 @@ def evaluate_setup(
         return result("absent")
     if not record.complete or record.pending_cleanup:
         return result("incomplete", record)
-    block = next((item for item in inputs.attachments if item.name == integration_name), None)
+    block = next((item for item in inputs.activations if item.name == integration_name), None)
     if block is None or inputs.declaration(block) != record.declaration:
         return result("stale", record)
     try:
@@ -122,10 +122,10 @@ def _applicable_evidence(
             kind="vm",
             name=vm.name,
             component="vm",
-            attachments=tuple(vm_template.harness_integrations),
+            activations=tuple(vm_template.harness_integrations),
             target=SecretTarget(vm=vm_template.env),
         )
-        remedy = f"Enable the attachment and run 'agw vm reinit {vm.name}'."
+        remedy = f"Enable the integration activation and run 'agw vm reinit {vm.name}'."
     elif facet == "user":
         if agent_name is None:
             admin = resolve_admin(db, registry, vm.name, vm.admin_template)
@@ -133,11 +133,11 @@ def _applicable_evidence(
                 kind="vm",
                 name=vm.name,
                 component="admin",
-                attachments=tuple(admin.harness_integrations),
+                activations=tuple(admin.harness_integrations),
                 target=SecretTarget(vm=vm_template.env, admin=admin.env),
             )
             username = vm.admin_username
-            remedy = f"Enable the attachment and run 'agw vm reinit {vm.name}'."
+            remedy = f"Enable the integration activation and run 'agw vm reinit {vm.name}'."
         else:
             agent = db.get_agent(agent_name)
             if agent is None or agent.vm_name != vm.name:
@@ -147,11 +147,11 @@ def _applicable_evidence(
                 kind="agent",
                 name=agent.name,
                 component="agent",
-                attachments=tuple(template.harness_integrations),
+                activations=tuple(template.harness_integrations),
                 target=SecretTarget(vm=vm_template.env, agent=template.env),
             )
             username = agent.linux_user
-            remedy = f"Enable the attachment and run 'agw agent reinit {agent.name}'."
+            remedy = f"Enable the integration activation and run 'agw agent reinit {agent.name}'."
         location = f"/home/{username}"
     else:
         if workspace.vm_name != vm.name:
@@ -161,7 +161,7 @@ def _applicable_evidence(
             kind="workspace",
             name=workspace.name,
             component="workspace",
-            attachments=tuple(project.harness_integrations),
+            activations=tuple(project.harness_integrations),
             target=SecretTarget(vm=vm_template.env, workspace=project.env),
         )
         location = workspace.workspace_path

@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from agentworks.agents.template import AgentTemplate
 from agentworks.agents.templates import resolve_from_dict_with_provenance as resolve_agent
 from agentworks.capabilities.descriptor import Facet
-from agentworks.capabilities.harness_integration.attachments import validate_attachments
+from agentworks.capabilities.harness_integration.activations import validate_activations
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
 from agentworks.errors import ConfigError, StateError
 from agentworks.instance_specs import parse_instance_spec, parse_vm_instance_specs
@@ -82,7 +82,7 @@ def test_setup_lists_inherit_replace_clear_and_project(model, resolve, kind, fac
     assert resolve({}, None).value.harness_integrations == []
 
 
-def test_admin_overlay_replaces_its_own_explicit_user_attachments() -> None:
+def test_admin_overlay_replaces_its_own_explicit_user_activations() -> None:
     template = AdminConfig(name="admin", harness_integrations=[CapabilityBlock.of("shell")])
     parsed = parse_vm_instance_specs(None, '{"harness_integrations": []}')
     assert parsed is not None and parsed.admin is not None
@@ -105,7 +105,7 @@ def test_effective_validation_rejects_duplicate_names_and_wrong_facet_fields() -
         [CapabilityBlock.of("shell", command="x")],
     ):
         with pytest.raises(ConfigError):
-            validate_attachments(blocks, facet="vm", source=("vm-template", "vm"), provenance={})
+            validate_activations(blocks, facet="vm", source=("vm-template", "vm"), provenance={})
 
 
 def test_user_config_secrets_retain_declaration_ownership_and_overlay_validation(seated: None) -> None:
@@ -159,7 +159,7 @@ def test_active_empty_setup_is_distinct_from_retirement() -> None:
 
 
 @pytest.mark.parametrize("enabled", [False, True])
-def test_setup_attachment_participates_in_capability_enablement(enabled: bool) -> None:
+def test_setup_activation_participates_in_capability_enablement(enabled: bool) -> None:
     from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled
     from agentworks.capabilities.harness_integration.kinds import HarnessIntegrationEntry
     from agentworks.origin import Origin

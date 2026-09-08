@@ -35,7 +35,7 @@ def effective_references(
     provenance: Mapping[ProvenancePath, tuple[LayerSource, ...]],
 ) -> tuple[ResourceReference, ...]:
     """References required by one effective VM admin declaration."""
-    from agentworks.capabilities.harness_integration.attachments import attachment_references
+    from agentworks.capabilities.harness_integration.activations import activation_references
     from agentworks.resources.reference import ResourceReference as _ResourceReq
     from agentworks.value_provenance import longest_prefix_value
 
@@ -62,7 +62,7 @@ def effective_references(
         for index, name in enumerate(effective.user_install_commands)
     )
     refs.extend(
-        attachment_references(effective.harness_integrations, facet="user", source=source, provenance=provenance)
+        activation_references(effective.harness_integrations, facet="user", source=source, provenance=provenance)
     )
     return tuple(refs)
 
@@ -167,9 +167,9 @@ class AdminConfig(DeclaredResource):
         return list(effective_references(self, ("admin-template", self.name), {}))
 
     def validate_config(self, context: FinalizeContext) -> None:
-        from agentworks.capabilities.harness_integration.attachments import validate_attachments
+        from agentworks.capabilities.harness_integration.activations import validate_activations
 
-        validate_attachments(
+        validate_activations(
             self.harness_integrations,
             facet="user",
             source=("admin-template", self.name),

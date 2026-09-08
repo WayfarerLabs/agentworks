@@ -511,8 +511,9 @@ def offered_model(impl: type, *, facet: Facet | None = None) -> type[BaseModel] 
 
     Read through ``Capability.config_for``, never off ``config_model``
     directly, so a capability that overrides the hook is honored everywhere
-    the framework asks. That is what lets a capability whose methods run at
-    several levels arrive as an ordinary registration.
+    the framework asks. A facet is a scoped part of a capability, which lets
+    one whose methods run at several levels arrive as an ordinary registration.
+    Capabilities without facets retain their one config model.
 
     ``impl`` is a ``Capability`` subclass, which is what the cast says. It
     is NOT necessarily a seated one: most callers read it out of a kind's
@@ -552,8 +553,8 @@ def config_model_for(impl: type, *, facet: Facet | None = None) -> type[BaseMode
     """The selected validation model, including a closed name-only facet.
 
     A registered implementation offering no config is still selectable. Its
-    attachment accepts its literal tag and rejects every other key. Unknown
-    implementations are handled separately by the registry lookup.
+    integration activation accepts its literal tag and rejects every other
+    key. Unknown implementations are handled separately by the registry lookup.
     """
     model = offered_model(impl, facet=facet)
     if model is not None:

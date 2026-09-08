@@ -33,7 +33,7 @@ def effective_references(
     provenance: Mapping[ProvenancePath, tuple[LayerSource, ...]],
 ) -> tuple[ResourceReference, ...]:
     """References required by one effective workspace declaration."""
-    from agentworks.capabilities.harness_integration.attachments import attachment_references
+    from agentworks.capabilities.harness_integration.activations import activation_references
     from agentworks.value_provenance import longest_prefix_value
 
     def owner(key: str) -> tuple[str, str] | None:
@@ -43,7 +43,7 @@ def effective_references(
     by_env = {key: declared_by for key in effective.env if (declared_by := owner(key)) is not None}
     refs: list[ResourceReference] = list(env_references(effective.env, source, by_env))
     refs.extend(
-        attachment_references(effective.harness_integrations, facet="workspace", source=source, provenance=provenance)
+        activation_references(effective.harness_integrations, facet="workspace", source=source, provenance=provenance)
     )
     return tuple(refs)
 
@@ -101,14 +101,14 @@ class WorkspaceTemplate(DeclaredResource):
         return refs
 
     def validate_config(self, context: FinalizeContext) -> None:
-        """Validate the effective native setup attachments for this resource."""
-        from agentworks.capabilities.harness_integration.attachments import validate_attachments
+        """Validate the effective native integration activations for this resource."""
+        from agentworks.capabilities.harness_integration.activations import validate_activations
         from agentworks.workspaces.templates import effective_template_with_provenance
 
         layered = effective_template_with_provenance(
             {**context.rows_of("workspace-template"), self.name: self}, self.name
         )
-        validate_attachments(
+        validate_activations(
             layered.value.harness_integrations,
             facet="workspace",
             source=("workspace-template", self.name),

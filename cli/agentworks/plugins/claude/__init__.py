@@ -24,8 +24,8 @@ Both rows are present-but-disabled until an operator opts in with
 ``shell`` remains the default harness integration, so the common session path is
 unaffected by this migration.
 
-Native marketplaces, plugins, and settings belong to explicit user attachments.
-Workspace attachments map project settings.
+Native marketplaces, plugins, and settings belong to explicit user integration
+activations. Workspace integration activations map project settings.
 """
 
 from __future__ import annotations

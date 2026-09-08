@@ -32,7 +32,10 @@ if TYPE_CHECKING:
 
 
 Facet = Literal["vm", "user", "workspace", "session"]
-"""The fixed levels at which a harness integration offers config."""
+"""A scoped part of a capability, selected by its consuming surface.
+
+The current vocabulary is fixed to vm, user, workspace, and session.
+"""
 
 FACETS: tuple[Facet, ...] = ("vm", "user", "workspace", "session")
 

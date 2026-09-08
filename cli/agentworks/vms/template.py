@@ -38,7 +38,7 @@ def effective_references(
     provenance: Mapping[ProvenancePath, tuple[LayerSource, ...]],
 ) -> tuple[ResourceReference, ...]:
     """References required by one effective VM declaration."""
-    from agentworks.capabilities.harness_integration.attachments import attachment_references
+    from agentworks.capabilities.harness_integration.activations import activation_references
     from agentworks.resources.reference import ResourceReference as _ResourceReq
     from agentworks.value_provenance import longest_prefix_value
 
@@ -76,7 +76,7 @@ def effective_references(
             source_kind=source[0],
         )
     )
-    refs.extend(attachment_references(effective.harness_integrations, facet="vm", source=source, provenance=provenance))
+    refs.extend(activation_references(effective.harness_integrations, facet="vm", source=source, provenance=provenance))
     return tuple(refs)
 
 
@@ -218,12 +218,12 @@ class VMTemplate(DeclaredResource):
         return refs
 
     def validate_config(self, context: FinalizeContext) -> None:
-        """Validate the effective native setup attachments for this resource."""
-        from agentworks.capabilities.harness_integration.attachments import validate_attachments
+        """Validate the effective native integration activations for this resource."""
+        from agentworks.capabilities.harness_integration.activations import validate_activations
         from agentworks.vms.templates import effective_template_with_provenance
 
         layered = effective_template_with_provenance({**context.rows_of("vm-template"), self.name: self}, self.name)
-        validate_attachments(
+        validate_activations(
             layered.value.harness_integrations,
             facet="vm",
             source=("vm-template", self.name),

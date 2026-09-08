@@ -1,4 +1,4 @@
-"""Effective setup attachment validation and dependency projection."""
+"""Effective integration activation validation and dependency projection."""
 
 from __future__ import annotations
 
@@ -21,8 +21,8 @@ if TYPE_CHECKING:
     from agentworks.value_provenance import ProvenancePath
 
 
-def attachment_references(
-    attachments: Sequence[CapabilityBlock],
+def activation_references(
+    activations: Sequence[CapabilityBlock],
     *,
     facet: Facet,
     source: tuple[str, str],
@@ -32,10 +32,10 @@ def attachment_references(
 
     Lists replace as a whole, so each block and its config share the source
     of that list declaration. The index resolves its provenance without
-    losing the order in which attachments are declared.
+    losing the order in which integration activations are declared.
     """
     refs: list[ResourceReference] = []
-    for index, block in enumerate(attachments):
+    for index, block in enumerate(activations):
         layers = longest_prefix_value(provenance, ("harness_integrations", index)) or ()
         declared_by = (layers[-1].resource_kind, layers[-1].name) if layers else None
         refs.append(
@@ -62,21 +62,21 @@ def attachment_references(
     return tuple(refs)
 
 
-def validate_attachments(
-    attachments: Sequence[CapabilityBlock],
+def validate_activations(
+    activations: Sequence[CapabilityBlock],
     *,
     facet: Facet,
     source: tuple[str, str],
     provenance: Mapping[ProvenancePath, tuple[LayerSource, ...]],
     location: SourceLocation | None = None,
 ) -> None:
-    """Validate an effective operator-authored attachment list at finalization.
+    """Validate an effective operator-authored integration activation list at finalization.
 
     Config errors retain the block index and the declaring resource. Unknown
     implementations remain the graph's miss-policy responsibility.
     """
     seen: set[str] = set()
-    for index, block in enumerate(attachments):
+    for index, block in enumerate(activations):
         prefix = ("harness_integrations", index)
         owner = _owner(source, index)
         local: dict[ProvenancePath, RefOwner] = {}
