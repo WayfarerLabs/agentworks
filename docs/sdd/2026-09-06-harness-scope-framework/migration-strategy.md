@@ -1,10 +1,10 @@
 # Harness Facet Migration
 
-- Status: Implementation design in progress
+- Status: Implemented locally; live migration acceptance pending
 - Baseline: `3641ea8c`, 2026-09-07
 - Governing contracts: [FRD](frd.md), [HLA](hla.md), [plan](plan.md)
 
-## Existing surfaces
+## Baseline surfaces
 
 Four first-party integrations currently expose session config through one harness capability. Two
 core setup callers provision Claude marketplaces/plugins: VM admin Phase B and agent initialization.
@@ -64,10 +64,12 @@ without mutating it. Unrelated fields and VM/admin components are retained. A mi
 not overwrite the original record, and unknown future payload versions remain unsupported rather
 than being guessed into this migration.
 
-Tests must cover an overlay defining only marketplaces, only plugins, explicit empty legacy lists, a
-migrated template with additional integrations, and collisions between legacy fields and authored
-new attachments. The implementation must price any case it cannot translate unambiguously before
-removing the existing decode path.
+The finite adapter covers marketplace-only and plugin-only overlays, empty legacy lists, templates
+with other integrations, and old/new collisions. Empty legacy lists append nothing; they do not
+clear inherited entries. Conversion captures the complete effective list, including unrelated
+integrations, under the new replacement semantics. Reinit serializes desired-state changes before
+reading the context and commits automatic conversion only after successful setup. Record-only
+inspection reports migration pending when template context is unavailable.
 
 ## Native ownership
 
