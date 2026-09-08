@@ -5,6 +5,11 @@ settings. The same attachment model serves administrators and agents. Workspace 
 project settings. They do not install workspace plugins. An attachment must be explicitly enabled,
 including when all of its configuration fields use defaults.
 
+Native setup requires `python3` on the VM for guarded file access and atomic publication. Add
+`python3` to the VM template's `apt_packages` and run `vm reinit` before user or workspace setup. A
+missing interpreter is reported before staging or native mutation. The harness CLI itself must also
+be installed through the existing package or install-command configuration.
+
 ## Settings mappings
 
 A `settings` mapping requires a workstation `source` and a `strategy`. The source is a local file
@@ -39,8 +44,10 @@ and refuses malformed existing settings. Repair those settings separately first.
 Serialization preserves values, not comments or formatting. JSON duplicate keys and non-finite
 numbers are rejected. Destinations must be regular files reached without traversing symbolic links.
 Publication uses a private sibling temporary file, checks the observed destination hash, and renames
-atomically. User files are private; workspace files are writable by the workspace group. Permission
-failures do not trigger elevation.
+atomically. Traversal respects search-only ancestors. If the settings change during plugin work
+outside the planned native keys, mapping publication refuses and retains the checkpointed plugin
+prefix for retry. User files are private; workspace files are writable by the workspace group.
+Permission failures do not trigger elevation.
 
 Use non-secret settings sources. Authentication files are not supported settings roles. Captured
 contents and native command output are transferred privately and are not stored in receipts or logs.

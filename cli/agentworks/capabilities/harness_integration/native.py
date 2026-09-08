@@ -117,8 +117,24 @@ class _MappingPlan:
         try:
             before = {} if current is None else parse_settings(current, format=self.prepared.format)
         except ConfigError:
-            # Replacement is permitted to repair an invalid destination.
+            # Replacement can repair the same invalid destination we observed.
+            if current != self.initial:
+                raise StateError("native settings changed during setup; retry against the current file") from None
             before = {}
+        native_paths: set[tuple[str, ...]] = set(removed)
+        for path, value in overlays:
+            if isinstance(value, dict):
+                native_paths.update((*path, key) for key in value)
+            else:
+                native_paths.add(path)
+        if self.initial != current:
+            try:
+                initial = {} if self.initial is None else parse_settings(self.initial, format=self.prepared.format)
+            except ConfigError:
+                raise StateError("native settings changed during setup; retry against the current file") from None
+            changed = _changes(initial, before)
+            if any(not any(path[: len(native)] == native for native in native_paths) for path in changed):
+                raise StateError("native settings changed outside the planned plugin keys; retry setup")
         for key, name in removed:
             _table(document, key).pop(name, None)
         for (key, name), value in overlays:
@@ -132,12 +148,6 @@ class _MappingPlan:
         if content == current:
             return None
         paths = _changes(before, document)
-        native_paths: set[tuple[str, ...]] = set(removed)
-        for path, value in overlays:
-            if isinstance(value, dict):
-                native_paths.update((*path, key) for key in value)
-            else:
-                native_paths.add(path)
         paths = {path for path in paths if not any(path[: len(native)] == native for native in native_paths)}
         files.publish(destination, content, expected=_hash(current), group=group)
         if files.read(destination) != content:

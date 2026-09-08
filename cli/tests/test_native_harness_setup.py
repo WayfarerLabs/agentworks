@@ -487,3 +487,71 @@ def test_codex_missing_marketplace_keeps_unobservable_plugin_cleanup_pending(tra
         setup_user("codex", None, invocation(transport, claims, prior=prior))
     assert len(claims) == count
     assert (transport.home / ".codex/config.toml").read_bytes() == before
+
+
+def test_search_only_ancestor_allows_native_read_and_publication(transport: LocalFixtureTransport) -> None:
+    ancestor = transport.home / "search-only"
+    ancestor.mkdir()
+    destination = ancestor / ".claude/settings.json"
+    destination.parent.mkdir()
+    ancestor.chmod(0o111)
+    try:
+        with NativeFiles(transport) as files:
+            assert files.read(str(destination)) is None
+            files.publish(str(destination), b"{}", expected=None)
+            assert files.read(str(destination)) == b"{}"
+    finally:
+        ancestor.chmod(0o700)
+
+
+def test_missing_guest_python_refuses_before_staging(transport: LocalFixtureTransport, monkeypatch) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    probe = Mock(return_value=SimpleNamespace(ok=False))
+    monkeypatch.setattr(transport, "run", probe)
+    with pytest.raises(StateError) as caught, NativeFiles(transport):
+        pytest.fail("missing prerequisite must stop before staging")
+    assert "python3" in str(caught.value) and "apt_packages" in caught.value.hint
+    assert probe.call_count == 1
+    assert not list((transport.root / "tmp").iterdir())
+
+
+@pytest.mark.parametrize("tool", ["codex", "claude"])
+@pytest.mark.parametrize("inside_plugin", [False, True])
+def test_mapping_refuses_unrelated_changes_during_plugin_install(
+    transport: LocalFixtureTransport, tool: NativeTool, inside_plugin: bool, monkeypatch
+) -> None:
+    from agentworks.capabilities.harness_integration.settings import parse_settings, serialize_settings
+
+    market = market_fixture(transport, tool)
+    format = "toml" if tool == "codex" else "json"
+    destination = transport.home / (".codex/config.toml" if tool == "codex" else ".claude/settings.json")
+    source = transport.root / "mapping"
+    source.write_bytes(serialize_settings({"mapped": True}, format=format))
+    config = NativeUserConfig(
+        marketplaces=[str(market)],
+        plugins=["one@fixture-market"],
+        settings=SettingsMapping(source=str(source), strategy="merge-preserve"),
+    )
+    claims = []
+    original = NativeCLI.install
+
+    def concurrent_edit(self, selector):
+        original(self, selector)
+        document = parse_settings(destination.read_bytes(), format=format)
+        if inside_plugin and tool == "codex":
+            document["plugins"][selector]["external"] = "preserve"
+        else:
+            document["external"] = "preserve"
+        destination.write_bytes(serialize_settings(document, format=format))
+
+    monkeypatch.setattr(NativeCLI, "install", concurrent_edit)
+    with pytest.raises(StateError):
+        setup_user(tool, config, invocation(transport, claims))
+    assert {claim.role for claim in claims[-1]} == {"marketplace", "plugin"}
+    assert b"preserve" in destination.read_bytes()
+    monkeypatch.setattr(NativeCLI, "install", original)
+    setup_user(tool, config, invocation(transport, claims, prior=record(claims[-1], tool)))
+    assert b"preserve" in destination.read_bytes()
+    assert parse_settings(destination.read_bytes(), format=format)["mapped"] is True

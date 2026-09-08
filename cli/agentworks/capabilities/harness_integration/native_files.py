@@ -27,11 +27,12 @@ if not destination.startswith('/') or any(p in ('', '.', '..') for p in parts):
     sys.exit(1)
 if op in ('directory', 'mkdir'):
     parts.append('unused')
-fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
+traverse = getattr(os, 'O_PATH', os.O_RDONLY) | os.O_DIRECTORY | os.O_NOFOLLOW
+fd = os.open('/', traverse)
 try:
     for component in parts[:-1]:
         try:
-            next_fd = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            next_fd = os.open(component, traverse, dir_fd=fd)
         except FileNotFoundError:
             if op in ('read', 'directory'):
                 print(json.dumps({'exists': False}))
@@ -79,7 +80,11 @@ try:
                 output.flush()
                 os.fsync(output.fileno())
             os.replace(name, parts[-1], src_dir_fd=fd, dst_dir_fd=fd)
-            os.fsync(fd)
+            sync_fd = os.open('.', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            try:
+                os.fsync(sync_fd)
+            finally:
+                os.close(sync_fd)
         finally:
             try:
                 os.unlink(name, dir_fd=fd)
@@ -107,6 +112,11 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
         self._counter = 0
 
     def __enter__(self) -> NativeFiles:
+        if not self.runner.run("command -v python3 >/dev/null", check=False, discard_output=True).ok:
+            raise StateError(
+                "native harness setup requires python3 on the VM",
+                hint="Add python3 to the VM template's apt_packages and run vm reinit before retrying setup.",
+            )
         result = self.runner.run("mktemp -d -t agentworks-native-XXXXXXXXXX", check=False)
         if not result.ok or not PurePosixPath(result.stdout.strip()).name.startswith("agentworks-native-"):
             raise ExternalError("could not create native setup staging directory")
