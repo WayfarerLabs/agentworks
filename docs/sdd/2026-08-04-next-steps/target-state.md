@@ -380,9 +380,11 @@ accumulated ancestor env, but only the artifact payloads still deferred for its 
 resource path; anything already handled upstream does not reach it. Agent artifacts are three typed
 kinds, hint, rule, and skill, on a reduced Rulesync model, with native placement at the defining
 scope as the ordinary case. An integration returns what it defers, with a reason for each, and
-omission from a successful result means handled; there is no separate acknowledgment ledger. Core
-enforces the contract at one point only: any entry still deferred at the session facet is a typed
-error before launch. Core attaches immutable origin metadata (owning scope, resource identity,
+omission from a successful result means handled; there is no separate acknowledgment ledger. An
+entry still deferred at the session facet must receive an explicit disposition; silent loss is never
+one. Whether it blocks launch or is treated another way is deliberately open (operator, 2026-09-07)
+and belongs to the artifacts successor SDD, which supersedes the earlier single-enforcement-point
+wording recorded here. Core attaches immutable origin metadata (owning scope, resource identity,
 producer), and a facet is derived from core's fixed mapping rather than authored as a second origin.
 Limited hooks and MCP server configurations are recognized as future artifact kinds this delivery
 model must not foreclose. This ruling supersedes the earlier wording, here and in

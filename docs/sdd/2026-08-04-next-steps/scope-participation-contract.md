@@ -116,16 +116,19 @@ integration at start. **Correction, 2026-09-06:** this originally said the sessi
 everything, artifacts included. It does not. Artifact payloads already handled upstream for that
 integration and resource path do not reach the session-facet invocation; each invocation receives
 local artifacts plus only the applicable inherited artifacts still deferred for it. An integration
-returns the artifacts it defers, with a reason for each, and any entry still deferred at the session
-facet is a typed core error before launch rather than something the session hoists. The integration
-owns representation. Env is naturally process-scoped. Content that cannot be represented at its own
-scope is hoisted into the session, and the integration decides placement using its harness knowledge
-(for example, session-scoped artifacts under a harness-specific workspace path keyed by
-`session_uuid`), including deduplication and double-provisioning avoidance. Hoisting is isolation,
-not security: other sessions being able to see user-scope artifacts is expected; the integration's
-job is that hoisted material only takes effect for its own workload. Session-scope env and artifacts
-come from the session template's own declarations; there is deliberately no session-feature
-initially (one gets added only if real pressure emerges).
+returns the artifacts it defers, with a reason for each, and an entry still deferred at the session
+facet is not something the session silently hoists. **Correction, 2026-09-08:** this originally said
+such an entry is a typed core error before launch. The operator has reopened that policy; whether an
+unresolved session entry blocks launch or receives another explicit treatment is for the artifacts
+successor SDD to settle. Silent loss is not among the options. The integration owns representation.
+Env is naturally process-scoped. Content that cannot be represented at its own scope is hoisted into
+the session, and the integration decides placement using its harness knowledge (for example,
+session-scoped artifacts under a harness-specific workspace path keyed by `session_uuid`), including
+deduplication and double-provisioning avoidance. Hoisting is isolation, not security: other sessions
+being able to see user-scope artifacts is expected; the integration's job is that hoisted material
+only takes effect for its own workload. Session-scope env and artifacts come from the session
+template's own declarations; there is deliberately no session-feature initially (one gets added only
+if real pressure emerges).
 
 ### Artifact conduct
 
