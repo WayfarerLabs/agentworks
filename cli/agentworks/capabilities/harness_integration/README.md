@@ -199,8 +199,9 @@ The capability ladder, harness-integration edition:
   `spec.harness_integration` is one tagged table whose `name` key selects the integration and whose
   remaining keys are that integration's config, which is the only accepted shape; the
   operator-facing view is in `docs/guides/resources.md`) and, at runtime, the session node that
-  holds the instance. VM, admin, agent, and workspace templates host ordered setup activations;
-  their owning lifecycles construct separate instances bound to the corresponding facet.
+  holds the instance. VM, admin, agent, and workspace templates host ordered integration
+  activations; their owning lifecycles construct separate instances bound to the corresponding
+  facet.
 
 Layering is a hard rule: this package imports neither `sessions/` nor `orchestration/` (the `target`
 type is a local `Protocol` for exactly this reason), and `test_shell_integration.py` asserts it. An
@@ -242,8 +243,8 @@ scoped part of a capability, a term that can apply beyond harness integrations. 
 enablement and the VM power-state activation gate remain separate concepts.
 
 `HarnessIntegration.for_setup(owner_kind=..., owner_name=..., facet=..., config=...)` binds one
-setup activation without session identity or conversation state. The instance's owner identifies its
-config and secret references. A removed activation binds with `config=None`, exposes
+integration activation without session identity or conversation state. The instance's owner
+identifies its config and secret references. A removed activation binds with `config=None`, exposes
 `retiring=True`, and refuses config access instead of synthesizing new defaults. Active setup with
 `{}` still selects the integration's defaults or its name-only config.
 

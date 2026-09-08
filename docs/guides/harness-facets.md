@@ -65,7 +65,7 @@ A session template selects exactly one integration through singular `harness_int
 effective template must select one or inherit a selection. The built-in `default` session template
 explicitly selects `shell`; an unrelated template with no selection is invalid.
 
-Setup activation lists use complete replacement:
+Integration activation lists use complete replacement:
 
 - Omit `harness_integrations` to inherit the effective list.
 - Supply a list to replace the complete inherited list, including each entry's config.
@@ -88,10 +88,10 @@ spec:
 
 Session selection has its existing tagged-object merge semantics: restating the same name merges
 session config according to its model; selecting a different name starts that integration's config
-anew. Setup activation config never rolls into a session's config, even when both name the same
-integration. Each host validates its own facet. Claude and Codex user facets accept settings,
-marketplaces, and plugins; their workspace facets accept settings. VM facets and the shell/Grok
-setup facets currently accept name-only entries and perform no native writes.
+anew. Config for integration activations at setup scopes never rolls into a session's config, even
+when both name the same integration. Each host validates its own facet. Claude and Codex user facets
+accept settings, marketplaces, and plugins; their workspace facets accept settings. VM facets and
+the shell/Grok setup facets currently accept name-only entries and perform no native writes.
 
 For separate project settings, select both workspace facets and give each its own workstation
 source. Create these source documents before workspace creation; this declaration does not change

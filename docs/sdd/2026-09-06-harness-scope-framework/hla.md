@@ -239,7 +239,7 @@ config; it does not implicitly activate or run a user facet.
 For example, these proposed manifests put plugin setup on the user, native project settings on the
 workspace, and workload policy on the session. The marketplace and plugin names are illustrative
 operator-owned values; plugin enablement and the ordinary VM/workspace selection still apply. These
-new setup activation fields become valid when this effort implements them.
+new integration activation fields on setup resources become valid when this effort implements them.
 
 ```yaml
 apiVersion: agentworks/v1
@@ -319,14 +319,15 @@ approval_policy: on-request
 name: grok-build
 permission_mode: default
 ---
-# Explicit shell selection needs no plugin or setup activation; defaults launch a login shell.
+# Explicit shell selection needs no plugin or broader integration activation; defaults launch a login shell.
 name: shell
 ```
 
-Absent setup activations do not by themselves prevent these sessions from launching. Each checks its
-executable and any upstream prerequisite the integration declares. Name-only shell or Grok setup
-calls remain no-ops, and the explicit default shell retains its ordinary launch behavior. No
-artifact input, deferral result, shell discovery variable, or artifact cleanup method is introduced.
+Absent integration activations at setup scopes do not by themselves prevent these sessions from
+launching. Each checks its executable and any upstream prerequisite the integration declares.
+Name-only shell or Grok setup calls remain no-ops, and the explicit default shell retains its
+ordinary launch behavior. No artifact input, deferral result, shell discovery variable, or artifact
+cleanup method is introduced.
 
 ## Same config shape, separate native scopes
 

@@ -99,11 +99,11 @@ and refuse invalid selection before tearing down an existing runtime.
 
 ## Order and evidence
 
-Complete the internal facet selector/schema plumbing first. Expose setup activation fields only when
-their owning lifecycle invokes them. Cut over the two Claude callers and legacy fields alongside
-native reconciliation, persisted-overlay handling and updated collateral. Do not claim migration
-complete until the real CLI has exercised existing stored overlays and native conflicts, as well as
-newly created resources.
+Complete the internal facet selector/schema plumbing first. Expose integration activation fields on
+setup resources only when their owning lifecycle invokes them. Cut over the two Claude callers and
+legacy fields alongside native reconciliation, persisted-overlay handling and updated collateral. Do
+not claim migration complete until the real CLI has exercised existing stored overlays and native
+conflicts, as well as newly created resources.
 
 Database automatic backups retain their existing safeguards. Native receipt export/round-trip and
 database restore tests are required; this effort introduces no VM restore workflow. Preserve

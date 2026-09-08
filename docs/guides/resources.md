@@ -332,8 +332,8 @@ and safe cleanup behavior.
 
 ## Harness integrations
 
-See [harness facets](harness-facets.md) for VM, user, and workspace setup activations, explicit
-selection, ownership, and session prerequisites.
+See [harness facets](harness-facets.md) for VM, user, and workspace integration activations,
+explicit selection, ownership, and session prerequisites.
 
 What a session runs is declared as a **harness integration**: the Agentworks capability (registered
 code) that knows how a particular harness or shell is started, restarted, and what executables it
