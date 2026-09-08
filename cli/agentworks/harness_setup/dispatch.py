@@ -8,6 +8,8 @@ import shlex
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from pydantic import ValidationError
+
 from agentworks import output
 from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled, harness_integration_for
 from agentworks.capabilities.harness_integration.setup import (
@@ -143,7 +145,10 @@ def run_setup(
             def checkpoint(claims: tuple[NativeClaim, ...]) -> None:
                 nonlocal current, state
                 # Plugin output crosses the registered capability boundary.
-                current = SetupRecord.model_validate({**current.model_dump(), "claims": claims})
+                try:
+                    current = SetupRecord.model_validate({**current.model_dump(), "claims": claims})
+                except ValidationError:
+                    raise StateError("integration returned malformed native claim metadata") from None
                 state = replace_setup_record(state, current)
                 persist(state)
 

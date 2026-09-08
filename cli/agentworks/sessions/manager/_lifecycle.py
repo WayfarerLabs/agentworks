@@ -713,6 +713,17 @@ def _launch_existing_session(
             agent_target=None if is_admin else session_target,
             secrets=ScopedSecrets(graph_secret_values, session_node.secret_refs()),
         )
+        from agentworks.harness_setup.readiness import require_setup_ready
+
+        require_setup_ready(
+            db,
+            registry,
+            session_node.harness_integration,
+            vm=vm,
+            workspace=ws,
+            agent_name=session.agent_name,
+            runner=session_target,
+        )
         harness_start = require_implemented_start(
             session_node.harness_integration.start(start_ctx, intent=intent),
             intent=intent,

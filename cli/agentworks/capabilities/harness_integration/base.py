@@ -38,6 +38,8 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
     from agentworks.capabilities.descriptor import Facet
     from agentworks.capabilities.harness_integration.setup import (
+        SetupGap,
+        SetupReadiness,
         UserSetupInvocation,
         VMSetupInvocation,
         WorkspaceSetupInvocation,
@@ -304,6 +306,16 @@ class HarnessIntegration(Capability):
 
     def workspace_init(self, invocation: WorkspaceSetupInvocation) -> None:
         """Default workspace setup has no native effects or ownership claims."""
+
+    def check_setup(self, evidence: SetupReadiness) -> tuple[SetupGap, ...]:
+        """Report upstream prerequisites without changing their native setup.
+
+        The default preserves session-only use. An integration may use current
+        evidence and inexpensive native probes to require or recommend setup
+        for the session's actual user, workspace or VM.
+        """
+        _ = self._session_binding
+        return ()
 
     @property
     def _session_binding(self) -> SessionBinding:

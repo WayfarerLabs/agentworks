@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from agentworks.db import VMRow
-    from agentworks.harness_setup.model import NativeClaim, SetupRecord
+    from agentworks.harness_setup.model import NativeClaim, SetupFacet, SetupRecord
     from agentworks.transports import Transport
 
 
@@ -50,3 +50,56 @@ class WorkspaceSetupInvocation(SetupInvocation):
     workspace_name: str
     root: str
     linux_group: str
+
+
+type SetupStatus = Literal["absent", "incomplete", "stale", "unavailable", "current"]
+
+
+@dataclass(frozen=True)
+class SetupEvidence:
+    """Read-only current setup evidence for one applicable owning resource."""
+
+    status: SetupStatus
+    owner_kind: str
+    owner_name: str
+    remediation: str
+    record: SetupRecord | None = None
+
+    @property
+    def current(self) -> bool:
+        return self.status == "current"
+
+
+@dataclass(frozen=True)
+class SetupGap:
+    """A consuming integration chooses severity and explains its prerequisite."""
+
+    evidence: SetupEvidence
+    severity: Literal["required", "recommended"]
+    reason: str
+
+
+@dataclass
+class SetupReadiness:
+    """Load only requested ancestor facts, cached for this readiness invocation."""
+
+    lookup: Callable[[SetupFacet], SetupEvidence] = field(repr=False)
+    runner: Transport
+    _cache: dict[SetupFacet, SetupEvidence] = field(default_factory=dict, init=False, repr=False)
+
+    def _get(self, facet: SetupFacet) -> SetupEvidence:
+        if facet not in self._cache:
+            self._cache[facet] = self.lookup(facet)
+        return self._cache[facet]
+
+    @property
+    def vm(self) -> SetupEvidence:
+        return self._get("vm")
+
+    @property
+    def user(self) -> SetupEvidence:
+        return self._get("user")
+
+    @property
+    def workspace(self) -> SetupEvidence:
+        return self._get("workspace")
