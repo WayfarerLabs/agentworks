@@ -449,3 +449,76 @@ def test_windows_allows_backup_with_only_nonsecret_applied_state(
     manifest = loads((destination / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["instance_spec_count"] == 0
     assert manifest["applied_state_count"] == 1
+
+
+def test_native_setup_export_and_database_restore_preserve_owner_tree(db, tmp_path, monkeypatch):
+    from agentworks.db import AppliedStateSlice, Database, create_manual_backup, restore_backup
+    from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
+    from agentworks.harness_setup.state import decode_native_setup, read_native_setup, write_native_setup
+
+    db.insert_vm("bvm", site="lima-local", hostname="bvm")
+    db.update_vm_tailscale("bvm", "100.64.0.8")
+    db.insert_agent("a", "bvm", "agt-a")
+    db.insert_workspace("w", "/work/w", "bvm", "aw-w")
+    db.insert_vm("other", site="lima-local", hostname="other")
+    expected = {}
+    for kind, name, components in (
+        ("vm", "bvm", ("vm", "admin")),
+        ("agent", "a", ("agent",)),
+        ("workspace", "w", ("workspace",)),
+        ("vm", "other", ("vm",)),
+    ):
+        state = NativeSetupState(
+            records=tuple(
+                SetupRecord(
+                    component=component,
+                    integration="shell",
+                    destination_id="a" * 64,
+                    declaration={"config": {"name": "shell"}},
+                    complete=True,
+                    claims=(NativeClaim(role="settings", identifier="native", destination=f"/{name}"),),
+                )
+                for component in components
+            )
+        )
+        write_native_setup(db, kind, name, state, operation="fixture")
+        if name != "other":
+            expected[kind, name] = state
+    _install_metadata_only_backup_fakes(monkeypatch)
+
+    class MetadataTarget:
+        def run(self, *args, **kwargs):
+            return SimpleNamespace(ok=False, stdout="", returncode=1)
+
+    target = MetadataTarget()
+    monkeypatch.setattr("agentworks.transports.SSHTransport", MetadataTarget)
+    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
+    monkeypatch.setattr(vm_backup, "_archive_workspaces", lambda *a: ([], []))
+    destination = vm_backup.backup_vm(
+        db,
+        SimpleNamespace(paths=SimpleNamespace(backups=tmp_path / "exports")),
+        "bvm",
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+    exported = loads((destination / "instance-applied-state.json").read_text())
+    decoded = {}
+    for value in exported:
+        record = AppliedStateSlice(
+            value["instance_kind"],
+            value["instance_name"],
+            AppliedStateKey(value["key"]),
+            VersionedPayload(value["payload_version"], value["value"]),
+            value["operation"],
+            value["recorded_at"],
+        )
+        decoded[record.instance_kind, record.instance_name] = decode_native_setup(record)
+    assert decoded == expected
+
+    snapshot = create_manual_backup(db.path)
+    restored_path = tmp_path / "restored.db"
+    restore_backup(snapshot, restored_path)
+    restored = Database(restored_path)
+    try:
+        assert {(kind, name): read_native_setup(restored, kind, name) for kind, name in expected} == expected
+    finally:
+        restored.close()

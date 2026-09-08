@@ -182,7 +182,7 @@ def test_unknown_enabled_name_raises_config_error_before_any_publish(monkeypatch
     plugin = _fixture_plugin()
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
     with seated_plugin(plugin):
-        registry = registry_with_shell()
+        registry = Registry.empty()
         # Two unknowns plus the real one: the error lists ALL unknowns and is
         # raised (a single typed ConfigError, never a KeyError) before any add.
         with pytest.raises(ConfigError) as exc:
