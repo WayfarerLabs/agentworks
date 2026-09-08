@@ -650,8 +650,16 @@ Merged work the ledger owes a line, recorded from the merges themselves.
   sanctioned exception, so the 2026-09-04 lock held. This is an addendum to that effort, not a fifth
   effort in the reconstruction below.
 
-Not recorded yet, because their PRs are open and merged PRs are this ledger's truth source: wave 4's
-pickup by an effort lead (PR #761) and the artifact-delivery reconciliation (PR #765).
+- **Artifact delivery reconciled** (PR #765, merged 2026-09-08). `target-state.md` and
+  `scope-participation-contract.md` now carry the 2026-09-06 artifact-delivery and
+  explicit-enablement rulings, corrected in place. The single-enforcement-point rule they originally
+  recorded is gone: the operator reopened whether an artifact entry still deferred at the session
+  facet blocks launch, and the artifacts successor SDD settles it. What survives is that such an
+  entry receives an explicit disposition and that silent loss is never one.
+
+Not recorded yet, because its PR is open and merged PRs are this ledger's truth source: wave 4's
+pickup by an effort lead (PR #761), which now carries its implementation as well as its design after
+PR #780 was closed unmerged and consolidated into it.
 
 ### Efforts that ran without ledger entries (reconstructed 2026-09-06)
 
