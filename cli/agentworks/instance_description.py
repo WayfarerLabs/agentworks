@@ -300,7 +300,9 @@ def single_declaration_instance_state[T: BaseModel, R](
                 )
             )
 
-    return InstanceStateDescription(
+    from agentworks.harness_setup.inspection import include_native_setup
+
+    state = InstanceStateDescription(
         declarations=(
             DeclarationSlot(
                 instance_kind,
@@ -312,6 +314,8 @@ def single_declaration_instance_state[T: BaseModel, R](
         unconsumed_records=unconsumed,
         issues=tuple(issues),
     )
+
+    return include_native_setup(state, inspection)
 
 
 def instance_state_data(state: InstanceStateDescription) -> JsonObject:

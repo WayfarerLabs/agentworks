@@ -1002,7 +1002,9 @@ def _vm_instance_state(
         unconsumed_records=tuple(unconsumed_facts),
         issues=tuple(issues),
     )
-    return state, ssh_applied
+    from agentworks.harness_setup.inspection import include_native_setup
+
+    return include_native_setup(state, inspection), ssh_applied
 
 
 def _add_current_ssh_comparison(
