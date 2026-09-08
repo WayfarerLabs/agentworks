@@ -426,24 +426,29 @@ def delete_agent_on_vm(
 
     target = transport(vm, config, logger=logger)
 
-    try:
-        # Kill any running processes for the user. This also frees any live
-        # tmux sockets under the per-agent socket dir removed next.
-        target.run(f"pkill -u {linux_user}", sudo=True, check=False)
-        # Remove the per-agent tmux socket directory (created by
-        # ``ensure_agent_socket_dir`` at create time). It lives on tmpfs
-        # under /run, is owned by the agent uid, and would otherwise linger
-        # until reboot. Done BEFORE userdel and best-effort (check=False) so
-        # that a userdel failure (e.g. exit 12, home or mail-spool cleanup)
-        # cannot skip it and re-orphan the dir under the freed uid. The dir
-        # is separate from the home directory userdel removes, and the
-        # sockets are already dead from the pkill above, so this ordering is
-        # safe.
-        target.run(f"rm -rf {shlex.quote(agent_socket_dir(linux_user))}", sudo=True, check=False)
-        # Remove the user and their home directory
+    account = target.run(f"getent passwd {shlex.quote(linux_user)}", sudo=True, check=False)
+    if account.returncode == 2:
+        home = shlex.quote(f"/home/{linux_user}")
+        target.run(f"test ! -e {home} && test ! -L {home}", sudo=True)
+    elif not account.ok:
+        raise SSHError("could not establish agent account ownership before deletion")
+
+    # Kill any running processes for the user. This also frees any live
+    # tmux sockets under the per-agent socket dir removed next.
+    target.run(f"pkill -u {linux_user}", sudo=True, check=False)
+    # Remove the per-agent tmux socket directory (created by
+    # ``ensure_agent_socket_dir`` at create time). It lives on tmpfs
+    # under /run, is owned by the agent uid, and would otherwise linger
+    # until reboot. Done BEFORE userdel and best-effort (check=False) so
+    # that a userdel failure (e.g. exit 12, home or mail-spool cleanup)
+    # cannot skip it and re-orphan the dir under the freed uid. The dir
+    # is separate from the home directory userdel removes, and the
+    # sockets are already dead from the pkill above, so this ordering is
+    # safe.
+    target.run(f"rm -rf {shlex.quote(agent_socket_dir(linux_user))}", sudo=True, check=False)
+    # Remove the user and their home directory
+    if account.ok:
         target.run(f"userdel -r {linux_user}", sudo=True)
-    except SSHError as e:
-        output.warn(f"remote cleanup for '{linux_user}' failed: {e}")
 
 
 def _run_agent_install_commands(

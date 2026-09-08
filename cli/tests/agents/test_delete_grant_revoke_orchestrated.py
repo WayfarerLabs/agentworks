@@ -577,17 +577,16 @@ def test_delete_socket_dir_runs_even_when_userdel_fails(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
-    captured_output: CapturedOutput,
 ) -> None:
     """Regression (#296): a failing ``userdel`` must not skip the socket-dir
     removal. ``userdel`` runs checked, so on failure it raises; because the
     ``rm`` now runs BEFORE it, the socket dir is already cleaned and does not
-    re-orphan under the freed uid. The delete still warns rather than aborts."""
+    re-orphan under the freed uid. The failure propagates so the owning manager retains its row."""
     import shlex
 
     from agentworks.agents import initializer as agent_initializer
     from agentworks.sessions.tmux import agent_socket_dir
-    from agentworks.ssh import SSHLogger
+    from agentworks.ssh import SSHError, SSHLogger
 
     config = make_config()
     _seed(db)
@@ -598,12 +597,13 @@ def test_delete_socket_dir_runs_even_when_userdel_fails(
     fake = _KwargRecordingTarget(fail_substr="userdel")
     monkeypatch.setattr(agent_initializer, "transport", lambda *a, **k: fake)
 
-    agent_initializer.delete_agent_on_vm(
-        vm,
-        config,
-        "agt-a1",
-        logger=SSHLogger("box", "test-delete-socket-userdel-fail"),
-    )
+    with pytest.raises(SSHError):
+        agent_initializer.delete_agent_on_vm(
+            vm,
+            config,
+            "agt-a1",
+            logger=SSHLogger("box", "test-delete-socket-userdel-fail"),
+        )
 
     expected_path = shlex.quote(agent_socket_dir("agt-a1"))
     commands = [cmd for cmd, _k in fake.calls]
@@ -612,7 +612,6 @@ def test_delete_socket_dir_runs_even_when_userdel_fails(
     rm_idx = commands.index(f"rm -rf {expected_path}")
     userdel_idx = next(i for i, c in enumerate(commands) if c.startswith("userdel -r agt-a1"))
     assert rm_idx < userdel_idx
-    assert any("remote cleanup for 'agt-a1' failed" in w for w in captured_output.warnings)
 
 
 def test_delete_nested_platform_path_reuses_the_callers_composition(

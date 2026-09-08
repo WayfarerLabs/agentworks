@@ -194,22 +194,20 @@ def delete_vm_workspace(
     caller has removed the agent members; ``groupdel`` removes the group
     regardless of remaining supplementary members (the admin's included).
     """
-    from agentworks.ssh import SSHError
+
+    import shlex
 
     assert vm.tailscale_host is not None
     target = transport(vm, config, logger=logger)
 
-    try:
-        target.run(f"rm -rf {workspace_path}", sudo=True, timeout=30)
-        session = console_session_name(ws_name)
-        target.run(f"rm -f ~/.config/tmuxinator/{session}.yml", check=False, timeout=10)
-        # Remove the workspace's Linux group. check=False so a group that
-        # is already gone (or, defensively, one groupdel refuses to remove)
-        # is tolerated rather than failing the delete, mirroring the
-        # best-effort group-membership teardown in agents/grants.py.
-        target.run(f"/usr/sbin/groupdel {linux_group}", sudo=True, check=False, timeout=10)
-    except SSHError as e:
-        output.warn(f"remote cleanup failed: {e}")
+    target.run(f"rm -rf {shlex.quote(workspace_path)}", sudo=True, timeout=30)
+    session = console_session_name(ws_name)
+    target.run(f"rm -f ~/.config/tmuxinator/{session}.yml", check=False, timeout=10)
+    # Remove the workspace's Linux group. check=False so a group that
+    # is already gone (or, defensively, one groupdel refuses to remove)
+    # is tolerated rather than failing the delete, mirroring the
+    # best-effort group-membership teardown in agents/grants.py.
+    target.run(f"/usr/sbin/groupdel {linux_group}", sudo=True, check=False, timeout=10)
 
 
 def generate_vscode_workspace(

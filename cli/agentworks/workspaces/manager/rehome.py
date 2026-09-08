@@ -73,44 +73,50 @@ def rehome_workspace(
             entity_name=name,
         )
 
-    # Block unless all sessions are STOPPED
-    from agentworks.db import PID_STOPPED, SessionStatus
-    from agentworks.sessions.manager import ensure_pids_batch, observe_session_statuses
+    from agentworks.harness_setup.lifecycle import require_workspace_rehome_supported
+    from agentworks.harness_setup.locking import native_mutation_guard
 
-    sessions = db.list_sessions(workspace_name=name)
-    if sessions:
-        try:
-            sessions = ensure_pids_batch(sessions, db=db, config=config)
-            status_map = observe_session_statuses(sessions, db=db, config=config)
-        except Exception as exc:
-            raise ExternalError(
-                f"cannot verify session status for workspace '{name}' (VM may be unreachable): {exc}",
-                entity_kind="workspace",
-                entity_name=name,
-            ) from exc
-        not_stopped = [
-            s
-            for s in sessions
-            if s.pid != PID_STOPPED and status_map.get(s.name, SessionStatus.UNKNOWN) != SessionStatus.STOPPED
-        ]
-        if not_stopped:
-            names = ", ".join(s.name for s in not_stopped)
-            raise StateError(
-                f"workspace '{name}' has {len(not_stopped)} non-stopped session(s) ({names}).",
-                entity_kind="workspace",
-                entity_name=name,
-                hint="Stop or delete the listed sessions first.",
-            )
+    require_workspace_rehome_supported(db, name)
+    with native_mutation_guard(db.path, ws.vm_name):
+        require_workspace_rehome_supported(db, name)
+        # Block unless all sessions are STOPPED
+        from agentworks.db import PID_STOPPED, SessionStatus
+        from agentworks.sessions.manager import ensure_pids_batch, observe_session_statuses
 
-    _rehome_vm(
-        db,
-        config,
-        ws,
-        new_path,
-        remove_old=remove_old,
-        yes=yes,
-        interaction=interaction,
-    )
+        sessions = db.list_sessions(workspace_name=name)
+        if sessions:
+            try:
+                sessions = ensure_pids_batch(sessions, db=db, config=config)
+                status_map = observe_session_statuses(sessions, db=db, config=config)
+            except Exception as exc:
+                raise ExternalError(
+                    f"cannot verify session status for workspace '{name}' (VM may be unreachable): {exc}",
+                    entity_kind="workspace",
+                    entity_name=name,
+                ) from exc
+            not_stopped = [
+                s
+                for s in sessions
+                if s.pid != PID_STOPPED and status_map.get(s.name, SessionStatus.UNKNOWN) != SessionStatus.STOPPED
+            ]
+            if not_stopped:
+                names = ", ".join(s.name for s in not_stopped)
+                raise StateError(
+                    f"workspace '{name}' has {len(not_stopped)} non-stopped session(s) ({names}).",
+                    entity_kind="workspace",
+                    entity_name=name,
+                    hint="Stop or delete the listed sessions first.",
+                )
+
+        _rehome_vm(
+            db,
+            config,
+            ws,
+            new_path,
+            remove_old=remove_old,
+            yes=yes,
+            interaction=interaction,
+        )
 
 
 def _rehome_vm(

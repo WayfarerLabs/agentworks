@@ -110,3 +110,31 @@ and
 [marketplace commands](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/cli/src/marketplace_cmd.rs).
 Native command success is always followed by a fresh observation; unexpected identity payloads
 refuse mutation instead of being interpreted as empty inventory.
+
+## Deleting owning resources
+
+Agent and workspace deletion first retires recorded native claims with no desired setup config. It
+does not reapply current template settings, resolve setup secrets, or install missing plugins.
+Settings mappings relinquish their claims while retaining the document; successful deletion of the
+user home or workspace directory subsequently removes that document with its owner.
+
+Unavailable integrations, changed destinations, interrupted cleanup, and remaining owned claims
+prevent owner deletion. Agentworks keeps the owner and the latest confirmed claim prefix for retry.
+An orphaned workspace with native receipts likewise requires recovery of its VM before deletion.
+Native user or directory removal failures propagate instead of discarding the corresponding database
+row. A missing agent account is treated as removed only when its home is also absent.
+
+A successful platform VM deletion removes guest-native effects with the VM and clears its family's
+instance records in the existing database cascade. If platform binding or deletion fails, recorded
+native evidence keeps the VM and child owners available for recovery. Ordinary cleanup of a broken
+VM with no native setup evidence retains its existing behavior.
+
+VM, agent, and workspace deletion use the same VM-family mutation guard as setup. A competing
+mutation refuses immediately with retry guidance, and nested removal can share its caller's held
+guard. This also covers workspace cleanup when the VM row is missing.
+
+Rehome changes a workspace's directory on its current VM and holds that VM's guard across the move.
+It refuses a workspace with native setup receipts before probing sessions or changing files;
+relocating receipts has no supported contract. Preserve the contents, delete the old workspace with
+its integration cleanup, and recreate at the new location. Workspaces without native receipts retain
+the existing rehome behavior.
