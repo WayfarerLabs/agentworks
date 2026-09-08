@@ -33,31 +33,24 @@ At source baseline `3641ea8c0cbc7c6389535099b9678932aa972f66`:
 - batch start and restart remain serial orchestration with interaction and shared-file mutation.
 
 PR #764 is a prerequisite. Its database-use sidecar gives every writable `Database` a shared
-lifetime lock and gives restore an exclusive replacement lock. The session-runtime lock introduced
-here complements that boundary rather than replacing or duplicating it.
+lifetime lock and gives restore an exclusive replacement lock. This effort retains that boundary and
+adds no second lock.
 
 ## Cutover Sequence
 
-### 1. Add lifecycle exclusion and state fencing
+### 1. Add state fencing and eligibility
 
-Generalize the existing SQLite sidecar migration lock into one session-runtime mutation lock and add
-atomic runtime compare-and-set. Route absent/version-zero initialization, migration, and every
-session runtime mutator through that boundary before introducing worker threads. Preserve PR #764's
-separate database-use lock as the restore exclusion boundary. Initialization rechecks absence under
-the session-runtime lock. After lifecycle acquisition, reload named or filtered session rows and
-their relationships before deriving status or teardown plans. Add affected-VM socket and partial or
-complete boot/PID collision gates. The generalized helper creates a missing database parent with the
-existing owner-private policy before opening the sidecar, preserving first-open support for an
-absent destination.
+Add atomic stopped-state compare-and-set for a complete prepared runtime identity. Partition
+selected rows after the current gates: only validated dedicated rows with complete fingerprints are
+eligible for concurrency. Missing-fingerprint dedicated rows and legacy rows remain serial. Refuse
+duplicate socket or complete process identities among concurrent plans before submission.
 
 ### 2. Extract value-based dedicated teardown
 
-Introduce immutable dedicated plan, probe, execution, and outcome values that reuse the existing
-tmux fingerprint. Split database preparation, pre-kill fingerprint checkpoint, and final
-reconciliation from remote execution while preserving the current synchronous dispatcher and
-untouched legacy helper. Move all existing dedicated callers through that dispatcher before
-introducing parallelism. A reachable destructive phase cannot begin until any newly learned start
-ticks are durable.
+Introduce one immutable complete-fingerprint dedicated plan. Extract the database-free remote phase
+from the current dispatcher and keep SQLite reconciliation on the invoking thread. Preserve the
+incomplete dedicated branch's current pre-kill start-ticks persistence and the untouched legacy
+helper.
 
 At this point behavior remains serial. Existing teardown regression tests must be green.
 
@@ -69,10 +62,9 @@ lock. Keep named and cascading transports unchanged.
 
 ### 4. Add the dedicated concurrent lane
 
-Submit prepared dedicated probes to the fixed worker pool. Consume each probe in completion order,
-checkpoint any fingerprint refinement on the invoking thread, and only then submit that session's
-destructive phase. Reconcile teardown results on the invoking thread. Run legacy rows through the
-existing synchronous helper afterward.
+Submit each complete-fingerprint plan once to the fixed worker pool. Consume futures in completion
+order and compare-and-set successful stopped state on the invoking thread. Run incomplete dedicated
+and legacy rows through the existing synchronous dispatcher afterward.
 
 ### 5. Add interruption reconciliation and heartbeat
 
@@ -115,8 +107,8 @@ exit before changing versions.
 The database may contain dedicated and legacy rows together. The implementation does not perform a
 bulk migration:
 
-- dedicated rows enter the concurrent lane;
-- legacy rows retain the serial compatibility lane; and
+- complete-fingerprint dedicated rows enter the concurrent lane;
+- incomplete dedicated and legacy rows retain the serial compatibility lane; and
 - a later successful start or restart may migrate a legacy row through the existing lifecycle
   behavior.
 
@@ -136,23 +128,22 @@ It emits a compact heartbeat after each five-second interval without a completio
 
 ### A transport timeout leaves an uncertain mutation
 
-Control: one attempt only, no blind retry, fail closed, durably checkpoint learned start ticks
-before destructive submission, and direct the operator to status inspection and an idempotent retry.
+Control: one attempt only, no blind retry, fail closed, and direct the operator to status inspection
+and an idempotent retry. Concurrent plans already contain complete persisted fingerprints.
 
 ### Shared tmux state is mutated concurrently
 
-Control: a pre-mutation collision scan proves unique socket and positive boot/PID ownership for the
-affected VMs even when start ticks are missing or differ. Only dedicated socket plans enter the
-pool. Legacy default-server work remains serial.
+Control: a pre-mutation collision scan proves unique socket and complete process identity among
+concurrent plans. Only complete-fingerprint dedicated plans enter the pool. Incomplete dedicated and
+legacy work remains serial.
 
 ### A concurrent lifecycle command replaces the prepared runtime
 
-Control: initialization, migration, and every session runtime mutator hold one database-scoped
-session-runtime sidecar across their mutation boundary. Every writable command also holds PR #764's
-shared database-use lock, while restore holds that separate lock exclusive. Initialization rechecks
-absent/version-zero state after session-runtime acquisition. Checkpoint and reconciliation writes
-compare-and-set the prepared identity and recognize an already-committed desired state after an
-interrupted attempt.
+Control: the worker repeats the current immediate capture, complete identity comparison, and
+destructive use without a database or queueing boundary between them. Final persistence
+compare-and-sets the complete prepared identity and recognizes an already-committed desired state
+after an interrupted attempt. PR #764's database-use lock prevents live-file replacement while the
+writable command remains open.
 
 ### Interrupt loses successful work
 

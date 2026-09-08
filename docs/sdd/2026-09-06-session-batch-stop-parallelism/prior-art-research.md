@@ -67,23 +67,15 @@ Design consequence: current sessions with distinct validated persisted `-S` sock
 mutation units, including when hosted on the same VM. Legacy rows on the default socket may share
 one server and remain serial with exact session targeting.
 
-### 5. Database replacement and session mutation need distinct exclusion roles
-
-The [SQLite transaction documentation](https://www.sqlite.org/lang_transaction.html) states that
-`BEGIN IMMEDIATE` starts the write transaction immediately and fails with `SQLITE_BUSY` when another
-write transaction is active. Agentworks already uses that operation on a dedicated sidecar database
-to serialize migration across processes, with controlled timeout and release by rollback/close.
+### 5. PR #764 prevents live-database replacement
 
 PR #764 adds a separate SQLite database-use sidecar: writable `Database` objects hold it shared for
 their lifetime, while restore holds it exclusive across replacement. This directly prevents a live
 database swap beneath any writable command. It does not serialize two ordinary writable lifecycle
 commands, because both hold shared use locks.
 
-Design consequence: retain PR #764's database-use lock for whole-file replacement and generalize the
-existing migration sidecar into a session-runtime mutation lock. Migration retains its bounded wait;
-session lifecycle acquires that sidecar non-blocking. Every session runtime mutator participates
-because an atomic database update alone cannot stop stale remote work from touching a replacement
-socket. Unrelated SQLite writers remain outside that second lock.
+Design consequence: keep the writable database open through worker reconciliation and retain pull
+request #764's whole-file replacement boundary. Issue #730 needs no second cross-process lock.
 
 ### 6. Current teardown has a pre-kill durability checkpoint
 
@@ -91,10 +83,9 @@ Agentworks' current reachable dedicated teardown persists newly learned process 
 it invokes `tmux kill-server`. PID repair does not eagerly fill start ticks, so this checkpoint is
 not redundant. If the write fails, destructive work does not begin.
 
-Design consequence: parallelization splits remote work into a non-destructive probe and a
-destructive execution. The coordinator compare-and-sets learned start ticks after the probe and
-before submitting execution. A one-shot worker outcome after kill would weaken current crash and
-persistence-failure behavior.
+Design consequence: only rows that already have complete fingerprints enter the concurrent lane.
+Incomplete rows stay synchronous and retain the checkpoint. Eligible workers can preserve the
+current immediate capture-to-kill sequence without a staged protocol.
 
 ### 7. Fresh transports preserve current authentication behavior
 
@@ -113,11 +104,19 @@ Refuted. Python cannot cancel already-running thread calls, and executor shutdow
 them. Immediate exit after mutation begins would abandon reconciliation or promise more than the
 runtime can do.
 
-### "A compare-and-set alone prevents stale remote mutation"
+### "A compare-and-set replaces remote identity validation"
 
-Refuted. It can reject a stale database write after remote work, but it cannot prevent that worker
-from killing or unlinking a replacement at the same socket. Lifecycle exclusion must span final
-status, remote work, and persistence; compare-and-set is a second fence.
+Refuted. Compare-and-set can reject a stale database write after remote work, but it does not
+protect the remote mutation itself. Each worker must retain the current immediate capture, complete
+identity comparison, and destructive use. Compare-and-set only fences the new
+completion-to-persistence gap.
+
+### "Batch parallelism requires a repository-wide lifecycle lock"
+
+Refuted for this effort. Current lifecycle commands do not promise cross-process serialization, and
+eligible workers do not widen the current capture-to-kill window. Retrofitting every runtime mutator
+would be a separate global coordination project. PR #764 already prevents live-file replacement; the
+final compare-and-set protects the new persistence gap.
 
 ### "SQLite serialized mode makes the shared connection safe"
 
@@ -152,7 +151,6 @@ that rewrite.
 | [SQLite threading mode](https://www.sqlite.org/threadsafe.html)             | Primary upstream docs    | library-level threading distinction        |
 | [SQLite WAL](https://www.sqlite.org/wal.html)                               | Primary upstream docs    | reader/writer concurrency and busy results |
 | [tmux manual](https://man7.org/linux/man-pages/man1/tmux.1.html)            | Primary upstream manual  | independent alternative server sockets     |
-| [SQLite transactions](https://www.sqlite.org/lang_transaction.html)         | Primary upstream docs    | `BEGIN IMMEDIATE` exclusion and contention |
 | [Agentworks ADR 0015](../../adrs/0015-abandon-ssh-controlmaster.md)         | Current project decision | no cached SSH connection optimization      |
 
 ## Questions Left to Implementation Evidence

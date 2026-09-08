@@ -12,28 +12,19 @@ Batch stop becomes a coordinator-owned mutation pipeline:
 
 ```text
 CLI and session manager, invoking thread
-  validate filters -> acquire session-runtime lock -> reload selection and relationships
-             -> hold VMs -> observe -> collision check
+  validate filters -> select -> hold VMs -> observe -> partition by identity completeness
                                       |
-                         prepare dedicated work
+                    validate concurrent plan collisions
                                       |
                     +-----------------+-----------------+
                     | bounded dedicated worker pool     |
-                    | probe, checkpoint, then teardown  |
-                    | max eight remote tasks active     |
+                    | current exact teardown, max eight |
                     +-----------------+-----------------+
                                       |
-                       structured probe outcomes
-                                      |
-                    invoking thread durably refines any
-                    missing start ticks before mutation
-                                      |
-                       structured teardown outcomes
-                                      |
-                    invoking thread applies stopped state
+                    invoking thread compare-and-sets state
                     and emits session-labeled outcomes
                                       |
-                    serial exact legacy kill-session lane
+                    serial incomplete and legacy lane
                                       |
                          aggregate failure or success
 ```
@@ -47,21 +38,21 @@ and interruption requirements.
 
 ### Batch stop coordinator
 
-`stop_all_sessions` validates filter names, acquires the state database's session-runtime lock, then
-loads the filtered rows and their VM/workspace relationships fresh under the lock. It retains the
-outer VM activation boundary. After the current PID repair, status-observation, and new collision
-gates, it prepares dedicated work while leaving legacy work on the existing synchronous path.
+`stop_all_sessions` retains its current filter, relationship, VM activation, PID repair, and status
+boundaries. It partitions actionable work by persisted identity completeness. Dedicated rows with a
+complete valid fingerprint become immutable concurrent plans. Incomplete dedicated and legacy rows
+stay on the existing synchronous dispatcher.
 
 For dedicated work, the coordinator creates one transport per task with an initially 10-second
-finite default timeout and submits at most eight remote tasks at once. Each session first receives a
-non-destructive probe. The coordinator consumes probe futures in completion order, durably
-compare-and-sets any missing start ticks, then submits destructive work for that session. It later
-applies each teardown outcome through compare-and-set and emits a labeled line. Ordinary failures
-accumulate without cancelling siblings. A five-second quiet wait emits a compact progress heartbeat.
+finite default timeout and submits one future per plan with at most eight active. It consumes
+futures in completion order, applies verified stopped evidence to SQLite through compare-and-set,
+and emits a labeled line. Ordinary failures accumulate without cancelling siblings. A five-second
+quiet wait emits a compact progress heartbeat.
 
-Legacy work runs serially on the invoking thread after the dedicated lane has reconciled. It keeps
-the exact shared-server `kill-session` behavior. The final aggregate error counts failures from both
-lanes.
+Incomplete dedicated and legacy work runs serially on the invoking thread after the concurrent lane
+has reconciled. Incomplete dedicated rows keep the current pre-kill fingerprint persistence. Legacy
+rows keep exact shared-server `kill-session` behavior. The final aggregate error counts failures
+from both lanes.
 
 ### Teardown preparation
 
@@ -70,7 +61,7 @@ socket-path validation. It produces a dedicated-only frozen value containing:
 
 - session name;
 - exact validated socket path;
-- stored boot ID, PID, and start ticks;
+- complete stored boot ID, PID, and start ticks;
 - target and sudo policy; and
 - force authorization.
 
@@ -78,92 +69,59 @@ The transport is a per-task object. No connection cache or control master is int
 preserves ADR 0015's fresh-authentication behavior and avoids relying on undocumented transport
 thread safety.
 
-### Remote probe and teardown engine
+### Remote teardown engine
 
-The remote engine splits the current exact protocol at its durability checkpoint. Its probe phase
-captures and validates current identity without mutation. The coordinator persists newly learned
-start ticks before it makes the session eligible for the teardown phase. Teardown then performs the
-server kill, absence proof, and socket cleanup using only immutable values. Both phases return typed
-results rather than mutating the database.
+The worker performs the current complete-fingerprint protocol without database access: capture the
+exact socket's fingerprint, compare every identity field, invoke `kill-server`, prove that process
+incarnation absent, remove the exact socket, and verify socket absence. There is no database call or
+queueing boundary between capture and destructive use.
 
-The results distinguish:
+The future distinguishes:
 
-- a validated reachable fingerprint;
-- unreachable or indeterminate initial state for the existing absence-proof path;
 - verified stopped;
-- failed teardown; and
+- an ordinary per-session exception; and
 - cancelled before start, which is tracked by the coordinator rather than a worker result.
 
-The engine catches ordinary `Exception` so per-session failure remains structured. It does not catch
-`BaseException` inside the worker. Because a complete reachable fingerprint is already durable
-before destructive submission, an escaped worker-level `BaseException` leaves conservative,
-actionable identity in SQLite while the coordinator drains sibling work and propagates the failure.
+Ordinary exceptions stay on the future and receive their session attribution from the future-to-plan
+map. A worker-level `BaseException` enters coordinator abort-and-drain handling before it
+propagates.
 
 ### Outcome reconciliation
 
-The coordinator applies one checkpoint or teardown outcome at a time. A reachable probe with missing
-stored start ticks first compare-and-sets the observed complete fingerprint and updates the
-immutable expected identity used by destructive work. The teardown future is not submitted unless
-that write succeeds. Verified stopped state later clears the runtime fingerprint using the existing
-stopped sentinel. Each write is an atomic compare-and-set against the stage's prepared runtime
-identity. A missing or changed row is a conflict and remains untouched. No worker owns a transaction
-or a connection.
+The coordinator applies one successful future at a time. Verified stopped state clears the runtime
+fingerprint using the existing stopped sentinel through an atomic compare-and-set against the plan's
+complete prepared identity. A missing or changed row is a conflict and remains untouched. No worker
+owns a transaction or a connection.
 
-Checkpoint persistence precedes destructive submission, and stopped-state persistence precedes
-success output. A checkpoint persistence error prevents that session's remote mutation. A final
-persistence error converts that session to a failed outcome. Remote success cannot be rolled back,
-so the failure tells the truth rather than pretending the runtime remains live.
+Persistence precedes success output. A persistence error converts that session to failure. Remote
+success cannot be rolled back, so the failure tells the truth rather than pretending the runtime
+remains live.
 
 ### Interruption controller
 
 The first interrupt changes coordinator state from ordinary collection to reconciliation:
 
-- pending futures are cancelled and no new destructive follow-up is submitted;
+- pending futures are cancelled;
 - a visible reconciliation notice is emitted; and
 - running futures continue under finite per-call timeouts.
 
-The coordinator consumes and persists every outcome that becomes available, then propagates the
-original interrupt. Later interrupts repeat the reconciliation notice and do not abandon running
+The coordinator reconciles every normally completed future that becomes available, then propagates
+the original interrupt. Later interrupts repeat the reconciliation notice and do not abandon running
 work. A five-second wait loop also preserves ordinary and interrupted progress heartbeats.
 
-### Session lifecycle exclusion
+### Database replacement boundary
 
-Every Agentworks runtime mutation for any session acquires the same cross-process session-runtime
-mutation lock for the resolved state-database path. The design generalizes the existing migration
-lock, which holds a `BEGIN IMMEDIATE` write transaction on a dedicated SQLite sidecar. Lifecycle
-acquisition is non-blocking and contention fails before mutation. This preserves all worker
-parallelism inside one batch while excluding a second CLI process from changing selected or
-unselected session runtime state during the collision scan and remote work. It is deliberately not a
-universal SQLite writer lock.
-
-The lock is held from the fresh pre-mutation load through remote mutation and persistence. Closing
-the sidecar connection releases it, including when process exit closes the connection. Create,
-start, restart, stop, direct delete, workspace/agent/VM cascading teardown, runtime fingerprint
-repair, `last_started_at` persistence, failed-launch cleanup, and rollback deletion all use this
-boundary. Absent/version-zero initialization and schema migration use the current bounded wait;
-initialization rechecks the database state under the lock. Compare-and-set persistence remains a
-defense against a missing or changed row in the open database.
-
-PR #764 supplies a separate database-use lock. A writable `Database` holds that lock shared for its
-lifetime, including while it acquires and holds the session-runtime mutation lock. Restore holds the
-database-use lock exclusive and does not acquire the session-runtime lock. It therefore cannot
-replace live state during any writable lifecycle command, while unrelated writable commands remain
-outside session-runtime serialization. The mutation token is bound to the same canonical database
-path and live sidecar handle as the `Database` using it.
-
-The neutral session-runtime helper securely creates a missing database parent before opening its
-sidecar, using the existing owner-private directory policy and typed filesystem failures. This keeps
-first open into a fully absent destination supported; PR #764 independently preserves absent-target
-restore through the database-use lock.
+PR #764 supplies the only new cross-process lock this design needs. A writable `Database` holds its
+database-use sidecar shared for the command lifetime; restore holds that same sidecar exclusive
+while replacing live state. The coordinator cannot therefore reconcile worker results into a
+different database file. The final compare-and-set separately prevents one completed worker from
+overwriting a row whose runtime identity changed through another command.
 
 ### Collision gate
 
-With the session-runtime lock held and before mutation, batch stop inspects every session row on the
-affected VMs. Two rows claiming one non-null socket path or one positive
-`(VM, canonical boot ID, PID)` identity cause a typed whole-batch refusal. Start ticks remain part
-of exact validation, but missing or differing ticks cannot turn shared boot/PID ownership into
-distinct runtimes. This proves that every submitted plan owns a distinct persisted runtime rather
-than treating path shape as uniqueness evidence.
+Before submission, batch stop indexes the selected complete-fingerprint plans by `(VM, socket_path)`
+and `(VM, canonical boot ID, PID, start ticks)`. A duplicate key causes a typed whole-batch refusal.
+Incomplete rows never enter the pool, and unselected rows cannot create two overlapping workers.
 
 ## Boundaries and Ownership
 
@@ -171,7 +129,7 @@ than treating path shape as uniqueness evidence.
 | ------------------------------------ | -------------------------------------- |
 | CLI parsing and confirmation         | existing CLI command                   |
 | Filtering and VM activation holds    | existing session manager coordinator   |
-| Cross-process lifecycle exclusion    | session runtime lock helper            |
+| Live-database replacement exclusion  | PR #764 database-use lock              |
 | Database reads and writes            | invoking thread only                   |
 | Socket-path and ownership validation | invoking thread preparation            |
 | Remote tmux/process/socket calls     | one dedicated worker per prepared task |
@@ -195,7 +153,7 @@ begins. A session can fail because of transport, identity, teardown, verificatio
 or persistence. Successful siblings retain their persisted stopped state.
 
 Whole-batch refusal remains appropriate before submission when the selection cannot be made safe,
-including lock contention, identity collision, unknown actionable status, or failed VM preparation.
+including concurrent-plan identity collision, unknown actionable status, or failed VM preparation.
 There is no attempt to make a remote multi-resource transaction.
 
 ## Security Model
@@ -239,16 +197,17 @@ Combining all teardown steps could reduce round trips, but it would also rewrite
 identity and failure-evidence boundaries. The performance problem can be solved by safe overlap
 without changing that safety protocol.
 
-### Database-only conflict detection
+### Add a repository-wide session-runtime lock
 
-A compare-and-set can prevent stale persistence but cannot prevent a stale worker from addressing or
-unlinking a replacement runtime at the same socket. Cross-process lifecycle exclusion is required
-across remote mutation and persistence; compare-and-set remains the final state fence.
+Rejected. Current lifecycle commands do not promise cross-process serialization, and complete-row
+workers preserve the existing immediate capture-to-kill window. A new lock and token threaded
+through every lifecycle caller would turn a bounded batch optimization into a separate global
+coordination project. PR #764 already prevents live-database replacement, while compare-and-set
+protects the newly introduced worker-to-persistence gap.
 
 ## Deployment Shape
 
-The change is an in-place internal refactor and behavior improvement based after PR #764. It
-generalizes the existing SQLite sidecar migration lock for session-runtime exclusion while retaining
-PR #764's separate database-use lock. It adds no dependency, schema migration, capability version
-change, persisted format change, CLI alias, or configuration rollout. Full code, documentation, and
-live-test evidence land together in one PR.
+The change is an in-place internal refactor and behavior improvement based after PR #764. It adds no
+new lock, dependency, schema migration, capability version change, persisted format change, CLI
+alias, or configuration rollout. Full code, documentation, and live-test evidence land together in
+one PR.

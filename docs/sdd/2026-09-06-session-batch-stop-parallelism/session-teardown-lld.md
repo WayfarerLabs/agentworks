@@ -16,92 +16,33 @@ restart. The existing `_teardown_legacy_session` stays synchronous and does not 
 or executor model. `_teardown_session` remains the one dispatcher: legacy rows take that existing
 path, while dedicated rows use the extracted prepare, execute, and reconcile phases.
 
-## Database and Session-Runtime Locks
+## Database Boundary
 
 PR #764 is an implementation prerequisite. It adds a database-use sidecar whose shared lock is held
 for every writable `Database` lifetime and whose exclusive lock is held by restore across live-file
-replacement. That remains the whole-database replacement boundary. Restore does not acquire the
-session-runtime lock described below.
+replacement. Batch stop keeps its writable database open through worker reconciliation, so the live
+file cannot be replaced beneath the command.
 
-Generalize the existing migration lock into a session-runtime mutation lock at a neutral database
-boundary. It retains the existing dedicated SQLite sidecar beside the resolved state database and
-acquires exclusion with `BEGIN IMMEDIATE`. The sidecar is separate from live state, so the lock may
-span remote work without holding a transaction on the operator database. The connection owns the
-lock; rollback and close release it, and process exit closes the connection without leaving a stale
-marker. This lock serializes session runtime mutation and schema initialization/migration. It is not
-a universal SQLite writer lock.
-
-Before opening the sidecar, the helper establishes a missing database parent with the current
-`mkdir(parents=True, mode=0o700, exist_ok=True)` policy and translates filesystem failure to the
-existing typed state boundary. The implementation centralizes this preparation rather than leaving
-later callers to create the directory after lock acquisition.
-
-`Database` retains its canonical resolved path as read-only internal state. The generalized helper
-retains an explicit timeout: absent/version-zero initialization and schema migration use the current
-bounded blocking value, while session lifecycle passes zero for non-blocking acquisition and
-translates contention to the existing typed busy-state error. The existing migration sidecar path
-remains stable so initialization, migration, and lifecycle operations from the same installation
-cannot acquire independent locks.
-
-Every mutating composition root holds one connection-backed lock handle and one explicit token for
-nested internal calls. The token is valid only for the same canonical database path, the live lock
-handle that issued it, and the lifetime of that handle. A token from another database or released
-handle cannot authorize mutation. In-command workers do not reacquire it.
-
-The session-runtime lock boundary covers every session runtime mutation:
-
-- create acquires before its final absent-name check and holds through initial runtime persistence;
-- start and restart acquire before their final live-status classification and hold through harness
-  state, `last_started_at`, runtime-fingerprint persistence, failed-launch cleanup, and shared
-  projection regeneration;
-- named and batch stop hold through remote teardown and reconciliation;
-- direct session deletion and workspace, agent, and VM cascading deletion hold through teardown and
-  row removal;
-- PID/fingerprint repair holds through every runtime-identity update, including batch repair called
-  by workspace rehome;
-- partial-create rollback holds through `SessionNode.teardown` row deletion; and
-- absent/version-zero initialization and schema migration use the same sidecar lock.
-
-The writable database-open path already acquires PR #764's shared database-use lock before it can
-initialize or migrate. It may inspect schema state before session-runtime acquisition, but it MUST
-reinspect under that lock before initializing. All writable lifecycle commands therefore hold locks
-in one order: database-use shared first, then session-runtime exclusive. Restore acquires only
-database-use exclusive, so it waits for every writable `Database` to close and cannot replace the
-file beneath lifecycle work.
-
-Low-level `_repair_session_pid`, `ensure_pids_batch`, teardown, `record_session_started`, runtime
-update, and session-row deletion seams either require the held token or acquire the lock when they
-are the composition root. Tests inventory every production call site, including VM deletion, and
-prove the token reaches mutation. Read-only list, describe, status, and backup creation do not
-acquire the session-runtime lock.
-
-Batch stop validates filter names and performs a read-only candidate query before acquisition so bad
-input and a structurally empty selection finish without contending. If candidates exist, it acquires
-the lock, reapplies the original filters, and reloads every selected row plus its VM/workspace
-relationships. The locked re-selection may also become empty and finish successfully. All status
-gates and plans consume only those fresh locked rows. Named mutators also refetch their target row
-and relationships after acquisition. The implementation splits the current combined filter-and-query
-helper or adds an equivalent private seam so pre-lock rows cannot leak into mutation preparation.
+No new session-runtime lock or token is added. Existing lifecycle commands do not promise
+cross-process serialization, and eligible workers retain the current immediate fingerprint
+capture-to-kill sequence. The only new persistence gap is between verified remote completion and the
+coordinator's stopped-state update; atomic compare-and-set fences that gap.
 
 ## Pre-mutation Collision Gate
 
-With the database-scoped session-runtime lock held, batch stop reads every session on each affected
-VM and builds two indexes:
+After preparation, batch stop indexes only the selected plans eligible for concurrent execution:
 
 - `(vm_name, socket_path)` for every non-null dedicated socket; and
-- `(vm_name, canonical_boot_id, pid)` for every positive persisted boot/PID identity.
+- `(vm_name, canonical_boot_id, pid, start_ticks)` for every complete process identity.
 
-Any key claimed by more than one row produces a typed whole-batch failure listing the conflicting
-sessions. Persisted stopped rows still participate in socket collision detection because a later
-start can reuse their path. Start ticks remain part of exact remote identity validation, but they
-are deliberately absent from the collision key: migration-36 rows may lack them, PID repair does not
-fill them eagerly, and differing or missing ticks cannot make two rows that claim one current
-boot/PID process safe to mutate concurrently.
+Any key claimed by more than one concurrent plan produces a typed whole-batch failure listing the
+conflicting sessions. Rows with missing or invalid fingerprint fields never enter these indexes or
+the pool; they stay on the synchronous compatibility path. Unselected rows and serial rows cannot
+create two overlapping workers and therefore do not add a new batch refusal.
 
-This gate runs after PID repair and before the first destructive submission. It validates ownership
-for the complete affected scope, not only the selected rows.
+This gate runs after PID repair and before the first destructive submission.
 
-## Dedicated Values
+## Dedicated Concurrent Plan
 
 ### `DedicatedTeardownPlan`
 
@@ -114,110 +55,75 @@ class DedicatedTeardownPlan:
     socket_path: str
     stored_pid: int
     stored_boot_id: str
-    stored_start_ticks: int | None
+    stored_start_ticks: int
     target: Transport
     sudo: bool
     force: bool
 ```
 
-The non-null fields are validated before construction. The values also form the expected identity
-for later compare-and-set persistence. Each plan owns a distinct transport instance. No two
+Every identity field is complete and validated before construction. The values form the expected
+identity for later compare-and-set persistence. Each plan owns a distinct transport instance. No two
 concurrently running plans share it.
-
-### `DedicatedTeardownProbe`
-
-A frozen dataclass containing only:
-
-```python
-@dataclass(frozen=True)
-class DedicatedTeardownProbe:
-    initial_status: ProbeStatus
-    validated_fingerprint: TmuxServerFingerprint | None = None
-    error: Exception | None = None
-```
-
-`validated_fingerprint` is present only when a complete observed identity exactly matches the
-persisted boot ID, PID, and optional start ticks. `ABSENT` or `UNKNOWN` carries no fingerprint and
-selects the existing absence-proof path. An identity mismatch is a terminal probe error and never
-becomes destructive work.
-
-### `DedicatedTeardownExecution`
-
-A frozen value pairs the original plan with the post-checkpoint expected fingerprint and initial
-probe classification. When the probe was reachable, expected start ticks are always present and
-already durable. When it was absent or unknown, the original stored identity remains the
-conservative absence-proof input.
-
-### `DedicatedTeardownOutcome`
-
-A frozen dataclass contains `error: Exception | None`. `error is None` means the runtime and exact
-socket were verified absent. A non-null error means the destructive or recovery phase failed. The
-future-to-value map supplies the session name, so neither result repeats it.
 
 ## Preparation
 
-`prepare_dedicated_teardown(db, session, *, target, target_owns_session, force)` runs only on the
-invoking thread while its session-runtime lock is held.
+`prepare_concurrent_dedicated_teardown(db, session, *, target, target_owns_session, force)` runs
+only on the invoking thread.
 
 1. Reject the stopped sentinel as no work.
 2. Require a dedicated socket and validate it as an exact managed path through the current database
    graph.
-3. Require a positive persisted PID and canonical boot ID.
-4. Validate optional start ticks.
+3. Require a positive persisted PID, canonical boot ID, and positive start ticks.
+4. If any fingerprint field is missing, classify the row for synchronous teardown instead of
+   constructing a concurrent plan.
 5. Construct the plan with `sudo=not target_owns_session`.
 
-Preparation performs no remote mutation. A preparation failure is a per-session failure only after
-the batch-wide status, collision, and lock gates have made the selection safe.
+Preparation performs no remote mutation. An invalid stored value retains the current per-session
+failure behavior; a merely incomplete fingerprint is not an error and stays serial.
 
 ## Dedicated Remote State Machine
 
-`probe_dedicated_teardown(plan)` and `execute_dedicated_teardown(execution)` run in workers and
-never access global output or SQLite. They use the plan's transport without copying ambient context,
-since workers consume no context-bound presentation or bootstrap service. The coordinator is the
-only bridge between the non-destructive probe and destructive execution.
+`execute_dedicated_teardown(plan)` runs in a worker and never accesses global output or SQLite. It
+uses the plan's transport without copying ambient context, since workers consume no context-bound
+presentation or bootstrap service.
 
 ### Reachable fingerprint
 
-1. The probe captures the tmux server fingerprint through the exact socket.
-2. It requires a present capture to contain a complete fingerprint.
-3. It validates the observed boot ID.
-4. It requires observed PID and boot ID to equal persisted values.
-5. If stored start ticks exist, it requires equality.
-6. It returns the validated complete fingerprint without mutating the runtime.
-7. If stored start ticks were absent, the coordinator compare-and-sets that complete fingerprint
-   into SQLite. A failed write ends this session before destructive submission.
-8. The coordinator constructs an execution value using the now-durable complete identity.
-9. The execution worker invokes exact `kill-server` through the socket.
-10. It proves the fingerprinted server process absent using the complete execution identity, without
-    rereading SQLite.
-11. It removes the exact socket path and verifies its absence.
-12. It returns verified stopped.
+1. Capture the tmux server fingerprint through the exact socket.
+2. Require a present capture to contain a complete fingerprint.
+3. Validate the observed boot ID.
+4. Require observed PID, boot ID, and start ticks to equal the complete plan.
+5. Invoke exact `kill-server` through the socket immediately after comparison.
+6. Prove the fingerprinted server process absent using the complete plan, without rereading SQLite.
+7. Remove the exact socket path and verify its absence.
+8. Return normally as verified stopped.
 
 The absence proof helper accepts explicit fingerprint values so it no longer needs a refreshed
 database row after the kill.
 
 ### Unreachable or indeterminate fingerprint
 
-If the probe's initial capture is absent or unknown, it returns that classification without remote
-mutation and without inventing refinement evidence. The coordinator submits an execution value for
-the existing recovery ordering. That worker first tries to prove the stored runtime absent
-regardless of `force`. If proof succeeds, it removes and verifies the exact stale socket and returns
-stopped. If proof cannot establish absence, an unforced plan returns the current actionable
-broken-state wrapper; a forced plan returns the more specific existing identity or connectivity
-failure. `force` changes the error/selection policy, not whether safe proven-absence recovery is
-attempted.
+If initial capture is absent or unknown, the worker preserves the current recovery ordering using
+the complete plan. It first tries to prove the stored runtime absent regardless of `force`. If proof
+succeeds, it removes and verifies the exact stale socket and returns normally. If proof cannot
+establish absence, an unforced plan raises the current actionable broken-state wrapper; a forced
+plan raises the more specific existing identity or connectivity failure. `force` changes the
+error/selection policy, not whether safe proven-absence recovery is attempted.
 
 The worker never kills a process by PID and never treats a transport failure as absence.
 
-### Exception preservation
+### Exception behavior
 
-Each function catches ordinary `Exception` at its outer boundary and returns that exception in its
-typed result. It does not catch `KeyboardInterrupt`, `SystemExit`, or other `BaseException` values.
-A reachable execution cannot begin until its complete fingerprint is durable, so an escaped
-`BaseException` after mutation leaves a conservative, fully identified runtime row for later status
-inspection and recovery.
+The worker does not wrap exceptions. `Future.result()` raises an ordinary per-session exception for
+coordinator accounting. A `KeyboardInterrupt`, `SystemExit`, or other `BaseException` enters the
+coordinator's abort-and-drain path before propagation.
 
-## Legacy Synchronous Path
+## Synchronous Compatibility Path
+
+Dedicated rows with a missing persisted fingerprint field remain on the current invoking-thread
+path. In particular, when start ticks are missing, that path captures and validates a complete
+fingerprint, persists it, rereads the session, and only then invokes `kill-server`. This preserves
+the current persistence-failure and crash boundary without adding a staged concurrent protocol.
 
 The existing legacy function stays on the invoking thread:
 
@@ -227,9 +133,9 @@ The existing legacy function stays on the invoking thread:
 4. probe until the exact session is absent; and
 5. mark the row stopped through its existing main-thread database call.
 
-Legacy rows run one at a time after all dedicated outcomes are reconciled. Ordinary legacy failure
-is accumulated and the next legacy row proceeds. Compatibility code does not learn the dedicated
-plan or outcome model.
+Incomplete dedicated and legacy rows run one at a time after all concurrent futures are reconciled.
+Ordinary failure is accumulated and the next serial row proceeds. Compatibility code does not learn
+the concurrent plan model.
 
 ## Transport Construction
 
@@ -250,43 +156,35 @@ timeout policy.
 
 ## Batch Coordinator
 
-`execute_concurrent_dedicated_teardowns(plans, *, db)` accepts dedicated plans only and drives a
-two-stage future pipeline.
+`execute_concurrent_dedicated_teardowns(plans, *, db)` accepts complete-fingerprint dedicated plans
+only.
 
 An empty plan sequence returns immediately without constructing an executor. This preserves the
-legacy-only lane and lets a batch containing only dedicated preparation failures continue to its
-normal failure accounting.
+serial-only lane and lets a batch containing only preparation failures continue to its normal
+failure accounting.
 
 1. Create a `ThreadPoolExecutor` with `min(8, len(plans))` workers.
-2. Submit one non-destructive probe future for every plan; no context copy is needed.
-3. Map each future to its plan and stage.
+2. Submit `execute_dedicated_teardown` once for every plan; no context copy is needed.
+3. Map each future to its plan.
 4. Use `wait(..., timeout=5, return_when=FIRST_COMPLETED)` so the invoking thread can emit a
    heartbeat after a quiet interval.
-5. For each completed probe, reject a terminal probe error or compare-and-set a required start-ticks
-   refinement on the invoking thread.
-6. Only after that checkpoint succeeds, submit the session's destructive execution future using the
-   updated immutable expected identity.
-7. Reconcile every completed destructive future before its labeled output.
-8. Collect `(session_name, error)` failures.
-9. Repeat until every submitted future is completed or cancelled.
-10. Shut down and return all failures.
+5. Call `future.result()` and collect an ordinary exception as that plan's failure.
+6. On normal return, compare-and-set verified stopped state before labeled success output.
+7. Repeat until every submitted future is completed or cancelled.
+8. Shut down and return all failures.
 
-The worker boundary converts every ordinary per-session `Exception` into an outcome. A
-`BaseException` escaping a worker, a broken executor, or another coordinator-level failure enters
-the abort-and-drain path. Sibling mutations are drained and reconciled before failure propagates.
-The affected row retains its complete pre-kill fingerprint if its destructive worker escaped, but
-the coordinator does not invent a terminal result for that worker. The maximum active remote-task
-count is eight, and at most one stage for a session is submitted at a time.
+An ordinary per-session `Exception` does not cancel siblings. A `BaseException` escaping a worker, a
+broken executor, or another coordinator-level failure enters the abort-and-drain path. Sibling
+mutations are drained and reconciled before failure propagates. The maximum active remote-task count
+is eight, and every eligible session has exactly one future.
 
 The heartbeat reports completed, active, and queued counts. A completion resets the quiet interval,
 so fast batches emit only their ordinary session outcomes.
 
-A completed future remains in coordinator bookkeeping until checkpoint or reconciliation and outcome
-rendering finish. If `KeyboardInterrupt` lands during that main-thread work, interruption mode
-retries the same database operation. Retry-safe compare-and-set recognizes a desired state that the
-interrupted attempt already committed. Once interruption mode begins, completed or running probes
-are drained and may strengthen stored identity, but they do not cause new destructive futures to be
-submitted.
+A completed future remains in coordinator bookkeeping until reconciliation and outcome rendering
+finish. If `KeyboardInterrupt` lands during that main-thread work, interruption mode retries the
+same database operation. Retry-safe compare-and-set recognizes a desired state that the interrupted
+attempt already committed.
 
 ## Atomic Reconciliation
 
@@ -297,47 +195,32 @@ through the existing transaction policy. After zero affected rows, it reads the 
 match for the desired state means an earlier interrupted reconciliation already committed and is
 idempotent success; any other or missing row is a typed conflict and remains untouched.
 
-`checkpoint_dedicated_fingerprint(db, plan, probe)` runs on the invoking thread while the
-session-runtime lock remains held. If the stored start ticks were missing, it compare-and-sets only
-the runtime identity fields from the prepared partial identity to the validated complete
-fingerprint. It leaves `last_started_at`, declarations, and harness state unchanged. Its success
-yields the immutable expected identity for destructive execution. If start ticks were already
-present, it validates the same expected identity without a write.
-
-`reconcile_dedicated_teardown(db, execution, outcome)` also runs on the invoking thread while the
-session-runtime lock remains held:
-
-- verified stopped compare-and-sets from the execution's expected identity to the persisted socket,
-  stopped PID, null boot ID, and null start ticks; and
-- failed execution makes no database change because any reachable complete fingerprint was already
-  durable before mutation.
+`reconcile_dedicated_teardown(db, plan)` runs on the invoking thread after a normally returned
+future. It compare-and-sets from the plan's complete expected identity to the persisted socket,
+stopped PID, null boot ID, and null start ticks.
 
 The function does not overwrite declaration or harness state. Persistence precedes success output. A
 compare-and-set conflict or other database error becomes that session's failure even if remote
 teardown was verified, because remote success cannot be rolled back or honestly hidden.
 
-The session-runtime lock is the remote-mutation exclusion boundary. Compare-and-set is the
-persisted-state fence against a bypass, programming error, or changed or missing row in the open
-database. PR #764's shared database-use lock excludes first-party live-database replacement while
-the writable lifecycle `Database` remains open; arbitrary external file replacement remains outside
-Agentworks' guarantees.
+Compare-and-set is the persisted-state fence against a concurrent command, programming error, or
+changed or missing row in the open database. PR #764's shared database-use lock excludes first-party
+live-database replacement while the writable lifecycle `Database` remains open; arbitrary external
+file replacement remains outside Agentworks' guarantees.
 
 ## Interruption State Machine
 
 The first `KeyboardInterrupt` that escapes future collection becomes the stored primary
 interruption. The coordinator then:
 
-1. invokes `future.cancel()` for every unfinished future and stops submitting destructive follow-up
-   work;
+1. invokes `future.cancel()` for every unfinished future;
 2. reports that active teardowns are being reconciled;
 3. continues the five-second wait loop for futures that were already running;
-4. reconciles every returned outcome; and
+4. reconciles every normally returned future; and
 5. re-raises the stored interruption after all running work finishes.
 
-Cancelled probe futures and probes drained after interruption produce no session failure because no
-destructive mutation began. Cancelled destructive futures likewise did not start. The
-session-runtime lock is released only when the whole coordinator exits, and those sessions remain
-eligible for a future retry.
+Cancelled futures produce no session failure because their mutation did not start. Those sessions
+remain eligible for a future retry.
 
 A later interrupt during reconciliation repeats the notice and returns to the wait loop. Python
 cannot terminate running executor threads, and interpreter shutdown joins them. The command
@@ -348,56 +231,45 @@ machine, and five-second heartbeats make the mandatory reconciliation wait visib
 
 ### Named stop
 
-Named stop acquires its session-runtime lock, dispatches legacy synchronously or prepares, probes,
-checkpoints, executes, and reconciles the dedicated plan synchronously. It retains its single
-terminal result line, does not use an executor, and does not gain the batch timeout.
+Named stop keeps its synchronous dispatcher, output, and transport policy. The complete dedicated
+branch may call the extracted database-free remote helper synchronously; the incomplete dedicated
+branch retains its current pre-kill fingerprint persistence. It does not use an executor or gain the
+batch timeout.
 
 ### Batch stop
 
-Batch stop validates filter names, acquires the session-runtime lock, reloads the selection and
-relationships, preserves current VM and status gates, performs the collision check, announces the
-count, drives the dedicated probe/checkpoint/teardown pipeline, then runs the legacy serial lane. It
+Batch stop preserves current filter, relationship, VM, status, force, and unknown-state gates. It
+partitions complete dedicated plans from incomplete dedicated and legacy rows, validates concurrent
+plan collisions, announces the count, reconciles the concurrent lane, then runs the serial lane. It
 raises the current aggregate `ExternalError` when any session failed.
 
 ### Create, start, restart, and deletion
 
-Create and launch operations gain only the session-runtime lock around final status, remote
-mutation, and persistence. Restart and direct or cascading deletion call the same synchronous
-teardown dispatcher. None enters the concurrent coordinator.
+Create, start, restart, and deletion keep their current orchestration. Any synchronous teardown they
+invoke continues through the one dispatcher and never enters the concurrent coordinator.
 
 ## Tests
 
 ### Unit and service tests
 
 - PR #764 shared database-use and exclusive restore-lock behavior remains unchanged;
-- generalized session-runtime sidecar exclusion, process-exit release, bounded migration wait, and
-  non-blocking lifecycle refusal;
-- mutual exclusion between migration and session lifecycle mutation, plus database-use exclusion
-  between restore and every writable lifecycle command;
-- absent/version-zero initialization reinspection under the session-runtime lock;
-- initialization and restore when both the database and parent directory are absent;
-- mutation-token rejection for a different canonical database path or released lock handle;
-- fresh post-lock selection and relationship loading for batch and named mutators;
-- database restore exclusion through PR #764's database-use lock and an inventory of first-party
-  whole-database replacement paths;
-- collision refusal for socket and partial or complete boot/PID identities;
+- collision refusal for duplicate socket and complete fingerprint identities among concurrent plans;
 - dedicated plan validation for admin, agent, force, and stopped rows;
-- successful reachable teardown with and without a pre-kill fingerprint checkpoint;
-- fingerprint persistence failure prevents destructive submission;
+- missing fingerprint fields select the synchronous compatibility path;
+- synchronous missing-start-ticks persistence still precedes `kill-server`;
+- successful reachable complete-fingerprint teardown;
 - current unforced and forced unreachable-runtime behavior;
 - exact socket cleanup and exact legacy session targeting;
 - distinct transport identity per concurrent task;
 - maximum eight active workers and same-VM overlap;
-- empty dedicated-plan handling for legacy-only and preparation-failure selections;
-- serial legacy execution without the plan model;
+- empty concurrent-plan handling for serial-only and preparation-failure selections;
+- serial incomplete-dedicated and legacy execution without the plan model;
 - atomic and retry-safe compare-and-set, persistence-before-output, and persistence failure;
 - sibling success under worker failure;
 - five-second heartbeat behavior;
-- first-interrupt queued cancellation, no new destructive follow-up, and running reconciliation;
+- first-interrupt queued cancellation and running reconciliation;
 - repeated-interrupt reconciliation; and
-- named stop, create/start/restart, `last_started_at`, failed-launch cleanup, direct delete,
-  workspace/agent/VM cascades, batch PID repair, workspace rehome, and partial-create rollback lock
-  regression coverage.
+- named stop plus create/start/restart and deletion regression coverage.
 
 Runtime tests use SQLite's real thread guard, a thread-recording output handler, and controlled
 transports to prove workers do not touch SQLite or output. Tests assert the behavior boundary
@@ -412,8 +284,7 @@ In an authorized disposable environment:
 3. verify every exact tmux server and socket is absent;
 4. verify the database reports stopped;
 5. inject one safely recoverable per-session failure and prove siblings stop;
-6. retry the failed selection successfully; and
-7. exercise lock contention from two local CLI processes without touching production sessions.
+6. retry the failed selection successfully.
 
 The test does not use production sessions or rely on timing alone. Instrumented unit overlap is the
 deterministic concurrency proof; live elapsed time is supporting evidence.

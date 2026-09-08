@@ -54,17 +54,17 @@ not authored prose.
 
 ## Requirement Traceability
 
-| Requirement | Design authority                         | Planned proof                                   |
-| ----------- | ---------------------------------------- | ----------------------------------------------- |
-| R1, R3      | FRD CLI/bound; HLA coordinator           | CLI regression and worker-bound tests           |
-| R2          | HLA concurrency unit/collision gate      | overlap, collision, and legacy tests            |
-| R4, R7      | HLA ownership/reconciliation; LLD        | thread-affinity and partial-evidence tests      |
-| R5, R6      | teardown LLD remote state machine        | identity, timeout, force, and no-retry tests    |
-| R8          | HLA output owner; LLD coordinator        | recording output-handler tests                  |
-| R9          | HLA/LLD interruption controller          | queued/running/repeated-interrupt tests         |
-| R10         | session-runtime lock and compare-and-set | exclusion and stale-result tests                |
-| R11         | FRD non-goal; HLA rejected alternative   | structural scope review                         |
-| R12         | this plan                                | full gates, private review, and live validation |
+| Requirement | Design authority                       | Planned proof                                   |
+| ----------- | -------------------------------------- | ----------------------------------------------- |
+| R1, R3      | FRD CLI/bound; HLA coordinator         | CLI regression and worker-bound tests           |
+| R2          | HLA concurrency unit/collision gate    | overlap, collision, and legacy tests            |
+| R4, R7      | HLA ownership/reconciliation; LLD      | thread-affinity and completion tests            |
+| R5, R6      | teardown LLD remote state machine      | identity, timeout, force, and no-retry tests    |
+| R8          | HLA output owner; LLD coordinator      | recording output-handler tests                  |
+| R9          | HLA/LLD interruption controller        | queued/running/repeated-interrupt tests         |
+| R10         | existing boundary and compare-and-set  | batch-gate and stale-result tests               |
+| R11         | FRD non-goal; HLA rejected alternative | structural scope review                         |
+| R12         | this plan                              | full gates, private review, and live validation |
 
 ## Phase 0: Design Checkpoint
 
@@ -91,40 +91,20 @@ not authored prose.
 - Every requirement has objective implementation proof.
 - No material design or complexity finding remains.
 
-## Phase 1: Extract One Phased Teardown Authority
+## Phase 1: Extract Complete-Fingerprint Teardown
 
 - [ ] Rebase onto the merged PR #764 database-use lock and retain its shared writable-lifetime and
       exclusive restore semantics unchanged.
-- [ ] Generalize the existing SQLite sidecar migration lock into one session-runtime mutation lock
-      with bounded migration wait and non-blocking lifecycle acquisition. Keep unrelated SQLite
-      writers outside this lock.
-- [ ] Route absent/version-zero initialization through the lock, recheck state after acquisition,
-      and prove it cannot race restore into an absent destination.
-- [ ] Centralize owner-private creation of a missing database parent before sidecar acquisition and
-      retain absent-parent initialization and restore coverage.
-- [ ] Route create, start, restart, stop, direct delete, and workspace, agent, and VM cascading
-      teardown through the same cross-process session-runtime exclusion boundary.
-- [ ] Route batch PID repair, workspace-rehome repair, and partial-create rollback through the lock
-      token boundary so low-level runtime updates and row deletion cannot bypass exclusion.
-- [ ] Inventory first-party live-database replacement paths and prove PR #764's database-use lock
-      excludes them from every writable lifecycle `Database` lifetime.
-- [ ] Bind each session-runtime lock token to the same canonical database path and live lock handle
-      as the `Database` it authorizes; reject cross-database and released-handle tokens.
-- [ ] Validate filter names before acquisition, then reload selected or named rows and required
-      relationships under the lock before status or plan derivation.
-- [ ] Add atomic runtime compare-and-set plus affected-VM socket and positive boot/PID collision
-      checks that fail closed even when start ticks are missing or differ.
-- [ ] Add dedicated-only immutable plan, probe, execution, and outcome values in a session-domain
-      teardown module, reusing the existing tmux fingerprint value.
-- [ ] Split main-thread preparation, pre-kill fingerprint checkpoint, and final reconciliation from
-      database-free remote probe and execution.
-- [ ] Persist missing-start-ticks refinement before destructive submission and prove persistence
-      failure prevents the kill.
-- [ ] Route named stop, restart, direct deletion, batch stop, and workspace, agent, and VM cascading
-      deletion through the synchronous dispatcher before enabling concurrency while leaving legacy
-      teardown unchanged.
-- [ ] Cover `last_started_at` persistence and failed-launch cleanup in the session-runtime lock
-      inventory without including that field in runtime compare-and-set identity.
+- [ ] Add atomic stopped-state compare-and-set against the complete prepared runtime identity.
+- [ ] Add one dedicated-only immutable complete-fingerprint plan in a session-domain teardown
+      module.
+- [ ] Extract database-free remote execution while keeping reconciliation on the invoking thread.
+- [ ] Partition incomplete dedicated rows into the existing synchronous path and prove their
+      missing-start-ticks persistence still precedes `kill-server`.
+- [ ] Add collision checks for duplicate socket or complete fingerprint identities among concurrent
+      plans.
+- [ ] Keep named stop, restart, direct and cascading deletion on the synchronous dispatcher and run
+      their existing regression suites.
 - [ ] Prove socket validation, exact tmux targeting, force recovery, absence verification, and
       stopped persistence remain unchanged.
 
@@ -132,40 +112,38 @@ not authored prose.
 
 - There is still one teardown authority.
 - Remote execution can run without a database or output handler.
-- Cross-process lifecycle mutation is excluded and stale persistence fails atomically.
+- Stale persistence fails atomically without adding a global lifecycle lock.
 - All current callers pass their existing regression suites while behavior remains serial.
 
 ## Phase 2: Concurrent Dedicated Batch Stop
 
-- [ ] Prepare dedicated plans after the existing batch safety gates and leave legacy rows on their
-      current synchronous helper.
-- [ ] Preserve the pre-lock empty-selection no-op and skip executor construction for an empty
-      dedicated plan set, including legacy-only and preparation-failure batches.
+- [ ] Prepare complete-fingerprint dedicated plans after the existing batch safety gates and leave
+      incomplete dedicated and legacy rows on the current synchronous dispatcher.
+- [ ] Preserve the empty-selection no-op and skip executor construction for an empty concurrent plan
+      set, including serial-only and preparation-failure batches.
 - [ ] Construct one 10-second, one-attempt transport per dedicated plan.
-- [ ] Add the fixed, maximum-eight dedicated probe/checkpoint/teardown executor.
-- [ ] Consume probe outcomes in completion order, persist required refinement, then submit that
-      session's destructive phase.
-- [ ] Consume teardown outcomes in completion order and reconcile each before labeled output.
+- [ ] Add the fixed, maximum-eight dedicated teardown executor with one future per plan.
+- [ ] Consume futures in completion order and reconcile successful stopped state before labeled
+      output.
 - [ ] Emit a compact heartbeat after each five-second quiet interval.
-- [ ] Keep legacy exact-session teardown serial after dedicated reconciliation.
+- [ ] Keep incomplete dedicated and legacy teardown serial after concurrent reconciliation.
 - [ ] Preserve sibling progress and final aggregate failure when one plan fails.
 - [ ] Leave start and restart batch launch loops serial and free of the new executor.
 
 ### Phase 2 Definition of Done
 
 - Instrumented tests prove real overlap for dedicated sessions, including same-VM work.
-- Legacy work never overlaps another legacy mutation.
+- Serial compatibility work begins only after the concurrent lane drains.
 - No worker accesses SQLite, global output, interaction, secrets, activation, or shared config.
 - A per-session transport failure does not suppress sibling success.
 
 ## Phase 3: Interruption and Failure Accounting
 
-- [ ] Cancel queued futures on first interrupt and stop submitting destructive follow-up work.
-- [ ] Report and drain bounded in-flight work, reconciling every returned outcome.
+- [ ] Cancel queued futures on first interrupt.
+- [ ] Report and drain bounded in-flight work, reconciling every normally returned future.
 - [ ] Repeat the reconciliation notice after later interrupts without pretending Python can
       terminate running thread work.
-- [ ] Prove pre-kill persistence failure, worker escape with durable complete identity, timeout,
-      partial fingerprint, and cancelled-future accounting.
+- [ ] Prove worker escape, timeout, incomplete-row serialization, and cancelled-future accounting.
 - [ ] Make reconciliation retry-safe when an interrupt lands after SQLite committed the desired
       state.
 - [ ] Preserve the current final aggregate command error for ordinary per-session failures.

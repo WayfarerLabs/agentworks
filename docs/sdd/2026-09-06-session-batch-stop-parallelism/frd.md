@@ -15,11 +15,10 @@ This effort makes batch stop perform safe dedicated-session teardown concurrentl
 new command grammar, a configurable worker count, or parallel start and restart. The main thread
 continues to own prompts, database access, state reconciliation, aggregate failure, and operator
 output. A bounded worker pool owns only prepared remote teardown work and returns structured
-evidence to the coordinator.
+completion to the coordinator through futures.
 
-The implementation depends on PR #764's database-use lock. That lock prevents live-database
-replacement while a writable command owns the database. This effort adds a separate session-runtime
-mutation lock for remote lifecycle exclusion; the two locks have distinct jobs.
+The implementation builds on PR #764's database-use lock, which prevents live-database replacement
+while the command owns a writable database. It adds no second cross-process lock.
 
 Legacy rows that still use a shared default tmux server remain serial. A single named stop keeps its
 current synchronous behavior while sharing the same extracted teardown phases.
@@ -82,18 +81,20 @@ This feature targets 0.19.0 and introduces no deprecation or compatibility alias
 ### R2: Concurrency eligibility
 
 A selected session MAY run in the concurrent lane only when its persisted runtime uses a validated
-dedicated tmux socket. Dedicated sessions MAY run concurrently even when they share a VM because
-each `-S SOCKET` address selects an independent tmux server.
+dedicated tmux socket and has a complete, valid boot ID, positive PID, and positive start ticks.
+Eligible sessions MAY run concurrently even when they share a VM because each `-S SOCKET` address
+selects an independent tmux server.
 
-Before mutation, Agentworks MUST inspect every session row on the affected VMs and fail closed if
-two rows claim the same dedicated socket or the same positive boot/PID process identity. Start ticks
-strengthen identity validation but MUST NOT make two rows with the same VM, canonical boot ID, and
-positive PID safe when either value is missing or differs. The parallelism invariant MUST be proved
-from current persisted facts, not inferred from a non-null socket.
+Before mutation, Agentworks MUST inspect the concurrent plans and fail closed if two selected plans
+claim the same dedicated socket or the same complete VM/boot/PID/start-time fingerprint. The
+parallelism invariant MUST be proved from validated persisted facts, not inferred from a non-null
+socket.
 
-A legacy row with no dedicated socket MUST use the existing exact `kill-session -t =NAME` behavior
-and MUST remain serial because it may share the default tmux server with another row. The
-implementation MUST NOT migrate, parallelize, or widen legacy teardown as part of this effort.
+A dedicated row with an incomplete fingerprint MUST keep the existing synchronous teardown path,
+including its pre-kill persistence of newly observed start ticks. A legacy row with no dedicated
+socket MUST use the existing exact `kill-session -t =NAME` behavior. Both categories MUST run
+serially after the concurrent lane. The implementation MUST NOT migrate or widen either
+compatibility path as part of this effort.
 
 ### R3: Fixed bounded fan-out
 
@@ -109,9 +110,9 @@ Only the invoking coordinator thread MAY read or write the shared `Database` dur
 teardown. Workers MUST NOT receive the database object, call output helpers, prompt, resolve
 secrets, activate VMs, alter provider state, or regenerate shared configuration.
 
-Before submission, the coordinator MUST convert each selected session into immutable work containing
-only the validated runtime identity, target, privilege policy, and teardown policy required by the
-remote phase. After completion, the coordinator MUST apply returned evidence and render output.
+Before submission, the coordinator MUST convert each eligible selected session into immutable work
+containing only its complete validated runtime identity, target, privilege policy, and teardown
+policy. After completion, the coordinator MUST apply returned evidence and render output.
 
 ### R5: Remote teardown invariants
 
@@ -127,13 +128,11 @@ Parallel execution MUST preserve the session lifecycle contract:
   unforced safe-recovery behavior.
 
 Concurrency MUST NOT weaken target identity, permit best-effort destructive guesses, or share a
-mutable transport between worker tasks. Every Agentworks session runtime mutator MUST hold the same
-cross-process, database-scoped session-runtime mutation lock from its final pre-mutation status
-check through remote work and persistence. The lock MUST be released automatically if the process
-exits, and its implementation MUST generalize the existing SQLite migration sidecar rather than add
-an independent session-lock file. It is not a universal SQLite writer lock. PR #764's database-use
-lock MUST remain held shared for the writable `Database` lifetime, while restore holds it exclusive
-across replacement, so a restore cannot install new runtime identities beneath in-flight work.
+mutable transport between worker tasks. Each eligible worker MUST preserve the current immediate
+capture, identity comparison, `kill-server`, absence-proof, and socket-cleanup sequence without a
+database or queueing checkpoint between capture and destructive use. PR #764's database-use lock
+MUST remain held shared for the writable `Database` lifetime, while restore holds it exclusive
+across replacement.
 
 ### R6: Bounded remote calls
 
@@ -142,32 +141,23 @@ one attempt for each non-interactive remote call. The initial implementation val
 MUST be confirmed or increased from supported-environment teardown evidence before lock. This bounds
 one remote step, not the whole session: the complete teardown may execute several sequential steps.
 
-Timeout is a failure for that session. The coordinator MUST retain partial evidence from steps that
-completed before the failure and MUST NOT automatically repeat a destructive command whose outcome
-is uncertain.
+Timeout is a failure for that session. Its complete persisted fingerprint MUST remain unchanged, and
+the coordinator MUST NOT automatically repeat a destructive command whose outcome is uncertain.
 
 The named synchronous stop path keeps its current transport policy. The concurrent timeout is a
 batch worker safety boundary, not a global transport-policy change.
 
 ### R7: Completion and persistence
 
-Remote teardown MUST have an explicit non-destructive probe checkpoint before its destructive phase.
-Each probe worker returns the strongest validated runtime evidence learned. When that probe learns
-missing start ticks for the exact persisted boot/PID identity, the coordinator MUST durably
-compare-and-set the refined fingerprint before it submits destructive work for that session. A
-persistence failure MUST prevent that session's destructive work.
+Each eligible worker MUST return verified stopped evidence on success. Ordinary worker exceptions
+MUST remain future exceptions; the coordinator's future-to-plan mapping provides session attribution
+without a second error wrapper.
 
-Each destructive worker MUST return one structured outcome containing either verified stopped state
-or a failure. The coordinator owns every future-to-session mapping. A worker MUST catch ordinary
-per-session exceptions so a later failure remains attributable without moving database work into the
-worker.
-
-The coordinator MUST consume probe and destructive outcomes as they complete. It MUST persist a
-required fingerprint refinement before destructive submission and apply a verified stopped result
-before announcing success. A database-write failure MUST be reported as failure even if the remote
-runtime was already stopped. A worker-level `BaseException` after mutation leaves the already
-persisted complete fingerprint intact, drains sibling work, and then propagates; it MUST NOT be
-misreported as a reconciled stopped outcome.
+The coordinator MUST consume completed futures as they become available and atomically
+compare-and-set a verified stopped result before announcing success. A database-write failure MUST
+be reported as failure even if the remote runtime was already stopped. A worker-level
+`BaseException` drains sibling work and then propagates; it MUST NOT be misreported as a reconciled
+stopped outcome.
 
 One session failure MUST NOT cancel sibling sessions. The final command failure MUST retain the
 existing aggregate behavior after all eligible work and reconciliation complete.
@@ -178,12 +168,12 @@ The human command MUST report the batch count before submitting remote mutations
 session MUST then receive a session-labeled success or warning from the coordinator. Completion
 lines MAY appear in completion order; they MUST NOT rely on adjacency to identify their session.
 
-If no concurrent probe or teardown completes for five seconds, the coordinator MUST emit a compact
-heartbeat containing completed, active, and queued counts. It MUST repeat at no more than
-five-second intervals while that concurrent wait remains quiet, including interruption
-reconciliation. A normally fast concurrent lane therefore has no heartbeat noise, while its slow
-transport work never leaves the operator with unexplained silence. Existing pre-submission
-preflight, activation, repair, and status progress remains outside this heartbeat contract.
+If no concurrent teardown completes for five seconds, the coordinator MUST emit a compact heartbeat
+containing completed, active, and queued counts. It MUST repeat at no more than five-second
+intervals while that concurrent wait remains quiet, including interruption reconciliation. A
+normally fast concurrent lane therefore has no heartbeat noise, while its slow transport work never
+leaves the operator with unexplained silence. Existing pre-submission preflight, activation, repair,
+and status progress remains outside this heartbeat contract.
 
 Workers MUST emit no output. Machine-readable output, if introduced independently, MUST remain free
 of progress prose; this effort does not add a batch-stop JSON result.
@@ -194,45 +184,26 @@ On the first operator interrupt after submission, the coordinator MUST:
 
 1. cancel futures that have not started;
 2. report that active teardowns are being reconciled;
-3. continue consuming already-completed and in-flight bounded outcomes;
-4. apply their evidence on the main thread; and
+3. continue consuming already-completed and in-flight bounded futures;
+4. apply successful stopped evidence on the main thread; and
 5. propagate interruption after reconciliation.
 
 Running thread work cannot be cancelled safely and MUST NOT be described as cancelled. A second or
 later interrupt MUST repeat the visible reconciliation notice and continue draining. The command
 MUST NOT promise an immediate escape that Python's executor shutdown cannot deliver.
 
-### R10: Existing batch boundary and selection
+### R10: Existing batch boundary and state fencing
 
-Filter-name validation MUST precede non-blocking acquisition of the state database's one
-session-runtime lock. A read-only pre-lock query MAY return the existing successful no-op when the
-selection is already empty. When candidates exist, contention MUST refuse the operation before
-mutation. With the lock held, Agentworks MUST reapply the filters and load the selected session rows
-and their current VM/workspace relationships fresh, then perform VM graph validation, activation
-holds, PID repair, batch status observation, collision checks, broken-state selection, and the
-`--force` gate before concurrent destructive work begins. The fresh locked selection MAY also become
-empty and return the same successful no-op. Named mutators MUST likewise reload their target row and
-required relationships after acquiring the lock. An unknown actionable session MUST retain the
-current whole-batch refusal before mutation.
-
-The session-runtime mutation lock and VM activation boundary MUST remain held until every submitted
-worker has completed and its outcome has been reconciled. Named create, start, restart, stop, and
-delete plus workspace, agent, and VM cascading teardown, PID/fingerprint repair, `last_started_at`
-persistence, failed-launch cleanup, and rollback row deletion MUST use the same mutation boundary so
-a stale worker cannot kill, unlink, repair, delete, or mark a replacement runtime.
-Absent/version-zero database initialization and schema migration MUST use the generalized migration
-sidecar as the same session-runtime exclusion mechanism. Initialization MUST recheck absence after
-acquiring it.
-
-Separately, every writable command MUST retain PR #764's shared database-use lock for the `Database`
-lifetime, and every first-party live-database replacement MUST retain its exclusive database-use
-lock. These two locks MUST keep their existing acquisition order and path canonicalization.
+Agentworks MUST retain the current filter validation, selection, VM graph validation, activation
+holds, PID repair, batch status observation, broken-state selection, and `--force` gate before
+destructive work. An unknown actionable session MUST retain the current whole-batch refusal before
+mutation. The VM activation boundary and writable `Database` MUST remain held until every submitted
+worker has completed and its result has been reconciled.
 
 Every runtime update performed after remote work MUST use an atomic compare-and-set against the
-prepared socket and process fingerprint. A changed or missing row MUST remain untouched and become a
-typed conflict failure even while its session-runtime lock is held. If an interrupted reconciliation
-already committed the exact desired state, retry MUST recognize it as idempotent success rather than
-a stale conflict.
+prepared complete socket and process fingerprint. A changed or missing row MUST remain untouched and
+become a typed conflict failure. If an interrupted reconciliation already committed the exact
+desired state, retry MUST recognize it as idempotent success rather than a stale conflict.
 
 ### R11: Start and restart disposition
 
@@ -247,16 +218,14 @@ Automated tests MUST prove:
 
 - dedicated remote phases overlap under the fixed bound;
 - same-VM dedicated sessions may overlap;
-- legacy work is serial and does not overlap any other legacy mutation;
+- incomplete dedicated and legacy work stay serial after the concurrent lane;
 - workers do not access SQLite or output;
-- duplicate socket or process identities refuse before mutation;
+- duplicate socket or complete process identities among concurrent plans refuse before mutation;
 - successful results persist despite sibling failure;
-- missing-start-ticks refinement is durable before destructive submission;
+- incomplete-fingerprint teardown retains the synchronous pre-kill persistence checkpoint;
 - queued work is cancelled and running work reconciled on first interrupt;
 - repeated interrupts cannot abandon reconciliation;
-- concurrent lifecycle mutation is excluded and stale persistence is rejected atomically;
-- VM deletion, launch timestamp persistence, and failed-launch cleanup participate in lifecycle
-  exclusion;
+- stale persistence is rejected atomically;
 - interrupted post-commit reconciliation is retry-safe;
 - single named stop retains current behavior; and
 - force, residual, broken, timeout, and aggregate-failure behavior remains fail closed.
@@ -280,6 +249,5 @@ Tests MUST assert behavior and state, not authored prose.
 
 1. Is a 10-second per-call batch timeout too aggressive for any supported transport or teardown
    step?
-2. Should legacy teardown run before or after the concurrent lane? The proposed design runs it after
-   dedicated reconciliation so shared-server compatibility work cannot delay independent modern
-   runtimes.
+2. Should serial compatibility teardown run before or after the concurrent lane? The proposed design
+   runs it afterward so incomplete or shared-server work cannot delay independent modern runtimes.
