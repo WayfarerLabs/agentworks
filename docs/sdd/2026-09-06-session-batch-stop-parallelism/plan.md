@@ -82,8 +82,10 @@ not authored prose.
 - [x] Publish the complete design checkpoint as a draft PR with `review-requested`.
 - [x] Audit implementation readiness against PR #764 head `5199bae9f` and close the canonical-VM
       plan field and partial-submission ownership gaps before implementation.
-- [ ] Complete up to three authorized design feedback/fix cycles.
-- [ ] Record design convergence before implementation begins.
+- [x] Complete two design feedback/fix cycles, within the three authorized: round 1 incorporated
+      published and implementation-readiness findings; round 2 completed with a clean Muntz
+      confirmation and no further findings.
+- [x] Record design convergence at `0275edc1e` before implementation begins.
 
 ### Phase 0 Definition of Done
 
