@@ -621,4 +621,7 @@ def test_codex_relative_source_named_local_does_not_match_source_type(transport:
         NativeUserConfig(marketplaces=["local"], plugins=["one@other-market"]),
         invocation(transport, repeated, prior=record(updated[-1], "codex")),
     )
-    assert repeated[-1] == updated[-1]
+    assert repeated == []
+    with NativeFiles(transport) as files:
+        cli = NativeCLI("codex", files, home=str(transport.home), config_root=str(transport.home / ".codex"))
+        assert [market.name for market in cli.markets()] == ["other-market"]
