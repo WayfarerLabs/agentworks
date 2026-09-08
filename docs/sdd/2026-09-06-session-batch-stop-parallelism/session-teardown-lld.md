@@ -88,8 +88,8 @@ runs only on the invoking thread.
 3. Require a positive persisted PID, canonical boot ID, and positive start ticks.
 4. If any fingerprint field is missing, classify the row for synchronous teardown instead of
    constructing a concurrent plan.
-5. Require `vm_name` to equal the canonical VM key already resolved by batch graph validation.
-6. Construct the plan with `sudo=not target_owns_session`.
+5. Copy the canonical `vm_name` from the already-validated batch relationship graph and construct
+   the plan with `sudo=not target_owns_session`.
 
 Preparation performs no remote mutation. An invalid stored value retains the current per-session
 failure behavior; a merely incomplete fingerprint is not an error and stays serial.

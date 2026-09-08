@@ -175,16 +175,11 @@ be reported as failure even if the remote runtime was already stopped. A worker-
 `BaseException` drains sibling work and then propagates; it MUST NOT be misreported as a reconciled
 stopped outcome.
 
-If executor submission fails or is interrupted before every plan receives a future, the coordinator
-MUST stop submitting. Every submitted callable MUST wait at a batch-local pre-mutation gate that is
-released for remote execution only after every future has returned and been mapped. A partial
-submission MUST mark that gate aborted before releasing it, cancel queued work, wait for running
-through executor shutdown where CPython registered it, and then propagate the original coordinator
-failure or interruption. A callable whose thread or future registration was interrupted MAY finish
-its no-mutation branch after propagation, but MUST NOT invoke the remote helper. This rule covers
-work that an executor may have enqueued or started even though `submit()` did not return its future.
-Every plan in a partially submitted batch MUST remain persisted and remotely untouched and be
-accounted as not started.
+Remote mutation MUST remain gated until every plan owns a mapped future. If submission fails or is
+interrupted before that boundary, every concurrent plan MUST remain remotely and persistently
+untouched and be accounted as not started, including work the executor enqueued or started without
+returning its future. The original coordinator failure or interruption MUST propagate. A wrapper
+that CPython did not register MAY finish its required no-mutation branch after propagation.
 
 One session failure MUST NOT cancel sibling sessions. The final command failure MUST retain the
 existing aggregate behavior after all eligible work and reconciliation complete.
@@ -214,10 +209,9 @@ On the first operator interrupt after submission, the coordinator MUST:
 4. apply successful stopped evidence on the main thread; and
 5. propagate interruption after reconciliation.
 
-When interruption lands before the complete future map exists, the aborted submission gate makes the
-entire concurrent lane a no-mutation attempt. Once the complete map exists, the coordinator MUST
-release the gate and apply the ordinary cancellation and reconciliation rules even if interruption
-lands at the release boundary.
+Before the complete future map exists, interruption MUST follow R7's partial-submission behavior. At
+or after that boundary, the coordinator MUST release the gate and apply the ordinary cancellation
+and reconciliation rules.
 
 Running thread work cannot be cancelled safely and MUST NOT be described as cancelled. A second or
 later interrupt MUST repeat the visible reconciliation notice and continue draining. The command
