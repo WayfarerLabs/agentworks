@@ -1,6 +1,6 @@
 # Native Harness Setup: Detailed Design
 
-- Status: Implementation design in progress
+- Status: Implemented locally; integrated acceptance pending
 - Governing design: [HLA](hla.md), especially invocation, convergence and readiness
 - Baseline: `3641ea8c`
 
@@ -54,13 +54,11 @@ components of the same VM-owned native slice; neither overwrites the existing SS
 New agents and workspaces have no database owner until native creation succeeds. Their initial
 receipts are buffered with the creation operation and inserted atomically with the owner and desired
 overlay. Workspace creation retains its existing refusal to adopt unexplained native residue. Fresh
-agent creation must first refuse an existing unowned Linux user or home, before mutation or rollback
-is armed; the current initializer instead converges such a user, so this boundary requires an
-implementation change. After that check, handled creation failure cleans up only the native owner
-created by this operation and drops its receipt buffer. A process crash leaves residue that a new
-create refuses to adopt. Reinit of a database-owned agent retains convergence and checkpoints
-directly into its existing instance-state row. This does not add partial-create rows or a workspace
-repair/reinit command.
+agent creation refuses an existing unowned Linux user or home before mutation or rollback is armed.
+After that check, handled creation failure cleans up only the native owner created by this operation
+and drops its receipt buffer. A process crash leaves residue that a new create refuses to adopt.
+Reinit of a database-owned agent retains convergence and checkpoints directly into its existing
+instance-state row. This does not add partial-create rows or a workspace repair/reinit command.
 
 ## Env and secrets
 
@@ -84,7 +82,9 @@ instance-state table. The domain codec carries a version, owning native identity
 records. VM records distinguish VM and user components. Agent/workspace records carry only their own
 facet. Each integration record contains:
 
-- Its name and facet, effective non-secret config and declared env references needed for freshness.
+- Its name and component, unresolved effective config, env secret-reference names and hashes of
+  literal env values needed for freshness. Neither literal env values nor resolved secrets are
+  stored.
 - Completion state and the last confirmed successful mutation prefix.
 - Native claims identified by integration-owned role, native identifier, destination and relevant
   comparison hash/strategy. A matching filename or matching bytes are not proof of ownership.
@@ -103,13 +103,13 @@ workflow; no VM import/restore command is added.
 
 ## Serialization and deletion
 
-The implementation must add a process-level native mutation guard; Database.transaction and VM
-activation gates do not provide it. Use operating-system file locking associated with the local
-state database and VM identity. Initially serialize native setup mutations within one VM family,
-which includes VM/admin setup, agent/workspace create and reinit, and deletion. Different VMs remain
-independent. This deliberately avoids a multi-lock cascade and locks held in different orders while
-an agent or workspace deletion invokes existing nested cleanup. Nested operations share the guard
-through the owning operation, rather than reacquiring it.
+A process-level native mutation guard provides serialization; Database.transaction and VM activation
+gates do not provide it. Use operating-system file locking associated with the local state database
+and VM identity. Initially serialize native setup mutations within one VM family, which includes
+VM/admin setup, agent/workspace create and reinit, and deletion. Different VMs remain independent.
+This deliberately avoids a multi-lock cascade and locks held in different orders while an agent or
+workspace deletion invokes existing nested cleanup. Nested operations share the guard through the
+owning operation, rather than reacquiring it.
 
 The guard refuses contention immediately and reports a typed retryable contention error. It holds no
 transaction on the state database across remote calls, releases automatically on process exit, and
@@ -145,10 +145,12 @@ ownership. Installation or registration that existed without an Agentworks recei
 the migration strategy explains explicit remediation. Query again after every command before
 recording its actual result. A command's success alone does not establish scope or identity.
 
-The concrete native query payload fields, supported removal behavior, and command/settings ordering
-must be pinned by isolated local fixture observations before this part is wired into setup. CLI help
-confirms JSON query and add/remove commands for both tools, but is not proof of idempotency or side
-effects. User-scoped plugin setup only is in scope. Workspace facets publish project settings only.
+Isolated local fixtures pin concrete native query payload fields, removal behavior and
+command/settings ordering; see [native research](prior-art-research.md). Commands resolve the
+executable and login PATH once under the actual user before switching to an isolated native home for
+source discovery. Prepared env remains authoritative. Marketplace source comparison includes
+optional identity fields, and source reuse compares the source location, never its classifier or
+ref. User-scoped plugin setup only is in scope. Workspace facets publish project settings only.
 
 ## Readiness
 
