@@ -175,7 +175,9 @@ not authored prose.
 
 ## Residual Work Deliberately Deferred
 
-- Parallel start/restart orchestration requires its own issue and SDD if measurements justify it.
-- Compound remote teardown for named-stop latency requires separate safety analysis.
+- Parallel start/restart orchestration is tracked by issue #778 and requires its own SDD if
+  measurements justify it.
+- Measured named-stop latency and any compound remote teardown are tracked by issue #777 and require
+  separate safety analysis.
 - Operator-configurable concurrency requires evidence from the fixed-bound implementation.
 - systemd/cgroup process containment remains issue #715.

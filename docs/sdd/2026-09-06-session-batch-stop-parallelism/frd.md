@@ -37,9 +37,11 @@ current synchronous behavior while sharing the same extracted teardown phases.
 
 ## Non-goals
 
-- Parallelizing `session start --all` or `session restart --all`.
-- Changing named `session stop` semantics or making it asynchronous.
+- Parallelizing `session start --all` or `session restart --all`; issue #778 tracks that design.
+- Changing named `session stop` semantics or making it asynchronous; issue #777 tracks measured
+  single-stop optimization.
 - Adding `--workers`, configuration, environment variables, or capability API changes.
+- Adding machine-readable batch-stop output or changing a machine contract.
 - Combining several session teardowns into one remote shell program.
 - Changing tmux signal policy, dedicated socket identity, force recovery, or descendant containment.
 - Providing a transactional all-or-nothing batch operation across remote runtimes and SQLite.
@@ -102,6 +104,10 @@ compatibility path as part of this effort.
 The concurrent lane MUST use a small fixed global ceiling of eight workers and MUST use fewer when
 fewer dedicated sessions are selected. It MUST NOT create a worker per session without a bound.
 
+The initial ceiling deliberately matches the existing fixed eight-worker read-only guest-observation
+pool in `agentworks.status_observation`. The mutating lifecycle path MUST name its policy separately
+because its mandatory drain behavior cannot depend on that module's cancellation helper.
+
 The fixed value is implementation policy, not a public contract. Adding operator configuration
 requires measured evidence that the fixed bound is inadequate and is outside this effort.
 
@@ -142,6 +148,10 @@ one attempt for each non-interactive remote call. The initial implementation val
 MUST be confirmed or increased from supported-environment teardown evidence before lock. This bounds
 one remote step, not the whole session: the complete teardown may execute several sequential steps.
 
+The initial timeout and attempt count deliberately match `GUEST_OBSERVATION_TIMEOUT_SECONDS` and
+`GUEST_OBSERVATION_ATTEMPTS`. The teardown constants MUST remain independently named because an
+uncertain destructive call cannot inherit read-only retry or cancellation semantics.
+
 Timeout is a failure for that session. Its complete persisted fingerprint MUST remain unchanged, and
 the coordinator MUST NOT automatically repeat a destructive command whose outcome is uncertain.
 
@@ -176,8 +186,7 @@ normally fast concurrent lane therefore has no heartbeat noise, while its slow t
 leaves the operator with unexplained silence. Existing pre-submission preflight, activation, repair,
 and status progress remains outside this heartbeat contract.
 
-Workers MUST emit no output. Machine-readable output, if introduced independently, MUST remain free
-of progress prose; this effort does not add a batch-stop JSON result.
+Workers MUST emit no output.
 
 ### R9: Interruption
 

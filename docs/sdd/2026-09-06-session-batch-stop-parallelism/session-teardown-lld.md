@@ -44,6 +44,11 @@ Start ticks remain part of each plan and the worker's exact process-incarnation 
 not part of the collision key because two plans that claim the same live PID on one VM boot are not
 safe to mutate concurrently merely because one stored start-ticks value is stale.
 
+A concrete collision uses two different persisted managed socket names in the same validated owner
+directory that alias one Unix socket and tmux server. Both workers can capture and validate that
+server's same boot ID and PID before either invokes `kill-server`. Socket-string uniqueness misses
+the overlap; the VM/boot/PID key refuses it before either worker mutates the shared process.
+
 This gate runs after PID repair and before the first destructive submission.
 
 ## Dedicated Concurrent Plan
@@ -150,10 +155,11 @@ initial implementation supplies:
 default_timeout=10
 ```
 
-The SSH transport already defaults to one attempt. The remote teardown code passes no wider timeout
-or retry override. Live validation covers every teardown step on supported environments. The value
-may be increased before design lock if evidence shows 10 seconds is too short; it remains one named
-internal batch-mutation constant rather than a CLI or configuration contract.
+The values deliberately match the shipped read-only guest-observation timeout and attempt constants,
+and eight likewise matches its worker ceiling. The remote teardown code passes no wider timeout or
+retry override. Live validation covers every teardown step on supported environments. The value may
+be increased before design lock if evidence shows 10 seconds is too short. Teardown keeps separately
+named mutation constants because it cannot share the read-only helper's cancellation behavior.
 
 Named stop and other synchronous teardown consumers use their existing transport instances and
 timeout policy.
@@ -236,9 +242,14 @@ machine, and five-second heartbeats make the mandatory reconciliation wait visib
 ### Named stop
 
 Named stop keeps its synchronous dispatcher, output, and transport policy. The complete dedicated
-branch may call the extracted database-free remote helper synchronously; the incomplete dedicated
-branch retains its current pre-kill fingerprint persistence. It does not use an executor or gain the
-batch timeout.
+branch calls the extracted database-free remote helper synchronously, then uses its existing
+unconditional stopped persistence. The incomplete dedicated branch retains its current pre-kill
+fingerprint persistence. Named stop does not use an executor or gain the batch timeout.
+
+Only the concurrent coordinator uses compare-and-set because this effort creates a new gap between
+worker completion and coordinator persistence. Named stop has no new scheduling boundary; widening
+cross-process fencing for existing singular lifecycle calls would change its contract outside this
+batch-performance effort.
 
 ### Batch stop
 

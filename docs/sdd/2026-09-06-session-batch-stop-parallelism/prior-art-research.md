@@ -29,6 +29,11 @@ defines `ThreadPoolExecutor(max_workers=N)` as a bounded asynchronous execution 
 Design consequence: use a fixed maximum of eight independent teardown tasks and consume outcomes as
 they complete. Per-call transport timeouts, not the executor, provide time bounds.
 
+Agentworks already uses an eight-worker ceiling, a 10-second guest-call timeout, and one attempt for
+read-only status observation. Those values are the initial teardown precedent, not fresh tuning. The
+teardown implementation keeps its policy independently named because destructive calls require
+different cancellation, retry, and reconciliation behavior.
+
 ### 2. Cancellation cannot stop a running teardown
 
 The same futures documentation states that `Future.cancel()` does not cancel a call that is already

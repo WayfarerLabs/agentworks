@@ -49,6 +49,10 @@ futures in completion order, applies verified stopped evidence to SQLite through
 and emits a labeled line. Ordinary failures accumulate without cancelling siblings. A five-second
 quiet wait emits a compact progress heartbeat.
 
+The initial eight-worker, ten-second, one-attempt policy matches the shipped read-only guest
+observation policy as precedent. Teardown owns separately named constants and a different executor
+loop because mutating work must drain and reconcile running futures rather than abandon them.
+
 Incomplete dedicated and legacy work runs serially on the invoking thread after the concurrent lane
 has reconciled. Incomplete dedicated rows keep the current pre-kill fingerprint persistence. Legacy
 rows keep exact shared-server `kill-session` behavior. The final aggregate error counts failures
