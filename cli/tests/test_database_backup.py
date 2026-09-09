@@ -411,7 +411,7 @@ def test_interrupted_database_use_lock_acquisition_closes_connection(
     with pytest.raises(KeyboardInterrupt) as raised:
         backup_module._acquire_database_use_lock(
             tmp_path / "live.db",
-            exclusive=True,
+            exclusive=False,
             timeout=0.2,
         )
 

@@ -1,6 +1,6 @@
 # Implementation Plan: Degraded Runnable Recovery
 
-- Status: Implementation
+- Status: Complete; locked on merge of PR #764
 - Date: 2026-09-06
 - Requirements: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
@@ -81,7 +81,7 @@
       suites.
 - [x] Run Ruff check and format, strict mypy, file lint, locked-SDD, Rulesync drift, diff, release
       residual, and the full non-integration Python suite.
-- [ ] Build an isolated wheel and validate shipped CLI human and JSON behavior against healthy and
+- [x] Build an isolated wheel and validate shipped CLI human and JSON behavior against healthy and
       synthetic degraded state without residue.
 - [ ] Run private project-values, Muntz, cold correctness/security, and integration-test review
       lanes appropriate to the final delta; resolve material findings.
@@ -91,21 +91,21 @@
 
 ## Phase 5: Closeout
 
-- [ ] Reconcile every requirement and definition of done against exact HEAD.
-- [ ] Update this plan with truthful completed work and create `locked.md` summarizing final
+- [x] Reconcile every requirement and definition of done against exact HEAD.
+- [x] Update this plan with truthful completed work and create `locked.md` summarizing final
       reality.
-- [ ] Ensure no load-bearing maintenance guidance exists only under `docs/sdd/`.
+- [x] Ensure no load-bearing maintenance guidance exists only under `docs/sdd/`.
 - [ ] Mark ready with merge intent and a signed exact-head handoff after all gates converge.
 
 ## Definition of done
 
-- [ ] Plain session and console inventory returns every selected stored row in degraded
+- [x] Plain session and console inventory returns every selected stored row in degraded
       current-schema state without external work or writes.
-- [ ] Requested status isolates incomplete structure per row and retains healthy peer results.
-- [ ] Focused and mutating operations stay strict.
-- [ ] Unsafe migration refuses through typed Agentworks errors without advancing its checkpoint.
-- [ ] Restore rejects foreign-key violations by default; `--force` accepts only those violations,
+- [x] Requested status isolates incomplete structure per row and retains healthy peer results.
+- [x] Focused and mutating operations stay strict.
+- [x] Unsafe migration refuses through typed Agentworks errors without advancing its checkpoint.
+- [x] Restore rejects foreign-key violations by default; `--force` accepts only those violations,
       remains independent from `--yes`, and warns before and after replacement.
-- [ ] Human, strict JSON v1, filter, names-only, docs, and locked design records agree.
+- [x] Human, strict JSON v1, filter, names-only, docs, and locked design records agree.
 - [ ] Local gates, private reviews, hosted CI, shipped-CLI validation, published feedback, and
       operator disposition are complete at the ready commit.

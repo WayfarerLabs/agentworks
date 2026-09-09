@@ -1,6 +1,6 @@
 # Degraded Runnable Recovery: Prior Art
 
-- Status: Design
+- Status: Complete; locked on merge of PR #764
 - Date: 2026-09-06
 
 ## Governing project patterns

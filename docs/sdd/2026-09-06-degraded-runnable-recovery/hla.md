@@ -1,6 +1,6 @@
 # Degraded Runnable Recovery: High-Level Architecture
 
-- Status: Design
+- Status: Implemented; locked on merge of PR #764
 - Date: 2026-09-06
 - Requirements: [frd.md](./frd.md)
 

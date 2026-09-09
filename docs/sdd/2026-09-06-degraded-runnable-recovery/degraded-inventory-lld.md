@@ -1,6 +1,6 @@
 # Degraded Inventory and Observation: Low-Level Design
 
-- Status: Design
+- Status: Implemented; locked on merge of PR #764
 - Date: 2026-09-06
 - Requirements: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)

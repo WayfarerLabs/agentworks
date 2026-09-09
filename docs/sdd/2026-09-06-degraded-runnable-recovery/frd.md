@@ -1,6 +1,6 @@
 # Degraded Runnable Recovery: Functional Requirements
 
-- Status: Design
+- Status: Implemented; locked on merge of PR #764
 - Date: 2026-09-06
 - Tracks: #763
 - Source baseline: `b22cc49c9827cb38fb7d8fc77522b436b318ac03`

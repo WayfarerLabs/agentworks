@@ -161,7 +161,6 @@ class PreparedRestore:
         try:
             _online_copy_to_connection(self._source.connection, stage.connection)
             stage.connection.close()
-            _require_restore_stage(stage)
             try:
                 use_lock = _acquire_database_use_lock(
                     self.database_path,
@@ -482,21 +481,41 @@ def _acquire_database_use_lock(
     timeout: float,
 ) -> sqlite3.Connection | None:
     """Acquire a cross-platform shared-use or exclusive-replacement lock."""
-    lock_path = _database_use_lock_path(database_path)
+    return _acquire_sqlite_lock(
+        _database_use_lock_path(database_path),
+        begin_statement="BEGIN EXCLUSIVE" if exclusive else "BEGIN",
+        timeout=timeout,
+        lock_kind="state database use lock",
+        materialize_deferred_lock=not exclusive,
+    )
+
+
+def _acquire_sqlite_lock(
+    lock_path: Path,
+    *,
+    begin_statement: str,
+    timeout: float,
+    lock_kind: str,
+    materialize_deferred_lock: bool = False,
+) -> sqlite3.Connection | None:
+    """Create and acquire one SQLite-backed coordination lock."""
     try:
         descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     except FileExistsError:
         pass
     except OSError as error:
-        raise StateError(f"could not create the state database use lock: {error}") from error
+        raise StateError(f"could not create the {lock_kind}: {error}") from error
     else:
         os.close(descriptor)
 
     connection: sqlite3.Connection | None = None
     try:
         connection = sqlite3.connect(str(lock_path), timeout=timeout)
-        connection.execute("BEGIN EXCLUSIVE" if exclusive else "BEGIN")
-        connection.execute("PRAGMA schema_version").fetchone()
+        connection.execute(begin_statement)
+        if materialize_deferred_lock:
+            # Plain BEGIN is deferred until the first read. Touch the schema so
+            # shared database users actually hold their lock before returning.
+            connection.execute("PRAGMA schema_version").fetchone()
         return connection
     except BaseException as error:
         if connection is not None:
@@ -504,7 +523,7 @@ def _acquire_database_use_lock(
         if isinstance(error, sqlite3.DatabaseError):
             if _is_busy(error):
                 return None
-            raise StateError(f"state database use lock is unavailable: {error}") from error
+            raise StateError(f"{lock_kind} is unavailable: {error}") from error
         raise
 
 
@@ -516,29 +535,12 @@ def _release_sqlite_lock(connection: sqlite3.Connection) -> None:
 
 
 def _acquire_migration_lock(database_path: Path, *, timeout: float) -> sqlite3.Connection | None:
-    lock_path = _migration_lock_path(database_path)
-    try:
-        descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    except FileExistsError:
-        pass
-    except OSError as error:
-        raise StateError(f"could not create the state database migration lock: {error}") from error
-    else:
-        os.close(descriptor)
-
-    connection: sqlite3.Connection | None = None
-    try:
-        connection = sqlite3.connect(str(lock_path), timeout=timeout)
-        connection.execute("BEGIN IMMEDIATE")
-        return connection
-    except BaseException as error:
-        if connection is not None:
-            connection.close()
-        if isinstance(error, sqlite3.DatabaseError):
-            if _is_busy(error):
-                return None
-            raise StateError(f"state database migration lock is unavailable: {error}") from error
-        raise
+    return _acquire_sqlite_lock(
+        _migration_lock_path(database_path),
+        begin_statement="BEGIN IMMEDIATE",
+        timeout=timeout,
+        lock_kind="state database migration lock",
+    )
 
 
 def create_manual_backup(database_path: Path) -> Path:
@@ -847,10 +849,7 @@ def _replace_existing_restore_destination(
         os.chmod(stage.path, destination.mode)
     except OSError as error:
         raise BackupError(f"could not preserve live state database permissions: {error}") from error
-    _require_restore_stage(stage)
-    _require_prepared_destination(database_path, destination.path_identity)
     destination.connection.close()
-    _require_prepared_destination(database_path, destination.path_identity)
     for suffix in ("-wal", "-shm", "-journal"):
         if database_path.with_name(f"{database_path.name}{suffix}").exists():
             raise BackupError("live state database still has active SQLite coordination files")
