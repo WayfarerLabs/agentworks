@@ -964,8 +964,8 @@ def _launch_all_sessions(
 ) -> None:
     """Start sessions, optionally replacing running runtimes.
 
-    Ordinary start leaves running selections unchanged; restart replaces them.
-    Each operation considers every matching session.
+    Batch start selects stopped sessions plus states required by explicit
+    modifiers; restart considers every match and replaces running runtimes.
 
     Each name filter accepts a single name or a list of names; lists
     OR within a filter, filters AND across the call. ``agent_name``
@@ -1017,6 +1017,14 @@ def _launch_all_sessions(
                 f"{len(unknown)} session(s) have unknown status after auto-repair ({names}).",
                 hint="Resolve the listed sessions manually before retrying.",
             )
+
+        if not replace_running:
+            start_statuses = {SessionStatus.STOPPED}
+            if force:
+                start_statuses.add(SessionStatus.BROKEN)
+            if force_new:
+                start_statuses.add(SessionStatus.RUNNING)
+            sessions = [s for s in sessions if status_map.get(s.name) in start_statuses]
 
         if not sessions:
             output.info("No matching sessions to start.")
