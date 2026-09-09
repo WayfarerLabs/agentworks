@@ -178,7 +178,9 @@ def test_list_user_column_distinguishes_agent_admin_and_unknown_modes(
             SessionListRow("s-agent", "ws", "box", "default", "shell", "agent", "agent-a", "running"),
             SessionListRow("s-admin", "ws", "box", "default", "shell", "admin", None, "stopped"),
             SessionListRow("s-agent-missing", "ws", "box", "default", "shell", "agent", None, "unknown"),
+            SessionListRow("s-agent-empty", "ws", "box", "default", "shell", "agent", "", "unknown"),
             SessionListRow("s-admin-agent", "ws", "box", "default", "shell", "admin", "agent-a", "unknown"),
+            SessionListRow("s-admin-empty", "ws", "box", "default", "shell", "admin", "", "unknown"),
             SessionListRow("s-unknown", "ws", "box", "default", "shell", "unknown", None, "unknown"),
             SessionListRow("s-unknown-agent", "ws", "box", "default", "shell", "unknown", "agent-a", "unknown"),
         )
@@ -195,7 +197,9 @@ def test_list_user_column_distinguishes_agent_admin_and_unknown_modes(
         "s-agent": "agent-a",
         "s-admin": "--admin--",
         "s-agent-missing": "unknown",
+        "s-agent-empty": "unknown",
         "s-admin-agent": "unknown",
+        "s-admin-empty": "unknown",
         "s-unknown": "unknown",
         "s-unknown-agent": "unknown",
     }

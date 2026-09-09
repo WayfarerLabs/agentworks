@@ -783,7 +783,7 @@ def render_session_listing(listing: SessionListing, *, include_status: bool = Fa
         status_label = "-" if status == "unavailable" else status
         if status == "running" and session.uptime_seconds is not None:
             status_label = f"running ({format_short_uptime(session.uptime_seconds)})"
-        if session.mode == "agent" and session.agent_name is not None:
+        if session.mode == "agent" and session.agent_name:
             user_label = session.agent_name
         elif session.mode == "admin" and session.agent_name is None:
             user_label = "--admin--"
