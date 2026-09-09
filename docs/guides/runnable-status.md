@@ -30,6 +30,11 @@ reflects starts observed by Agentworks. Provider or guest restarts performed out
 not refresh that observation, so the reported uptime may be stale until Agentworks next records a
 conclusive start.
 
+The human `session list --status` table includes known uptime in the running status, such as
+`running (45s)`, `running (12m)`, `running (8h)`, or `running (3d)`. It keeps showing `running` when
+the start time is unknown. The compact form uses seconds below two minutes, whole minutes below two
+hours, whole hours below two days, and whole days thereafter.
+
 These observations do not start a VM, repair a session, create or destroy tmux state, or persist an
 observed result. An expected provider, credential, identity, or transport failure keeps the local
 facts and reports status as `unknown`. One failed VM or provider boundary does not remove successful

@@ -55,3 +55,14 @@ def format_uptime(seconds: int | None, *, running: bool) -> str:
     if not running:
         return "-"
     return format_duration(seconds)
+
+
+def format_short_uptime(seconds: int) -> str:
+    """Format canonical whole-second uptime in one compact unit."""
+    if seconds < 120:
+        return f"{seconds}s"
+    if seconds < 7_200:
+        return f"{seconds // 60}m"
+    if seconds < 172_800:
+        return f"{seconds // 3_600}h"
+    return f"{seconds // 86_400}d"

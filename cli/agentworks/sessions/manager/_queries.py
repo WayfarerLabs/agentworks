@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 
 import agentworks.sessions.manager as _mgr
@@ -18,7 +19,7 @@ from agentworks.errors import (
     UserAbort,
 )
 from agentworks.list_sorting import nullable_sort_value, sort_rows
-from agentworks.runtime_time import derive_uptime_seconds, format_uptime
+from agentworks.runtime_time import derive_uptime_seconds, format_short_uptime, format_uptime
 from agentworks.sessions._resource_cleanup import cleanup_now_empty_resource
 from agentworks.sessions.tmux import exact_tmux_target
 
@@ -43,6 +44,7 @@ class SessionListRow:
     mode: str
     agent_name: str | None
     status: str
+    uptime_seconds: int | None = None
 
 
 @dataclass(frozen=True)
@@ -680,6 +682,7 @@ def session_listing(
             f"across {output.count(len(selected_vms), 'VM')}..."
         )
         status_map = _mgr.observe_session_statuses(session_rows, db=db, config=config)
+    observed_at = datetime.now(UTC) if include_status else None
     registry = _mgr._display_registry(config)
     harness_by_template: dict[str, str] = {}
 
@@ -701,7 +704,17 @@ def session_listing(
 
     facts: list[SessionListRow] = []
     for session in sessions:
-        status = status_map.get(session.name, SessionStatus.UNKNOWN).value if include_status else "unavailable"
+        observed_status = status_map.get(session.name, SessionStatus.UNKNOWN) if include_status else None
+        status = observed_status.value if observed_status is not None else "unavailable"
+        uptime_seconds = None
+        if observed_status is SessionStatus.RUNNING and session.last_started_at is not None:
+            uptime_seconds = derive_uptime_seconds(
+                session.last_started_at,
+                running=True,
+                entity_kind="session",
+                entity_name=session.name,
+                now=observed_at,
+            )
         facts.append(
             SessionListRow(
                 name=session.name,
@@ -712,6 +725,7 @@ def session_listing(
                 mode=project_session_mode(session.mode),
                 agent_name=session.agent_name,
                 status=status,
+                uptime_seconds=uptime_seconds,
             )
         )
     return SessionListing(sessions=tuple(facts))
@@ -765,7 +779,10 @@ def render_session_listing(listing: SessionListing, *, include_status: bool = Fa
     broken_names: list[str] = []
     unknown_by_vm: dict[str, list[str]] = {}
     for session in listing.sessions:
-        status = "-" if session.status == "unavailable" else session.status
+        status = session.status
+        status_label = "-" if status == "unavailable" else status
+        if status == "running" and session.uptime_seconds is not None:
+            status_label = f"running ({format_short_uptime(session.uptime_seconds)})"
         mode = session.mode
         mode_label = mode if mode == "unknown" else f"agent ({session.agent_name})" if session.agent_name else "admin"
         row = (
@@ -776,7 +793,7 @@ def render_session_listing(listing: SessionListing, *, include_status: bool = Fa
             session.harness_integration or "-",
             mode_label,
         )
-        rows.append((*row, status) if include_status else row)
+        rows.append((*row, status_label) if include_status else row)
         if include_status and status == "broken":
             broken_names.append(session.name)
         elif include_status and status == "unknown":
