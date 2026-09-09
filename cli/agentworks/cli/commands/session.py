@@ -330,7 +330,10 @@ def _launch_sessions(
 @session_app.command("start")
 def session_start(
     name: Annotated[str | None, typer.Argument(help="Session name")] = None,
-    all_sessions: Annotated[bool, typer.Option("--all", help="Start all sessions")] = False,
+    all_sessions: Annotated[
+        bool,
+        typer.Option("--all", help="Start matching stopped sessions by default"),
+    ] = False,
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM (with --all)")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace (with --all)")] = None,
     agent: Annotated[str | None, typer.Option("--agent", help="Filter by agent (with --all)")] = None,
@@ -343,7 +346,7 @@ def session_start(
         typer.Option("--resume-only", help="Fail unless the existing harness conversation can be resumed"),
     ] = False,
 ) -> None:
-    """Start a session, or all sessions with --all."""
+    """Start one session; --all starts matching stopped sessions by default."""
     _launch_sessions(
         name,
         all_sessions=all_sessions,

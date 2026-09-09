@@ -2,7 +2,7 @@
 
 ``session list`` resolves every session's template to its concrete
 harness integration name (a config-only, no-SSH derivation) and shows it in a
-harness integration column between TEMPLATE and MODE. These pins cover the column
+harness integration column between TEMPLATE and USER. These pins cover the column
 value for the default (``shell``) and a declared ``claude-code``
 template, the guard that a template which fails to resolve shows ``-``
 without aborting the render, the 20-char truncation the shared
@@ -13,10 +13,15 @@ the harness integration, and that ``--names-only`` stays pure (no registry cost)
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from agentworks.db import SessionMode
+import pytest
+
+from agentworks.db import SessionMode, SessionStatus
 from agentworks.sessions import manager as session_manager
+from agentworks.sessions.manager import _queries as session_queries
+from agentworks.sessions.manager._queries import SessionListing, SessionListRow
 from tests.conftest import ManifestDoc
 
 if TYPE_CHECKING:
@@ -59,7 +64,7 @@ def _header_and_rows(info: list[str]) -> tuple[str, list[str]]:
     return info[header_idx], rows
 
 
-def test_list_shows_harness_integration_column_between_template_and_mode(
+def test_list_shows_harness_integration_column_between_template_and_user(
     db: Database,
     make_config,  # noqa: ANN001
     captured_output,  # noqa: ANN001
@@ -137,7 +142,7 @@ def test_list_truncates_over_cap_values_with_ellipsis(
     assert long_name not in rows[0]
 
 
-def test_list_mode_column_uses_wider_cap(
+def test_list_user_column_uses_wider_cap(
     db: Database,
     make_config,  # noqa: ANN001
     captured_output,  # noqa: ANN001
@@ -158,9 +163,46 @@ def test_list_mode_column_uses_wider_cap(
     session_manager.list_sessions(db, config)
 
     _header, rows = _header_and_rows(captured_output.info)
-    mode_cell = re.split(r" {2,}", rows[0])[5]
-    assert len(mode_cell) == 40
-    assert mode_cell.endswith("...")
+    user_cell = re.split(r" {2,}", rows[0])[5]
+    assert len(user_cell) == 40
+    assert user_cell.endswith("...")
+
+
+@pytest.mark.parametrize("include_status", [False, True])
+def test_list_user_column_distinguishes_agent_admin_and_unknown_modes(
+    include_status: bool,
+    captured_output,  # noqa: ANN001
+) -> None:
+    listing = SessionListing(
+        (
+            SessionListRow("s-agent", "ws", "box", "default", "shell", "agent", "agent-a", "running"),
+            SessionListRow("s-admin", "ws", "box", "default", "shell", "admin", None, "stopped"),
+            SessionListRow("s-agent-missing", "ws", "box", "default", "shell", "agent", None, "unknown"),
+            SessionListRow("s-agent-empty", "ws", "box", "default", "shell", "agent", "", "unknown"),
+            SessionListRow("s-admin-agent", "ws", "box", "default", "shell", "admin", "agent-a", "unknown"),
+            SessionListRow("s-admin-empty", "ws", "box", "default", "shell", "admin", "", "unknown"),
+            SessionListRow("s-unknown", "ws", "box", "default", "shell", "unknown", None, "unknown"),
+            SessionListRow("s-unknown-agent", "ws", "box", "default", "shell", "unknown", "agent-a", "unknown"),
+        )
+    )
+
+    session_manager.render_session_listing(listing, include_status=include_status)
+
+    header, rows = _header_and_rows(captured_output.info)
+    assert "USER" in header
+    assert "MODE" not in header
+    fields_by_row = (re.split(r" {2,}", row) for row in rows)
+    by_name = {fields[0]: fields[5] for fields in fields_by_row}
+    assert by_name == {
+        "s-agent": "agent-a",
+        "s-admin": "--admin--",
+        "s-agent-missing": "unknown",
+        "s-agent-empty": "unknown",
+        "s-admin-agent": "unknown",
+        "s-admin-empty": "unknown",
+        "s-unknown": "unknown",
+        "s-unknown-agent": "unknown",
+    }
 
 
 def test_plain_list_shows_harness_integration_without_status(
@@ -180,6 +222,52 @@ def test_plain_list_shows_harness_integration_without_status(
     assert "STATUS" not in header
     fields = rows[0].split()
     assert "shell" in fields
+
+
+def test_status_list_adds_short_uptime_only_to_running_rows_with_known_start_time(
+    db: Database,
+    make_config,  # noqa: ANN001
+    captured_output,  # noqa: ANN001
+    monkeypatch,  # noqa: ANN001
+) -> None:
+    config = make_config()
+    _seed_vm(db, "box", "ws-box")
+    for name in ("known", "unknown", "stopped"):
+        _seed_session(db, name, "ws-box", "default")
+    db._conn.executemany(
+        "UPDATE sessions SET last_started_at = ? WHERE name = ?",
+        [
+            ("2026-09-09T12:00:00Z", "known"),
+            ("2026-09-09T12:00:00Z", "stopped"),
+        ],
+    )
+    db._conn.commit()
+
+    class FixedDatetime:
+        @classmethod
+        def now(cls, tz: object) -> datetime:
+            assert tz is UTC
+            return datetime(2026, 9, 9, 12, 2, tzinfo=UTC)
+
+    monkeypatch.setattr(session_queries, "datetime", FixedDatetime)
+    monkeypatch.setattr(
+        session_manager,
+        "observe_session_statuses",
+        lambda sessions, **_kwargs: {
+            session.name: SessionStatus.STOPPED if session.name == "stopped" else SessionStatus.RUNNING
+            for session in sessions
+        },
+    )
+
+    session_manager.list_sessions(db, config, include_status=True)
+
+    _header, rows = _header_and_rows(captured_output.info)
+    statuses = {row.split()[0]: re.split(r" {2,}", row)[-1] for row in rows}
+    assert statuses == {
+        "known": "running (2m)",
+        "stopped": "stopped",
+        "unknown": "running",
+    }
 
 
 def test_list_resolves_each_distinct_template_at_most_once(
