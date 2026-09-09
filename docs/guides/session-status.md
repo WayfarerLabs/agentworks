@@ -31,9 +31,11 @@ Calls without fact input explicitly close stdin so Windows SSH does not retain t
 console handle after returning the complete result.
 
 Plain `agw session list` is local inventory and does not run these probes. Add `--status` to request
-them; the table adds `STATUS` and reports progress before SSH begins. `agw session describe NAME`
-always performs one non-activating observation before rendering its configured facts. A stopped or
-unreachable VM remains stopped and yields `UNKNOWN` rather than being started for inspection.
+them; the table adds `STATUS`, reports progress before SSH begins, and appends compact uptime to a
+running status when the session has a known start time. A running session without one remains
+`running`. `agw session describe NAME` always performs one non-activating observation before
+rendering its configured facts. A stopped or unreachable VM remains stopped and yields `UNKNOWN`
+rather than being started for inspection.
 
 A lifecycle command that needs teardown or replacement may repair an incomplete reachable row from
 the server's reported PID and a stable double-read of its boot ID and process start time. A provably

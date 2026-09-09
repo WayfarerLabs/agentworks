@@ -845,7 +845,9 @@ only; `--admin` matches admin-mode sessions only (the two are mutually exclusive
 
 Plain `session list` reads local inventory and omits `STATUS`. Add `--status` for bounded,
 non-activating live observation of the selected sessions; the human table then uses `running`,
-`stopped`, `residual`, `broken`, or `unknown`. `--status` cannot be combined with `--names-only`.
+`stopped`, `residual`, `broken`, or `unknown`. A running row with a known start time includes
+compact uptime, such as `running (45s)` or `running (3d)`; one without a known start time remains
+`running`. `--status` cannot be combined with `--names-only`.
 
 `session stop`, `session start`, and `session restart` operate on a single session by default. Pass
 `--all` to batch over matching sessions. By default, session start --all dispatches only matches
