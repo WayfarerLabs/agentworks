@@ -39,10 +39,11 @@ outside the supported adversary boundary.
 
 ## Verification and review
 
-The completed implementation passed the full non-integration Python suite, Ruff check and format,
-strict mypy, repository file lint, locked-SDD and Rulesync checks, website suites and deterministic
-builds, plus isolated installed-wheel recovery smoke tests. Hosted Python, CodeQL, documentation,
-and aggregate CI gates were green at the ready checkpoint.
+The final code checkpoint is `a3aba69a4`. It passed 8,625 non-integration Python tests with 3
+platform-specific skips, Ruff check and format, strict mypy, repository file lint, locked-SDD and
+Rulesync checks, website suites and deterministic builds, plus an isolated wheel build and install.
+All hosted Python, Windows Python 3.13, CodeQL, documentation, and aggregate CI gates were green on
+that checkpoint.
 
 Independent project-values, Muntz, cold correctness/security, and integration-test lanes converged.
 The final feedback iteration removed redundant destination checks while retaining stage identity at
@@ -53,7 +54,10 @@ passed after that change.
 
 The operator validated the Windows recovery script, including `-ExerciseLiveRestore`: it created a
 recovery backup, exercised synthetic recovery and lock behavior, restored the live database, and
-confirmed session and console inventory afterward.
+confirmed session and console inventory afterward. The final integration lane could not reach the
+Windows workstation because no execution connector was exposed, so it made no workstation change;
+exact-head hosted Windows coverage ran the three new lock and stage-identity regressions, while the
+lane's local exact-head recovery corpus passed 169 tests.
 
 ## Permanent homes and accepted limits
 

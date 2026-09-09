@@ -83,11 +83,11 @@
       residual, and the full non-integration Python suite.
 - [x] Build an isolated wheel and validate shipped CLI human and JSON behavior against healthy and
       synthetic degraded state without residue.
-- [ ] Run private project-values, Muntz, cold correctness/security, and integration-test review
+- [x] Run private project-values, Muntz, cold correctness/security, and integration-test review
       lanes appropriate to the final delta; resolve material findings.
-- [ ] Push the exact checkpoint, obtain hosted CI success, and complete operator-gated live
+- [x] Push the exact checkpoint, obtain hosted CI success, and complete operator-gated live
       validation or record the operator's explicit disposition.
-- [ ] Complete up to three authorized final feedback/fix rounds.
+- [x] Complete up to three authorized final feedback/fix rounds.
 
 ## Phase 5: Closeout
 
@@ -95,7 +95,7 @@
 - [x] Update this plan with truthful completed work and create `locked.md` summarizing final
       reality.
 - [x] Ensure no load-bearing maintenance guidance exists only under `docs/sdd/`.
-- [ ] Mark ready with merge intent and a signed exact-head handoff after all gates converge.
+- [x] Mark ready with merge intent and a signed exact-head handoff after all gates converge.
 
 ## Definition of done
 
@@ -107,5 +107,5 @@
 - [x] Restore rejects foreign-key violations by default; `--force` accepts only those violations,
       remains independent from `--yes`, and warns before and after replacement.
 - [x] Human, strict JSON v1, filter, names-only, docs, and locked design records agree.
-- [ ] Local gates, private reviews, hosted CI, shipped-CLI validation, published feedback, and
+- [x] Local gates, private reviews, hosted CI, shipped-CLI validation, published feedback, and
       operator disposition are complete at the ready commit.
