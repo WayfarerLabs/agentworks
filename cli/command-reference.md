@@ -848,18 +848,19 @@ non-activating live observation of the selected sessions; the human table then u
 `stopped`, `residual`, `broken`, or `unknown`. `--status` cannot be combined with `--names-only`.
 
 `session stop`, `session start`, and `session restart` operate on a single session by default. Pass
-`--all` to batch over matching sessions. The batch form accepts `--vm <vm>`, `--workspace <ws>`,
-`--agent <agent>`, `--console <console>`, and `--admin` to narrow the set; filters compose with AND
-and require `--all`. The name filters accept a single value or a comma-separated list
-(`--vm vm1,vm2`); commas within a filter are OR-ed together, and an unknown name in a filter is an
-error, not an empty result. `--console` selects sessions belonging to any of the given consoles.
-`--agent` matches agent-mode sessions only; `--admin` matches admin-mode sessions only (the two are
-mutually exclusive). Pass `--force` only to recover broken state after Agentworks proves the prior
-managed tmux server is absent; Agentworks never signals a stored numeric PID. Start and restart
-resume the harness conversation when possible. `--resume-only` refuses unless the integration can
-resume existing state; `--force-new` requires a fresh conversation when the operation launches a
-runtime. The two options are mutually exclusive. A running `session start` remains a no-op under the
-default or resume-only policy; a running `session start --force-new` is refused rather than silently
+`--all` to batch over matching sessions. By default, session start --all dispatches only matches
+observed as stopped. The batch form accepts `--vm <vm>`, `--workspace <ws>`, `--agent <agent>`,
+`--console <console>`, and `--admin` to narrow the set; filters compose with AND and require
+`--all`. The name filters accept a single value or a comma-separated list (`--vm vm1,vm2`); commas
+within a filter are OR-ed together, and an unknown name in a filter is an error, not an empty
+result. `--console` selects sessions belonging to any of the given consoles. `--agent` matches
+agent-mode sessions only; `--admin` matches admin-mode sessions only (the two are mutually
+exclusive). Pass `--force` only to recover broken state after Agentworks proves the prior managed
+tmux server is absent; Agentworks never signals a stored numeric PID. Start and restart resume the
+harness conversation when possible. `--resume-only` refuses unless the integration can resume
+existing state; `--force-new` requires a fresh conversation when the operation launches a runtime.
+The two options are mutually exclusive. A running `session start` remains a no-op under the default
+or resume-only policy; a running `session start --force-new` is refused rather than silently
 replacing the runtime. A restart obtains the integration's launch decision before teardown, so an
 unsupported policy or unavailable strict resume leaves the managed tmux runtime and
 integration-owned state intact. Normal lifecycle preparation may already have persisted observed

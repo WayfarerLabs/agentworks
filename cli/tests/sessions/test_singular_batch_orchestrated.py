@@ -395,6 +395,122 @@ def test_batch_empty_vm_set_is_a_complete_noop(
     assert any("No running sessions to stop" in m for m in captured_output.info)
 
 
+@pytest.mark.parametrize(
+    ("operation_name", "options", "expected"),
+    [
+        pytest.param("start_all_sessions", {}, ["stopped"], id="start-only-stopped"),
+        pytest.param(
+            "start_all_sessions",
+            {"force": True},
+            ["broken", "stopped"],
+            id="start-force-includes-broken",
+        ),
+        pytest.param(
+            "start_all_sessions",
+            {"force_new": True},
+            ["running", "stopped"],
+            id="start-force-new-includes-running-refusal",
+        ),
+        pytest.param(
+            "start_all_sessions",
+            {"resume_only": True},
+            ["stopped"],
+            id="start-resume-only-only-stopped",
+        ),
+        pytest.param(
+            "restart_all_sessions",
+            {},
+            ["broken", "legacy", "residual", "running", "stopped", "unobserved-stopped"],
+            id="restart-every-session",
+        ),
+    ],
+)
+def test_batch_launch_status_selection(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    operation_name: str,
+    options: dict[str, bool],
+    expected: list[str],
+) -> None:
+    """Bulk launch verbs consume the batch observation with their own policy."""
+    _seed_vm(db, "box", "100.64.0.9")
+    for name in ("stopped", "running", "residual", "broken", "legacy", "unobserved-stopped"):
+        _seed_session(db, name, "ws-box")
+    db.update_session_runtime(
+        "legacy",
+        socket_path=None,
+        pid=1234,
+        boot_id=BOOT_ID,
+        tmux_server_start_ticks=5678,
+    )
+    observed = {
+        "stopped": SessionStatus.STOPPED,
+        "running": SessionStatus.RUNNING,
+        "residual": SessionStatus.RESIDUAL,
+        "broken": SessionStatus.BROKEN,
+        "legacy": SessionStatus.UNKNOWN,
+        "unobserved-stopped": SessionStatus.UNKNOWN,
+    }
+    launched: list[str] = []
+
+    monkeypatch.setattr(session_manager, "_batch_vm_boundary", lambda *args, **kwargs: contextlib.nullcontext())
+    monkeypatch.setattr(session_manager, "ensure_pids_batch", lambda selected, **kwargs: selected)
+    monkeypatch.setattr(session_manager, "observe_session_statuses", lambda selected, **kwargs: observed)
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._lifecycle._launch_existing_session",
+        lambda *args, name, **kwargs: launched.append(name),
+    )
+
+    getattr(session_manager, operation_name)(
+        db,
+        make_config(),
+        interaction=TtyInteractionPolicy.REFUSE,
+        **options,
+    )
+
+    assert launched == expected
+
+
+def test_batch_start_refuses_actionable_unknown_before_status_selection(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unknown runtime authority remains fail-closed before stopped filtering."""
+    _seed_vm(db, "box", "100.64.0.9")
+    _seed_session(db, "unknown", "ws-box")
+    db.update_session_runtime(
+        "unknown",
+        socket_path="/tmp/unknown.sock",
+        pid=1234,
+        boot_id=BOOT_ID,
+        tmux_server_start_ticks=5678,
+    )
+    launched: list[str] = []
+
+    monkeypatch.setattr(session_manager, "_batch_vm_boundary", lambda *args, **kwargs: contextlib.nullcontext())
+    monkeypatch.setattr(session_manager, "ensure_pids_batch", lambda selected, **kwargs: selected)
+    monkeypatch.setattr(
+        session_manager,
+        "observe_session_statuses",
+        lambda selected, **kwargs: {"unknown": SessionStatus.UNKNOWN},
+    )
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._lifecycle._launch_existing_session",
+        lambda *args, name, **kwargs: launched.append(name),
+    )
+
+    with pytest.raises(StateError):
+        session_manager.start_all_sessions(
+            db,
+            make_config(),
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert launched == []
+
+
 def test_batch_operator_stopped_vm_aborts_before_the_probes(
     db: Database,
     make_config,  # noqa: ANN001
