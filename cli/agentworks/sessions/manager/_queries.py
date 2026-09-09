@@ -783,15 +783,19 @@ def render_session_listing(listing: SessionListing, *, include_status: bool = Fa
         status_label = "-" if status == "unavailable" else status
         if status == "running" and session.uptime_seconds is not None:
             status_label = f"running ({format_short_uptime(session.uptime_seconds)})"
-        mode = session.mode
-        mode_label = mode if mode == "unknown" else f"agent ({session.agent_name})" if session.agent_name else "admin"
+        if session.mode == "agent" and session.agent_name:
+            user_label = session.agent_name
+        elif session.mode == "admin" and session.agent_name is None:
+            user_label = "--admin--"
+        else:
+            user_label = "unknown"
         row = (
             session.name,
             session.workspace_name,
             session.vm_name,
             session.template,
             session.harness_integration or "-",
-            mode_label,
+            user_label,
         )
         rows.append((*row, status_label) if include_status else row)
         if include_status and status == "broken":
@@ -799,10 +803,10 @@ def render_session_listing(listing: SessionListing, *, include_status: bool = Fa
         elif include_status and status == "unknown":
             unknown_by_vm.setdefault(session.vm_name, []).append(session.name)
 
-    headers = ["NAME", "WORKSPACE", "VM", "TEMPLATE", "HARNESS INT.", "MODE"]
+    headers = ["NAME", "WORKSPACE", "VM", "TEMPLATE", "HARNESS INT.", "USER"]
     if include_status:
         headers.append("STATUS")
-    for line in output.render_table(headers, rows, max_col_widths={headers.index("MODE"): 40}):
+    for line in output.render_table(headers, rows, max_col_widths={headers.index("USER"): 40}):
         output.info(line)
 
     if broken_names or unknown_by_vm:
