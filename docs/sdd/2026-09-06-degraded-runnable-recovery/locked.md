@@ -45,10 +45,11 @@ builds, plus isolated installed-wheel recovery smoke tests. Hosted Python, CodeQ
 and aggregate CI gates were green at the ready checkpoint.
 
 Independent project-values, Muntz, cold correctness/security, and integration-test lanes converged.
-The final feedback iteration removed redundant pathname checks without weakening the entry,
-pathname-binding, or final pre-replacement boundaries; it also consolidated SQLite-backed lock
-acquisition and documented the read that materializes a deferred shared lock. The focused restore,
-CLI, and migration safety corpus passed after that change.
+The final feedback iteration removed redundant destination checks while retaining stage identity at
+each installation boundary; it also consolidated SQLite-backed lock acquisition and documented the
+read that materializes a deferred shared lock. Real contention coverage proves an open writable
+database blocks replacement until close. The focused restore, CLI, and migration safety corpus
+passed after that change.
 
 The operator validated the Windows recovery script, including `-ExerciseLiveRestore`: it created a
 recovery backup, exercised synthetic recovery and lock behavior, restored the live database, and

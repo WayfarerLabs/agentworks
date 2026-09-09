@@ -829,6 +829,7 @@ def _require_restore_stage(stage: _RestoreStage) -> None:
 
 def _install_absent_restore_stage(stage: _RestoreStage, database_path: Path) -> None:
     """Install a stage only while the prepared destination remains absent."""
+    _require_restore_stage(stage)
     try:
         os.link(stage.path, database_path)
     except FileExistsError as error:
@@ -854,6 +855,7 @@ def _replace_existing_restore_destination(
         if database_path.with_name(f"{database_path.name}{suffix}").exists():
             raise BackupError("live state database still has active SQLite coordination files")
     _require_prepared_destination(database_path, destination.path_identity)
+    _require_restore_stage(stage)
     try:
         os.replace(stage.path, database_path)
     except OSError as error:

@@ -446,6 +446,22 @@ def test_interrupted_migration_lock_acquisition_closes_connection(
     assert connection.closed is True
 
 
+@pytest.mark.windows
+def test_writable_database_shared_use_lock_blocks_exclusive_replacement(tmp_path: Path) -> None:
+    import agentworks.db.backup as backup_module
+
+    live = tmp_path / "live.db"
+    database = Database(live)
+    try:
+        assert backup_module._acquire_database_use_lock(live, exclusive=True, timeout=0.1) is None
+    finally:
+        database.close()
+
+    exclusive = backup_module._acquire_database_use_lock(live, exclusive=True, timeout=0.1)
+    assert exclusive is not None
+    backup_module._release_sqlite_lock(exclusive)
+
+
 @pytest.mark.skipif(os.name == "nt", reason="Windows does not replace an open SQLite destination path")
 def test_prepared_restore_refuses_destination_path_replacement(tmp_path: Path) -> None:
     source = tmp_path / "source.db"
@@ -524,6 +540,61 @@ def test_destination_replacement_after_pre_copy_check_does_not_receive_copy(
 
     assert _setting(displaced, "identity") == "live"
     assert _setting(live, "identity") == "replacement"
+
+
+@pytest.mark.parametrize("destination_exists", [False, True], ids=["absent", "existing"])
+@pytest.mark.windows
+def test_restore_refuses_stage_path_replacement_before_install(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    destination_exists: bool,
+) -> None:
+    import agentworks.db.backup as backup_module
+
+    source = tmp_path / "source.db"
+    live = tmp_path / "live.db"
+    displaced_stage = tmp_path / "displaced-stage.db"
+    source_database = Database(source)
+    source_database.set_setting("identity", "source")
+    source_database.close()
+    if destination_exists:
+        live_database = Database(live)
+        live_database.set_setting("identity", "live")
+        live_database.close()
+
+    stage_path: Path | None = None
+    real_copy = backup_module._online_copy_to_connection
+    real_acquire = backup_module._acquire_database_use_lock
+
+    def remember_stage(source_connection: sqlite3.Connection, destination: sqlite3.Connection) -> None:
+        nonlocal stage_path
+        real_copy(source_connection, destination)
+        row = destination.execute("PRAGMA database_list").fetchone()
+        assert row is not None
+        stage_path = Path(str(row[2]))
+
+    def replace_stage_before_lock(
+        database_path: Path,
+        *,
+        exclusive: bool,
+        timeout: float,
+    ) -> sqlite3.Connection | None:
+        assert stage_path is not None
+        stage_path.replace(displaced_stage)
+        sqlite3.connect(stage_path).close()
+        return real_acquire(database_path, exclusive=exclusive, timeout=timeout)
+
+    monkeypatch.setattr(backup_module, "_online_copy_to_connection", remember_stage)
+    monkeypatch.setattr(backup_module, "_acquire_database_use_lock", replace_stage_before_lock)
+
+    with pytest.raises(BackupError, match="staged database changed during restore"):
+        restore_backup(source, live)
+
+    if destination_exists:
+        assert _setting(live, "identity") == "live"
+    else:
+        assert not live.exists()
+    assert _setting(displaced_stage, "identity") == "source"
 
 
 @pytest.mark.windows
