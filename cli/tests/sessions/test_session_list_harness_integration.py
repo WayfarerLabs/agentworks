@@ -177,7 +177,10 @@ def test_list_user_column_distinguishes_agent_admin_and_unknown_modes(
         (
             SessionListRow("s-agent", "ws", "box", "default", "shell", "agent", "agent-a", "running"),
             SessionListRow("s-admin", "ws", "box", "default", "shell", "admin", None, "stopped"),
+            SessionListRow("s-agent-missing", "ws", "box", "default", "shell", "agent", None, "unknown"),
+            SessionListRow("s-admin-agent", "ws", "box", "default", "shell", "admin", "agent-a", "unknown"),
             SessionListRow("s-unknown", "ws", "box", "default", "shell", "unknown", None, "unknown"),
+            SessionListRow("s-unknown-agent", "ws", "box", "default", "shell", "unknown", "agent-a", "unknown"),
         )
     )
 
@@ -188,7 +191,14 @@ def test_list_user_column_distinguishes_agent_admin_and_unknown_modes(
     assert "MODE" not in header
     fields_by_row = (re.split(r" {2,}", row) for row in rows)
     by_name = {fields[0]: fields[5] for fields in fields_by_row}
-    assert by_name == {"s-agent": "agent-a", "s-admin": "--admin--", "s-unknown": "unknown"}
+    assert by_name == {
+        "s-agent": "agent-a",
+        "s-admin": "--admin--",
+        "s-agent-missing": "unknown",
+        "s-admin-agent": "unknown",
+        "s-unknown": "unknown",
+        "s-unknown-agent": "unknown",
+    }
 
 
 def test_plain_list_shows_harness_integration_without_status(
