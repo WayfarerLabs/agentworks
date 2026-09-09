@@ -156,6 +156,100 @@ that skill rather than from a copy here. Only a saga lead can charter its confor
 written; outside a saga, that pass generalizes to the same clause-by-clause check against whatever
 contracts govern the PR.
 
+## Coverage axes: workstation and platform
+
+Live coverage runs along two independent axes, and conflating them is the easy mistake. A claim like
+"we tested wsl2" does not say which axis it covers, so it cannot be checked.
+
+- **Workstation**: the operating system `agw` itself runs on. This axis owns the CLI's own surface:
+  path handling, config location, terminal and console behavior, the ssh client, process spawning.
+- **VM platform (site)**: what `agw` reaches out and manages. This axis owns provisioning,
+  bootstrap, exposure, and teardown against a real backend.
+
+Most platforms are **decoupled** from the workstation: they reach a backend over SSH or a REST
+endpoint, so any workstation can drive them and you pick one for convenience. A few are
+**workstation-bound**: the platform drives host-local tooling, so `agw` has to be running on that
+operating system, and covering the platform therefore requires a bed running that OS.
+
+Read the platform's transport to tell which kind you have, rather than assuming. A platform that
+shells a local binary or resolves a local app-data path is workstation-bound. A platform whose
+config carries an endpoint plus credentials is decoupled, and its bed is a reachable service rather
+than a particular workstation.
+
+State both axes when reporting coverage: name the platform exercised and the workstation it was
+driven from. The same discipline applies to gaps, because a platform can be unreachable for either
+reason, and the two call for completely different beds.
+
+### Windows beds
+
+Windows testing uses two beds, and the tier numbers name **beds, not thoroughness levels**:
+
+- **Tier 1** is a plain Windows machine with no nested virtualization. It covers the workstation
+  axis only: the CLI surface on Windows, `doctor`, console and ssh behavior, path handling. It is
+  the cheaper bed and the default for anything whose Windows risk is the CLI itself.
+- **Tier 2** is Windows with nested virtualization and a real WSL2 install. It covers the same
+  workstation axis plus the `wsl2` platform axis, which is workstation-bound and therefore
+  unreachable from any other bed. It costs more, so reserve it for changes that touch WSL and for
+  pre-release passes.
+
+Tier 2 is a strict superset of Tier 1, so a Tier 2 pass implies the Tier 1 result on the same tree.
+What Tier 2 adds is one more reachable platform, not a deeper class of testing; do not read the
+higher number as a stronger verdict.
+
+### Standing up a bed for a decoupled platform
+
+A decoupled platform needs a reachable service rather than a particular workstation, and a cloud VM
+with nested virtualization is usually the cheapest way to get one, because it runs the hypervisor
+itself as an ordinary guest. Check the provider before assuming this is possible: offerings differ
+sharply, and where one exposes nested virtualization on ordinary instance types, another may require
+bare metal at an order of magnitude more cost for the same work. Prefer a project or account
+separate from anything the operator uses personally, so a mistake on the bed cannot reach their
+resources.
+
+Two things are worth expecting the first time a platform gets a live bed.
+
+**The setup tooling is part of the surface under test.** Where the repository ships a script to
+prepare the backend, running it is a test and its failures are findings, not obstacles to work
+around silently. The parameters such a script accepts (storage, network, release) are exactly where
+it is most likely to have been exercised against only one value, so a bed that picks a different one
+finds real defects immediately. Fix forward locally to keep the bed moving if you must, but report
+what the unmodified script did.
+
+**Assume the basic path is broken.** A platform nothing has driven live has had no pressure keeping
+it aligned with the system it manages, so the managed system's own vocabulary drifts underneath it:
+privileges get renamed, exit codes gain meanings, defaults move. The first end-to-end create is the
+highest-yield test that platform will ever get. Budget for it failing, and prove the diagnosis by
+changing one thing and re-running rather than reasoning from the error text, which on an untested
+path is itself untested and often names the wrong cause.
+
+### Cover every supported major version of a managed system
+
+Where a platform declares support for more than one major version of the system it manages, each
+supported major is its own bed and each needs exercising. One bed is not evidence about the other,
+and testing whichever bed happens to be warm is how a version-specific defect reaches an operator
+running the version nobody drove.
+
+This matters most when the code itself forks on version. A version check that selects different
+privileges, endpoints, or payload shapes is a branch, and a branch tested on one side only is half
+tested; the untested side is exactly where the drift the check exists to absorb will surface. The
+same applies to normalization written for an older release: confirm on the live system that it is
+still needed and that what it deliberately leaves alone genuinely does not need it.
+
+Record which majors a result covers. A pass that does not say which version produced it invites the
+reader to assume it covers all of them.
+
+### A bed's toolchain is part of its result
+
+A bed missing an external binary manufactures failures that look exactly like product defects.
+Record what each bed has installed, and when a suite fails there, attribute the failures before
+reporting them: a spawn error or a shell exit code of 127 is the bed talking, not the code. Where
+the difference changes the verdict, say which bed produced the number.
+
+The same care runs the other way. When a bed runs a newer release of the managed system than the
+code was written against, a failure there is a finding about the code rather than about the bed, and
+it is the most valuable kind: it is the drift no unit suite can see. Record the bed's version
+alongside its toolchain so a reader can tell which of the two a result speaks to.
+
 ## Live-testing discipline
 
 - Run long operations (provisioning, initialization, teardown) synchronously with generous timeouts.
