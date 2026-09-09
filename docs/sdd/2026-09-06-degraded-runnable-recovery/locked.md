@@ -62,7 +62,7 @@ lane's local exact-head recovery corpus passed 169 tests.
 The current-main reconciliation code checkpoint is `3d681d401`. It composes main's session user and
 compact-uptime projections with degraded-row isolation, using one shared observation timestamp and
 deriving uptime only for observed running sessions. The conflict resolution passed a focused
-242-test session and database corpus and the full 8,642-test suite with 3 platform-specific skips,
+242-test session and database corpus and the full 8,645-test suite with 3 platform-specific skips,
 plus Ruff, strict mypy, repository, locked-SDD, Rulesync, website, and deterministic-build gates.
 Exact-head project-values, Muntz, and cold correctness reviews found the composition clean. Hosted
 Python, Windows Python 3.13, static-analysis, and repository gates passed. The first hosted website

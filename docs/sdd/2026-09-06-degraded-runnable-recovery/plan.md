@@ -102,7 +102,7 @@
 - [x] Merge `main` at `3cdd3c0f6` and resolve the session-query and command-reference conflicts.
 - [x] Preserve degraded-row status isolation while composing main's session user and compact-uptime
       projections with one shared observation timestamp.
-- [x] Run the 242-test focused session and database corpus and the full 8,642-test suite with 3
+- [x] Run the 242-test focused session and database corpus and the full 8,645-test suite with 3
       platform-specific skips on the reconciliation code checkpoint.
 - [x] Run Ruff check and format, strict mypy, repository file lint, locked-SDD, Rulesync drift,
       website suites, and deterministic website builds on the reconciled implementation.
