@@ -97,6 +97,23 @@
 - [x] Ensure no load-bearing maintenance guidance exists only under `docs/sdd/`.
 - [x] Mark ready with merge intent and a signed exact-head handoff after all gates converge.
 
+## Phase 6: Current-main reconciliation
+
+- [x] Merge `main` at `3cdd3c0f6` and resolve the session-query and command-reference conflicts.
+- [x] Preserve degraded-row status isolation while composing main's session user and compact-uptime
+      projections with one shared observation timestamp.
+- [x] Run the 242-test focused session and database corpus and the full 8,642-test suite with 3
+      platform-specific skips on the reconciliation code checkpoint.
+- [x] Run Ruff check and format, strict mypy, repository file lint, locked-SDD, Rulesync drift,
+      website suites, and deterministic website builds on the reconciled implementation.
+- [x] Obtain clean exact-head project-values, Muntz, and cold correctness reviews of the conflict
+      resolution.
+- [x] Push the reconciliation checkpoint and obtain hosted Python, Windows, static-analysis, and
+      repository-gate success. Classify the first website attempt's missing Chromium DevTools
+      endpoint as infrastructure after its suites passed locally, then obtain a clean replacement
+      run on the final documentation-only head.
+- [x] Re-hand off the conflict-free branch as ready after the final exact-head gates converge.
+
 ## Definition of done
 
 - [x] Plain session and console inventory returns every selected stored row in degraded

@@ -39,11 +39,11 @@ outside the supported adversary boundary.
 
 ## Verification and review
 
-The final code checkpoint is `a3aba69a4`. It passed 8,625 non-integration Python tests with 3
-platform-specific skips, Ruff check and format, strict mypy, repository file lint, locked-SDD and
-Rulesync checks, website suites and deterministic builds, plus an isolated wheel build and install.
-All hosted Python, Windows Python 3.13, CodeQL, documentation, and aggregate CI gates were green on
-that checkpoint.
+The feature code checkpoint before current-main reconciliation was `a3aba69a4`. It passed 8,625
+non-integration Python tests with 3 platform-specific skips, Ruff check and format, strict mypy,
+repository file lint, locked-SDD and Rulesync checks, website suites and deterministic builds, plus
+an isolated wheel build and install. All hosted Python, Windows Python 3.13, CodeQL, documentation,
+and aggregate CI gates were green on that checkpoint.
 
 Independent project-values, Muntz, cold correctness/security, and integration-test lanes converged.
 The final feedback iteration removed redundant destination checks while retaining stage identity at
@@ -58,6 +58,17 @@ confirmed session and console inventory afterward. The final integration lane co
 Windows workstation because no execution connector was exposed, so it made no workstation change;
 exact-head hosted Windows coverage ran the three new lock and stage-identity regressions, while the
 lane's local exact-head recovery corpus passed 169 tests.
+
+The current-main reconciliation code checkpoint is `3d681d401`. It composes main's session user and
+compact-uptime projections with degraded-row isolation, using one shared observation timestamp and
+deriving uptime only for observed running sessions. The conflict resolution passed a focused
+242-test session and database corpus and the full 8,642-test suite with 3 platform-specific skips,
+plus Ruff, strict mypy, repository, locked-SDD, Rulesync, website, and deterministic-build gates.
+Exact-head project-values, Muntz, and cold correctness reviews found the composition clean. Hosted
+Python, Windows Python 3.13, static-analysis, and repository gates passed. The first hosted website
+attempt failed because Chromium did not publish its DevTools endpoint; both website suites and
+deterministic builds passed locally, and the final documentation-only head received a clean hosted
+replacement run.
 
 ## Permanent homes and accepted limits
 
