@@ -412,9 +412,15 @@ def test_batch_empty_vm_set_is_a_complete_noop(
             id="start-force-new-includes-running-refusal",
         ),
         pytest.param(
+            "start_all_sessions",
+            {"resume_only": True},
+            ["stopped"],
+            id="start-resume-only-only-stopped",
+        ),
+        pytest.param(
             "restart_all_sessions",
             {},
-            ["broken", "residual", "running", "stopped"],
+            ["broken", "legacy", "residual", "running", "stopped", "unobserved-stopped"],
             id="restart-every-session",
         ),
     ],
@@ -429,13 +435,22 @@ def test_batch_launch_status_selection(
 ) -> None:
     """Bulk launch verbs consume the batch observation with their own policy."""
     _seed_vm(db, "box", "100.64.0.9")
-    for name in ("stopped", "running", "residual", "broken"):
+    for name in ("stopped", "running", "residual", "broken", "legacy", "unobserved-stopped"):
         _seed_session(db, name, "ws-box")
+    db.update_session_runtime(
+        "legacy",
+        socket_path=None,
+        pid=1234,
+        boot_id=BOOT_ID,
+        tmux_server_start_ticks=5678,
+    )
     observed = {
         "stopped": SessionStatus.STOPPED,
         "running": SessionStatus.RUNNING,
         "residual": SessionStatus.RESIDUAL,
         "broken": SessionStatus.BROKEN,
+        "legacy": SessionStatus.UNKNOWN,
+        "unobserved-stopped": SessionStatus.UNKNOWN,
     }
     launched: list[str] = []
 

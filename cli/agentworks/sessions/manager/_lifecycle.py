@@ -997,9 +997,10 @@ def _launch_all_sessions(
         # Error if any actionable sessions are still unknown after auto-repair.
         # The observer reports PID_STOPPED rows too; lifecycle omits them from
         # this refusal set because it does not need to act on them.
-        # Legacy sessions remain UNKNOWN in the observer status map; the
-        # singular launch migrates them to the new model, so lifecycle alone
-        # excludes them from this refusal set.
+        # Legacy sessions remain UNKNOWN in batch observation. Exclude them
+        # from this refusal so unfiltered batch restart can migrate them in the
+        # singular launcher. Named start also migrates directly; batch start's
+        # observed-status selection below omits them.
         unknown = [
             s
             for s in sessions
