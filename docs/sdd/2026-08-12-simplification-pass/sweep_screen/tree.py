@@ -1,0 +1,198 @@
+"""Reading first-party source from the working tree.
+
+Every command here answers a question about the tree in front of it, and only
+that tree. A row is anchored by identity rather than by line number, so it
+resolves against whatever is checked out and nothing here reads a ref.
+"""
+
+from __future__ import annotations
+
+import ast
+import subprocess
+from collections import Counter
+from pathlib import Path
+
+PROD_ROOT = "cli/agentworks"
+TEST_ROOT = "cli/tests"
+WEB_ROOT = "website/tests"
+#: The website's own production modules, which sit beside its tests rather
+#: than under a package directory, so they are named rather than globbed.
+WEB_PROD = "website"
+
+
+class Tree:
+    """The working tree, listed and parsed on demand.
+
+    A file that is listed but does not parse is fatal, not skipped. Skipping
+    would silently shrink the estate: the file's sites would not exist to be
+    reported unowned, so the "every site is claimed by exactly one row" check
+    would pass over a file nobody had looked at.
+    """
+
+    def __init__(self) -> None:
+        self._parsed: dict[str, ast.Module] = {}
+        self._listed: dict[tuple[str, ...], list[str]] = {}
+
+    def __str__(self) -> str:
+        return "the working tree"
+
+    def _list(self, roots: tuple[str, ...]) -> list[str]:
+        """Every file under `roots`, sorted by path.
+
+        The working tree includes files git does not track yet, because a test
+        file added but not staged holds real sites and an estate that cannot see
+        it reports the same "every site is claimed" as a complete one. Ignored
+        files stay out. Paths come back NUL-separated, so a path containing
+        whitespace cannot split into two.
+        """
+        if roots not in self._listed:
+            command = ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *roots]
+            done = subprocess.run(command, capture_output=True, text=True)
+            if done.returncode != 0:
+                raise SystemExit(f"cannot list {', '.join(roots)} at {self}: {done.stderr.strip()}")
+            self._listed[roots] = sorted({f for f in done.stdout.split("\0") if f})
+        return self._listed[roots]
+
+    def files(self, *roots: str) -> list[str]:
+        """Every `.py` file under `roots`, sorted by path.
+
+        This is what the estate walks, so it takes every module rather than only
+        the test ones: a helper beside the tests can hold a site too.
+        """
+        return [f for f in self._list(roots) if f.endswith(".py")]
+
+    def path_suffixes(self) -> Counter[str]:
+        """Every way a file in this tree can be named by a trailing path, counted.
+
+        A citation names a file at whatever depth reads clearly, so `errors.py`,
+        `agentworks/errors.py` and the full path all resolve to the same file.
+        The COUNT is what makes that safe: a suffix two files share points at
+        neither, and a reader who follows it lands on whichever they guess. So
+        this counts rather than collecting, and the check refuses a citation
+        that names more than one file as firmly as one that names none.
+        """
+        found: Counter[str] = Counter()
+        for path in self._list(()):
+            parts = path.split("/")
+            for start in range(len(parts)):
+                found["/".join(parts[start:])] += 1
+        return found
+
+    def resolve_suffix(self, suffix: str) -> str | None:
+        """The one tracked path a citation's suffix names, or None.
+
+        A citation names a file at whatever depth reads clearly, so resolving it
+        to something the AST can be asked about means finding the full path
+        again. None when the suffix names no file or more than one; the caller
+        refuses either way, because both leave a reader with nowhere to go.
+        """
+        for path in self._list(()):
+            if path == suffix or path.endswith("/" + suffix):
+                if self.path_suffixes()[suffix] != 1:
+                    return None
+                return path
+        return None
+
+    def test_files(self) -> list[str]:
+        """Every test file the sweep accounts for, sorted by path.
+
+        The population behind "which files carry no row": a `test_*.py` module
+        under either test root, or a `*.test.mjs` suite under the website's. A
+        `conftest.py` or a helper module beside the tests holds no test of its
+        own, so no row is expected to name it and it is not part of the
+        accounting.
+        """
+        return [
+            f
+            for f in self._list((TEST_ROOT, WEB_ROOT))
+            if (Path(f).name.startswith("test_") and f.endswith(".py")) or f.endswith(".test.mjs")
+        ]
+
+    def read(self, path: str) -> str | None:
+        """The file's text, or None when it does not exist."""
+        try:
+            return Path(path).read_text(encoding="utf-8")
+        except OSError:
+            return None
+
+    def exists(self, path: str) -> bool:
+        return self.read(path) is not None
+
+    def parse(self, path: str) -> ast.Module:
+        """Parse one file, or stop.
+
+        See the class docstring for why an unparsed file is fatal rather than
+        skipped.
+        """
+        if path not in self._parsed:
+            text = self.read(path)
+            if text is None:
+                raise SystemExit(f"{path}: absent from the working tree, so it cannot be parsed")
+            try:
+                self._parsed[path] = ast.parse(text, path)
+            except SyntaxError as exc:
+                message = f"{path}: cannot parse at {self} ({exc}); the estate would be short by this file"
+                raise SystemExit(message) from exc
+        return self._parsed[path]
+
+
+def exc_name(node: ast.AST | None) -> str | None:
+    """The name an exception expression names, ignoring how it is called."""
+    if isinstance(node, ast.Call):
+        return exc_name(node.func)
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
+def template(node: ast.AST | None, *, wildcard: str | None = None) -> str | None:
+    """A string expression's fixed skeleton, with its variable parts blanked.
+
+    An interpolation renders as `{}` by default, so `f"no {kind} named {name}"`
+    reads back as `no {} named {}`. The skeleton is deliberately blind to WHAT
+    is interpolated. Keying the identity digest on the interpolated expression
+    instead would make a local variable rename orphan the row that names the
+    site, which is the drift the identity exists to retire; two sites in one
+    test that differ only in what they interpolate are one identity with a
+    multiplicity of two, and that is right, because their disposition is the
+    same and a row addresses both alike.
+
+    `%` formatting and `str.format` are read the same way, from the literal
+    they are applied to, whose own `%s` and `{}` are already the blanks.
+
+    `wildcard` replaces each interpolation with one marker instead, which is
+    what the callee screen wants: there the question is whether a `match=`
+    needle can select a raise's message, so the interpolated part is anything
+    at all rather than a thing to compare. That mode declines `%` and
+    `str.format` rather than guessing, because their blanks sit inside the
+    literal where nothing can mark them.
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.JoinedStr):
+        blank = wildcard if wildcard is not None else "{}"
+        return "".join(
+            v.value if isinstance(v, ast.Constant) and isinstance(v.value, str) else blank for v in node.values
+        )
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left, right = template(node.left, wildcard=wildcard), template(node.right, wildcard=wildcard)
+        return None if left is None or right is None else left + right
+    if wildcard is not None:
+        return None
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mod):
+        return template(node.left)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "format":
+        return template(node.func.value)
+    return None
+
+
+def call_name(node: ast.Call) -> str:
+    """The bare name a call invokes, whether it is spelled plain or attributed."""
+    fn = node.func
+    if isinstance(fn, ast.Attribute):
+        return fn.attr
+    if isinstance(fn, ast.Name):
+        return fn.id
+    return ""
