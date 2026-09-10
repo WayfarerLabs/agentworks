@@ -44,7 +44,12 @@ def test_platform_exec_uses_limited_native_transport_without_env_resolution(
 ) -> None:
     config = make_config(manifests=[VM_ENV_TEMPLATE])
     _seed_vm(db)
-    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda _host: True)
+    monkeypatch.setattr(
+        vm_manager,
+        "_is_tailscale_reachable",
+        lambda _host: pytest.fail("platform recovery must not probe Tailscale"),
+    )
+    monkeypatch.setattr(ProxmoxPlatform, "status", lambda *_args, **_kwargs: VMStatus.RUNNING)
     monkeypatch.setattr(
         "agentworks.vms.manager.boundary.require_vm_ssh_boundary",
         lambda *_args, **_kwargs: pytest.fail("platform recovery must not require canonical SSH evidence"),
@@ -152,7 +157,7 @@ def test_platform_exec_starts_without_canonical_connectivity_repair(
     initial_status: VMStatus,
 ) -> None:
     config = make_config(manifests=[VM_ENV_TEMPLATE])
-    _seed_vm(db, tailscale_host=None)
+    _seed_vm(db)
     events: list[str] = []
     site_tokens: list[str] = []
 

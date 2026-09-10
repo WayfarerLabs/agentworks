@@ -147,7 +147,13 @@ def _gated_vm_boundary(
     from agentworks.vms.nodes import live_vm_node
 
     resolver = Resolver(config, registry, interaction=interaction)
-    vm_node = live_vm_node(db, config, registry, vm)
+    vm_node = live_vm_node(
+        db,
+        config,
+        registry,
+        vm,
+        repair_canonical_connectivity=repair_canonical_connectivity,
+    )
     nodes = walk(vm_node)
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
@@ -158,7 +164,6 @@ def _gated_vm_boundary(
     with activation_gate(
         vm_node,
         gate_secret_resolver(config, registry, resolver),
-        repair_canonical_connectivity=repair_canonical_connectivity,
     ):
         preflight_all(
             nodes,

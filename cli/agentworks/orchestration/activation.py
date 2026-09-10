@@ -58,8 +58,10 @@ Three properties are load-bearing:
   consulted and resolved LAZILY on first read by the repair path, because
   whether a rejoin is needed is knowable only after starting and watching the
   VM fail to reconnect. Resolving eagerly would prompt every start for a key
-  almost never used. The node reads only the reader the gate hands it
-  (declare/receive holds), and resolution stays orchestrator-owned.
+  almost never used. A target whose operation must stay below canonical
+  connectivity advertises no repair names and skips its own repair path. The
+  node reads only the reader the gate hands it (declare/receive holds), and
+  resolution stays orchestrator-owned.
 """
 
 from __future__ import annotations
@@ -124,15 +126,14 @@ class GateTarget(Protocol):
     def auto_start(
         self,
         gate_secrets: SecretReader,
-        *,
-        repair_canonical_connectivity: bool = True,
     ) -> None:
-        """Start an auto-stopped target, including any post-start
-        reachability repair when ``repair_canonical_connectivity`` is true.
+        """Start an auto-stopped target under the target's repair policy.
+
         Repair secrets arrive through ``gate_secrets`` and resolve on first
         read. The node re-reads its operator-stopped intent here and REFUSES a
         manually stopped target with a typed error and the explicit-start
-        hint: the node, not the helper, is the authority."""
+        hint: the node, not the helper, is the authority.
+        """
         ...
 
     def hold_active(self) -> contextlib.AbstractContextManager[None]:
@@ -189,30 +190,23 @@ class _GateSecrets:
 def ensure_active(
     target: GateTarget,
     resolve_secret: Callable[[str], str],
-    *,
-    repair_canonical_connectivity: bool = True,
 ) -> dict[str, str]:
     """Converge ``target``'s power state: the gate's point half.
 
     Fast path first (no secret touched); otherwise resolve the
     target's gate secrets just-in-time and drive observe-then-start,
     with the operator-stopped refusal raised from the node's own
-    ``auto_start`` and the repair secrets resolving lazily only if the
-    repair path reads them. ``repair_canonical_connectivity=False`` preserves
-    power convergence but skips that post-start repair for a platform-native
-    recovery operation. Returns every gate-resolved value, eager and lazy alike
-    (empty on the fast path). A singular pre-boundary caller's resolve callback
-    seeds its later boundary as each value lands; a batch post-boundary caller
-    uses its completed cache and never seeds after resolution.
+    ``auto_start`` and the repair secrets resolving lazily only if the target's
+    repair path reads them. Returns every gate-resolved value, eager and lazy
+    alike (empty on the fast path). A singular pre-boundary caller's resolve
+    callback seeds its later boundary as each value lands; a batch post-boundary
+    caller uses its completed cache and never seeds after resolution.
     """
     if target.confirmed_active():
         return {}
     values = {name: resolve_secret(name) for name in target.gate_secret_refs()}
     if target.observed_stopped(ScopedSecrets(values, values.keys())):
-        target.auto_start(
-            _GateSecrets(values, target.repair_secret_refs, resolve_secret),
-            repair_canonical_connectivity=repair_canonical_connectivity,
-        )
+        target.auto_start(_GateSecrets(values, target.repair_secret_refs, resolve_secret))
     return values
 
 
@@ -240,8 +234,6 @@ def gate_secret_resolver(
 def activation_gate(
     target: GateTarget,
     resolve_secret: Callable[[str], str],
-    *,
-    repair_canonical_connectivity: bool = True,
 ) -> Iterator[dict[str, str]]:
     """The gate as the orchestrator opens it: :func:`ensure_active`,
     then the held-active span for the body's duration.
@@ -251,10 +243,6 @@ def activation_gate(
     any unwind INSIDE the gate, so teardown ops still reach a held
     target.
     """
-    values = ensure_active(
-        target,
-        resolve_secret,
-        repair_canonical_connectivity=repair_canonical_connectivity,
-    )
+    values = ensure_active(target, resolve_secret)
     with target.hold_active():
         yield values

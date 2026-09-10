@@ -62,10 +62,8 @@ class _Target:
     def auto_start(
         self,
         gate_secrets: SecretReader,
-        *,
-        repair_canonical_connectivity: bool = True,
     ) -> None:
-        del gate_secrets, repair_canonical_connectivity
+        del gate_secrets
         if self._operator_stopped:
             # The node's own refusal (the ``operator_stopped`` flag,
             # re-read for the race guard): auto-start never overrides
@@ -189,15 +187,8 @@ class _Rejoining(_Target):
     def auto_start(
         self,
         gate_secrets: SecretReader,
-        *,
-        repair_canonical_connectivity: bool = True,
     ) -> None:
-        super().auto_start(
-            gate_secrets,
-            repair_canonical_connectivity=repair_canonical_connectivity,
-        )
-        if not repair_canonical_connectivity:
-            return
+        super().auto_start(gate_secrets)
         self.seen_secrets["tailscale-auth-key"] = gate_secrets.get("tailscale-auth-key")
         # A second read must serve the recorded value, not re-resolve.
         gate_secrets.get("tailscale-auth-key")
@@ -248,42 +239,12 @@ def test_repair_secret_resolves_lazily_and_lands_in_the_seed() -> None:
     assert values == {"proxmox-token": "tok", "tailscale-auth-key": "ts"}
 
 
-def test_platform_recovery_converges_power_without_connectivity_repair() -> None:
-    target = _Rejoining(
-        stopped=True,
-        refs=("proxmox-token",),
-        repair_refs=("tailscale-auth-key",),
-    )
-
-    with activation_gate(
-        target,
-        _resolver({"proxmox-token": "tok"}, target.events),
-        repair_canonical_connectivity=False,
-    ) as values:
-        target.events.append("body")
-
-    assert values == {"proxmox-token": "tok"}
-    assert target.events == [
-        "probe",
-        "resolve:proxmox-token",
-        "status",
-        "start",
-        "hold-open",
-        "body",
-        "hold-close",
-    ]
-    assert "tailscale-auth-key" not in target.seen_secrets
-
-
 def test_auto_start_reader_refuses_undeclared_names() -> None:
     class _Greedy(_Target):
         def auto_start(
             self,
             gate_secrets: SecretReader,
-            *,
-            repair_canonical_connectivity: bool = True,
         ) -> None:
-            del repair_canonical_connectivity
             gate_secrets.get("git-token-gh")  # neither gate nor repair
 
     target = _Greedy(stopped=True, repair_refs=("tailscale-auth-key",))

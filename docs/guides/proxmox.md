@@ -207,7 +207,7 @@ remain available when Tailscale SSH is unavailable.
 Use `agw vm exec --platform test-vm COMMAND...` for a bounded, non-interactive recovery command over
 QEMU Guest Agent. Output is buffered until the command completes, stdin is closed, and Agentworks
 does not inject its composed environment or secret-backed values. The flag cannot be combined with
-`--workspace`, and the command never falls back to Tailscale.
+`--workspace`, never falls back to Tailscale, and skips post-start Tailscale reconnect and rejoin.
 
 QEMU Guest Agent does not provide an interactive terminal, so `vm shell --platform` is unavailable
 for Proxmox. Use the Proxmox web UI's serial console for interactive access. Normal Agentworks work

@@ -728,6 +728,10 @@ In both exec commands the `--` separator is only required when the remote comman
 starts with `-` (it stops Agentworks from reading the token as its own option); without it, a
 dash-led first token is rejected with a hint naming the recoveries. Bare commands need no `--`.
 
+Both `vm shell --platform` and `vm exec --platform` still start an auto-stopped VM and hold it
+active for the operation, but they skip post-start Tailscale reconnect and rejoin. Broken canonical
+connectivity therefore cannot block the platform-native recovery path.
+
 Combining `vm shell --workspace` with `--platform` works (the shell still `cd`s into the workspace)
 but environment delivery depends on the platform's full transport. In particular, the local platform
 transports (`limactl shell`, `wsl.exe`) do not deliver the workspace's template env or the

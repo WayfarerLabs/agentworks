@@ -125,12 +125,15 @@ class LiveVMNode:
         registry: Registry,
         row: VMRow,
         site: VMSiteNode,
+        *,
+        repair_canonical_connectivity: bool = True,
     ) -> None:
         self._db = db
         self._config = config
         self._registry = registry
         self._row = row
         self._site = site
+        self._repair_canonical_connectivity = repair_canonical_connectivity
         self._observed: VMStatus | None = None
         self._repair_refs: tuple[str, ...] | None = None
 
@@ -184,6 +187,8 @@ class LiveVMNode:
         return RunContext(config=self._config, secrets=gate_secrets)
 
     def repair_secret_refs(self) -> tuple[str, ...]:
+        if not self._repair_canonical_connectivity:
+            return ()
         # The rejoin auth key comes from the VM's template row field.
         # Resolved on FIRST call, not construction: the gate consults
         # this only when the repair path actually reads a name, which
@@ -203,6 +208,9 @@ class LiveVMNode:
         return self._repair_refs
 
     def confirmed_active(self) -> bool:
+        if not self._repair_canonical_connectivity:
+            return False
+
         from agentworks.vms.manager import _is_tailscale_reachable
 
         row = self._row
@@ -232,8 +240,6 @@ class LiveVMNode:
     def auto_start(
         self,
         gate_secrets: SecretReader,
-        *,
-        repair_canonical_connectivity: bool = True,
     ) -> None:
         from agentworks import output
         from agentworks.vms.manager import _ensure_tailscale, _tailscale_rejoin_required
@@ -258,7 +264,7 @@ class LiveVMNode:
         if self._observed in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
             self._db.record_vm_started(self._row.name)
 
-        if not repair_canonical_connectivity:
+        if not self._repair_canonical_connectivity:
             return
 
         with platform.vm_active(self._row, config=self._config):
@@ -456,6 +462,7 @@ def live_vm_node(
     row: VMRow,
     *,
     site_nodes: dict[str, VMSiteNode] | None = None,
+    repair_canonical_connectivity: bool = True,
 ) -> LiveVMNode:
     """Build the ``vm/<name>`` node from its DB row. The row's ``site``
     field translates to the live edge (row fields become edges): the
@@ -471,6 +478,11 @@ def live_vm_node(
     instance per site (the by-site dedup the imperative batch bind
     performed). ``None`` builds a fresh site node, the single-VM
     composition's shape.
+
+    ``repair_canonical_connectivity`` is operation policy carried by this node.
+    Ordinary operations retain the default repair behavior; a platform-native
+    recovery operation disables it so broken canonical connectivity cannot
+    block the recovery path or authorize a Tailscale repair secret.
     """
     if site_nodes is None:
         site = vm_site_node(registry, row.site)
@@ -480,7 +492,14 @@ def live_vm_node(
             memoized = vm_site_node(registry, row.site)
             site_nodes[row.site] = memoized
         site = memoized
-    return LiveVMNode(db, config, registry, row, site)
+    return LiveVMNode(
+        db,
+        config,
+        registry,
+        row,
+        site,
+        repair_canonical_connectivity=repair_canonical_connectivity,
+    )
 
 
 def vm_template_node(tmpl: ResolvedVMTemplate) -> VMTemplateNode:

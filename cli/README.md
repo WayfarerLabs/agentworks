@@ -570,6 +570,10 @@ does not inject the Agentworks environment; it also cannot be combined with `--w
 the configured public key, then reinitialize. Some platform transports also depend on the configured
 key; use provider-native recovery or recreate the VM when that path cannot connect.
 
+Both `vm shell --platform` and `vm exec --platform` still start an auto-stopped VM and hold it
+active for the operation, but they skip post-start Tailscale reconnect and rejoin. Broken canonical
+connectivity therefore cannot block the platform-native recovery path.
+
 Debian distribution upgrades remain operator-led. After following Debian's release notes and
 verifying provider-native recovery, run `agw vm confirm-release <name>` to inspect and explicitly
 adopt the live release, then run the separate `agw vm reinit <name>` to converge release-aware
