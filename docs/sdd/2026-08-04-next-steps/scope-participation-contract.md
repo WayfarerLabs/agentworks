@@ -44,7 +44,11 @@ At every setup scope, one pipeline runs in one order:
    dependencies are deferred until a real case demands more than declaration order. Features are
    harness-agnostic by definition; anything harness-specific is harness-integration config, never a
    feature (the Claude marketplace and plugin settings are the standing example).
-3. **Enabled harness integrations run last**, receiving all env and agent artifacts for the scope.
+3. **Enabled harness integrations run last**, receiving the completed env for the scope plus its
+   local artifacts and the applicable inherited artifacts still deferred for that integration.
+   **Correction, 2026-09-06:** this originally said they receive all env and agent artifacts for the
+   scope. Artifacts are filtered by what is still deferred, at every facet and not only at the
+   session; see "Sessions and hoisting" below.
 
 Reinit (vm, agent) reruns the same pipeline idempotently. Env and agent artifacts are the two
 currencies of the pipeline; their concrete schemas are the wave 4 seed's to settle, and the artifact
@@ -107,10 +111,18 @@ disclosure.
 
 ### Sessions and hoisting
 
-The session receives everything: env and agent artifacts from all ancestor scopes plus its own,
-passed to the harness integration at start and resume. The integration owns representation. Env is
-naturally process-scoped. Content that cannot be represented at its own scope is hoisted into the
-session, and the integration decides placement using its harness knowledge (for example,
+The session receives accumulated env from all ancestor scopes plus its own, passed to the harness
+integration at start. **Correction, 2026-09-06:** this originally said the session receives
+everything, artifacts included. It does not. Artifact payloads already handled upstream for that
+integration and resource path do not reach the session-facet invocation; each invocation receives
+local artifacts plus only the applicable inherited artifacts still deferred for it. An integration
+returns the artifacts it defers, with a reason for each, and an entry still deferred at the session
+facet is not something the session silently hoists. **Correction, 2026-09-08:** this originally said
+such an entry is a typed core error before launch. The operator has reopened that policy; whether an
+unresolved session entry blocks launch or receives another explicit treatment is for the artifacts
+successor SDD to settle. Silent loss is not among the options. The integration owns representation.
+Env is naturally process-scoped. Content that cannot be represented at its own scope is hoisted into
+the session, and the integration decides placement using its harness knowledge (for example,
 session-scoped artifacts under a harness-specific workspace path keyed by `session_uuid`), including
 deduplication and double-provisioning avoidance. Hoisting is isolation, not security: other sessions
 being able to see user-scope artifacts is expected; the integration's job is that hoisted material

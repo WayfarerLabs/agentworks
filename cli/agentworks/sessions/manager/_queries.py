@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 
 import agentworks.sessions.manager as _mgr
@@ -18,7 +19,7 @@ from agentworks.errors import (
     UserAbort,
 )
 from agentworks.list_sorting import nullable_sort_value, sort_rows
-from agentworks.runtime_time import derive_uptime_seconds, format_uptime
+from agentworks.runtime_time import derive_uptime_seconds, format_short_uptime, format_uptime
 from agentworks.sessions._resource_cleanup import cleanup_now_empty_resource
 from agentworks.sessions.tmux import exact_tmux_target
 
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, InstanceStateInspection, SessionRow
     from agentworks.instance_description import InstanceStateDescription
-    from agentworks.machine_output import JsonObject
+    from agentworks.machine_output import JsonObject, JsonValue
     from agentworks.resources.registry import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.sessions.template import SessionTemplate
@@ -37,12 +38,13 @@ if TYPE_CHECKING:
 class SessionListRow:
     name: str
     workspace_name: str
-    vm_name: str
+    vm_name: str | None
     template: str
     harness_integration: str | None
     mode: str
     agent_name: str | None
     status: str
+    uptime_seconds: int | None = None
 
 
 @dataclass(frozen=True)
@@ -77,8 +79,11 @@ class SessionDescription:
 
 def session_listing_data(listing: SessionListing) -> JsonObject:
     """Project session list facts into the closed JSON v1 shape."""
-    return {
-        "sessions": [
+    rows: list[JsonValue] = []
+    for session in listing.sessions:
+        if session.vm_name is None:
+            raise AssertionError("session list JSON requires a resolved VM name")
+        rows.append(
             {
                 "name": session.name,
                 "workspace_name": session.workspace_name,
@@ -89,8 +94,9 @@ def session_listing_data(listing: SessionListing) -> JsonObject:
                 "agent_name": session.agent_name,
                 "status": session.status,
             }
-            for session in listing.sessions
-        ],
+        )
+    return {
+        "sessions": rows,
     }
 
 
@@ -652,9 +658,14 @@ def session_listing(
     agent_name: str | list[str] | None = None,
     admin_only: bool = False,
     include_status: bool = False,
+    require_vm_names: bool = False,
     sort_keys: tuple[str, ...] | None = None,
 ) -> SessionListing:
-    """Collect local session inventory, optionally enriched by live status."""
+    """Collect local session inventory, optionally enriched by live status.
+
+    ``require_vm_names`` keeps closed projections from receiving the nullable
+    VM fact used only by human recovery inventory.
+    """
     sessions = _sorted_session_rows(
         db,
         workspace_name=workspace_name,
@@ -666,20 +677,41 @@ def session_listing(
     if not sessions:
         return SessionListing(sessions=())
 
-    vm_names: dict[str, str] = {}
+    vm_names: dict[str, str | None] = {}
+    observable_sessions: list[SessionRow] = []
+    observable_vm_names: set[str] = set()
     for session in sessions:
-        workspace = _mgr._require_workspace(db, session.workspace_name)
-        vm_names[session.name] = _mgr._require_vm_for_workspace(db, workspace).name
+        workspace = (
+            _mgr._require_workspace(db, session.workspace_name)
+            if require_vm_names
+            else db.get_workspace(session.workspace_name)
+        )
+        if workspace is None:
+            vm_names[session.name] = None
+            continue
+        vm_names[session.name] = workspace.vm_name
+        if db.get_vm(workspace.vm_name) is None:
+            continue
+        observable_sessions.append(session)
+        observable_vm_names.add(workspace.vm_name)
 
-    status_map: dict[str, SessionStatus] = {}
+    status_map: dict[str, SessionStatus] = (
+        {session.name: SessionStatus.UNKNOWN for session in sessions} if include_status else {}
+    )
     if include_status:
-        session_rows = list(sessions)
-        selected_vms = _mgr._distinct_vms_for_sessions(db, session_rows)
         output.info(
             f"Checking status for {output.count(len(sessions), 'session')} "
-            f"across {output.count(len(selected_vms), 'VM')}..."
+            f"across {output.count(len(observable_vm_names), 'VM')}..."
         )
-        status_map = _mgr.observe_session_statuses(session_rows, db=db, config=config)
+        if observable_sessions:
+            status_map.update(
+                _mgr.observe_session_statuses(
+                    observable_sessions,
+                    db=db,
+                    config=config,
+                )
+            )
+    observed_at = datetime.now(UTC) if include_status else None
     registry = _mgr._display_registry(config)
     harness_by_template: dict[str, str] = {}
 
@@ -701,7 +733,17 @@ def session_listing(
 
     facts: list[SessionListRow] = []
     for session in sessions:
-        status = status_map.get(session.name, SessionStatus.UNKNOWN).value if include_status else "unavailable"
+        observed_status = status_map.get(session.name, SessionStatus.UNKNOWN) if include_status else None
+        status = observed_status.value if observed_status is not None else "unavailable"
+        uptime_seconds = None
+        if observed_status is SessionStatus.RUNNING and session.last_started_at is not None:
+            uptime_seconds = derive_uptime_seconds(
+                session.last_started_at,
+                running=True,
+                entity_kind="session",
+                entity_name=session.name,
+                now=observed_at,
+            )
         facts.append(
             SessionListRow(
                 name=session.name,
@@ -712,6 +754,7 @@ def session_listing(
                 mode=project_session_mode(session.mode),
                 agent_name=session.agent_name,
                 status=status,
+                uptime_seconds=uptime_seconds,
             )
         )
     return SessionListing(sessions=tuple(facts))
@@ -733,12 +776,12 @@ def _sorted_session_rows(
         agent_name=agent_name,
         admin_only=admin_only,
     )
-    vm_names: dict[str, str] = {}
+    vm_names: dict[str, str | None] = {}
 
-    def session_vm_name(session: SessionRow) -> str:
+    def session_vm_name(session: SessionRow) -> str | None:
         if session.name not in vm_names:
-            workspace = _mgr._require_workspace(db, session.workspace_name)
-            vm_names[session.name] = _mgr._require_vm_for_workspace(db, workspace).name
+            workspace = db.get_workspace(session.workspace_name)
+            vm_names[session.name] = None if workspace is None else workspace.vm_name
         return vm_names[session.name]
 
     return sort_rows(
@@ -764,31 +807,42 @@ def render_session_listing(listing: SessionListing, *, include_status: bool = Fa
     rows: list[tuple[str, ...]] = []
     broken_names: list[str] = []
     unknown_by_vm: dict[str, list[str]] = {}
+    unknown_without_vm: list[str] = []
     for session in listing.sessions:
-        status = "-" if session.status == "unavailable" else session.status
-        mode = session.mode
-        mode_label = mode if mode == "unknown" else f"agent ({session.agent_name})" if session.agent_name else "admin"
+        status = session.status
+        status_label = "-" if status == "unavailable" else status
+        if status == "running" and session.uptime_seconds is not None:
+            status_label = f"running ({format_short_uptime(session.uptime_seconds)})"
+        if session.mode == "agent" and session.agent_name:
+            user_label = session.agent_name
+        elif session.mode == "admin" and session.agent_name is None:
+            user_label = "--admin--"
+        else:
+            user_label = "unknown"
         row = (
             session.name,
             session.workspace_name,
-            session.vm_name,
+            session.vm_name or "-",
             session.template,
             session.harness_integration or "-",
-            mode_label,
+            user_label,
         )
-        rows.append((*row, status) if include_status else row)
+        rows.append((*row, status_label) if include_status else row)
         if include_status and status == "broken":
             broken_names.append(session.name)
         elif include_status and status == "unknown":
-            unknown_by_vm.setdefault(session.vm_name, []).append(session.name)
+            if session.vm_name is None:
+                unknown_without_vm.append(session.name)
+            else:
+                unknown_by_vm.setdefault(session.vm_name, []).append(session.name)
 
-    headers = ["NAME", "WORKSPACE", "VM", "TEMPLATE", "HARNESS INT.", "MODE"]
+    headers = ["NAME", "WORKSPACE", "VM", "TEMPLATE", "HARNESS INT.", "USER"]
     if include_status:
         headers.append("STATUS")
-    for line in output.render_table(headers, rows, max_col_widths={headers.index("MODE"): 40}):
+    for line in output.render_table(headers, rows, max_col_widths={headers.index("USER"): 40}):
         output.info(line)
 
-    if broken_names or unknown_by_vm:
+    if broken_names or unknown_by_vm or unknown_without_vm:
         output.info("")
         if broken_names:
             output.warn(
@@ -798,6 +852,8 @@ def render_session_listing(listing: SessionListing, *, include_status: bool = Fa
         if unknown_by_vm:
             groups = "; ".join(f"{vm}: {', '.join(names)}" for vm, names in unknown_by_vm.items())
             output.warn(f"Session status is unknown by VM: {groups}.")
+        if unknown_without_vm:
+            output.warn(f"Session status is unknown with no resolved VM: {', '.join(unknown_without_vm)}.")
 
 
 def attach_session(

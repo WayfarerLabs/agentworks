@@ -16,6 +16,7 @@ from agentworks.cli import app
 from agentworks.cli._typer_output import TyperHandler
 from agentworks.db import Database, backup_directory, create_manual_backup
 from agentworks.db.migrations import LATEST_VERSION, MIGRATIONS, MigrationContext
+from agentworks.errors import StateError, UserAbort
 from agentworks.path_rendering import format_host_path
 
 
@@ -41,6 +42,18 @@ def _value(path: Path) -> str | None:
     row = connection.execute("SELECT value FROM settings WHERE key = 'cli-test'").fetchone()
     connection.close()
     return None if row is None else str(row[0])
+
+
+def _seed_orphan_workspace(path: Path) -> None:
+    connection = sqlite3.connect(path)
+    connection.execute("PRAGMA foreign_keys = OFF")
+    connection.execute(
+        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES (?, ?, ?, ?)",
+        ("orphan-workspace", "missing-vm", "/tmp/orphan-workspace", "ws--orphan-workspace"),
+    )
+    connection.commit()
+    assert connection.execute("PRAGMA foreign_key_check").fetchone() is not None
+    connection.close()
 
 
 def _build_stale_schema(path: Path) -> None:
@@ -118,6 +131,100 @@ def test_database_restore_yes_uses_stderr_and_creates_no_implicit_backup(
     assert result.stderr.endswith("Database restore complete.\n")
     assert _value(live) == "selected"
     assert {path.name for path in backup_directory(live).glob("*.db")} == before
+
+
+@pytest.mark.windows
+def test_database_restore_force_and_yes_copy_degraded_source_with_two_stderr_warnings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentworks.db as db
+
+    selected = tmp_path / "selected.db"
+    live = tmp_path / "agentworks.db"
+    Database(selected).close()
+    Database(live).close()
+    _set_value(selected, "selected")
+    _set_value(live, "replace-me")
+    _seed_orphan_workspace(selected)
+    monkeypatch.setattr(db, "DB_PATH", live)
+
+    with _cli_output():
+        result = CliRunner().invoke(app, ["database", "restore", str(selected), "--force", "--yes"])
+
+    assert result.exit_code == 0, result.output
+    assert result.stdout == ""
+    lines = result.stderr.splitlines()
+    warning_positions = [index for index, line in enumerate(lines) if line.startswith("Warning:")]
+    assert warning_positions == [0, len(lines) - 2]
+    assert _value(live) == "selected"
+    connection = sqlite3.connect(live)
+    assert connection.execute("PRAGMA foreign_key_check").fetchone() is not None
+    connection.close()
+
+
+@pytest.mark.windows
+def test_database_restore_force_without_yes_can_be_declined_after_one_warning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentworks.db as db
+
+    selected = tmp_path / "selected.db"
+    live = tmp_path / "agentworks.db"
+    Database(selected).close()
+    Database(live).close()
+    journal = sqlite3.connect(selected)
+    journal.execute("PRAGMA journal_mode = DELETE")
+    journal.close()
+    _set_value(selected, "selected")
+    _set_value(live, "unchanged")
+    _seed_orphan_workspace(selected)
+    monkeypatch.setattr(db, "DB_PATH", live)
+    monkeypatch.setattr(output, "is_interactive", lambda: True)
+
+    with _cli_output():
+        result = CliRunner().invoke(
+            app,
+            ["database", "restore", str(selected), "--force"],
+            input="n\n",
+        )
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, UserAbort)
+    assert result.stdout == ""
+    assert sum(line.startswith("Warning:") for line in result.stderr.splitlines()) == 1
+    assert _value(live) == "unchanged"
+    writer = sqlite3.connect(selected, timeout=0)
+    writer.execute("BEGIN EXCLUSIVE")
+    writer.rollback()
+    writer.close()
+
+
+@pytest.mark.windows
+def test_database_restore_yes_without_force_refuses_degraded_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentworks.db as db
+
+    selected = tmp_path / "selected.db"
+    live = tmp_path / "agentworks.db"
+    Database(selected).close()
+    Database(live).close()
+    _set_value(selected, "selected")
+    _set_value(live, "unchanged")
+    _seed_orphan_workspace(selected)
+    monkeypatch.setattr(db, "DB_PATH", live)
+
+    with _cli_output():
+        result = CliRunner().invoke(app, ["database", "restore", str(selected), "--yes"])
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, StateError)
+    assert result.stdout == ""
+    assert not any(line.startswith("Warning:") for line in result.stderr.splitlines())
+    assert _value(live) == "unchanged"
 
 
 @pytest.mark.windows

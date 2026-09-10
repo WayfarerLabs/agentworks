@@ -476,15 +476,19 @@ def console_listing(
         },
         entity_kind="console",
     )
-    statuses: dict[str, ConsoleStatus] = {}
+    statuses: dict[str, ConsoleStatus] = (
+        {console.name: ConsoleStatus.UNKNOWN for console, _count in consoles} if include_status else {}
+    )
     if include_status and consoles:
         if config is None:
             raise StateError("console status observation requires config")
+        observable = [console for console, _count in consoles if db.get_vm(console.vm_name) is not None]
         output.info(
             f"Checking status for {output.count(len(consoles), 'console')} "
-            f"across {output.count(len({console.vm_name for console, _count in consoles}), 'VM')}..."
+            f"across {output.count(len({console.vm_name for console in observable}), 'VM')}..."
         )
-        statuses = _mc.observe_console_statuses(db, config, [console for console, _count in consoles])
+        if observable:
+            statuses.update(_mc.observe_console_statuses(db, config, observable))
 
     return ConsoleListing(
         consoles=tuple(
