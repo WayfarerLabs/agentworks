@@ -1,6 +1,6 @@
 # Implementation Plan: Session Batch Stop Parallelism
 
-- Status: Design checkpoint
+- Status: Implementation complete; closeout validation pending
 - Date: 2026-09-06
 - Requirements: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
@@ -99,16 +99,16 @@ not authored prose.
 
 - [x] Rebase onto the merged PR #764 database-use lock and retain its shared writable-lifetime and
       exclusive restore semantics unchanged.
-- [ ] Add atomic stopped-state compare-and-set against the complete prepared runtime identity.
-- [ ] Add one dedicated-only immutable complete-fingerprint plan in a session-domain teardown
+- [x] Add atomic stopped-state compare-and-set against the complete prepared runtime identity.
+- [x] Add one dedicated-only immutable complete-fingerprint plan in a session-domain teardown
       module.
-- [ ] Extract database-free remote execution while keeping reconciliation on the invoking thread.
-- [ ] Partition incomplete dedicated rows into the existing synchronous path and prove their
+- [x] Extract database-free remote execution while keeping reconciliation on the invoking thread.
+- [x] Partition incomplete dedicated rows into the existing synchronous path and prove their
       missing-start-ticks persistence still precedes `kill-server`.
-- [ ] Add collision checks for duplicate socket or VM/boot/PID process keys among concurrent plans.
-- [ ] Keep named stop, restart, direct and cascading deletion on the synchronous dispatcher and run
+- [x] Add collision checks for duplicate socket or VM/boot/PID process keys among concurrent plans.
+- [x] Keep named stop, restart, direct and cascading deletion on the synchronous dispatcher and run
       their existing regression suites.
-- [ ] Prove socket validation, exact tmux targeting, force recovery, absence verification, and
+- [x] Prove socket validation, exact tmux targeting, force recovery, absence verification, and
       stopped persistence remain unchanged.
 
 ### Phase 1 Definition of Done
@@ -120,19 +120,19 @@ not authored prose.
 
 ## Phase 2: Concurrent Dedicated Batch Stop
 
-- [ ] Prepare complete-fingerprint dedicated plans after the existing batch safety gates and leave
+- [x] Prepare complete-fingerprint dedicated plans after the existing batch safety gates and leave
       incomplete dedicated and legacy rows on the current synchronous dispatcher.
-- [ ] Preserve the empty-selection no-op and skip executor construction for an empty concurrent plan
+- [x] Preserve the empty-selection no-op and skip executor construction for an empty concurrent plan
       set, including serial-only and preparation-failure batches.
-- [ ] Construct one 10-second, one-attempt transport per dedicated plan.
-- [ ] Add the fixed, maximum-eight dedicated teardown executor with a pre-mutation submission gate,
+- [x] Construct one 10-second, one-attempt transport per dedicated plan.
+- [x] Add the fixed, maximum-eight dedicated teardown executor with a pre-mutation submission gate,
       one mapped future per plan before release, and untouched accounting for a partial submission.
-- [ ] Consume futures in completion order and reconcile successful stopped state before labeled
+- [x] Consume futures in completion order and reconcile successful stopped state before labeled
       output.
-- [ ] Emit a compact heartbeat after each five-second quiet interval.
-- [ ] Keep incomplete dedicated and legacy teardown serial after concurrent reconciliation.
-- [ ] Preserve sibling progress and final aggregate failure when one plan fails.
-- [ ] Leave start and restart batch launch loops serial and free of the new executor.
+- [x] Emit a compact heartbeat after each five-second quiet interval.
+- [x] Keep incomplete dedicated and legacy teardown serial after concurrent reconciliation.
+- [x] Preserve sibling progress and final aggregate failure when one plan fails.
+- [x] Leave start and restart batch launch loops serial and free of the new executor.
 
 ### Phase 2 Definition of Done
 
@@ -143,16 +143,16 @@ not authored prose.
 
 ## Phase 3: Interruption and Failure Accounting
 
-- [ ] Cancel queued futures on first interrupt.
-- [ ] Report and drain bounded in-flight work, reconciling every normally returned future.
-- [ ] Repeat the reconciliation notice after later interrupts without pretending Python can
+- [x] Cancel queued futures on first interrupt.
+- [x] Report and drain bounded in-flight work, reconciling every normally returned future.
+- [x] Repeat the reconciliation notice after later interrupts without pretending Python can
       terminate running thread work.
-- [ ] Prove worker escape, timeout, incomplete-row serialization, cancelled-future accounting, and
+- [x] Prove worker escape, timeout, incomplete-row serialization, cancelled-future accounting, and
       partial-submission abort at both CPython ownership gaps: post-enqueue/pre-future and
       post-thread-start/pre-registration.
-- [ ] Make reconciliation retry-safe when an interrupt lands after SQLite committed the desired
+- [x] Make reconciliation retry-safe when an interrupt lands after SQLite committed the desired
       state.
-- [ ] Preserve the current final aggregate command error for ordinary per-session failures.
+- [x] Preserve the current final aggregate command error for ordinary per-session failures.
 
 ### Phase 3 Definition of Done
 
@@ -162,7 +162,7 @@ not authored prose.
 
 ## Phase 4: Collateral and Exact-Head Validation
 
-- [ ] Update active command reference and session lifecycle/status guidance.
+- [x] Update active command reference and session lifecycle/status guidance.
 - [ ] Add `locked.md` from the implemented exact head and run locked-SDD validation.
 - [ ] Run full Python, lint, Rulesync, website, and installed-wheel gates.
 - [ ] Obtain fresh private project-values, Muntz, and cold correctness/security reviews on the exact
