@@ -764,6 +764,7 @@ def stop_all_sessions(
         output.info(f"Stopping {len(alive_sessions)} session(s)...")
 
         from agentworks.sessions.manager._teardown import (
+            DEDICATED_TEARDOWN_ATTEMPTS,
             DEDICATED_TEARDOWN_TIMEOUT_SECONDS,
             DedicatedTeardownPlan,
             execute_concurrent_dedicated_teardowns,
@@ -779,6 +780,13 @@ def stop_all_sessions(
                 ws = _mgr._require_workspace(db, session.workspace_name)
                 vm = _mgr._require_vm_for_workspace(db, ws)
                 target_owns_session = session.mode == SessionMode.ADMIN.value
+                if session.pid == PID_STOPPED:
+                    raise StateError(
+                        f"session '{session.name}' has live runtime evidence but is marked stopped",
+                        entity_kind="session",
+                        entity_name=session.name,
+                        hint="Inspect and repair the persisted session runtime before retrying.",
+                    )
                 complete_dedicated = (
                     session.socket_path is not None
                     and session.pid is not None
@@ -790,6 +798,7 @@ def stop_all_sessions(
                         vm,
                         config,
                         default_timeout=DEDICATED_TEARDOWN_TIMEOUT_SECONDS,
+                        retries=DEDICATED_TEARDOWN_ATTEMPTS,
                     )
                     plan = prepare_concurrent_dedicated_teardown(
                         db,
@@ -799,7 +808,13 @@ def stop_all_sessions(
                         target_owns_session=target_owns_session,
                         force=force,
                     )
-                    assert plan is not None
+                    if plan is None:
+                        raise StateError(
+                            f"session '{session.name}' could not produce a complete teardown plan",
+                            entity_kind="session",
+                            entity_name=session.name,
+                            hint="Inspect and repair the persisted session runtime before retrying.",
+                        )
                     concurrent_plans.append(plan)
                     continue
 

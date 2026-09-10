@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
 DEDICATED_TEARDOWN_MAX_WORKERS = 8
 DEDICATED_TEARDOWN_TIMEOUT_SECONDS = 10
+DEDICATED_TEARDOWN_ATTEMPTS = 1
 DEDICATED_TEARDOWN_HEARTBEAT_SECONDS = 5
 
 
@@ -181,38 +182,16 @@ def validate_concurrent_dedicated_teardown_plans(plans: Sequence[DedicatedTeardo
 
 def _prove_plan_runtime_absent(plan: DedicatedTeardownPlan) -> bool:
     """Prove the prepared process incarnation absent without SQLite access."""
-    from agentworks.sessions.tmux import probe_process_start_ticks
+    from agentworks.sessions.manager._pids import _prove_runtime_absent
 
-    current_boot = _mgr._get_boot_id(plan.target)
-    if current_boot is None:
-        raise ConnectivityError(
-            f"could not read the VM boot identity for session '{plan.session_name}'",
-            entity_kind="session",
-            entity_name=plan.session_name,
-        )
-    if current_boot != plan.stored_boot_id:
-        return True
-
-    pid_presence = _mgr._pid_presence(plan.stored_pid, target=plan.target, sudo=plan.sudo)
-    if pid_presence is ProbeStatus.ABSENT:
-        return True
-    if pid_presence is ProbeStatus.UNKNOWN:
-        raise ConnectivityError(
-            f"could not determine whether the stored process for session '{plan.session_name}' exists",
-            entity_kind="session",
-            entity_name=plan.session_name,
-        )
-
-    ticks = probe_process_start_ticks(plan.stored_pid, target=plan.target, sudo=plan.sudo)
-    if ticks.status is ProbeStatus.ABSENT:
-        return _mgr._pid_presence(plan.stored_pid, target=plan.target, sudo=plan.sudo) is ProbeStatus.ABSENT
-    if ticks.status is ProbeStatus.UNKNOWN or ticks.value is None:
-        raise StateError(
-            f"could not verify the stored process start time for session '{plan.session_name}'",
-            entity_kind="session",
-            entity_name=plan.session_name,
-        )
-    return ticks.value != plan.stored_start_ticks
+    return _prove_runtime_absent(
+        session_name=plan.session_name,
+        stored_pid=plan.stored_pid,
+        stored_boot_id=plan.stored_boot_id,
+        stored_start_ticks=plan.stored_start_ticks,
+        target=plan.target,
+        sudo=plan.sudo,
+    )
 
 
 def _remove_stale_socket(
@@ -411,7 +390,7 @@ def teardown_dedicated_session(
 
     plan = DedicatedTeardownPlan(
         session_name=session.name,
-        vm_name="",
+        vm_name=_mgr._require_workspace(db, session.workspace_name).vm_name,
         socket_path=socket_path,
         stored_pid=observed.pid,
         stored_boot_id=observed_boot_id,
@@ -461,9 +440,12 @@ def _execute_gated(
 
 def _shutdown_after_submission_abort(executor: ThreadPoolExecutor, gate: _SubmissionGate) -> None:
     """Abort every wrapper and keep later interrupts from masking the first."""
-    gate.abort()
+    aborted = False
     while True:
         try:
+            if not aborted:
+                gate.abort()
+                aborted = True
             executor.shutdown(wait=True, cancel_futures=True)
             return
         except KeyboardInterrupt:
@@ -475,6 +457,39 @@ def _announce_reconciliation(error: BaseException) -> None:
         output.notice("Session stop interrupted; reconciling active teardowns before exit.")
     else:
         output.notice("Session stop failed; reconciling active teardowns before exit.")
+
+
+def _enter_reconciliation(
+    futures: Sequence[Future[DedicatedTeardownEvidence | None]],
+    error: BaseException,
+    *,
+    cancel_queued: bool,
+) -> None:
+    """Enter or report drain mode without letting later interrupts escape."""
+    while True:
+        try:
+            if cancel_queued:
+                _cancel_queued(futures)
+                cancel_queued = False
+            _announce_reconciliation(error)
+            return
+        except KeyboardInterrupt as later_interrupt:
+            error = later_interrupt
+            cancel_queued = True
+        except BaseException:
+            # The primary failure is already recorded. A broken output sink
+            # cannot be allowed to bypass executor draining.
+            return
+
+
+def _release_gate_after_escape(gate: _SubmissionGate) -> None:
+    """Authorize the complete mapped batch despite repeated interrupts."""
+    while True:
+        try:
+            gate.release()
+            return
+        except KeyboardInterrupt:
+            continue
 
 
 def _cancel_queued(futures: Sequence[Future[DedicatedTeardownEvidence | None]]) -> None:
@@ -505,33 +520,28 @@ def execute_concurrent_dedicated_teardowns(
     validate_concurrent_dedicated_teardown_plans(plans)
 
     gate = _SubmissionGate()
+    failures: list[tuple[str, str]] = []
+    pending: set[Future[DedicatedTeardownEvidence | None]] = set()
+    primary_error: BaseException | None = None
+    reconciling = False
     executor = ThreadPoolExecutor(max_workers=min(DEDICATED_TEARDOWN_MAX_WORKERS, len(plans)))
     future_plans: dict[Future[DedicatedTeardownEvidence | None], DedicatedTeardownPlan] = {}
+    future_map_complete = False
     try:
         for plan in plans:
             future = executor.submit(_execute_gated, gate, plan)
             future_plans[future] = plan
-    except BaseException:
-        _shutdown_after_submission_abort(executor, gate)
-        raise
-
-    failures: list[tuple[str, str]] = []
-    pending = set(future_plans)
-    primary_error: BaseException | None = None
-    reconciling = False
-    try:
+            pending.add(future)
+        future_map_complete = True
         gate.release()
     except BaseException as exc:
+        if not future_map_complete:
+            _shutdown_after_submission_abort(executor, gate)
+            raise
         primary_error = exc
-        while True:
-            try:
-                gate.release()
-                break
-            except KeyboardInterrupt:
-                continue
-        _cancel_queued(tuple(pending))
+        _release_gate_after_escape(gate)
         reconciling = True
-        _announce_reconciliation(exc)
+        _enter_reconciliation(tuple(pending), exc, cancel_queued=True)
 
     while pending:
         try:
@@ -553,17 +563,19 @@ def execute_concurrent_dedicated_teardowns(
                     evidence = future.result()
                 except Exception as exc:
                     failures.append((plan.session_name, str(exc)))
-                    output.warn(f"Session '{plan.session_name}' failed to stop: {exc}")
                     pending.remove(future)
+                    output.warn(f"Session '{plan.session_name}' failed to stop: {exc}")
                     continue
                 except BaseException as exc:
                     if primary_error is None:
                         primary_error = exc
                     pending.remove(future)
+                    output.warn(f"Session '{plan.session_name}' teardown aborted: {exc}")
                     if not reconciling:
-                        _cancel_queued(tuple(pending))
                         reconciling = True
-                    _announce_reconciliation(exc)
+                        _enter_reconciliation(tuple(pending), exc, cancel_queued=True)
+                    else:
+                        _enter_reconciliation(tuple(pending), exc, cancel_queued=False)
                     continue
 
                 if evidence is not DedicatedTeardownEvidence.VERIFIED_STOPPED:
@@ -573,50 +585,55 @@ def execute_concurrent_dedicated_teardowns(
                         entity_name=plan.session_name,
                     )
                     failures.append((plan.session_name, str(invalid_evidence)))
-                    output.warn(f"Session '{plan.session_name}' failed to stop: {invalid_evidence}")
                     pending.remove(future)
+                    output.warn(f"Session '{plan.session_name}' failed to stop: {invalid_evidence}")
                     continue
 
                 try:
                     reconcile_dedicated_teardown(db, plan)
-                    output.info(f"Session '{plan.session_name}' stopped")
                 except Exception as exc:
                     failures.append((plan.session_name, str(exc)))
-                    output.warn(f"Session '{plan.session_name}' failed to persist stopped state: {exc}")
                     pending.remove(future)
+                    output.warn(f"Session '{plan.session_name}' failed to persist stopped state: {exc}")
                     continue
                 except KeyboardInterrupt as exc:
                     if primary_error is None:
                         primary_error = exc
                     if not reconciling:
-                        _cancel_queued(tuple(pending))
                         reconciling = True
-                    _announce_reconciliation(exc)
+                        _enter_reconciliation(tuple(pending), exc, cancel_queued=True)
+                    else:
+                        _enter_reconciliation(tuple(pending), exc, cancel_queued=False)
                     break
                 except BaseException as exc:
                     if primary_error is None:
                         primary_error = exc
                     pending.remove(future)
+                    output.warn(f"Session '{plan.session_name}' stopped-state persistence aborted: {exc}")
                     if not reconciling:
-                        _cancel_queued(tuple(pending))
                         reconciling = True
-                    _announce_reconciliation(exc)
+                        _enter_reconciliation(tuple(pending), exc, cancel_queued=True)
+                    else:
+                        _enter_reconciliation(tuple(pending), exc, cancel_queued=False)
                     continue
                 pending.remove(future)
+                output.info(f"Session '{plan.session_name}' stopped")
         except KeyboardInterrupt as exc:
             if primary_error is None:
                 primary_error = exc
             if not reconciling:
-                _cancel_queued(tuple(pending))
                 reconciling = True
-            _announce_reconciliation(exc)
+                _enter_reconciliation(tuple(pending), exc, cancel_queued=True)
+            else:
+                _enter_reconciliation(tuple(pending), exc, cancel_queued=False)
         except BaseException as exc:
             if primary_error is None:
                 primary_error = exc
             if not reconciling:
-                _cancel_queued(tuple(pending))
                 reconciling = True
-            _announce_reconciliation(exc)
+                _enter_reconciliation(tuple(pending), exc, cancel_queued=True)
+            else:
+                _enter_reconciliation(tuple(pending), exc, cancel_queued=False)
 
     while True:
         try:
@@ -625,7 +642,7 @@ def execute_concurrent_dedicated_teardowns(
         except KeyboardInterrupt as exc:
             if primary_error is None:
                 primary_error = exc
-            _announce_reconciliation(exc)
+            _enter_reconciliation((), exc, cancel_queued=False)
 
     if primary_error is not None:
         raise primary_error

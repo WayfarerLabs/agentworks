@@ -232,8 +232,6 @@ def _prove_stored_runtime_absent(
     sudo: bool = False,
 ) -> bool:
     """Prove the stored process incarnation absent without signaling its PID."""
-    from agentworks.sessions.tmux import ProbeStatus, probe_process_start_ticks
-
     if session.pid is None or session.pid <= 0 or session.boot_id is None:
         raise StateError(
             f"session '{session.name}' lacks the stored identity required to prove runtime absence",
@@ -242,38 +240,60 @@ def _prove_stored_runtime_absent(
         )
     stored_boot_id = _validated_stored_boot_id(session)
     stored_ticks = _validated_stored_start_ticks(session)
+    return _prove_runtime_absent(
+        session_name=session.name,
+        stored_pid=session.pid,
+        stored_boot_id=stored_boot_id,
+        stored_start_ticks=stored_ticks,
+        target=target,
+        sudo=sudo,
+    )
+
+
+def _prove_runtime_absent(
+    *,
+    session_name: str,
+    stored_pid: int,
+    stored_boot_id: str,
+    stored_start_ticks: int | None,
+    target: Transport,
+    sudo: bool = False,
+) -> bool:
+    """Prove one validated process incarnation absent from primitive fields."""
+    from agentworks.sessions.tmux import ProbeStatus, probe_process_start_ticks
+
     current_boot = _mgr._get_boot_id(target)
     if current_boot is None:
         raise ConnectivityError(
-            f"could not read the VM boot identity for session '{session.name}'",
+            f"could not read the VM boot identity for session '{session_name}'",
             entity_kind="session",
-            entity_name=session.name,
+            entity_name=session_name,
         )
     if current_boot != stored_boot_id:
         return True
 
-    pid_presence = _mgr._pid_presence(session.pid, target=target, sudo=sudo)
+    pid_presence = _mgr._pid_presence(stored_pid, target=target, sudo=sudo)
     if pid_presence is ProbeStatus.ABSENT:
         return True
     if pid_presence is ProbeStatus.UNKNOWN:
         raise ConnectivityError(
-            f"could not determine whether the stored process for session '{session.name}' exists",
+            f"could not determine whether the stored process for session '{session_name}' exists",
             entity_kind="session",
-            entity_name=session.name,
+            entity_name=session_name,
         )
-    if stored_ticks is None:
+    if stored_start_ticks is None:
         return False
 
-    ticks = probe_process_start_ticks(session.pid, target=target, sudo=sudo)
+    ticks = probe_process_start_ticks(stored_pid, target=target, sudo=sudo)
     if ticks.status is ProbeStatus.ABSENT:
-        return _mgr._pid_presence(session.pid, target=target, sudo=sudo) is ProbeStatus.ABSENT
+        return _mgr._pid_presence(stored_pid, target=target, sudo=sudo) is ProbeStatus.ABSENT
     if ticks.status is ProbeStatus.UNKNOWN or ticks.value is None:
         raise StateError(
-            f"could not verify the stored process start time for session '{session.name}'",
+            f"could not verify the stored process start time for session '{session_name}'",
             entity_kind="session",
-            entity_name=session.name,
+            entity_name=session_name,
         )
-    return ticks.value != stored_ticks
+    return ticks.value != stored_start_ticks
 
 
 def _needs_repair(session: SessionRow) -> bool:

@@ -18,6 +18,7 @@ from agentworks.sessions import manager as session_manager
 from agentworks.sessions.manager import _lifecycle as lifecycle_mod
 from agentworks.sessions.manager import _teardown as teardown_mod
 from agentworks.sessions.manager._teardown import (
+    DEDICATED_TEARDOWN_ATTEMPTS,
     DEDICATED_TEARDOWN_TIMEOUT_SECONDS,
     DedicatedTeardownEvidence,
     DedicatedTeardownPlan,
@@ -262,7 +263,8 @@ def test_incomplete_synchronous_teardown_persists_fingerprint_before_kill(
         ),
     )
 
-    def execute(*args: object, **kwargs: object) -> DedicatedTeardownEvidence:
+    def execute(plan: DedicatedTeardownPlan, **kwargs: object) -> DedicatedTeardownEvidence:
+        assert plan.vm_name == "box"
         events.append("kill")
         return DedicatedTeardownEvidence.VERIFIED_STOPPED
 
@@ -313,11 +315,17 @@ def test_batch_partitions_complete_work_before_serial_compatibility_and_uses_dis
     monkeypatch.setattr(session_manager, "ensure_pids_batch", lambda sessions, **kwargs: sessions)
     monkeypatch.setattr(session_manager, "observe_session_statuses", lambda sessions, **kwargs: statuses)
 
-    transport_calls: list[tuple[int | None, _Target]] = []
+    transport_calls: list[tuple[int | None, int, _Target]] = []
 
-    def transport(vm: object, config: object, *, default_timeout: int | None = None) -> _Target:
+    def transport(
+        vm: object,
+        config: object,
+        *,
+        default_timeout: int | None = None,
+        retries: int = 1,
+    ) -> _Target:
         target = _Target(f"target-{len(transport_calls)}")
-        transport_calls.append((default_timeout, target))
+        transport_calls.append((default_timeout, retries, target))
         return target
 
     monkeypatch.setattr(session_manager, "transport", transport)
@@ -351,13 +359,39 @@ def test_batch_partitions_complete_work_before_serial_compatibility_and_uses_dis
     )
 
     assert events == ["concurrent", "serial"]
-    assert [timeout for timeout, _target in transport_calls] == [
-        DEDICATED_TEARDOWN_TIMEOUT_SECONDS,
-        DEDICATED_TEARDOWN_TIMEOUT_SECONDS,
-        None,
+    assert [(timeout, retries) for timeout, retries, _target in transport_calls] == [
+        (DEDICATED_TEARDOWN_TIMEOUT_SECONDS, DEDICATED_TEARDOWN_ATTEMPTS),
+        (DEDICATED_TEARDOWN_TIMEOUT_SECONDS, DEDICATED_TEARDOWN_ATTEMPTS),
+        (None, 1),
     ]
     assert len({id(target) for target in concurrent_targets}) == 2
     assert not captured_output.warnings
+
+
+def test_live_observation_for_stopped_sentinel_is_a_labeled_typed_failure(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    session = _seed_session(db, "inconsistent", socket_path=None, pid=PID_STOPPED, start_ticks=None)
+
+    monkeypatch.setattr(session_manager, "_batch_vm_boundary", lambda *args, **kwargs: contextlib.nullcontext())
+    monkeypatch.setattr(session_manager, "ensure_pids_batch", lambda sessions, **kwargs: sessions)
+    monkeypatch.setattr(
+        session_manager,
+        "observe_session_statuses",
+        lambda sessions, **kwargs: {session.name: SessionStatus.RUNNING},
+    )
+    monkeypatch.setattr(session_manager, "transport", lambda *args, **kwargs: pytest.fail("transport opened"))
+
+    with pytest.raises(ExternalError):
+        lifecycle_mod.stop_all_sessions(
+            db,
+            cast("Config", SimpleNamespace()),
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert any(session.name in warning for warning in captured_output.warnings)
 
 
 def test_worker_failure_does_not_suppress_sibling_persistence_or_labeled_warning(
@@ -461,6 +495,33 @@ def test_repeated_interrupts_cancel_queued_work_drain_running_work_and_reconcile
     assert len(captured_output.notices) >= 2
 
 
+def test_reconciliation_transition_retries_interrupts_during_cancel_and_notice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cancel_calls = 0
+    notice_calls = 0
+
+    def interrupt_cancel(futures: object) -> None:
+        nonlocal cancel_calls
+        cancel_calls += 1
+        if cancel_calls == 1:
+            raise KeyboardInterrupt
+
+    def interrupt_notice(error: BaseException) -> None:
+        nonlocal notice_calls
+        notice_calls += 1
+        if notice_calls == 1:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(teardown_mod, "_cancel_queued", interrupt_cancel)
+    monkeypatch.setattr(teardown_mod, "_announce_reconciliation", interrupt_notice)
+
+    teardown_mod._enter_reconciliation((), KeyboardInterrupt(), cancel_queued=True)
+
+    assert cancel_calls == 3
+    assert notice_calls == 2
+
+
 def test_interrupt_after_persistence_attempt_retries_reconciliation_idempotently(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -488,6 +549,7 @@ def test_interrupt_after_persistence_attempt_retries_reconciliation_idempotently
 
 def test_persistent_base_exception_during_reconciliation_drains_siblings_once(
     monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
 ) -> None:
     monkeypatch.setattr(
         teardown_mod,
@@ -509,6 +571,7 @@ def test_persistent_base_exception_during_reconciliation_drains_siblings_once(
         )
 
     assert sorted(name for _thread_id, name in db.calls) == ["exit-1", "good-2"]
+    assert any("exit-1" in warning for warning in captured_output.warnings)
 
 
 def test_interrupt_at_complete_map_release_drains_and_reconciles(
@@ -543,6 +606,7 @@ def test_interrupt_at_complete_map_release_drains_and_reconciles(
 
 def test_worker_base_exception_drains_and_persists_successful_sibling(
     monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
 ) -> None:
     ready = threading.Barrier(2)
 
@@ -562,6 +626,40 @@ def test_worker_base_exception_drains_and_persists_successful_sibling(
         )
 
     assert [name for _thread_id, name in db.calls] == ["good-2"]
+    assert any("escape-1" in warning for warning in captured_output.warnings)
+
+
+@pytest.mark.parametrize("worker_fails", [False, True])
+def test_completed_future_is_not_reconsumed_when_outcome_rendering_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    worker_fails: bool,
+) -> None:
+    executions = 0
+
+    def execute(plan: DedicatedTeardownPlan) -> DedicatedTeardownEvidence:
+        nonlocal executions
+        executions += 1
+        if worker_fails:
+            raise ExternalError("remote failure")
+        return DedicatedTeardownEvidence.VERIFIED_STOPPED
+
+    def fail_output(_message: str) -> None:
+        raise BrokenPipeError
+
+    monkeypatch.setattr(teardown_mod, "execute_dedicated_teardown", execute)
+    monkeypatch.setattr(output_mod, "info", fail_output)
+    monkeypatch.setattr(output_mod, "warn", fail_output)
+    monkeypatch.setattr(output_mod, "notice", lambda message: None)
+    db = _RecordingDB()
+
+    with pytest.raises(BrokenPipeError):
+        teardown_mod.execute_concurrent_dedicated_teardowns(
+            [_plan("session-1")],
+            db=db,  # type: ignore[arg-type]
+        )
+
+    assert executions == 1
+    assert [name for _thread_id, name in db.calls] == ([] if worker_fails else ["session-1"])
 
 
 def test_submission_interrupt_after_enqueue_never_reaches_remote_mutation(
@@ -580,6 +678,18 @@ def test_submission_interrupt_after_enqueue_never_reaches_remote_mutation(
         "execute_dedicated_teardown",
         lambda plan: calls.append(plan.session_name) or DedicatedTeardownEvidence.VERIFIED_STOPPED,
     )
+    real_abort = teardown_mod._SubmissionGate.abort
+    abort_calls = 0
+
+    def interrupt_during_abort(gate: teardown_mod._SubmissionGate) -> None:
+        nonlocal abort_calls
+        abort_calls += 1
+        if abort_calls == 1:
+            gate._aborted.set()
+            raise KeyboardInterrupt
+        real_abort(gate)
+
+    monkeypatch.setattr(teardown_mod._SubmissionGate, "abort", interrupt_during_abort)
 
     with pytest.raises(KeyboardInterrupt):
         teardown_mod.execute_concurrent_dedicated_teardowns(
@@ -588,6 +698,7 @@ def test_submission_interrupt_after_enqueue_never_reaches_remote_mutation(
         )
 
     assert calls == []
+    assert abort_calls == 2
 
 
 def test_submission_interrupt_after_unregistered_thread_start_never_reaches_remote_mutation(
