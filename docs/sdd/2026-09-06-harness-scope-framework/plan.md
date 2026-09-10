@@ -270,3 +270,10 @@ database open, and pending native receipts and unknown future payloads survive r
 database is closed. The source is opened through a relative path so the resolved native-lock
 identity is exercised too. Implementation has no planned feature work remaining; the ready handoff
 requests independent integration validation. Live acceptance and final locking remain open.
+
+At `bc8a4685`, the local Linux CI selection passed 8,919 tests with three skips; strict mypy passed
+across 803 production/test files. Ruff lint/format, file lint, rulesync drift, locked-SDD and typer
+isolation checks passed. Website Python (160) and Node (103) tests and deterministic double builds
+for both site bases passed. Project, complexity and generic correctness/security reviews of the
+reconciliation are clean, with 147, two and 202 focused tests respectively. These are local and
+fixture results; native Windows CI and independent live backend acceptance are separate evidence.
