@@ -1,203 +1,115 @@
-# SSH Connection Contracts: High-Level Architecture
+# SSH Isolation and Consolidation: High-Level Architecture
 
-- Status: Draft for design review
-- Date: 2026-09-05
+- Status: Draft for reduced-scope design review
+- Updated: 2026-09-09
 - Requirements: [frd.md](frd.md)
-- Source baseline: `a64b1b9c`
+- Source baseline: main `c7dce3d4`
 
-## Current architecture and defects
+## Architecture
 
-`cli/agentworks/ssh.py` and `cli/agentworks/transports/ssh.py` duplicate command construction and
-whole-process timeout retries. Interactive execution, streaming, Remote Lima, workspace copying,
-backup progress, and port forwarding construct additional SSH or scp commands independently.
-Consequently, policy changes in a shared builder do not cover the whole surface.
+Retain installed OpenSSH subprocesses and existing transport interfaces. One connection value
+describes host, user, port, configured identity, agent selection and explicit trust-file references.
+It contains no VM name, workload state or command. Existing VM factories and Remote Lima placement
+configuration produce it; there is no separately persisted host resource or routing framework.
 
-Canonical VM connections already carry host, user, and configured identity
-(`transports/__init__.py:92`). Remote Lima instead delegates its outer host resolution and identity
-to operator SSH configuration (`capabilities/vm_platform/lima.py:144`,
-`transports/remote_lima.py:59`). The latter is the migration boundary, not a reason to retain
-ambient configuration for all operations.
+One leaf SSH-policy builder supplies common options for SSH and scp, accounting for their different
+port syntax. `ssh.py` and `transports/ssh.py` share buffered execution, including stdin handling,
+logging, sensitive-output suppression and existing retry behavior. Interactive, streaming, archive,
+backup and tunnel paths retain their current subprocess/I/O lifetimes but use that same policy.
+Delete superseded builders once all consumers move; do not force streams through buffered capture.
 
-`SSHResult` carries only an integer and streams (`ssh.py:58`), while `SSHError` conflates checked
-command failures with connectivity (`ssh.py:71`). Interactive status 255 is described as a drop
-(`transports/ssh.py:75`). Log capture ignores failed execution (`sessions/tmux.py:917`). These
-represent information loss at different layers, so repairing the warning alone is insufficient.
+The shared policy ignores ambient config with `-F none`, disables connection sharing, selects only
+the configured identity, disables agent/X11 forwarding and uses explicit trust files. Operation
+options select PTYs, EOF or inherited input, environment, timeouts/keepalives and requested
+forwards. Do not use ClearAllForwardings in a way that removes requested tunnel listeners; request
+ExitOnForwardFailure for tunnel setup. Validate actual identity offers, including agent signing,
+rather than assuming an identity filename alone excludes other keys or discovered certificates.
 
-## Components and responsibilities
+Fresh authentication per operation preserves
+[ADR 0015](../../adrs/0015-abandon-ssh-controlmaster.md). No AsyncSSH, mux passenger/proxy client,
+custom completion channel, new connection pool or background SSH service is introduced.
 
-### Explicit SSH connection
+## Virtualization-host access
 
-Introduce one immutable connection value describing an endpoint, user, port, configured identity,
-host-key policy reference, and any supported jump connection. It contains no Lima VM name, guest
-command, PTY mode, or workload lifecycle state. Connection data comes from validated Agentworks
-configuration and platform results, never from evaluating the operator's SSH configuration.
+Replace Remote Lima's alias-only outer SSH target with the common explicit connection value. The
+host transport remains platform-neutral; Lima keeps its login-shell PATH handling, limactl command
+rendering, guest selection and transfer staging. Do not replace limactl shell/copy with direct guest
+SSH or add a generic virtualization adapter hierarchy.
 
-For managed VMs, factories construct this value from existing VM and operator data. For remote
-virtualization hosts, placement configuration supplies the equivalent fields through a reusable SSH
-connection schema. The initial consumer is Lima's SSH placement; no separately persisted host
-resource or connection registry is needed merely to make the schema reusable.
+Audit Lima's provider-generated SSH configuration and invocation behavior on both local and remote
+hosts. Operator config isolation must hold at the inner hop too. Use bounded provider-supported
+configuration controls if needed; an inability to establish that boundary is an escalation, not a
+reason to silently exempt it. Provider guest trust is not replaced by the outer host's trust store.
+Document existing provider trust limitations without presenting them as newly verified host trust.
 
-Each jump uses the same explicit identity and trust rules. Retained jump support must describe
-actual hops instead of an opaque alias string interpreted through ambient configuration. No
-arbitrary proxy command escape hatch is added as a substitute for a defined routing contract.
+## Migration without a trust reset
 
-### SSH policy and execution
+Placement configuration supplies explicit host/user/identity/port. The operator supplies values
+previously hidden in aliases; Agentworks does not run ssh -G, Match exec, or import arbitrary
+config. The minimum agent selector supports an explicit endpoint, inherited SSH_AUTH_SOCK when
+chosen, or the supported native platform agent. It never inherits an IdentityAgent directive.
+Identity selection remains independent of agent selection, and forwarding stays disabled.
 
-One component owns connection policy for every Agentworks-launched SSH/scp process. It disables
-ambient configuration using `-F none` or a private generated file with no external includes. It
-selects the configured identity, restricts offered identities, and sets explicit known-hosts paths.
-It preserves host-key verification and does not disable trust checks to simplify isolation.
+Trust migration is explicit and operator-controlled. Before an existing connection is used, copy the
+applicable known_hosts files into an Agentworks-owned location and reference them explicitly. Keep
+complete files rather than extracting/reinterpreting hashed names, CA patterns or revocations; keep
+connection-specific trust sources scoped to that connection. Preserve a required HostKeyAlias as an
+explicit connection field. If RevokedHostKeys was used, reference an owned copy of that file too,
+including KRL format; OpenSSH remains responsible for interpreting it.
 
-An SSH agent may provide signing for the configured identity. This is distinct from agent
-forwarding, which remains disabled. The implementation must test actual offered identities and
-encrypted-key behavior instead of equating `-i` alone with exclusive identity selection.
+Migrated connections use strict host verification. Missing files, unmatched trust, changed keys or
+inconsistent source policies cause refusal and migration guidance, not automatic acceptance. A
+genuinely new managed target may retain the existing accept-new enrollment policy only when
+explicitly established as new, never merely because its owned trust file is absent. The later
+migration plan must specify paths, config fields and first-use setup before code handoff. No custom
+trust parser, automatic discovery, CA-to-pin conversion or implicit update of operator files is
+required. If a source policy cannot be preserved by explicit files and aliases, stop and escalate.
 
-Operation-specific execution choices are supplied separately: PTY or no PTY, stdin payload, EOF, or
-explicitly inherited input, captured or inherited streams, explicit environment, connection timeout,
-operation deadline, and intentional forwarding. Keepalive detection applies to long-lived
-connections, including nested outer hops. Forwarding uses explicit listeners and fails when their
-establishment fails.
+Use OpenSSH's version-specific default algorithms; no custom algorithm-policy surface is added.
+Custom Ciphers, KexAlgorithms, MACs, HostKeyAlgorithms and authentication-signature restrictions
+from operator configuration are not honored. Likewise, no ProxyCommand or ProxyJump route is
+migrated; remove unused explicit jump plumbing. Operators needing those policies/routes cannot use
+this reduced connection surface until a separately approved extension exists. Do not weaken policy
+or silently choose another route to make a connection work.
 
-Buffered primitive execution and `SSHTransport.run` share one execution path, including logging,
-sensitive-input handling, error translation, and any caller-authorized retries. Interactive,
-streaming, transfer-progress, archive, and tunnel operations consume the same connection policy
-without forcing their different I/O lifetimes through a buffered subprocess API.
+## Diagnostics and integration
 
-### Virtualization-platform composition
+Keep SSHResult/SSHError and the merged ExecTransport/Transport split from
+[#746](https://github.com/WayfarerLabs/agentworks/pull/746). Correct status-255 warnings to explain
+ambiguity, preserving the numeric status and post-terminal-cleanup ordering. Neither OpenSSH process
+status nor a nested limactl status establishes which connection failed. No automatic reconnect or
+shared outcome migration follows from this wording correction.
 
-Remote platform access composes two existing concerns: an explicit SSH connection reaches the
-virtualization host, and the platform adapter renders commands for its control plane. Lima owns
-`limactl` invocation, guest selection, staging, and any inner connection behavior.
+Preserve [ADR 0020](../../adrs/0020-close-ssh-stdin-instead-of-forcing-a-tty.md) and
+[#737](https://github.com/WayfarerLabs/agentworks/pull/737) for stdin and PTY behavior. Update
+permanent transport documentation, configuration examples, help/completions and affected guide
+topics with the implementation, not ahead of observable behavior.
 
-The outer SSH implementation is platform-neutral. Refactor the existing Remote Lima path to consume
-it; do not introduce a generic virtualization adapter hierarchy without another concrete
-requirement. Inner guest failures retain their origin instead of being relabeled as failure of the
-outer connection. Where the provider does not expose that evidence, the result remains indeterminate
-at that boundary.
+## Verification and next artifacts
 
-### Execution outcomes
+Inventory every direct SSH/scp builder and provider-inner invocation. Behavioral fixtures must
+exercise hostile config, multiple agent keys, explicit trust/mismatch/revocation, stdin and binary
+streams, PTY restoration, copy/tunnel cleanup and unchanged exit codes. Include a migration with
+existing trust so an empty-store reset cannot pass unnoticed. Verify all listeners before tunnel
+readiness and preserve operation-owned access holds through cleanup.
 
-Represent observed execution facts independently:
+The implementation plan will map these checks to invocation families and workstation/platform beds,
+with observed results and explicit gaps. Keep protocol experiments out of acceptance: no exact
+classification or reconnect is being delivered. The remaining plan/migration details are ordinary
+implementation preparation, not permission to add an SSH protocol implementation. If inner isolation
+or trust migration requires substantial redesign, return to the operator.
 
-- remote completion, with exit status or signal when received;
-- local cancellation or process-launch failure;
-- deadline expiry;
-- connection establishment failure or established connection/channel loss when known; and
-- indeterminate failure when the carrier cannot distinguish those facts.
+Independent project and complexity reviews plus gates precede this draft checkpoint. Its new
+two-round feedback allowance applies after republication. No lockfile or implementation-completion
+claim belongs in this artifact handoff.
 
-Connection termination can coexist with unknown remote completion. Preserve the endpoint/hop and
-operation phase that produced the evidence. Ordinary output remains separate from these facts;
-diagnostics must not leak sensitive payloads or translate uncertainty into claims of no mutation.
+## Primary references
 
-The shared contract belongs at the execution boundary introduced by #746. SSH-specific evidence is
-produced by the SSH adapter; guest-agent and local transports report their own evidence. Checked
-remote failure and transport failure have distinct internal handling. CLI adapters retain remote
-exit codes where appropriate while rendering actionable failure and uncertainty information.
-Cancellation is intentional termination and never reconnects.
+- [OpenSSH client manual](https://man.openbsd.org/ssh.1): config isolation and ambiguous process
+  status 255.
+- [OpenSSH configuration manual](https://man.openbsd.org/ssh_config.5): identity, agent selection,
+  explicit trust files, algorithm defaults, forwarding and connection sharing.
+- [OpenSSH copy manual](https://man.openbsd.org/scp.1): copy options and explicit SSH configuration.
 
-### Completion mechanism decision gate
-
-OpenSSH's process status alone cannot provide the requested distinction: it returns a remote command
-status or 255 on error. A remote status of 255 is therefore ambiguous. Parsing diagnostic wording or
-reserving that remote status would not meet the requirements.
-
-Before design convergence, a focused executable prototype must select one feasible mechanism:
-
-1. Retain OpenSSH with a separate, reliable completion/control mechanism that does not alter
-   arbitrary command output, stdin, PTYs, or the command's exit semantics.
-2. Use a protocol-aware SSH implementation that exposes channel exit-status and connection events
-   independently, while proving supported identity, trust, terminal, transfer, and platform
-   behavior.
-
-The preferred starting point is retaining OpenSSH because it is the established client, but that
-preference does not waive the evidence requirement. A marker appended to arbitrary stdout/stderr is
-not a separate control channel, and a remote file descriptor does not automatically become an SSH
-channel. No library migration is selected by this document.
-
-The prototype must demonstrate remote exits 0/1/255, PTY detach, raw binary streams, sensitive
-stdin, nested execution, and loss before acknowledgement. Record the selected mechanism, its
-tradeoffs, and executable evidence in this HLA before claiming design convergence. If neither option
-meets the requirements with proportionate complexity, stop and escalate; do not implement a
-heuristic and describe it as exact classification.
-
-Even a protocol-aware implementation cannot infer remote non-execution from missing completion
-evidence. That uncertainty survives the mechanism choice and is part of the contract.
-
-### Recovery belongs to the operation
-
-Session and console attachment own the opt-in reconnect loop above the transport. They retain the
-same runtime identity and operation resource hold, classify the outcome, check that the runtime
-still exists, and reconnect only when the outcome and policy permit it. Access is revalidated when
-needed, and failures of authorization or host trust terminate recovery.
-
-Received clean completion and local cancellation end attachment. With reconnect enabled, known
-connection loss permits bounded reattachment even when remote completion is unknown. The opt-in
-discloses that a lost detach acknowledgement can therefore cause reattachment. If the carrier cannot
-distinguish connection loss from normal termination, it asks the operator before reattachment.
-Recovery never invokes session creation, restart, or console realization as a side effect. Terminal
-cleanup runs after each lost attachment and before recovery diagnostics.
-
-The future implementation plan will specify the exact CLI option, finite attempt budget, backoff,
-and non-interactive refusal behavior together with completions and help. Those choices cannot be
-left implicit at implementation handoff. Automatic replay of arbitrary execution and automatic
-transfer or tunnel continuation remain outside this effort.
-
-## Migration and integration
-
-Implement one coherent migration of all SSH invocation families. Remove duplicate builders once
-their consumers move; do not leave an ambient-config compatibility path behind the isolation claim.
-Manual alias export remains available for operator use.
-
-For example, a Lima placement currently containing only an SSH alias must be replaced by explicit
-host, user, identity, and optional port/jump settings. The operator supplies those values rather
-than Agentworks executing `ssh -G` against arbitrary configuration to discover them. Missing fields
-produce local migration guidance before credentials are used or remote commands run.
-
-Before implementation, record how existing trusted host keys move to the owned store, including
-host/port matching, conflict refusal, and whether an explicit import action is needed. An empty new
-store must not silently erase prior mismatch protection. This is a design decision gate alongside
-the completion mechanism, not permission to ship a trust reset.
-
-Coordinate shared changes with the native execution effort: #746 lands its extraction first, then
-this effort migrates outcomes on the resulting execution interface and all implementations. SSH
-isolation and prototypes do not depend on that extraction. If the dependency remains unavailable,
-continue independent work and report it; do not take ownership of another effort's artifacts.
-
-The approved delivery vehicle is a single draft PR. After design convergence, add the detailed plan,
-migration strategy, selected-mechanism evidence, and complete implementation in one push. Permanent
-docs describe shipped behavior only and accompany implementation. The final plan must include
-updating transport documentation, configuration examples, CLI help/completions, and guide topics
-affected by the actual changes.
-
-## Verification strategy
-
-Use behavioral tests at the execution boundary, plus isolated real SSH fixtures and live platform
-validation. Disruptive configuration should include PTY forcing, multiplexing, remote/local
-commands, environment injection, forwarding, identity additions, and routing overrides. Observe
-actual connection behavior and filesystem writes, not only helper-generated argument lists.
-
-Fault injection must cover connection establishment, active execution, and completion delivery.
-Verify exact data delivery, partial-output refusal, cleanup, preserved exit status, unknown remote
-completion, and no replay of ambiguous mutations. Exercise plain SSH, virtualization-host access,
-the relevant inner transport, and supported controller platforms. Maintain an operation coverage
-matrix with explicit gaps; local mocks cannot close unavailable live acceptance cases.
-
-Independent project and complexity reviews precede each handoff. The draft `review-requested`
-checkpoint solicits PR-level design feedback; it is not a ready-for-merge or live-validation signal.
-
-## Related work and primary sources
-
-- [Native execution design #746](https://github.com/WayfarerLabs/agentworks/pull/746): shared
-  execution boundary and Proxmox evidence semantics.
-- [Secret delivery #516](https://github.com/WayfarerLabs/agentworks/issues/516): coordinate any
-  diagnostic changes; do not broaden exposure while adding outcome evidence.
-- [AWS route lifetime #408](https://github.com/WayfarerLabs/agentworks/issues/408): independent
-  source of connection interruption; reconnect does not repair shared route ownership.
-- [OpenSSH client manual](https://man.openbsd.org/ssh.1): configuration isolation, jump-host option
-  scope, terminal behavior, and ambiguous process exit status.
-- [OpenSSH configuration manual](https://man.openbsd.org/ssh_config.5): identity selection,
-  known-hosts files, keepalives, forwarding, and configuration evaluation.
-
-The source audit and protocol limitations above motivate the component boundaries. The pending
-prototype and trust migration decision are explicitly unresolved; the rest is the proposed design
-submitted for review, not a statement that these behaviors already exist.
+This reduced design follows the existing OpenSSH execution pattern; a new SSH-library selection
+study is not an implementation dependency.

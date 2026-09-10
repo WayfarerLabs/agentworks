@@ -1,154 +1,107 @@
-# SSH Connection Contracts: Functional Requirements
+# SSH Isolation and Consolidation: Functional Requirements
 
-- Status: Draft for design review
-- Date: 2026-09-05
-- Operator: authenticated direction in the `agw-ssh-improv` session
+- Status: Draft for reduced-scope design review
+- Updated: 2026-09-09
 - Architecture: [hla.md](hla.md)
 
-## Purpose
+## Purpose and scope
 
-Agentworks must connect predictably regardless of the operator's SSH configuration, report what it
-knows about an operation's completion, and recover persistent interactive attachments without
-repeating remote work. SSH access to a virtualization host is a reusable connection concern; Remote
-Lima is its first existing consumer, not the name of that concern.
+Make existing SSH operations predictable despite operator SSH configuration, using installed
+OpenSSH. This PR covers consolidation [#740](https://github.com/WayfarerLabs/agentworks/issues/740)
+and isolation [#745](https://github.com/WayfarerLabs/agentworks/issues/745).
 
-This effort covers issues [#740](https://github.com/WayfarerLabs/agentworks/issues/740),
-[#745](https://github.com/WayfarerLabs/agentworks/issues/745),
-[#492](https://github.com/WayfarerLabs/agentworks/issues/492), and
-[#409](https://github.com/WayfarerLabs/agentworks/issues/409).
+On September 9 the operator approved reducing this effort to consolidation, isolation, explicit
+Remote Lima connection settings, preserved trust, and honest status-255 diagnostics. Exact exit/drop
+classification, reconnect, and shared outcome redesign are deferred, not completed. AsyncSSH and
+multiplexing/control-protocol implementations are excluded.
 
-## R1: Isolated SSH connections
+## R1: One isolated SSH policy
 
-Every Agentworks-controlled SSH connection must obtain its endpoint, login identity, routing,
-execution options, and host-key storage from explicit Agentworks configuration or platform-owned
-connection data. User and system SSH configuration must not affect an Agentworks invocation. The
-requirement applies to every hop, including a virtualization host and any supported jump host.
+Every Agentworks-launched SSH or scp invocation must ignore user and system SSH configuration.
+Endpoint, user, port, identity, trust files, and intentional execution options come from explicit
+Agentworks settings or platform data. This deliberately supersedes #745's suggestion to retain
+ambient routing and identity configuration.
 
-Coverage includes captured commands, sensitive and ordinary stdin delivery, interactive sessions and
-shells, streamed execution, file transfers, workspace archive streams, backup transfers, forwarding,
-bootstrap, recovery, and remote virtualization-platform access. Provider-owned inner connections
-must be audited and validated against the same behavioral boundary; a library or subprocess boundary
-is not an exemption.
+Cover buffered execution, interactive attachment and shells, streaming, transfers, workspace
+archives, backups, forwarding, bootstrap, and virtualization-host access. Consolidate duplicate
+policy construction and buffered execution rather than adding another parallel helper.
 
-Host-key verification remains enabled. Accepted host keys must be stored in an explicit
-Agentworks-owned location, with no implicit writes to the operator's SSH files. Existing trust must
-not be silently replaced or mismatches treated as first-use acceptance during migration.
+Audit provider-launched inner SSH, including local and remote Lima, for operator-config influence.
+Validate that boundary using provider-owned connection data; do not infer isolation from the outer
+hop alone. If the provider cannot be isolated with a bounded configuration change, escalate before
+implementation handoff rather than introduce a new guest transport or claim complete isolation.
 
-Only the configured authentication identity may be offered. An SSH agent may sign for that explicit
-identity; unrelated agent keys or implicit default keys must not become fallback credentials.
-Generated manual SSH aliases remain an operator convenience, not an input to managed operations.
+## R2: Explicit connection and compatibility boundary
 
-## R2: Reusable virtualization-host access
+Use a small reusable SSH connection value, independent of the virtualization platform. Remote Lima
+is its first virtualization-host consumer; Lima command rendering and guest selection stay local to
+the Lima adapter. No host registry or generic virtualization framework is required.
 
-Connection configuration must describe an SSH host independently of the virtualization platform. The
-existing Remote Lima placement must consume this connection model for its outer host access.
-Lima-specific command rendering and guest selection remain platform concerns.
+Alias-only placements must migrate to explicit host, user, identity and port settings. Missing
+settings fail locally before remote work. Do not evaluate operator SSH configuration to discover
+values. Manual SSH aliases remain an operator convenience, not a managed-connection input.
 
-Existing installations using an operator SSH alias must have documented migration to explicit
-connection settings. Missing settings must fail before remote work with actionable guidance.
-Migration must not execute or import arbitrary operator SSH configuration implicitly.
+Only the configured authentication identity may be offered. An agent may sign for that identity;
+agent selection uses an explicit endpoint or the deliberately supported SSH_AUTH_SOCK/platform-agent
+selection, not IdentityAgent from SSH config. Migration guidance must explain that distinction.
+Unrelated agent keys, default identity files and agent forwarding are not fallback mechanisms.
 
-No additional virtualization provider, generic remote platform framework, or new fallback route is
-required. The shared model must serve the concrete existing consumers without Lima-specific fields.
+Connections use the installed OpenSSH version's default algorithm policy. Targets or organizational
+policies requiring custom cipher, key-exchange, MAC or signature restrictions are outside this PR's
+supported configuration. No automatic negotiation downgrade, arbitrary SSH option passthrough,
+ProxyJump or ProxyCommand configuration is added. Existing alias-based routing or algorithm
+restrictions do not carry over. This is a declared compatibility limit, not a claim that an operator
+configuration survey found no such users.
 
-## R3: Preserve execution behavior
+## R3: Preserve trust and existing I/O
 
-Consolidation must preserve explicit PTY selection, byte-exact stdin delivery, stream separation
-where supported, environment delivery, sensitive-data suppression, and terminal restoration.
-Buffered programmatic execution supplies EOF when no payload is provided. Interactive and streaming
-operations retain explicitly inherited keyboard or piped stdin. Raw archive streams must remain
-byte-transparent.
+Direct SSH/scp connections retain OpenSSH host verification, using explicit Agentworks-owned trust
+files without implicit reads or writes to operator SSH files. Migration must preserve existing
+host-key mismatch protection, including applicable aliases, ports, CA and revocation records. Never
+silently replace existing trust with an empty store or treat an existing target as new. Use
+OpenSSH's trust implementation, not a custom parser or a new trust engine.
 
-All supported controller platforms must receive equivalent guarantees. Interactive and streaming
-operations must detect an unresponsive connection within a documented keepalive budget; buffered
-operations and transfers must have explicit connection and operation timeout semantics.
+Provider-owned guest identity and trust remain provider concerns in this PR; their existing
+limitations must be documented separately from the direct-connection guarantee. Auditing their
+configuration isolation does not authorize weakening verification or redesigning their trust model.
 
-Intentional forwarding must retain its requested listeners while rejecting inherited forwarding. A
-failure to establish a requested listener must fail the operation rather than leave an apparently
-successful tunnel process. Operator cancellation must stop local connection processes and release
-their operation-owned resources.
+Preserve explicit PTYs, byte-exact stdin, stream separation where supported, sensitive-data
+suppression, environment delivery, terminal restoration, and existing timeout/keepalive behavior.
+Buffered calls supply EOF without a payload; interactive and streaming paths retain their explicit
+stdin behavior. Preserve the contracts in
+[ADR 0020](../../adrs/0020-close-ssh-stdin-instead-of-forcing-a-tty.md) and
+[#737](https://github.com/WayfarerLabs/agentworks/pull/737).
 
-## R4: Evidence-based outcomes
+Keep requested forwards and reject inherited forwards. Listener setup failure must fail the tunnel
+operation. Preserve cancellation cleanup and resource holds. Consolidation must not broaden retries
+or add automatic replay; redesigning existing retry semantics is a separate effort.
 
-Every operation must preserve the distinction between a received remote exit status, a local
-cancellation or launch failure, a deadline, and a connection or channel failure. A remote exit of
-255 must not be classified as a connection drop solely from its numeric value. Failure to establish
-a connection must not be described as loss of an established session.
+## R4: Honest diagnostics, unchanged result interface
 
-Connection outcome and remote completion are separate facts. If completion evidence is lost, remote
-completion is unknown: the command may have run and changed state. No diagnostic may claim
-otherwise. Nested operations must identify the failing hop when evidence supports that distinction,
-and preserve uncertainty when it does not.
+Keep existing return codes and result/error interfaces. Status 255 alone must not be described as a
+proven connection drop: it can also be the remote command's exit status. Correct the affected
+diagnostics without parsing OpenSSH prose or introducing a new outcome model. Do not infer a failing
+inner hop from a Remote Lima outer-process status.
 
-A clean detach or remote exit must be distinguished from a detected connection failure when the
-corresponding completion evidence arrives. Perfect knowledge after loss is not promised. An
-unacknowledged clean detach leaves remote completion unknown, even if connection loss is known.
+No reconnect options, exact completion protocol, transfer resume, connection pooling, or changes to
+non-SSH outcome semantics belong in this PR. Preserve the execution interface delivered by
+[#746](https://github.com/WayfarerLabs/agentworks/pull/746), now merged.
 
-Remote command failures must not automatically become connectivity failures. Logs and transfers must
-not present failed or incomplete output as a successful complete result. Existing CLI exit status
-behavior must be preserved wherever unambiguous; any unavoidable compatibility change needs an
-explicit migration decision before implementation.
+## Acceptance and delivery
 
-## R5: Retry and reconnect
+Demonstrate the shared policy across every invocation family with disruptive SSH configuration,
+including forced PTYs, remote/local commands, environment injection, identity additions, routing,
+multiplexing and forwarding. Observe actual behavior and trust-file writes, not only argv strings.
+Verify configured-key exclusivity, trust mismatch/revocation refusal, migration without trust reset,
+binary streams, secret suppression, terminal restoration, intentional forwarding and cleanup.
 
-A deadline is not proof of failure before execution and must not automatically replay a command.
-Repetition is allowed only when the owning operation establishes that it is safe, such as a
-deliberately idempotent readiness probe. Arbitrary commands and mutations receive no automatic
-repetition after ambiguous execution.
+Record workstation OS and VM platform separately, covering supported Linux, macOS and Windows
+workstations and the virtualization-host/provider-inner boundary. Name unavailable cases; mocks do
+not establish live SSH or terminal acceptance. Test exits 0/1/255 and interruption only for
+preserved behavior and honest diagnostics, not as proof of exact classification.
 
-Provide an explicit opt-in reconnect option for persistent session and console attachment. Recovery
-must target the same persisted runtime identity, verify that it is still attachable, and preserve
-the required access and route lifetime throughout the attempt. It must not create, restart, or
-replace the workload. A received clean detach or exit, operator cancellation, missing runtime, or
-non-retryable authentication or trust failure ends recovery.
-
-Recovery has finite attempts, bounded backoff, visible status, and immediate local cancellation.
-Opting in permits reattachment after known connection loss despite unknown remote completion,
-including the race where a detach acknowledgement was lost. The option must disclose this behavior.
-If the carrier cannot distinguish connection loss from normal termination, reattachment requires an
-explicit operator decision. A successful reattachment resets no lifetime budget in a way that
-permits an unbounded reconnect loop.
-
-Plain shells, arbitrary execution, file transfers, and tunnels receive reliable outcome reporting in
-this effort but no automatic continuation. Reopening a plain shell is a new shell. Transfer resume
-and command replay require separate operation-specific contracts and are out of scope.
-
-## R6: Shared transport coordination
-
-The native execution effort in [PR #746](https://github.com/WayfarerLabs/agentworks/pull/746) owns
-the `ExecTransport` extraction, native platform contracts, and Proxmox guest-agent implementation.
-Native means independent of Tailscale, not necessarily independent of SSH.
-
-This effort owns SSH connections and the subsequent shared outcome migration. Isolation and outcome
-research may proceed in parallel; shared result and error changes must integrate with the native
-effort's resulting contract. No silent canonical-to-native fallback is introduced.
-
-The implementation must preserve non-SSH evidence, including an acknowledged guest-agent process
-identity and unknown completion after polling failure. It must not impose SSH-specific failure codes
-or reconnect semantics on all transports.
-
-## Acceptance
-
-Behavioral validation must exercise all in-scope invocation families with disruptive user and system
-SSH configuration, explicit identities, isolated host-key storage, and expected host-key mismatch
-refusal. Verify supported controller platforms and the virtualization-host path.
-
-Outcome validation must cover remote exits 0, 1, and 255; clean detach; local interruption;
-authentication and trust failures; connection loss before and during execution; and loss after
-execution before completion acknowledgement. Verify byte-transparent streams, secret suppression,
-terminal restoration, finite recovery, and no automatic replay of an uncertain mutation.
-
-An operation coverage matrix must name observed passes, failures, and unavailable environments.
-Mocks alone cannot establish network-loss, PTY, or supported-platform acceptance.
-
-## Delivery and authority
-
-The operator requested FRD and HLA review in one draft PR using `review-requested`, with up to three
-authorized design feedback/fix cycles. After design convergence, planning and implementation may be
-pushed together in that same PR, followed by up to three implementation feedback/fix cycles. The PR
-remains draft unless the operator separately directs otherwise; no merge is authorized.
-
-The initial checkpoint contains these design documents, not a claim of completed implementation.
-Material requirement changes, an unworkable outcome mechanism, or unresolved cross-effort ownership
-must be escalated rather than absorbed through speculative complexity. Implementation starts only
-after the design's decision gates are resolved.
+Republish FRD/HLA in the same draft PR with review-requested after private project and complexity
+reviews and gates. The operator authorizes up to two further feedback/fix rounds on this reduced
+checkpoint. These documents are design, not shipped behavior. After convergence, the previously
+authorized plan and implementation share one push in this PR; no implementation starts as part of
+this republication. Keep the PR draft; no merge is authorized.
