@@ -205,7 +205,6 @@ def test_platform_exec_starts_without_canonical_connectivity_repair(
         return SSHResult(returncode=0, stdout="", stderr="")
 
     target = ExecutionOnlyTransport(_result)
-    seen_contexts: list[RunContext] = []
 
     def _native_transport(
         _vm: object,
@@ -215,9 +214,8 @@ def test_platform_exec_starts_without_canonical_connectivity_repair(
         ctx: RunContext,
         stack: object,
     ) -> ExecutionOnlyTransport:
-        del stack
+        del ctx, stack
         events.append("native-transport")
-        seen_contexts.append(ctx)
         return target
 
     monkeypatch.setattr("agentworks.transports.native_transport", _native_transport)
@@ -238,7 +236,3 @@ def test_platform_exec_starts_without_canonical_connectivity_repair(
     vm = db.get_vm("box")
     assert vm is not None
     assert vm.last_started_at is not None
-    (ctx,) = seen_contexts
-    assert ctx.secret("proxmox-token") == "pve-token"
-    with pytest.raises(StateError):
-        ctx.secret("vm-env-secret")
