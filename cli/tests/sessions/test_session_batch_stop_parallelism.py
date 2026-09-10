@@ -486,6 +486,31 @@ def test_interrupt_after_persistence_attempt_retries_reconciliation_idempotently
     assert [name for _thread_id, name in db.calls] == ["session-1", "session-1"]
 
 
+def test_persistent_base_exception_during_reconciliation_drains_siblings_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        teardown_mod,
+        "execute_dedicated_teardown",
+        lambda plan: DedicatedTeardownEvidence.VERIFIED_STOPPED,
+    )
+
+    class _ExitingDB(_RecordingDB):
+        def compare_and_set_session_stopped(self, name: str, **kwargs: object) -> None:
+            super().compare_and_set_session_stopped(name, **kwargs)
+            if name == "exit-1":
+                raise SystemExit(7)
+
+    db = _ExitingDB()
+    with pytest.raises(SystemExit, match="7"):
+        teardown_mod.execute_concurrent_dedicated_teardowns(
+            [_plan("exit-1"), _plan("good-2")],
+            db=db,  # type: ignore[arg-type]
+        )
+
+    assert sorted(name for _thread_id, name in db.calls) == ["exit-1", "good-2"]
+
+
 def test_interrupt_at_complete_map_release_drains_and_reconciles(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -585,7 +585,7 @@ def execute_concurrent_dedicated_teardowns(
                     output.warn(f"Session '{plan.session_name}' failed to persist stopped state: {exc}")
                     pending.remove(future)
                     continue
-                except BaseException as exc:
+                except KeyboardInterrupt as exc:
                     if primary_error is None:
                         primary_error = exc
                     if not reconciling:
@@ -593,6 +593,15 @@ def execute_concurrent_dedicated_teardowns(
                         reconciling = True
                     _announce_reconciliation(exc)
                     break
+                except BaseException as exc:
+                    if primary_error is None:
+                        primary_error = exc
+                    pending.remove(future)
+                    if not reconciling:
+                        _cancel_queued(tuple(pending))
+                        reconciling = True
+                    _announce_reconciliation(exc)
+                    continue
                 pending.remove(future)
         except KeyboardInterrupt as exc:
             if primary_error is None:
