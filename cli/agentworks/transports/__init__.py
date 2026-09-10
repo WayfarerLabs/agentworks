@@ -133,7 +133,6 @@ def agent_transport(
     agent: AgentRow,
     *,
     default_timeout: int | None = None,
-    retries: int = SSH_DEFAULT_RETRIES,
     logger: SSHLogger | None = None,
 ) -> Transport:
     """Canonical transport for an agent's Linux user (Tailscale SSH).
@@ -148,7 +147,6 @@ def agent_transport(
         config,
         user=agent.linux_user,
         default_timeout=default_timeout,
-        retries=retries,
         logger=logger,
     )
 
