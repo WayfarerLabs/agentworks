@@ -97,7 +97,7 @@ not authored prose.
 
 ## Phase 1: Extract Complete-Fingerprint Teardown
 
-- [ ] Rebase onto the merged PR #764 database-use lock and retain its shared writable-lifetime and
+- [x] Rebase onto the merged PR #764 database-use lock and retain its shared writable-lifetime and
       exclusive restore semantics unchanged.
 - [ ] Add atomic stopped-state compare-and-set against the complete prepared runtime identity.
 - [ ] Add one dedicated-only immutable complete-fingerprint plan in a session-domain teardown
