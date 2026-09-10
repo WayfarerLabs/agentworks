@@ -152,6 +152,7 @@ def test_dedicated_teardown_kills_the_fingerprinted_server_and_not_a_numeric_pid
     from agentworks.db import PID_STOPPED
     from agentworks.sessions import manager as session_manager
     from agentworks.sessions import tmux as tmux_mod
+    from agentworks.sessions.manager import _teardown as teardown_mod
 
     db = _seed_db(tmp_path)
     session = _seed_dedicated_admin_session(db)
@@ -182,7 +183,7 @@ def test_dedicated_teardown_kills_the_fingerprinted_server_and_not_a_numeric_pid
         "kill_server",
         lambda *, run_command, socket_path: killed.append(socket_path) or True,
     )
-    monkeypatch.setattr(session_manager, "_prove_stored_runtime_absent", lambda *args, **kwargs: True)
+    monkeypatch.setattr(teardown_mod, "_prove_plan_runtime_absent", lambda plan: True)
 
     session_manager._teardown_session(  # type: ignore[arg-type]
         session,
@@ -239,7 +240,7 @@ def test_admin_transport_elevates_agent_runtime_absence_proof(
     from agentworks.errors import BrokenStateError, ExternalError
     from agentworks.sessions import manager as session_manager
     from agentworks.sessions import tmux as tmux_mod
-    from agentworks.sessions.manager import _lifecycle as lifecycle_mod
+    from agentworks.sessions.manager import _teardown as teardown_mod
 
     db = _seed_db(tmp_path)
     session = _seed_dedicated_agent_session(db)
@@ -250,17 +251,28 @@ def test_admin_transport_elevates_agent_runtime_absence_proof(
         observed_sudo.append(sudo)
         return False
 
-    monkeypatch.setattr(session_manager, "_prove_stored_runtime_absent", _still_live)
-
     if operation == "recover":
+        monkeypatch.setattr(session_manager, "_prove_stored_runtime_absent", _still_live)
+        monkeypatch.setattr(
+            tmux_mod,
+            "capture_tmux_server_fingerprint",
+            lambda **kwargs: FingerprintProbe(ProbeStatus.ABSENT),
+        )
         with pytest.raises(BrokenStateError):
-            lifecycle_mod._recover_broken_session(  # type: ignore[arg-type]
+            session_manager._teardown_session(  # type: ignore[arg-type]
                 session,
                 target=target,
                 target_owns_session=False,
                 db=db,
+                force=False,
             )
     else:
+
+        def _still_live_plan(plan):  # type: ignore[no-untyped-def]
+            observed_sudo.append(plan.sudo)
+            return False
+
+        monkeypatch.setattr(teardown_mod, "_prove_plan_runtime_absent", _still_live_plan)
         monkeypatch.setattr(
             tmux_mod,
             "capture_tmux_server_fingerprint",
