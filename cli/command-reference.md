@@ -687,10 +687,11 @@ consumes both stored VM and admin instance specs but cannot change or clear eith
 VMs created before SSH lifecycle-evidence tracking have no synthesized identity evidence. Ordinary
 canonical SSH commands refuse that unknown state until one successful `agw vm reinit <name>` proves
 and records the configured identity. After upgrading Agentworks, run that reinit while the installed
-key still works. If it no longer works, try `agw vm shell <name> --platform` where supported,
-restore the configured public key, and rerun reinit. A platform-native transport can itself depend
-on the configured key, so use provider-native recovery tooling or recreate the VM if it cannot
-connect.
+key still works. If it no longer works, try `agw vm shell <name> --platform` for interactive repair
+or `agw vm exec --platform <name> <command...>` for a bounded, buffered recovery command. Proxmox
+supports both platform-native options. Restore the configured public key, then rerun reinit. A
+platform-native transport can itself depend on the configured key, so use provider-native recovery
+tooling or recreate the VM if it cannot connect.
 
 `vm confirm-release` reads `/etc/os-release` through the named VM's canonical live transport and
 shows the recorded and live Debian releases. A changed or previously unknown value requires a

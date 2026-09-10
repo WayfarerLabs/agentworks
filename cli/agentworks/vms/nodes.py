@@ -229,7 +229,12 @@ class LiveVMNode:
         # answer. Same stance as that platform's fatal runup.
         return observed in (VMStatus.STOPPED, VMStatus.DEALLOCATED)
 
-    def auto_start(self, gate_secrets: SecretReader) -> None:
+    def auto_start(
+        self,
+        gate_secrets: SecretReader,
+        *,
+        repair_canonical_connectivity: bool = True,
+    ) -> None:
         from agentworks import output
         from agentworks.vms.manager import _ensure_tailscale, _tailscale_rejoin_required
 
@@ -252,6 +257,9 @@ class LiveVMNode:
         platform.start(self._row, self._gate_ops_ctx(gate_secrets))
         if self._observed in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
             self._db.record_vm_started(self._row.name)
+
+        if not repair_canonical_connectivity:
+            return
 
         with platform.vm_active(self._row, config=self._config):
             if _tailscale_rejoin_required(

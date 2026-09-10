@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.base import RunContext
+from agentworks.db import VMStatus
 from agentworks.errors import StateError, ValidationError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -141,23 +142,85 @@ def test_platform_exec_rejects_workspace_before_composition(
     assert resolve_counter == []
 
 
-def test_platform_exec_does_not_require_a_tailscale_host(
+@pytest.mark.parametrize("initial_status", [VMStatus.STOPPED, VMStatus.DEALLOCATED])
+def test_platform_exec_starts_without_canonical_connectivity_repair(
     db: Database,
     make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
+    initial_status: VMStatus,
 ) -> None:
-    from agentworks.db import VMStatus
-
-    config = make_config()
+    config = make_config(manifests=[VM_ENV_TEMPLATE])
     _seed_vm(db, tailscale_host=None)
-    monkeypatch.setattr(ProxmoxPlatform, "status", lambda *_args, **_kwargs: VMStatus.RUNNING)
+    events: list[str] = []
+    site_tokens: list[str] = []
+
+    def _status(_self: object, _row: object, ctx: RunContext) -> VMStatus:
+        events.append("status")
+        site_tokens.append(ctx.secret("proxmox-token"))
+        return initial_status
+
+    def _start(_self: object, _row: object, ctx: RunContext) -> None:
+        events.append("start")
+        site_tokens.append(ctx.secret("proxmox-token"))
+
+    @contextmanager
+    def _hold_active(*_args: object, **_kwargs: object):  # noqa: ANN202
+        events.append("hold-open")
+        try:
+            yield
+        finally:
+            events.append("hold-close")
+
+    monkeypatch.setattr(ProxmoxPlatform, "status", _status)
+    monkeypatch.setattr(ProxmoxPlatform, "start", _start)
+    monkeypatch.setattr(ProxmoxPlatform, "vm_active", _hold_active)
+    monkeypatch.setattr(
+        vm_manager,
+        "_is_tailscale_reachable",
+        lambda *_args, **_kwargs: pytest.fail("platform recovery must not probe Tailscale"),
+    )
+    monkeypatch.setattr(
+        vm_manager,
+        "_tailscale_rejoin_required",
+        lambda *_args, **_kwargs: pytest.fail("platform recovery must not evaluate Tailscale repair"),
+    )
+    monkeypatch.setattr(
+        vm_manager,
+        "_ensure_tailscale",
+        lambda *_args, **_kwargs: pytest.fail("platform recovery must not rejoin Tailscale"),
+    )
     monkeypatch.setattr(
         "agentworks.vms.manager.boundary.require_vm_ssh_boundary",
         lambda *_args, **_kwargs: pytest.fail("platform recovery must not require canonical SSH evidence"),
     )
-    target = ExecutionOnlyTransport()
-    monkeypatch.setattr("agentworks.transports.native_transport", lambda *_args, **_kwargs: target)
+    monkeypatch.setattr(
+        "agentworks.transports.transport",
+        lambda *_args, **_kwargs: pytest.fail("platform recovery must not use the canonical transport"),
+    )
+
+    def _result(_call: ExecCall) -> SSHResult:
+        events.append("run")
+        return SSHResult(returncode=0, stdout="", stderr="")
+
+    target = ExecutionOnlyTransport(_result)
+    seen_contexts: list[RunContext] = []
+
+    def _native_transport(
+        _vm: object,
+        _platform: object,
+        _config: object,
+        *,
+        ctx: RunContext,
+        stack: object,
+    ) -> ExecutionOnlyTransport:
+        del stack
+        events.append("native-transport")
+        seen_contexts.append(ctx)
+        return target
+
+    monkeypatch.setattr("agentworks.transports.native_transport", _native_transport)
 
     result = vm_manager.exec_vm_platform(
         db,
@@ -168,4 +231,14 @@ def test_platform_exec_does_not_require_a_tailscale_host(
     )
 
     assert result.returncode == 0
-    assert target.calls[-1].command == "true"
+    assert target.calls == [ExecCall(command="true", sudo=False, check=False, timeout=None, input_text=None)]
+    assert events == ["status", "start", "hold-open", "native-transport", "run", "hold-close"]
+    assert site_tokens == ["pve-token", "pve-token"]
+    assert resolve_counter == [["proxmox-token"]]
+    vm = db.get_vm("box")
+    assert vm is not None
+    assert vm.last_started_at is not None
+    (ctx,) = seen_contexts
+    assert ctx.secret("proxmox-token") == "pve-token"
+    with pytest.raises(StateError):
+        ctx.secret("vm-env-secret")

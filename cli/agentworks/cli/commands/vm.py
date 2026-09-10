@@ -20,6 +20,11 @@ vm_app = typer.Typer(
 app.add_typer(vm_app)
 
 
+def _shell_compatible_exit_code(returncode: int) -> int:
+    """Map a signal-style negative result to its conventional shell status."""
+    return 128 - returncode if returncode < 0 else returncode
+
+
 @vm_app.command("create")
 def vm_create(
     name: Annotated[str, typer.Argument(help="VM name")],
@@ -335,6 +340,9 @@ def vm_exec(
     ] = None,
 ) -> None:
     """Execute a command on a VM as the admin user."""
+    if platform and workspace is not None:
+        raise typer.BadParameter("--platform cannot be combined with --workspace")
+
     interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config
     from agentworks.vms.manager import exec_vm, exec_vm_platform
@@ -355,7 +363,7 @@ def vm_exec(
         sys.stdout.flush()
         sys.stderr.write(result.stderr)
         sys.stderr.flush()
-        raise typer.Exit(result.returncode)
+        raise typer.Exit(_shell_compatible_exit_code(result.returncode))
     raise typer.Exit(
         exec_vm(
             get_db(),

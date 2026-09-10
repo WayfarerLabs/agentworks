@@ -170,15 +170,21 @@ def test_vm_exec_without_platform_keeps_canonical_route(monkeypatch: pytest.Monk
     assert captured["workspace_name"] is None
 
 
-def test_vm_exec_platform_emits_captured_streams_and_exit_code(
+@pytest.mark.parametrize(
+    ("remote_returncode", "local_exit_code"),
+    [(23, 23), (-15, 143)],
+)
+def test_vm_exec_platform_emits_captured_streams_and_shell_exit_code(
     monkeypatch: pytest.MonkeyPatch,
+    remote_returncode: int,
+    local_exit_code: int,
 ) -> None:
     captured: dict[str, Any] = {}
 
     def _platform_spy(*args: object, **kwargs: object) -> SSHResult:
         captured["_args"] = args
         captured.update(kwargs)
-        return SSHResult(returncode=23, stdout="buffered-out", stderr="buffered-err")
+        return SSHResult(returncode=remote_returncode, stdout="buffered-out", stderr="buffered-err")
 
     monkeypatch.setattr("agentworks.vms.manager.exec_vm_platform", _platform_spy)
     monkeypatch.setattr(
@@ -190,11 +196,30 @@ def test_vm_exec_platform_emits_captured_streams_and_exit_code(
 
     result = CliRunner().invoke(app, ["vm", "exec", "--platform", "box", "printf", "payload"])
 
-    assert result.exit_code == 23
+    assert result.exit_code == local_exit_code
     assert result.stdout == "buffered-out"
     assert result.stderr == "buffered-err"
     assert captured["_args"][2:] == ("box", ["printf", "payload"])
     assert captured["workspace_name"] is None
+
+
+def test_vm_exec_platform_workspace_mutex_precedes_cli_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _unexpected(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("invalid CLI options must not access command dependencies")
+
+    monkeypatch.setattr("agentworks.cli.commands.vm.get_db", _unexpected)
+    monkeypatch.setattr("agentworks.config.load_config", _unexpected)
+    monkeypatch.setattr("agentworks.vms.manager.exec_vm", _unexpected)
+    monkeypatch.setattr("agentworks.vms.manager.exec_vm_platform", _unexpected)
+
+    result = CliRunner().invoke(
+        app,
+        ["vm", "exec", "--platform", "--workspace", "ws1", "box", "pwd"],
+    )
+
+    assert result.exit_code == 2
 
 
 def test_vm_shell_provisioner_alias_is_removed(

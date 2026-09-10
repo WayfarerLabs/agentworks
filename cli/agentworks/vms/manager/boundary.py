@@ -87,6 +87,7 @@ def _gated_vm_boundary(
     *,
     targets: Sequence[SecretTarget] = (),
     scope: OperationScope | None = None,
+    repair_canonical_connectivity: bool = True,
     interaction: TtyInteractionPolicy,
 ) -> Iterator[tuple[LiveVMNode, Resolver, RunContext]]:
     """Compose a gated VM span after its caller selects SSH policy.
@@ -122,6 +123,11 @@ def _gated_vm_boundary(
     session ops a SESSION-level one accordingly; the VM default
     serves the commands that are about the VM itself.
 
+    ``repair_canonical_connectivity=False`` keeps power convergence and the
+    held-active span but skips post-start Tailscale reconnect/rejoin. Explicit
+    platform-native recovery uses this mode so broken canonical connectivity
+    cannot block the operation intended to repair it.
+
     Deliberately NOT :func:`_live_vm_boundary` (the no-gate lifecycle
     trio): these commands converge power state first, and the gate
     ordering (gate, then preflight, then resolve, all inside the span)
@@ -149,7 +155,11 @@ def _gated_vm_boundary(
         resolver.register_targets(targets, allow_transient_auto_declare=True)
     if scope is None:
         scope = _vm_scope(db, vm.name)
-    with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
+    with activation_gate(
+        vm_node,
+        gate_secret_resolver(config, registry, resolver),
+        repair_canonical_connectivity=repair_canonical_connectivity,
+    ):
         preflight_all(
             nodes,
             RunContext(config=config, operation_scope=scope),
@@ -196,7 +206,7 @@ def gated_vm_platform_recovery_boundary(
     scope: OperationScope | None = None,
     interaction: TtyInteractionPolicy,
 ) -> Iterator[tuple[LiveVMNode, Resolver, RunContext]]:
-    """Compose the explicit platform-native recovery gate without SSH proof."""
+    """Compose platform recovery without SSH proof or Tailscale repair."""
     with _gated_vm_boundary(
         db,
         config,
@@ -204,6 +214,7 @@ def gated_vm_platform_recovery_boundary(
         vm,
         targets=targets,
         scope=scope,
+        repair_canonical_connectivity=False,
         interaction=interaction,
     ) as boundary:
         yield boundary
