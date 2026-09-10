@@ -932,6 +932,67 @@ class Database:
         )
         self._commit_unless_in_tx()
 
+    def compare_and_set_session_stopped(
+        self,
+        name: str,
+        *,
+        expected_socket_path: str,
+        expected_pid: int,
+        expected_boot_id: str,
+        expected_tmux_server_start_ticks: int,
+    ) -> None:
+        """Clear one runtime only when its complete prepared identity matches.
+
+        Persisted runtime identity is a cross-process boundary. A zero-row
+        update is accepted only when an interrupted prior attempt already
+        committed the exact desired stopped state; every other mismatch stays
+        untouched and fails closed.
+        """
+        if (
+            isinstance(expected_pid, bool)
+            or expected_pid <= 0
+            or isinstance(expected_tmux_server_start_ticks, bool)
+            or expected_tmux_server_start_ticks <= 0
+        ):
+            raise ValueError("a prepared runtime requires positive process identity fields")
+        result = self._conn.execute(
+            "UPDATE sessions SET socket_path = ?, pid = ?, boot_id = NULL, tmux_server_start_ticks = NULL, "
+            "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
+            "WHERE name = ? AND socket_path IS ? AND pid IS ? AND boot_id IS ? "
+            "AND tmux_server_start_ticks IS ?",
+            (
+                expected_socket_path,
+                _db.PID_STOPPED,
+                name,
+                expected_socket_path,
+                expected_pid,
+                expected_boot_id,
+                expected_tmux_server_start_ticks,
+            ),
+        )
+        self._commit_unless_in_tx()
+        if result.rowcount == 1:
+            return
+
+        session = self.get_session(name)
+        if (
+            session is not None
+            and session.socket_path == expected_socket_path
+            and session.pid == _db.PID_STOPPED
+            and session.boot_id is None
+            and session.tmux_server_start_ticks is None
+        ):
+            return
+
+        from agentworks.errors import StateError
+
+        raise StateError(
+            f"session '{name}' runtime identity changed before stopped state could be persisted",
+            entity_kind="session",
+            entity_name=name,
+            hint="Inspect the current session runtime before retrying.",
+        )
+
     def record_session_started(self, name: str) -> None:
         """Record a successful managed tmux creation."""
         result = self._conn.execute(
