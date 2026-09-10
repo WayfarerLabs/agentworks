@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Annotated
 
@@ -317,6 +318,17 @@ def vm_reinit(
 def vm_exec(
     ctx: typer.Context,
     name: Annotated[str, typer.Argument(help="VM name")],
+    platform: Annotated[
+        bool,
+        typer.Option(
+            "--platform",
+            help=(
+                "Use the platform-native recovery transport without Tailscale fallback. "
+                "Output is buffered; stdin is EOF; no Agentworks environment is injected. "
+                "Incompatible with --workspace."
+            ),
+        ),
+    ] = False,
     workspace: Annotated[
         str | None,
         typer.Option("--workspace", help="Run from a workspace"),
@@ -325,11 +337,25 @@ def vm_exec(
     """Execute a command on a VM as the admin user."""
     interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config
-    from agentworks.vms.manager import exec_vm
+    from agentworks.vms.manager import exec_vm, exec_vm_platform
 
     if not ctx.args:
         typer.echo("Error: missing command", err=True)
         raise typer.Exit(1)
+    if platform:
+        result = exec_vm_platform(
+            get_db(),
+            load_config(),
+            name,
+            ctx.args,
+            workspace_name=workspace,
+            interaction=interaction,
+        )
+        sys.stdout.write(result.stdout)
+        sys.stdout.flush()
+        sys.stderr.write(result.stderr)
+        sys.stderr.flush()
+        raise typer.Exit(result.returncode)
     raise typer.Exit(
         exec_vm(
             get_db(),

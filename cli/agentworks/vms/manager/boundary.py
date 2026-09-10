@@ -102,14 +102,14 @@ def _gated_vm_boundary(
     preflight sweep (its just-in-time values seed the boundary
     resolver) and run the one boundary resolve inside it. Yields
     ``(vm_node, resolver, ops_ctx)`` within the held-active span: the
-    body's interactive or streaming work stays anchored (WSL2's
+    body's interactive, streaming, or captured work stays anchored (WSL2's
     keepalive) for the command's duration, callers read
     ``resolver.values`` for env composition, and ``ops_ctx`` is the
     OP-START context for driving the node's platform (secrets scoped to
     the site's declared names), identical in shape to the one
-    :func:`_live_vm_boundary` returns. ``vm shell --platform`` is
-    today's only body that needs it; a command that touches the
-    platform must take it from here rather than assemble a secret-less
+    :func:`_live_vm_boundary` returns. The ``vm shell --platform`` and
+    ``vm exec --platform`` recovery bodies need it; a command that touches
+    the platform must take it from here rather than assemble a secret-less
     context of its own.
 
     ``scope`` is the command's :class:`OperationScope`; when None the

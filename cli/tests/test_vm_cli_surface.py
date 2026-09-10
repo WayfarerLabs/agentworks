@@ -13,6 +13,7 @@ from typer.testing import CliRunner
 
 from agentworks.cli import app
 from agentworks.schema import CapabilityBlock
+from agentworks.ssh import SSHResult
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -153,6 +154,47 @@ def test_vm_shell_platform_flag_routes_native(monkeypatch: pytest.MonkeyPatch) -
     )
     assert result.exit_code == 0, result.output
     assert captured["platform_transport"] is True
+
+
+def test_vm_exec_without_platform_keeps_canonical_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+    result = _invoke(
+        monkeypatch,
+        ["vm", "exec", "box", "echo", "hi"],
+        "agentworks.vms.manager.exec_vm",
+        captured,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["_args"][2:] == ("box", ["echo", "hi"])
+    assert captured["workspace_name"] is None
+
+
+def test_vm_exec_platform_emits_captured_streams_and_exit_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def _platform_spy(*args: object, **kwargs: object) -> SSHResult:
+        captured["_args"] = args
+        captured.update(kwargs)
+        return SSHResult(returncode=23, stdout="buffered-out", stderr="buffered-err")
+
+    monkeypatch.setattr("agentworks.vms.manager.exec_vm_platform", _platform_spy)
+    monkeypatch.setattr(
+        "agentworks.vms.manager.exec_vm",
+        lambda *_args, **_kwargs: pytest.fail("--platform must not use canonical exec"),
+    )
+    monkeypatch.setattr("agentworks.cli.commands.vm.get_db", lambda: object())
+    monkeypatch.setattr("agentworks.config.load_config", lambda *_args, **_kwargs: object())
+
+    result = CliRunner().invoke(app, ["vm", "exec", "--platform", "box", "printf", "payload"])
+
+    assert result.exit_code == 23
+    assert result.stdout == "buffered-out"
+    assert result.stderr == "buffered-err"
+    assert captured["_args"][2:] == ("box", ["printf", "payload"])
+    assert captured["workspace_name"] is None
 
 
 def test_vm_shell_provisioner_alias_is_removed(

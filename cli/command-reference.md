@@ -625,23 +625,23 @@ just a vm-site.
 > true long-lived VMs (e.g. Lima, Azure, Proxmox, etc.) if you need a VM that survives independent
 > of your workstation.
 
-| Command                                             | Description                                                   |
-| --------------------------------------------------- | ------------------------------------------------------------- |
-| `agw vm create <name>`                              | Create a new VM (provision + initialize)                      |
-| `agw vm list`                                       | List configured VMs                                           |
-| `agw vm describe <name>`                            | Show VM details, workspaces, and event log                    |
-| `agw vm verify-connection <name>`                   | Test the canonical admin connection without starting the VM   |
-| `agw vm shell <name> [--workspace <ws>]`            | Admin shell on a VM (optionally rooted in a workspace)        |
-| `agw vm exec <name> [--workspace <ws>] -- <cmd...>` | Run a one-shot command as admin (optionally from a workspace) |
-| `agw vm start <name>`                               | Start a stopped VM and clear its manual-stop intent           |
-| `agw vm stop <name>`                                | Stop a VM and keep it stopped (no auto-start)                 |
-| `agw vm reinit <name>`                              | Re-run initialization on a provisioned VM                     |
-| `agw vm confirm-release <name>`                     | Observe and explicitly record the live Debian release         |
-| `agw vm delete <name>`                              | Delete a VM (with confirmation)                               |
-| `agw vm backup <name>`                              | Back up a VM: metadata, agents, workspaces, and files         |
-| `agw vm rekey <name>`                               | Assign a new Tailscale auth key to a VM (logout + rejoin)     |
-| `agw vm port-forward <name> <ports...>`             | Forward local port(s) to a VM (like kubectl port-forward)     |
-| `agw vm logs <name>`                                | Show SSH logs for a VM                                        |
+| Command                                                          | Description                                                   |
+| ---------------------------------------------------------------- | ------------------------------------------------------------- |
+| `agw vm create <name>`                                           | Create a new VM (provision + initialize)                      |
+| `agw vm list`                                                    | List configured VMs                                           |
+| `agw vm describe <name>`                                         | Show VM details, workspaces, and event log                    |
+| `agw vm verify-connection <name>`                                | Test the canonical admin connection without starting the VM   |
+| `agw vm shell <name> [--workspace <ws>]`                         | Admin shell on a VM (optionally rooted in a workspace)        |
+| `agw vm exec [--workspace <ws>] [--platform] <name> -- <cmd...>` | Run a one-shot command as admin (optionally from a workspace) |
+| `agw vm start <name>`                                            | Start a stopped VM and clear its manual-stop intent           |
+| `agw vm stop <name>`                                             | Stop a VM and keep it stopped (no auto-start)                 |
+| `agw vm reinit <name>`                                           | Re-run initialization on a provisioned VM                     |
+| `agw vm confirm-release <name>`                                  | Observe and explicitly record the live Debian release         |
+| `agw vm delete <name>`                                           | Delete a VM (with confirmation)                               |
+| `agw vm backup <name>`                                           | Back up a VM: metadata, agents, workspaces, and files         |
+| `agw vm rekey <name>`                                            | Assign a new Tailscale auth key to a VM (logout + rejoin)     |
+| `agw vm port-forward <name> <ports...>`                          | Forward local port(s) to a VM (like kubectl port-forward)     |
+| `agw vm logs <name>`                                             | Show SSH logs for a VM                                        |
 
 **Power-state semantics:** a VM that stopped on its own (idle timeout, host reboot) is started
 automatically, on demand, by any command that needs it live. A VM stopped with `agw vm stop` is
@@ -726,10 +726,11 @@ In both exec commands the `--` separator is only required when the remote comman
 starts with `-` (it stops Agentworks from reading the token as its own option); without it, a
 dash-led first token is rejected with a hint naming the recoveries. Bare commands need no `--`.
 
-Combining `--workspace` with `--platform` works (the shell still `cd`s into the workspace) but the
-workspace's template env and the `AGENTWORKS_WORKSPACE` identity vars are not delivered: the
-platform-native transports (`limactl shell`, `wsl.exe`) drop the `env=` kwarg by design. Treat
-`--platform` as a transport-repair escape hatch, not a routine combination.
+Combining `vm shell --workspace` with `--platform` works (the shell still `cd`s into the workspace)
+but environment delivery depends on the platform's full transport. In particular, the local platform
+transports (`limactl shell`, `wsl.exe`) do not deliver the workspace's template env or the
+`AGENTWORKS_WORKSPACE` identity vars. Treat `--platform` as a transport-repair escape hatch, not a
+routine combination.
 
 `agw vm shell --platform` opens the same shell over the platform-native transport (`limactl shell`
 for Lima, `wsl.exe` for WSL2, SSH via the VM's public IP for Azure) instead of Tailscale. Useful
@@ -744,6 +745,14 @@ the config's `[operator]` section to a list of IPv4 addresses and/or CIDRs to al
 detection fails entirely, those entries are used alone. Proxmox QGA supplies native non-interactive
 execution, but it does not provide the interactive terminal required by this flag. Use the Proxmox
 web UI's serial console (`VM > Console` in the Proxmox VE web UI) as the equivalent escape hatch.
+
+`agw vm exec --platform <name> <cmd...>` is the non-interactive recovery form. It always uses the
+platform-native execution transport and never falls back to Tailscale. The command completes before
+its buffered stdout and stderr are written to the corresponding local streams, stdin is immediate
+EOF, and the remote exit code becomes the local exit code. This route does not resolve or inject VM,
+workspace, admin, or secret-backed environment values. It rejects `--workspace` because that option
+promises both a working directory and workspace environment semantics. Execution-only platforms such
+as Proxmox QEMU Guest Agent support this form even though they cannot support `vm shell --platform`.
 
 ### Workspaces
 
