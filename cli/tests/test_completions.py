@@ -447,6 +447,7 @@ function Complete([string]$line) {{
         for script in generated.values():
             assert "database" in script
             assert "restore" in script
+            assert "--force" in script
             assert "--yes" in script
 
     @requires_posix_shell

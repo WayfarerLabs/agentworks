@@ -36,6 +36,10 @@ def database_restore(
         bool,
         typer.Option("--yes", "-y", help="Replace the live database without prompting."),
     ] = False,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Restore even when the backup has inconsistent relationships."),
+    ] = False,
 ) -> None:
     """Replace the live state database with a validated backup."""
     import agentworks.db as db
@@ -48,14 +52,28 @@ def database_restore(
             hint="Pass --yes only when replacing the live state database is intentional.",
         )
 
-    db.validate_restore_source(backup_path)
-    typer.echo(f"Backup: {format_host_path(backup_path)}", err=True)
-    typer.echo(f"Live database: {format_host_path(db.DB_PATH)}", err=True)
-    if not yes:
-        with output.suppress_presentation():
-            confirmed = output.confirm("Replace the live state database with this backup?", default=False)
-        if not confirmed:
-            raise UserAbort("database restore cancelled")
+    with db.prepare_restore(
+        backup_path,
+        db.DB_PATH,
+        allow_foreign_key_violations=force,
+    ) as prepared:
+        if prepared.inspection.has_foreign_key_violations:
+            output.warn(
+                "The selected backup has inconsistent relationships. Some resources may be unavailable "
+                "until they are repaired; --force permits restoring this state."
+            )
+        typer.echo(f"Backup: {format_host_path(prepared.backup_path)}", err=True)
+        typer.echo(f"Live database: {format_host_path(prepared.database_path)}", err=True)
+        if not yes:
+            with output.suppress_presentation():
+                confirmed = output.confirm("Replace the live state database with this backup?", default=False)
+            if not confirmed:
+                raise UserAbort("database restore cancelled")
 
-    db.restore_backup(backup_path, db.DB_PATH)
-    typer.echo("Database restore complete.", err=True)
+        prepared.apply()
+        if prepared.inspection.has_foreign_key_violations:
+            output.warn(
+                "The restored database has inconsistent relationships. Some resources may be unavailable "
+                "until they are repaired."
+            )
+        typer.echo("Database restore complete.", err=True)

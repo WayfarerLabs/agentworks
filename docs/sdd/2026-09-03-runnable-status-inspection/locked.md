@@ -124,3 +124,18 @@ valid guest boundary. The same correction centralizes the session/console guest 
 policy, makes persisted session mode project once when rows become output facts, and removes the
 redundant projection of service-constructed session status. None of those cleanups changes the
 locked status vocabulary or observation behavior.
+
+## Post-lock correction (2026-09-07)
+
+Issue #763 replaces the console-only recovery exception above with the general distinction between
+inventory and focused operations. Plain session and console lists preserve selected stored rows with
+incomplete workspace or VM relationships. Requested list status leaves only those rows `unknown`,
+performs no guest call for them, and continues observing structurally complete peers. Named describe
+and every lifecycle operation remain strict.
+
+Human session inventory renders `-` when a missing workspace leaves no derivable VM name. JSON v1
+retains its required string `sessions[].vm_name`, so that selection fails atomically before live
+observation instead of widening the field or emitting a partial collection. A missing VM remains
+representable when the existing workspace preserves its stored VM name. Database migration remains
+fail-closed for foreign-key violations, and restore now refuses them by default with an explicit,
+warned `--force` recovery path. See PR #764 for the implementation and reviewed rationale.
