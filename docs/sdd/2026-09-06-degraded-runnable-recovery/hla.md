@@ -1,0 +1,239 @@
+# Degraded Runnable Recovery: High-Level Architecture
+
+- Status: Implemented; locked on merge of PR #764
+- Date: 2026-09-06
+- Requirements: [frd.md](./frd.md)
+
+## Architectural stance
+
+Recovery tolerance belongs in list services, not in the database model, shared observers, or
+lifecycle helpers. Database rows remain truthful records of what is stored. List projection joins
+them when possible, represents an unavailable derived fact explicitly, and partitions observable
+from unobservable rows before calling a strict observer. Focused commands continue through strict
+`_require_*` helpers.
+
+```text
+persisted rows
+    |
+    +-- list projection ---- best-effort structural join ---- output facts
+    |                                                   \
+    |                                                    +-- optional healthy-only observation
+    |
+    +-- describe/lifecycle -- strict structural join -------- typed failure or operation
+
+stale schema
+    +-- migration step -- foreign_key_check -- checkpoint OR typed refusal
+
+restore candidate
+    +-- file/schema validation -- foreign_key_check -- refusal OR explicit warned bypass
+```
+
+The design does not introduce a generic runnable abstraction. Sessions and consoles share a failure
+policy, but their stored relationships and guest evidence remain resource-owned.
+
+## Components and responsibilities
+
+### Session inventory projection
+
+`session_listing` performs a best-effort local join for each selected `SessionRow`:
+
+| Stored relationship          | Output workspace | Output VM         | Status eligibility |
+| ---------------------------- | ---------------- | ----------------- | ------------------ |
+| workspace and VM exist       | stored name      | workspace VM name | eligible           |
+| workspace exists, VM missing | stored name      | workspace VM name | unknown            |
+| workspace missing            | stored name      | null / human `-`  | unknown            |
+
+The internal list projection permits `vm_name: str | None`; `SessionDescription.vm_name` stays `str`
+because the focused description is strict. This avoids contaminating lifecycle APIs with
+recovery-only nullability.
+
+The human projection uses `-` only as display. JSON v1 does not widen the existing string
+`sessions[].vm_name` field or change the meaning of `{sessions}`. Rows with a known stored VM name
+stay representable, including when the VM row is missing. A selection containing a row with no
+derivable VM retains a typed failure and emits no JSON document. The JSON path requests this strict
+local projection before any optional live observation.
+
+### Session status partition
+
+`session_listing` owns the forgiving partition:
+
+1. initialize every selected session to `UNKNOWN`;
+2. resolve its workspace and VM with non-raising lookups;
+3. leave structurally incomplete rows unknown and exclude them from guest grouping;
+4. call the unchanged strict `observe_session_statuses` with only complete rows; and
+5. merge those returned statuses into the initialized map.
+
+The shared observer remains strict for lifecycle, console-mutation, workspace-rehome, and other
+non-list callers. Recovery tolerance cannot silently leak into future mutation code.
+
+### Console status partition
+
+Console rows store `vm_name` directly. `console_listing` initializes every selected status to
+`UNKNOWN`, partitions rows by whether `db.get_vm` succeeds, sends only complete rows to the
+unchanged strict `observe_console_statuses`, and merges the result. `console_description` and
+lifecycle therefore retain their current strict behavior without compensating checks.
+
+### Human projection
+
+The shared table renderer receives `session.vm_name or "-"`; alignment remains centralized there.
+Status warnings group unknown rows with known VM names as today. Sessions without any derivable VM
+stay in a separate sequence and render in a distinct clause outside the VM-group map. This avoids
+colliding with any valid VM name. The warning does not claim connectivity failure; `unknown` covers
+both structural and operational inability to observe.
+
+Progress announces the number of selected resources and the number of complete VM boundaries that
+may receive live work. This keeps the message honest when some selected sessions have no VM.
+
+### Filter boundaries
+
+Name-filter validation remains unchanged. Workspace and VM filters are relational queries and do not
+select rows disconnected from that relationship. Agent/admin filters can still select orphaned
+sessions using fields stored on the session. Plain unfiltered list and names-only remain the broad
+recovery inventory.
+
+The architecture does not add special filter syntax for orphans. That would expand grammar and query
+semantics beyond the recovery defect.
+
+### Migration error boundary
+
+`Database._migrate` retains `PRAGMA foreign_key_check` after each step. If rows are returned, it
+raises a typed `StateError` carrying `entity_kind="database"`, the failed target version, and a hint
+to restore an automatic or manual backup or repair the inconsistent relationship before retrying.
+
+`MigrationBlockedError` is not used for this branch. That subtype promises a precondition failure
+before schema or data changes, while the post-step foreign-key check can occur after SQLite DDL has
+changed the live file. Through the safe opener, the existing migration-failure wrapper may replace
+the detail with its stronger partial-migration warning and exact backup recovery command. Direct
+`Database` construction still receives an Agentworks state error. Both paths remain typed and
+truthful about possible partial change.
+
+The schema-version row is inserted only after a clean check, exactly as today. No violation is
+ignored, deleted, or auto-repaired.
+
+### Restore validation boundary
+
+Restore source inspection reports both the supported schema version and whether SQLite's declared
+foreign-key constraints are violated. It stops at the first violation because warning and refusal
+need only that classification. The restore service rejects a violating snapshot unless its caller
+explicitly allows foreign-key violations. That narrowly named service policy is the only validation
+weakened by the CLI's `--force`; SQLite readability, `quick_check`, Agentworks identity, supported
+version, expected table and column shape, and expected foreign-key declarations remain mandatory.
+
+Preparation resolves and observes both paths and requires regular files for existing endpoints. It
+opens the source with a non-blocking open before SQLite, records its observed path identity, begins
+a read transaction, pins its snapshot with the first validation query, and keeps that connection
+open across warning and confirmation. Only after source validation succeeds, preparation opens an
+existing live destination and records its observed path identity. The observed identities must be
+distinct. Both existing connections stay open through confirmation. An OS descriptor holds each
+observed inode across its SQLite path bind to prevent inode reuse, while checks around that bind
+refuse replacement that remains visible at either boundary.
+
+After consent, apply creates a private staged SQLite file beside the live path and copies the pinned
+source snapshot into it through the bounded online-backup mechanism. No SQLite write targets the
+live pathname during this phase. For an existing destination, apply must checkpoint its WAL cleanly,
+switch it to delete journal mode, and acquire an exclusive writer lock within the bounded wait. This
+retires old coordination state before replacement; active database users that prevent the boundary
+cause refusal. A separate cross-platform database-use lock is shared for the lifetime of every
+writable `Database` connection and held exclusively by restore from this check through installation.
+Both derive the lock and database pathname from the same resolved path, so a symlink cannot split
+coordination. Apply then verifies the observed identity again, preserves its file mode on the stage,
+closes the prepared destination, verifies that no coordination files remain, and atomically replaces
+it while retaining that exclusion. A replacement observed during the staged copy is refused without
+modifying that replacement. If the destination was absent at preparation, apply installs the stage
+with a no-overwrite link and refuses if another file appeared first. Failed or interrupted staging
+removes only the private file whose identity Agentworks created.
+
+Once the source SQLite connection is open, later source commits or path replacements cannot redirect
+or change the snapshot copied to the stage. The CLI emits a warning before showing the source and
+destination and asking for confirmation when `--force` allows a violating snapshot, then warns again
+after that same snapshot is successfully restored.
+
+The existing public `validate_restore_source` still returns the schema version, and the existing
+public `restore_backup` still returns `None`. Both delegate to the same snapshot-validation and copy
+internals. The additive prepared-restore API carries the richer inspection fact and owns both open
+connections through a context manager, so cancellation and failures always release them. Direct
+`restore_backup` callers retain their exact fail-closed signature and return contract; callers that
+need the bypass use the explicit prepared-restore API.
+
+Python's SQLite API and the final atomic replacement bind by pathname rather than by an existing OS
+descriptor. Writable Agentworks connections cooperate with the database-use lock, but a same-user
+process using SQLite directly or replacing and restoring a path entirely within one such call can
+evade that coordination or the surrounding identity observations. Defending against that adversarial
+capability would require a custom SQLite VFS or platform-handle bridge and is outside this local
+recovery boundary; the same process can already mutate the user's state database directly.
+
+Holding the snapshot across an interactive prompt can delay a writer to a rollback-journal source.
+Restore inputs are expected to be quiescent backup files, and WAL sources do not impose that writer
+delay. Staging begins only after consent, performs one full bounded copy, and keeps the private
+file's lifetime limited to installation or cleanup.
+
+`--force` expresses acceptance of inconsistent relationships, while `--yes` expresses confirmation
+of replacement. Neither implies the other. The warning path is presentation owned by the CLI; the
+validation and bypass policy remain service owned.
+
+## Delivery and rollback
+
+This is an in-place code transition with no stored-data migration or capability version. It adds the
+`database restore --force` modifier for explicit degraded recovery. It can be rolled back without
+transforming the database; degraded rows will again make some inventory operations fail. Any
+operator database used for live testing is backed up first, and validation never repairs or deletes
+operator state.
+
+## Data and machine contracts
+
+No stored schema, capability contract, or JSON v1 shape changes.
+
+The ordinary session list JSON v1 item remains unchanged:
+
+```json
+{
+  "name": "example",
+  "workspace_name": "example-workspace",
+  "vm_name": "example-vm",
+  "template": "claude-auto",
+  "harness_integration": "claude-code",
+  "mode": "agent",
+  "agent_name": "example-agent",
+  "status": "unavailable"
+}
+```
+
+When the workspace exists but its VM does not, the stored VM name remains a string and requested
+status becomes `unknown`. When the workspace itself is missing, the command returns a typed error
+before observation because no truthful string VM name exists. Human and names-only output remain the
+complete recovery inventory for that case. Healthy row vocabulary and console JSON remain unchanged.
+
+## Failure matrix
+
+| Condition                  | Plain list          | List `--status`        | Describe/lifecycle      | Stale migration                  |
+| -------------------------- | ------------------- | ---------------------- | ----------------------- | -------------------------------- |
+| session workspace missing  | row, VM `-`         | row unknown            | typed failure           | typed refusal if checked         |
+| session VM missing         | row, stored VM name | row unknown            | typed failure           | typed refusal if checked         |
+| console VM missing         | row, stored VM name | row unknown            | typed failure           | typed refusal if checked         |
+| healthy peer beside orphan | row                 | independently observed | unchanged               | n/a                              |
+| transport unavailable      | row                 | row unknown            | existing focused policy | n/a                              |
+| migration FK violation     | n/a                 | n/a                    | n/a                     | no checkpoint, typed state error |
+
+The plain-list column describes human and names-only recovery. JSON v1 additionally requires a
+derivable string VM name and fails atomically when a selected session lacks one.
+
+## Security and safety
+
+- Recovery projection does not infer a target, username, transport, or authority from stale names.
+- Orphans never trigger guest work.
+- Status remains read-only and does not reconcile persisted runtime evidence.
+- Migration validation remains fail-closed.
+- Restore accepts foreign-key violations only with explicit `--force`; every other source check
+  remains fail-closed.
+- Forced inconsistent restore retains replacement confirmation and warns both before and after the
+  live database changes.
+- Restore inspection and copy use one pinned SQLite snapshot; validation cannot race a changed
+  source path or later source commit.
+- Error text may report table and relationship metadata but not row payloads or secrets.
+
+## Permanent homes
+
+Implementation behavior lives in the session and console query/status modules and migration opener.
+The operator contract lives in `cli/command-reference.md` and `docs/guides/runnable-status.md`. The
+JSON recovery limit lives in the command reference. The prior runnable-status SDD receives a dated
+correction in its lockfile because its current post-lock limit is superseded.

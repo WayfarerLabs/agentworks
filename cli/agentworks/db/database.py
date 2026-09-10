@@ -81,14 +81,15 @@ class Database:
         self._read_only = read_only
         self._read_tx_active = False
         self._tx_depth = 0
-        db_path = path or _db.DB_PATH
-        self.path = db_path.resolve()
+        self._use_lock: sqlite3.Connection | None = None
+        db_path = (path or _db.DB_PATH).resolve()
+        self.path = db_path
         if read_only:
             from agentworks.db.backup import _connect_ro, _is_busy
             from agentworks.errors import BusyStateError, StateError
 
             connection: sqlite3.Connection | None = None
-            ro_uri = f"{db_path.resolve().as_uri()}?mode=ro"
+            ro_uri = f"{db_path.as_uri()}?mode=ro"
             try:
                 connection = _connect_ro(ro_uri, timeout=timeout)
                 row = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()
@@ -127,19 +128,47 @@ class Database:
             self._conn.execute("PRAGMA foreign_keys = ON")
             return
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(db_path))
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA foreign_keys = ON")
+        from agentworks.db.backup import (
+            BACKUP_DEADLINE_SECONDS,
+            _acquire_database_use_lock,
+            _release_sqlite_lock,
+        )
+        from agentworks.errors import BusyStateError
+
+        self._use_lock = _acquire_database_use_lock(
+            db_path,
+            exclusive=False,
+            timeout=BACKUP_DEADLINE_SECONDS,
+        )
+        if self._use_lock is None:
+            raise BusyStateError()
+        writable_connection: sqlite3.Connection | None = None
         try:
+            writable_connection = sqlite3.connect(str(db_path))
+            self._conn = writable_connection
+            self._conn.row_factory = sqlite3.Row
+            self._conn.execute("PRAGMA foreign_keys = ON")
             self._reject_future_schema()
             self._conn.execute("PRAGMA journal_mode = WAL")
             self._migrate()
         except BaseException:
-            self._conn.close()
+            if writable_connection is not None:
+                writable_connection.close()
+            use_lock = self._use_lock
+            self._use_lock = None
+            _release_sqlite_lock(use_lock)
             raise
 
     def close(self) -> None:
-        self._conn.close()
+        try:
+            self._conn.close()
+        finally:
+            use_lock = self._use_lock
+            self._use_lock = None
+            if use_lock is not None:
+                from agentworks.db.backup import _release_sqlite_lock
+
+                _release_sqlite_lock(use_lock)
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
@@ -312,9 +341,15 @@ class Database:
                         stmt = stmt.strip()
                         if stmt:
                             self._conn.execute(stmt)
-                violations = self._conn.execute("PRAGMA foreign_key_check").fetchall()
-                if violations:
-                    raise sqlite3.IntegrityError(f"foreign key violations after migration {version}: {violations}")
+                has_violation = self._conn.execute("PRAGMA foreign_key_check").fetchone() is not None
+                if has_violation:
+                    from agentworks.errors import StateError
+
+                    raise StateError(
+                        f"state database has foreign key violations after migration {version}",
+                        entity_kind="database",
+                        hint="Restore a backup or repair the inconsistent relationships before retrying.",
+                    )
                 self._conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
                 self._conn.commit()
         finally:

@@ -1,11 +1,14 @@
 """Native setup metadata survives partial replacement and export boundaries."""
 
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
 from agentworks.db import AppliedStateKey, AppliedStateSlice, Database, VersionedPayload
-from agentworks.errors import StateError
+from agentworks.db.backup import create_manual_backup, restore_backup
+from agentworks.errors import BackupError, StateError
+from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
 from agentworks.harness_setup.state import (
     UnsupportedNativeSetupVersionError,
@@ -78,3 +81,40 @@ def test_replacement_retains_sibling_records_and_incomplete_prefix(tmp_path):
         assert restored.records == (failed, second)
     finally:
         db.close()
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("future", [False, True])
+def test_restore_preserves_native_receipts_after_setup_releases_database(tmp_path, monkeypatch, future):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("agentworks.db.backup.BACKUP_DEADLINE_SECONDS", 0.1)
+    pending = replace_setup_record(_state(), _state().records[0].model_copy(update={"pending_cleanup": True}))
+    payload = VersionedPayload(99, {"future": True}) if future else encode_native_setup(pending)
+    db = Database(Path("state.db"))
+    try:
+        db.insert_vm("box", site="local", hostname="box")
+        db.insert_agent("a", "box", "agt-a")
+        db.instance_state.replace_applied_slices(
+            "agent", "a", "agent-reinit", {AppliedStateKey.HARNESS_NATIVE_SETUP: payload}
+        )
+        expected = db.instance_state.get_applied_slices("agent", "a")
+        snapshot = create_manual_backup(db.path)
+        with native_mutation_guard(db.path, "box"):
+            write_native_setup(db, "agent", "a", NativeSetupState(), operation="agent-reinit")
+            with pytest.raises(BackupError):
+                restore_backup(snapshot, db.path)
+            assert read_native_setup(db, "agent", "a") == NativeSetupState()
+    finally:
+        db.close()
+
+    restore_backup(snapshot, db.path)
+    restored = Database(db.path)
+    try:
+        assert restored.instance_state.get_applied_slices("agent", "a") == expected
+        if future:
+            with pytest.raises(UnsupportedNativeSetupVersionError):
+                read_native_setup(restored, "agent", "a")
+        else:
+            assert read_native_setup(restored, "agent", "a") == pending
+    finally:
+        restored.close()

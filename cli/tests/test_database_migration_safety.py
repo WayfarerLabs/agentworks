@@ -47,6 +47,19 @@ def _version(path: Path) -> int:
     return version
 
 
+def _build_orphaned_stale_schema(path: Path) -> None:
+    build_schema(path, LATEST_VERSION - 1)
+    connection = sqlite3.connect(path)
+    connection.execute("PRAGMA foreign_keys = OFF")
+    connection.execute(
+        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES (?, ?, ?, ?)",
+        ("orphan-workspace", "missing-vm", "/tmp/orphan-workspace", "ws--orphan-workspace"),
+    )
+    connection.commit()
+    assert connection.execute("PRAGMA foreign_key_check").fetchone() is not None
+    connection.close()
+
+
 @pytest.mark.windows
 def test_schema_fixture_preserves_normal_connection_durability(tmp_path: Path) -> None:
     path = tmp_path / "fixture.db"
@@ -81,6 +94,42 @@ def test_latest_schema_enforces_atomic_debian_release_observation(tmp_path: Path
             ("trixie", "release-witness"),
         )
     connection.close()
+
+
+@pytest.mark.windows
+def test_direct_database_open_translates_post_migration_foreign_key_violation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "state.db"
+    _build_orphaned_stale_schema(path)
+    monkeypatch.setitem(MIGRATIONS, LATEST_VERSION, "SELECT 1")
+
+    with pytest.raises(StateError) as raised:
+        Database(path)
+
+    assert raised.value.entity_kind == "database"
+    assert _version(path) == LATEST_VERSION - 1
+
+
+@pytest.mark.windows
+def test_safe_database_open_keeps_partial_migration_wrapper_for_foreign_key_violation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "state.db"
+    _build_orphaned_stale_schema(path)
+    monkeypatch.setitem(MIGRATIONS, LATEST_VERSION, "SELECT 1")
+    plan = prepare_database_open(path)
+
+    with pytest.raises(StateError) as raised:
+        open_database_safely(path, plan, create_backup=True)
+
+    backups = tuple(backup_directory(path).glob("*.db"))
+    assert len(backups) == 1
+    assert isinstance(raised.value.__cause__, StateError)
+    assert raised.value.__cause__.entity_kind == "database"
+    assert _version(path) == LATEST_VERSION - 1
 
 
 def test_version_33_advances_through_checkpoint_retirement(tmp_path: Path) -> None:
@@ -192,7 +241,7 @@ def _serialized_open_worker(
 
 
 def _late_partial_writer(path: Path, start: Any, acquired: Any) -> None:
-    from agentworks.db.backup import _acquire_migration_lock, _release_migration_lock
+    from agentworks.db.backup import _acquire_migration_lock, _release_sqlite_lock
 
     start.wait()
     lock = _acquire_migration_lock(path, timeout=5.0)
@@ -203,11 +252,11 @@ def _late_partial_writer(path: Path, start: Any, acquired: Any) -> None:
     connection.close()
     acquired.set()
     time.sleep(0.25)
-    _release_migration_lock(lock)
+    _release_sqlite_lock(lock)
 
 
 def _unchanged_lock_holder(path: Path, acquired: Any, release: Any) -> None:
-    from agentworks.db.backup import _acquire_migration_lock, _release_migration_lock
+    from agentworks.db.backup import _acquire_migration_lock, _release_sqlite_lock
 
     lock = _acquire_migration_lock(path, timeout=5.0)
     assert lock is not None
@@ -215,11 +264,11 @@ def _unchanged_lock_holder(path: Path, acquired: Any, release: Any) -> None:
     try:
         assert release.wait(timeout=10)
     finally:
-        _release_migration_lock(lock)
+        _release_sqlite_lock(lock)
 
 
 def _released_partial_writer(path: Path, start: Any, released: Any) -> None:
-    from agentworks.db.backup import _acquire_migration_lock, _release_migration_lock
+    from agentworks.db.backup import _acquire_migration_lock, _release_sqlite_lock
 
     start.wait()
     lock = _acquire_migration_lock(path, timeout=5.0)
@@ -228,12 +277,12 @@ def _released_partial_writer(path: Path, start: Any, released: Any) -> None:
     connection.execute("CREATE TABLE released_partial_change (value TEXT)")
     connection.commit()
     connection.close()
-    _release_migration_lock(lock)
+    _release_sqlite_lock(lock)
     released.set()
 
 
 def _tainted_baseline_writer(path: Path, committed: Any, release: Any, released: Any) -> None:
-    from agentworks.db.backup import _acquire_migration_lock, _release_migration_lock
+    from agentworks.db.backup import _acquire_migration_lock, _release_sqlite_lock
 
     lock = _acquire_migration_lock(path, timeout=5.0)
     assert lock is not None
@@ -243,7 +292,7 @@ def _tainted_baseline_writer(path: Path, committed: Any, release: Any, released:
     connection.close()
     committed.set()
     assert release.wait(timeout=5)
-    _release_migration_lock(lock)
+    _release_sqlite_lock(lock)
     released.set()
 
 
@@ -922,7 +971,7 @@ def test_base_exception_migration_failure_preserves_identity_and_visible_recover
     import agentworks.db as db_module
     from agentworks import output
     from agentworks.cli import _helpers
-    from agentworks.db.backup import _acquire_migration_lock, _release_migration_lock
+    from agentworks.db.backup import _acquire_migration_lock, _release_sqlite_lock
 
     path = tmp_path / "state.db"
     config_path = tmp_path / "config.toml"
@@ -955,7 +1004,7 @@ def test_base_exception_migration_failure_preserves_identity_and_visible_recover
 
     lock = _acquire_migration_lock(path, timeout=0.0)
     assert lock is not None
-    _release_migration_lock(lock)
+    _release_sqlite_lock(lock)
 
 
 def test_completion_probe_unavailable_state_fails_before_database_caller(
@@ -1178,9 +1227,10 @@ def test_database_closes_connection_when_migration_raises(tmp_path: Path, monkey
     with pytest.raises(RuntimeError, match="boom"):
         Database(tmp_path / "state.db")
 
-    assert len(opened) == 1
-    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
-        opened[0].execute("SELECT 1")
+    assert len(opened) == 2
+    for connection in opened:
+        with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+            connection.execute("SELECT 1")
 
 
 def test_production_has_one_writable_database_construction_site() -> None:

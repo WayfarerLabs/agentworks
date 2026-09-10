@@ -11,8 +11,10 @@ The operator directed the approved FRD/HLA and implementation to share PR 761. C
 `sdd/harness-scope-framework-hla`; PR 780 is superseded, with its review reports retained and linked
 from the consolidated checkpoint. Config exposure, execution, receipts and migration form one
 working increment. The large diff receives separate configuration, lifecycle, native setup and
-migration review units before the combined handoff. This remains a draft implementation checkpoint
-until live acceptance is complete; the earlier design-only merge intent no longer applies.
+migration review units before the combined handoff. The implementation is intended to merge. A
+complete, green handoff is marked ready to request independent integration testing and review; live
+acceptance is not a prerequisite for that signal. `review-requested` is reserved for unfinished
+draft checkpoints. The earlier design-only delivery intent no longer applies.
 
 The operator owns requirements and has approved the design and implementation. The lead owns this
 plan, architecture, integration, and implementation disposition. Delegates own only their assigned
@@ -141,6 +143,10 @@ changes together before the first native write; installation commands may modify
 
 ## Acceptance and closeout
 
+Implementation tasks are complete. The remaining live scenarios below belong to integration
+validation, followed by acceptance and SDD closeout. Keep those boxes open until observed evidence
+satisfies them; ready-for-review does not claim that they already passed.
+
 Use local native plugin/marketplace/settings fixtures so external services cannot confound the
 vertical. Real CLI evidence must observe destinations and receipts, not merely mock the dispatch.
 Read the integration-testing and agw-test-env skills and establish the scoped inventory and budget
@@ -159,11 +165,11 @@ without touching the operator's installed plugins or authentication.
       (R9).
 - [ ] Prove failed workspace setup unwinds under standalone and session-created paths and retry
       refuses unexplained residue (R13).
-- [ ] Run full repository gates and focused native Windows tests from the current CI selection;
+- [x] Run full repository gates and focused native Windows tests from the current CI selection;
       record actual commands, exit codes and unreachable live surfaces.
 - [x] Obtain independent project, complexity and generic correctness/security reviews, resolve
       material findings, and validate the final integrated head.
-- [ ] Publish a coherent implementation handoff and consume published feedback only within operator
+- [x] Publish a coherent implementation handoff and consume published feedback only within operator
       authorization. Never treat a review report as authority to widen the effort.
 - [ ] Verify cleanup independently at all layers used by testing, update the plan with evidence, and
       complete lock/promotion only when all retained requirements are proven.
@@ -250,3 +256,17 @@ for Claude and Codex show the chosen facet terminology. Project and complexity r
 lint, locked-SDD, rulesync drift, typer isolation, website Python (160) and Node (103) tests, and
 deterministic builds for both site bases passed. Main's artifact-reconciliation documentation at
 `566d1819` was merged without conflicts or implementation changes before handoff.
+
+## Main reconciliation and ready handoff, 2026-09-10
+
+The operator requested reconciliation with merged PRs and clarified the handoff signal. Main at
+`c7dce3d4` adds degraded inventory and raw database recovery, session listing fields and bulk-start
+selection, and integration-testing coverage guidance. The database constructor conflict retains both
+main's database-use lock and this effort's resolved `Database.path`; automatic session lifecycle
+merges retain upstream selection and this effort's setup readiness checks.
+
+The added restore cases exercise their shared boundary: replacement is refused while setup holds the
+database open, and pending native receipts and unknown future payloads survive restore after the
+database is closed. The source is opened through a relative path so the resolved native-lock
+identity is exercised too. Implementation has no planned feature work remaining; the ready handoff
+requests independent integration validation. Live acceptance and final locking remain open.
