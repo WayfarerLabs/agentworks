@@ -28,6 +28,82 @@ class ProxmoxAPIError(ProvisioningError):
     code: int | None = None
 
 
+_QGA_BOOLEAN_FIELDS = ("exited", "out-truncated", "err-truncated")
+_QGA_COMPLETION_FIELDS = {
+    "exitcode",
+    "signal",
+    "out-data",
+    "err-data",
+    "out-truncated",
+    "err-truncated",
+}
+
+
+class _InvalidQGAExecStatus(ProxmoxAPIError):
+    """A QGA exec-status response violates the provider contract."""
+
+
+def _invalid_qga_exec_status(reason: str, *, node: str, vmid: int, pid: int) -> _InvalidQGAExecStatus:
+    return _InvalidQGAExecStatus(
+        f"Proxmox guest-agent exec-status for VMID {vmid} on node '{node}' (PID {pid}) {reason}"
+    )
+
+
+def _validate_qga_exec_status(
+    status: dict[str, object],
+    *,
+    node: str,
+    vmid: int,
+    pid: int,
+) -> dict[str, object]:
+    """Normalize exact wire booleans and validate one QGA status shape."""
+    normalized = dict(status)
+    for field in _QGA_BOOLEAN_FIELDS:
+        if field not in normalized:
+            continue
+        value = normalized[field]
+        if type(value) is bool:
+            continue
+        if type(value) is int and value in (0, 1):
+            normalized[field] = bool(value)
+            continue
+        raise _invalid_qga_exec_status(f"has an invalid {field} field", node=node, vmid=vmid, pid=pid)
+
+    exited = normalized.get("exited")
+    if type(exited) is not bool:
+        raise _invalid_qga_exec_status("has an invalid exited field", node=node, vmid=vmid, pid=pid)
+    if not exited:
+        if _QGA_COMPLETION_FIELDS.intersection(normalized):
+            raise _invalid_qga_exec_status("reports completion data before exit", node=node, vmid=vmid, pid=pid)
+        return normalized
+
+    has_exitcode = "exitcode" in normalized
+    has_signal = "signal" in normalized
+    if has_exitcode == has_signal:
+        raise _invalid_qga_exec_status("has an invalid exit status", node=node, vmid=vmid, pid=pid)
+    if has_exitcode:
+        exitcode = normalized["exitcode"]
+        if type(exitcode) is not int or exitcode < 0:
+            raise _invalid_qga_exec_status("has an invalid exit status", node=node, vmid=vmid, pid=pid)
+    else:
+        signal = normalized["signal"]
+        if type(signal) is not int or signal <= 0:
+            raise _invalid_qga_exec_status("has an invalid exit status", node=node, vmid=vmid, pid=pid)
+
+    stdout = normalized.get("out-data", "")
+    stderr = normalized.get("err-data", "")
+    if not isinstance(stdout, str) or not isinstance(stderr, str):
+        raise _invalid_qga_exec_status("has invalid output fields", node=node, vmid=vmid, pid=pid)
+
+    out_truncated = normalized.get("out-truncated", False)
+    err_truncated = normalized.get("err-truncated", False)
+    if type(out_truncated) is not bool or type(err_truncated) is not bool:
+        raise _invalid_qga_exec_status("has invalid truncation fields", node=node, vmid=vmid, pid=pid)
+    if out_truncated or err_truncated:
+        raise _invalid_qga_exec_status("reports truncated output", node=node, vmid=vmid, pid=pid)
+    return normalized
+
+
 class ProxmoxAPI:
     """Minimal Proxmox VE REST client."""
 
@@ -225,40 +301,82 @@ class ProxmoxAPI:
         command: str,
         args: list[str] | None = None,
         *,
-        timeout: int = 60,
+        timeout: float = 60,
     ) -> dict[str, Any] | None:
         """Run a command via the guest agent and wait for completion.
 
         Uses exec then polls exec-status until finished or timeout.
-        Returns the result dict with exitcode, out-data, err-data.
+        Returns a validated completion status, or ``None`` at the deadline.
 
         Proxmox 8 requires the command as a JSON array sent with
         Content-Type: application/json.
         """
-        cmd_array = [command] + (args or [])
+        deadline = time.monotonic() + timeout
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        pid = self.guest_agent_exec(
+            node,
+            vmid,
+            command=[command, *(args or [])],
+            timeout=remaining,
+        )
+        while (remaining := deadline - time.monotonic()) > 0:
+            status = self.guest_agent_exec_status(
+                node,
+                vmid,
+                pid=pid,
+                timeout=remaining,
+            )
+            if status.get("exited") is True:
+                return status
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                time.sleep(min(2, remaining))
 
+        return None
+
+    def guest_agent_exec(
+        self,
+        node: str,
+        vmid: int,
+        *,
+        command: list[str],
+        input_data: str | None = None,
+        timeout: float | None = None,
+    ) -> int:
+        """Dispatch one QGA command and return its provider PID."""
+        payload: dict[str, Any] = {"command": command}
+        if input_data is not None:
+            payload["input-data"] = input_data
         result = self._request(
             "POST",
             f"/nodes/{node}/qemu/{vmid}/agent/exec",
-            {"command": cmd_array},
+            payload,
             json_body=True,
+            timeout=timeout,
         )
-        pid = result.get("pid") if result else None
-        if pid is None:
-            return None
+        if not isinstance(result, dict) or type(result.get("pid")) is not int:
+            raise ProxmoxAPIError("Proxmox guest-agent exec returned a malformed response")
+        return int(result["pid"])
 
-        # Poll for completion
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            status = self._request(
-                "GET",
-                f"/nodes/{node}/qemu/{vmid}/agent/exec-status?pid={pid}",
-            )
-            if status and status.get("exited"):
-                return status  # type: ignore[no-any-return]
-            time.sleep(2)
-
-        return None
+    def guest_agent_exec_status(
+        self,
+        node: str,
+        vmid: int,
+        *,
+        pid: int,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        """Read one QGA command's current status."""
+        result = self._request(
+            "GET",
+            f"/nodes/{node}/qemu/{vmid}/agent/exec-status?pid={pid}",
+            timeout=timeout,
+        )
+        if not isinstance(result, dict):
+            raise _invalid_qga_exec_status("returned a malformed response", node=node, vmid=vmid, pid=pid)
+        return _validate_qga_exec_status(result, node=node, vmid=vmid, pid=pid)
 
     def guest_agent_file_write(self, node: str, vmid: int, path: str, content: str) -> None:
         """Write a file inside the VM via the guest agent.

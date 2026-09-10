@@ -21,6 +21,7 @@ the rest of the suite could not.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from textwrap import dedent
 
@@ -28,6 +29,7 @@ import pytest
 
 from agentworks.errors import ConfigError
 from agentworks.manifests import load_manifests
+from agentworks.path_rendering import format_host_path
 
 # -- Fixtures: one manifest per refusing layer --------------------------------
 
@@ -130,7 +132,9 @@ def test_every_manifest_error_frames_its_path_through_the_shared_helper(
         load_manifests(root)
     message = str(caught.value)
 
-    assert message.startswith("~/.config/agentworks/resources/"), (
+    # The framed prefix is the resources dir rendered by the shared helper
+    # plus the native separator (``~/...`` on POSIX, ``~\...`` on Windows).
+    assert message.startswith(format_host_path(root) + os.sep), (
         f"{label}: refusal is not framed home-relative; an operator sees {message!r}"
     )
     assert str(home) not in message, f"{label}: an absolute path leaked into {message!r}"
@@ -161,7 +165,7 @@ def test_the_advisory_channel_frames_the_same_way(home: Path) -> None:
 
     assert issues, "expected the managed-identity-variable advisory"
     for issue in issues:
-        assert issue.startswith("~/.config/agentworks/resources/"), issue
+        assert issue.startswith(format_host_path(root) + os.sep), issue
         assert str(home) not in issue, issue
 
 
@@ -184,7 +188,7 @@ def test_an_unreadable_file_names_the_file_and_no_line(home: Path, monkeypatch: 
         load_manifests(root)
 
     message = str(caught.value)
-    assert message.startswith("~/.config/agentworks/resources/a.yaml: not valid UTF-8")
+    assert message.startswith(f"{format_host_path(root / 'a.yaml')}: not valid UTF-8")
     assert ":0" not in message
 
 
@@ -204,7 +208,7 @@ def test_a_yaml_error_without_a_problem_mark_names_the_file_and_no_line(
         load_manifests(root)
 
     message = str(caught.value)
-    assert message == "~/.config/agentworks/resources/a.yaml: invalid YAML: boom"
+    assert message == f"{format_host_path(root / 'a.yaml')}: invalid YAML: boom"
 
 
 def test_the_duplicate_error_frames_both_locations(home: Path) -> None:
@@ -219,7 +223,6 @@ def test_the_duplicate_error_frames_both_locations(home: Path) -> None:
     with pytest.raises(ConfigError) as caught:
         load_manifests(root)
 
-    assert str(caught.value) == (
-        '~/.config/agentworks/resources/b.yaml:2: duplicate secret "dup" '
-        "(also declared at ~/.config/agentworks/resources/a.yaml:2)"
-    )
+    framed_a = format_host_path(root / "a.yaml")
+    framed_b = format_host_path(root / "b.yaml")
+    assert str(caught.value) == (f'{framed_b}:2: duplicate secret "dup" (also declared at {framed_a}:2)')

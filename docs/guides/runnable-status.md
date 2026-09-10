@@ -21,6 +21,20 @@ agw session describe review
 agw console describe development
 ```
 
+Each describe view also reports the most recent successful start Agentworks observed and the current
+uptime. Uptime is available only when that resource's own status observation says `running` and a
+start time is known. Older resources keep an unknown start time until Agentworks successfully starts
+them; stopped, deallocated, residual, broken, and unknown resources have no current uptime. A future
+timestamp caused by clock skew reports zero seconds rather than a negative duration. VM uptime
+reflects starts observed by Agentworks. Provider or guest restarts performed outside Agentworks do
+not refresh that observation, so the reported uptime may be stale until Agentworks next records a
+conclusive start.
+
+The human `session list --status` table includes known uptime in the running status, such as
+`running (45s)`, `running (12m)`, `running (8h)`, or `running (3d)`. It keeps showing `running` when
+the start time is unknown. The compact form uses seconds below two minutes, whole minutes below two
+hours, whole hours below two days, and whole days thereafter.
+
 These observations do not start a VM, repair a session, create or destroy tmux state, or persist an
 observed result. An expected provider, credential, identity, or transport failure keeps the local
 facts and reports status as `unknown`. One failed VM or provider boundary does not remove successful
@@ -28,6 +42,37 @@ rows from a list.
 
 Corrupt or unsupported persisted applied-state is different from an unavailable or mismatched SSH
 identity: it remains a typed error because Agentworks cannot trust the structural record.
+
+List inventory is also a recovery surface for incomplete database relationships. Plain session and
+console lists preserve every selected stored row without guest work. A session whose workspace is
+missing shows `-` for VM in human output; if the workspace exists but its VM is missing, the stored
+workspace VM name remains visible. A console always retains its directly stored VM name.
+
+Requested list status partitions those incomplete rows before observation. They remain visible as
+`unknown`, receive no guest call, and do not suppress healthy peer results. Named describe and every
+lifecycle command stay strict because they need a complete target boundary. A schema migration can
+also reject an orphan before inventory is available; direct migration refusal is a typed database
+state error and does not advance the failed version checkpoint.
+
+`agw database restore` checks expected foreign-key declarations and their rows before replacing live
+state and refuses relationship violations by default. If an inconsistent backup is the best
+available recovery source, `--force` bypasses only the violating-row check and warns before
+confirmation and after the copy. It does not imply `--yes`, and all file-integrity, version, and
+schema-shape validation remains mandatory. Agentworks compares endpoint identities around their
+SQLite opens and refuses changes that remain observable. After successful preparation, the open
+source and any existing destination stay fixed through confirmation. Restore then copies to a
+private stage and verifies the live path before installation, so a destination replaced during the
+copy remains unchanged. An absent destination is installed without overwriting a file that appeared
+there first. Replacing an existing destination requires its WAL to checkpoint cleanly and an
+exclusive SQLite writer lock. A database-use lock shared by writable Agentworks connections remains
+exclusive through installation, preventing a new Agentworks process from recreating WAL state in the
+replacement gap. Restore refuses after a bounded wait when another database user prevents that safe
+replacement boundary.
+
+JSON v1 retains its existing string `sessions[].vm_name` contract. A missing VM row remains
+representable when the workspace preserves its stored VM name. A selected session whose workspace is
+missing fails atomically before requested live work because no truthful string VM name can be
+derived. Human and names-only lists remain the complete recovery inventory for that case.
 
 ## Status meanings
 

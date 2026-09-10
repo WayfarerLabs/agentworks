@@ -54,7 +54,7 @@ class _GuestAgent:
         command: str,
         args: list[str] | None = None,
         *,
-        timeout: int = 60,
+        timeout: float = 60,
     ) -> dict[str, object] | None:
         del node, vmid, timeout
         argv = tuple(args or ())

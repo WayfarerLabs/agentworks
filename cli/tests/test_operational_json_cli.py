@@ -301,6 +301,8 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
         issues=tuple(VMIssue(VMInspectionIssueSource(source)) for source in VMInspectionIssueSource),
         diagnostics=(),
         instance_state=vm_state,
+        last_started_at="2026-01-01T00:00:00Z",
+        uptime_seconds=3_723,
     )
     workspace_description = WorkspaceDescription(
         WorkspaceDetailFacts.from_row(workspace_row),
@@ -336,6 +338,8 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
         "2026-01-08",
         (SessionConsole("console-z", 5), SessionConsole("console-a", 2)),
         session_state,
+        last_started_at="2026-01-07T00:00:00Z",
+        uptime_seconds=3_723,
     )
     console_description = ConsoleDescription(
         "console-a",
@@ -348,6 +352,8 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
             ConsoleMember(5, "admin", ()),
         ),
         "running",
+        last_started_at="2026-01-09T00:00:00Z",
+        uptime_seconds=3_723,
     )
 
     monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: {"unsafe": unsafe})
@@ -363,6 +369,8 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
         "vm": {
             "name": "box",
             "created_at": "2026-01-01",
+            "last_started_at": "2026-01-01T00:00:00Z",
+            "uptime_seconds": 3_723,
             "site": "site-a",
             "platform": "proxmox",
             "backend": "node/pve1",
@@ -472,6 +480,8 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
             "status": "running",
             "pid": 4242,
             "created_at": "2026-01-07",
+            "last_started_at": "2026-01-07T00:00:00Z",
+            "uptime_seconds": 3_723,
             "updated_at": "2026-01-08",
             "consoles": [
                 {"console_name": "console-z", "position": 5},
@@ -486,6 +496,8 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
             "vm_name": "box",
             "admin_shell": True,
             "created_at": "2026-01-09",
+            "last_started_at": "2026-01-09T00:00:00Z",
+            "uptime_seconds": 3_723,
             "updated_at": "2026-01-10",
             "status": "running",
             "sessions": [

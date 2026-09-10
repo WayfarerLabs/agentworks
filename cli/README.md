@@ -170,8 +170,15 @@ surfaces, valid values retain their existing human bytes and corrupt values rend
 `unknown` sentinel without echoing their stored text. Doctor diagnostics are a separate surface. VM,
 session, and console lists are local inventory reads by default; add `--status` to any of those
 three lists for live observation. Their describe commands include the same non-activating live
-status by default. See [Runnable status inspection](../docs/guides/runnable-status.md) for the
-resource-specific states, time bounds, and failure behavior.
+status by default. Session and console list inventory preserves structurally incomplete rows during
+database recovery; requested status isolates those rows as unknown while observing healthy peers.
+Focused describe and lifecycle commands remain strict. See
+[Runnable status inspection](../docs/guides/runnable-status.md) for the resource-specific states,
+time bounds, recovery behavior, and JSON v1 limit.
+
+List commands default to alphabetical order. Use `--sort KEY[,KEY...]` for the additional
+command-specific orderings documented in the
+[list-ordering reference](command-reference.md#list-ordering).
 
 ## Configuration
 
@@ -641,6 +648,22 @@ ordinary command owns any forward migration. A backup from a newer schema is pre
 restored by an Agentworks release that understands that schema. Before downgrading Agentworks,
 restore a backup whose schema the older release understands; do not open newer state with the older
 release first.
+
+Restore also validates the schema's foreign-key declarations and rejects declared relationship
+violations by default. If an inconsistent backup is the best available recovery source, `--force`
+bypasses only the violating-row check and emits warnings before confirmation and after replacement.
+It does not imply `--yes`, and `--yes` never hides the warnings. All other source validation remains
+mandatory. Both endpoints must be regular files. Agentworks compares their path identities around
+the SQLite opens, requires the observed identities to be distinct, and refuses endpoint changes that
+remain observable. The open source and any existing destination stay fixed through confirmation.
+After confirmation, SQLite copies to a private staged file, then Agentworks verifies the live path
+before installing the completed stage. A destination replaced during the copy is left unchanged. An
+absent destination is installed without overwriting a file that appeared there first. Replacing an
+existing destination also takes the database-use lock held by writable Agentworks connections,
+requires its WAL to checkpoint cleanly, and takes an exclusive SQLite writer lock. The use lock
+remains held through installation so another Agentworks process cannot recreate WAL state in the
+replacement gap. If other database work prevents that safe boundary, restore refuses after a bounded
+wait so the operator can finish that work and retry.
 
 SQLite may leave user-only `-shm` and zero-byte `-wal` coordination files beside a selected backup
 after validation or restore. This is expected: the backup database remains unchanged, valid, and

@@ -29,7 +29,7 @@ def sample_config(tmp_path: Path) -> Path:
 
     src = SAMPLE_CONFIG_PATH.read_text()
     # Replace the operator section's SSH key paths with tmp_path versions.
-    src = src.replace("~/.ssh/id_ed25519.pub", str(pub)).replace("~/.ssh/id_ed25519", str(priv))
+    src = src.replace("~/.ssh/id_ed25519.pub", pub.as_posix()).replace("~/.ssh/id_ed25519", priv.as_posix())
 
     cfg = tmp_path / "config.toml"
     cfg.write_text(src)

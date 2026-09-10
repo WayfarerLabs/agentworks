@@ -341,7 +341,9 @@ def test_default_config_builds_green_with_zero_enabled_system_plugins(tmp_path: 
     key.write_text("private")
     (tmp_path / "id_ed25519.pub").write_text("public")
     config_path = tmp_path / "config.toml"
-    config_path.write_text(f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n')
+    config_path.write_text(
+        f'[operator]\nssh_public_key = "{key.as_posix()}.pub"\nssh_private_key = "{key.as_posix()}"\n'
+    )
     config = load_config(config_path, warn_issues=False, warn_deprecations=False)
     assert config.enabled_system_plugins == ()  # no [plugins] section at all
 

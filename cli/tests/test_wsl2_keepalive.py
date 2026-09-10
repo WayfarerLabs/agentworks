@@ -9,6 +9,7 @@ lifecycle without actually running wsl.exe.
 from __future__ import annotations
 
 import subprocess
+import sys
 from contextlib import contextmanager
 from typing import Any, Literal
 from unittest.mock import MagicMock, patch
@@ -336,8 +337,43 @@ def test_base_platform_vm_active_is_nullcontext() -> None:
         def display_backend_name(self, vm: Any) -> str:
             raise NotImplementedError
 
+        def native_transport(self, vm: Any, ctx: Any, *, config: Any = None) -> Any:
+            raise NotImplementedError
+
     # Patch Popen at the wsl2 module level; the base default must NOT touch it.
     with patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen") as popen:
         with _Stub("stub", {}).vm_active(_fake_vm()):
             pass
         popen.assert_not_called()
+
+
+@pytest.mark.windows
+@pytest.mark.skipif(sys.platform != "win32", reason="requires native Win32 job objects")
+def test_native_job_close_terminates_its_child() -> None:
+    """The keepalive's orphan protection must work with real kernel handles."""
+    from agentworks.capabilities.vm_platform.wsl2 import (
+        _assign_process_to_job,
+        _close_handle,
+        _create_kill_on_close_job,
+    )
+
+    job = _create_kill_on_close_job()
+    assert job is not None
+    try:
+        with subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ) as child:
+            try:
+                assert _assign_process_to_job(job, child._handle)  # type: ignore[attr-defined] # Windows Popen handle
+                _close_handle(job)
+                job = None
+                child.wait(timeout=5)
+            finally:
+                if child.poll() is None:
+                    child.kill()
+                child.wait(timeout=5)
+    finally:
+        _close_handle(job)

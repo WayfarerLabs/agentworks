@@ -29,7 +29,7 @@ from agentworks.env import ResourceContext, vm_stable_identity_env
 from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.git_credentials import configure_user_git_credentials
 from agentworks.ssh import SSHError, SSHLogger
-from agentworks.transports import SSHTransport, Transport
+from agentworks.transports import ExecTransport, SSHTransport, Transport
 
 from .mise import (
     MISE_ACTIVATE_LINES,
@@ -89,7 +89,7 @@ def bootstrap_vm(
     db: Database,
     config: Config,
     vm_name: str,
-    exec_target: Transport,
+    exec_target: ExecTransport,
     platform: VMPlatform,
     ctx: RunContext,
     logger: SSHLogger,
@@ -136,7 +136,7 @@ def bootstrap_vm(
     """
     home = f"/home/{admin_username}"
 
-    # Attach logger to the provisioning transport. ``Transport`` declares
+    # Attach logger to the provisioning transport. ``ExecTransport`` declares
     # ``logger`` on the ABC; the assignment is polymorphic.
     exec_target.logger = logger
 
@@ -341,7 +341,7 @@ def _phase_a_bootstrap(
     db: Database,
     config: Config,
     vm_name: str,
-    exec_target: Transport,
+    exec_target: ExecTransport,
     admin_username: str,
     logger: SSHLogger,
     *,

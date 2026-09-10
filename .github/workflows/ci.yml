@@ -80,6 +80,28 @@ jobs:
         env:
           AGENTWORKS_PACKAGE_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
 
+  # Linux runs the full suite; Windows covers native host boundaries selected
+  # with pytest.mark.windows. Keep this job required through ci-success.
+  test-windows:
+    name: Test (Windows, Python 3.13)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: uv sync --frozen --no-editable
+
+      - name: Pytest
+        run: uv run --no-sync pytest tests/ -m 'windows and not integration' --durations=25
+
   # File-quality linters and the rulesync drift check both run via the same
   # scripts contributors use locally (./scripts/lint-files.sh, ./scripts/rulesync-upgen.sh
   # --check). That keeps CI and local behavior in lockstep; the version pins,
@@ -169,7 +191,7 @@ jobs:
   # rather than in GitHub settings that can drift silently.
   ci-success:
     if: always()
-    needs: [python-checks, test, lint-files, rulesync-drift, locked-sdds, website]
+    needs: [python-checks, test, test-windows, lint-files, rulesync-drift, locked-sdds, website]
     runs-on: ubuntu-latest
     steps:
       - name: Verify all required jobs passed
@@ -177,8 +199,8 @@ jobs:
           REQUIRED_RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
           read -r -a results <<< "$REQUIRED_RESULTS"
-          if [[ "${#results[@]}" -ne 6 ]]; then
-            echo "::error::Expected six required CI job results."
+          if [[ "${#results[@]}" -ne 7 ]]; then
+            echo "::error::Expected seven required CI job results."
             exit 1
           fi
           for result in "${results[@]}"; do

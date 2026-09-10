@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Annotated, cast
 import typer
 
 from agentworks.cli._app import app
-from agentworks.cli._helpers import get_db, load_completion_registry, ordinary_tty_interaction_access
+from agentworks.cli._helpers import get_db, load_completion_registry, ordinary_tty_interaction_access, parse_csv_sort
 from agentworks.machine_output import OutputFormat
 
 # Module-level because three commands in this file render a host path and
@@ -58,6 +58,11 @@ def resource_list(
         False,
         "--include-disabled",
         help=("Also show disabled resources, for example a not-enabled plugin's rows. Default: hidden."),
+    ),
+    sort: str | None = typer.Option(
+        None,
+        "--sort",
+        help="Sort by comma-separated keys: alpha. Default: alpha.",
     ),
     names_only: bool = typer.Option(
         False,
@@ -123,6 +128,7 @@ def resource_list(
         kinds=kinds,
         origin_filter=cast("OriginFilter | None", origin_filter),
         include_disabled=include_disabled,
+        sort_keys=parse_csv_sort(sort),
     )
     # ``--names-only`` short-circuits the table render. Per the
     # cli-conventions ``--names-only`` rule, render-only work is skipped:
@@ -143,14 +149,12 @@ def resource_list(
             output.info(f"{row.kind}/{row.name}")
         return
     if output_format is OutputFormat.JSON:
-        from click import get_binary_stream
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
 
-        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
-
-        write_json_envelope(
+        write_json_stdout(
             MachineOutputCommand.RESOURCE_LIST,
             resource_listing_data(listing),
-            get_binary_stream("stdout"),
         )
         return
     render_resource_table(listing)
@@ -197,14 +201,12 @@ def resource_show(
     )
 
     if output_format is OutputFormat.JSON:
-        from click import get_binary_stream
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
 
-        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
-
-        write_json_envelope(
+        write_json_stdout(
             MachineOutputCommand.RESOURCE_SHOW,
             resource_show_data(shown),
-            get_binary_stream("stdout"),
         )
         return
     render_resource_show(shown)
@@ -212,6 +214,11 @@ def resource_show(
 
 @resource_app.command("kinds")
 def resource_kinds(
+    sort: str | None = typer.Option(
+        None,
+        "--sort",
+        help="Sort by comma-separated keys: alpha. Default: alpha.",
+    ),
     names_only: bool = typer.Option(
         False,
         "--names-only",
@@ -244,7 +251,9 @@ def resource_kinds(
     # static code. Keeps completion fast and working even with a broken
     # or absent config. KIND_REGISTRY is imported at module level.
     if names_only:
-        for name in sorted(KIND_REGISTRY):
+        from agentworks.resources.inspect import sort_kind_names
+
+        for name in sort_kind_names(KIND_REGISTRY, sort_keys=parse_csv_sort(sort)):
             output.info(name)
         return
 
@@ -260,13 +269,12 @@ def resource_kinds(
         warn=output_format is OutputFormat.HUMAN,
         include_live_resources=False,
     )
-    rows = list_kinds(registry)
+    rows = list_kinds(registry, sort_keys=parse_csv_sort(sort))
     if output_format is OutputFormat.JSON:
-        from click import get_binary_stream
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
 
-        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
-
-        write_json_envelope(MachineOutputCommand.RESOURCE_KINDS, resource_kinds_data(rows), get_binary_stream("stdout"))
+        write_json_stdout(MachineOutputCommand.RESOURCE_KINDS, resource_kinds_data(rows))
         return
     render_kind_table(rows)
 

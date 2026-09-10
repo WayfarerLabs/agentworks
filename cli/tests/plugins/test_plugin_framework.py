@@ -201,6 +201,37 @@ class _AbstractPlatform(VMPlatform):
     description = "abstract: no power ops implemented"
 
 
+class _NoNativeConfig(AgwModel):
+    name: Literal["no-native-platform"]
+
+
+class _PlatformWithoutNativeTransport(VMPlatform):
+    """Implements every operation except required native execution."""
+
+    contract_version = 1
+    name = "no-native-platform"
+    description = "omits native execution"
+    config_model = _NoNativeConfig
+
+    def create(self, request: Any, ctx: Any) -> Any:
+        raise NotImplementedError
+
+    def start(self, vm: Any, ctx: Any) -> None:
+        raise NotImplementedError
+
+    def stop(self, vm: Any, ctx: Any) -> None:
+        raise NotImplementedError
+
+    def delete(self, vm: Any, ctx: Any) -> None:
+        raise NotImplementedError
+
+    def status(self, vm: Any, ctx: Any) -> Any:
+        raise NotImplementedError
+
+    def display_backend_name(self, vm: Any) -> str:
+        raise NotImplementedError
+
+
 class _PlatformWithoutADescription(ConformingVMPlatform):
     name = "no-description-platform"
     # ``description`` is what the published capability row carries, so an
@@ -421,6 +452,7 @@ class _HarnessOfferingAnUnsafeMergeContract(ConformingHarnessIntegration):
     [
         ("vm-platform", _NotAPlatform, "does not derive from VMPlatform"),
         ("vm-platform", _AbstractPlatform, "it is abstract"),
+        ("vm-platform", _PlatformWithoutNativeTransport, "it is abstract"),
         ("vm-platform", _PlatformWithoutADescription, "'description' class attribute"),
         ("secret-backend", _BackendMissingItsOperations, "does not derive from SecretBackend"),
         ("secret-backend", _BackendWithoutTtySupport, "does not derive from SecretBackend"),
@@ -433,6 +465,7 @@ class _HarnessOfferingAnUnsafeMergeContract(ConformingHarnessIntegration):
     ids=[
         "wrong-base",
         "abstract",
+        "missing-native-transport",
         "missing-metadata",
         "missing-operations",
         "missing-attribute",
@@ -453,6 +486,10 @@ def test_rejects_a_non_conforming_impl_naming_the_plugin(kind: str, impl: type, 
     assert "'p'" in message
     assert impl.__name__ in message
     assert expected in message
+
+
+def test_native_transport_is_the_only_missing_platform_operation() -> None:
+    assert _PlatformWithoutNativeTransport.__abstractmethods__ == frozenset({"native_transport"})
 
 
 @pytest.mark.parametrize(

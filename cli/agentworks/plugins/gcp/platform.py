@@ -574,12 +574,16 @@ class GCEPlatform(VMPlatform):
         ctx: RunContext,
         *,
         config: Config | None = None,
-    ) -> Transport | None:
+    ) -> Transport:
         identity = _VMIdentity.from_row(vm)
         instances = self._clients.client("instances", ctx)
         current = self._owned_instance(instances, identity)
         if current is None:
-            return None
+            raise StateError(
+                f"GCE instance '{identity.instance_name}' no longer exists",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
         verify_instance_network(current, network_url=identity.network_url, subnet_url=identity.subnet_url)
         identity_file = None
         if config is not None:

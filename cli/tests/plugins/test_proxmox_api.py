@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError
+from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError, _InvalidQGAExecStatus
 
 
 @pytest.fixture()
@@ -134,6 +134,176 @@ class TestResponseParsing:
         result = api.guest_agent_network("pve", 100)
         assert len(result) == 2
         assert result[1]["name"] == "eth0"
+
+    @patch("urllib.request.urlopen")
+    def test_guest_agent_exec_sends_argv_and_optional_input(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
+        mock_urlopen.return_value = _mock_response({"pid": 42})
+
+        pid = api.guest_agent_exec(
+            "pve",
+            100,
+            command=["/bin/bash", "-lc", "read value"],
+            input_data="sensitive input\n",
+            timeout=9.5,
+        )
+
+        req = mock_urlopen.call_args.args[0]
+        assert pid == 42
+        assert req.get_method() == "POST"
+        assert json.loads(req.data) == {
+            "command": ["/bin/bash", "-lc", "read value"],
+            "input-data": "sensitive input\n",
+        }
+        assert mock_urlopen.call_args.kwargs["timeout"] == 9.5
+
+    @patch("urllib.request.urlopen")
+    def test_guest_agent_exec_omits_input_for_immediate_eof(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
+        mock_urlopen.return_value = _mock_response({"pid": 42})
+
+        api.guest_agent_exec("pve", 100, command=["/bin/true"])
+
+        req = mock_urlopen.call_args.args[0]
+        assert json.loads(req.data) == {"command": ["/bin/true"]}
+
+    @patch("urllib.request.urlopen")
+    def test_guest_agent_exec_status_reads_pid(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
+        status = {"exited": True, "exitcode": 0}
+        mock_urlopen.return_value = _mock_response(status)
+
+        assert api.guest_agent_exec_status("pve", 100, pid=42, timeout=3) == status
+
+        req = mock_urlopen.call_args.args[0]
+        assert req.get_method() == "GET"
+        assert req.full_url.endswith("/nodes/pve/qemu/100/agent/exec-status?pid=42")
+        assert mock_urlopen.call_args.kwargs["timeout"] == 3
+
+    @patch("urllib.request.urlopen")
+    def test_guest_agent_exec_status_normalizes_wire_booleans(
+        self,
+        mock_urlopen: MagicMock,
+        api: ProxmoxAPI,
+    ) -> None:
+        mock_urlopen.return_value = _mock_response({"exited": 1, "exitcode": 0, "out-truncated": 0, "err-truncated": 0})
+
+        result = api.guest_agent_exec_status("pve", 100, pid=42)
+
+        assert result == {"exited": True, "exitcode": 0, "out-truncated": False, "err-truncated": False}
+
+    @pytest.mark.parametrize("field", ["exited", "out-truncated", "err-truncated"])
+    @pytest.mark.parametrize("value", [-1, 2, "1", 0.0, None])
+    @patch("urllib.request.urlopen")
+    def test_guest_agent_exec_status_rejects_invalid_wire_booleans(
+        self,
+        mock_urlopen: MagicMock,
+        api: ProxmoxAPI,
+        field: str,
+        value: object,
+    ) -> None:
+        status: dict[str, object] = {"exited": 1, "exitcode": 0}
+        status[field] = value
+        mock_urlopen.return_value = _mock_response(status)
+
+        with pytest.raises(_InvalidQGAExecStatus):
+            api.guest_agent_exec_status("pve", 100, pid=42)
+
+    @patch("urllib.request.urlopen")
+    def test_guest_agent_exec_wait_handles_numeric_running_and_exited_wire_status(
+        self,
+        mock_urlopen: MagicMock,
+        api: ProxmoxAPI,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        mock_urlopen.side_effect = [
+            _mock_response({"pid": 42}),
+            _mock_response({"exited": 0}),
+            _mock_response({"exited": 1, "exitcode": 0}),
+        ]
+        monkeypatch.setattr("agentworks.plugins.proxmox.api.time.sleep", lambda _seconds: None)
+
+        result = api.guest_agent_exec_wait("pve", 100, "/bin/true")
+
+        assert result == {"exited": True, "exitcode": 0}
+        assert mock_urlopen.call_count == 3
+
+    @patch("urllib.request.urlopen")
+    def test_guest_agent_exec_wait_does_not_dispatch_after_deadline(
+        self,
+        mock_urlopen: MagicMock,
+        api: ProxmoxAPI,
+    ) -> None:
+        assert api.guest_agent_exec_wait("pve", 100, "/bin/true", timeout=0) is None
+        mock_urlopen.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "status",
+        [
+            {},
+            {"exited": "yes"},
+            {"exited": 0, "exitcode": 0},
+            {"exited": 0, "signal": 9},
+            {"exited": 0, "out-data": ""},
+            {"exited": 0, "err-data": ""},
+            {"exited": 0, "out-truncated": 0},
+            {"exited": 0, "err-truncated": 0},
+            {"exited": 1},
+            {"exited": 1, "exitcode": 0, "signal": 9},
+            {"exited": 1, "exitcode": 0, "signal": None},
+            {"exited": 1, "exitcode": 0, "out-truncated": 1},
+            {"exited": 1, "exitcode": 0, "err-truncated": 1},
+            {"exited": 1, "signal": 0},
+            {"exited": 1, "signal": -1},
+            {"exited": 1, "exitcode": -1},
+            {"exited": 1, "exitcode": "0"},
+            {"exited": 1, "exitcode": 0, "out-data": 1},
+            {"exited": 1, "exitcode": 0, "err-data": 1},
+        ],
+    )
+    @patch("urllib.request.urlopen")
+    def test_guest_agent_exec_wait_rejects_invalid_status(
+        self,
+        mock_urlopen: MagicMock,
+        api: ProxmoxAPI,
+        status: dict[str, object],
+    ) -> None:
+        mock_urlopen.side_effect = [_mock_response({"pid": 42}), _mock_response(status)]
+
+        with pytest.raises(_InvalidQGAExecStatus) as caught:
+            api.guest_agent_exec_wait("pve", 100, "/bin/true")
+
+        assert "pve" in str(caught.value)
+        assert "100" in str(caught.value)
+        assert "42" in str(caught.value)
+        assert mock_urlopen.call_count == 2
+
+    @pytest.mark.parametrize("response", [None, [], "invalid"])
+    @patch("urllib.request.urlopen")
+    def test_guest_agent_exec_status_rejects_malformed_data(
+        self,
+        mock_urlopen: MagicMock,
+        api: ProxmoxAPI,
+        response: object,
+    ) -> None:
+        mock_urlopen.return_value = _mock_response(response)
+
+        with pytest.raises(_InvalidQGAExecStatus) as caught:
+            api.guest_agent_exec_status("pve", 100, pid=42)
+
+        assert "pve" in str(caught.value)
+        assert "100" in str(caught.value)
+        assert "42" in str(caught.value)
+
+    @pytest.mark.parametrize("response", [None, {}, {"pid": None}, {"pid": "42"}, {"pid": True}])
+    @patch("urllib.request.urlopen")
+    def test_guest_agent_exec_rejects_malformed_pid(
+        self,
+        mock_urlopen: MagicMock,
+        api: ProxmoxAPI,
+        response: object,
+    ) -> None:
+        mock_urlopen.return_value = _mock_response(response)
+
+        with pytest.raises(ProxmoxAPIError):
+            api.guest_agent_exec("pve", 100, command=["/bin/true"])
 
 
 class TestErrorHandling:

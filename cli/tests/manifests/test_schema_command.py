@@ -18,6 +18,7 @@ from jsonschema import Draft202012Validator
 from agentworks.manifests.emit import ENVELOPE_SCHEMA_FILENAME, SCHEMA_DIRNAME
 from agentworks.manifests.loader import RESOURCES_DIRNAME
 from agentworks.manifests.spec_model import declarable_kinds
+from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -90,7 +91,9 @@ def test_write_lands_where_the_modeline_says(
     schema_dir = configured / RESOURCES_DIRNAME / SCHEMA_DIRNAME
     written = {path.name for path in schema_dir.iterdir()}
     assert written == {ENVELOPE_SCHEMA_FILENAME, *(f"{kind}.schema.json" for kind in declarable_kinds())}
-    assert str(schema_dir) in capsys.readouterr().out
+    # The confirmation names the directory operator-facing (home-relative on
+    # Windows, where the tmp dir is under $HOME), so frame the expectation.
+    assert format_host_path(schema_dir) in capsys.readouterr().out
 
 
 def test_write_tolerates_missing_ssh_keys(
@@ -116,7 +119,7 @@ ssh_private_key = "{(tmp_path / "id").as_posix()}"
     assert _run(monkeypatch, "--install") == 0
     schema_dir = tmp_path / RESOURCES_DIRNAME / SCHEMA_DIRNAME
     assert schema_dir.is_dir()
-    assert str(schema_dir) in capsys.readouterr().out
+    assert format_host_path(schema_dir) in capsys.readouterr().out
 
 
 def test_write_with_a_kind_is_a_clean_refusal(

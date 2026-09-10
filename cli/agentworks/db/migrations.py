@@ -720,6 +720,12 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
     36: """
         ALTER TABLE sessions ADD COLUMN tmux_server_start_ticks INTEGER;
     """,
+    # Latest successful start observations. Existing rows remain unknown. --
+    37: """
+        ALTER TABLE vms ADD COLUMN last_started_at TEXT;
+        ALTER TABLE sessions ADD COLUMN last_started_at TEXT;
+        ALTER TABLE consoles ADD COLUMN last_started_at TEXT;
+    """,
 }
 
 LATEST_VERSION = max(MIGRATIONS)
@@ -844,6 +850,11 @@ _SCHEMA_SENTINEL_ADDITIONS: dict[int, dict[str, tuple[str, ...]]] = {
         )
     },
     36: {"sessions": ("tmux_server_start_ticks",)},
+    37: {
+        "vms": ("last_started_at",),
+        "sessions": ("last_started_at",),
+        "consoles": ("last_started_at",),
+    },
 }
 
 _SCHEMA_SENTINEL_REMOVED_TABLES: dict[int, tuple[str, ...]] = {
@@ -885,3 +896,71 @@ def _build_schema_sentinels() -> dict[int, dict[str, frozenset[str]]]:
 
 SCHEMA_SENTINELS = _build_schema_sentinels()
 """Complete Agentworks table-and-column shape for each completed schema."""
+
+
+ForeignKeySentinel = tuple[str, str, str, str, str]
+"""Referenced table, local column, referenced column, update action, delete action."""
+
+# Restore validation depends on this map matching every completed migration.
+# Future migrations that add, rebuild, or remove a foreign-key declaration
+# must update these changes in the same commit as the migration.
+_NO_ACTION = "NO ACTION"
+
+_FOREIGN_KEY_SENTINEL_ADDITIONS: dict[int, dict[str, tuple[ForeignKeySentinel, ...]]] = {
+    1: {
+        "vms": (("vm_hosts", "vm_host_name", "name", _NO_ACTION, _NO_ACTION),),
+        "workspaces": (("vms", "vm_name", "name", _NO_ACTION, _NO_ACTION),),
+        "vm_git_host_keys": (("vms", "vm_name", "name", _NO_ACTION, _NO_ACTION),),
+    },
+    4: {"agents": (("workspaces", "workspace_name", "name", _NO_ACTION, _NO_ACTION),)},
+    6: {"vm_events": (("vms", "vm_name", "name", _NO_ACTION, _NO_ACTION),)},
+    8: {"tasks": (("workspaces", "workspace_name", "name", _NO_ACTION, _NO_ACTION),)},
+    13: {
+        "agents": (("vms", "vm_name", "name", _NO_ACTION, "CASCADE"),),
+        "agent_workspace_grants": (
+            ("agents", "agent_name", "name", _NO_ACTION, "CASCADE"),
+            ("workspaces", "workspace_name", "name", _NO_ACTION, "CASCADE"),
+        ),
+    },
+    14: {"tasks": (("agents", "agent_name", "name", _NO_ACTION, _NO_ACTION),)},
+    17: {
+        "sessions": (
+            ("agents", "agent_name", "name", _NO_ACTION, _NO_ACTION),
+            ("workspaces", "workspace_name", "name", _NO_ACTION, _NO_ACTION),
+        )
+    },
+    23: {
+        "consoles": (("vms", "vm_name", "name", _NO_ACTION, "CASCADE"),),
+        "console_sessions": (
+            ("consoles", "console_name", "name", _NO_ACTION, "CASCADE"),
+            ("sessions", "session_name", "name", _NO_ACTION, "CASCADE"),
+        ),
+    },
+    34: {"vm_checkpoints": (("vms", "vm_name", "name", _NO_ACTION, "RESTRICT"),)},
+}
+
+_FOREIGN_KEY_SENTINEL_REMOVALS: dict[int, dict[str, tuple[ForeignKeySentinel, ...]]] = {
+    13: {"agents": (("workspaces", "workspace_name", "name", _NO_ACTION, _NO_ACTION),)},
+    27: {"vms": (("vm_hosts", "vm_host_name", "name", _NO_ACTION, _NO_ACTION),)},
+}
+
+
+def _build_foreign_key_sentinels() -> dict[int, dict[str, frozenset[ForeignKeySentinel]]]:
+    """Expand declared foreign-key changes into each completed schema."""
+    foreign_keys: dict[str, set[ForeignKeySentinel]] = {}
+    versions: dict[int, dict[str, frozenset[ForeignKeySentinel]]] = {}
+    for version in range(1, LATEST_VERSION + 1):
+        for table in _SCHEMA_SENTINEL_REMOVED_TABLES.get(version, ()):
+            foreign_keys.pop(table, None)
+        for table, declarations in _FOREIGN_KEY_SENTINEL_REMOVALS.get(version, {}).items():
+            foreign_keys[table].difference_update(declarations)
+        for table, declarations in _FOREIGN_KEY_SENTINEL_ADDITIONS.get(version, {}).items():
+            foreign_keys.setdefault(table, set()).update(declarations)
+        versions[version] = {
+            table: frozenset(declarations) for table, declarations in foreign_keys.items() if declarations
+        }
+    return versions
+
+
+FOREIGN_KEY_SENTINELS = _build_foreign_key_sentinels()
+"""Complete Agentworks foreign-key declarations for each completed schema."""

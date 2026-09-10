@@ -851,7 +851,7 @@ def test_agent_template_node_derives_credential_edges(tmp_path, monkeypatch: pyt
     key.write_text("private")
     (tmp_path / "id_ed25519.pub").write_text("public")
     cfg = tmp_path / "config.toml"
-    cfg.write_text(f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n')
+    cfg.write_text(f'[operator]\nssh_public_key = "{key.as_posix()}.pub"\nssh_private_key = "{key.as_posix()}"\n')
     write_manifests(
         tmp_path,
         ManifestDoc("git-credential", "gh", {"provider": {"name": "github", "source": {"mode": "secret"}}}),

@@ -1,6 +1,8 @@
 # Scope Participation Contract
 
-- Status: Design-track artifact, draft for review
+- Status: Settled design-track artifact (merged via PR #407). Corrected in place 2026-09-06 where
+  the code moved past it; the corrections are marked inline and collected in
+  `docs/sdd/2026-09-06-harness-scope-framework/frd.md`
 - Date: 2026-08-05
 - Inputs: the harness-integration-scope and session-observability perspectives (`inputs/`), the
   harness-transcripts harvest, `target-state.md`'s settled rulings,
@@ -42,7 +44,11 @@ At every setup scope, one pipeline runs in one order:
    dependencies are deferred until a real case demands more than declaration order. Features are
    harness-agnostic by definition; anything harness-specific is harness-integration config, never a
    feature (the Claude marketplace and plugin settings are the standing example).
-3. **Enabled harness integrations run last**, receiving all env and agent artifacts for the scope.
+3. **Enabled harness integrations run last**, receiving the completed env for the scope plus its
+   local artifacts and the applicable inherited artifacts still deferred for that integration.
+   **Correction, 2026-09-06:** this originally said they receive all env and agent artifacts for the
+   scope. Artifacts are filtered by what is still deferred, at every facet and not only at the
+   session; see "Sessions and hoisting" below.
 
 Reinit (vm, agent) reruns the same pipeline idempotently. Env and agent artifacts are the two
 currencies of the pipeline; their concrete schemas are the wave 4 seed's to settle, and the artifact
@@ -53,11 +59,13 @@ hooks): composition and hook semantics belong to wave 6.
 
 Harness integrations are the only participants that straddle scopes, so the scope surface lives
 directly on the one registered integration API as methods (names indicative): `vm_init`,
-`user_init`, `workspace_init`, alongside the existing session `start` and `resume`. `user_init` is
-one surface for user-level setup: it is invoked for the admin user during VM init and for each agent
-during agent init, the invocation context says which user, and one method body serves both. These
-levels are the capability's facets (vm, user, workspace, session): a facet names the pairing of one
-level's API methods and its config, nothing more. Facets are deliberately not scopes: core owns the
+`user_init`, `workspace_init`, alongside the existing session `start`. **Correction, 2026-09-06:**
+this originally read "session `start` and `resume`". There is no longer a `resume` method; `start`
+takes a `HarnessLaunchIntent` and serves both paths. `user_init` is one surface for user-level
+setup: it is invoked for the admin user during VM init and for each agent during agent init, the
+invocation context says which user, and one method body serves both. These levels are the
+capability's facets (vm, user, workspace, session): a facet names the pairing of one level's API
+methods and its config, nothing more. Facets are deliberately not scopes: core owns the
 scope-to-facet mapping (admin and agent both map to the user facet; session start and resume share
 the session facet), so producers never need to know their consumers. The per-scope orchestrators
 call these at the end of their pipelines for the integrations the owning template selects. Env is
@@ -78,13 +86,16 @@ capability and after wave 2 by core against capability-provided schema, one blob
 graph walk reaches each resource. The one specialty is that the harness-integration capability
 offers config per facet, producer-oriented: a capability declares a fixed set of facet configs
 exactly as it declares its fixed set of API methods, and consumers choose which facet they drive,
-just as the orchestrators choose which method to call. Core asks `config_for(facet)` (names
-indicative) and owns the scope-to-facet mapping, so admin and agent templates get the same
-user-facet answer by construction. A capability with one config declares it without naming any
-facet, so the ordinary case stays invisible, and the association is introspectable at finalize,
-before any method runs. That is capability-specific, not a framework mechanism, and the harness
-integration is the odd one out at first and possibly forever. Validation still consumes exactly one
-facet's schema per blob; offering no config for a facet means there is nothing to validate there.
+just as the orchestrators choose which method to call. Core asks `config_for` and owns the
+scope-to-facet mapping, so admin and agent templates get the same user-facet answer by construction.
+**Correction, 2026-09-06:** this originally spelled the call `config_for(facet)` and called the name
+indicative. The name is not indicative any more, because it shipped: `Capability.config_for` exists
+and declares this facet contract in its own docstring. The facet argument is the part wave 4 adds. A
+capability with one config declares it without naming any facet, so the ordinary case stays
+invisible, and the association is introspectable at finalize, before any method runs. That is
+capability-specific, not a framework mechanism, and the harness integration is the odd one out at
+first and possibly forever. Validation still consumes exactly one facet's schema per blob; offering
+no config for a facet means there is nothing to validate there.
 
 ### Trust, not enforcement
 
@@ -100,10 +111,18 @@ disclosure.
 
 ### Sessions and hoisting
 
-The session receives everything: env and agent artifacts from all ancestor scopes plus its own,
-passed to the harness integration at start and resume. The integration owns representation. Env is
-naturally process-scoped. Content that cannot be represented at its own scope is hoisted into the
-session, and the integration decides placement using its harness knowledge (for example,
+The session receives accumulated env from all ancestor scopes plus its own, passed to the harness
+integration at start. **Correction, 2026-09-06:** this originally said the session receives
+everything, artifacts included. It does not. Artifact payloads already handled upstream for that
+integration and resource path do not reach the session-facet invocation; each invocation receives
+local artifacts plus only the applicable inherited artifacts still deferred for it. An integration
+returns the artifacts it defers, with a reason for each, and an entry still deferred at the session
+facet is not something the session silently hoists. **Correction, 2026-09-08:** this originally said
+such an entry is a typed core error before launch. The operator has reopened that policy; whether an
+unresolved session entry blocks launch or receives another explicit treatment is for the artifacts
+successor SDD to settle. Silent loss is not among the options. The integration owns representation.
+Env is naturally process-scoped. Content that cannot be represented at its own scope is hoisted into
+the session, and the integration decides placement using its harness knowledge (for example,
 session-scoped artifacts under a harness-specific workspace path keyed by `session_uuid`), including
 deduplication and double-provisioning avoidance. Hoisting is isolation, not security: other sessions
 being able to see user-scope artifacts is expected; the integration's job is that hoisted material
@@ -123,8 +142,10 @@ reported rather than fought; secrets never enter persisted state or resolved con
 Per-(owning resource, integration) state follows the proven session pattern
 (`harness_integration_state`: namespaced blob, persisted by the owning manager, degrading to empty
 on malformed content). VM and agent scoped state homes in the instance-state store when the design
-track lands it; until then the interim home is the wave 4 effort's call. State records carry their
-schema version as an attribute, so upgrades migrate rather than orphan.
+track lands it. **Correction, 2026-09-06:** the store landed in 0.16.0
+(`cli/agentworks/db/instance_state.py`), so there is no interim period and no interim home to
+choose. State records carry their schema version as an attribute, so upgrades migrate rather than
+orphan.
 
 ### Upstream prerequisites
 
@@ -168,7 +189,6 @@ not as a permission system.
 - Init method signatures, the env and artifact currency schemas, and how env rides the run targets
   (wave 4).
 - Whether a supported-scopes report exists for doctor and guide, and its mechanism (wave 4).
-- The interim state home before the instance-state store lands (wave 4).
 - The admin attachment's spelling on the vm-template (it validates against the same user-scope model
   as agent attachments) (wave 4).
 - The retry contract for a partially created workspace with some artifacts already written (wave 4).

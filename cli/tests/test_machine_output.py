@@ -172,6 +172,7 @@ def test_unserializable_input_writes_no_partial_document() -> None:
         encode_json_envelope(MachineOutputCommand.DOCTOR, {"not_a_number": float("nan")})
 
 
+@pytest.mark.windows
 def test_origin_projection_has_fixed_safe_order_and_variant_fields() -> None:
     origins = [
         Origin.operator_declared(file=Path("é/resources.yaml"), line=7),
@@ -185,7 +186,9 @@ def test_origin_projection_has_fixed_safe_order_and_variant_fields() -> None:
     assert projections == [
         {
             "variant": "operator-declared",
-            "file": "é/resources.yaml",
+            # project_origin renders the host manifest path via str(Path), so
+            # the separator is host-native (backslashes on Windows).
+            "file": str(Path("é/resources.yaml")),
             "line": 7,
             "source": None,
             "source_resource": None,

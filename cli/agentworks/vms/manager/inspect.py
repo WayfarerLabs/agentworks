@@ -19,7 +19,9 @@ from agentworks.errors import (
     StateError,
     UserAbort,
 )
+from agentworks.list_sorting import nullable_sort_value, sort_rows
 from agentworks.naming import MAX_VM_NAME_LENGTH
+from agentworks.runtime_time import derive_uptime_seconds
 
 from ._helpers import _require_vm, _vm_scope
 from ._status import observe_vm_statuses, project_vm_status
@@ -244,6 +246,8 @@ class VMDescription:
     issues: tuple[VMIssue, ...]
     diagnostics: tuple[VMDiagnostic, ...]
     instance_state: InstanceStateDescription
+    last_started_at: str | None = None
+    uptime_seconds: int | None = None
 
 
 def vm_listing_data(listing: VMListing) -> JsonObject:
@@ -279,6 +283,8 @@ def vm_description_data(description: VMDescription) -> JsonObject:
         "vm": {
             "name": vm.name,
             "created_at": vm.created_at,
+            "last_started_at": description.last_started_at,
+            "uptime_seconds": description.uptime_seconds,
             "site": vm.site,
             "platform": description.platform,
             "backend": description.backend,
@@ -391,9 +397,10 @@ def vm_listing(
     *,
     include_status: bool = False,
     interaction: TtyInteractionPolicy | None = None,
+    sort_keys: tuple[str, ...] | None = None,
 ) -> VMListing:
     """Collect local VM inventory, optionally enriched by provider status."""
-    vm_rows = db.list_vms()
+    vm_rows = _sorted_vm_rows(db, sort_keys)
     statuses: dict[str, VMStatus] = {}
     if include_status and vm_rows:
         if config is None or interaction is None:
@@ -505,13 +512,30 @@ def render_vm_listing(
             output.warn(f"VM status is unknown by provider site: {groups}.")
 
 
-def list_vms(db: Database, *, names_only: bool = False) -> None:
+def _sorted_vm_rows(db: Database, sort_keys: tuple[str, ...] | None) -> tuple[VMRow, ...]:
+    return sort_rows(
+        db.list_vms(),
+        sort_keys=sort_keys,
+        key_functions={
+            "alpha": lambda vm: (vm.name,),
+            "creation": lambda vm: nullable_sort_value(vm.created_at),
+        },
+        entity_kind="vm",
+    )
+
+
+def list_vms(
+    db: Database,
+    *,
+    names_only: bool = False,
+    sort_keys: tuple[str, ...] | None = None,
+) -> None:
     """List all VMs from local inventory."""
     if names_only:
-        for vm in db.list_vms():
+        for vm in _sorted_vm_rows(db, sort_keys):
             output.info(vm.name)
         return
-    render_vm_listing(vm_listing(db))
+    render_vm_listing(vm_listing(db, sort_keys=sort_keys))
 
 
 def vm_description(
@@ -683,6 +707,13 @@ def vm_description(
         issues=tuple(issues),
         diagnostics=tuple(diagnostics),
         instance_state=instance_state,
+        last_started_at=vm.last_started_at,
+        uptime_seconds=derive_uptime_seconds(
+            vm.last_started_at,
+            running=observed_status == VMStatus.RUNNING.value,
+            entity_kind="vm",
+            entity_name=vm.name,
+        ),
     )
 
 

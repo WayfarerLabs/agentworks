@@ -94,14 +94,12 @@ def show(
     )
 
     if output_format is OutputFormat.JSON:
-        from click import get_binary_stream
+        from agentworks.cli._machine_output import write_json_stdout
+        from agentworks.machine_output import MachineOutputCommand
 
-        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
-
-        write_json_envelope(
+        write_json_stdout(
             MachineOutputCommand.GRAPH_SHOW,
             graph_result_data(result),
-            get_binary_stream("stdout"),
         )
         return
 

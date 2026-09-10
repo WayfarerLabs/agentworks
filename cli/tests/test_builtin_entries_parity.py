@@ -286,7 +286,8 @@ def _write_operator_config(
     cfg = tmp_path / "config.toml"
     plugin_names = ", ".join(f'"{name}"' for name in enabled_plugins)
     cfg.write_text(
-        f'[operator]\nssh_public_key = "{pub}"\nssh_private_key = "{priv}"\n\n[plugins]\nsystem = [{plugin_names}]\n'
+        f'[operator]\nssh_public_key = "{pub.as_posix()}"\nssh_private_key = "{priv.as_posix()}"\n'
+        f"\n[plugins]\nsystem = [{plugin_names}]\n"
     )
     if manifests:
         resources = tmp_path / "resources"

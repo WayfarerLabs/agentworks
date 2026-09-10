@@ -787,12 +787,20 @@ def _launch_existing_session(
                         hint="Use 'session stop --force' to kill it, then retry.",
                     ) from exc
                 raise
-
             from agentworks.sessions.tmux import (
                 ProbeStatus,
                 capture_tmux_server_fingerprint,
                 kill_server_and_probe,
             )
+
+            try:
+                db.record_session_started(name)
+            except (KeyboardInterrupt, Exception):
+                cleanup = kill_server_and_probe(run_command=session_run_command, socket_path=new_sock)
+                if cleanup is not ProbeStatus.ABSENT:
+                    _mark_runtime_unknown(db, session, socket_path=new_sock)
+                    output.warn(f"session '{name}' may still have a runtime at socket {new_sock}")
+                raise
 
             fingerprint_probe = capture_tmux_server_fingerprint(
                 target=session_target,
@@ -956,8 +964,8 @@ def _launch_all_sessions(
 ) -> None:
     """Start sessions, optionally replacing running runtimes.
 
-    Ordinary start leaves running selections unchanged; restart replaces them.
-    Each operation considers every matching session.
+    Batch start selects stopped sessions plus states required by explicit
+    modifiers; restart considers every match and replaces running runtimes.
 
     Each name filter accepts a single name or a list of names; lists
     OR within a filter, filters AND across the call. ``agent_name``
@@ -989,9 +997,10 @@ def _launch_all_sessions(
         # Error if any actionable sessions are still unknown after auto-repair.
         # The observer reports PID_STOPPED rows too; lifecycle omits them from
         # this refusal set because it does not need to act on them.
-        # Legacy sessions remain UNKNOWN in the observer status map; the
-        # singular launch migrates them to the new model, so lifecycle alone
-        # excludes them from this refusal set.
+        # Legacy sessions remain UNKNOWN in batch observation. Exclude them
+        # from this refusal so unfiltered batch restart can migrate them in the
+        # singular launcher. Named start also migrates directly; batch start's
+        # observed-status selection below omits them.
         unknown = [
             s
             for s in sessions
@@ -1009,6 +1018,14 @@ def _launch_all_sessions(
                 f"{len(unknown)} session(s) have unknown status after auto-repair ({names}).",
                 hint="Resolve the listed sessions manually before retrying.",
             )
+
+        if not replace_running:
+            start_statuses = {SessionStatus.STOPPED}
+            if force:
+                start_statuses.add(SessionStatus.BROKEN)
+            if force_new:
+                start_statuses.add(SessionStatus.RUNNING)
+            sessions = [s for s in sessions if status_map.get(s.name) in start_statuses]
 
         if not sessions:
             output.info("No matching sessions to start.")

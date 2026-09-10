@@ -50,6 +50,33 @@ replacement instead. Run `agw resource explain vm-template`, `workspace-template
 or `session-template` for the accepted fields. Use `agw resource explain admin-template` for
 `--admin-spec` fields.
 
+### List ordering
+
+List commands default to alphabetical order and accept `--sort KEY[,KEY...]` where another useful
+ordering exists. Keys are ascending, the first supplied key is primary, and `alpha` is always the
+final tie-breaker regardless of where it appears in the option. Unknown, duplicate, empty, and
+command-inapplicable keys are errors. Missing creation times and relationship names sort before
+present values.
+
+| Command          | Sort keys                                       |
+| ---------------- | ----------------------------------------------- |
+| `vm list`        | `alpha`, `creation`                             |
+| `agent list`     | `alpha`, `creation`, `vm`                       |
+| `workspace list` | `alpha`, `creation`, `vm`                       |
+| `session list`   | `alpha`, `creation`, `vm`, `agent`, `workspace` |
+| `console list`   | `alpha`, `creation`, `vm`                       |
+| `secret list`    | `alpha`, `source`, `backend`                    |
+| `resource list`  | `alpha`                                         |
+| `resource kinds` | `alpha`                                         |
+
+For `resource list`, alphabetical order means `(kind, name)`. Human, JSON, and `--names-only` output
+use the same service ordering. `guide list` preserves its inherent catalog order and does not accept
+`--sort`.
+
+For `secret list`, `source` and `backend` mean the source name and configured backend name of the
+first candidate source in configured source-chain precedence. A secret with no candidate source
+sorts before named values.
+
 ### Machine-readable output
 
 The operational inspection commands `agw graph show`, `agw resource list`, `agw resource show`,
@@ -105,8 +132,8 @@ deduplicated, grouped, or sorted.
 ```
 
 `origin`, `used_by_count`, and `not_ready_reason` may be null. `disabled` is boolean. Resource rows
-preserve the selected kind order, then name order, and counts are post-filter values. Disabled rows
-remain hidden unless `--include-disabled` is requested.
+use the requested list ordering, defaulting to kind then name, and counts are post-filter values.
+Disabled rows remain hidden unless `--include-disabled` is requested.
 
 `agw resource show KIND/NAME --output json` uses command `resource.show` and data:
 
@@ -156,7 +183,7 @@ declaration values but never resolves a secret reference; treat its output as se
 
 `agw resource kinds --output json` uses command `resource.kinds` and data
 `{kinds: [{kind, category, resource_count, description}]}`. `category` is exactly `declarable` or
-`capability`; kinds sort lexically.
+`capability`; kinds use the requested list ordering, which is lexical for the available `alpha` key.
 
 #### Graph JSON schema
 
@@ -240,14 +267,15 @@ omit static non-candidates. The default preview permits no backend-classified op
 
 `template`, `tailscale_host`, `debian_release`, and `debian_release_observed_at` are nullable. A
 non-null release is a codename recognized by this Agentworks build, and its timestamp records the
-last matching live observation. VMs retain name order. Provisioning is `pending`, `in_progress`,
-`complete`, `failed`, or `unknown`; initialization additionally permits `partial`. These frozen JSON
-v1 vocabularies do not expand when domain enums gain members. In this VM list JSON projection,
-`unknown` is the stable sentinel for an invalid persisted value and never echoes that stored value.
-The current producer always emits the additive nullable v1 fields `observed_status` and
-`status_disposition`; a v1 consumer must tolerate their absence from older producers. Plain list
-emits null for both. With `--status`, observed status is `running`, `stopped`, `deallocated`, or
-`unknown`; disposition is `manual` or `idle` only for stopped or deallocated VMs.
+last matching live observation. VM rows retain the selected service-layer order, alphabetical by
+name by default. Provisioning is `pending`, `in_progress`, `complete`, `failed`, or `unknown`;
+initialization additionally permits `partial`. These frozen JSON v1 vocabularies do not expand when
+domain enums gain members. In this VM list JSON projection, `unknown` is the stable sentinel for an
+invalid persisted value and never echoes that stored value. The current producer always emits the
+additive nullable v1 fields `observed_status` and `status_disposition`; a v1 consumer must tolerate
+their absence from older producers. Plain list emits null for both. With `--status`, observed status
+is `running`, `stopped`, `deallocated`, or `unknown`; disposition is `manual` or `idle` only for
+stopped or deallocated VMs.
 
 The VM, workspace, agent, and session description records append the JSON v1 `instance_state`
 object. Current producers always include it; older JSON v1 producers may omit this additive field:
@@ -284,23 +312,25 @@ recorded-fact section `Lifecycle evidence`.
 this ordered shape:
 
 ```text
-{name, created_at, site, platform, backend, observed_status, status_disposition,
+{name, created_at, last_started_at, uptime_seconds, site, platform, backend,
+ observed_status, status_disposition,
  operator_stopped, hostname, system_slug, system_slug_state, template, admin_template,
  admin_username, provisioning_status, initialization_status, tailscale_host, last_seen_at,
  debian_release, debian_release_observed_at, provisioned_resources, live_resources, agents,
  workspaces, events, instance_state}
 ```
 
-`platform`, `backend`, `status_disposition`, `system_slug`, `template`, `admin_template`,
-`tailscale_host`, `last_seen_at`, `debian_release`, `debian_release_observed_at`, and
-`live_resources` are nullable. Older JSON v1 producers may also emit a null `observed_status`; the
-current producer always emits `running`, `stopped`, `deallocated`, or `unknown` because describe
-requests observation. Non-null release observations have the same recognized-codename and timestamp
-semantics as VM list. `status_disposition` is `manual` or `idle` only for stopped or deallocated
-VMs; and `system_slug_state` is `set`, `declined`, or `unset`. `provisioned_resources` is
-`{cpus, memory_gib, disk_gib, swap_gib}` with nullable integers. It is the provisioning request
-recorded by Agentworks, not provider-observed realized hardware. Human VM describe labels these
-persisted values `Requested`. `live_resources` is null or this record:
+`last_started_at`, `uptime_seconds`, `platform`, `backend`, `status_disposition`, `system_slug`,
+`template`, `admin_template`, `tailscale_host`, `last_seen_at`, `debian_release`,
+`debian_release_observed_at`, and `live_resources` are nullable. Older JSON v1 producers may also
+emit a null `observed_status`; the current producer always emits `running`, `stopped`,
+`deallocated`, or `unknown` because describe requests observation. Non-null release observations
+have the same recognized-codename and timestamp semantics as VM list. `status_disposition` is
+`manual` or `idle` only for stopped or deallocated VMs; and `system_slug_state` is `set`,
+`declined`, or `unset`. `provisioned_resources` is `{cpus, memory_gib, disk_gib, swap_gib}` with
+nullable integers. It is the provisioning request recorded by Agentworks, not provider-observed
+realized hardware. Human VM describe labels these persisted values `Requested`. `live_resources` is
+null or this record:
 
 ```text
 {cpus, load_average, memory_total, memory_used, memory_percent, swap_total,
@@ -334,19 +364,19 @@ agw vm describe build-vm --output json
 #### Workspace and agent JSON schemas
 
 `agw workspace list --output json` uses `workspace.list` and
-`{workspaces: [{name, vm_name, template, created_at}]}`. `template` is nullable and order remains
-workspace name order after filtering. `agw workspace describe NAME --output json` uses
-`workspace.describe` and `{workspace}`; workspace is
-`{name, vm_name, template, path, created_at, sessions, agents, instance_state}`. Session entries are
-`{name, template, mode, agent_name}` and agent entries are `{name, linux_user}`. `template` and
+`{workspaces: [{name, vm_name, template, created_at}]}`. `template` is nullable. Rows retain the
+selected service-layer order, alphabetical by name by default.
+`agw workspace describe NAME --output json` uses `workspace.describe` and `{workspace}`; workspace
+is `{name, vm_name, template, path, created_at, sessions, agents, instance_state}`. Session entries
+are `{name, template, mode, agent_name}` and agent entries are `{name, linux_user}`. `template` and
 `agent_name` are nullable, and mode is `admin`, `agent`, or `unknown`. An invalid persisted mode
 maps to `unknown` without exposing its raw value in this workspace JSON projection.
 
 `agw agent list --output json` uses `agent.list` and
 `{agents: [{name, vm_name, template, grant_all, grants}]}`. `template` is nullable, `grant_all` is
 boolean, and grant entries are `{workspace_name, grant_type}` where grant type is `explicit`,
-`implicit`, or `both`. Agents retain VM then agent name order.
-`agw agent describe NAME --output json` uses `agent.describe` and `{agent}`; agent is
+`implicit`, or `both`. Agent rows retain the selected service-layer order, alphabetical by name by
+default. `agw agent describe NAME --output json` uses `agent.describe` and `{agent}`; agent is
 `{name, vm_name, linux_user, template, grant_all, created_at, explicit_grants, sessions, instance_state}`,
 with nullable `template` and session entries `{name, template, workspace_name}`.
 
@@ -366,31 +396,45 @@ is exactly `running`, `stopped`, `residual`, `broken`, `unknown`, or `unavailabl
 inconclusive. Older JSON v1 producers may have used `unavailable` for other unavailable
 observations. A bad persisted mode maps to `unknown` without exposing its raw value in these session
 JSON projections. The frozen output mode vocabulary does not expand when the domain enum gains a
-member. Rows retain workspace then session name order. `agw session describe NAME --output json`
-uses `session.describe` and `{session}`. Session is this record:
+member. A row whose workspace still exists keeps that workspace's stored string `vm_name`, even if
+the VM row is missing. If a selected session's workspace is missing and no truthful VM name can be
+derived, JSON v1 fails atomically before live observation because `vm_name` remains a required
+string. Human and names-only inventory still report that row. Rows retain the selected service-layer
+order, alphabetical by name by default. `agw session describe NAME --output json` uses
+`session.describe` and `{session}`. Session is this record:
 
 ```text
 {name, workspace_name, vm_name, template, harness_integration, mode, agent_name,
- status, pid, created_at, updated_at, consoles, instance_state}
+ status, pid, created_at, last_started_at, uptime_seconds, updated_at, consoles, instance_state}
 ```
 
-`pid` is a positive integer or null. Opaque harness state, socket paths, and boot identifiers are
-never serialized. `consoles` is the additive optional v1 field `[{console_name, position}]`. Entries
-retain deterministic console-name order, and `position` is the console membership's stored
-zero-based position. Current producers emit `[]` when the session has no console associations; older
-v1 producers may omit this additive field under the compatibility contract below.
+`pid` and `uptime_seconds` are nonnegative integers or null; `pid` is positive when present.
+`last_started_at` is a UTC timestamp or null. Opaque harness state, socket paths, and boot
+identifiers are never serialized. `consoles` is the additive optional v1 field
+`[{console_name, position}]`. Entries retain deterministic console-name order, and `position` is the
+console membership's stored zero-based position. Current producers emit `[]` when the session has no
+console associations; older v1 producers may omit this additive field under the compatibility
+contract below.
 
 `agw console list --output json` uses `console.list` and
-`{consoles: [{name, vm_name, session_count, status}]}` in configured name order after filtering.
-Current producers always emit the additive v1 console `status` field; a v1 consumer must tolerate
-its absence from older producers. Status is `unavailable` for plain list; with `--status` it is
-`running`, `stopped`, `residual`, or `unknown`. `agw console describe NAME --output json` uses
-`console.describe` and `{console}`. Console is
-`{name, vm_name, admin_shell, created_at, updated_at, status, sessions}`. Describe status uses the
-console live vocabulary and never `unavailable`. Members are `{position, session_name, shells}` in
-ascending position, and shells are `{cwd, admin}` in configured shell order. `cwd` is nullable and
-all booleans remain JSON booleans. Console inspection preserves configured database membership even
-when its non-activating live observation is unknown.
+`{consoles: [{name, vm_name, session_count, status}]}`. Rows retain the selected service-layer
+order, alphabetical by name by default. Current producers always emit the additive v1 console
+`status` field; a v1 consumer must tolerate its absence from older producers. Status is
+`unavailable` for plain list; with `--status` it is `running`, `stopped`, `residual`, or `unknown`.
+`agw console describe NAME --output json` uses `console.describe` and `{console}`. Console is
+`{name, vm_name, admin_shell, created_at, last_started_at, uptime_seconds, updated_at, status, sessions}`.
+Describe status uses the console live vocabulary and never `unavailable`. Members are
+`{position, session_name, shells}` in ascending position, and shells are `{cwd, admin}` in
+configured shell order. `cwd` is nullable and all booleans remain JSON booleans. Console inspection
+preserves configured database membership even when its non-activating live observation is unknown. A
+console whose referenced VM row is missing retains its directly stored string `vm_name` and uses
+`unknown` when status is requested.
+
+For all three runnable describes, `last_started_at` is the raw nullable UTC timestamp persisted
+after a successful start. `uptime_seconds` is a nullable nonnegative integer derived at inspection
+time. It is present only when the resource's exact observed status is `running` and the start time
+is known; a future start time clamps it to zero. These additive fields may be absent from older JSON
+v1 producers.
 
 #### Doctor JSON schema
 
@@ -461,16 +505,17 @@ changing an enum spelling requires a new schema version and an explicit compatib
 
 ### Database
 
-| Command                                       | Description                                       |
-| --------------------------------------------- | ------------------------------------------------- |
-| `agw database backup`                         | Create an on-demand SQLite snapshot               |
-| `agw database restore BACKUP_PATH [--yes/-y]` | Replace the live database with a validated backup |
+| Command                                                 | Description                                       |
+| ------------------------------------------------------- | ------------------------------------------------- |
+| `agw database backup`                                   | Create an on-demand SQLite snapshot               |
+| `agw database restore BACKUP_PATH [--force] [--yes/-y]` | Replace the live database with a validated backup |
 
 Both commands operate directly on SQLite through its online backup API. They do not open the
 migrating `Database` facade. `database backup` snapshots the present schema, including a schema
 newer than the running release, and emits only the completed path on stdout. Status text stays on
-stderr. A missing or malformed live database is refused without creating an empty database or a
-completed backup.
+stderr. It preserves incomplete relationships without warning or refusal because a backup remains
+valuable recovery evidence; restore owns the later import decision. A missing or malformed live
+database is refused without creating an empty database or a completed backup.
 
 Backups are stored in `database-backups/` beside `agentworks.db`. On-demand names start with
 `agentworks-manual-` and are never automatically removed. Pre-migration names start with
@@ -495,15 +540,33 @@ failure reports the exact restore command when a snapshot exists, or explicitly 
 pre-migration backup was created. Notices and prompts stay on stderr, so JSON and `--names-only`
 stdout remain machine-pure.
 
-`database restore` validates SQLite integrity, the claimed supported schema version, and that
-version's complete Agentworks table-and-column shape before it opens the live destination. It
-refuses an identical path, a generic SQLite file, an incomplete Agentworks lookalike, or a schema
-newer than this release understands. The source remains available after restore. Confirmation is
-required by default; a non-interactive invocation must pass `--yes` (or `-y`). Restore does not
-create an implicit backup of the live destination and does not migrate the restored schema. Run
-`agw database backup` first if you want an additional recovery point before replacement. Restore a
-schema-compatible backup before running an older Agentworks release against state created by a newer
-release.
+`database restore` validates SQLite integrity, the claimed supported schema version, that version's
+complete Agentworks table-and-column shape, its expected foreign-key declarations, and violations of
+those relationships before it prepares the live destination. It refuses an identical path, a generic
+SQLite file, an incomplete Agentworks lookalike, a schema newer than this release understands, or a
+source with foreign-key violations. The source remains available after restore.
+
+Pass `--force` only when an inconsistent backup is the best available recovery source. It bypasses
+the foreign-key refusal and no other validation. Agentworks warns before confirmation and again
+after restoring that some resources may remain unavailable until their relationships are repaired.
+Confirmation is still required by default; `--force` does not imply `--yes`, and a non-interactive
+invocation must pass `--yes` (or `-y`). `--yes` skips only the prompt and never suppresses either
+warning. The source and any existing destination must be regular files. Agentworks compares path
+identities observed around the SQLite opens, refuses endpoint changes that remain observable, and
+requires the observed source and destination identities to differ. Validation then keeps the same
+source snapshot and any existing destination open through confirmation. After confirmation, SQLite
+copies only to a private staged file. Agentworks refuses a changed destination before installing
+that completed stage. If no live database exists, installation uses a no-overwrite link and refuses
+a file that appeared in the meantime. Replacing an existing destination takes the database-use lock
+held by writable Agentworks connections, requires its WAL to checkpoint cleanly, switches it out of
+WAL mode, and takes an exclusive SQLite writer lock. The database-use lock remains held through
+installation so another Agentworks process cannot recreate WAL state in the replacement gap. Restore
+refuses after a bounded wait when other database users prevent that safe replacement boundary.
+
+Restore does not create an implicit backup of the live destination and does not migrate the restored
+schema. Run `agw database backup` first if you want an additional recovery point before replacement.
+Restore a schema-compatible backup before running an older Agentworks release against state created
+by a newer release.
 
 ### Secrets
 
@@ -647,7 +710,8 @@ disk, export, or other recovery artifact. On POSIX, its local timestamp director
 mode 0700 and its JSON files with mode 0600. Native Windows refuses backups containing instance
 specs until private access-control export is supported. Instance specs can contain plaintext
 environment values, so keep the configured backup path on a trusted local filesystem and protect any
-copies of the archive with equivalent access controls.
+copies of the archive with equivalent access controls. Current archives use manifest version 5;
+their VM and session rows include the nullable latest-start observations.
 
 `agw vm shell` is the Agentworks-wrapped entry point; for raw SSH (VS Code Remote-SSH, `scp`, etc.),
 use the `awvm--<vm>` alias documented under [Direct SSH aliases](#direct-ssh-aliases).
@@ -677,9 +741,9 @@ IP is created (one per session, so concurrent sessions never tear down each othe
 removed again on exit (the public IP itself is permanent). If your SSH traffic egresses through a
 different address than the detection sees (VPN split tunnel, proxy, CGNAT), set `ssh_allow_cidrs` in
 the config's `[operator]` section to a list of IPv4 addresses and/or CIDRs to allow additionally; if
-detection fails entirely, those entries are used alone. Proxmox isn't supported by this flag because
-the QEMU guest agent's exec interface is one-shot and non-interactive; use the Proxmox web UI's
-serial console (`VM > Console` in the Proxmox VE web UI) as the equivalent escape hatch.
+detection fails entirely, those entries are used alone. Proxmox QGA supplies native non-interactive
+execution, but it does not provide the interactive terminal required by this flag. Use the Proxmox
+web UI's serial console (`VM > Console` in the Proxmox VE web UI) as the equivalent escape hatch.
 
 ### Workspaces
 
@@ -805,21 +869,31 @@ only; `--admin` matches admin-mode sessions only (the two are mutually exclusive
 
 Plain `session list` reads local inventory and omits `STATUS`. Add `--status` for bounded,
 non-activating live observation of the selected sessions; the human table then uses `running`,
-`stopped`, `residual`, `broken`, or `unknown`. `--status` cannot be combined with `--names-only`.
+`stopped`, `residual`, `broken`, or `unknown`. A running row with a known start time includes
+compact uptime, such as `running (45s)` or `running (3d)`; one without a known start time remains
+`running`. `--status` cannot be combined with `--names-only`.
+
+Plain human and names-only inventory preserve selected session rows while recovering incomplete
+relationships. A missing workspace renders VM as `-`; an existing workspace that references a
+missing VM preserves that stored VM name. Requested status leaves either row `unknown`, performs no
+guest call for it, and still observes structurally complete peers. Named describe and lifecycle
+commands remain strict. Relationship-based filters select only rows reachable through the requested
+existing relationship; unfiltered inventory is the broad recovery view.
 
 `session stop`, `session start`, and `session restart` operate on a single session by default. Pass
-`--all` to batch over matching sessions. The batch form accepts `--vm <vm>`, `--workspace <ws>`,
-`--agent <agent>`, `--console <console>`, and `--admin` to narrow the set; filters compose with AND
-and require `--all`. The name filters accept a single value or a comma-separated list
-(`--vm vm1,vm2`); commas within a filter are OR-ed together, and an unknown name in a filter is an
-error, not an empty result. `--console` selects sessions belonging to any of the given consoles.
-`--agent` matches agent-mode sessions only; `--admin` matches admin-mode sessions only (the two are
-mutually exclusive). Pass `--force` only to recover broken state after Agentworks proves the prior
-managed tmux server is absent; Agentworks never signals a stored numeric PID. Start and restart
-resume the harness conversation when possible. `--resume-only` refuses unless the integration can
-resume existing state; `--force-new` requires a fresh conversation when the operation launches a
-runtime. The two options are mutually exclusive. A running `session start` remains a no-op under the
-default or resume-only policy; a running `session start --force-new` is refused rather than silently
+`--all` to batch over matching sessions. By default, session start --all dispatches only matches
+observed as stopped. The batch form accepts `--vm <vm>`, `--workspace <ws>`, `--agent <agent>`,
+`--console <console>`, and `--admin` to narrow the set; filters compose with AND and require
+`--all`. The name filters accept a single value or a comma-separated list (`--vm vm1,vm2`); commas
+within a filter are OR-ed together, and an unknown name in a filter is an error, not an empty
+result. `--console` selects sessions belonging to any of the given consoles. `--agent` matches
+agent-mode sessions only; `--admin` matches admin-mode sessions only (the two are mutually
+exclusive). Pass `--force` only to recover broken state after Agentworks proves the prior managed
+tmux server is absent; Agentworks never signals a stored numeric PID. Start and restart resume the
+harness conversation when possible. `--resume-only` refuses unless the integration can resume
+existing state; `--force-new` requires a fresh conversation when the operation launches a runtime.
+The two options are mutually exclusive. A running `session start` remains a no-op under the default
+or resume-only policy; a running `session start --force-new` is refused rather than silently
 replacing the runtime. A restart obtains the integration's launch decision before teardown, so an
 unsupported policy or unavailable strict resume leaves the managed tmux runtime and
 integration-owned state intact. Normal lifecycle preparation may already have persisted observed
@@ -873,7 +947,7 @@ panes you want preloaded into a session's window.
 | `agw console remove-sessions <name> <sessions...>`  | Remove session windows (accepts `-y`/`--yes`)                     |
 | `agw console reorder-sessions <name> <sessions...>` | Reorder member sessions (`--to-index N` or `--to-back`)           |
 | `agw console add-shell <name> <session>`            | Add a shell pane to a session window (accepts `--cwd`, `--admin`) |
-| `agw console restore-session <name> <session>`      | Repair one session window against its configured shell list       |
+| `agw console restore-session <name> <session>`      | Repair one session window and reconcile configured window order   |
 
 `console create` accepts:
 
@@ -913,8 +987,11 @@ displayed is the total membership, not the count of matching sessions. Filters c
 Plain `console list` is a local inventory read and omits `STATUS`. Add `--status` to enumerate the
 selected VMs' canonical and staging tmux session names without starting a VM or rebuilding a
 console. Status is `running`, `stopped`, `residual`, or `unknown`; `--status` cannot be combined
-with `--names-only`. `console describe` performs the same non-activating observation by default
-while preserving configured membership when live state is unknown.
+with `--names-only`. A saved console whose VM row is missing remains in both list forms with its
+stored VM name and `unknown` requested status. It receives no guest call and does not prevent
+healthy peers from being observed. `console describe` performs the same non-activating observation
+by default while preserving configured membership when live state is unknown; it remains strict when
+the console's VM relationship itself is missing.
 
 The shared inventory-versus-observation rules, status meanings, bounds, and failure behavior are
 documented in [Runnable status inspection](../docs/guides/runnable-status.md).
@@ -943,11 +1020,12 @@ agw console add-shell backend auth-server --cwd src/api --admin
 
 `console restore-session` repairs a single session window in a running console: it re-adds shell
 panes you killed by accident (each back in its configured position) and rebuilds the window from
-config if it is gone entirely. It is additive and never kills a live pane or window, so it refuses,
-pointing you at `console restart`, when the fix would require destroying live state: more panes live
-than configured, shell panes it can't map back to the config (untagged, duplicated, or out of
-range), or a window whose session pane itself was killed (the console then shows a plain shell where
-the session should be).
+config if it is gone entirely. A successful restore also reconciles live session-window order with
+the console's configured member order. It is additive and never kills a live pane or window, so it
+refuses, pointing you at `console restart`, when the fix would require destroying live state: more
+panes live than configured, shell panes it can't map back to the config (untagged, duplicated, or
+out of range), or a window whose session pane itself was killed (the console then shows a plain
+shell where the session should be).
 
 Memberships and shell layouts persist in the database. `agw console create` stores the definition
 and builds it, `console start` realizes a stopped definition, `console restart` rebuilds it, and

@@ -31,7 +31,7 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     def _make(extra: str = "", *, manifests: list[ManifestDoc] | None = None):
         path = tmp_path / "config.toml"
         path.write_text(
-            f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n'
+            f'[operator]\nssh_public_key = "{key.as_posix()}.pub"\nssh_private_key = "{key.as_posix()}"\n'
             '[secret_config]\nsources = ["env-var"]\n' + extra
         )
         if manifests:
