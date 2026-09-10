@@ -217,9 +217,9 @@ are local); Azure, EC2, GCE, and Proxmox use it:
   reachability with an `echo ok` retry loop. Lima, WSL2, Azure, EC2, and GCE return their full
   interactive `Transport`: local platform CLIs for Lima and WSL2, and SSH against the current public
   IP for the cloud platforms. Proxmox returns an execution-only QEMU Guest Agent transport. Core
-  uses only `ExecTransport` for native bootstrap and recovery. `vm shell --platform` is the sole
-  caller that requires the full subtype; it checks `native_shell_unavailable_hint` before route,
-  credential, transport, or probe work.
+  uses only `ExecTransport` for native bootstrap and non-interactive recovery, including
+  `vm exec --platform`. `vm shell --platform` is the sole caller that requires the full subtype; it
+  checks `native_shell_unavailable_hint` before route, credential, transport, or probe work.
 - `transient_route(vm, ctx, *, config=None) -> context manager` (default `nullcontext()`). Azure
   opens a scoped SSH route on enter (heals a missing public IP, converges the NSG onto the
   baseline-deny model, pokes this operation's own ephemeral allow rule scoped to the operator's
@@ -253,8 +253,8 @@ are local); Azure, EC2, GCE, and Proxmox use it:
   hook never fired on either. Create-time bootstrap failure stays inside the platform rollback
   window and never reaches this hook. Azure and GCE delete the owned fixed-name bootstrap allow and
   EC2 revokes the recorded bootstrap tuples, so the VM defaults to zero inbound exposure; debugging
-  survives via `vm shell --platform` (a fresh per-operation allow) and the platform's serial console
-  (not firewall-gated).
+  survives via `vm shell --platform` or `vm exec --platform` (a fresh per-operation allow) and the
+  platform's serial console (not firewall-gated).
 
 The two closing hooks and `transient_route` take `ctx` because opening or closing the firewall route
 (an Azure NSG rule, an EC2 security-group rule) is a backend call; the caller (Phase A's
@@ -265,8 +265,8 @@ the interrupt path never resolves a secret for the first time.
 Callers must pass the context their composition root already built for the platform's ops
 (`gated_vm_boundary` and `_live_vm_boundary` in `agentworks.vms.manager.boundary` both hand one out;
 the activation gate builds its own from the gate's scoped reader), never a freshly constructed empty
-one. `vm shell --platform` is the case that makes this load-bearing: on a running VM the gate's
-happy path is a pure Tailscale reachability probe, so nothing has touched the platform with a
+one. `vm shell --platform` and `vm exec --platform` make this load-bearing: on a running VM the
+gate's happy path is a pure Tailscale reachability probe, so nothing has touched the platform with a
 context before the transport is built. A platform must never depend on an earlier op in the same
 process having warmed a credential cache.
 
@@ -507,10 +507,10 @@ egress or `ssh_allow_cidrs` changed. EC2 revokes only those tuples. GCE reconstr
 fixed-name allow from the persisted canonical prefixes, network, tag, and contract fields, then
 requires both its persisted provider ID and that independent full shape before a name-based delete;
 a same-ID rule whose shape changed is retained and reported. In both platforms a concurrent
-`vm shell --platform` route's distinct allow survives (nothing serializes commands per VM). The
-other EC2-native divergence (tuple-identity rules, so concurrent same-egress routes share one rule
-and the poke/remove are idempotent/tolerant and fail closed) is covered under `transient_route`
-above and in `network.py`.
+`vm shell --platform` or `vm exec --platform` route's distinct allow survives (nothing serializes
+commands per VM). The other EC2-native divergence (tuple-identity rules, so concurrent same-egress
+routes share one rule and the poke/remove are idempotent/tolerant and fail closed) is covered under
+`transient_route` above and in `network.py`.
 
 ### Resources on a Cloud Platform: Per-VM Resources and Shared State
 

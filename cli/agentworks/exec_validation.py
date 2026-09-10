@@ -44,6 +44,7 @@ def normalize_exec_command(
 
     Returns the remote-command tokens the transport should run:
 
+    - An empty command is rejected at the shared service boundary.
     - If ``command`` begins with a single ``--`` end-of-options
       separator, that ``--`` is consumed and everything after it is
       returned verbatim (a dash-led first token included, a later
@@ -55,6 +56,13 @@ def normalize_exec_command(
       ``sh -c`` fallback).
     - Otherwise ``command`` is returned unchanged.
     """
+    if not command:
+        raise ValidationError(
+            "missing command",
+            entity_kind=kind,
+            entity_name=name,
+        )
+
     if command and command[0] == "--":
         remainder = command[1:]
         if not remainder:

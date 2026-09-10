@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 from typing import TYPE_CHECKING
 
-from agentworks.errors import StateError
+from agentworks.errors import StateError, ValidationError
 
 from ._helpers import (
     _guard_failed_vm,
@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
     from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.ssh import SSHResult
 
 # NOTE on ``_resolve_vm_admin_env_scopes`` / ``_vm_secret_target``: both
 # are defined in ``_helpers.py``, and tests monkeypatch them as
@@ -272,3 +273,59 @@ def exec_vm(
         if ws is not None:
             remote_cmd = f"cd {shlex.quote(ws.workspace_path)} && {remote_cmd}"
         return target.call_streaming(remote_cmd, env=env)
+
+
+def exec_vm_platform(
+    db: Database,
+    config: Config,
+    name: str,
+    command: list[str],
+    *,
+    workspace_name: str | None = None,
+    interaction: TtyInteractionPolicy,
+) -> SSHResult:
+    """Execute a recovery command through the VM's platform transport.
+
+    This explicit degraded route captures output, closes stdin, and does not
+    resolve or inject the Agentworks environment. It returns the native
+    transport result so the CLI can write each buffered stream and preserve
+    the guest exit status.
+    """
+    if workspace_name is not None:
+        raise ValidationError(
+            "--platform cannot be combined with --workspace",
+            entity_kind="vm",
+            entity_name=name,
+            hint="Run without --platform when workspace environment and directory semantics are required.",
+        )
+
+    import shlex
+
+    from agentworks.bootstrap import load_request_registry
+    from agentworks.exec_validation import normalize_exec_command
+    from agentworks.transports import native_transport
+
+    command = normalize_exec_command(command, kind="vm", name=name)
+    vm = _require_vm(db, name)
+    _guard_failed_vm(vm, allow_failed_init=True)
+
+    registry = load_request_registry(config, live_database=db)
+    with contextlib.ExitStack() as stack:
+        vm_node, _resolver, ops_ctx = stack.enter_context(
+            gated_vm_platform_recovery_boundary(
+                db,
+                config,
+                registry,
+                vm,
+                interaction=interaction,
+            )
+        )
+        target = native_transport(
+            vm,
+            vm_node.site.platform,
+            config,
+            ctx=ops_ctx,
+            stack=stack,
+        )
+        remote_cmd = command[0] if len(command) == 1 else shlex.join(command)
+        return target.run(remote_cmd, check=False)

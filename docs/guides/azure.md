@@ -85,7 +85,7 @@ authorizes each operation directly; correct RBAC and retry if Azure denies it.
 ## Network and cleanup model
 
 Each VM gets an Agentworks-owned public IP, NSG, VNet, NIC, and managed OS disk. The NSG has a
-deny-all-inbound baseline and ephemeral scoped TCP/22 allows for bootstrap and native platform
-shells. `agw vm delete <name>` deletes the VM first, then sweeps its auxiliary resources and
-confirms that the VM is absent before dropping the database row. A failed delete keeps the row so
-the operator can correct RBAC and retry.
+deny-all-inbound baseline and ephemeral scoped TCP/22 allows for bootstrap and native platform shell
+or exec recovery operations. `agw vm delete <name>` deletes the VM first, then sweeps its auxiliary
+resources and confirms that the VM is absent before dropping the database row. A failed delete keeps
+the row so the operator can correct RBAC and retry.

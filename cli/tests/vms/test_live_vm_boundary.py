@@ -84,38 +84,6 @@ def test_ordinary_gate_requires_ssh_identity_before_activation(
     assert calls == ["identity", "activation"]
 
 
-def test_platform_recovery_gate_does_not_require_canonical_ssh_identity(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The named platform recovery boundary remains available during SSH drift."""
-    from agentworks.vms.manager import boundary
-
-    calls: list[str] = []
-
-    @contextlib.contextmanager
-    def fake_boundary(*args: object, **kwargs: object):  # noqa: ANN202
-        calls.append("activation")
-        yield object(), object(), object()
-
-    monkeypatch.setattr(
-        boundary,
-        "require_vm_ssh_boundary",
-        lambda *args, **kwargs: calls.append("identity"),
-    )
-    monkeypatch.setattr(boundary, "_gated_vm_boundary", fake_boundary)
-
-    with boundary.gated_vm_platform_recovery_boundary(
-        object(),
-        object(),
-        object(),
-        object(),
-        interaction=TtyInteractionPolicy.REFUSE,
-    ):
-        pass
-
-    assert calls == ["activation"]
-
-
 def test_no_site_secrets_skips_the_resolve_pass(
     db: Database,
     make_config,

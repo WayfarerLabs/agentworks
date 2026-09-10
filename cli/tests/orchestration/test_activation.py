@@ -59,7 +59,11 @@ class _Target:
             self.seen_secrets[name] = gate_secrets.get(name)
         return self._stopped
 
-    def auto_start(self, gate_secrets: SecretReader) -> None:
+    def auto_start(
+        self,
+        gate_secrets: SecretReader,
+    ) -> None:
+        del gate_secrets
         if self._operator_stopped:
             # The node's own refusal (the ``operator_stopped`` flag,
             # re-read for the race guard): auto-start never overrides
@@ -180,7 +184,10 @@ class _Rejoining(_Target):
     rejoin key (today's ``_ensure_tailscale`` observing the node fail
     to reconnect and rejoining)."""
 
-    def auto_start(self, gate_secrets: SecretReader) -> None:
+    def auto_start(
+        self,
+        gate_secrets: SecretReader,
+    ) -> None:
         super().auto_start(gate_secrets)
         self.seen_secrets["tailscale-auth-key"] = gate_secrets.get("tailscale-auth-key")
         # A second read must serve the recorded value, not re-resolve.
@@ -234,7 +241,10 @@ def test_repair_secret_resolves_lazily_and_lands_in_the_seed() -> None:
 
 def test_auto_start_reader_refuses_undeclared_names() -> None:
     class _Greedy(_Target):
-        def auto_start(self, gate_secrets: SecretReader) -> None:
+        def auto_start(
+            self,
+            gate_secrets: SecretReader,
+        ) -> None:
             gate_secrets.get("git-token-gh")  # neither gate nor repair
 
     target = _Greedy(stopped=True, repair_refs=("tailscale-auth-key",))

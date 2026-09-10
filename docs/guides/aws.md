@@ -83,8 +83,8 @@ the route opens. A failed explicit delete keeps the VM row so the operator can c
 
 Each VM receives one Agentworks-owned security group. Its empty ingress set is the deny baseline.
 Agentworks opens TCP/22 only to the detected operator IPv4 address plus `operator.ssh_allow_cidrs`,
-first for bootstrap and later for a native platform shell. It revokes only the tuples that operation
-opened.
+first for bootstrap and later for a native platform shell or exec recovery command. It revokes only
+the tuples that operation opened.
 
 `agw vm delete <name>` refreshes the STS identity and refuses an account mismatch. It reads the
 recorded instance and security group, verifies their `agentworks:vm` ownership and recorded

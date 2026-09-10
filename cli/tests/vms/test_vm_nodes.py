@@ -124,9 +124,22 @@ class _GatePlatform:
             self.events.append("hold-close")
 
 
-def _node(db: Database, platform: _GatePlatform, vm: VMRow) -> tuple[LiveVMNode, VMSiteNode]:
+def _node(
+    db: Database,
+    platform: _GatePlatform,
+    vm: VMRow,
+    *,
+    repair_canonical_connectivity: bool = True,
+) -> tuple[LiveVMNode, VMSiteNode]:
     site = VMSiteNode("stub", cast("VMPlatform", platform), (), cast("Registry", object()))
-    node = LiveVMNode(db, cast("Config", object()), cast("Registry", object()), vm, site)
+    node = LiveVMNode(
+        db,
+        cast("Config", object()),
+        cast("Registry", object()),
+        vm,
+        site,
+        repair_canonical_connectivity=repair_canonical_connectivity,
+    )
     return node, site
 
 
@@ -207,6 +220,30 @@ def test_auto_resume_healthy_probe_releases_without_auth_reader_access(
     ensure_active(node, _no_resolve)
 
     assert platform.events[2:] == ["hold-open", "probe-false", "hold-close"]
+
+
+def test_recovery_node_starts_without_repair_authority(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: object,
+) -> None:
+    vm = _seed(db)
+    monkeypatch.setattr(
+        vm_manager,
+        "_is_tailscale_reachable",
+        lambda host: pytest.fail("recovery must not probe canonical connectivity"),
+    )
+    platform = _GatePlatform(status=VMStatus.STOPPED)
+    node, _ = _node(db, platform, vm, repair_canonical_connectivity=False)
+    monkeypatch.setattr(
+        vm_manager,
+        "_tailscale_rejoin_required",
+        lambda *args, **kwargs: pytest.fail("recovery must not probe canonical connectivity"),
+    )
+
+    assert node.repair_secret_refs() == ()
+    assert ensure_active(node, _no_resolve) == {}
+    assert platform.events == ["status", "start"]
 
 
 def test_auto_resume_rejoin_orders_probe_reader_ensure_inside_hold(

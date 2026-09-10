@@ -251,9 +251,9 @@ provider's error message, details, or raw error code in either case.
 The external IPv4 is an outbound and recovery route, not standing inbound exposure. Agentworks reads
 it live after power transitions and never stores it. After Tailscale is ready, Agentworks closes the
 bootstrap allow; if closure cannot be proven, it retains and reports the rule. After a successful
-close only the priority-1 deny remains. `vm shell --platform` opens a fresh UUID-named scoped SSH
-allow for that command and removes only its own rule on exit; an unproven close is retained and
-reported rather than sweeping another rule.
+close only the priority-1 deny remains. `vm shell --platform` and `vm exec --platform` open a fresh
+UUID-named scoped SSH allow for that command and remove only their own rule on exit; an unproven
+close is retained and reported rather than sweeping another rule.
 
 ## Recovery and safe cleanup
 

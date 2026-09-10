@@ -455,6 +455,29 @@ def test_exec_missing_command_after_double_dash_fails_pre_gate(
     assert target.streaming_calls == []
 
 
+def test_exec_empty_service_command_fails_before_agent_lookup(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeAgentTarget,
+) -> None:
+    config = make_config()
+
+    with pytest.raises(ValidationError) as exc_info:
+        agent_manager.exec_agent(
+            db,
+            config,
+            name="missing",
+            command=[],
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert exc_info.value.entity_kind == "agent"
+    assert exc_info.value.entity_name == "missing"
+    assert resolve_counter == []
+    assert target.streaming_calls == []
+
+
 def test_missing_grant_fails_with_zero_resolves_and_zero_gate(
     db: Database,
     make_config,  # noqa: ANN001

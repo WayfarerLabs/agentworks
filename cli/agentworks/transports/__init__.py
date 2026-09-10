@@ -8,8 +8,9 @@ Three named factories plus one low-level helper:
   Linux user. Same mechanism as :func:`transport`, different SSH user.
 - :func:`native_transport` -- the platform-native transport
   (``limactl shell``, ``wsl.exe``, cloud public-IP SSH, Proxmox QGA).
-  Used for bootstrap and recovery; full transports additionally support
-  the explicit ``vm shell --platform`` opt-in.
+  Used for bootstrap and explicit recovery. Every native transport supports
+  ``vm exec --platform``; full transports additionally support the interactive
+  ``vm shell --platform`` opt-in.
 - :func:`transport_for_user` -- low-level helper used by the named
   factories. Direct use is reserved for the mid-create case where the
   agent row doesn't exist yet (today's only direct caller is
@@ -157,8 +158,9 @@ def native_transport(
     """Platform-native transport for an existing VM.
 
     Used for start-time Tailscale recovery, Tailscale rekey and logout,
-    and the explicit ``vm shell --platform`` opt-in. VM creation obtains
-    its initial transport separately from :meth:`VMPlatform.create`.
+    and the explicit ``vm shell --platform`` and ``vm exec --platform``
+    opt-ins. VM creation obtains its initial transport separately from
+    :meth:`VMPlatform.create`.
 
     ``platform`` is the VM's bound platform, resolved at the caller's
     composition root (the node factories via ``resolve_site``). ``stack``

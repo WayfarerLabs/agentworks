@@ -51,7 +51,7 @@ from .boundary import (
     gated_vm_platform_recovery_boundary,
     require_vm_ssh_boundary,
 )
-from .exec import exec_vm, shell_vm
+from .exec import exec_vm, exec_vm_platform, shell_vm
 from .inspect import (
     describe_vm,
     list_vms,
@@ -99,6 +99,7 @@ __all__ = [
     "delete_vm",
     "describe_vm",
     "exec_vm",
+    "exec_vm_platform",
     "gated_vm_boundary",
     "gated_vm_platform_recovery_boundary",
     "list_vms",

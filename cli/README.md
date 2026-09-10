@@ -563,10 +563,16 @@ current config and both stored final layers. See
 Agentworks records the configured SSH identity only after a VM create or reinit proves the admin
 `authorized_keys` result. It does not synthesize evidence for VMs created before this tracking was
 introduced. Such a VM needs one successful `agw vm reinit NAME` before ordinary canonical SSH
-commands will use it. If the configured key no longer works, use `agw vm shell NAME --platform`
-where the platform offers a usable recovery transport, restore the configured public key, and
-reinitialize. Some platform transports also depend on the configured key; use provider-native
-recovery or recreate the VM when that path cannot connect.
+commands will use it. If the configured key no longer works, use `agw vm shell NAME --platform` for
+interactive recovery or `agw vm exec --platform NAME COMMAND...` for a bounded repair where the
+platform offers the corresponding native transport. Platform exec buffers output, closes stdin, and
+does not inject the Agentworks environment; it also cannot be combined with `--workspace`. Restore
+the configured public key, then reinitialize. Some platform transports also depend on the configured
+key; use provider-native recovery or recreate the VM when that path cannot connect.
+
+Both `vm shell --platform` and `vm exec --platform` still start an auto-stopped VM and hold it
+active for the operation, but they skip post-start Tailscale reconnect and rejoin. Broken canonical
+connectivity therefore cannot block the platform-native recovery path.
 
 Debian distribution upgrades remain operator-led. After following Debian's release notes and
 verifying provider-native recovery, run `agw vm confirm-release <name>` to inspect and explicitly

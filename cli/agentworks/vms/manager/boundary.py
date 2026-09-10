@@ -87,6 +87,7 @@ def _gated_vm_boundary(
     *,
     targets: Sequence[SecretTarget] = (),
     scope: OperationScope | None = None,
+    repair_canonical_connectivity: bool = True,
     interaction: TtyInteractionPolicy,
 ) -> Iterator[tuple[LiveVMNode, Resolver, RunContext]]:
     """Compose a gated VM span after its caller selects SSH policy.
@@ -102,14 +103,14 @@ def _gated_vm_boundary(
     preflight sweep (its just-in-time values seed the boundary
     resolver) and run the one boundary resolve inside it. Yields
     ``(vm_node, resolver, ops_ctx)`` within the held-active span: the
-    body's interactive or streaming work stays anchored (WSL2's
+    body's interactive, streaming, or captured work stays anchored (WSL2's
     keepalive) for the command's duration, callers read
     ``resolver.values`` for env composition, and ``ops_ctx`` is the
     OP-START context for driving the node's platform (secrets scoped to
     the site's declared names), identical in shape to the one
-    :func:`_live_vm_boundary` returns. ``vm shell --platform`` is
-    today's only body that needs it; a command that touches the
-    platform must take it from here rather than assemble a secret-less
+    :func:`_live_vm_boundary` returns. The ``vm shell --platform`` and
+    ``vm exec --platform`` recovery bodies need it; a command that touches
+    the platform must take it from here rather than assemble a secret-less
     context of its own.
 
     ``scope`` is the command's :class:`OperationScope`; when None the
@@ -121,6 +122,11 @@ def _gated_vm_boundary(
     delete / grant / revoke) an AGENT-level one, and the singular
     session ops a SESSION-level one accordingly; the VM default
     serves the commands that are about the VM itself.
+
+    ``repair_canonical_connectivity=False`` keeps power convergence and the
+    held-active span but skips post-start Tailscale reconnect/rejoin. Explicit
+    platform-native recovery uses this mode so broken canonical connectivity
+    cannot block the operation intended to repair it.
 
     Deliberately NOT :func:`_live_vm_boundary` (the no-gate lifecycle
     trio): these commands converge power state first, and the gate
@@ -141,7 +147,13 @@ def _gated_vm_boundary(
     from agentworks.vms.nodes import live_vm_node
 
     resolver = Resolver(config, registry, interaction=interaction)
-    vm_node = live_vm_node(db, config, registry, vm)
+    vm_node = live_vm_node(
+        db,
+        config,
+        registry,
+        vm,
+        repair_canonical_connectivity=repair_canonical_connectivity,
+    )
     nodes = walk(vm_node)
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
@@ -149,7 +161,10 @@ def _gated_vm_boundary(
         resolver.register_targets(targets, allow_transient_auto_declare=True)
     if scope is None:
         scope = _vm_scope(db, vm.name)
-    with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
+    with activation_gate(
+        vm_node,
+        gate_secret_resolver(config, registry, resolver),
+    ):
         preflight_all(
             nodes,
             RunContext(config=config, operation_scope=scope),
@@ -196,7 +211,7 @@ def gated_vm_platform_recovery_boundary(
     scope: OperationScope | None = None,
     interaction: TtyInteractionPolicy,
 ) -> Iterator[tuple[LiveVMNode, Resolver, RunContext]]:
-    """Compose the explicit platform-native recovery gate without SSH proof."""
+    """Compose platform recovery without SSH proof or Tailscale repair."""
     with _gated_vm_boundary(
         db,
         config,
@@ -204,6 +219,7 @@ def gated_vm_platform_recovery_boundary(
         vm,
         targets=targets,
         scope=scope,
+        repair_canonical_connectivity=False,
         interaction=interaction,
     ) as boundary:
         yield boundary

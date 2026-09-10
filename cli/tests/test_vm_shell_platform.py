@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.db import Database
+from agentworks.db import Database, VMStatus
 from agentworks.errors import StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from tests.conftest import empty_secret_target, stub_build_registry, stub_vm_gates
@@ -221,6 +221,9 @@ def test_shell_vm_platform_uses_native_transport(
 
         def preflight(self, ctx: object) -> None:
             return None
+
+        def status(self, vm: object, ctx: object) -> VMStatus:
+            return VMStatus.RUNNING
 
         def native_transport(self, vm: object, ctx: object, *, config: object | None = None) -> object:
             platform_calls.append((getattr(vm, "name", "?"), config))

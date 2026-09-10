@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Annotated
 
@@ -17,6 +18,11 @@ vm_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(vm_app)
+
+
+def _shell_compatible_exit_code(returncode: int) -> int:
+    """Map a signal-style negative result to its conventional shell status."""
+    return 128 - returncode if returncode < 0 else returncode
 
 
 @vm_app.command("create")
@@ -317,19 +323,47 @@ def vm_reinit(
 def vm_exec(
     ctx: typer.Context,
     name: Annotated[str, typer.Argument(help="VM name")],
+    platform: Annotated[
+        bool,
+        typer.Option(
+            "--platform",
+            help=(
+                "Use the platform-native recovery transport without Tailscale fallback. "
+                "Output is buffered; stdin is EOF; no Agentworks environment is injected. "
+                "Incompatible with --workspace."
+            ),
+        ),
+    ] = False,
     workspace: Annotated[
         str | None,
         typer.Option("--workspace", help="Run from a workspace"),
     ] = None,
 ) -> None:
     """Execute a command on a VM as the admin user."""
+    if platform and workspace is not None:
+        raise typer.BadParameter("--platform cannot be combined with --workspace")
+
     interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config
-    from agentworks.vms.manager import exec_vm
+    from agentworks.vms.manager import exec_vm, exec_vm_platform
 
     if not ctx.args:
         typer.echo("Error: missing command", err=True)
         raise typer.Exit(1)
+    if platform:
+        result = exec_vm_platform(
+            get_db(),
+            load_config(),
+            name,
+            ctx.args,
+            workspace_name=workspace,
+            interaction=interaction,
+        )
+        sys.stdout.write(result.stdout)
+        sys.stdout.flush()
+        sys.stderr.write(result.stderr)
+        sys.stderr.flush()
+        raise typer.Exit(_shell_compatible_exit_code(result.returncode))
     raise typer.Exit(
         exec_vm(
             get_db(),

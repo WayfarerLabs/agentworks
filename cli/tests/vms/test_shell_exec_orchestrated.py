@@ -508,6 +508,23 @@ def test_exec_missing_command_after_double_dash_fails_pre_gate(
     assert target.streaming_calls == []
 
 
+def test_exec_empty_service_command_fails_before_vm_lookup(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeTarget,
+) -> None:
+    config = make_config()
+
+    with pytest.raises(ValidationError) as exc_info:
+        vm_manager.exec_vm(db, config, "missing", [], interaction=TtyInteractionPolicy.REFUSE)
+
+    assert exc_info.value.entity_kind == "vm"
+    assert exc_info.value.entity_name == "missing"
+    assert resolve_counter == []
+    assert target.streaming_calls == []
+
+
 def test_exec_bare_flag_after_command_word_still_works(
     db: Database,
     make_config,  # noqa: ANN001
@@ -656,7 +673,12 @@ def test_shell_platform_transport_routes_through_the_node_platform(
     instance the node's site edge holds (one object per node)."""
     config = make_config()
     _seed_vm(db)
-    _reachable(monkeypatch, True)
+    monkeypatch.setattr(
+        vm_manager,
+        "_is_tailscale_reachable",
+        lambda host: pytest.fail("platform recovery must not probe Tailscale"),
+    )
+    monkeypatch.setattr(ProxmoxPlatform, "status", lambda *_args, **_kwargs: VMStatus.RUNNING)
     seen: list[object] = []
     target = SSHTransport(host="203.0.113.8")
     target.interactive = lambda *_args, **_kwargs: 0  # type: ignore[method-assign]
@@ -688,20 +710,22 @@ def test_shell_platform_transport_hands_a_secret_bearing_ctx(
     """--platform hands the native-transport factory the BOUNDARY's
     op-start context, not a fresh empty one.
 
-    This is the load-bearing half of the ctx threading: a cold
-    ``vm shell --platform`` on a running VM never touches the platform
-    with a context first (the gate's happy path is a pure Tailscale
-    reachability probe), so if this call site handed over a secret-less
-    context, a platform whose transport needs a credential would have
-    no delivery surface at all and could only work by accident, off a
-    cache some earlier op happened to warm. The pin: the delivered
-    context can read the site's declared secret.
+    This is the load-bearing half of the ctx threading: platform recovery
+    observes power through the native platform rather than canonical
+    connectivity, then the native transport needs the same scoped site
+    credential. The pin: the delivered context can read the site's declared
+    secret.
     """
     from agentworks.errors import StateError
 
     config = make_config()
     _seed_vm(db)
-    _reachable(monkeypatch, True)
+    monkeypatch.setattr(
+        vm_manager,
+        "_is_tailscale_reachable",
+        lambda host: pytest.fail("platform recovery must not probe Tailscale"),
+    )
+    monkeypatch.setattr(ProxmoxPlatform, "status", lambda *_args, **_kwargs: VMStatus.RUNNING)
     seen: list[RunContext] = []
     target = SSHTransport(host="203.0.113.8")
     target.interactive = lambda *_args, **_kwargs: 0  # type: ignore[method-assign]

@@ -2,8 +2,8 @@
 
 Reaches a local Lima VM via ``limactl shell`` / ``limactl copy``. Used
 as the platform-native transport for the Lima platform (bootstrap and
-``vm shell --platform``); the canonical transport for Lima VMs is
-Tailscale SSH once the VM is online.
+explicit ``vm shell --platform`` / ``vm exec --platform`` recovery); the
+canonical transport for Lima VMs is Tailscale SSH once the VM is online.
 """
 
 from __future__ import annotations
