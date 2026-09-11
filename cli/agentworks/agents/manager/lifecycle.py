@@ -329,15 +329,13 @@ def delete_agent(
 
     vm = _require_vm(db, agent.vm_name)
 
-    from agentworks.harness_setup.lifecycle import mark_cleanup_pending, retire_owner_setup
     from agentworks.harness_setup.locking import native_mutation_guard
 
-    with native_mutation_guard(db.path, vm.name) as guard:
+    with native_mutation_guard(db.path, vm.name):
         from agentworks.ssh import SSHLogger
 
         ssh_logger = SSHLogger(vm.name, "agent-delete")
         try:
-            registry = None
             output.info(f"Deleting agent '{name}' on VM '{vm.name}'...")
             if vm_node is None:
                 # The standalone composition root: build the boundary here.
@@ -378,17 +376,6 @@ def delete_agent(
                     )
                 boundary = vm_node.hold_active()
             with boundary:
-                retire_owner_setup(
-                    db,
-                    config,
-                    kind="agent",
-                    name=name,
-                    vm=vm,
-                    logger=ssh_logger,
-                    held=guard,
-                    registry=registry,
-                    username=agent.linux_user,
-                )
                 # Kill running sessions for this agent (status-aware)
                 if agent_sessions:
                     from agentworks.sessions.manager import _teardown_session, ensure_pids_batch
@@ -449,9 +436,6 @@ def delete_agent(
 
                 output.info(f"Agent '{name}' deleted")
 
-        except BaseException:
-            mark_cleanup_pending(db, "agent", name, operation="agent-delete")
-            raise
         finally:
             ssh_logger.close()
 

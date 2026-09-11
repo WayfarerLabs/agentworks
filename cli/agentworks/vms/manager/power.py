@@ -234,11 +234,9 @@ def delete_vm(
         if not output.confirm(msg):
             raise UserAbort("delete cancelled")
 
-    from agentworks.harness_setup.lifecycle import mark_cleanup_pending, vm_family_setup_owners
     from agentworks.harness_setup.locking import native_mutation_guard
 
     with native_mutation_guard(db.path, vm.name):
-        setup_owners = vm_family_setup_owners(db, vm.name)
         # Platform-specific cleanup (also handles Tailscale logout)
         vm_node: LiveVMNode | None
         ops_ctx: RunContext | None = None
@@ -258,16 +256,6 @@ def delete_vm(
             vm_node = None
             hint = getattr(e, "hint", None)
             output.warn(f"platform binding failed, skipping backend cleanup: {e}" + (f"\n{hint}" if hint else ""))
-
-        if vm_node is None and setup_owners:
-            for kind, owner in setup_owners:
-                mark_cleanup_pending(db, kind, owner, operation="vm-delete")
-            raise StateError(
-                "cannot discard native setup ownership without confirmed VM deletion",
-                entity_kind="vm",
-                entity_name=name,
-                hint="Restore the platform binding and retry deletion. Owner records were retained.",
-            )
 
         if vm_node is not None:
             assert ops_ctx is not None  # set beside vm_node above
@@ -323,12 +311,7 @@ def delete_vm(
             # nothing left to target it (#329). ``--force`` does not soften
             # this: force skips the child-count guard and the confirm
             # prompt, never a failed backend delete.
-            try:
-                platform.delete(vm, ops_ctx)
-            except BaseException:
-                for kind, owner in setup_owners:
-                    mark_cleanup_pending(db, kind, owner, operation="vm-delete")
-                raise
+            platform.delete(vm, ops_ctx)
 
         # Clean up logs
         from agentworks.ssh import LOG_DIR

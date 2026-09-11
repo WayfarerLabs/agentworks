@@ -76,10 +76,9 @@ def delete_workspace(
         if not output.confirm(msg):
             raise UserAbort("delete cancelled")
 
-    from agentworks.harness_setup.lifecycle import mark_cleanup_pending, retire_owner_setup
     from agentworks.harness_setup.locking import native_mutation_guard
 
-    with native_mutation_guard(db.path, ws.vm_name) as guard:
+    with native_mutation_guard(db.path, ws.vm_name):
         # Create SSH logger for VM operations
         import contextlib
 
@@ -89,7 +88,6 @@ def delete_workspace(
         try:
             output.info(f"Deleting workspace '{name}' on VM '{ws.vm_name}'...")
 
-            registry = None
             # Kill running sessions (status-aware) and delete session records
             vm = db.get_vm(ws.vm_name)
             # console_pairs is populated only when we have live SSH access; the
@@ -140,19 +138,6 @@ def delete_workspace(
                                 entity_name=name,
                             )
                         _keepalive_stack.enter_context(vm_node.hold_active())
-
-                retire_owner_setup(
-                    db,
-                    config,
-                    kind="workspace",
-                    name=name,
-                    vm=vm,
-                    logger=ssh_logger,
-                    held=guard,
-                    registry=registry,
-                    root=ws.workspace_path,
-                    linux_group=ws.linux_group,
-                )
 
                 if vm is not None and vm.tailscale_host is not None:
                     from agentworks.sessions.manager import (
@@ -213,8 +198,5 @@ def delete_workspace(
 
                 db.delete_workspace(name)
                 output.info(f"Workspace '{name}' deleted")
-        except BaseException:
-            mark_cleanup_pending(db, "workspace", name, operation="workspace-delete")
-            raise
         finally:
             ssh_logger.close()

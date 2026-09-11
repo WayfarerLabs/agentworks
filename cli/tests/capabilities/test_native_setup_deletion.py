@@ -1,4 +1,4 @@
-"""Owner deletion consumes recorded claims under the VM-family mutation guard."""
+"""Parent deletion ignores native receipts while excluding concurrent setup."""
 
 from contextlib import nullcontext
 from types import SimpleNamespace
@@ -9,6 +9,7 @@ import pytest
 from agentworks.agents.manager import delete_agent
 from agentworks.capabilities.harness_integration.kinds import HarnessIntegrationEntry
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
+from agentworks.db import AppliedStateKey, VersionedPayload
 from agentworks.errors import StateError
 from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
@@ -56,6 +57,9 @@ def deletion(db, tmp_path, monkeypatch):
     monkeypatch.setattr("agentworks.harness_setup.dispatch.destination_id", lambda *a, **kw: "a" * 64)
     monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.agents.grants.revoke_workspace_grants", lambda *a, **k: None)
+    from agentworks.agents.initializer import delete_agent_on_vm
+    from agentworks.workspaces.backends.vm import delete_vm_workspace
+
     removed = []
 
     def remove_agent(*args, **kwargs):
@@ -84,70 +88,54 @@ def deletion(db, tmp_path, monkeypatch):
 
     monkeypatch.setattr("agentworks.ssh.SSHLogger", Logger)
     config = SimpleNamespace(paths=SimpleNamespace(vscode_workspaces=tmp_path))
-    return SimpleNamespace(vm=vm, registry=registry, target=target, config=config, removed=removed, logs=logs)
+    return SimpleNamespace(
+        vm=vm,
+        registry=registry,
+        target=target,
+        config=config,
+        removed=removed,
+        logs=logs,
+        delete_agent_on_vm=delete_agent_on_vm,
+        delete_vm_workspace=delete_vm_workspace,
+    )
+
+
+def _store_receipt(db, kind, name, receipt) -> None:
+    if receipt == "claims":
+        component = "admin" if kind == "vm" else kind
+        write_native_setup(db, kind, name, NativeSetupState(records=(_record(component),)), operation=f"{kind}-create")
+    else:
+        payload = (
+            VersionedPayload(99, {"future": True}) if receipt == "unknown" else VersionedPayload(1, {"records": False})
+        )
+        db.instance_state.replace_applied_slices(
+            kind, name, f"{kind}-create", {AppliedStateKey.HARNESS_NATIVE_SETUP: payload}
+        )
 
 
 @pytest.mark.parametrize("kind,name", [("agent", "agent"), ("workspace", "project")])
-@pytest.mark.parametrize("outcome", ["success", "unavailable", "interrupted", "retained", "changed"])
-def test_retirement_precedes_native_owner_destruction_and_preserves_failures(
-    db, deletion, monkeypatch, kind, name, outcome
-):
-    previous = _record(kind)
-    write_native_setup(db, kind, name, NativeSetupState(records=(previous,)), operation=f"{kind}-create")
-    calls = []
-
-    def retire(self, invocation):
-        assert self.retiring and self.config_secret_refs() == ()
-        assert invocation.secrets == {}
-        assert deletion.removed == []
-        calls.append(invocation)
-        if outcome == "interrupted":
-            invocation.checkpoint(previous.claims[1:])
-            raise SSHError("interrupted cleanup")
-        if outcome == "success":
-            invocation.checkpoint(())
-
-    monkeypatch.setattr(ShellIntegration, "user_init" if kind == "agent" else "workspace_init", retire)
-    if outcome == "unavailable":
-
-        def disabled(*args):
-            raise StateError("integration unavailable")
-
-        monkeypatch.setattr("agentworks.harness_setup.dispatch.ensure_harness_integration_enabled", disabled)
-    if outcome == "changed":
-        monkeypatch.setattr("agentworks.harness_setup.dispatch.destination_id", lambda *a, **kw: "b" * 64)
-
-    def delete() -> None:
-        if kind == "agent":
-            delete_agent(db, deletion.config, name=name, yes=True, interaction=TtyInteractionPolicy.REFUSE)
-        else:
-            delete_workspace(db, deletion.config, name, yes=True, interaction=TtyInteractionPolicy.REFUSE)
-
-    if outcome == "success":
-        delete()
-        assert deletion.removed == [kind]
-        assert (db.get_agent(name) if kind == "agent" else db.get_workspace(name)) is None
-        assert read_native_setup(db, kind, name).records == ()
+@pytest.mark.parametrize("receipt", ["claims", "unknown", "malformed"])
+def test_parent_deletion_does_not_require_native_receipt_cleanup(db, deletion, monkeypatch, kind, name, receipt):
+    _store_receipt(db, kind, name, receipt)
+    monkeypatch.setattr(ShellIntegration, "user_init", lambda *a: pytest.fail("individual plugin cleanup"))
+    monkeypatch.setattr(ShellIntegration, "workspace_init", lambda *a: pytest.fail("individual plugin cleanup"))
+    if kind == "agent":
+        delete_agent(db, deletion.config, name=name, yes=True, interaction=TtyInteractionPolicy.REFUSE)
     else:
-        with pytest.raises((StateError, SSHError)):
-            delete()
-        assert deletion.removed == []
-        assert (db.get_agent(name) if kind == "agent" else db.get_workspace(name)) is not None
-        (retained,) = read_native_setup(db, kind, name).records
-        assert retained.pending_cleanup and not retained.complete
-        assert retained.claims == (previous.claims[1:] if outcome == "interrupted" else previous.claims)
-    assert len(calls) == (0 if outcome in {"unavailable", "changed"} else 1)
+        delete_workspace(db, deletion.config, name, yes=True, interaction=TtyInteractionPolicy.REFUSE)
+    assert deletion.removed == [kind]
+    assert (db.get_agent(name) if kind == "agent" else db.get_workspace(name)) is None
+    assert db.instance_state.get_applied_slices(kind, name) == ()
     assert deletion.logs[0].closed
 
 
+@pytest.mark.parametrize("receipt", ["claims", "unknown", "malformed"])
 @pytest.mark.parametrize("outcome", ["success", "binding-failed", "delete-failed"])
-def test_vm_deletion_requires_confirmed_native_destruction_for_its_whole_family(db, deletion, monkeypatch, outcome):
-    for kind, name, component in [
-        ("vm", "box", "admin"),
-        ("agent", "agent", "agent"),
-        ("workspace", "project", "workspace"),
-    ]:
-        write_native_setup(db, kind, name, NativeSetupState(records=(_record(component),)), operation=f"{kind}-create")
+def test_vm_deletion_preserves_existing_backend_failure_policy(db, deletion, monkeypatch, receipt, outcome):
+    owners = [("vm", "box"), ("agent", "agent"), ("workspace", "project")]
+    for kind, name in owners:
+        _store_receipt(db, kind, name, receipt)
+    previous = {kind: db.instance_state.get_applied_slices(kind, name) for kind, name in owners}
     removed = []
 
     def remove(vm, ctx):
@@ -163,22 +151,19 @@ def test_vm_deletion_requires_confirmed_native_destruction_for_its_whole_family(
         return SimpleNamespace(site=SimpleNamespace(platform=SimpleNamespace(delete=remove))), Mock()
 
     monkeypatch.setattr("agentworks.vms.manager.power._live_vm_boundary", boundary)
-    if outcome == "success":
-        delete_vm(db, deletion.config, "box", force=True, interaction=TtyInteractionPolicy.REFUSE)
-        assert removed == ["box"]
-        assert db.get_vm("box") is None and db.get_agent("agent") is None and db.get_workspace("project") is None
-    else:
-        with pytest.raises((StateError, SSHError)):
+    if outcome == "delete-failed":
+        with pytest.raises(SSHError):
             delete_vm(db, deletion.config, "box", force=True, interaction=TtyInteractionPolicy.REFUSE)
-        assert (
-            db.get_vm("box") is not None
-            and db.get_agent("agent") is not None
-            and db.get_workspace("project") is not None
-        )
-        for kind, name in [("vm", "box"), ("agent", "agent"), ("workspace", "project")]:
-            (record,) = read_native_setup(db, kind, name).records
-            assert record.pending_cleanup and record.claims
-    assert deletion.removed == []  # Native VM destruction needs no per-user provisioning.
+        assert db.get_vm("box") and db.get_agent("agent") and db.get_workspace("project")
+        for kind, name in owners:
+            assert db.instance_state.get_applied_slices(kind, name) == previous[kind]
+    else:
+        delete_vm(db, deletion.config, "box", force=True, interaction=TtyInteractionPolicy.REFUSE)
+        assert removed == (["box"] if outcome == "success" else [])
+        assert db.get_vm("box") is None and db.get_agent("agent") is None and db.get_workspace("project") is None
+        for kind, name in owners:
+            assert db.instance_state.get_applied_slices(kind, name) == ()
+    assert deletion.removed == []
 
 
 @pytest.mark.parametrize("kind,name", [("agent", "agent"), ("workspace", "project"), ("vm", "box")])
@@ -193,84 +178,30 @@ def test_deletion_refuses_vm_family_contention_before_native_mutation(db, deleti
     assert deletion.removed == [] and deletion.logs == []
 
 
-def test_orphan_workspace_with_receipts_keeps_evidence_without_native_target(db, deletion):
-    write_native_setup(
-        db, "workspace", "project", NativeSetupState(records=(_record("workspace"),)), operation="workspace-create"
-    )
+def test_orphan_workspace_deletion_does_not_require_native_target(db, deletion):
+    _store_receipt(db, "workspace", "project", "claims")
     db._conn.execute("PRAGMA foreign_keys = OFF")
     db._conn.execute("DELETE FROM vms WHERE name = 'box'")
     db._conn.commit()
-    with pytest.raises(StateError):
-        delete_workspace(db, deletion.config, "project", yes=True, interaction=TtyInteractionPolicy.REFUSE)
-    assert db.get_workspace("project") is not None
-    assert read_native_setup(db, "workspace", "project").records[0].pending_cleanup
+    delete_workspace(db, deletion.config, "project", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+    assert db.get_workspace("project") is None
     assert deletion.removed == []
 
 
 @pytest.mark.parametrize("kind,name", [("agent", "agent"), ("workspace", "project")])
-def test_native_removal_failure_keeps_owner_without_recreating_retired_claims(db, deletion, monkeypatch, kind, name):
-    write_native_setup(db, kind, name, NativeSetupState(records=(_record(kind),)), operation=f"{kind}-create")
-    retired = []
-
-    def retire(self, invocation):
-        assert self.retiring
-        invocation.checkpoint(())
-        retired.append(self.name)
-
-    monkeypatch.setattr(ShellIntegration, "user_init" if kind == "agent" else "workspace_init", retire)
-    method = (
-        "agentworks.agents.initializer.delete_agent_on_vm"
-        if kind == "agent"
-        else "agentworks.workspaces.backends.vm.delete_vm_workspace"
-    )
-
-    def failed(*args, **kwargs):
-        raise SSHError("native removal failed")
-
-    monkeypatch.setattr(method, failed)
-
-    def delete() -> None:
-        if kind == "agent":
-            delete_agent(db, deletion.config, name=name, yes=True, interaction=TtyInteractionPolicy.REFUSE)
-        else:
-            delete_workspace(db, deletion.config, name, yes=True, interaction=TtyInteractionPolicy.REFUSE)
-
-    with pytest.raises(SSHError):
-        delete()
-    assert (db.get_agent(name) if kind == "agent" else db.get_workspace(name)) is not None
-    assert read_native_setup(db, kind, name).records == ()
-    monkeypatch.setattr(method, lambda *a, **k: None)
-    delete()
-    assert retired == ["shell"]
-    assert (db.get_agent(name) if kind == "agent" else db.get_workspace(name)) is None
-
-
-@pytest.mark.parametrize("state", ["present", "absent", "home-remains", "unreachable"])
-def test_agent_native_deletion_requires_account_and_home_removal(db, monkeypatch, state):
-    from agentworks.agents.initializer import delete_agent_on_vm
-
-    vm = db.insert_vm("vm", site="fixture", hostname="vm")
-    target = Mock(spec=Transport)
-    commands = []
-
-    def run(command, **kwargs):
-        commands.append(command)
-        if command.startswith("getent"):
-            return SSHResult(255 if state == "unreachable" else 0 if state == "present" else 2, "", "")
-        if command.startswith("test") and state == "home-remains":
-            raise SSHError("home remains")
-        if command.startswith("userdel"):
-            raise SSHError("account removal failed")
-        return SSHResult(0, "", "")
-
-    target.run.side_effect = run
-    monkeypatch.setattr("agentworks.agents.initializer.transport", lambda *a, **k: target)
-    if state == "absent":
-        delete_agent_on_vm(vm, Mock(), "agt-a")
-        assert not any(command.startswith("userdel") for command in commands)
+def test_remote_cleanup_failure_keeps_existing_best_effort_parent_deletion(db, deletion, monkeypatch, kind, name):
+    _store_receipt(db, kind, name, "claims")
+    deletion.target.run.side_effect = SSHError("unreachable")
+    if kind == "agent":
+        monkeypatch.setattr("agentworks.agents.initializer.delete_agent_on_vm", deletion.delete_agent_on_vm)
+        delete_agent(db, deletion.config, name=name, yes=True, interaction=TtyInteractionPolicy.REFUSE)
+        assert db.get_agent(name) is None
     else:
-        with pytest.raises(SSHError):
-            delete_agent_on_vm(vm, Mock(), "agt-a")
+        monkeypatch.setattr("agentworks.workspaces.backends.vm.delete_vm_workspace", deletion.delete_vm_workspace)
+        db.update_vm_tailscale("box", "box")
+        delete_workspace(db, deletion.config, name, yes=True, interaction=TtyInteractionPolicy.REFUSE)
+        assert db.get_workspace(name) is None
+    assert deletion.logs[0].closed
 
 
 def test_rehome_refuses_native_receipts_before_probes_and_preserves_destination(db, deletion, monkeypatch):
