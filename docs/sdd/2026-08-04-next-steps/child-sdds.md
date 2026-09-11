@@ -656,6 +656,11 @@ Merged work the ledger owes a line, recorded from the merges themselves.
   recorded is gone: the operator reopened whether an artifact entry still deferred at the session
   facet blocks launch, and the artifacts successor SDD settles it. What survives is that such an
   entry receives an explicit disposition and that silent loss is never one.
+- **`2026-09-06-degraded-runnable-recovery` locked** (PR #764, merged 2026-09-10, `locked.md` dated
+  2026-09-09). The effort the saga lead's review of PR #756 split out, settled on the axis recorded
+  there: inventory tolerates a degraded runnable, while focused operations and mutations stay
+  strict. Its restore work also hardened the database-use lock that wave 4's native setup locking
+  later had to merge with, so the two efforts met in `db/database.py` rather than only on paper.
 
 Not recorded yet, because its PR is open and merged PRs are this ledger's truth source: wave 4's
 pickup by an effort lead (PR #761), which now carries its implementation as well as its design after
