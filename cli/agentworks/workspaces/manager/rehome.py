@@ -73,11 +73,9 @@ def rehome_workspace(
             entity_name=name,
         )
 
-    from agentworks.harness_setup.lifecycle import require_workspace_rehome_supported
     from agentworks.harness_setup.locking import native_mutation_guard
 
     with native_mutation_guard(db.path, ws.vm_name):
-        require_workspace_rehome_supported(db, name)
         # Block unless all sessions are STOPPED
         from agentworks.db import PID_STOPPED, SessionStatus
         from agentworks.sessions.manager import ensure_pids_batch, observe_session_statuses

@@ -13,7 +13,7 @@ from agentworks.db import AppliedStateKey, VersionedPayload
 from agentworks.errors import StateError
 from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
-from agentworks.harness_setup.state import read_native_setup, write_native_setup
+from agentworks.harness_setup.state import write_native_setup
 from agentworks.origin import Origin
 from agentworks.resources.registry import Registry
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -204,31 +204,13 @@ def test_remote_cleanup_failure_keeps_existing_best_effort_parent_deletion(db, d
     assert deletion.logs[0].closed
 
 
-def test_rehome_refuses_native_receipts_before_probes_and_preserves_destination(db, deletion, monkeypatch):
+@pytest.mark.parametrize("receipt", ["none", "claims", "malformed", "future"])
+def test_rehome_holds_its_vm_guard_without_interpreting_receipts(db, deletion, monkeypatch, receipt):
     from agentworks.workspaces.manager import rehome_workspace
 
-    previous = NativeSetupState(records=(_record("workspace"),))
-    write_native_setup(db, "workspace", "project", previous, operation="workspace-create")
-    mutation = Mock()
-    monkeypatch.setattr("agentworks.workspaces.manager.rehome._rehome_vm", mutation)
-    monkeypatch.setattr("agentworks.sessions.manager.ensure_pids_batch", lambda *a, **k: pytest.fail("session probe"))
-    with pytest.raises(StateError):
-        rehome_workspace(
-            db,
-            deletion.config,
-            "project",
-            target_path="/new/project",
-            yes=True,
-            interaction=TtyInteractionPolicy.REFUSE,
-        )
-    mutation.assert_not_called()
-    assert db.get_workspace("project").workspace_path == "/work/project"
-    assert read_native_setup(db, "workspace", "project") == previous
-
-
-def test_rehome_without_receipts_holds_its_vm_guard(db, deletion, monkeypatch):
-    from agentworks.workspaces.manager import rehome_workspace
-
+    if receipt != "none":
+        _store_receipt(db, "workspace", "project", receipt)
+    previous = db.instance_state.get_applied_slices("workspace", "project")
     calls = []
 
     def move(*args, **kwargs):
@@ -241,3 +223,5 @@ def test_rehome_without_receipts_holds_its_vm_guard(db, deletion, monkeypatch):
         db, deletion.config, "project", target_path="/new/project", yes=True, interaction=TtyInteractionPolicy.REFUSE
     )
     assert calls == ["move"]
+
+    assert db.instance_state.get_applied_slices("workspace", "project") == previous

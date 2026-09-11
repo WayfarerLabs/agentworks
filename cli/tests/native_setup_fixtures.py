@@ -124,6 +124,10 @@ def market_fixture(transport: LocalFixtureTransport, tool: NativeTool) -> Path:
     bindir = transport.root / "bin"
     bindir.mkdir(exist_ok=True)
     (bindir / tool).symlink_to(Path(binary).resolve())
+    # npm-installed launchers need Node in the fixture's deliberately small PATH.
+    node = shutil.which("node")
+    if node is not None and not (bindir / "node").exists():
+        (bindir / "node").symlink_to(Path(node).resolve())
     root = transport.root / "market"
     manifest = root / (".agents/plugins/marketplace.json" if tool == "codex" else ".claude-plugin/marketplace.json")
     manifest.parent.mkdir(parents=True)

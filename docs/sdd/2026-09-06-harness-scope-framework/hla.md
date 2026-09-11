@@ -431,12 +431,11 @@ file mapping, not the separately declared plugin work. The LLD must specify nati
 and protect mapped settings against subsequent plugin-command rewrites; activation order is not a
 last-writer policy.
 
-Applied facts distinguish keys/files written by the mapping from untouched content. A skip or a
-preserved collision grants no ownership of the retained value. On removal of a mapping, leave the
-settings file and its current values in place and relinquish only this mapping's claims; there is no
-automatic restoration of overwritten workstation-independent values or deletion of an adopted file.
-Report that settings are retained. Explicit removal of managed plugin associations remains separate
-and may change their native keys. This is deliberately a provisioning policy, not a backup system.
+Settings mappings have no per-file or per-key ownership ledger. Their declaration and the completed
+setup record describe what was requested and whether setup finished. On removal of a mapping, leave
+the settings file and its current values in place; there is no automatic restoration of overwritten
+values or deletion of an adopted file. Explicit removal of managed plugin associations remains
+separate and may change their native keys. This is a provisioning policy, not a backup system.
 Changing the source or strategy reruns the mapping at the next owning setup operation, subject to
 other recorded owners and native validation. Workspace mappings retain the create-only lifecycle;
 subsequent changes require workspace recreation until an owner-authorized reinit surface exists.
@@ -570,11 +569,13 @@ removal facts needed after a plugin entry or whole activation disappears.
 Removed activations still reconcile: core invokes the same facet method with absent desired config
 and prior ownership, then drops only confirmed removals. If its plugin is unavailable or cleanup is
 unsafe, record pending cleanup and useful remediation rather than claiming success. Intentional
-settings retention differs from failed cleanup. Resource deletion consumes applicable cleanup facts
-before discarding them when provisioned effects survive that deletion. A failed cleanup retains the
-owner and evidence needed for recovery; successful owner deletion removes its instance records in
-the existing transaction. This does not add workspace reinit or attempt to reverse every side
-effect.
+settings retention differs from failed cleanup. Deleting a VM, agent, or workspace uses the existing
+parent lifecycle without first invoking native plugin retirement. Parent filesystem removal takes
+its contained native effects with it; database deletion removes the owner's instance records in the
+existing transaction. Existing best-effort cleanup and backend failure policies remain unchanged.
+Effects configured outside the deleted parent are outside its filesystem cleanup. No forget command
+or additional force semantics are needed. This does not add workspace reinit or attempt to reverse
+every side effect.
 
 Serialize observation, native mutation, and receipt persistence for the same owning resource across
 command executions. A competing mutation refuses with retry guidance. The LLD chooses a lock that
@@ -590,7 +591,10 @@ carry the new typed lifecycle evidence through their appropriate codecs. VM expo
 only VM applied slices (`db/database.py:1238-1239`), so extending its owner-scoped evidence requires
 explicit coverage. Exported-payload codec round trips and database restore are separate from a VM
 restore/import workflow, which this effort does not add. Copy, rehome, restore, and same-name
-recreation must not turn old receipts into proof of setup at a new destination.
+recreation must not turn old receipts into proof of setup at a new destination. Destination
+fingerprints inform read-only readiness; they do not prohibit reinit or workspace rehome. Owning
+setup invokes the integration against the current destination, where its native identity checks
+govern plugin reconciliation, and records the new completed setup on success.
 
 ## Workspace retry and session readiness
 

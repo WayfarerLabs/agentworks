@@ -44,16 +44,17 @@ and refuses malformed existing settings. Repair those settings separately first.
 Serialization preserves values, not comments or formatting. JSON duplicate keys and non-finite
 numbers are rejected. Destinations must be regular files reached without traversing symbolic links.
 Publication uses a private sibling temporary file, checks the observed destination hash, and renames
-atomically. Traversal respects search-only ancestors. If the settings change during plugin work
-outside the planned native keys, mapping publication refuses and retains the recorded plugin prefix
-for retry. User files are private; workspace files are writable by the workspace group. Permission
-failures do not trigger elevation.
+atomically. Traversal respects search-only ancestors. After plugin commands finish, merge policies
+use the current settings and preserve the native associations. Publication refuses if the file
+changes again between that read and the atomic write. User files are private; workspace files are
+writable by the workspace group. Permission failures do not trigger elevation.
 
 Use non-secret settings sources. Authentication files are not supported settings roles. Captured
 contents and native command output are transferred privately and are not stored in receipts or logs.
-Removing a mapping retains the native file and its current values, reports that retention, and
-relinquishes the mapping's claims. It does not restore overwritten values. Workspace mapping changes
-follow workspace creation; applying a new mapping requires workspace recreation.
+Removing a mapping retains the native file and its current values. Settings mappings do not create
+ownership claims; the setup record tracks completion and the requested policy. It does not restore
+overwritten values. Workspace mapping changes follow workspace creation; applying a new mapping
+requires workspace recreation.
 
 ## Marketplaces and plugins
 
@@ -104,13 +105,10 @@ cleanup.
 
 ## Native compatibility evidence
 
-The local fixture suite exercises the actual setup helpers with Codex CLI 0.153.4 and Claude Code
-2.1.263. It covers installation, repeat setup, retirement, interrupted checkpoints, settings
-conflicts, project dependencies, disabled plugins, source capture, and guarded file publication.
-Each fixture uses a dedicated home and empty local marketplace without authentication or model
-requests. Native CLI tests skip when the required executable is absent. These fixtures validate the
-native boundary; they do not replace tests of Agentworks lifecycle orchestration and remote
-transports against supported backends.
+Native CLI fixture tests require Codex and Claude executables on the test runner's PATH. The
+simplification round was validated locally with Codex CLI 0.154.0 and Claude Code 2.1.269. These are
+tested versions, not an enforced minimum. Fixtures use isolated temporary homes and do not require
+provider credentials. Runs without the required executable skip the corresponding native tests.
 
 Codex inventory handling follows its tagged
 [plugin commands](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/cli/src/plugin_cmd.rs)
@@ -121,28 +119,21 @@ refuse mutation instead of being interpreted as empty inventory.
 
 ## Deleting owning resources
 
-Agent and workspace deletion first retires recorded native claims with no desired setup config. It
-does not reapply current template settings, resolve setup secrets, or install missing plugins.
-Settings mappings relinquish their claims while retaining the document; successful deletion of the
-user home or workspace directory subsequently removes that document with its owner.
+VM, agent, and workspace deletion follow their existing lifecycle policies. Removing a VM removes
+its contained native files; removing an agent home or workspace directory removes the settings and
+plugins inside it. There is no separate native plugin retirement step before parent deletion. Setup
+receipts, including unreadable or unknown versions, do not add deletion prerequisites. The existing
+database deletion removes the owner's records and any affected child records together.
 
-Unavailable integrations, changed destinations, interrupted cleanup, and remaining owned claims
-prevent owner deletion. Agentworks keeps the owner and the latest confirmed claim prefix for retry.
-An orphaned workspace with native receipts likewise requires recovery of its VM before deletion.
-Native user or directory removal failures propagate instead of discarding the corresponding database
-row. A missing agent account is treated as removed only when its home is also absent.
+Backend binding failures retain the existing warning-and-local-cleanup behavior of VM deletion. An
+actual platform deletion failure still aborts as before. Agent and workspace remote cleanup retains
+its existing best-effort warnings. Files deliberately configured outside the removed parent remain
+outside that filesystem cleanup; setup does not introduce a new forget command or force option.
 
-A successful platform VM deletion removes guest-native effects with the VM and clears its family's
-instance records in the existing database cascade. If platform binding or deletion fails, recorded
-native evidence keeps the VM and child owners available for recovery. Ordinary cleanup of a broken
-VM with no native setup evidence retains its existing behavior.
+Setup and parent deletion share a VM-family mutation guard so they cannot race. This serializes
+mutating operations on the same VM, including owners without harness activations; contention refuses
+with retry guidance. It does not require native receipt discovery before parent deletion.
 
-VM, agent, and workspace deletion use the same VM-family mutation guard as setup. A competing
-mutation refuses immediately with retry guidance, and nested removal can share its caller's held
-guard. This also covers workspace cleanup when the VM row is missing.
-
-Rehome changes a workspace's directory on its current VM and holds that VM's guard across the move.
-It refuses a workspace with native setup receipts before probing sessions or changing files;
-relocating receipts has no supported contract. Preserve the contents, delete the old workspace with
-its integration cleanup, and recreate at the new location. Workspaces without native receipts retain
-the existing rehome behavior.
+Rehome moves project settings with the workspace and holds the same guard across the move. Setup
+records do not block rehome. Their old destination makes readiness stale until owning setup runs
+successfully at the new destination; rehome itself does not run harness setup.

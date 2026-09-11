@@ -93,6 +93,9 @@ def test_real_marketplace_discovery_reuses_user_login_tool_under_isolated_home(
     installed = (target.root / "bin" / tool).resolve()
     executable_path = target.home / ".local/bin" / tool
     executable_path.parent.mkdir(parents=True)
+    node = target.root / "bin" / "node"
+    if node.exists():
+        executable_path.with_name("node").symlink_to(node.resolve())
     observations = target.root / "native-environments.jsonl"
     executable_path.write_text(
         "#!/usr/bin/python3\nimport json, os, sys\n"

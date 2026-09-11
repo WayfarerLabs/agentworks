@@ -74,7 +74,7 @@ def require_prepared_setup(
 
 
 def prepare_vm_setup(
-    db: Database, registry: Registry, *, name: str, template: ResolvedVMTemplate, admin: AdminConfig
+    db: Database, *, name: str, template: ResolvedVMTemplate, admin: AdminConfig
 ) -> tuple[SetupInputs, ...]:
     """Prepare VM and actual-admin inputs independently, including retirement."""
     result = []
@@ -243,19 +243,3 @@ def apply_workspace_setup(
         linux_group=linux_group,
     )
     return run_setup(db, registry, inputs, invocation, operation=operation, buffered=buffered, held=held)
-
-
-def require_workspace_rehome_supported(db: Database, name: str) -> None:
-    """Native ownership has no relocation contract; preserve its current root."""
-    try:
-        recorded = bool(read_native_setup(db, "workspace", name).records)
-    except StateError:
-        recorded = True
-    if recorded:
-        raise StateError(
-            "cannot rehome a workspace with native setup evidence",
-            entity_kind="workspace",
-            entity_name=name,
-            hint="Preserve the workspace contents, delete the old workspace with its setup cleanup, "
-            "then create a workspace at the new location. Native receipts cannot be relocated.",
-        )

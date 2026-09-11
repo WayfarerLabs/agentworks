@@ -107,8 +107,6 @@ def run_setup(
         for name in (*desired, *(name for name in prior if name not in desired)):
             previous = prior.get(name)
             block = desired.get(name)
-            if previous is not None and previous.destination_id != destination:
-                raise StateError("native setup evidence belongs to a different destination; ownership was retained")
             if block is None and previous is not None and not previous.claims:
                 state = NativeSetupState(
                     records=tuple(

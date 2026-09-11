@@ -297,7 +297,7 @@ def create_vm(
 
     from agentworks.harness_setup.lifecycle import prepare_vm_setup
 
-    setup_inputs = prepare_vm_setup(db, registry, name=vm_name, template=vm_tmpl, admin=admin)
+    setup_inputs = prepare_vm_setup(db, name=vm_name, template=vm_tmpl, admin=admin)
     for setup_input in setup_inputs:
         setup_input.register(resolver, registry)
 
@@ -865,7 +865,7 @@ def reinit_vm(
 
     from agentworks.harness_setup.lifecycle import prepare_vm_setup
 
-    setup_inputs = prepare_vm_setup(db, registry, name=name, template=reinit_vm_tmpl, admin=admin)
+    setup_inputs = prepare_vm_setup(db, name=name, template=reinit_vm_tmpl, admin=admin)
     for setup_input in setup_inputs:
         setup_input.register(resolver, registry)
 

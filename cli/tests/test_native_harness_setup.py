@@ -96,11 +96,11 @@ def test_settings_only_replace_repairs_invalid_document_and_retirement_retains_i
     config = NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="replace"))
     claims: list[tuple[NativeClaim, ...]] = []
     setup_user(tool, config, invocation(transport, claims))
-    assert claims[-1] == ()
+    assert not any(claims)
     provisioned = destination.read_bytes()
     source.unlink()
-    setup_user(tool, None, invocation(transport, claims, prior=record(claims[-1], tool)))
-    assert claims[-1] == ()
+    setup_user(tool, None, invocation(transport, claims, prior=record((), tool)))
+    assert not any(claims)
     assert destination.read_bytes() == provisioned
 
 
@@ -159,7 +159,7 @@ def test_workspace_mapping_uses_group_and_fixed_project_role(transport: LocalFix
     destination = workspace / ".claude/settings.json"
     assert destination.stat().st_mode & 0o777 == 0o660
     assert destination.stat().st_gid == os.getgid()
-    assert claims[-1] == ()
+    assert not any(claims)
     assert not (transport.home / ".claude/settings.json").exists()
 
 
@@ -379,7 +379,7 @@ def test_user_setup_binding_uses_native_model_and_config_home(
     key = "CODEX_HOME" if tool == "codex" else "CLAUDE_CONFIG_DIR"
     bound.user_init(invocation(transport, claims, env={key: str(root)}))
     assert (root / ("config.toml" if tool == "codex" else "settings.json")).is_file()
-    assert claims[-1] == ()
+    assert not any(claims)
     assert not (transport.home / (".codex" if tool == "codex" else ".claude")).exists()
 
 

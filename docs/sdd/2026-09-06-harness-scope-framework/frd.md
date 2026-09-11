@@ -156,13 +156,17 @@ preserve these typed receipt semantics; this adds no VM restore workflow or pers
 model.
 
 The same facility drives idempotent cleanup when provisioned plugins, other native setup entries, or
-whole activations are removed. At the owning reconciliation or deletion operation, compare current
-desired state with recorded applied ownership and remove obsolete owned resources wherever the
-native mechanism permits safe removal. Repeated cleanup must converge, including when the resource
-is already gone. This is not a promise to reverse every side effect: intentional retention policies,
+whole activations are removed. At the owning setup reconciliation operation, compare current desired
+state with recorded applied ownership and remove obsolete owned resources wherever the native
+mechanism permits safe removal. Repeated cleanup must converge, including when the resource is
+already gone. This is not a promise to reverse every side effect: intentional retention policies,
 including R15's treatment of settings, remain explicit. Unsupported or unsafe removal reports what
 remains with useful evidence. Do not discard required cleanup records or claim success before the
-disposition is known.
+disposition is known. This governs reconciliation while the owner remains. Deleting a VM, agent, or
+workspace follows its existing lifecycle: the parent filesystem removes its contained native
+effects, and the existing database deletion removes its setup records. Native receipts must not add
+deletion prerequisites, change backend-failure handling, or prevent workspace rehome. Settings
+mappings need no separate ownership ledger because removing a mapping retains the settings.
 
 **R10. Upstream prerequisites are reported, never repaired from a session operation.** A session
 integration checks its own upstream prerequisites during readiness using persisted applied state and

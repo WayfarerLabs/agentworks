@@ -81,8 +81,8 @@ force flag is introduced by this migration.
 
 Once new receipts exist, removal of an entry or whole activation can safely reconcile recorded
 claims. Settings mapping policy controls explicit replacement/merge of its declared file; it does
-not claim other plugin installations. Removing a settings mapping retains the current document and
-relinquishes mapping claims, as specified by R15.
+not claim other plugin installations. Removing a settings mapping retains the current document,
+as specified by R15. Settings mappings do not create ownership claims.
 
 ## Explicit session selection
 

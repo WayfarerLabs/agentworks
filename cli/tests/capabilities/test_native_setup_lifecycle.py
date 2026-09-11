@@ -51,7 +51,7 @@ def test_empty_setup_does_not_resolve_ancestor_env(db, registry, vm, monkeypatch
     monkeypatch.setattr("agentworks.vms.templates.resolve_live_template", lambda *a: pytest.fail("unused ancestor env"))
     assert prepare_agent_setup(db, registry, vm=vm, name="agent", template=ResolvedAgentTemplate("default")) is None
     assert prepare_workspace_setup(db, registry, vm=vm, name="project", template=ResolvedTemplate("default")) is None
-    assert prepare_vm_setup(db, registry, name=vm.name, template=resolve_vm({}), admin=AdminConfig()) == ()
+    assert prepare_vm_setup(db, name=vm.name, template=resolve_vm({}), admin=AdminConfig()) == ()
 
 
 def test_component_inputs_keep_only_ancestors_and_retirement(db, registry, vm, monkeypatch):
@@ -80,7 +80,7 @@ def test_component_inputs_keep_only_ancestors_and_retirement(db, registry, vm, m
     assert project.target.admin is None and project.target.agent is None
     parent.harness_integrations = selected
     admin = AdminConfig(env=_env(USER="admin"), harness_integrations=selected)
-    system, user = prepare_vm_setup(db, registry, name=vm.name, template=parent, admin=admin)
+    system, user = prepare_vm_setup(db, name=vm.name, template=parent, admin=admin)
     assert system.target.admin is None and user.target.admin == admin.env
     assert system.kind == user.kind == "vm" and system.name == user.name == vm.name
     assert user.component == "admin"
@@ -369,7 +369,7 @@ def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(db, registry,
     template.harness_integrations = [CapabilityBlock.of("shell")]
     template.env = _env(VM_ONLY="system", TOKEN={"secret": "vm-token"})
     admin = AdminConfig(env=_env(ADMIN_ONLY="admin"), harness_integrations=[CapabilityBlock.of("shell")])
-    inputs = prepare_vm_setup(db, registry, name=vm.name, template=template, admin=admin)
+    inputs = prepare_vm_setup(db, name=vm.name, template=template, admin=admin)
     events = []
 
     def core(*args, **kwargs):

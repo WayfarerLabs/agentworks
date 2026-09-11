@@ -18,15 +18,16 @@ _Hash = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 class NativeClaim(AgwModel):
     """An integration's confirmed association, never native document contents.
 
-    Settings paths identify changed keys only. Their values and source bytes
-    stay transient. Other roles use native identifiers and optional source
-    identity to distinguish registrations from coincidentally matching names.
+    Native identifiers and optional source identity distinguish registrations
+    from coincidentally matching names. Settings mappings create no claims.
     """
 
     role: _Text
     identifier: _Text
     destination: _Text
     source: str | None = None
+    # Read compatibility for settings receipts already produced by this effort.
+    # New setup drops those receipts and never emits these fields with values.
     sha256: _Hash | None = None
     strategy: str | None = None
     # JSON carries tuples as arrays; only sequence representation is lenient.

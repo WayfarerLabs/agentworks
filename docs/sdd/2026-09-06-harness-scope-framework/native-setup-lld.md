@@ -86,9 +86,10 @@ facet. Each integration record contains:
   literal env values needed for freshness. Neither literal env values nor resolved secrets are
   stored.
 - Completion state and the last confirmed successful mutation prefix.
-- Native claims identified by integration-owned role, native identifier, destination and relevant
-  comparison hash/strategy. A matching filename or matching bytes are not proof of ownership.
-- Explicit retained settings or pending-cleanup disposition where a prior claim remains relevant.
+- Native plugin and marketplace claims identified by integration-owned role, native identifier,
+  destination and source identity. Matching files or bytes are not proof of ownership.
+- Pending-cleanup disposition where a prior native association remains relevant. Settings mappings
+  retain their documents when removed and do not create ownership claims.
 
 Use typed domain structures and a versioned codec, following vms/applied_state.py. Reject malformed
 known payloads without echoing raw contents. Preserve unknown versions and unrelated integrations;
@@ -118,11 +119,12 @@ coordination metadata; unlinking it during concurrent use would allow a second i
 lock, so normal owner deletion does not unlink it. The lock implementation must exercise native
 Windows and POSIX paths.
 
-Consume claims before deleting an owner whose native effects can survive deletion. For effects
-removed by deleting the native user/workspace/VM itself, confirmed native deletion is their removal
-evidence. If cleanup fails before deletion, retain owner records and the remaining claims. Settings
-mapping removal is deliberate retention and relinquishes mapping claims; it is not cleanup failure.
-Do not force-remove another integration's or an operator's material.
+Parent deletion follows the existing VM, agent and workspace lifecycle and its existing failure
+policies. It removes contained native effects with their parent, without first retiring plugins or
+reading setup receipts. Recorded claims guide reconciliation while an owner remains; they do not
+veto parent deletion or workspace rehome. Destination fingerprints determine readiness after a move,
+not permission to move. Settings mapping removal retains the document without ownership bookkeeping.
+Native reconciliation must not force-remove another integration's or an operator's material.
 
 ## Native settings and plugins
 

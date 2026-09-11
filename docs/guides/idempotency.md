@@ -172,18 +172,16 @@ therefore takes effect at the next owning setup operation, not at configuration 
 inherits, an authored list replaces the complete inherited list, and `[]` requests no activations.
 
 Cleanup is deliberately bounded. Settings mappings retain their native document when removed and
-relinquish ownership; they do not restore overwritten values. Native plugins and marketplaces are
-removed only when their recorded identity still proves ownership, without affecting unowned or
-project dependencies. A matching pre-existing installation is not adopted. See
+have no separate ownership claims; they do not restore overwritten values. Native plugins and
+marketplaces are removed only when their recorded identity still proves ownership, without affecting
+unowned or project dependencies. A matching pre-existing installation is not adopted. See
 [native harness setup](native-harness-setup.md) for collision and retirement behavior, and
 [migrating Claude setup](migrating-claude-setup.md) for old declarations and stored overlays.
 
-Setup and owner deletion share a VM-family mutation guard. Agent or workspace deletion stops and
-retains its database owner when native cleanup cannot complete. Successful platform VM deletion can
-remove guest-native receipts with its owner tree. Rehome refuses workspaces carrying native
-receipts; use explicit deletion with cleanup and recreation at the new location. These boundaries
-prevent repeat operations from losing ownership evidence or treating copied files as newly owned
-effects.
+Setup and parent deletion share a VM-family mutation guard. Parent deletion uses the existing core
+lifecycle and clears setup records in its database transaction; it does not first uninstall native
+plugins or interpret receipts. Rehome moves project settings with the workspace and does not require
+receipt relocation. Readiness still checks whether recorded setup matches the current destination.
 
 [Harness facets](harness-facets.md) explains configuration, owning scopes, environment composition,
 and required versus recommended session prerequisites.

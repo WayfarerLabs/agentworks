@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, cast
 
 from pydantic import ValidationError
@@ -42,7 +41,7 @@ def decode_native_setup(record: AppliedStateSlice) -> NativeSetupState:
             hint="Use a release that understands this native setup record. The stored evidence was retained.",
         )
     try:
-        state = NativeSetupState.model_validate_json(json.dumps(record.payload.value, allow_nan=False))
+        state = NativeSetupState.model_validate(record.payload.value)
         if any(item.component not in _COMPONENTS[record.instance_kind] for item in state.records):
             raise ValueError("component does not belong to this owner")
     except (ValidationError, ValueError, RecursionError):

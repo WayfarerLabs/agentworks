@@ -277,3 +277,49 @@ isolation checks passed. Website Python (160) and Node (103) tests and determini
 for both site bases passed. Project, complexity and generic correctness/security reviews of the
 reconciliation are clean, with 147, two and 202 focused tests respectively. These are local and
 fixture results; native Windows CI and independent live backend acceptance are separate evidence.
+
+## Operator-directed simplification, 2026-09-11
+
+The operator rejected the new native-receipt restrictions on VM deletion and directed a full KISS
+scan of this effort. Parent deletion follows the existing core lifecycle: deleting a VM, user home,
+or workspace directory removes its contained native files. Setup records do not authorize or veto
+those operations. This ruling supersedes the earlier checked implementation of cleanup before owner
+deletion and the settings-claim retention work recorded above; those entries describe work that was
+completed and is now deliberately removed.
+
+The scan covered lifecycle integration, native helpers, facet/config/schema propagation, migration,
+environment composition, readiness, receipt codecs, and inspection/backup. It removes individual
+plugin retirement before parent deletion, receipt-based workspace rehome refusal, the generic
+destination mismatch mutation gate, per-file/per-key settings ownership bookkeeping, and the
+native-settings changed-key classifier. Settings mappings apply their selected policy to the live
+file; plugin fields remain explicit, and final publication retains its atomic compare-and-swap.
+Plugin and marketplace claims remain because their removal needs actual ownership evidence.
+
+The shared VM-family mutation lock remains: deleting a parent must not race setup inside it.
+Conditional receipt discovery or parent/child lock ordering would introduce more machinery. The
+tradeoff is serialization of mutating operations on the same VM, including ones without harness
+activations. Fresh-account creation checks also remain because failed-create rollback must not
+delete a pre-existing user's home. Explicit activation, no-op facet defaults, scoped secrets, and
+integration-directed readiness retain their approved behavior.
+
+The receipt codec now validates its already-parsed value directly, avoiding a second JSON parser
+with a different nesting limit. The restore regression changes working directories after opening a
+relative database path, so it now requires the resolved database identity it claims to exercise.
+Native fixture launchers expose their Node runtime inside isolated test homes. The upgrade guide now
+includes both template migrations.
+Independent live backend acceptance and final SDD locking remain open.
+
+The integrated simplification passed 8,930 tests with three skips on Linux using Codex CLI 0.154.0
+and Claude Code 2.1.269. Ruff and strict mypy (803 files) passed. Project review identified stale
+lifecycle and settings-claim prose, now corrected. Independent correctness review passed 232 focused
+tests without a finding. The complexity pass also removed redundant terminal receipt checkpoints
+and an unused setup-preparation parameter.
+
+Installing native CLI fixtures in CI remains a follow-up: GitHub rejected the prepared workflow
+change because both available credentials lack workflow permission. The reviewed patch is retained
+with the lead's handoff; this PR's CI workflow remains unchanged. Native fixture validation here is
+local evidence, not a claim that CI installs those tools. Independent live acceptance remains open.
+
+The final checkpoint and signature simplifications passed 74 focused tests. Website Python (160)
+and Node (103) tests and deterministic double builds for both site bases passed. Typer isolation,
+locked-SDD checks and Rulesync generation parity also passed.

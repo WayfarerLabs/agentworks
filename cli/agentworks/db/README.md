@@ -104,11 +104,11 @@ counts under `lifecycle_evidence`; it performs no native I/O and does not reveal
 Doctor checks the stored evidence without repairing or completing it. Unsupported versions remain
 unavailable evidence and are preserved for a compatible release.
 
-Owner deletion must first satisfy the native cleanup boundary. User and workspace deletion retain
-the owner and pending evidence when native retirement fails. Successful platform VM deletion may
-clear its guest-native evidence with the owner tree, because the destination itself is gone. The
-VM-family mutation guard spans native setup and deletion; it is separate from the database
-transaction. See [harness facets](../../../docs/guides/harness-facets.md) for operating guidance.
+Owner deletion uses the existing parent lifecycle and removes its applied state in the same database
+transaction. Native records do not add cleanup prerequisites or change backend failure handling. The
+VM-family mutation guard prevents parent deletion from racing setup; it is separate from the
+database transaction. See [harness facets](../../../docs/guides/harness-facets.md) for operating
+guidance.
 
 `clear_applied_slice` removes only one supplied registered key for one typed owner. It rejects
 caller-authored strings and keys registered for a different owner kind, treats an already absent key

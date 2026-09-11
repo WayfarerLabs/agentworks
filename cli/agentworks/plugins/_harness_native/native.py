@@ -134,7 +134,7 @@ def setup_workspace(
     if mapping is None:
         if claims:
             output.info("Removed settings mapping; native settings and their current values are retained.")
-        invocation.checkpoint(())
+            invocation.checkpoint(())
         return
     prepared = prepare_settings(mapping, format=_format(tool))
     root = native_path(invocation.root) + ("/.claude" if tool == "claude" else "/.codex")
@@ -143,7 +143,8 @@ def setup_workspace(
         initial = files.read(destination)
         plan = _MappingPlan.build(prepared, initial)
         plan.publish(files, destination, current=initial, group=invocation.linux_group)
-        invocation.checkpoint(())
+        if claims:
+            invocation.checkpoint(())
 
 
 def _require_owned(claim: NativeClaim | None, source: str | None, *, operation: str) -> None:
@@ -224,13 +225,11 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
     requested = [] if config is None else config.plugins
     if not native_claims and not sources and not requested:
         if prepared is None or mapping is None:
-            invocation.checkpoint(())
             return
         with NativeFiles(invocation.runner) as files:
             initial = files.read(destination)
             settings_plan = _MappingPlan.build(prepared, initial)
             settings_plan.publish(files, destination, current=initial)
-            invocation.checkpoint(())
         return
     with NativeFiles(invocation.runner) as files:
         initial = files.read(destination)
@@ -400,4 +399,3 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                 overlays=overlays,
                 removed=tuple(_native_key(tool, old.role, old.identifier) for old in obsolete),
             )
-            invocation.checkpoint(tuple(claims))

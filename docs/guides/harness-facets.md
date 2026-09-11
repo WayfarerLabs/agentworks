@@ -184,13 +184,13 @@ operation, using its previous receipts. Workspace mappings require explicit recr
 changes; `workspace repair` only repairs its existing access and Git identity responsibilities.
 
 Cleanup only removes effects whose ownership can be established. Removed settings mappings retain
-the document and relinquish claims; removed owned plugin associations are reconciled where safe. See
+the document; removed owned plugin associations are reconciled where safe. See
 [native cleanup rules](native-harness-setup.md#deleting-owning-resources) before deleting an owner.
-Agent and workspace deletion stop and retain evidence when retirement cannot complete. Successful
-platform VM deletion removes guest-native effects with the VM and clears its family's records.
+Parent deletion follows the existing VM, agent, or workspace lifecycle. It removes the contained
+native files with their parent and clears setup records through the existing database deletion. It
+does not first uninstall plugins or require readable setup receipts.
 
 Setup, deletion, and workspace rehome share a VM-family mutation guard. A competing mutation refuses
-with retry guidance. Rehome refuses a workspace carrying native receipts because receipt relocation
-is unsupported; preserve its contents, delete with integration cleanup, and recreate at the new
-location. [Idempotency](idempotency.md#harness-setup-reconciliation) describes retry guarantees and
-limits.
+with retry guidance. Rehome moves project settings with the workspace. Existing receipts do not
+block the move; readiness reports stale setup when its recorded destination no longer matches.
+[Idempotency](idempotency.md#harness-setup-reconciliation) describes retry guarantees and limits.

@@ -53,6 +53,22 @@ def test_codec_round_trip_and_owner_validation():
         decode_native_setup(replace(record, instance_kind="workspace"))
 
 
+def test_nested_declaration_survives_persistence(tmp_path):
+    from pydantic import JsonValue
+
+    declaration: JsonValue = "value"
+    for _ in range(200):
+        declaration = {"nested": declaration}
+    record = _state().records[0].model_copy(update={"declaration": {"config": declaration}})
+    state = NativeSetupState(records=(record,))
+    db = Database(tmp_path / "state.db")
+    try:
+        write_native_setup(db, "agent", "a", state, operation="agent-reinit")
+        assert read_native_setup(db, "agent", "a") == state
+    finally:
+        db.close()
+
+
 def test_unknown_version_is_retained_but_cannot_bless_setup():
     record = _slice(VersionedPayload(2, {"future": True}))
     with pytest.raises(UnsupportedNativeSetupVersionError):
@@ -92,6 +108,9 @@ def test_restore_preserves_native_receipts_after_setup_releases_database(tmp_pat
     payload = VersionedPayload(99, {"future": True}) if future else encode_native_setup(pending)
     db = Database(Path("state.db"))
     try:
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
         db.insert_vm("box", site="local", hostname="box")
         db.insert_agent("a", "box", "agt-a")
         db.instance_state.replace_applied_slices(

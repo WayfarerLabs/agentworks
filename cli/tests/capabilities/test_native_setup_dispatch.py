@@ -7,7 +7,6 @@ import pytest
 
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
 from agentworks.db import Database
-from agentworks.errors import StateError
 from agentworks.harness_setup.dispatch import run_setup
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.model import NativeClaim
@@ -113,14 +112,17 @@ def test_buffered_creation_does_not_publish_ownerless_receipts(setup_case):
     assert read_native_setup(db, "agent", "agent").records == ()
 
 
-def test_changed_native_destination_refuses_before_any_mutation(setup_case, monkeypatch):
+def test_changed_destination_can_be_reconciled_by_owning_integrations(setup_case, monkeypatch):
     db, inputs, invocation, events, _ = setup_case
     run_setup(db, Mock(), inputs, invocation, operation="agent-reinit")
     events.clear()
     monkeypatch.setattr("agentworks.harness_setup.dispatch.destination_id", lambda *args, **kwargs: "b" * 64)
-    with pytest.raises(StateError):
-        run_setup(db, Mock(), inputs, invocation, operation="agent-reinit")
-    assert events == []
+    run_setup(db, Mock(), inputs, invocation, operation="agent-reinit")
+    assert events == [("first", False), ("second", False)]
+    assert all(
+        record.complete and record.destination_id == "b" * 64
+        for record in read_native_setup(db, "agent", "agent").records
+    )
 
 
 def test_receipts_omit_env_values_but_detect_declaration_changes(setup_case):
