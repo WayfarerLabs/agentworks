@@ -306,20 +306,20 @@ The receipt codec now validates its already-parsed value directly, avoiding a se
 with a different nesting limit. The restore regression changes working directories after opening a
 relative database path, so it now requires the resolved database identity it claims to exercise.
 Native fixture launchers expose their Node runtime inside isolated test homes. The upgrade guide now
-includes both template migrations.
-Independent live backend acceptance and final SDD locking remain open.
+includes both template migrations. Independent live backend acceptance and final SDD locking remain
+open.
 
 The integrated simplification passed 8,930 tests with three skips on Linux using Codex CLI 0.154.0
 and Claude Code 2.1.269. Ruff and strict mypy (803 files) passed. Project review identified stale
 lifecycle and settings-claim prose, now corrected. Independent correctness review passed 232 focused
-tests without a finding. The complexity pass also removed redundant terminal receipt checkpoints
-and an unused setup-preparation parameter.
+tests without a finding. The complexity pass also removed redundant terminal receipt checkpoints and
+an unused setup-preparation parameter.
 
 Installing native CLI fixtures in CI remains a follow-up: GitHub rejected the prepared workflow
 change because both available credentials lack workflow permission. The reviewed patch is retained
 with the lead's handoff; this PR's CI workflow remains unchanged. Native fixture validation here is
 local evidence, not a claim that CI installs those tools. Independent live acceptance remains open.
 
-The final checkpoint and signature simplifications passed 74 focused tests. Website Python (160)
-and Node (103) tests and deterministic double builds for both site bases passed. Typer isolation,
+The final checkpoint and signature simplifications passed 74 focused tests. Website Python (160) and
+Node (103) tests and deterministic double builds for both site bases passed. Typer isolation,
 locked-SDD checks and Rulesync generation parity also passed.
