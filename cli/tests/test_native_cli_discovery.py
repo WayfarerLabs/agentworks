@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from agentworks.errors import ExternalError
+from agentworks.errors import ConnectivityError, ExternalError
 from agentworks.harness_setup.model import NativeClaim
 from agentworks.plugins._harness_native.native import setup_user
 from agentworks.plugins._harness_native.native_cli import NativeCLI, NativeTool
@@ -136,3 +136,21 @@ def test_home_dependent_launcher_does_not_escape_discovery_isolation(target: Loc
     assert not (target.home / ".codex").exists()
     assert not (target.home / ".claude").exists()
     assert not list((target.root / "tmp").iterdir())
+
+
+@pytest.mark.parametrize("resolved", [False, True])
+def test_native_response_transfer_preserves_transport_error(target, monkeypatch, resolved):
+    executable(target.home / ".local/bin/codex", "login")
+    with NativeFiles(target) as files:
+        cli = NativeCLI("codex", files, home=str(target.home), config_root=str(target.home / ".codex"))
+        if resolved:
+            cli._resolve_command()
+        failure = ConnectivityError("fixture transport disconnected")
+
+        def disconnect(*args, **kwargs):
+            raise failure
+
+        monkeypatch.setattr(target, "copy_from", disconnect)
+        with pytest.raises(ConnectivityError) as caught:
+            cli.command(["inspect"], structured=True)
+        assert caught.value is failure

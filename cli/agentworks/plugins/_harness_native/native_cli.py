@@ -131,8 +131,8 @@ class NativeCLI:
         )
         if not result.ok:
             raise ExternalError(f"could not resolve {self.tool} from the actual user's login environment")
+        self.files.runner.copy_from(remote, local)
         try:
-            self.files.runner.copy_from(remote, local)
             observed = json.loads(local.read_bytes())
             executable = _text(observed["executable"])
             path = _text(observed["path"])
@@ -178,8 +178,8 @@ class NativeCLI:
             raise ExternalError(f"{self.tool} native plugin operation failed; inspect its setup with the native CLI")
         if not structured:
             return None
+        self.files.runner.copy_from(remote, local)
         try:
-            self.files.runner.copy_from(remote, local)
             return json.loads(local.read_bytes())
         except Exception:
             raise ExternalError(f"invalid {self.tool} native plugin response") from None

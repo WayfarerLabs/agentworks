@@ -55,7 +55,7 @@ class SettingsMapping(AgwModel):
 class SettingsResult:
     """Effective native bytes, including untouched bytes when mapping is skipped.
 
-    ``skipped`` means no mapping ownership can be claimed.
+    ``skipped`` means the destination already existed under skip-existing.
     """
 
     content: bytes = field(repr=False)

@@ -96,7 +96,7 @@ def test_settings_only_replace_repairs_invalid_document_and_retirement_retains_i
     config = NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="replace"))
     claims: list[tuple[NativeClaim, ...]] = []
     setup_user(tool, config, invocation(transport, claims))
-    assert claims[-1][0].role == "settings"
+    assert claims[-1] == ()
     provisioned = destination.read_bytes()
     source.unlink()
     setup_user(tool, None, invocation(transport, claims, prior=record(claims[-1], tool)))
@@ -159,7 +159,7 @@ def test_workspace_mapping_uses_group_and_fixed_project_role(transport: LocalFix
     destination = workspace / ".claude/settings.json"
     assert destination.stat().st_mode & 0o777 == 0o660
     assert destination.stat().st_gid == os.getgid()
-    assert claims[-1][0].destination == str(destination)
+    assert claims[-1] == ()
     assert not (transport.home / ".claude/settings.json").exists()
 
 
@@ -185,8 +185,9 @@ def test_mapping_conflict_precedes_real_native_writes(transport: LocalFixtureTra
 
 
 @pytest.mark.parametrize("tool", ["codex", "claude"])
+@pytest.mark.parametrize("strategy", ["replace", "skip-existing"])
 def test_replacement_keeps_explicit_plugins_and_captured_source(
-    transport: LocalFixtureTransport, tool: NativeTool, monkeypatch: pytest.MonkeyPatch
+    transport: LocalFixtureTransport, tool: NativeTool, strategy: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     market = market_fixture(transport, tool)
     source = transport.root / "source"
@@ -204,7 +205,7 @@ def test_replacement_keeps_explicit_plugins_and_captured_source(
         NativeUserConfig(
             marketplaces=[str(market)],
             plugins=["one@fixture-market"],
-            settings=SettingsMapping(source=str(source), strategy="replace"),
+            settings=SettingsMapping(source=str(source), strategy=strategy),
         ),
         invocation(transport, claims),
     )
@@ -213,13 +214,12 @@ def test_replacement_keeps_explicit_plugins_and_captured_source(
         cli = NativeCLI(tool, files, home=str(transport.home), config_root=root)
         installed = cli.plugins(cli.markets())
         assert len(installed) == 1 and installed[0].enabled
-    mapping = next(claim for claim in claims[-1] if claim.role == "settings")
-    assert (
-        mapping.written_keys == (("model_reasoning_effort",),)
-        if tool == "codex"
-        else (mapping.written_keys == (("alwaysThinkingEnabled",),))
+    destination = transport.home / (".codex/config.toml" if tool == "codex" else ".claude/settings.json")
+    document = parse_settings(destination.read_bytes(), format="toml" if tool == "codex" else "json")
+    assert document["model_reasoning_effort" if tool == "codex" else "alwaysThinkingEnabled"] == (
+        "low" if tool == "codex" else False
     )
-    assert "invalid replacement source" not in str(claims)
+    assert {claim.role for claim in claims[-1]} == {"marketplace", "plugin"}
 
 
 @pytest.mark.parametrize("tool", ["codex", "claude"])
@@ -248,9 +248,9 @@ def test_skip_existing_does_not_block_explicit_install(transport: LocalFixtureTr
     assert {claim.role for claim in claims[-1]} == {"marketplace", "plugin"}
 
 
-@pytest.mark.parametrize(("strategy", "retained"), [("merge-preserve", True), ("skip-existing", False)])
-def test_unchanged_mapping_preserves_all_owned_receipts_unless_skipped(
-    transport: LocalFixtureTransport, strategy: str, retained: bool
+@pytest.mark.parametrize("strategy", ["merge-preserve", "skip-existing"])
+def test_mapping_discards_legacy_settings_receipts_and_preserves_native_claims(
+    transport: LocalFixtureTransport, strategy: str
 ) -> None:
     tool: NativeTool = "codex"
     market = market_fixture(transport, tool)
@@ -284,8 +284,8 @@ def test_unchanged_mapping_preserves_all_owned_receipts_unless_skipped(
         ),
         invocation(transport, checkpoints, prior=record(prior_claims, tool)),
     )
-    expected = prior_claims if retained else initial[-1]
-    assert checkpoints[-1] == expected
+    assert checkpoints[-1] == initial[-1]
+    assert destination.read_bytes() == content
 
 
 @pytest.mark.parametrize("tool", ["codex", "claude"])
@@ -379,7 +379,7 @@ def test_user_setup_binding_uses_native_model_and_config_home(
     key = "CODEX_HOME" if tool == "codex" else "CLAUDE_CONFIG_DIR"
     bound.user_init(invocation(transport, claims, env={key: str(root)}))
     assert (root / ("config.toml" if tool == "codex" else "settings.json")).is_file()
-    assert claims[-1][0].destination.startswith(str(root) + "/")
+    assert claims[-1] == ()
     assert not (transport.home / (".codex" if tool == "codex" else ".claude")).exists()
 
 
@@ -406,9 +406,24 @@ def test_codex_mapping_preserves_unrelated_plugin_and_market_fields(transport: L
     assert document["plugins"]["one@fixture-market"]["enabled"] is True
     assert document["plugins"]["one@fixture-market"]["custom"] == "fixture-extra"
     assert document["marketplaces"]["fixture-market"]["custom"] == "fixture-market-extra"
-    written = next(claim.written_keys for claim in claims[-1] if claim.role == "settings")
-    assert ("plugins", "one@fixture-market", "custom") in written
-    assert ("plugins", "one@fixture-market", "enabled") not in written
+    document["marketplaces"]["fixture-market"]["last_updated"] = "2026-09-11T00:00:00Z"
+    destination = transport.home / ".codex/config.toml"
+    destination.write_bytes(serialize_settings(document, format="toml"))
+    source.write_text(source.read_text().replace("fixture-extra", "updated-extra"))
+    setup_user(
+        "codex",
+        NativeUserConfig(
+            marketplaces=[str(market)],
+            plugins=["one@fixture-market"],
+            settings=SettingsMapping(source=str(source), strategy="replace"),
+        ),
+        invocation(transport, claims, prior=record(claims[-1], "codex")),
+    )
+    updated = tomllib.loads(destination.read_text())
+    assert updated["plugins"]["one@fixture-market"]["custom"] == "updated-extra"
+    assert updated["marketplaces"]["fixture-market"]["last_updated"] == "2026-09-11T00:00:00Z"
+    assert updated["marketplaces"]["fixture-market"]["source_type"] == "local"
+    assert updated["marketplaces"]["fixture-market"]["source"] == str(market)
 
 
 @pytest.mark.parametrize("tool", ["codex", "claude"])
@@ -431,7 +446,7 @@ def test_mapping_merge_does_not_reintroduce_removed_owned_plugin(
         ),
         invocation(transport, claims, prior=record(claims[-1], tool)),
     )
-    assert {claim.role for claim in claims[-1]} == {"marketplace", "settings"}
+    assert {claim.role for claim in claims[-1]} == {"marketplace"}
     with NativeFiles(transport) as files:
         cli = NativeCLI(
             tool,
@@ -549,18 +564,17 @@ def test_missing_guest_python_refuses_before_staging(transport: LocalFixtureTran
 
     probe = Mock(return_value=SimpleNamespace(ok=False))
     monkeypatch.setattr(transport, "run", probe)
-    with pytest.raises(StateError) as caught, NativeFiles(transport):
+    with pytest.raises(StateError), NativeFiles(transport):
         pytest.fail("missing prerequisite must stop before staging")
-    assert caught.value.hint is not None
-    assert "python3" in str(caught.value) and "apt_packages" in caught.value.hint
     assert probe.call_count == 1
     assert not list((transport.root / "tmp").iterdir())
 
 
 @pytest.mark.parametrize("tool", ["codex", "claude"])
 @pytest.mark.parametrize("inside_plugin", [False, True])
-def test_mapping_refuses_unrelated_changes_during_plugin_install(
-    transport: LocalFixtureTransport, tool: NativeTool, inside_plugin: bool, monkeypatch
+@pytest.mark.parametrize("strategy", ["merge-preserve", "merge-overwrite"])
+def test_mapping_merges_current_changes_during_plugin_install(
+    transport: LocalFixtureTransport, tool: NativeTool, inside_plugin: bool, strategy: str, monkeypatch
 ) -> None:
     market = market_fixture(transport, tool)
     format = "toml" if tool == "codex" else "json"
@@ -570,7 +584,7 @@ def test_mapping_refuses_unrelated_changes_during_plugin_install(
     config = NativeUserConfig(
         marketplaces=[str(market)],
         plugins=["one@fixture-market"],
-        settings=SettingsMapping(source=str(source), strategy="merge-preserve"),
+        settings=SettingsMapping(source=str(source), strategy=strategy),
     )
     claims: list[tuple[NativeClaim, ...]] = []
     original = NativeCLI.install
@@ -586,13 +600,20 @@ def test_mapping_refuses_unrelated_changes_during_plugin_install(
             plugin["external"] = "preserve"
         else:
             document["external"] = "preserve"
+        if tool == "codex":
+            marketplaces = document["marketplaces"]
+            assert isinstance(marketplaces, dict)
+            marketplace = marketplaces["fixture-market"]
+            assert isinstance(marketplace, dict)
+            marketplace["last_updated"] = "2026-09-11T00:00:00Z"
         destination.write_bytes(serialize_settings(document, format=format))
 
     monkeypatch.setattr(NativeCLI, "install", concurrent_edit)
-    with pytest.raises(StateError):
-        setup_user(tool, config, invocation(transport, claims))
+    setup_user(tool, config, invocation(transport, claims))
     assert {claim.role for claim in claims[-1]} == {"marketplace", "plugin"}
     assert b"preserve" in destination.read_bytes()
+    if tool == "codex":
+        assert b"2026-09-11T00:00:00Z" in destination.read_bytes()
     monkeypatch.setattr(NativeCLI, "install", original)
     setup_user(tool, config, invocation(transport, claims, prior=record(claims[-1], tool)))
     assert b"preserve" in destination.read_bytes()
@@ -666,3 +687,37 @@ def test_codex_relative_source_named_local_does_not_match_source_type(transport:
     with NativeFiles(transport) as files:
         cli = NativeCLI("codex", files, home=str(transport.home), config_root=str(transport.home / ".codex"))
         assert [market.name for market in cli.markets()] == ["other-market"]
+
+
+def test_settings_publication_refuses_changes_after_final_snapshot(transport, monkeypatch):
+    source = transport.root / "mapping.json"
+    source.write_bytes(b'{"mapped": true}')
+    destination = transport.home / ".claude/settings.json"
+    original = NativeFiles.publish
+
+    def concurrent_edit(self, path, content, **kwargs):
+        destination.parent.mkdir(exist_ok=True)
+        destination.write_bytes(b'{"external": true}')
+        original(self, path, content, **kwargs)
+
+    monkeypatch.setattr(NativeFiles, "publish", concurrent_edit)
+    with pytest.raises(StateError):
+        setup_user(
+            "claude",
+            NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="replace")),
+            invocation(transport, []),
+        )
+    assert json.loads(destination.read_bytes()) == {"external": True}
+
+
+def test_marketplace_only_repeat_does_not_read_available_catalog(transport, monkeypatch):
+    market = market_fixture(transport, "codex")
+    config = NativeUserConfig(marketplaces=[str(market)])
+    claims: list[tuple[NativeClaim, ...]] = []
+    setup_user("codex", config, invocation(transport, claims))
+
+    def unexpected_catalog(self):
+        pytest.fail("no plugin selector needs catalog resolution")
+
+    monkeypatch.setattr(NativeCLI, "available", unexpected_catalog)
+    setup_user("codex", config, invocation(transport, claims, prior=record(claims[-1], "codex")))

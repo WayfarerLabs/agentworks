@@ -14,7 +14,6 @@ from agentworks import output
 from agentworks.capabilities.harness_integration.settings import (
     PreparedSettings,
     SettingsFormat,
-    SettingsMapping,
     SettingsObject,
     SettingsValue,
     parse_settings,
@@ -84,35 +83,16 @@ def _overlay_fields(existing: SettingsValue, desired: SettingsValue) -> Settings
     return desired
 
 
-def _changes(before: SettingsObject, after: SettingsObject, prefix: tuple[str, ...] = ()) -> set[tuple[str, ...]]:
-    result = set()
-    for key in before.keys() | after.keys():
-        path = (*prefix, key)
-        old, new = before.get(key), after.get(key)
-        if key not in before and isinstance(new, dict) and new:
-            result.update(_changes({}, new, path))
-        elif key not in after and isinstance(old, dict) and old:
-            result.update(_changes(old, {}, path))
-        elif key in before and key in after and isinstance(old, dict) and isinstance(new, dict):
-            result.update(_changes(old, new, path))
-        elif key not in before or key not in after or type(old) is not type(new) or old != new:
-            result.add(path)
-    return result
-
-
 @dataclass
 class _MappingPlan:
-    mapping: SettingsMapping
     prepared: PreparedSettings
-    initial: bytes | None
-    content: bytes
     skipped: bool
     contributions: SettingsObject
 
     @classmethod
-    def build(cls, mapping: SettingsMapping, prepared: PreparedSettings, initial: bytes | None) -> _MappingPlan:
+    def build(cls, prepared: PreparedSettings, initial: bytes | None) -> _MappingPlan:
         result = prepared.apply(initial)
-        return cls(mapping, prepared, initial, result.content, result.skipped, prepared.contributions(initial))
+        return cls(prepared, result.skipped, prepared.contributions(initial))
 
     def publish(
         self,
@@ -123,75 +103,24 @@ class _MappingPlan:
         group: str = "",
         overlays: tuple[tuple[tuple[str, str], SettingsValue], ...] = (),
         removed: tuple[tuple[str, str], ...] = (),
-    ) -> NativeClaim | None:
+    ) -> None:
         if self.skipped:
-            return None
-        document = parse_settings(self.content, format=self.prepared.format)
-        try:
-            before = {} if current is None else parse_settings(current, format=self.prepared.format)
-        except ConfigError:
-            # Replacement can repair the same invalid destination we observed.
-            if current != self.initial:
-                raise StateError("native settings changed during setup; retry against the current file") from None
-            before = {}
-        native_paths: set[tuple[str, ...]] = set(removed)
-        for path, value in overlays:
-            if isinstance(value, dict):
-                native_paths.update((*path, key) for key in value)
-            else:
-                native_paths.add(path)
-        if self.initial != current:
-            try:
-                initial = {} if self.initial is None else parse_settings(self.initial, format=self.prepared.format)
-            except ConfigError:
-                raise StateError("native settings changed during setup; retry against the current file") from None
-            changed = _changes(initial, before)
-            if any(not any(path[: len(native)] == native for native in native_paths) for path in changed):
-                raise StateError("native settings changed outside the planned plugin keys; retry setup")
+            return
+        # Keep the initial skip decision even when plugin commands create the file.
+        result = self.prepared.apply(None if self.prepared.strategy == "skip-existing" else current)
+        document = parse_settings(result.content, format=self.prepared.format)
         for key, name in removed:
             _table(document, key).pop(name, None)
+        native = {} if current is None or not overlays else parse_settings(current, format=self.prepared.format)
         for (key, name), value in overlays:
             if key not in document:
                 document[key] = {}
             table = _table(document, key)
-            baseline = _table(before, key).get(name)
-            requested = table.get(name, baseline)
-            table[name] = _overlay_fields(_overlay_fields(baseline, requested), value)
+            baseline = _table(native, key).get(name)
+            table[name] = _overlay_fields(_overlay_fields(baseline, table.get(name, baseline)), value)
         content = serialize_settings(document, format=self.prepared.format)
-        if content == current:
-            return None
-        paths = _changes(before, document)
-        paths = {path for path in paths if not any(path[: len(native)] == native for native in native_paths)}
-        files.publish(destination, content, expected=_hash(current), group=group)
-        return NativeClaim(
-            role="settings",
-            identifier="settings",
-            destination=destination,
-            source=self.mapping.source,
-            sha256=_hash(content),
-            strategy=self.mapping.strategy,
-            written_keys=tuple(sorted(paths)),
-        )
-
-
-def _retain_settings(claims: list[NativeClaim]) -> list[NativeClaim]:
-    if any(claim.role == "settings" for claim in claims):
-        output.info("Removed settings mapping; native settings and their current values are retained.")
-    return [claim for claim in claims if claim.role != "settings"]
-
-
-def _matching_settings_claims(
-    claims: list[NativeClaim], destination: str, content: bytes | None, *, skipped: bool
-) -> list[NativeClaim]:
-    """Carry every owned settings receipt forward when no publication was needed."""
-    if skipped:
-        return []
-    digest = _hash(content)
-    return [
-        claim
-        for claim in claims
-        if claim.role == "settings" and claim.destination == destination and claim.sha256 == digest
-    ]
+        if content != current:
+            files.publish(destination, content, expected=_hash(current), group=group)
 
 
 def setup_workspace(
@@ -203,22 +132,18 @@ def setup_workspace(
         raise StateError("workspace native setup contains unsupported ownership claims")
     mapping = None if config is None else config.settings
     if mapping is None:
-        invocation.checkpoint(tuple(_retain_settings(claims)))
+        if claims:
+            output.info("Removed settings mapping; native settings and their current values are retained.")
+        invocation.checkpoint(())
         return
     prepared = prepare_settings(mapping, format=_format(tool))
     root = native_path(invocation.root) + ("/.claude" if tool == "claude" else "/.codex")
     destination = root + "/" + _filename(tool)
     with NativeFiles(invocation.runner) as files:
         initial = files.read(destination)
-        plan = _MappingPlan.build(mapping, prepared, initial)
-        claim = plan.publish(files, destination, current=initial, group=invocation.linux_group)
-        previous = _matching_settings_claims(claims, destination, initial, skipped=plan.skipped)
-        claims = [old for old in claims if old.role != "settings" or old.destination != destination]
-        if claim is not None:
-            claims.append(claim)
-        else:
-            claims.extend(previous)
-        invocation.checkpoint(tuple(claims))
+        plan = _MappingPlan.build(prepared, initial)
+        plan.publish(files, destination, current=initial, group=invocation.linux_group)
+        invocation.checkpoint(())
 
 
 def _require_owned(claim: NativeClaim | None, source: str | None, *, operation: str) -> None:
@@ -279,7 +204,12 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
     root = native_path(
         invocation.environment.get(override) or (invocation.home + ("/.claude" if tool == "claude" else "/.codex"))
     )
+    if mapping is None and any(claim.role == "settings" for claim in claims):
+        output.info("Removed settings mapping; native settings and their current values are retained.")
     native_claims = [claim for claim in claims if claim.role in ("plugin", "marketplace")]
+    if native_claims != claims:
+        invocation.checkpoint(tuple(native_claims))
+    claims = native_claims.copy()
     if config is None and native_claims:
         roots = {native_path(claim.destination) for claim in native_claims}
         if len(roots) != 1:
@@ -294,18 +224,17 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
     requested = [] if config is None else config.plugins
     if not native_claims and not sources and not requested:
         if prepared is None or mapping is None:
-            invocation.checkpoint(tuple(_retain_settings(claims)))
+            invocation.checkpoint(())
             return
         with NativeFiles(invocation.runner) as files:
             initial = files.read(destination)
-            settings_plan = _MappingPlan.build(mapping, prepared, initial)
-            claim = settings_plan.publish(files, destination, current=initial)
-            previous_claims = _matching_settings_claims(claims, destination, initial, skipped=settings_plan.skipped)
-            invocation.checkpoint(tuple([claim] if claim else previous_claims))
+            settings_plan = _MappingPlan.build(prepared, initial)
+            settings_plan.publish(files, destination, current=initial)
+            invocation.checkpoint(())
         return
     with NativeFiles(invocation.runner) as files:
         initial = files.read(destination)
-        plan = None if mapping is None or prepared is None else _MappingPlan.build(mapping, prepared, initial)
+        plan = None if mapping is None or prepared is None else _MappingPlan.build(prepared, initial)
         # Native inventory must be trustworthy before mutation. A settings-only
         # replacement can repair malformed input; plugin reconciliation refuses
         # it until that separate repair makes ownership observable again.
@@ -338,7 +267,7 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                 raise ConfigError("multiple marketplace sources resolve to the same native name")
             desired.append(market)
             source_for[market.name] = source
-        if root_exists:
+        if root_exists and requested:
             available.update(cli.available())
         selectors = []
         for selector in requested:
@@ -450,11 +379,7 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                     "plugin",
                     selector,
                 )
-        if plan is None:
-            updated = _retain_settings(claims)
-            if updated != claims:
-                invocation.checkpoint(tuple(updated))
-        else:
+        if plan is not None:
             current = files.read(destination)
             current_document = {} if current is None else parse_settings(current, format=_format(tool))
             overlays: tuple[tuple[tuple[str, str], SettingsValue], ...] = tuple(
@@ -468,14 +393,11 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
             for (key, name), _value in overlays:
                 if name not in _table(current_document, key):
                     raise StateError("native plugin settings association could not be confirmed")
-            claim = plan.publish(
+            plan.publish(
                 files,
                 destination,
                 current=current,
                 overlays=overlays,
                 removed=tuple(_native_key(tool, old.role, old.identifier) for old in obsolete),
             )
-            previous = _matching_settings_claims(claims, destination, current, skipped=plan.skipped)
-            updated = [old for old in claims if old.role != "settings"]
-            updated.extend([claim] if claim else previous)
-            invocation.checkpoint(tuple(updated))
+            invocation.checkpoint(tuple(claims))
