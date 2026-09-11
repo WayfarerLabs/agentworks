@@ -63,7 +63,7 @@ def run_setup(
 
     A fresh owner's caller buffers and commits this result with its owner row.
     It must already have refused native residue and own failed-create rollback.
-    Existing owners checkpoint each confirmed mutation before another can run.
+    Existing owners checkpoint confirmed ownership changes before another can run.
     """
     expected = {"vm": VMSetupInvocation, "user": UserSetupInvocation, "workspace": WorkspaceSetupInvocation}
     if not isinstance(invocation, expected[inputs.facet]):

@@ -552,7 +552,7 @@ setup completed. Core owns persistence and lifecycle dispatch; the integration o
 writes, removal decisions, and their evidence.
 
 Before the first native mutation, invalidate the prior completed setup marker while preserving
-ownership facts needed for reconciliation. Checkpoint each completed mutation before the next one;
+ownership facts needed for reconciliation. Checkpoint confirmed ownership changes before continuing;
 core acknowledges only after persistence succeeds. A failure leaves the recorded prefix and
 incomplete status available for retry, including a failed same-input reinit. Mark setup complete
 only after the facet returns successfully. A no-op selected facet can record completion but cannot
