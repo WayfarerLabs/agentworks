@@ -41,8 +41,9 @@ For one owner:
 3. For each integration, prepare sources and native observations and reject conflicting desired
    plugin/settings changes before its first write.
 4. Persist incomplete status before the first mutation, retaining existing claims needed for retry.
-5. Perform one native mutation, observe its authoritative result, and checkpoint the resulting
-   ownership before proceeding to the next mutation. Persistence failure aborts further writes.
+5. After each plugin or marketplace mutation, observe its authoritative result and checkpoint the
+   resulting ownership before proceeding. Persistence failure aborts further writes. Settings
+   publication creates no ownership claim and needs only the operation's completion record.
 6. Record completion only after successful return. Keep incomplete or pending cleanup evidence on
    failure; a same-input retry must not mistake it for a successful current setup.
 7. Release the guard on every exit, including interruption.
