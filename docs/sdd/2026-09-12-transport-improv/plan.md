@@ -22,7 +22,7 @@ checkpoint.
       mechanism before any guest target exists.
 - [ ] Specify interpreter and startup policy. Done when fixed `sh`/`bash`, supported explicit
       interpreters, destination user-shell resolution after elevation, login/interactive startup,
-      carrier bootstrap, and profile-free readiness have precise behavior and acceptance cases.
+      carrier bootstrap, and readiness preparation have precise behavior and acceptance cases.
 - [ ] Establish Proxmox and WSL2 feasibility under a separately authorized live-test charter. Done
       when each design assumption has observed evidence or an explicit operator disposition.
 - [ ] Have the SSH developer review the proposed #757 boundary and carrier seam. Done when singular

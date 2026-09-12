@@ -90,18 +90,22 @@ under root. Resolve once per invocation and retain that selection for detached w
 account's shell later cannot change the interpreter of an already-submitted job. Source language
 remains the caller's responsibility when requesting the user's shell.
 
-Literal execution uses the target's explicit environment and working directory without profile
-initialization. A profile-dependent operation deliberately invokes a shell with the required startup
-policy. Carrier bootstrap may itself involve an account shell, notably OpenSSH's remote command
-handling, but that shell is delivery machinery: adapters must preserve literal argv and the chosen
-payload interpreter. Isolation does not claim the carrier never starts a shell. If a supported
-carrier cannot honor the payload contract through its bootstrap shell, that is an implementation gap
-to resolve, not a different interpretation of the command.
+Literal execution uses the target's explicit environment and working directory without requesting
+profile initialization. A profile-dependent operation deliberately invokes a shell with the required
+startup policy. Carrier bootstrap may itself involve an account shell, notably OpenSSH's remote
+command handling, but that shell is delivery machinery: adapters must preserve literal argv and the
+chosen payload interpreter. Isolation does not claim the carrier never starts a shell. If a
+supported carrier cannot honor the payload contract through its bootstrap shell, that is an
+implementation gap to resolve, not a different interpretation of the command.
 
 Application shell policy belongs above the adapters. Provider wrappers and shared transfer/job
 helpers choose their own explicit internal interpreter and must not inherit the application's
-user-shell choice. Readiness uses bounded probes with fixed preparation and no profile evaluation;
-context accessors never resolve user shells or run initialization files.
+user-shell choice. Readiness preparation uses bounded probes, does not request login or interactive
+startup, source profiles, or depend on startup side effects. This constrains Agentworks-controlled
+payloads and helpers: OpenSSH may execute preexisting account hooks before the payload, and this API
+cannot establish that arbitrary hooks are read-only. Adapters document and test that bootstrap
+behavior and refuse when it prevents the promised argument or stream semantics. Context accessors
+never resolve user shells or run initialization files.
 
 ### Optional channel features
 
@@ -230,8 +234,8 @@ identity, not a transport class. The selected route is inspectable metadata on t
 The owning operation can bind explicit shell defaults alongside its prepared environment. Context
 consumers can inspect those defaults and override shell policy deliberately per invocation. The
 target does not derive application policy from its route; accessing the target performs no account
-lookup. Readiness targets retain their no-startup/no-staging preparation constraint even when a
-later operation context will use an explicitly selected login shell.
+lookup. Readiness targets retain the shell-policy preparation constraints above and do not stage
+scripts, even when a later operation context will use an explicitly selected login shell.
 
 The orchestrator decides whether an admin target uses canonical or native access before delivering
 the context. Do not add an accessor that looks up arbitrary VMs, accepts a route override, or builds
@@ -328,11 +332,11 @@ select application privilege or shell, resolve `RunContext`, or decide to repeat
 legacy entry points may preserve their existing retry behavior during #757's consolidation; the new
 stack cannot inherit hidden replay underneath its own no-ambiguous-retry guarantee.
 
-#757 preserves the existing result interfaces and corrects misleading status-255 diagnostics. This
-effort owns the common outcome model and maps only evidence the carrier actually provides. OpenSSH
-status 255 alone cannot distinguish a guest exit from connection failure; nested Lima status does
-not identify a failed inner hop. Preserve that uncertainty without adding a completion protocol,
-reconnect mechanism, new SSH library, or second trust implementation.
+PR #757 preserves the existing result interfaces and corrects misleading status-255 diagnostics.
+This effort owns the common outcome model and maps only evidence the carrier actually provides.
+OpenSSH status 255 alone cannot distinguish a guest exit from connection failure; nested Lima status
+does not identify a failed inner hop. Preserve that uncertainty without adding a completion
+protocol, reconnect mechanism, new SSH library, or second trust implementation.
 
 Prepared environment, sensitive I/O, and shell wrappers currently reside partly in SSH. The
 integration inventory must assign each to either common preparation or carrier delivery and remove
