@@ -19,6 +19,7 @@ forms, not executable code or a second command language:
 target.run(["tool", "--name", name], check=True)
 target.script(source, shell=Shell.fixed("bash"), stdin=Input.sensitive(secret_bytes), sudo=True)
 target.script(source, shell=Shell.user_default(login=True), cwd=remote_directory)
+target.run(["tool"], stdin=Input.live(source_stream), output=Output.stream(out_sink, err_sink))
 job = target.start(Script(source, shell=Shell.fixed("sh")), sudo=True)
 status = target.observe(job)
 result = target.wait(job, deadline=deadline)
@@ -33,19 +34,29 @@ credential-free `JobRef` after launch acknowledgement. A lost acknowledgement pr
 uncertain-start outcome with any safe reconciliation reference, never automatic relaunch. There is
 no anonymous `background=True` or caller-written `nohup` requirement.
 
-Shared keyword options are `sudo`, `env`, `cwd`, `stdin`, `output`, and `deadline`. Foreground calls
-also accept `check`; `wait` accepts it when collecting a job result. Elevation is non-interactive
-and constrained by the bound identity. Shell defaults are absent unless deliberately bound by the
-operation; a script without either an explicit policy or that bound default is rejected. `Shell`
-separates interpreter choice from login and interactive startup as specified in the HLA.
+Shared keyword options are `sudo`, `env`, `cwd`, `stdin`, `output`, `sensitive`, and `deadline`.
+Foreground calls also accept `check`; `wait` accepts it when collecting a job result. Elevation is
+non-interactive and constrained by the bound identity. Shell defaults are absent unless deliberately
+bound by the operation; a script without either an explicit policy or that bound default is
+rejected. `Shell` separates interpreter choice from login and interactive startup as specified in
+the HLA.
 
-Input is finite bytes with an explicit sensitivity designation; omission means EOF, not inherited
-console input. Script source has its own delivery path and never consumes application stdin. Output
-defaults to bounded capture, with explicit discard or direct-streaming modes. Sensitive input uses
-FRD R4's suppression policy by default. Only explicit operation-owned presentation may permit live
-disclosure. `env` and `cwd` affect the final execution identity, not the workstation SSH process. A
-deadline is one monotonic budget through preparation and observation; omission follows the
-explicitly bound operation policy, not a carrier-selected timeout or retry default.
+Finite byte input works on every target; omission means EOF, not inherited console input. Foreground
+calls may explicitly select `Input.live(source)` for non-terminal piped or duplex work on a channel
+with direct live stdio. This does not allocate a PTY. The carrier pumps that source with the
+selected output sinks; an unsupported channel refuses before dispatch. Detached launch rejects live
+input, since its input must be delivered independently of the initiating connection. Script source
+has its own delivery path and never consumes application stdin.
+
+Output defaults to bounded capture, with explicit discard or direct-streaming modes. Effective
+sensitivity combines bound environment metadata, an input sensitivity marker, and the request-wide
+`sensitive=True` option for caller-supplied source, environment or other payloads. A call can add
+protection but cannot downgrade a sensitive bound value. Preparation preserves this designation
+through staging and `CarrierIO`; carriers do not infer sensitivity from content. FRD R4 owns the
+resulting suppression and authorized live-presentation policy. `env` and `cwd` affect the final
+execution identity, not the workstation SSH process. A deadline is one monotonic budget through
+preparation and observation; omission follows the explicitly bound operation policy, not a
+carrier-selected timeout or retry default.
 
 | Surface                                  | Proposed behavior                                                                                                               |
 | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
@@ -107,12 +118,22 @@ reported only from evidence about the submitted invocation. A local SSH process 
 by itself proof of guest completion. For nested delivery, the outer report proves only the outer
 invocation; the remote Lima adapter cannot manufacture guest status from an ambiguous inner hop.
 
+`CarrierIO` carries the effective sensitivity and any explicitly authorized live presentation.
+Finite prepared input and an explicit live input source are mutually exclusive; the latter is
+available only for the live-stdio feature or explicit terminal attachment. Neither mode inherits
+workstation stdin accidentally.
+
 Each call makes at most one dispatch attempt. Idempotent status polling is allowed; reconnecting and
-resending the invocation is not. On timeout, interruption, or connection loss, the carrier returns
-the available partial evidence after bounded local cleanup. Stopping the local SSH process does not
-claim remote cancellation. Operational exceptions must retain the same safe partial report; request
-validation may fail before dispatch. Only the owning operation can authorize a new attempt when it
-knows repetition is safe.
+resending the invocation is not. On timeout or connection loss, the carrier returns the available
+partial evidence after bounded local cleanup. Stopping the local SSH process does not claim remote
+cancellation. Operational exceptions must retain the same safe partial report; request validation
+may fail before dispatch. Only the owning operation can authorize a new attempt when it knows
+repetition is safe.
+
+Control-flow interruption, including `KeyboardInterrupt`, propagates after bounded local cleanup,
+regardless of `check`. Safe partial evidence may accompany it but must not convert it to an ordinary
+returned result or checked-command error. The owning operation's interrupt rollback must still run;
+remote cancellation remains a separate explicit action.
 
 Captured bytes are not silently truncated: limits produce explicit incomplete-output evidence.
 Common helpers arrange bounded transfer/spooling for required large data, while readiness targets
@@ -120,7 +141,9 @@ refuse implicit staging. Live sinks are drained without unbounded buffering; ter
 combined rather than presented as separate streams. OpenSSH client diagnostics can share stderr with
 the remote program, so an adapter must identify mixed provenance rather than assert it is pure guest
 stderr. Neither arbitrary stderr text nor status 255 establishes a specific connection fault. The
-LLD must settle stream framing where a required consumer needs stronger separation.
+common layer must satisfy FRD R4's distinct guest-stream contract, not relabel a mixed carrier
+stream as guest stderr. Its LLD must settle separation/framing and readiness-compatible behavior
+before implementation; the low-level evidence model is not a weaker public output contract.
 
 ### SSH binding
 
@@ -137,11 +160,13 @@ through the supported remote account shell without selecting the application's i
 sudo/login wrappers. The shell LLD must specify supported account-shell/bootstrap combinations and
 refusal behavior, including startup hooks that execute before the payload.
 
-There is no SSH completion-envelope protocol in this proposal. In particular, OpenSSH status 255
-remains ambiguous unless independent shared execution/job evidence establishes the guest outcome. No
-new SSH library, reconnect manager, or connection pool is implied. Optional SCP acceleration uses
-the same new connection/trust option builder and remains beneath common file publication semantics;
-it is not necessary to implement the mandatory carrier seam.
+There is no SSH completion-envelope protocol in this proposal. The
+[OpenSSH client manual](https://man.openbsd.org/ssh.1) describes process status and command
+delivery; in particular, OpenSSH status 255 remains ambiguous unless independent shared
+execution/job evidence establishes the guest outcome. No new SSH library, reconnect manager, or
+connection pool is implied. Optional SCP acceleration uses the same new connection/trust option
+builder and remains beneath common file publication semantics; it is not necessary to implement the
+mandatory carrier seam.
 
 ## Filesystem and package layout
 
@@ -170,7 +195,7 @@ cli/agentworks/
       remote_lima.py            new nested delivery using the new SSH carrier
       wsl2.py                   new workstation-local carrier
   plugins/proxmox/execution.py  new QGA adapter, no legacy transport imports
-  capabilities/base.py         existing RunContext, retargeted at cutover
+  capabilities/base.py         existing RunContext, updated at cutover
 
 cli/tests/
   execution/                   public behavior, helpers, dependency isolation
@@ -181,7 +206,7 @@ cli/tests/
 This is one contract module and concrete implementations, not a class hierarchy for each directory.
 Split implementation files further only when their size/responsibility earns it. Adapter-neutral
 conformance cases live under `tests/execution`; provider tests invoke those cases plus provider
-limits. Copy/adapt useful fixtures into the new test tree instead of importing legacy conftests or
+limits. Copy/adapt useful fixtures into the new test tree instead of importing legacy test setup or
 factories. New tests must not need the old implementation to compute expected results.
 
 Dependency direction is `callers -> execution public API -> target/helpers -> carrier protocol`.
