@@ -661,10 +661,32 @@ Merged work the ledger owes a line, recorded from the merges themselves.
   there: inventory tolerates a degraded runnable, while focused operations and mutations stay
   strict. Its restore work also hardened the database-use lock that wave 4's native setup locking
   later had to merge with, so the two efforts met in `db/database.py` rather than only on paper.
-
-Not recorded yet, because its PR is open and merged PRs are this ledger's truth source: wave 4's
-pickup by an effort lead (PR #761), which now carries its implementation as well as its design after
-PR #780 was closed unmerged and consolidated into it.
+- **Wave 4 merged** (PR #761, merged 2026-09-12 as `7c744828`; its SDD is **not yet locked**). The
+  harness scope framework landed with design and implementation in one PR, after PR #780 was closed
+  unmerged and consolidated into it. What shipped is the facet framework and native setup: five
+  scopes and four facets, core env preparation then explicitly activated integrations, per-facet
+  config and schema propagation, actual-user required/recommended readiness, native Claude and Codex
+  user marketplaces and plugins, workstation settings mappings with four merge policies, and
+  instance-state applied state for setup, drift, and cleanup.
+  - **Deferred to the artifacts successor**, not built here: the `artifacts` block, artifact kinds
+    and producer APIs, acquisition, the normalized representation, propagation and deferral, content
+    storage, shell artifact delivery, and the early `session_uuid` slice. Feature capability kinds
+    remain future work with their pipeline position preserved as guidance.
+  - **Integration testing found four blockers at the first ready flip.** Three were fixed by
+    deleting the machinery that produced them, a round removing 272 net production lines: the
+    receipt-dependent VM deletion refusal, the destination-change veto, the settings ownership
+    ledger, and the changed-key classifier. The fourth, an activation at an unimplemented facet
+    banking a `complete` receipt that readiness read back as `current`, was fixed by making the base
+    setup methods reject unsupported invocations.
+  - **That fourth fix supersedes this saga's own ruling** at
+    `scope-participation-contract.md:72-74`, which chose base no-op defaults over an
+    absence-means-unsupported rule on the premise that "review and testing catch a mistyped
+    override." Eight of twelve integration-by-facet cells shipped accepted and inert, so the premise
+    did not hold. The effort relayed the operator's direction in
+    `message-2026-09-11-harness-unsupported-facets.md` and correctly did not edit this saga's
+    artifacts. Reconciling the contract is the saga lead's, pending the operator's direction.
+  - **Open after merge:** live VM acceptance of the harness integrations, which no lane has
+    performed, and the effort's final SDD lock.
 
 ### Efforts that ran without ledger entries (reconstructed 2026-09-06)
 
