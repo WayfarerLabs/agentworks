@@ -92,11 +92,12 @@ design choices that the bundle ingestion design must account for.
 
 The former classifier recognized `.md`, `.txt`, `.py`, `.sh`, `.bash`, `.zsh`, `.ps1`, `.js`,
 `.mjs`, `.cjs`, `.ts`, `.json`, `.jsonc`, `.yaml`, `.yml` and `.toml`, and required valid UTF-8
-without NUL. Other supporting members stayed byte-for-byte intact, including extensionless scripts.
-Exact contained paths in the former `preserve_bytes` control could exempt recognized supporting
-files, but never `SKILL.md`. Preserve that byte-sensitive fixture use case when choosing the new
-bundle configuration shape; do not treat a successful text decode as permission to rewrite an
-unknown format. The persisted normalized representation must preserve both opaque bytes and text.
+without NUL. Other supporting members stayed byte-for-byte intact, including scripts without
+filename extensions. Exact contained paths in the former `preserve_bytes` control could exempt
+recognized supporting files, but never `SKILL.md`. Preserve that byte-sensitive fixture use case
+when choosing the new bundle configuration shape; do not treat a successful text decode as
+permission to rewrite an unknown format. The persisted normalized representation must preserve both
+opaque bytes and text.
 
 The old source spelling, declaration map, refresh-on-reinit schedule and snapshot codec are
 historical proposals, not selected interfaces for this SDD. The new `artifact-bundle` resource owns
