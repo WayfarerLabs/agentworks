@@ -1,16 +1,17 @@
 # Agent artifacts: prior-art research
 
-## Status and recommendation
+## Status and terminology decision
 
 Terminology research, 2026-09-12. This first pass addresses the operator's naming questions and the
 skill content standard. Acquisition options, Rulesync reuse and the complete native support matrix
 remain open research work. No runtime dependency, wire schema or implementation is approved.
 
-Recommend **agent persona** for a reusable definition of an agent's behavior, whether used for a
-primary agent or delegated work where the harness supports it. The definition may include
-instructions and supported execution settings. This is a proposed Agentworks term, not a claim that
-harnesses share a standard format. Keep **subagent** for an agent executing delegated work and
-**agent** for the existing Agentworks resource when discussing resource configuration.
+The operator accepted **agents** as shorthand for **agent personas** on 2026-09-12. An agent persona
+is a reusable definition of an agent's behavior, whether used for a primary agent or delegated work
+where the harness supports it. The definition may include instructions and supported execution
+settings. This terminology does not imply a shared standard format. Keep **subagent** for an agent
+executing delegated work. Use **agent persona** and **agent resource** where the artifact and the
+existing Agentworks resource could otherwise be confused.
 
 ## Findings and design implications
 
@@ -35,7 +36,7 @@ tool restrictions and model. The same documentation describes delegated invocati
 definitions. Its native term therefore does not restrict the definition to delegated execution.
 
 Implication: naming our artifact type only for subagents would encode an unnecessary restriction.
-The recommended persona term describes reusable behavior independently of invocation position.
+The agreed agent persona term describes reusable behavior independently of invocation position.
 Exactly how Agentworks exposes selection and translates fields belongs in the support matrix and
 HLA; this finding is not a promise to expose every native setting.
 
@@ -62,7 +63,7 @@ Claude Code from the shared concept. Native filenames and configuration keys kee
 
 ## Remaining research
 
-- Agree the persona name with the operator and specify which fields are portable or native.
+- Specify which agent persona fields are portable or native.
 - Research Rulesync's canonical representations and generators, including its agent definitions.
 - Compare acquisition and distribution formats and define capture/update behavior.
 - Complete the artifact type and facet matrix for every shipped integration, including primary

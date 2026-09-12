@@ -65,12 +65,13 @@ document and any supporting files, preserving the standard's metadata and progre
 model. Loading a rule does not guarantee obedience; publishing files for shell retains the delivery
 limitation described below.
 
-The model must also account for reusable agent definitions, and leave room for limited hooks and MCP
-configuration later. **Agent persona** is the recommended name for that artifact type, pending
-operator agreement; the [terminology research](prior-art-research.md) explains why it covers both
-primary and delegated use without colliding with Agentworks' agent resource. It includes behavioral
-instructions and supported execution settings, not just personality. Native support for either use
-must be stated per integration; the name does not promise both in every harness.
+**Agents** is the agreed shorthand for **agent personas**: reusable definitions containing
+behavioral instructions and supported execution settings. They can serve primary or delegated agents
+where the harness supports it; see the [terminology research](prior-art-research.md). In artifact
+discussions, an agent means this definition. Where resource ownership could be ambiguous, say
+**agent persona** for the artifact and **agent resource** for the Agentworks resource. Native
+support for primary and delegated use must be stated per integration; the name does not promise both
+in every harness. The model also leaves room for limited hooks and MCP configuration later.
 
 Use **artifact type** for these categories. Reserve **kind** for resource kinds, including the
 proposed `artifact-bundle` resource kind. An artifact is a logical input and may comprise several
@@ -181,11 +182,11 @@ uses consistent captured inputs. Errors identify the source and consumer without
 credentials or content. A packaged distribution source remains a later extension unless research
 shows an existing format makes it a small, justified addition.
 
-**R3. Normalize hints, rules, skills and agent personas (proposed name).** Carry these four artifact
-types through one internal representation with source provenance and complete supporting files.
-Preserve binary assets while normalizing text line endings. Acquisition must reject package paths
-that escape the declared boundary; the design must state link and file-type handling. Hooks and MCP
-configuration are recognized extension directions, not first-delivery functionality.
+**R3. Normalize hints, rules, skills and agents.** Carry these four artifact types through one
+internal representation with source provenance and complete supporting files. Preserve binary assets
+while normalizing text line endings. Acquisition must reject package paths that escape the declared
+boundary; the design must state link and file-type handling. Hooks and MCP configuration are
+recognized extension directions, not first-delivery functionality.
 
 **R4. Apply and defer through explicit facets.** Implement the carried-forward owner-independent
 routing model, including lazy inactive-facet passthrough, direct-to-session fallback when VM
@@ -250,8 +251,6 @@ worked manifests and migration guidance with the behavior they explain.
    honest outcomes for harnesses that cannot express an artifact type or placement.
 4. Set source refresh, stable content identity, ordering and name-collision semantics in the HLA.
    These must compose with resource reuse and concurrent sessions without global consumption.
-5. Confirm **agent persona** as the name for reusable agent definitions. This is a terminology
-   recommendation; the normalized fields and primary/delegated support remain design work.
 
 ## Definition of done
 
