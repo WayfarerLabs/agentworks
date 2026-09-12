@@ -32,11 +32,19 @@ operational. New internal entry points and test composition roots exercise commo
 shell policy, files/jobs, channel features, and context delivery. Production `RunContext` does not
 gain an old/new target union, and plugin authors are not asked to choose a stack.
 
-Develop against the agreed SSH carrier seam while #757 consolidates the old SSH implementation. That
-effort owns the buffered internals and connection/trust changes during consolidation. This effort
-owns new shared semantics and the other adapters, then integrates the consolidated SSH machinery. No
-second SSH policy builder or trust store is introduced. The HLA's coordination table is the proposed
-ownership boundary for the SSH developer's review.
+Develop against the [proposed carrier contract and destination layout](execution-contract.md). The
+proposed revised SSH assignment is a new carrier and connection/trust implementation under
+`execution/carriers/ssh/`, not consolidation of the old runner. This effort builds shared semantics
+and the other adapters, then composes the new SSH carrier. This differs from #757's currently
+published plan and awaits its developer's review. No old execution code is called from the new
+stack, directly or indirectly. Copying and adapting useful code and tests is permitted.
+
+Old and new implementation code intentionally coexist during development; production continues using
+only the old stack until the coherent cutover. Configuration and trust records are retained state,
+not disposable implementation. The SSH effort specifies reuse or migration of those records without
+resetting host trust, broadening identity selection, or importing the old runner. Resolve trust-file
+writer ownership and rollback evidence before switching production; tests of conversion use isolated
+copies, not a concurrent second writer against operator state.
 
 Existing callers are migration evidence, not the new API's limit. Design and test the core/plugin
 scenarios in FRD R11 even where the old stack has no equivalent operation. Test new mutating
@@ -44,23 +52,27 @@ workflows on isolated resources, never by sending one production request down bo
 
 ## Sequence and cutover gates
 
-1. Settle the FRD/HLA and confirm the ownership/seam agreement with the SSH developer. Resolve
-   execution/context and file/job LLDs, including shell startup and guest/host prerequisites.
+1. Settle the FRD/HLA and confirm the new-stack ownership/seam agreement with the SSH developer.
+   Resolve execution/context and file/job LLDs, including shell startup and guest/host
+   prerequisites.
 2. Build the new stack independently. Exercise literal commands, selected-shell scripts, sensitive
    input, files, and jobs against at least SSH, Proxmox QGA, and placement-host execution early.
    Complete the remaining adapters before claiming platform coverage.
-3. Integrate #757's consolidated SSH runner. Verify a single-attempt primitive, explicit connection
-   policy, and truthful status-255 handling; apply environment, shell, elevation, and suppression
-   exactly once. Existing SSH behavior is preserved by #757 until this new-stack integration.
+3. Integrate the independently built SSH carrier. Verify the single-attempt primitive, explicit
+   connection policy, and truthful status-255 handling; apply environment, shell, elevation, and
+   suppression exactly once. Run new-stack tests with the legacy execution modules unavailable.
 4. Validate complete new-stack workflows through internal entry points: provisioning, native
    recovery with Tailscale unavailable, plugin operations, backup, and interactive attachment.
    Validate new context delivery independently while the production context still uses the old API.
 5. Prepare and validate the complete caller cutover against the settled contract. Audit every call's
    invocation form, shell/startup policy, identity, environment, stdio, deadline, and job lifetime.
-   Resolve surviving legacy work and the external plugin compatibility policy before switching.
+   Resolve surviving legacy work, SSH configuration/trust state, and the external plugin
+   compatibility policy before switching.
 6. Cut over factories, `RunContext` producers/consumers, plugins, and direct service entry points in
    one coherent production increment. Run the same workflow gates through real production entry
-   points, remove the old stack and temporary test/compatibility bridges, and update collateral.
+   points, physically remove the old stack and temporary test scaffolding, and update collateral.
+   Prove production package import and workflows still work after removal, not only that factories
+   prefer the new path.
 
 The cutover gate requires all mandatory operations on supported targets, optional-feature
 support/refusal, native bootstrap without a circular helper dependency, secret-handling evidence,
@@ -116,8 +128,8 @@ acknowledged detached launch; later observation opens a fresh authorized context
   does not establish that old code can read new state. Prefer a forward repair when it cannot.
 - A context target can outlive its route accidentally. Lifetime checks and later-observation tests
   must cover both normal exit and exceptions.
-- In-flight SSH changes can move migration sites. Re-inventory at integration and keep ownership of
-  buffered internals singular until #757's consolidation is available.
+- In-flight SSH changes can move migration sites. Agree on the revised new-carrier assignment with
+  the SSH developer before implementation; do not assume #757 has already adopted this proposal.
 - Contract versions and any job persistence changes require an explicit compatibility decision after
   the caller inventory. This draft does not assume that aliases or a database migration are
   necessary.

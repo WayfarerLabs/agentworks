@@ -24,8 +24,10 @@ SSH work, with reconciliation afterward. This effort has no designated parent sa
 
 Subsequent operator direction establishes intentional shell selection, requirements shaped by future
 core and plugin workflows, and building a new execution stack alongside the old before cutting over.
-The proposed coordination with the SSH effort is described in the HLA for its developer to review;
-this document does not change that effort's requirements or ownership.
+This includes a new SSH implementation, not a wrapper around the legacy SSH runner. Working code may
+be copied and adapted, but the new stack must not call or depend on the legacy execution stack. The
+proposed coordination with the SSH effort is described in the HLA for its developer to review; this
+document does not change that effort's requirements or ownership.
 
 The requirements below are proposed details of that direction, pending review. The current
 deliverable is a draft PR for design discussion. It changes no runtime behavior and neither merges
@@ -237,6 +239,16 @@ Build the new execution stack alongside the operational old stack, validate it i
 cut production callers over to the settled contract. Temporary coexistence is an implementation
 strategy, not two supported public execution APIs or an operator-selectable transport version. The
 new path must not execute a mutation through both stacks for comparison.
+
+The new stack includes SSH connection and delivery machinery. It is independently usable without
+legacy execution packages installed: no imports, inheritance, forwarding calls, or indirect runtime
+dependencies on the implementations being retired. Copying working code is permitted when it is
+adapted to the new contract and tested independently. This is not a ban on using ordinary shared
+project utilities that remain supported and do not depend on the retired stack.
+
+Preserve operator-owned SSH configuration and trust evidence through an explicit state transition;
+replacing implementation code must not reset trust, silently widen authentication, or require old
+execution code to interpret retained state.
 
 At cutover all existing adapters and core consumers adopt the same target contract. The effort
 retires duplicate command rendering, transport-shaped setup wrappers, and detached helpers. It does
