@@ -63,6 +63,30 @@ need to separate native recovery from canonical repair, while its proposed limit
 motivates shared execution semantics. Its published test reports are external evidence, not runs
 performed for this draft.
 
+### Coordination and caller evidence
+
+The reduced
+[SSH FRD](https://github.com/WayfarerLabs/agentworks/blob/2694d31afeaffe32841c995a552c5223add26689/docs/sdd/2026-09-05-ssh-connection-contracts/frd.md)
+and
+[HLA](https://github.com/WayfarerLabs/agentworks/blob/2694d31afeaffe32841c995a552c5223add26689/docs/sdd/2026-09-05-ssh-connection-contracts/hla.md)
+in PR #757 cover explicit connections, configuration isolation, trust preservation, and buffered
+execution consolidation while preserving the current interfaces. Outcome redesign and reconnect are
+deferred. The proposed split therefore keeps connection mechanics with that effort and assigns the
+new execution/context contract here, with final SSH integration after its consolidation.
+
+The two in-tree production `run_detached` calls are remote Lima provisioning and backup. Lima sets
+`reuse_completed=False` at `capabilities/vm_platform/lima.py:623`; backup creates a fresh directory
+at `vms/backup.py:345` before calling the helper at `:357`. Neither is an intentional
+cross-invocation completed-result consumer. This narrows migration obligations; it does not remove
+the future developer requirement for explicit job references and later observation. Existing callers
+are evidence about today's migration, not a ceiling on the new interface.
+
+The published review of PR #795 identified duplicated policy prose and optional-feature
+declarations. The revision leaves sensitive-output policy in FRD R4, combines placement-host
+architecture, and uses one channel-feature description for early checks and opened targets.
+Implementation conformance still checks actual behavior; there is no second declaration to
+synchronize.
+
 ## Claims not relied upon
 
 - A common API makes every backend interactive.
@@ -71,6 +95,8 @@ performed for this draft.
 - A provider PID is a durable, safely cancellable job identity.
 - A detached process keeps WSL2 running after its workstation hold is released.
 - QEMU protocol support proves Proxmox endpoint availability on every supported major.
+- An absent old-stack caller means a credible core/plugin workflow should be excluded.
+- A shared transport API can select an application shell implicitly from its carrier.
 
 ## Open evidence
 

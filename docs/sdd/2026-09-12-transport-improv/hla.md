@@ -1,6 +1,6 @@
 # Transport Improvements: High-Level Architecture
 
-- Status: First draft for operator review
+- Status: Revised draft for operator review
 - Requirements: [FRD](frd.md)
 - Supporting work: [Prior art](prior-art-research.md), [migration](migration-strategy.md),
   [plan](plan.md)
@@ -15,6 +15,12 @@ shared staging or polling to provide them.
 This replaces the current execution-only/full inheritance split as the caller-facing contract. It
 does not erase physical differences between SSH, local VM tools, and a guest-agent API. There is no
 backend selection inside a command, and no generic capability registry to negotiate a route.
+
+Build this as a new stack alongside the current one, with separate internal entry points for
+development and validation. Settle and prove the contract before cutting over existing callers.
+Current callers inform the migration; the intended core/plugin workflows in FRD R11 determine what
+the new interface must express. New job observation or script facilities need not wait for an old
+caller to demonstrate a use that the old interface could not support.
 
 ## Components and ownership
 
@@ -35,7 +41,10 @@ The same execution and job mechanics serve the existing remote Lima placement-ho
 identity is the SSH host and bound host user, not a VM that has yet to be created. The Lima platform
 owns this target inside provisioning and rollback; it is not delivered through guest admin/agent
 accessors in `RunContext`. This preserves an existing use of SSH without adding arbitrary host
-discovery or a second detached implementation.
+discovery or a second detached implementation. Its shared job/file helpers must preserve supported
+host userspace, including macOS, without assuming Debian paths, GNU-only options, or guest identity
+files. The LLD names portable helper prerequisites and explicit host shell/PATH preparation for
+`limactl`.
 
 ## Public target contract
 
@@ -60,22 +69,53 @@ directory, finite input, output handling, check behavior, and local deadline. A 
 may carry these through adapters; an extensible command AST or middleware pipeline is unnecessary.
 Ordinary literal commands must remain concise to call without constructing a graph of objects.
 
-Programmatic scripts use the supported guest's Bash in non-login mode with documented startup
-isolation. Literal execution preserves arguments even where delivery requires shell quoting.
-Interactive login shells keep login behavior. Existing callers relying on profile initialization
-must request that behavior explicitly or supply the executable/environment they actually need.
+### Shell policy
+
+Keep invocation form separate from interpreter policy. `run` executes literal argv; `script` names
+source and a shell policy; `start` accepts either form without changing its semantics. Shell policy
+selects a fixed interpreter (`sh`, `bash`, or a supported explicit executable) or the destination
+execution user's configured default shell, with separate login and interactive startup choices.
+Names and exact Python signatures belong in the execution LLD.
+
+Every script call supplies that policy or uses an explicit default bound by its owning operation.
+There is no transport-selected interpreter. A shell choice without startup modifiers means
+non-login, non-interactive startup. Shared preparation isolates unsolicited startup hooks where the
+supported interpreter permits it; the LLD must enumerate supported interpreters and their startup
+behavior rather than promise identical flags for every shell. A missing interpreter or unsupported
+startup combination fails before payload execution; it does not fall back to another shell.
+
+Resolve a user-shell request from the destination account after choosing execution identity. For
+elevated execution it selects root's configured shell; requesting Bash explicitly still selects Bash
+under root. Resolve once per invocation and retain that selection for detached work. Changing the
+account's shell later cannot change the interpreter of an already-submitted job. Source language
+remains the caller's responsibility when requesting the user's shell.
+
+Literal execution uses the target's explicit environment and working directory without profile
+initialization. A profile-dependent operation deliberately invokes a shell with the required startup
+policy. Carrier bootstrap may itself involve an account shell, notably OpenSSH's remote command
+handling, but that shell is delivery machinery: adapters must preserve literal argv and the chosen
+payload interpreter. Isolation does not claim the carrier never starts a shell. If a supported
+carrier cannot honor the payload contract through its bootstrap shell, that is an implementation gap
+to resolve, not a different interpretation of the command.
+
+Application shell policy belongs above the adapters. Provider wrappers and shared transfer/job
+helpers choose their own explicit internal interpreter and must not inherit the application's
+user-shell choice. Readiness uses bounded probes with fixed preparation and no profile evaluation;
+context accessors never resolve user shells or run initialization files.
 
 ### Optional channel features
 
-Use one immutable description with a closed set of optional features: interactive terminal and
-direct live stdio streaming. A feature declaration is backed by an implementation hook; registration
-and conformance checks reject contradictory declarations. A typed unsupported-operation error is the
-default for an absent optional hook. Required methods have no unsupported default.
+Use one immutable description for the selected channel, with a closed set of optional features:
+interactive terminal and direct live stdio streaming. The adapter/factory owns this description;
+platform preflight and the opened target reference the same definition. They do not maintain two
+declarations plus a checker to keep them synchronized. A platform may provide canonical SSH with
+interaction and native QGA without it, so the description is channel-specific, not a platform-wide
+boolean. Reading it does not open the route.
 
-Platform metadata can declare native interaction absent before constructing a target, allowing an
-early refusal. The resulting target is the authority for the opened channel, and conformance checks
-ensure the platform declaration agrees. A capability description is not a health probe or permission
-grant. Avoid calling these flags "capabilities" in APIs where that would confuse them with
+Conformance verifies that advertised features work and required operations remain present. An absent
+optional operation raises a typed refusal, allowing early refusal when the selected channel is
+already known. Required methods have no unsupported default. The description is not a health probe
+or permission grant. Avoid calling these flags "capabilities" where that would confuse them with
 Agentworks' resource capability model.
 
 | Operation                                          | Canonical VM target                    | Native VM target                |
@@ -108,15 +148,11 @@ and protected keys, replacing `SetupRunner`'s copied transport interface and cus
 Per-call ordinary overrides obey that policy; callers cannot rewrite protected Agentworks identity.
 Derived environment views retain the same identity, route, optional features, and lifetime.
 
-Sensitive values travel through protected finite input or restricted staging, never interpolated
-into argv. Script source and program stdin have separate storage/delivery even when both need
-staging. Sensitive execution defaults to discarded streams, including remote job output. Existing
-interactive/streaming operations explicitly select live presentation under their own output policy;
-the transport neither silently suppresses that stream nor claims it cannot reflect workload secrets.
-That selection does not authorize logging or persisting the stream. Any temporary sensitive material
-is private to the executing identity and removed under an owned lifecycle; disconnect-related
-cleanup debt remains visible for the next authorized operation. This is protection against
-incidental disclosure, not a sandbox against guest root or malicious in-process plugins.
+FRD R4 owns sensitive-output and live-presentation policy. Architecturally, preparation carries an
+explicit input/output policy to each carrier and logger, keeps script source separate from program
+stdin, and uses private staging when required. Cleanup debt after a disconnect stays with the owning
+operation. Protection from incidental disclosure is not a sandbox against guest root or malicious
+in-process plugins.
 
 ## Delivery and bootstrap
 
@@ -135,12 +171,6 @@ daemon. Bootstrap-critical operations must work from the base image and native a
 available at provisioning. The LLD must enumerate the minimal shell/tools used by transfer and job
 helpers and demonstrate that delivering those helpers does not depend on themselves. No Phase B
 package install or Tailscale access can be a hidden prerequisite.
-
-The existing remote Lima placement-host consumer must also work on its supported host userspace,
-including macOS. Shared job/file helpers must not assume Debian paths, GNU-only command options, or
-guest identity files on that target. The LLD names portable helper prerequisites and host-specific
-preparation where needed; it preserves explicit host login/PATH setup used to locate `limactl`.
-Managed Debian guest guarantees remain unchanged, and host access does not require a guest context.
 
 Read-only readiness probes use a direct invocation or bounded reads. They cannot trigger the
 staging/spooling/job fallback that writes guest files. Readiness call sites choose bounded probes;
@@ -196,6 +226,12 @@ Keep the existing accessor distinction between descriptive context and execution
 `admin_target()` and `agent_target()` return the common bound execution target, or no target when
 that identity does not exist or was not supplied at that lifecycle stage. Their names describe
 identity, not a transport class. The selected route is inspectable metadata on the target.
+
+The owning operation can bind explicit shell defaults alongside its prepared environment. Context
+consumers can inspect those defaults and override shell policy deliberately per invocation. The
+target does not derive application policy from its route; accessing the target performs no account
+lookup. Readiness targets retain their no-startup/no-staging preparation constraint even when a
+later operation context will use an explicitly selected login shell.
 
 The orchestrator decides whether an admin target uses canonical or native access before delivering
 the context. Do not add an accessor that looks up arbitrary VMs, accepts a route override, or builds
@@ -260,6 +296,67 @@ One deadline covers an operation's preparation, dispatch, and observation budget
 does not cancel a process. A separate cancellation request has its own bounded observation. Retry
 policy remains at the layer that can prove whether repeated dispatch is safe.
 
+## Coordination with SSH isolation and consolidation
+
+This is the proposed boundary for review with the SSH developer, based on the reduced FRD/HLA in
+[PR #757](https://github.com/WayfarerLabs/agentworks/pull/757) at `2694d31a`. It records this
+effort's integration plan; it does not amend the SSH effort's owned artifacts or claim its
+agreement.
+
+| Responsibility                                                                                         | Owner                                                        |
+| ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
+| Explicit SSH endpoint, user, identity, agent selection, trust and trust migration                      | SSH effort (#757)                                            |
+| OpenSSH config isolation, common SSH/scp options, forwarding, subprocess I/O and connection keepalives | SSH effort (#757)                                            |
+| Consolidating `ssh.py` and `transports/ssh.py` buffered internals with current interfaces/behavior     | SSH effort (#757)                                            |
+| Remote Lima placement-host connection settings and provider-inner SSH isolation                        | SSH effort (#757)                                            |
+| Application shell policy, commands/scripts, environment, cwd, elevation, sensitive-data policy         | `transport-improv`                                           |
+| Common targets, optional features, files/jobs, results/errors and safe command retry policy            | `transport-improv`                                           |
+| `RunContext` production cutover and core/plugin consumer migration                                     | `transport-improv`                                           |
+| Final new-stack SSH adapter integration after the consolidated runner is available                     | `transport-improv`, using the SSH-owned connection machinery |
+
+During consolidation the SSH effort owns edits to buffered SSH internals. This effort develops its
+common layer and other carriers in separate modules. After the shared runner is available, the
+transport effort owns the bounded integration change that connects the new target API, removes
+superseded execution entry points, and moves common execution policy above the carrier. Connection
+and trust policy remain SSH-owned. Remote Lima's host connection changes precede integration of its
+new execution/job adapter; they need not delay that adapter's design or independent tests.
+
+Before implementation, agree on the carrier seam: explicit connection plus prepared remote
+invocation, finite input, I/O mode, and deadline in; observed process status, output, and available
+completion evidence out. It must expose a single-attempt path. It does not compose workspace env,
+select application privilege or shell, resolve `RunContext`, or decide to repeat a mutation. SSH's
+legacy entry points may preserve their existing retry behavior during #757's consolidation; the new
+stack cannot inherit hidden replay underneath its own no-ambiguous-retry guarantee.
+
+#757 preserves the existing result interfaces and corrects misleading status-255 diagnostics. This
+effort owns the common outcome model and maps only evidence the carrier actually provides. OpenSSH
+status 255 alone cannot distinguish a guest exit from connection failure; nested Lima status does
+not identify a failed inner hop. Preserve that uncertainty without adding a completion protocol,
+reconnect mechanism, new SSH library, or second trust implementation.
+
+Prepared environment, sensitive I/O, and shell wrappers currently reside partly in SSH. The
+integration inventory must assign each to either common preparation or carrier delivery and remove
+duplicate application of that policy. Raw SSH I/O and explicit environment delivery primitives can
+remain below the seam; deciding their meaning for an Agentworks operation stays above it.
+
+## Parallel build and cutover
+
+Use the destination package structure for the new stack, with development/test composition roots
+that exercise its contracts while production factories and `RunContext` retain the old stack. Use an
+internal prototype context in those tests, not two public target types in the production context.
+Never dispatch a mutating workflow through both stacks to compare results.
+
+Prove the new layer against SSH, QGA, and placement-host differences early, then cover the remaining
+adapters and complete workflows. Integrate #757's connection machinery once its agreed seam is
+available. Only after the new stack's acceptance gates pass does a coherent cutover change
+factories, context producers/consumers, plugin delivery, and direct service entry points. Remove the
+old stack and temporary bridges in that cutover increment. The detailed gates and treatment of
+existing jobs are in the [migration strategy](migration-strategy.md).
+
+This permits development coexistence without a released old/new selector or two plugin execution
+APIs. The current PR remains a design checkpoint; implementation landing units are decided in the
+plan after the dependency and complete-cutover scope are known.
+
 ## Alternatives and remaining decisions
 
 PyInfra informs centralized command preparation but is not a proposed dependency. Its host/state
@@ -271,6 +368,7 @@ contract would push required file/script/job mechanics back into callers. The pr
 those operations common while making the small set of real optional I/O features explicit.
 
 Before implementation, resolve the request/result signatures, readiness no-staging enforcement, job
-storage/ownership/retention and process-group protocol, transfer bounds and path policy, and WSL2
-lifetime evidence. Reconcile the accepted API against then-current SSH work afterward; this draft
-does not adopt an in-flight SSH design as a constraint.
+storage/ownership/retention and process-group protocol, shell startup/lookup behavior, transfer
+bounds and path policy, and WSL2 lifetime evidence. Review the proposed integration seam with the
+SSH developer and re-inventory then-current callers before implementation. The new API remains
+driven by the execution contract rather than by preserving the old runner's structure.
