@@ -1,6 +1,6 @@
 # Transport Improvements: Migration Outline
 
-- Status: First draft; sequencing will be refined after FRD/HLA review
+- Status: Revised draft; parallel build followed by complete production cutover
 - Baseline: `7c744828184ccb0ad9ffd90a8a02226384fb384e`, inspected 2026-09-12
 
 ## Inventory and destination
@@ -25,22 +25,71 @@ delivered as a guest target through `RunContext`; its macOS-compatible userspace
 | VM/agent exec and shell, sessions/consoles                                      | Preserve command/stdin and terminal behavior while using shared execution and feature checks.          |
 | SSH-named shared result/error/logger types                                      | Move generic execution facts into transport-neutral vocabulary.                                        |
 
-## Sequence
+## Parallel build
 
-1. Review required behavior and optional features through the FRD/HLA draft PR.
-2. Resolve the execution/context and file/job LLDs, feasibility evidence, and complete caller
-   inventory. Reconcile the accepted contract against then-current SSH work and PR #789.
-3. Build common preparation and carrier conformance. Move each existing adapter and its factory
-   together; prove the required native contract without optional features.
-4. Migrate `RunContext` producers and consumers, direct service callers, setup execution, files, and
-   detached workflows. Remove obsolete APIs and copied wrappers within the same complete migration
-   increment rather than publishing a permanent compatibility bridge.
-5. Validate live, update permanent collateral with the behavior change, and close the effort only
-   after the old entry points and assumptions are retired.
+Build the destination execution stack in separate modules while the old production path remains
+operational. New internal entry points and test composition roots exercise common requests/results,
+shell policy, files/jobs, channel features, and context delivery. Production `RunContext` does not
+gain an old/new target union, and plugin authors are not asked to choose a stack.
 
-This is an ordering outline, not an approved PR stack. Implementation may use several commits in one
-branch. A future split must produce independently complete increments with an explicit removal point
-for any temporary bridge. The current PR contains design artifacts only.
+Develop against the agreed SSH carrier seam while #757 consolidates the old SSH implementation. That
+effort owns the buffered internals and connection/trust changes during consolidation. This effort
+owns new shared semantics and the other adapters, then integrates the consolidated SSH machinery. No
+second SSH policy builder or trust store is introduced. The HLA's coordination table is the proposed
+ownership boundary for the SSH developer's review.
+
+Existing callers are migration evidence, not the new API's limit. Design and test the core/plugin
+scenarios in FRD R11 even where the old stack has no equivalent operation. Test new mutating
+workflows on isolated resources, never by sending one production request down both stacks.
+
+## Sequence and cutover gates
+
+1. Settle the FRD/HLA and confirm the ownership/seam agreement with the SSH developer. Resolve
+   execution/context and file/job LLDs, including shell startup and guest/host prerequisites.
+2. Build the new stack independently. Exercise literal commands, selected-shell scripts, sensitive
+   input, files, and jobs against at least SSH, Proxmox QGA, and placement-host execution early.
+   Complete the remaining adapters before claiming platform coverage.
+3. Integrate #757's consolidated SSH runner. Verify a single-attempt primitive, explicit connection
+   policy, and truthful status-255 handling; apply environment, shell, elevation, and suppression
+   exactly once. Existing SSH behavior is preserved by #757 until this new-stack integration.
+4. Validate complete new-stack workflows through internal entry points: provisioning, native
+   recovery with Tailscale unavailable, plugin operations, backup, and interactive attachment.
+   Validate new context delivery independently while the production context still uses the old API.
+5. Prepare and validate the complete caller cutover against the settled contract. Audit every call's
+   invocation form, shell/startup policy, identity, environment, stdio, deadline, and job lifetime.
+   Resolve surviving legacy work and the external plugin compatibility policy before switching.
+6. Cut over factories, `RunContext` producers/consumers, plugins, and direct service entry points in
+   one coherent production increment. Run the same workflow gates through real production entry
+   points, remove the old stack and temporary test/compatibility bridges, and update collateral.
+
+The cutover gate requires all mandatory operations on supported targets, optional-feature
+support/refusal, native bootstrap without a circular helper dependency, secret-handling evidence,
+shell-policy coverage, and supported workstation/platform live evidence. Missing evidence needs
+operator disposition; a successful SSH fixture alone cannot satisfy it.
+
+Implementation can use successive commits and internal test harnesses on its feature branch. The
+current delivery remains a draft design PR. The default implementation landing unit contains the new
+stack and complete cutover together; splitting it later requires independently complete units and an
+explicit removal point. Temporary coexistence during development is not a promise to release two
+public APIs or a runtime selection flag.
+
+## Existing jobs and compatibility
+
+The two in-tree production `run_detached` callers do not implement intentional cross-invocation
+reuse of a completed result: Lima provisioning passes `reuse_completed=False` (`lima.py:616`), and
+backup creates a fresh directory for each launch (`vms/backup.py:345`). This is a source-level
+finding about current consumers, not proof that no external script calls the exported helper.
+Explicit new job references and later observation remain required by FRD R6/R11.
+
+Before deleting the old helper, inventory surviving jobs and artifacts. The migration must choose
+how an owning operation drains or explicitly adopts its in-progress work, and how owned obsolete
+records are disposed. It must not infer new job authority from arbitrary old PID files, kill
+unrelated work, or auto-reuse completed results. Any required transition reader has a bounded
+purpose and removal point; it cannot become a second execution stack.
+
+Inventory external plugin entry points and contract versions before cutover. Select and document the
+version/refusal or migration policy rather than silently accepting incompatible callers. A temporary
+internal adapter must not become a separately supported plugin API.
 
 ## Worked example: native recovery command
 
@@ -57,16 +106,18 @@ acknowledged detached launch; later observation opens a fresh authorized context
 ## Risks and safeguards
 
 - Existing shell strings may depend on expansion or login profiles. Classify every caller before
-  moving it to literal arguments or scripts; do not mechanically split shell source into argv.
+  moving it to literal arguments or scripts; do not mechanically split shell source into argv. Fixed
+  interpreter, user-default shell, and login/interactive startup are explicit choices. A transport
+  change must not select one accidentally.
 - Environment and elevation changes can alter guest authority or expose secrets. Preserve scoped
   resolution and prove whole-operation identity and secret absence across adapters.
-- Old detached artifacts can describe running work. Inventory their actual retention and consumers;
-  do not reinterpret arbitrary legacy paths as new job references or delete unowned work. The job
-  LLD must choose a bounded drain/adoption strategy before retiring the old reader.
+- Before cutover, the old production path remains the rollback point. After cutover, rollback must
+  account for new jobs, retained artifacts, and plugin contract changes; changing only an import
+  does not establish that old code can read new state. Prefer a forward repair when it cannot.
 - A context target can outlive its route accidentally. Lifetime checks and later-observation tests
   must cover both normal exit and exceptions.
-- In-flight SSH changes can move migration sites. Re-inventory after contract review; compare
-  semantics to the accepted design before deciding what to reuse.
+- In-flight SSH changes can move migration sites. Re-inventory at integration and keep ownership of
+  buffered internals singular until #757's consolidation is available.
 - Contract versions and any job persistence changes require an explicit compatibility decision after
   the caller inventory. This draft does not assume that aliases or a database migration are
   necessary.

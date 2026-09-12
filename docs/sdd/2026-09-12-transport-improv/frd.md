@@ -1,6 +1,6 @@
 # Transport Improvements: Functional Requirements
 
-- Status: First draft for operator review; implementation is not authorized by this document.
+- Status: Revised draft for operator review; implementation is not authorized by this document.
 - Started: 2026-09-12
 - Effort: `transport-improv`
 - Companion: [High-level architecture](hla.md)
@@ -21,6 +21,11 @@ interactive shell is useful where available but cannot be a prerequisite for rec
 The operator requested a new SDD with a first-draft FRD and HLA, extending the design through
 `RunContext`. The operator explicitly asked that the ideal API be designed independently of ongoing
 SSH work, with reconciliation afterward. This effort has no designated parent saga.
+
+Subsequent operator direction establishes intentional shell selection, requirements shaped by future
+core and plugin workflows, and building a new execution stack alongside the old before cutting over.
+The proposed coordination with the SSH effort is described in the HLA for its developer to review;
+this document does not change that effort's requirements or ownership.
 
 The requirements below are proposed details of that direction, pending review. The current
 deliverable is a draft PR for design discussion. It changes no runtime behavior and neither merges
@@ -81,10 +86,28 @@ Callers can execute a program with literal arguments or explicitly submit a scri
 boundaries, empty arguments, quotes, whitespace, and shell special characters are preserved. Literal
 arguments are never implicitly interpreted as a script.
 
-Scripts support compound commands, pipelines, redirects, and multiple lines with one documented
-shell and startup policy. Script delivery owns temporary artifacts and cleanup. A script and its
-stdin payload remain separate inputs; reading stdin inside a script must not consume its source.
-Existing provisioning scripts must work without provider-specific staging at their call sites.
+Script execution deliberately selects a fixed interpreter, including `sh` or `bash`, or the
+execution user's configured default shell. Selection is explicit on the call or inherited from a
+default deliberately bound by the owning operation. An unspecified script interpreter is an error,
+not permission for the carrier to choose one. Source is interpreted in the selected shell's
+language; the execution API does not translate shell languages.
+
+Interpreter selection, login startup, and interactive shell behavior are separate choices. Fixed and
+user-shell requests default to non-login, non-interactive startup unless explicitly requested
+otherwise. A terminal allocation alone does not select an interpreter or change startup policy.
+User-shell selection refers to the actual execution identity on the destination, including root
+after elevation, never the workstation shell or an inherited `$SHELL`. Missing or incompatible
+interpreters fail explicitly without substitution.
+
+Literal program execution does not apply an application shell or shell startup implicitly. A caller
+needing profile-initialized behavior requests a shell invocation intentionally. Any shell used
+internally by the carrier must preserve argument boundaries and cannot redefine this contract.
+
+Scripts support compound commands, pipelines, redirects, and multiple lines according to their
+selected language. Script delivery owns temporary artifacts and cleanup. A script and its stdin
+payload remain separate inputs; reading stdin inside a script must not consume its source. The same
+shell policy applies to foreground and detached execution. Provisioning and plugin scripts must work
+without provider-specific staging at their call sites.
 
 ### R3. Identity, privilege, environment, and directory
 
@@ -98,9 +121,8 @@ selected execution identity. Environment covers the entire script, not only its 
 execution layer preserves the environment policy composed by the owning operation, including
 protected Agentworks identity values. It does not independently resolve config or secrets.
 
-Programmatic execution has deterministic shell-startup behavior. Interactive login behavior remains
-explicitly separate. Default authority must not depend on whether a provider happens to execute its
-guest agent as root.
+Shell selection follows R2, independently of environment composition and carrier choice. Default
+authority must not depend on whether a provider happens to execute its guest agent as root.
 
 ### R4. Input, output, and results
 
@@ -208,19 +230,44 @@ observation receives a fresh authorized context; a saved job reference carries n
 
 ### R10. Complete adoption and evidence
 
-All existing adapters and core consumers adopt the same target contract. The effort retires
-duplicate command rendering, transport-shaped setup wrappers, and detached helpers once their
-consumers move. It does not leave a permanent old/new API bridge.
+Build the new execution stack alongside the operational old stack, validate it independently, then
+cut production callers over to the settled contract. Temporary coexistence is an implementation
+strategy, not two supported public execution APIs or an operator-selectable transport version. The
+new path must not execute a mutation through both stacks for comparison.
+
+At cutover all existing adapters and core consumers adopt the same target contract. The effort
+retires duplicate command rendering, transport-shaped setup wrappers, and detached helpers. It does
+not leave a permanent old/new API bridge. Migration still audits callers' intended shell, identity,
+environment, and lifetime; current implementation quirks do not define the new contract.
 
 Verification covers shared behavior, required workflows over a target with no optional features, and
 optional feature support/refusal. Live evidence covers the supported platforms and relevant
 workstation operating systems, including supported Proxmox majors and WSL2 lifetime behavior.
 Unavailable live coverage is recorded for operator disposition, never counted as passing.
 
-Permanent capability docs, CLI help/reference, provider guidance, and other affected collateral
-change with the implementation that makes their claims true.
+### R11. Core and plugin developer workflows
+
+Requirements must serve credible future core and plugin workflows as well as existing callers.
+Current usage informs migration and demonstrates problems; absence of a current caller does not by
+itself justify removing an operation developers need. Each facility needs a concrete developer
+scenario and observable guarantees, without requiring a production caller before it can be designed.
+
+Examples include a plugin running a Bash installer with separate sensitive stdin, a developer
+choosing a user's login shell for configured tools, binary file movement across a bounded native
+channel, and a long-running operation whose output and result are observed from a later authorized
+invocation. The common target must make these workflows straightforward. Extensible command ASTs,
+generic scheduling, or a second orchestration system are not implied by supporting them.
 
 ## Acceptance scenarios
+
+Shell acceptance includes fixed `sh` and `bash`, user-default selection, login versus non-login
+startup, and elevated user-shell resolution. Changing carriers must not change those choices;
+literal arguments and script stdin remain intact. Readiness probes must not execute user startup
+files merely to prepare an invocation.
+
+Cutover acceptance exercises complete workflows through the new stack before switching production
+entry points, then proves those entry points and plugin contexts use it exclusively. Future-facing
+scenarios in R11 are acceptance cases even where the current implementation has no caller.
 
 | Scenario                      | Observable success                                                                                                                                        |
 | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
