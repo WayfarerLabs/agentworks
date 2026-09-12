@@ -7,10 +7,10 @@
 
 ## Architectural decision
 
-Expose one bound guest execution target to callers and `RunContext`. Put common command, script,
-file, and job semantics above delivery adapters. Describe optional interaction as a feature of the
-selected channel. Required operations are implemented by every target, even when a carrier needs
-shared staging or polling to provide them.
+Expose permission-scoped views of one bound guest execution target through `RunContext`. Put common
+command, script, file, and job semantics above delivery adapters. Describe optional interaction as a
+feature of the selected channel. Required operations are implemented by every target, even when a
+carrier needs shared staging or polling to provide them.
 
 This replaces the current execution-only/full inheritance split as the caller-facing contract. It
 does not erase physical differences between SSH, local VM tools, and a guest-agent API. There is no
@@ -41,6 +41,10 @@ Proxmox-specific delivery stays in the Proxmox plugin. The
 [contract and layout proposal](execution-contract.md) names the package boundaries, interfaces,
 dependency direction, and deletion test for the old stack.
 
+The composition root binds which interfaces and actions a recipient receives. The target implements
+all required semantics, while command, file, and job access are separately exposed views, not
+separate execution implementations. Transport feature descriptions never stand in for permissions.
+
 The same execution and job mechanics serve the existing remote Lima placement-host target. Its
 identity is the SSH host and bound host user, not a VM that has yet to be created. The Lima platform
 owns this target inside provisioning and rollback; it is not delivered through guest admin/agent
@@ -52,7 +56,8 @@ files. The LLD names portable helper prerequisites and explicit host shell/PATH 
 
 ## Public target contract
 
-The proposed vocabulary is `run`, `script`, `start`, file operations, and `interactive`. The
+The proposed operation vocabulary is `run`, `script`, `start`, file operations, and `interactive`,
+exposed through the scoped command/file/job interfaces rather than an all-authority target. The
 [contract proposal](execution-contract.md) gives callable shapes for review; the behavioral division
 is the design:
 
@@ -232,9 +237,19 @@ fire-and-forget work so a new public handle does not turn into indefinite guest 
 ## RunContext integration
 
 Keep the existing accessor distinction between descriptive context and execution-bearing targets.
-`admin_target()` and `agent_target()` return the common bound execution target, or no target when
-that identity does not exist or was not supplied at that lifecycle stage. Their names describe
-identity, not a transport class. The selected route is inspectable metadata on the target.
+`admin_target()` and `agent_target()` return a permission-scoped target view, or no target when that
+identity is unavailable or withheld. Their names describe identity, not a transport class. Each view
+provides passive accessors for command, file and job interfaces; a missing grant can withhold an
+entire interface, while a bound action restriction can distinguish upload/download or
+observe/cancel. The [contract proposal](execution-contract.md) gives the concrete shape. The
+selected route remains inspectable metadata, not a way to obtain an unrestricted handle.
+
+Bind recipient authority at context composition, independently from guest identity and channel
+features. VM admin access does not by itself grant root elevation. Supplied interfaces check their
+bound action/elevation restrictions before preparation or effects, even when the guest account could
+perform the operation. Environment-derived views preserve or narrow these restrictions. Later job
+observation requires the fresh context's corresponding grant and job ownership; a reference cannot
+grant cancellation. Accessors expose existing decisions and perform no policy lookup.
 
 The owning operation can bind explicit shell defaults alongside its prepared environment. Context
 consumers can inspect those defaults and override shell policy deliberately per invocation. The
@@ -258,13 +273,18 @@ initialization it constructs a new stage context with the newly established targ
 
 `RunContext` remains immutable and passive. Its accessors do no I/O and it owns no `ExitStack`. The
 composition root owns resource cleanup and supplies targets tied to that lifetime. Use after closure
-fails before dispatch. Target absence is reported according to the existing lifecycle's defer/error
-rules, not reclassified as an optional transport feature.
+fails before dispatch. Composition retains the non-sensitive reason for absence so callers can
+distinguish lifecycle unavailability from withheld access. Neither is an optional transport feature;
+requesting an ungranted action produces an authorization refusal, not a channel-support error.
 
 Preserve `OperationScope` as descriptive data and `ScopedSecrets` as delivery of declared resolved
-names. Passing a target remains an explicit act by the owning operation; this design does not claim
-to add requester permission checks to today's context. It also does not authorize accessing
-undeclared secrets through a transport factory hidden inside a capability.
+names. This effort supplies the interface decomposition and bound restriction checks; current core
+composition explicitly supplies its required access. A future plugin permission system determines
+the grants for each recipient, rather than being implemented here as roles, policy configuration or
+a new evaluator. Capability consumers receive no public raw-carrier or unrestricted-target escape.
+This does not authorize secret discovery through a factory hidden inside a capability. FRD R9 owns
+the limits of this API boundary: unrestricted user execution includes that user's filesystem powers,
+and hostile in-process plugin containment needs a separate security design.
 
 Migrate context constructors and consumers together, including VM boundaries, agent realization,
 session readiness/roll-forward, git-credential operations, and harness setup. Setup invocation types

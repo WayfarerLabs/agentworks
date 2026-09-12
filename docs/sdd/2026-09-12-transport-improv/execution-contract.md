@@ -11,20 +11,22 @@ the SSH effort owns its new carrier implementation. Neither imports the legacy e
 
 ## Caller contract
 
-Core and plugin consumers import public types from `agentworks.execution` and normally receive an
-`ExecutionTarget` from `RunContext`. The following Python-shaped examples propose names and argument
+Core and plugin consumers import public types from `agentworks.execution` and receive a scoped
+`ExecutionTarget` view from `RunContext`. The view provides optional command, file and job
+interfaces as described below; it is not an unrestricted runner. These examples assume the owning
+operation has checked that `commands` and `jobs` were supplied. They propose names and argument
 forms, not executable code or a second command language:
 
 ```python
-target.run(["tool", "--name", name], check=True)
-target.script(source, shell=Shell.fixed("bash"), stdin=Input.sensitive(secret_bytes), sudo=True)
-target.script(source, shell=Shell.user_default(login=True), cwd=remote_directory)
-target.run(["tool"], stdin=Input.live(source_stream), output=Output.stream(out_sink, err_sink))
-job = target.start(Script(source, shell=Shell.fixed("sh")), sudo=True)
-status = target.observe(job)
-result = target.wait(job, deadline=deadline)
-target.cancel(job, deadline=cancel_deadline)
-target.dispose(job)
+commands.run(["tool", "--name", name], check=True)
+commands.script(source, shell=Shell.fixed("bash"), stdin=Input.sensitive(secret_bytes), sudo=True)
+commands.script(source, shell=Shell.user_default(login=True), cwd=remote_directory)
+commands.run(["tool"], stdin=Input.live(source_stream), output=Output.stream(out_sink, err_sink))
+job = jobs.start(Script(source, shell=Shell.fixed("sh")), sudo=True)
+status = jobs.observe(job)
+result = jobs.wait(job, deadline=deadline)
+jobs.cancel(job, deadline=cancel_deadline)
+jobs.dispose(job)
 ```
 
 `run(argv, ...)` is literal execution; `script(source, shell=..., ...)` is shell execution. Both
@@ -36,10 +38,10 @@ no anonymous `background=True` or caller-written `nohup` requirement.
 
 Shared keyword options are `sudo`, `env`, `cwd`, `stdin`, `output`, `sensitive`, and `deadline`.
 Foreground calls also accept `check`; `wait` accepts it when collecting a job result. Elevation is
-non-interactive and constrained by the bound identity. Shell defaults are absent unless deliberately
-bound by the operation; a script without either an explicit policy or that bound default is
-rejected. `Shell` separates interpreter choice from login and interactive startup as specified in
-the HLA.
+non-interactive and requires both the bound elevation grant and guest authority. A VM admin account
+alone does not authorize `sudo=True`. Shell defaults are absent unless deliberately bound by the
+operation; a script without either an explicit policy or that bound default is rejected. `Shell`
+separates interpreter choice from login and interactive startup as specified in the HLA.
 
 Finite byte input works on every target; omission means EOF, not inherited console input. Foreground
 calls may explicitly select `Input.live(source)` for non-terminal piped or duplex work on a channel
@@ -73,8 +75,43 @@ same safe result facts when `check=True`; `check=False` exposes them without tur
 into an ordinary guest exit. Output decoding is explicit and does not normalize raw bytes. Invalid
 requests and unavailable optional features are typed refusals regardless of `check`.
 
+### Permission-scoped access
+
+The proposed view has three passive accessors. Their interfaces use the operation vocabulary above;
+the view itself has no forwarding `run`, `upload`, or other all-authority convenience methods.
+
+| View accessor                                    | Exposed operations when granted                                                                               |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `commands()` returning `CommandAccess` or `None` | `run`, `script`, `interactive`, subject to the bound action and elevation restrictions.                       |
+| `files()` returning `FileAccess` or `None`       | Upload/write and download operations, including directory forms; read and write can be granted independently. |
+| `jobs()` returning `JobAccess` or `None`         | `start`, observation/output/wait, cancellation and disposal, independently restrictable for owned jobs.       |
+
+These are small typed interfaces over shared execution mechanics, not new transport subclasses or a
+generic permissions registry. Withhold a whole interface when none of its actions is granted. For a
+partially granted interface, expose its bound allowed actions as passive metadata and reject an
+ungranted method with `AuthorizationError` before preparation, local/remote file I/O or dispatch,
+regardless of `check`. Do not dynamically delete Python methods or rely on callers checking metadata
+to enforce the restriction. Exact grant value representations belong in the LLD.
+
+The composition root binds recipient, identity, route, permitted actions and elevation once before
+delivery. Future plugin policy supplies that decision; a plugin-supplied name, `OperationScope`, or
+request flag cannot authorize it. No public accessor returns the unrestricted implementation or
+carrier. Derived environment/shell views preserve or narrow grants and lifetime. Grant selection and
+checks are distinct from channel features and guest OS permissions; authorized recovery composition
+still receives all required operations.
+
+Checks govern the requested public action, not its private implementation steps. A granted upload
+may use internal command delivery for staging without exposing `CommandAccess`; a granted script may
+stage source without exposing `FileAccess`. Internal helpers cannot be requested as a back door to
+arbitrary execution through a file-only interface. Validate that boundary, not that no internal
+command was used. As FRD R9 states, an arbitrary foreground or detached execution grant already
+conveys the execution user's filesystem powers, and these in-process views are not a plugin sandbox.
+
 The public surface does not expose SSH credentials, provider task IDs, or a carrier constructor.
-`RunContext.admin_target()` and `.agent_target()` become `ExecutionTarget | None` at cutover.
+`RunContext.admin_target()` and `.agent_target()` become `ExecutionTarget | None` at cutover, with
+each supplied view scoped to that recipient. Context composition retains a non-sensitive absence
+reason distinguishing unavailable lifecycle state from withheld authority; the LLD specifies its
+representation. An absent interface is not a claim that the carrier cannot implement it.
 `RunContext` stays in `capabilities/base.py`; it is not cloned into the execution package. During
 development, test composition supplies targets without changing production context types. The
 composition root owns target/resource closure; retaining a target cannot extend its authorized
@@ -176,9 +213,10 @@ the permanent name `execution`, not `transports_v2` or a second installed distri
 ```text
 cli/agentworks/
   execution/
-    __init__.py                 public ExecutionTarget and caller value exports
+    __init__.py                 scoped target, access interfaces and caller values
     models.py                   command, shell, input/output, result and job values
-    target.py                   bound public operations and lifetime enforcement
+    target.py                   bound execution mechanics and target view
+    access.py                   typed command/file/job access and bound restrictions
     preparation.py              identity, shell, env/cwd and helper preparation
     files.py                    bounded transfer and publication semantics
     jobs.py                     shared job protocol and observation

@@ -29,6 +29,10 @@ be copied and adapted, but the new stack must not call or depend on the legacy e
 proposed coordination with the SSH effort is described in the HLA for its developer to review; this
 document does not change that effort's requirements or ownership.
 
+The operator intends future third-party plugin permissions to determine what `RunContext` exposes.
+This design supports separately granted operations and identities now, without implementing the
+future permission-policy system or claiming to sandbox in-process plugins.
+
 The requirements below are proposed details of that direction, pending review. The current
 deliverable is a draft PR for design discussion. It changes no runtime behavior and neither merges
 nor closes [issue #788](https://github.com/WayfarerLabs/agentworks/issues/788) or
@@ -51,7 +55,8 @@ Outside this effort:
 - Replacing Agentworks orchestration or provisioning with a configuration-management framework.
 - New cloud execution carriers, such as replacing public-IP SSH with a provider command service.
 - A general scheduler, durable workflow engine, or replacement for tmux-backed sessions.
-- A new plugin sandbox or general requester-permission system.
+- A new plugin sandbox or general requester-permission policy system. Permission-scoped interface
+  composition is in scope; plugin grant configuration and policy evaluation are future work.
 - Requiring native interaction on a platform that cannot supply it.
 
 ## Users and outcomes
@@ -69,6 +74,7 @@ Outside this effort:
 ### R1. Required operations and optional features
 
 Every native VM target and every canonical VM target must support the common operations in R2-R8.
+This is an implementation requirement, not a grant of every operation to every context recipient.
 Provider limitations must be handled inside the implementation through a supported mechanism; they
 cannot become an "unsupported" escape for an operation Agentworks needs to function or recover.
 
@@ -216,9 +222,23 @@ channels still rely on guest SSH. This effort must describe that dependency hone
 
 ### R9. RunContext delivery
 
-`RunContext` delivers the common execution target contract for admin and agent identities. Optional
-features are inspected on a delivered target without narrowing to a concrete transport. A target
-absent at a lifecycle stage is distinct from a present target missing an optional feature.
+`RunContext` delivers permission-scoped views of the common execution target contract for admin and
+agent identities. A recipient receives only the operation interfaces and authority provided by the
+owning composition root. Command execution, file access, and job operations are separable;
+possession of one does not automatically expose the others. Finer grants must be possible within a
+family, including upload versus download and job observation versus cancellation. Target-user
+execution, VM-admin-user execution, and elevation to root are distinct grants.
+
+Optional channel features describe implementation support, not permission. An unavailable lifecycle
+target, an ungranted interface/action, a missing optional channel feature, and a guest permission
+failure are distinct conditions. Authorization denial must not be reported as an unsupported
+transport operation. Authorized core provisioning and recovery still receive everything they need;
+restricting plugin views must not weaken required native functionality.
+
+Views are bound before delivery and cannot widen their authority through `sudo=True`, another
+identity, an environment-derived view, a saved job reference, or public access to an unrestricted
+target/carrier. Refusal happens before staging, dispatch, or other effects. Accessors are passive;
+they expose the bound decision rather than evaluating plugin policy or discovering authority.
 
 Context construction and accessors do not connect, start VMs, open routes, resolve secrets, switch
 identities, or select a fallback. The orchestrator delivers the selected route and scoped secrets at
@@ -232,6 +252,12 @@ run before the payload are documented connection prerequisites, not initializati
 API or a guarantee that arbitrary account hooks are read-only. Execution targets and their
 operation-scoped resources cannot remain usable after the owning lifetime closes. A later job
 observation receives a fresh authorized context; a saved job reference carries no credentials.
+
+These are API authority boundaries, not claims of hostile-code isolation. Arbitrary execution as a
+user permits that user's filesystem operations even when a file-transfer interface is withheld;
+withholding upload does not confine an allowed shell. In-process Python plugins can access process
+resources outside this API. Strong isolation requires a separate enforcement boundary and is not
+provided by this transport effort.
 
 ### R10. Complete adoption and evidence
 
@@ -284,6 +310,12 @@ controlled preparation from carrier/account bootstrap behavior described in R9.
 Cutover acceptance exercises complete workflows through the new stack before switching production
 entry points, then proves those entry points and plugin contexts use it exclusively. Future-facing
 scenarios in R11 are acceptance cases even where the current implementation has no caller.
+
+Context acceptance includes command-only, file-only, upload-without-download, job observation
+without cancellation, and admin-without-elevation views. Missing grants fail before effects; derived
+views and saved job references do not restore withheld authority. The same carrier supports a
+restricted plugin view and a fully authorized recovery view without changing its feature
+description.
 
 | Scenario                      | Observable success                                                                                                                                        |
 | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |

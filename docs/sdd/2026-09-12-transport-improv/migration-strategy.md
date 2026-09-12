@@ -32,6 +32,12 @@ operational. New internal entry points and test composition roots exercise commo
 shell policy, files/jobs, channel features, and context delivery. Production `RunContext` does not
 gain an old/new target union, and plugin authors are not asked to choose a stack.
 
+New contexts deliver the scoped target/access interfaces from the contract proposal, not the full
+implementation object. Core composition explicitly supplies required operations and elevation; test
+composition also supplies restricted views. The future third-party plugin policy evaluator is not a
+dependency of this cutover, but the API must not require another redesign to withhold commands, file
+directions, job actions or elevation later.
+
 Develop against the [proposed carrier contract and destination layout](execution-contract.md). The
 proposed revised SSH assignment is a new carrier and connection/trust implementation under
 `execution/carriers/ssh/`, not consolidation of the old runner. This effort builds shared semantics
@@ -66,7 +72,8 @@ workflows on isolated resources, never by sending one production request down bo
    Validate new context delivery independently while the production context still uses the old API.
 5. Prepare and validate the complete caller cutover against the settled contract. Audit every call's
    invocation form, shell/startup policy, identity, environment, stdio, deadline, and job lifetime.
-   Resolve surviving legacy work, SSH configuration/trust state, and the external plugin
+   Audit each consumer's needed action interfaces and elevation, not merely its admin/agent
+   identity. Resolve surviving legacy work, SSH configuration/trust state, and the external plugin
    compatibility policy before switching.
 6. Cut over factories, `RunContext` producers/consumers, plugins, and direct service entry points in
    one coherent production increment. Run the same workflow gates through real production entry
