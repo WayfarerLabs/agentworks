@@ -140,6 +140,7 @@ def _build_live_transport(vm: VMRow, config: Config) -> tuple[Transport, RunComm
 
 
 def _preflight_and_resolve(
+    db: Database,
     config: Config,
     *,
     plan: SessionPlan,
@@ -207,6 +208,23 @@ def _preflight_and_resolve(
             registry=graph.registry,
             interaction=interaction,
         )
+
+        # Setup can inspect every bound owner now only if this operation
+        # creates neither the workspace nor the agent. Pending owners are
+        # checked once their setup has been applied, in the session slice.
+        if not plan.new_workspace and not plan.new_agent:
+            from agentworks.harness_setup.readiness import require_setup_ready
+
+            assert plan.existing_ws is not None
+            require_setup_ready(
+                db,
+                graph.registry,
+                graph.session_node.harness_integration,
+                vm=vm,
+                workspace=plan.existing_ws,
+                agent_name=plan.agent_name,
+                runner=agent_target or target,
+            )
 
     with output.section("Resolving Secrets"):
         graph.resolver.resolve()
@@ -391,6 +409,7 @@ def create_session(
         target, run_command = _build_live_transport(vm, config)
 
         secret_values, agent_target = _preflight_and_resolve(
+            db,
             config,
             plan=plan,
             graph=graph,

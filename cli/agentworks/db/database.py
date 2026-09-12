@@ -83,6 +83,7 @@ class Database:
         self._tx_depth = 0
         self._use_lock: sqlite3.Connection | None = None
         db_path = (path or _db.DB_PATH).resolve()
+        self.path = db_path
         if read_only:
             from agentworks.db.backup import _connect_ro, _is_busy
             from agentworks.errors import BusyStateError, StateError
@@ -1271,7 +1272,15 @@ class Database:
             for agent in agents:
                 grants_by_agent[agent.name] = self.list_agent_grants(agent.name)
             desired_overlays = self.instance_state.list_vm_owner_tree_desired_overlays(vm_name)
-            applied_slices = self.instance_state.get_applied_slices("vm", vm_name)
+            applied_slices = (
+                *self.instance_state.get_applied_slices("vm", vm_name),
+                *(record for agent in agents for record in self.instance_state.get_applied_slices("agent", agent.name)),
+                *(
+                    record
+                    for workspace in workspaces
+                    for record in self.instance_state.get_applied_slices("workspace", workspace.name)
+                ),
+            )
         finally:
             self._conn.execute("COMMIT")
         return (

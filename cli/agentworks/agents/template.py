@@ -18,7 +18,7 @@ from pydantic import Field, model_validator
 from agentworks.declared_resource import DeclaredResource
 from agentworks.env.entry import EnvTable, env_references
 from agentworks.git_credentials.credential import credential_references
-from agentworks.schema import ResourceRef
+from agentworks.schema import CapabilityBlock, MergeStrategy, ResourceRef
 from agentworks.schema.reference import RefRelationship
 
 if TYPE_CHECKING:
@@ -37,6 +37,7 @@ def effective_references(
     provenance: Mapping[ProvenancePath, tuple[LayerSource, ...]],
 ) -> tuple[ResourceReference, ...]:
     """References required by one effective agent declaration."""
+    from agentworks.capabilities.harness_integration.activations import activation_references
     from agentworks.resources.reference import ResourceReference as _ResourceReq
     from agentworks.value_provenance import longest_prefix_value
 
@@ -67,6 +68,9 @@ def effective_references(
             declared_by=owner(("user_install_commands", index)),
         )
         for index, name in enumerate(effective.user_install_commands)
+    )
+    refs.extend(
+        activation_references(effective.harness_integrations, facet="user", source=source, provenance=provenance)
     )
     return tuple(refs)
 
@@ -135,11 +139,9 @@ class AgentTemplate(DeclaredResource):
     """Whether re-running init removes mise tools no longer declared.
     Write booleans unquoted; quoted strings such as ``"no"`` are invalid."""
 
-    claude_marketplaces: list[str] | None = None
-    """Claude Code marketplaces to register for the agent user."""
-
-    claude_plugins: list[str] | None = None
-    """Claude Code plugins to install for the agent user."""
+    harness_integrations: Annotated[list[CapabilityBlock], MergeStrategy.REPLACE] | None = None
+    """Ordered integrations explicitly activated for native user setup.
+    An authored list replaces the inherited list; an empty list activates none."""
 
     env: EnvTable = Field(default_factory=dict)
     """Environment variables exported for this agent, as a plaintext value
@@ -172,3 +174,17 @@ class AgentTemplate(DeclaredResource):
         refs = list(effective_references(layered.value, source, layered.provenance))
         refs.extend(inherits_reference(parent, source) for parent in self.inherits)
         return refs
+
+    def validate_config(self, context: FinalizeContext) -> None:
+        """Validate the effective native integration activations for this resource."""
+        from agentworks.agents.templates import effective_template_with_provenance
+        from agentworks.capabilities.harness_integration.activations import validate_activations
+
+        layered = effective_template_with_provenance({**context.rows_of("agent-template"), self.name: self}, self.name)
+        validate_activations(
+            layered.value.harness_integrations,
+            facet="user",
+            source=("agent-template", self.name),
+            provenance=layered.provenance,
+            location=self.error_location,
+        )

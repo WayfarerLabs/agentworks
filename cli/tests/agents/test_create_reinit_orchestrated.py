@@ -46,6 +46,7 @@ AGENT_MANIFESTS = [
 @pytest.fixture(autouse=True)
 def _stub_ssh_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     stub_vm_ssh_identity(monkeypatch)
+    monkeypatch.setattr(agent_initializer, "create_new_agent_user", lambda *args, **kwargs: None)
 
 
 @pytest.fixture
@@ -55,8 +56,12 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN20
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
     monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GH", "ghtok")
 
-    def _make():  # noqa: ANN202
-        return write_operator_config(tmp_path, PLUGINS_ENABLED, manifests=[proxmox_site(), *AGENT_MANIFESTS])
+    def _make(*, agent_manifests=None):  # noqa: ANN202
+        return write_operator_config(
+            tmp_path,
+            PLUGINS_ENABLED,
+            manifests=[proxmox_site(), *(AGENT_MANIFESTS if agent_manifests is None else agent_manifests)],
+        )
 
     return _make
 
@@ -1214,3 +1219,122 @@ def test_reinit_reconciles_grant_all_agent_via_materialized_rows(
     assert group_adds == [("agt-dev", "ws1")]  # reconciled via the materialized row
     # Summary line present when grants were reconciled (N > 0).
     assert "Reconciled 1 workspace grant" in captured_output.info
+
+
+@pytest.mark.parametrize("operation", ["create", "reinit"])
+def test_active_user_setup_joins_eager_env_and_runs_after_core(
+    db,
+    make_config,
+    mutation,
+    monkeypatch,
+    operation,
+    resolve_counter,
+):
+    from agentworks.capabilities.harness_integration.shell import ShellIntegration
+    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+    from agentworks.harness_setup.state import read_native_setup
+    from agentworks.transports import Transport
+
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    monkeypatch.setenv("AW_SECRET_SETUP_TOKEN", "setup-private")
+    if operation == "reinit":
+        db.insert_agent("dev", "box", "agt-dev", template="default")
+    target = MagicMock(spec=Transport)
+    target.run.return_value.stdout = "native-identity"
+    monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: target)
+    calls = []
+
+    def setup(self, invocation):
+        assert mutation["agent_name"] == "dev"
+        assert invocation.environment["SETUP_TOKEN"] == "setup-private"
+        assert invocation.environment["AGENTWORKS_AGENT"] == "dev"
+        assert "AGENTWORKS_WORKSPACE" not in invocation.environment
+        with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "box"):
+            pass
+        calls.append(invocation)
+
+    monkeypatch.setattr(ShellIntegration, "user_init", setup)
+    spec = '{"harness_integrations":[{"name":"shell"}],"env":{"SETUP_TOKEN":{"secret":"setup-token"}}}'
+    if operation == "create":
+        agent_manager.create_agent(
+            db, config, name="dev", vm_name="box", spec=spec, interaction=TtyInteractionPolicy.REFUSE
+        )
+    else:
+        agent_manager.reinit_agent(db, config, name="dev", spec=spec, interaction=TtyInteractionPolicy.REFUSE)
+    assert len(calls) == 1
+    assert len(resolve_counter) == 1 and "setup-token" in resolve_counter[0]
+    assert read_native_setup(db, "agent", "dev").records[0].complete
+
+
+@pytest.mark.parametrize("fail_setup", [False, True])
+@pytest.mark.parametrize("repoint", [False, True])
+def test_legacy_overlay_conversion_waits_for_successful_native_reinit(
+    db, make_config, monkeypatch, mutation, fail_setup, repoint
+):
+    from dataclasses import replace
+
+    from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
+    from agentworks.transports import Transport
+
+    manifests = [
+        *AGENT_MANIFESTS[:2],
+        ManifestDoc(
+            "agent-template",
+            "other",
+            {
+                "git_credentials": ["gh"],
+                "harness_integrations": [{"name": "codex"}, {"name": "claude-code", "marketplaces": ["new-base"]}],
+            },
+        ),
+    ]
+    config = make_config(agent_manifests=manifests)
+    config = replace(config, enabled_system_plugins=(*config.enabled_system_plugins, "claude", "codex"))
+    _seed_vm(db)
+    db.insert_agent("dev", "box", "agt-dev", template="default")
+    payload = VersionedPayload(1, {"claude_plugins": ["legacy@fixture"], "shell": "zsh"})
+    db.instance_state.put_desired_overlay("agent", "dev", payload)
+    original = db.instance_state.get_desired_overlay("agent", "dev")
+    _reachable(monkeypatch, True)
+    target = MagicMock(spec=Transport)
+    target.run.return_value.stdout = "native-identity"
+    monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: target)
+
+    def setup(self, invocation):
+        assert db.instance_state.get_desired_overlay("agent", "dev") == original
+        assert db.get_agent("dev").template == ("other" if repoint else "default")
+        assert self._config_as(type(self).config_for("user")).plugins == ["legacy@fixture"]
+        if fail_setup:
+            raise StateError("fixture native failure")
+
+    monkeypatch.setattr(ClaudeCodeIntegration, "user_init", setup)
+    if fail_setup:
+        with pytest.raises(ExternalError):
+            agent_manager.reinit_agent(
+                db,
+                config,
+                name="dev",
+                update_template="other" if repoint else None,
+                interaction=TtyInteractionPolicy.REFUSE,
+            )
+        assert db.instance_state.get_desired_overlay("agent", "dev") == original
+    else:
+        agent_manager.reinit_agent(
+            db,
+            config,
+            name="dev",
+            update_template="other" if repoint else None,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+        assert db.instance_state.get_desired_overlay("agent", "dev").payload.value == {
+            "shell": "zsh",
+            "harness_integrations": (
+                [
+                    {"name": "codex"},
+                    {"name": "claude-code", "marketplaces": ["new-base"], "plugins": ["legacy@fixture"]},
+                ]
+                if repoint
+                else [{"name": "claude-code", "plugins": ["legacy@fixture"]}]
+            ),
+        }

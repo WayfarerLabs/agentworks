@@ -14,9 +14,9 @@
 In agentic engineering, "harness" generally refers to the tooling within which an agentic workload
 operates. Agentworks is infrastructure for running that tooling, not a harness itself.
 
-In the simplest (and default) case, Agentworks just runs a plain shell as the session's workload.
-From here, the operator can do whatever they want in terms of configuring the environment and
-launching their desired tooling.
+The built-in `default` session template explicitly selects `shell` as its workload. From here, the
+operator can do whatever they want in terms of configuring the environment and launching their
+desired tooling.
 
 However, Agentworks also supports deeper tooling support through a **harness integration**. An
 Agentworks harness integration knows how to run a specific harness as the session's workload,
@@ -24,9 +24,14 @@ including checking dependencies, configuring it, and choosing whether to resume 
 This allows tight integration with harnesses such as Claude Code or Codex without confusing the
 Agentworks integration layer with the harness it drives.
 
-The current integration contract covers session-scoped configuration and one launch operation.
-Broader user- and workspace-scoped tooling behavior remains outside that contract, as described
-below.
+The integration contract has VM, user, workspace, and session facets. Owning setup lifecycles
+configure native tooling before a session launches; the session facet chooses the workload command.
+The base setup methods reject activation of an unimplemented facet with an error naming the
+integration and facet. Implement only supported setup methods; an implemented method can succeed
+without changes for default-only or already-satisfied config. An inactive integration with no prior
+owned effects to retire is skipped and not marked applied. A config model, including a name-only
+schema, does not establish facet support. See
+[harness facets](../../../../docs/guides/harness-facets.md) for complete configuration examples.
 
 And note that regardless of integration, all sessions run inside the standard tmux session. This
 provides both access to stdin/stdout/stderr for interactivity as well as the persistent execution
@@ -36,19 +41,17 @@ than to tell the core session logic what to run.
 
 ## A Note on Scope
 
-The current harness-integration concept is scoped solely to the session (the running
-workload/process), and everything an integration does must stay session-local. It may set up state
-that belongs to this one session, but it must not cause effects that reach a wider scope: another
-session of the same user, the whole user account, the workspace, or the machine.
+A **scope** is the owning resource and its context; a **facet** is the integration's entry point at
+that scope. A VM uses the VM facet. Both an admin and an agent use the user facet, each for its
+actual Linux user and home. A workspace uses the workspace facet, shared by its sessions. The
+session facet belongs to the running workload. An admin is not an ancestor of an agent's user setup.
 
-Auth is the clarifying example. Authenticating a tool in a way that stays session-local (say, an
-injected env var only this session sees) is entirely fair game. Authenticating in a way that mutates
-shared user state (a login written into the user's home that every one of that user's sessions then
-inherits) is not, because it reaches past the session. The same line rules out installing a plugin
-into the workspace (every session there would see it) or changing anything machine-wide.
-
-The current contract does not support machine-, user-, or workspace-scoped effects. Keep every
-integration effect session-scoped.
+Effects must stay within the selected facet's ownership. User setup can change its native user
+settings, and workspace setup can change project settings. Session launch must not rewrite those
+shared files or silently provision a missing ancestor. Core owns accounts, directories, transports,
+and lifecycle transactions; integrations own their native placements and report confirmed claims.
+Authentication files are not supported settings roles. Put session-local secrets in the session's
+environment rather than command text.
 
 ## Available Integrations
 
@@ -56,12 +59,12 @@ Four integrations ship today. This list can change, so `agw resource explain har
 the definitive set on any given install, and `agw resource explain harness-integration/<name>` the
 definitive config for one.
 
-- **`shell`** (built in) is the default. By default it simply opens the configured shell for the
-  session's target user (agent or admin user). It can further be configured to run a specific
-  command with `resume_command` for ordinary `session start`/`restart` versus a fresh launch
-  (`session create` or `--force-new`). From here, an operator can do whatever they want in terms of
-  configuring the environment and launching their desired tooling. They're just largely on their
-  own.
+- **`shell`** (built in) is selected by the built-in `default` template. By default it simply opens
+  the configured shell for the session's target user (agent or admin user). It can further be
+  configured to run a specific command with `resume_command` for ordinary `session start`/`restart`
+  versus a fresh launch (`session create` or `--force-new`). From here, an operator can do whatever
+  they want in terms of configuring the environment and launching their desired tooling. They're
+  just largely on their own.
 - **`claude-code`** (via the `claude` system plugin) drives an interactive Claude Code session. It
   knows how to launch Claude Code and, on resume, how to check for an existing session and reattach
   if found so that the operator experience is seamless and they can pick up right where they left
@@ -99,8 +102,8 @@ as unsupported instead of silently starting a workload.
 
 ## Integration Obligations
 
-A harness integration knows how to run one harness as a session's workload and bring it back, and
-nothing about the machinery around it. It:
+A harness integration owns native setup at its selected facets and the launch decision at the
+session facet. Its session implementation:
 
 - **MUST** implement `start(ctx, *, intent=HarnessLaunchIntent.RESUME_OR_NEW)` and return a
   `HarnessStartResult`. `HarnessStart` contains the command that launches its tool for a given
@@ -138,7 +141,7 @@ nothing about the machinery around it. It:
   workspace, or the machine, such as an auth flow that writes shared login state or a workspace-wide
   plugin install. A session-local secret (say, for auth) belongs in that session's environment,
   never baked into the launch command, where it would leak into process listings and terminal
-  scrollback. Broader-scope provisioning is a separate, forthcoming concern (see
+  scrollback. Broader effects belong to explicitly selected setup facets (see
   [A Note on Scope](#a-note-on-scope)).
 - **SHOULD** surface its launch decision (resumed, started fresh, adopted by discovery, or handed to
   the operator to disambiguate) to the operator, both in the command's output and as the pane's
@@ -147,7 +150,8 @@ nothing about the machinery around it. It:
   one.
 
 It does not own the tmux session, the user, the workspace, or attach and detach. Agentworks provides
-those; the integration only decides what runs in the pane.
+those; the session facet only decides what runs in the pane. Setup facets use the core-supplied
+runner and checkpoint callback to configure native tooling at their owning scope.
 
 ## Technical Overview
 
@@ -155,17 +159,18 @@ The preceding sections describe the operator-facing model. The remaining section
 integration sits in the capability model, its implementation contract, how the session machinery
 consumes it, and the practices that make the shipped integrations robust, especially resume policy.
 
-A **harness integration** is a harness's runtime adapter: it knows how a session workload (a plain
-shell, Claude Code, Codex, ...) is configured and launched, and what the launch target must provide
-for that to work. The session is the rich consuming resource: a session node HOLDS an integration
-instance, composes its readiness, and the session manager invokes its ops. The integration never
-touches tmux, the database, or the CLI; it declares its config, probes its target, and returns pane
-command strings.
+A **harness integration** is a harness's setup and runtime adapter: it knows how a session workload
+(a plain shell, Claude Code, Codex, ...) is configured and launched, and what the launch target must
+provide for that to work. The session is the rich consuming resource: a session node HOLDS an
+integration instance, composes its readiness, and the session manager invokes its ops. The
+integration never touches tmux, the database, or the CLI; it declares its config, probes its target,
+and returns pane command strings.
 
 Four integrations ship today and serve as references:
 
-- **`shell`** (`shell.py`): the core built-in and default. Operator-authored `command` /
-  `resume_command` / `required_commands`. The minimal member: no state, no tool conventions.
+- **`shell`** (`shell.py`): the core built-in selected by the `default` template. Operator-authored
+  `command` / `resume_command` / `required_commands`. The minimal member: no state, no tool
+  conventions.
 - **`claude-code`** (`agentworks/plugins/claude/harness_integration.py`): the first tool
   integration, shipped as the opt-in `claude` system plugin. The reference for everything stateful:
   durable session identity, resume-vs-launch detection, tool flag mapping, and the plugin packaging.
@@ -191,14 +196,17 @@ The capability ladder, harness-integration edition:
   the generic capability publisher (`capabilities/publish.py`, driven by the kind's descriptor); a
   plugin-seated integration's row is published by the plugin machinery with a `system-plugin` origin
   instead, and the built-in publisher skips it.
-- An **instance** is one integration bound to one session: the merged harness config blob plus the
-  session's identity (`session_name`, `vm_name`, `workspace_name`, the agent-or-admin target) and
-  its per-session state blob. Constructed fresh per operation by the session node factories.
-- The **consuming resource** is the `session-template` (it owns the config: in manifests,
+- A **session instance** is one integration bound to one session: the merged harness config blob
+  plus the session's identity (`session_name`, `vm_name`, `workspace_name`, the agent-or-admin
+  target) and its per-session state blob. Constructed fresh per operation by the session node
+  factories.
+- The **session consuming resource** is the `session-template` (it owns the config: in manifests,
   `spec.harness_integration` is one tagged table whose `name` key selects the integration and whose
   remaining keys are that integration's config, which is the only accepted shape; the
   operator-facing view is in `docs/guides/resources.md`) and, at runtime, the session node that
-  holds the instance.
+  holds the instance. VM, admin, agent, and workspace templates host ordered integration
+  activations; their owning lifecycles construct separate instances bound to the corresponding
+  facet.
 
 Layering is a hard rule: this package imports neither `sessions/` nor `orchestration/` (the `target`
 type is a local `Protocol` for exactly this reason), and `test_shell_integration.py` asserts it. An
@@ -210,7 +218,7 @@ A new harness integration implements this surface (see `base.py` for the full do
 
 #### Class Identity
 
-`name` and `description` ClassVars (the registry row), inherited `owner_kind = "session-template"`
+`name` and `description` ClassVars (the registry row), default `owner_kind = "session-template"`
 (error framing: config errors render as `session-template/<name>`).
 
 Four class-level declarations are REQUIRED and none is defaulted, because a default would let an
@@ -220,20 +228,94 @@ missing any of them, naming the plugin:
 - `contract_version`: the capability contract version this implementation is written against.
   Registration requires an exact match with the version its kind's descriptor declares supported, so
   a contract change is a hard cutover rather than a silent re-certification. The current contract is
-  version 3, and every shipped integration declares 3. The version number identifies this current
-  start-only contract; it does not imply compatibility with the earlier version-1 or version-2
-  shapes.
-- `config_model`: what the config IS (see below). A capability that accepts none declares a model
-  with no fields beyond its tag, which is closed-world by construction.
+  version 4, and every shipped integration declares 4. This contract requires explicit facet
+  selection for config; it does not imply compatibility with earlier shapes.
+- `config_model`: the session config when using the base selector (see below). An override of
+  `config_for` supplies its own facet answers; `None` accepts the tag alone.
 - `name` / `description`: the registry row's identity.
 
-#### Config: One Declared Model
+#### Setup Binding
 
-The integration declares `config_model`, an `AgwModel` carrying its own `name` as a `Literal` tag
-plus one field per accepted key, each with its type and an attribute docstring that IS its
-operator-facing description. The core validates against it (closed-world, so an unknown key is a
-hard error naming the valid fields) and extracts whatever references it marks. No integration code
-runs for either. Two rules with teeth:
+VM, admin, agent, and workspace templates explicitly select native setup integrations through
+`harness_integrations`, an ordered list of tagged capability blocks. Admin and agent select the same
+user facet. An omitted list inherits; an authored list replaces the whole inherited list, and `[]`
+selects none. Duplicate integration names are invalid. Each block is validated against its hosting
+facet, and its capability and secret references participate in the usual graph gates.
+
+Each block is an **integration activation**, with defaults or explicit configuration. It activates
+the integration's facet on the owning resource; it does not prove that setup completed. A facet is a
+scoped part of a capability, a term that can apply beyond harness integrations. Global plugin
+enablement and the VM power-state activation gate remain separate concepts.
+
+`HarnessIntegration.for_setup(owner_kind=..., owner_name=..., facet=..., config=...)` binds one
+integration activation without session identity or conversation state. The instance's owner
+identifies its config and secret references. A removed activation binds with `config=None`, exposes
+`retiring=True`, and refuses config access instead of synthesizing new defaults. Active setup with
+`{}` still selects the integration's defaults or its name-only config.
+
+`vm_init`, `user_init`, and `workspace_init` receive their corresponding typed setup invocations.
+The base methods have no native effects or claims. Session construction retains its existing
+arguments and stores them in a `SessionBinding`; setup access to session identity or state raises
+`StateError`. An integration's setup methods read their bound facet model through `_config_as`; its
+existing session `config` property may continue narrowing to the session model.
+
+Owning lifecycles run setup after core provisioning: VM and admin during VM initialization, agent
+during create or reinit, and workspace after its directory and repository are created. Explicitly
+selected setup consumes its owning scope's environment: VM only; VM plus the actual admin or agent;
+or VM plus workspace. Existing applied-state records also invoke this path when integration
+activations are removed. With neither selections nor applied-state records, setup does not resolve
+unused environment secrets. Install commands keep their existing environment behavior.
+
+The command registers setup environment and config secrets before its single secret-resolution pass
+and before constructing its SSH logger. An invocation receives the complete scope environment with
+protected `AGENTWORKS_*` identity, plus a secret mapping restricted to that integration's config
+references. VM/admin setup binds references to the live VM owner; agent and workspace setup bind to
+their respective live owners, including resources still pending during session creation.
+
+A VM-family mutation guard spans core provisioning, integration setup, and failed-create cleanup.
+Setup checkpoints record confirmed native claims through instance state. Fresh agent and workspace
+applied-state records remain buffered until the owner row and desired overlay commit atomically;
+failed creation cleans up the newly owned native resource. Fresh agent creation refuses an existing
+unowned Linux account or home before arming rollback. Existing agents retain the create-or-converge
+reinit path. VM/admin setup finishes before the final VM initialization and SSH-identity checkpoint.
+
+Session create, start, and restart check the integration's declared setup prerequisites before
+session mutation. These checks inspect evidence and native placement; they do not provision an
+ancestor or resolve additional setup secrets.
+
+#### Setup Prerequisites and Applied State
+
+The session facet's `check_setup(SetupReadiness)` may inspect `.vm`, `.user`, or `.workspace`.
+Evidence is loaded once per requested facet and includes the actual owner, its last setup record,
+status, and remediation. A record is current only when completion, effective declaration, and native
+destination identity agree. Checks do not reread workstation settings sources or resolve secrets.
+Integrations can use the supplied session runner for read-only native probes.
+
+Return `SetupGap` entries with `required` or `recommended` severity and an integration-specific
+reason. Core refuses required gaps before session runtime replacement and warns for recommended
+gaps. The base and all shipped integrations currently return no gaps, preserving session-only use;
+there is no operator-authored universal `required_facets` field. This hook is separate from the
+capability's executable-readiness probe.
+
+Setup invocations carry prior claims and a callback for the complete remaining claim set after each
+confirmed ownership change. Core persists completion and cleanup evidence in the owning
+instance-state slice; it does not infer native ownership from filenames. Removed activations are
+invoked with absent config for retirement, and failed retirement retains evidence for retry. See
+[native harness setup](../../../../docs/guides/native-harness-setup.md) for the shipped cleanup
+rules and the [instance-state contract](../../db/README.md) for persistence and inspection.
+
+#### Config: Facet Selection
+
+The integration declares its session `config_model`, an `AgwModel` carrying its own `name` as a
+`Literal` tag plus one field per accepted key, each with its type and an attribute docstring that IS
+its operator-facing description. `config_for(facet="session")` selects that model. The base returns
+`None` for vm, user, and workspace; overrides may offer models at those facets. No config means a
+closed name-only selection, not a support or enablement declaration. A missing facet selector is
+refused. Resource hosts choose the facet, and capability references show all four answers.
+
+The core validates against the selected model (closed-world, so an unknown key is a hard error
+naming the valid fields) and extracts whatever references it marks. No integration code runs for
+either. Two rules with teeth:
 
 - **A required field is a claim about the whole lineage.** Validation runs at finalize on each
   template's EFFECTIVE (merged) blob, so a child may declare a partial one that its parents
@@ -269,7 +351,7 @@ instance layer:
 
 - A layer that omits the selector leaves the accumulated selector and config unchanged.
 - The same registered selector merges config through the model that integration offers via
-  `config_for()` (normally its `config_model`).
+  `config_for(facet="session")` (normally its `config_model`).
 - A different selector discards the complete accumulated config before the incoming config is
   considered, so one integration never receives another integration's fields.
 - Repeating the same unknown selector replaces the complete earlier raw config. There is no model
@@ -529,7 +611,11 @@ environment the workload actually gets. Prefer shell-neutral inner commands (the
 
 #### Testing a Harness Integration
 
-No real tool binary anywhere. The layers, with the shipped tests as templates:
+Session launch tests use stubbed tool boundaries. Native setup additionally has isolated local
+fixtures using installed harness CLIs, temporary homes, and local marketplaces without model
+requests; see
+[native setup evidence](../../../../docs/guides/native-harness-setup.md#native-compatibility-evidence).
+The session layers, with the shipped tests as templates:
 
 - **Unit (the bulk):** `cli/tests/test_claude_code_integration.py`. Use `_FakeTarget` /
   `_FakeResult` from `cli/tests/conftest.py`: a substring-to-result map standing in for the
@@ -580,8 +666,8 @@ authority on the descriptor, registration mechanics, and the enablement model; t
    is a `user-install-command` (how the tool's binary gets onto a VM user's PATH), published weak
    (add-if-absent) while the plugin is disabled so templates referencing it still finalize.
 4. Everything is present-but-disabled until the operator opts in with
-   `[plugins] system = ["<name>"]`; `agw doctor` shows the roster. No other installer machinery
-   exists or is needed.
+   `[plugins] system = ["<name>"]`; `agw doctor` shows the roster. Native setup still requires
+   explicit activations at the desired owning resources.
 
 The checklist beyond code, per the repo rules:
 
@@ -604,15 +690,14 @@ The checklist beyond code, per the repo rules:
 
 Known holes the current contract leaves open on purpose, so the boundaries read as deliberate:
 
-- **Provisioning.** An integration runs the harness; nothing yet provisions the user it runs as (the
-  harness's config files, skills, MCP registration, auth). The sketched shape is a paired future
-  multi-scope harness-integration expansion. Until it exists, provisioning is install-commands plus
-  operator setup, and auth in particular is out of integration scope.
+- **Artifacts and features.** The current setup pipeline is core provisioning and scoped env,
+  followed by harness integrations. It has no artifact ingestion, bundles, propagation, deferral, or
+  feature-emission stage. Those are future contracts, not accepted configuration today.
 - **Secrets and integration-owned environment.** The declare-and-receive secret plumbing is in place
-  but unexercised (no shipped integration declares a secret). The session template's `env` chain,
-  including secret-backed entries, is the supported way to put an env var (an API key, a tool
-  config-dir override) into the pane today; what does not exist is a way for an integration to
-  contribute env from its OWN config. No design record yet; a first-class surface is future work.
+  but no shipped integration declares a config secret. The session template's `env` chain, including
+  secret-backed entries, is the supported way to put an env var (an API key, a tool config-dir
+  override) into the pane today; what does not exist is a way for an integration to contribute env
+  from its OWN config. No design record yet; a first-class surface is future work.
 - **Liveness and headless ops.** The integration chooses a launch command, not "is the workload
   healthy" and not a non-TTY exec mode. Both are plausible extensions of the op surface; no design
   record yet.

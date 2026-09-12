@@ -18,8 +18,10 @@ if TYPE_CHECKING:
     from agentworks.agents.template import AgentTemplate
     from agentworks.db import Database
     from agentworks.env.entry import EnvEntry
+    from agentworks.instance_specs import InstanceOverlay
     from agentworks.resources.inheritance import LayeredResolution
     from agentworks.resources.registry import Registry
+    from agentworks.schema import CapabilityBlock
 
 
 @dataclass
@@ -39,8 +41,7 @@ class ResolvedAgentTemplate:
     mise_allow_unlocked: bool = False
     mise_install_before: str = "7d"
     mise_prune_on_reinit: bool = True
-    claude_marketplaces: list[str] = field(default_factory=list)
-    claude_plugins: list[str] = field(default_factory=list)
+    harness_integrations: list[CapabilityBlock] = field(default_factory=list)
     env: dict[str, EnvEntry] = field(default_factory=dict)
 
 
@@ -124,19 +125,7 @@ def resolve_live_template(
     template_name: str | None,
 ) -> ResolvedAgentTemplate:
     """Resolve a persisted agent's template chain plus its stored final layer."""
-    from typing import cast
-
-    from agentworks.instance_specs import get_instance_overlay
-
-    overlay = get_instance_overlay(db, "agent", instance_name)
-    if overlay is None:
-        return resolve_template(registry, template_name)
-    return resolve_template(
-        registry,
-        template_name,
-        overlay=cast("AgentTemplate", overlay.declaration),
-        instance_name=instance_name,
-    )
+    return resolve_live_template_with_provenance(db, registry, instance_name, template_name).value
 
 
 def resolve_live_template_with_provenance(
@@ -148,13 +137,22 @@ def resolve_live_template_with_provenance(
     """Resolve a persisted agent and retain its layer provenance."""
     from typing import cast
 
-    from agentworks.instance_specs import get_instance_overlay
+    from agentworks.instance_specs import decode_stored_overlay
+    from agentworks.legacy_claude import legacy_component
 
-    overlay = get_instance_overlay(db, "agent", instance_name)
+    record = db.instance_state.get_desired_overlay("agent", instance_name)
+    overlay = None
+    if record is not None:
+        base = (
+            resolve_template(registry, template_name).harness_integrations
+            if legacy_component(record) is not None
+            else None
+        )
+        overlay = cast("InstanceOverlay[AgentTemplate]", decode_stored_overlay(record, legacy_user_base=base))
     return resolve_template_with_provenance(
         registry,
         template_name,
-        overlay=None if overlay is None else cast("AgentTemplate", overlay.declaration),
+        overlay=None if overlay is None else overlay.declaration,
         instance_name=instance_name,
     )
 

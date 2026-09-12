@@ -159,7 +159,9 @@ def _report_instance_state(
         Status,
     )
     from agentworks.errors import StateError
+    from agentworks.harness_setup.state import UnsupportedNativeSetupVersionError, decode_native_setup
     from agentworks.instance_specs import UnsupportedStoredOverlayError, decode_stored_overlay
+    from agentworks.legacy_claude import LegacyClaudeContextRequired
     from agentworks.ssh_identity import SSHIdentityReadError, read_private_ssh_identity
     from agentworks.vms.applied_state import (
         UnsupportedAppliedStateVersionError,
@@ -251,6 +253,15 @@ def _report_instance_state(
         metadata = desired_record.metadata
         try:
             decode_stored_overlay(desired_record.record)
+        except LegacyClaudeContextRequired:
+            add(
+                Status.INFO,
+                label(metadata),
+                "legacy Claude setup awaits contextual conversion",
+                InstanceStateHealthFactType.MIGRATION_PENDING,
+                metadata,
+                hint="Migrate the selected template, then run owning reinit to convert the stored overlay.",
+            )
         except UnsupportedStoredOverlayError:
             add(
                 Status.INFO,
@@ -294,7 +305,22 @@ def _report_instance_state(
                 decoded = decode_ssh_identity(applied_record.record)
                 if applied_record.metadata.owner_exists:
                     ssh_evidence[applied_record.record.instance_name] = (decoded, metadata)
-        except UnsupportedAppliedStateVersionError:
+            elif applied_record.record.key is AppliedStateKey.HARNESS_NATIVE_SETUP:
+                native = decode_native_setup(applied_record.record)
+                incomplete = any(not record.complete for record in native.records)
+                add(
+                    Status.WARN if incomplete else Status.OK,
+                    label(metadata),
+                    "native setup has incomplete or pending cleanup evidence"
+                    if incomplete
+                    else "native setup recorded",
+                    InstanceStateHealthFactType.COVERAGE,
+                    metadata,
+                    hint="Retry the owning setup or removal operation to reconcile recorded claims."
+                    if incomplete
+                    else None,
+                )
+        except (UnsupportedAppliedStateVersionError, UnsupportedNativeSetupVersionError):
             add(
                 Status.INFO,
                 label(metadata),

@@ -123,7 +123,8 @@ def test_no_harness_arm_requires_a_field_beyond_its_tag() -> None:
     import agentworks.plugins  # noqa: F401  (registers every shipped plugin)
 
     for name, seated in descriptor_for("harness-integration").registry().items():
-        model = offered_model(seated if isinstance(seated, type) else type(seated))
+        model = offered_model(seated if isinstance(seated, type) else type(seated), facet="session")
+        assert model is not None
         assert model.model_json_schema().get("required", []) == ["name"], name
 
 

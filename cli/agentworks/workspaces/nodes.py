@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import Database, WorkspaceRow
+    from agentworks.harness_setup.inputs import SetupInputs
     from agentworks.orchestration.node import Node
     from agentworks.resources.reference import ResourceReference
     from agentworks.secrets.policy import TtyInteractionPolicy
@@ -98,6 +99,7 @@ class PendingWorkspaceNode:
         self._template = template
         self._interaction = interaction
         self._realized = False
+        self.setup_inputs: SetupInputs | None = None
 
     @property
     def key(self) -> str:

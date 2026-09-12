@@ -14,9 +14,10 @@ from pathlib import Path
 import pytest
 
 from agentworks.errors import ConfigError
-from agentworks.resources import Origin, Registry, SecretReference
+from agentworks.resources import Origin, SecretReference
 from agentworks.resources.reference import ResourceReference
 from agentworks.secrets.base import SecretDecl
+from tests.conftest import registry_with_shell
 
 
 @dataclass(frozen=True)
@@ -45,7 +46,7 @@ def test_secret_auto_declared_when_required_but_not_published() -> None:
     """A SecretReference for an unpublished name triggers the
     secret kind's auto-declare miss policy.
     """
-    r = Registry.empty()
+    r = registry_with_shell()
     stub = _PublisherStub(
         reqs=(
             SecretReference(
@@ -73,7 +74,7 @@ def test_admin_template_rejects_non_default_name() -> None:
     """``admin-template`` kind only auto-declares ``default``. A
     requirement for any other name errors at finalize.
     """
-    r = Registry.empty()
+    r = registry_with_shell()
     stub = _PublisherStub(
         reqs=(
             ResourceReference(
@@ -96,7 +97,7 @@ def test_operator_declared_secret_gets_usage_populated() -> None:
     """An operator-declared SecretDecl in the registry accumulates a
     ``usage`` list from the requirements pointing at it.
     """
-    r = Registry.empty()
+    r = registry_with_shell()
     decl = SecretDecl(name="api-key", description="API key")
     r.add("secret", "api-key", decl, _opdecl(line=5))
 
@@ -140,7 +141,7 @@ def test_operator_declared_secret_gets_usage_populated() -> None:
 
 
 def test_auto_declared_secret_origin_uses_first_matching_requirement() -> None:
-    r = Registry.empty()
+    r = registry_with_shell()
     stub_a = _PublisherStub(
         reqs=(
             SecretReference(
@@ -178,7 +179,7 @@ def test_publish_order_determines_first_matching_origin_source() -> None:
     and not "alphabetical" or anything implicit. Pins the dict-insertion-
     order contract that ``Registry.finalize`` relies on.
     """
-    r = Registry.empty()
+    r = registry_with_shell()
     # SAME two stubs, opposite registration order.
     stub_a = _PublisherStub(
         reqs=(
@@ -249,7 +250,7 @@ def test_synthesize_path_walked_for_second_level_requirements() -> None:
     exercised: usage attachment happens after the worklist settles
     rather than at synthesize time).
     """
-    r = Registry.empty()
+    r = registry_with_shell()
     # Two operator-declared publishers both pointing at "shared".
     # finalize auto-declares "shared"; usage should have 2 entries.
     r.add(

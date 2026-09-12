@@ -33,6 +33,7 @@ from agentworks.schema import AgwModel, CapabilityBlock, RefOwner
 from agentworks.sessions.template import SessionTemplate, _capability_provenance
 from agentworks.source_location import SourceLocation
 from agentworks.value_provenance import longest_prefix_value
+from tests.conftest import registry_with_shell
 from tests.plugins._fixtures import ConformingHarnessIntegration
 
 if TYPE_CHECKING:
@@ -91,7 +92,7 @@ def seated() -> Iterator[None]:
 def _registry(*templates: SessionTemplate) -> Registry:
     """A finalized registry holding ``templates`` plus the seated
     integration's capability row (so the selector edge resolves)."""
-    registry = Registry.empty()
+    registry = registry_with_shell()
     plugin_origin = Origin.system_plugin(plugin=PLUGIN, source=f"agentworks.plugins.{PLUGIN}")
     for name in ("needy", "nested"):
         registry.add(

@@ -40,7 +40,6 @@ from .driver import (
     _phase_a_bootstrap,
     _phase_b_setup,
     bootstrap_vm,
-    install_claude_plugins,
     run_initialization,
 )
 from .mise import (
@@ -120,7 +119,6 @@ __all__ = [
     "_write_sudoers_console_setenv",
     "_write_sudoers_env_keep",
     "bootstrap_vm",
-    "install_claude_plugins",
     "rejoin_tailscale",
     "run_initialization",
     "verify_tailscale_available",

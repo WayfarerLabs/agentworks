@@ -98,8 +98,14 @@ def project_agent_live_resource(
 ) -> LiveResource:
     """Project one agent from its identity and typed effective declaration."""
     from agentworks.agents.template import effective_references
+    from agentworks.capabilities.harness_integration.activations import validate_activations
 
     source = ("agent", name)
+
+    if layered is not None:
+        validate_activations(
+            layered.value.harness_integrations, facet="user", source=source, provenance=layered.provenance
+        )
     desired = (
         *(
             ()
@@ -120,9 +126,15 @@ def project_workspace_live_resource(
     layered: LayeredResolution[ResolvedWorkspaceTemplate] | None,
 ) -> LiveResource:
     """Project one workspace from its identity and typed effective declaration."""
+    from agentworks.capabilities.harness_integration.activations import validate_activations
     from agentworks.workspaces.template import effective_references
 
     source = ("workspace", name)
+
+    if layered is not None:
+        validate_activations(
+            layered.value.harness_integrations, facet="workspace", source=source, provenance=layered.provenance
+        )
     desired = (
         *(
             ()
@@ -174,10 +186,20 @@ def project_vm_live_resource(
     layered_admin: LayeredResolution[AdminConfig] | None,
 ) -> LiveResource:
     """Project one VM from its identity and paired effective declarations."""
+    from agentworks.capabilities.harness_integration.activations import validate_activations
     from agentworks.vms.admin import effective_references as admin_effective_references
     from agentworks.vms.template import effective_references as vm_effective_references
 
     source = ("vm", name)
+
+    if layered_vm is not None:
+        validate_activations(
+            layered_vm.value.harness_integrations, facet="vm", source=source, provenance=layered_vm.provenance
+        )
+    if layered_admin is not None:
+        validate_activations(
+            layered_admin.value.harness_integrations, facet="user", source=source, provenance=layered_admin.provenance
+        )
     vm_desired = (
         *(
             ()
@@ -233,7 +255,12 @@ def agent_live_resource(db: Database, registry: Registry, row: AgentRow) -> Live
     from agentworks.instance_specs import get_instance_overlay
 
     selected = "default" if row.template is None else row.template
-    overlay = _read_database(lambda: get_instance_overlay(db, "agent", row.name))
+    base = (
+        resolve_template_with_provenance(registry, selected).value.harness_integrations
+        if _is_published(registry, "agent-template", selected)
+        else None
+    )
+    overlay = _read_database(lambda: get_instance_overlay(db, "agent", row.name, legacy_user_base=base))
     if not _is_published(registry, "agent-template", selected):
         return project_agent_live_resource(
             name=row.name,
@@ -341,7 +368,12 @@ def vm_live_resource(db: Database, registry: Registry, row: VMRow) -> LiveResour
 
     selected_vm = "default" if row.template is None else row.template
     selected_admin = "default" if row.admin_template is None else row.admin_template
-    overlays = _read_database(lambda: get_vm_instance_overlays(db, row.name))
+    base = (
+        resolve_admin(registry, selected_admin).value.harness_integrations
+        if _is_published(registry, "admin-template", selected_admin)
+        else None
+    )
+    overlays = _read_database(lambda: get_vm_instance_overlays(db, row.name, legacy_user_base=base))
     vm_template_name = _published_name(registry, "vm-template", selected_vm)
     admin_template_name = _published_name(registry, "admin-template", selected_admin)
     layered_vm = (

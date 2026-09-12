@@ -31,12 +31,14 @@ from agentworks.errors import AgentworksError, ExternalError
 from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
     from pydantic import BaseModel
 
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
+    from agentworks.harness_setup.inputs import SetupInputs
     from agentworks.instance_specs import InstanceOverlay
     from agentworks.resources.registry import Registry
     from agentworks.workspaces.templates import ResolvedTemplate
@@ -52,6 +54,8 @@ def realize_workspace(
     template: ResolvedTemplate,
     overlay: InstanceOverlay[BaseModel] | None = None,
     defer_overlay_report: bool = False,
+    setup_inputs: SetupInputs | None = None,
+    setup_values: Mapping[str, str] | None = None,
 ) -> Path:
     """Make workspace ``name`` real on ``vm``: create the on-VM
     directory from its RESOLVED template, generate the VS Code
@@ -79,8 +83,6 @@ def realize_workspace(
 
     workspace_path: str | None = None
     vscode_path: Path | None = None
-
-    ssh_logger = SSHLogger(vm.name, "workspace-create")
 
     def _cleanup() -> None:
         # The on-VM teardown (directory + the workspace's fresh Linux group)
@@ -111,59 +113,89 @@ def realize_workspace(
                 f"SSH log: {ssh_logger.display_path}"
             )
 
-    # Outer try/finally ensures the SSH logger is closed exactly once, AFTER
-    # any rollback commands have been logged. Closing earlier would write the
-    # "Finished" footer before the rollback section, making the log misleading.
-    try:
+    from agentworks.harness_setup.lifecycle import require_prepared_setup
+    from agentworks.harness_setup.locking import native_mutation_guard
+
+    with native_mutation_guard(db.path, vm.name) as guard:
+        require_prepared_setup(db, "workspace", name, ("workspace",), () if setup_inputs is None else (setup_inputs,))
+        ssh_logger = SSHLogger(
+            vm.name, "workspace-create", redactions=tuple((setup_values or {}).values()) if setup_inputs else ()
+        )
+        # Outer try/finally ensures the SSH logger is closed exactly once, AFTER
+        # any rollback commands have been logged. Closing earlier would write the
+        # "Finished" footer before the rollback section, making the log misleading.
         try:
-            output.info(f"Creating workspace '{name}' on VM '{vm.name}' (template: {template.name})...")
-            workspace_path = create_vm_workspace(vm, config, name, template, logger=ssh_logger)
+            try:
+                output.info(f"Creating workspace '{name}' on VM '{vm.name}' (template: {template.name})...")
+                workspace_path = create_vm_workspace(vm, config, name, template, logger=ssh_logger)
 
-            vscode_path = generate_vscode_workspace(vm, config, name, workspace_path)
-            output.detail(f"VS Code workspace: {format_host_path(vscode_path)}")
+                native_setup = None
+                if setup_inputs is not None:
+                    from agentworks.harness_setup.lifecycle import apply_workspace_setup
 
-            from agentworks.instance_specs import persist_creation_overlay, refuse_orphan_creation_state
+                    native_setup = apply_workspace_setup(
+                        db,
+                        config,
+                        registry,
+                        inputs=setup_inputs,
+                        vm=vm,
+                        root=workspace_path,
+                        linux_group=workspace_group(name),
+                        values=setup_values or {},
+                        logger=ssh_logger,
+                        held=guard,
+                        operation="workspace-create",
+                    )
 
-            with db.transaction():
-                refuse_orphan_creation_state(db, "workspace", name)
-                db.insert_workspace(
-                    name,
-                    workspace_path=workspace_path,
-                    vm_name=vm.name,
-                    template=template.name,
-                    linux_group=workspace_group(name),
-                )
-                overlay_outcome = persist_creation_overlay(db, "workspace", name, overlay)
-        except KeyboardInterrupt:
-            output.warn(f"Cancelling workspace create '{name}'... rolling back.")
-            _safe_cleanup()
-            raise
-        except AgentworksError:
-            _safe_cleanup()
-            raise
-        except Exception as e:
-            _safe_cleanup()
-            raise ExternalError(
-                f"creating workspace: {e}",
-                entity_kind="workspace",
-                entity_name=name,
-                hint=f"SSH log: {ssh_logger.display_path}",
-            ) from e
+                vscode_path = generate_vscode_workspace(vm, config, name, workspace_path)
+                output.detail(f"VS Code workspace: {format_host_path(vscode_path)}")
 
-        from agentworks.instance_specs import report_overlay_outcome
+                from agentworks.instance_specs import persist_creation_overlay, refuse_orphan_creation_state
 
-        with report_overlay_outcome(None if defer_overlay_report else overlay_outcome):
-            # Materialize grant_all agents onto the new workspace: one explicit
-            # grant row plus the on-VM group membership per agent. Best-effort
-            # (per-agent failures warn, they do not abort); the invariant,
-            # ordering rationale, and KI handling live with the helper.
-            materialize_grant_all_agents(db, config, vm, name, logger=ssh_logger)
-    finally:
-        ssh_logger.close()
+                with db.transaction():
+                    refuse_orphan_creation_state(db, "workspace", name)
+                    db.insert_workspace(
+                        name,
+                        workspace_path=workspace_path,
+                        vm_name=vm.name,
+                        template=template.name,
+                        linux_group=workspace_group(name),
+                    )
+                    overlay_outcome = persist_creation_overlay(db, "workspace", name, overlay)
+                    if native_setup is not None:
+                        from agentworks.harness_setup.state import write_native_setup
 
-    output.info(f"Workspace '{name}' created")
-    # vscode_path was assigned inside the try before the row insert;
-    # reaching here means the body completed without raising, so it is
-    # set. Assert for the type-checker.
-    assert vscode_path is not None
-    return vscode_path
+                        write_native_setup(db, "workspace", name, native_setup, operation="workspace-create")
+            except KeyboardInterrupt:
+                output.warn(f"Cancelling workspace create '{name}'... rolling back.")
+                _safe_cleanup()
+                raise
+            except AgentworksError:
+                _safe_cleanup()
+                raise
+            except Exception as e:
+                _safe_cleanup()
+                raise ExternalError(
+                    f"creating workspace: {e}",
+                    entity_kind="workspace",
+                    entity_name=name,
+                    hint=f"SSH log: {ssh_logger.display_path}",
+                ) from e
+
+            from agentworks.instance_specs import report_overlay_outcome
+
+            with report_overlay_outcome(None if defer_overlay_report else overlay_outcome):
+                # Materialize grant_all agents onto the new workspace: one explicit
+                # grant row plus the on-VM group membership per agent. Best-effort
+                # (per-agent failures warn, they do not abort); the invariant,
+                # ordering rationale, and KI handling live with the helper.
+                materialize_grant_all_agents(db, config, vm, name, logger=ssh_logger)
+        finally:
+            ssh_logger.close()
+
+        output.info(f"Workspace '{name}' created")
+        # vscode_path was assigned inside the try before the row insert;
+        # reaching here means the body completed without raising, so it is
+        # set. Assert for the type-checker.
+        assert vscode_path is not None
+        return vscode_path

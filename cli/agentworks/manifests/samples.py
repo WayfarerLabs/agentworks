@@ -26,7 +26,7 @@ from typing import Literal
 from agentworks.errors import ValidationError
 from agentworks.manifests.reference import kind_reference
 from agentworks.manifests.skeleton import skeleton_text
-from agentworks.manifests.spec_model import declarable_kinds
+from agentworks.manifests.spec_model import declarable_kinds, spec_model
 from agentworks.path_rendering import format_host_path
 from agentworks.resources import KIND_REGISTRY
 
@@ -63,7 +63,14 @@ def sample_text(kind: str | None = None, *, all_kinds: bool = False) -> str:
     operation (see ``.claude/rules/cli-conventions.md``).
     """
     kinds = _validated_kinds(kind, all_kinds)
-    parts = [skeleton_text(kind_reference(k)).rstrip("\n") for k in kinds]
+    parts = []
+    for current_kind in kinds:
+        # Kind-owned examples supply cross-field requirements that individual
+        # optional fields cannot express, while the schema checks their shape.
+        values = getattr(KIND_REGISTRY[current_kind], "sample_spec", {})
+        if values:
+            spec_model(current_kind).model_validate({"name": f"my-{current_kind}", **values})
+        parts.append(skeleton_text(kind_reference(current_kind), spec_values=values).rstrip("\n"))
     # A commented document separator between kinds, so the concatenation is
     # a real multi-document file once uncommented rather than a pile of
     # documents YAML would read as one.

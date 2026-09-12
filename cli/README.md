@@ -499,10 +499,10 @@ Agentworks installs [mise](https://mise.jdx.dev/) by default on all VMs for mana
 
 ### Claude Code Plugins
 
-Agentworks can register Claude Code marketplaces and install plugins automatically per user (admin
-and per-agent). Configure via `claude_marketplaces` and `claude_plugins` on the admin template or
-any agent template. Requires the `claude` CLI on PATH (typically installed via
-`user_install_commands`). To install nerftools this way:
+Agentworks manages native marketplaces, plugins, and settings through explicit user-facet
+integration activations. The same model serves administrators and agents. Enable the `claude` system
+plugin and install the `claude` CLI (for example through `user_install_commands`) before selecting
+it:
 
 ```yaml
 apiVersion: agentworks/v1
@@ -510,9 +510,15 @@ kind: admin-template
 metadata:
   name: default
 spec:
-  claude_marketplaces: ["https://github.com/WayfarerLabs/nerftools#4.1.0"]
-  claude_plugins: [nerftools-default@nerftools]
+  harness_integrations:
+    - name: claude-code
+      marketplaces: ["https://github.com/WayfarerLabs/nerftools#4.1.0"]
+      plugins: [nerftools-default@nerftools]
 ```
+
+See [native harness setup](../docs/guides/native-harness-setup.md) for settings policies and native
+ownership, and [the Claude setup migration guide](../docs/guides/migrating-claude-setup.md) for
+existing declarations and stored instance overlays.
 
 ### Optional Apt / Install-Command Catalogs
 

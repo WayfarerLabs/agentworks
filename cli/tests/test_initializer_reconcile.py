@@ -208,64 +208,6 @@ def test_apply_sve_mask_emits_same_grub_bytes_as_phase_a() -> None:
     assert "".join(f"{line}\n" for line in SVE_NOSVE_GRUB_LINES) == SVE_NOSVE_GRUB_CONTENT
 
 
-# -- install_claude_plugins ------------------------------------------------
-
-
-def test_install_claude_plugins_skips_when_claude_missing() -> None:
-    """When claude is not on PATH, skip marketplace/plugin setup with a warning."""
-    from agentworks.ssh import SSHError
-    from agentworks.vms.initializer import install_claude_plugins
-
-    commands: list[str] = []
-
-    def fake_run(cmd: str, timeout: int) -> None:
-        if "command -v claude" in cmd:
-            raise SSHError("command failed")
-        commands.append(cmd)
-
-    install_claude_plugins(
-        fake_run,
-        marketplaces=["https://github.com/example/tools#v1"],
-        plugins=["my-plugin@my-marketplace"],
-    )
-
-    # No marketplace or plugin commands should have been run
-    assert commands == []
-
-
-def test_install_claude_plugins_runs_when_claude_present() -> None:
-    """When claude is on PATH, register marketplaces and install plugins."""
-    from agentworks.vms.initializer import install_claude_plugins
-
-    commands: list[str] = []
-
-    def fake_run(cmd: str, timeout: int) -> None:
-        commands.append(cmd)
-
-    install_claude_plugins(
-        fake_run,
-        marketplaces=["https://github.com/example/tools#v1"],
-        plugins=["my-plugin@my-marketplace"],
-    )
-
-    assert any("marketplace add" in c for c in commands)
-    assert any("plugin install" in c and "my-plugin@my-marketplace" in c for c in commands)
-
-
-def test_install_claude_plugins_noop_when_empty() -> None:
-    """No-op when both lists are empty."""
-    from agentworks.vms.initializer import install_claude_plugins
-
-    called = False
-
-    def fake_run(cmd: str, timeout: int) -> None:
-        nonlocal called
-        called = True
-
-    install_claude_plugins(fake_run, marketplaces=[], plugins=[])
-    assert not called
-
-
 # -- _reconcile_authorized_keys: owner= stage-and-install path -----------------
 
 

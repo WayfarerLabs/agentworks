@@ -77,8 +77,6 @@ def test_every_admin_field_round_trips() -> None:
         "mise_install_before": "2026-01-01",
         "mise_prune_on_reinit": False,
         "git_force_safe_directory": False,
-        "claude_marketplaces": ["me/market"],
-        "claude_plugins": ["thing@me/market"],
         "env": {"EDITOR": "nvim"},
     }
 

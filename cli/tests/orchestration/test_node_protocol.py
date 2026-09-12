@@ -68,7 +68,7 @@ class _NoConfig(AgwModel):
 class _PlainCap(Capability):
     name: ClassVar[str] = "plain"
     description: ClassVar[str] = "no config"
-    owner_kind: ClassVar[str] = "thing"
+    owner_kind: str = "thing"
     contract_version: ClassVar[int] = 1
     config_model: ClassVar[type[AgwModel]] = _NoConfig
 

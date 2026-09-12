@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from functools import cache
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from agentworks.errors import StateError
 
@@ -29,6 +29,15 @@ if TYPE_CHECKING:
     from agentworks.origin import Origin
     from agentworks.resources.graph import Readiness
     from agentworks.schema import ResourceRef
+
+
+Facet = Literal["vm", "user", "workspace", "session"]
+"""A scoped part of a capability, selected by its consuming surface.
+
+The current vocabulary is fixed to vm, user, workspace, and session.
+"""
+
+FACETS: tuple[Facet, ...] = ("vm", "user", "workspace", "session")
 
 
 class ModelInputDomain(Enum):
@@ -77,7 +86,7 @@ class ConfigContract:
 class HostSurface:
     """How a capability kind is selected inside a declarable kind's spec.
 
-    The manifest shape is one tagged table on ``naming_field``.
+    The field selects one facet, with singular or list cardinality.
     """
 
     host_kind: str
@@ -86,6 +95,12 @@ class HostSurface:
 
     naming_field: str
     """The spec field naming the capability (``"platform"``)."""
+
+    facet: Facet | None = None
+    """The config answer consumed here; ordinary capabilities omit it."""
+
+    cardinality: Literal["singular", "list"] = "singular"
+    """Whether the field holds one tagged block or an ordered list."""
 
 
 @dataclass(frozen=True)
@@ -156,11 +171,10 @@ class CapabilityKindDescriptor:
     publisher_source: str
     """The ``Origin.built_in`` source label the kind's built-in rows carry."""
 
-    manifest_section: HostSurface
+    manifest_sections: tuple[HostSurface, ...]
     """How the kind is selected in its host's manifest spec.
 
-    Required: all four kinds declare one, and the dataclass refuses a
-    record without it."""
+    A kind can serve several resource fields, each selecting its own facet."""
 
     config_schema: ConfigContract
     """What a config model offered for this kind must be.
@@ -170,6 +184,9 @@ class CapabilityKindDescriptor:
     every model that comes back has to satisfy this contract. A capability
     whose methods run at several levels with different config is then a
     per-capability declaration rather than a framework change."""
+
+    config_facets: tuple[Facet, ...] = ()
+    """Answers registration checks; empty for ordinary single-config kinds."""
 
     mapping_schema: ConfigContract | None = None
     """The model contract for a map-key-selected consuming surface."""

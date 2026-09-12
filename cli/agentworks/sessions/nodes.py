@@ -315,8 +315,8 @@ def _harness_integration_for_template(
     """Build the harness integration the session node holds, from the resolved
     template's ``(harness_integration, harness_integration_config)`` pair.
 
-    The resolver has already collapsed an undeclared template to the
-    ``shell`` default and merged the config, so this reads
+    The resolver has already required an explicit effective selection and
+    merged the config, so this reads
     ``resolved.harness_integration`` / ``resolved.harness_integration_config`` directly; the
     session-template name is the config owner (error framing), and the
     session's captured identity (``session_name``, ancestors, and the

@@ -287,7 +287,7 @@ def test_session_template_env_plaintext_and_secret(tmp_path: Path) -> None:
             ManifestDoc(
                 "session-template",
                 "shell",
-                {"env": {"EDITOR": "nvim", "API_KEY": {"secret": "anthropic-api-key"}}},
+                {"inherits": ["default"], "env": {"EDITOR": "nvim", "API_KEY": {"secret": "anthropic-api-key"}}},
             ),
             ManifestDoc("secret", "anthropic-api-key", description="Anthropic API key"),
         ],
@@ -692,7 +692,7 @@ def test_session_template_inherits_parent_env(tmp_path: Path) -> None:
     _write_base(
         cfg_file,
         manifests=[
-            ManifestDoc("session-template", "parent", {"env": {"EDITOR": "nvim"}}),
+            ManifestDoc("session-template", "parent", {"inherits": ["default"], "env": {"EDITOR": "nvim"}}),
             ManifestDoc("session-template", "child", {"inherits": ["parent"]}),
         ],
     )

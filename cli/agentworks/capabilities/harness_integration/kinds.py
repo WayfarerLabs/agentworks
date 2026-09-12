@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from agentworks.capabilities.descriptor import (
+    FACETS,
     CapabilityKindDescriptor,
     ConfigContract,
     HostSurface,
@@ -71,8 +72,8 @@ class _HarnessIntegrationKind:
 
         Integrations are code, and a session-template selects one by writing its name
         inside `spec.harness_integration`. The keys allowed beside that name are the
-        integration's own, which is why each documents its own config. A template that
-        selects none gets `shell`.
+        integration's own, which is why each documents its own config. Every template
+        lineage must select an integration; the synthesized default selects `shell`.
         """,
     )
     miss_policy: Literal["auto-declare", "error"] = "error"
@@ -114,20 +115,30 @@ def _readiness(name: str, impl: Any) -> Readiness:
 
 HARNESS_INTEGRATION_DESCRIPTOR = CapabilityKindDescriptor(
     kind="harness-integration",
-    contract_version=3,
+    contract_version=4,
     implementation_contract=HarnessIntegration,
     registry=_registry,
-    required_operations=frozenset({"start"}),
+    required_operations=frozenset({"start", "vm_init", "user_init", "workspace_init"}),
     # Empty: HarnessIntegration supplies every non-operation member a
     # subclass needs.
     required_attributes=frozenset(),
     entry_factory=_entry,
     readiness=_readiness,
     publisher_source="agentworks.capabilities.harness_integration",
+    config_facets=FACETS,
     config_schema=ConfigContract(base=AgwModel, discriminator="name", layered_merge=True),
-    manifest_section=HostSurface(
-        host_kind="session-template",
-        naming_field="harness_integration",
+    manifest_sections=(
+        HostSurface(host_kind="vm-template", naming_field="harness_integrations", facet="vm", cardinality="list"),
+        HostSurface(host_kind="admin-template", naming_field="harness_integrations", facet="user", cardinality="list"),
+        HostSurface(host_kind="agent-template", naming_field="harness_integrations", facet="user", cardinality="list"),
+        HostSurface(
+            host_kind="workspace-template", naming_field="harness_integrations", facet="workspace", cardinality="list"
+        ),
+        HostSurface(
+            host_kind="session-template",
+            naming_field="harness_integration",
+            facet="session",
+        ),
     ),
 )
 """The harness-integration record in the capability-kind descriptor table

@@ -159,7 +159,7 @@ class VMPlatform(Capability):
     name, never target or replace the existing resource.
     """
 
-    owner_kind: ClassVar[str] = "vm-site"
+    owner_kind: str = "vm-site"
 
     @classmethod
     def unsupported_reason(cls) -> str | None:

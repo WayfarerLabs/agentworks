@@ -18,7 +18,7 @@ from pathlib import Path
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
-from tests.conftest import ManifestDoc, write_cfg, write_manifests
+from tests.conftest import ManifestDoc, registry_with_shell, write_cfg, write_manifests
 
 
 def _write_minimal(path: Path) -> Path:
@@ -35,14 +35,14 @@ def _write_minimal(path: Path) -> Path:
 
 
 def test_unreferenced_default_lands_with_framework_source(tmp_path: Path) -> None:
-    """Direct Registry.empty() + finalize, no publisher contributing
+    """Direct registry_with_shell() + finalize, no publisher contributing
     admin-template:default. The always-materialize step lands the row
     with ``auto-declared`` origin and the synthetic
     ``("framework", "always-materialize")`` source.
     """
-    from agentworks.resources import ALWAYS_MATERIALIZE_SOURCE, Registry
+    from agentworks.resources import ALWAYS_MATERIALIZE_SOURCE
 
-    registry = Registry.empty()
+    registry = registry_with_shell()
     registry.finalize()
 
     admin = registry.lookup("admin-template", "default")
@@ -140,9 +140,8 @@ def test_secret_kind_not_materialized_by_pre_step(tmp_path: Path) -> None:
     secrets WERE always-materialized, they'd have empty usage like
     template-kind defaults do.
     """
-    from agentworks.resources import Registry
 
-    registry = Registry.empty()
+    registry = registry_with_shell()
     registry.finalize()
 
     secrets = list(registry.iter_kind("secret"))

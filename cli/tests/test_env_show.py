@@ -342,7 +342,7 @@ def test_session_scope_wins_over_vm_for_same_key(
     cfg = _write_config(
         tmp_path,
         vm_template=ManifestDoc("vm-template", "default", {"env": {"EDITOR": "vim"}}),
-        manifests=[ManifestDoc("session-template", "shell", {"env": {"EDITOR": "nvim"}})],
+        manifests=[ManifestDoc("session-template", "shell", {"inherits": ["default"], "env": {"EDITOR": "nvim"}})],
     )
     config = load_config(cfg, warn_issues=False)
     _seed_db(db, with_workspace=True, with_agent=True, with_session=True)
@@ -545,7 +545,13 @@ def test_identity_var_overlays_user_env(
     at render time (per FRD R1; the operator's value is replaced)."""
     cfg = _write_config(
         tmp_path,
-        manifests=[ManifestDoc("session-template", "shell", {"env": {"AGENTWORKS_SESSION": "operator-override"}})],
+        manifests=[
+            ManifestDoc(
+                "session-template",
+                "shell",
+                {"inherits": ["default"], "env": {"AGENTWORKS_SESSION": "operator-override"}},
+            )
+        ],
     )
     config = load_config(cfg, warn_issues=False)
     _seed_db(db, with_workspace=True, with_agent=True, with_session=True)

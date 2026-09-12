@@ -233,7 +233,7 @@ Pre-resolve concerns read `self` (config bound at construct); runup and ops read
 
 ```python
 config_model: ClassVar[type[BaseModel]]          # what this capability's config IS
-config_for() -> type[BaseModel]                  # which config the core reads, the override point
+config_for(facet: Facet | None = None) -> type[BaseModel] | None  # the selected config
 ```
 
 A capability DECLARES the shape of its config as a model, and the core does everything else with it:
@@ -279,23 +279,27 @@ against the capability's own declared model. Validating them twice, against two 
 host kind would end up encoding what its capabilities accept, which is the coupling this whole layer
 exists to avoid.
 
-`config_for()` is how the core asks which config a capability offers, and every read of a
-capability's config goes through the selected result rather than off `config_model` directly. The
-framework keeps that selection stable while the implementation's declared `config_model` identity is
-unchanged, so registration and later consumers see the same model. Every capability today offers ONE
-config shared by all of its operations, so it declares `config_model` and the base hook answers with
-it.
+A **facet** is a scoped part of a capability: the operations and configuration it offers for that
+level. The term applies to capabilities generally. Harness integrations are the current consumer of
+the four-facet contract; this does not require other capability kinds to acquire facets.
 
-Config is offered per FACET by contract: a facet is the level a capability is driven at (`vm`,
-`user`, `workspace`, `session`), pairing that level's methods with that level's config. CONSUMERS
-choose which facet they drive, so a producer never has to know who is asking, and facets are
-deliberately **not** scopes, with core owning the mapping between them (admin and agent both drive
-the `user` level; session launches share `session`). Nothing under `capabilities/` spells a scope.
-The parameter that names a facet is not on the signature yet, because nothing offers more than one
-config; it arrives additively with the first capability whose methods run at several levels, which
-is the same change that brings the consumers able to pass it. Offering a config at a facet is
-**not** a claim to support that level, and offering none is not a claim to lack it: support is
-carried by the implementation.
+`config_for(facet=None)` is how the core asks which config a capability offers. Ordinary
+capabilities declare `config_model`; their single config ignores the selector, and existing
+single-config overrides can still take no arguments. Harness integrations require an explicit
+`Facet`: `vm`, `user`, `workspace`, or `session`. Their base supplies `config_model` for session and
+no config for setup facets. An override can supply a different model at each facet.
+
+Consumers choose the facet, not a resource kind. Admin and agent both select `user`; a session
+launch selects `session`. A `None` answer accepts only the integration's literal `name` tag, with
+all extra keys rejected. It is different from an unknown implementation, whose reference fails
+resolution, and it says nothing about which operations the integration supports or enables.
+
+Registration checks all four harness answers and caches each selection while the implementation's
+`config_model` identity remains unchanged. Validation, merge, references, construction, and secret
+extraction consume that same selection. Union caches include kind, facet, and actual model arms, so
+registry replacement and restoration cannot reuse another facet's schema. A harness capability
+reference groups all four answers; a resource field's reference and emitted schema use only that
+host's selected facet.
 
 The references the core extracts are sourceless. The consuming resource attaches itself as the
 source when it emits them, in its `dependencies()` at finalize ("whoever hosts the config that names
@@ -309,7 +313,7 @@ References are never value-resolved at command entry.
 
 When a capability config participates in template inheritance or an instance layer, the model that
 capability offers also owns the merge policy. A capability normally offers its `config_model`
-through the inherited `config_for()` hook; an override must return the model the other derived
+through the inherited `config_for` hook; an override must return the model the other derived
 surfaces use too. The framework does not call capability code to combine two config blobs. This
 keeps built-in and system-plugin models on the same recursive contract and keeps merge callbacks out
 of registry finalization.
@@ -339,7 +343,7 @@ Mapping value annotations are supported, but list elements and mapping keys do n
 merge-policy slots. List items remain atomic rather than recursively merged.
 
 A capability kind whose config participates in layered merging declares that fact in its core-owned
-`ConfigContract`. Registration then calls `merge_contract_error()` on the exact model `config_for()`
+`ConfigContract`. Registration then calls `merge_contract_error()` on the exact model `config_for`
 offers before the plugin registry is mutated. That check rejects invalid strategy placement,
 append-deduplicated item types outside the closed structural JSON comparison carrier, and merged
 mappings without exact `str` keys. Mark the complete list or mapping `REPLACE` when its model
@@ -573,10 +577,10 @@ implementation of it:
   implementation must derive from its kind's contract.
 - **`registry`, `entry_factory`, `readiness`, `publisher_source`**, how the kind's implementations
   are stored, published as read-only rows, and asked whether this host supports them.
-- **`manifest_section`** (a `HostSurface`), which declarable kind's spec selects this capability and
-  under which field. Required, because a capability kind no declarable spec selects is a capability
-  nothing can ask for. `secret-backend` is selected by `secret-source.backend`; its separate
-  per-secret `backend_mappings` surface is described by `mapping_host`.
+- **`manifest_sections`** (a sequence of `HostSurface` records), which declarable fields select this
+  capability, each with its chosen facet and singular or list cardinality. `secret-backend` is
+  selected by `secret-source.backend`; its separate per-secret `backend_mappings` surface is
+  described by `mapping_host`.
 
 Every registry stores the implementation CLASS under each name: adapters, graph nodes, and published
 rows preserve the exact registered class and registration never constructs it. The kind list is
