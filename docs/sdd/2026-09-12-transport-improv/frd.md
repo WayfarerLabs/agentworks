@@ -230,7 +230,7 @@ family, including upload versus download and job observation versus cancellation
 execution, VM-admin-user execution, and elevation to root are distinct grants.
 
 Optional channel features describe implementation support, not permission. An unavailable lifecycle
-target, an ungranted interface/action, a missing optional channel feature, and a guest permission
+target, a withheld interface/action, a missing optional channel feature, and a guest permission
 failure are distinct conditions. Authorization denial must not be reported as an unsupported
 transport operation. Authorized core provisioning and recovery still receive everything they need;
 restricting plugin views must not weaken required native functionality.
@@ -254,10 +254,13 @@ operation-scoped resources cannot remain usable after the owning lifetime closes
 observation receives a fresh authorized context; a saved job reference carries no credentials.
 
 These are API authority boundaries, not claims of hostile-code isolation. Arbitrary execution as a
-user permits that user's filesystem operations even when a file-transfer interface is withheld;
-withholding upload does not confine an allowed shell. In-process Python plugins can access process
-resources outside this API. Strong isolation requires a separate enforcement boundary and is not
-provided by this transport effort.
+user conveys that account's available guest authority, including filesystem access and configured
+sudo privileges. Withholding upload does not confine an allowed shell; withholding API elevation
+does not prevent an allowed command, script or job from invoking sudo itself. Elevation grants
+control API-performed elevation, not removal of guest privileges. Actual root denial requires a
+restricted guest identity or another enforcement boundary, not command-text filtering here.
+In-process Python plugins can access process resources outside this API. Strong isolation requires a
+separate enforcement boundary and is not provided by this transport effort.
 
 ### R10. Complete adoption and evidence
 
@@ -312,9 +315,9 @@ entry points, then proves those entry points and plugin contexts use it exclusiv
 scenarios in R11 are acceptance cases even where the current implementation has no caller.
 
 Context acceptance includes command-only, file-only, upload-without-download, job observation
-without cancellation, and admin-without-elevation views. Missing grants fail before effects; derived
-views and saved job references do not restore withheld authority. The same carrier supports a
-restricted plugin view and a fully authorized recovery view without changing its feature
+without cancellation, and admin views without API elevation. Missing grants fail before effects;
+derived views and saved job references do not restore withheld authority. The same carrier supports
+a restricted plugin view and a fully authorized recovery view without changing its feature
 description.
 
 | Scenario                      | Observable success                                                                                                                                        |

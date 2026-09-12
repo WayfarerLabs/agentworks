@@ -245,11 +245,12 @@ observe/cancel. The [contract proposal](execution-contract.md) gives the concret
 selected route remains inspectable metadata, not a way to obtain an unrestricted handle.
 
 Bind recipient authority at context composition, independently from guest identity and channel
-features. VM admin access does not by itself grant root elevation. Supplied interfaces check their
-bound action/elevation restrictions before preparation or effects, even when the guest account could
-perform the operation. Environment-derived views preserve or narrow these restrictions. Later job
-observation requires the fresh context's corresponding grant and job ownership; a reference cannot
-grant cancellation. Accessors expose existing decisions and perform no policy lookup.
+features. VM admin access does not by itself grant API-performed root elevation. Supplied interfaces
+check their bound action/elevation restrictions before preparation or effects, even when the guest
+account could perform the operation. Environment-derived views preserve or narrow these
+restrictions. Later job observation requires the fresh context's corresponding grant and job
+ownership; a reference cannot grant cancellation. Accessors expose existing decisions and perform no
+policy lookup.
 
 The owning operation can bind explicit shell defaults alongside its prepared environment. Context
 consumers can inspect those defaults and override shell policy deliberately per invocation. The
@@ -275,7 +276,7 @@ initialization it constructs a new stage context with the newly established targ
 composition root owns resource cleanup and supplies targets tied to that lifetime. Use after closure
 fails before dispatch. Composition retains the non-sensitive reason for absence so callers can
 distinguish lifecycle unavailability from withheld access. Neither is an optional transport feature;
-requesting an ungranted action produces an authorization refusal, not a channel-support error.
+requesting an action without a grant produces an authorization refusal, not a channel-support error.
 
 Preserve `OperationScope` as descriptive data and `ScopedSecrets` as delivery of declared resolved
 names. This effort supplies the interface decomposition and bound restriction checks; current core
@@ -283,8 +284,9 @@ composition explicitly supplies its required access. A future plugin permission 
 the grants for each recipient, rather than being implemented here as roles, policy configuration or
 a new evaluator. Capability consumers receive no public raw-carrier or unrestricted-target escape.
 This does not authorize secret discovery through a factory hidden inside a capability. FRD R9 owns
-the limits of this API boundary: unrestricted user execution includes that user's filesystem powers,
-and hostile in-process plugin containment needs a separate security design.
+the limits of this API boundary: unrestricted user execution includes that account's guest
+authority, including configured sudo privileges, and hostile in-process plugin containment needs a
+separate security design.
 
 Migrate context constructors and consumers together, including VM boundaries, agent realization,
 session readiness/roll-forward, git-credential operations, and harness setup. Setup invocation types
