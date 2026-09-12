@@ -319,7 +319,7 @@ def create_vm(
 
     # Provisioning credentials and explicitly active setup env/config secrets
     # join one boundary pass. Install-command runners remain hermetic; with
-    # neither desired setup nor prior receipts, unused operator env stays out.
+    # neither desired setup nor prior applied-state records, unused operator env stays out.
     with output.section("Preflight"):
         from agentworks.git_credentials import announce_git_credentials
 

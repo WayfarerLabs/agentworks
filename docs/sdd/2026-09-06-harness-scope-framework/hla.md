@@ -332,7 +332,7 @@ cleanup method is introduced.
 ## Same config shape, separate native scopes
 
 The integration may reuse config fields or a model across facets. Each activation still binds a
-different instance with its own origin, lifecycle, desired state, and applied receipts. Both Claude
+different instance with its own origin, lifecycle, desired state, and applied state. Both Claude
 Code and Codex have `settings` at user and workspace facets: the user mapping writes native user
 settings, and the workspace mapping writes native project settings. Reusing that shape does not
 merge the declarations. `marketplaces` and `plugins` are user-facet fields in this effort.
@@ -426,10 +426,10 @@ the settings document produced by the selected strategy must not silently fight 
 identities: inconsistent desired declarations are config errors before writes, while matching ones
 are reconciled once. Source values discarded by `skip-existing` or `merge-preserve` are not proposed
 writes and cannot create a conflict by themselves. Treat native plugin commands that also edit
-settings as part of that same plan, with receipts for their actual writes. `skip-existing` skips the
-file mapping, not the separately declared plugin work. The LLD must specify native command ordering
-and protect mapped settings against subsequent plugin-command rewrites; activation order is not a
-last-writer policy.
+settings as part of that same plan, with applied-state records for their actual writes.
+`skip-existing` skips the file mapping, not the separately declared plugin work. The LLD must
+specify native command ordering and protect mapped settings against subsequent plugin-command
+rewrites; activation order is not a last-writer policy.
 
 Settings mappings have no per-file or per-key ownership ledger. Their declaration and the completed
 setup record describe what was requested and whether setup finished. On removal of a mapping, leave
@@ -577,12 +577,12 @@ Effects configured outside the deleted parent are outside its filesystem cleanup
 or additional force semantics are needed. This does not add workspace reinit or attempt to reverse
 every side effect.
 
-Serialize observation, native mutation, and receipt persistence for the same owning resource across
-command executions. A competing mutation refuses with retry guidance. The LLD chooses a lock that
-spans that lifetime and specifies cascade ordering; a SQLite write transaction held across network
-calls is not the design. Remote writes and SQLite are not a distributed transaction: a crash can
-leave unrecorded native residue. Treat it as unowned until the integration can prove its claim; do
-not adopt it just because bytes match. Unknown versions retain their evidence, malformed known
+Serialize observation, native mutation, and applied-state persistence for the same owning resource
+across command executions. A competing mutation refuses with retry guidance. The LLD chooses a lock
+that spans that lifetime and specifies cascade ordering; a SQLite write transaction held across
+network calls is not the design. Remote writes and SQLite are not a distributed transaction: a crash
+can leave unrecorded native residue. Treat it as unowned until the integration can prove its claim;
+do not adopt it just because bytes match. Unknown versions retain their evidence, malformed known
 records yield safe errors, and partial replacement preserves unrelated keys and integrations.
 
 For a new workspace, buffer applied facts until creation commits and unwind partial native setup
@@ -591,10 +591,10 @@ carry the new typed lifecycle evidence through their appropriate codecs. VM expo
 only VM applied slices (`db/database.py:1238-1239`), so extending its owner-scoped evidence requires
 explicit coverage. Exported-payload codec round trips and database restore are separate from a VM
 restore/import workflow, which this effort does not add. Copy, rehome, restore, and same-name
-recreation must not turn old receipts into proof of setup at a new destination. Destination
-fingerprints inform read-only readiness; they do not prohibit reinit or workspace rehome. Owning
-setup invokes the integration against the current destination, where its native identity checks
-govern plugin reconciliation, and records the new completed setup on success.
+recreation must not turn old applied-state records into proof of setup at a new destination.
+Destination fingerprints inform read-only readiness; they do not prohibit reinit or workspace
+rehome. Owning setup invokes the integration against the current destination, where its native
+identity checks govern plugin reconciliation, and records the new completed setup on success.
 
 ## Workspace retry and session readiness
 
@@ -734,7 +734,7 @@ the operation to prove retry preserves outstanding ownership. Cover already-abse
 unavailable native removal, unowned or drifted resources, another integration's claims, and
 intentional settings retention. Include the new evidence in VM backup exports and round-trip its
 payloads through domain codecs; exercise existing database backup/restore separately. Copied or
-restored receipts cannot bless a different native destination.
+restored applied-state records cannot bless a different native destination.
 
 Enablement covers name-only default config, two integrations with distinct configs and ordered
 calls, disabled/unavailable capabilities, duplicates, inherited selection, an empty setup list, and
@@ -762,7 +762,7 @@ supported-scopes registry; admin-template activation ownership pending confirmat
 cleanup then fresh create; and ordered activations with native conflict reporting. The main risks
 are retaining the facet through every schema consumer, binding setup to the actual resource,
 coordinating plugin commands with settings mappings, and recovering between native writes and local
-receipts. No-op defaults and the state table alone do not solve those boundaries.
+applied-state records. No-op defaults and the state table alone do not solve those boundaries.
 
 Artifacts and Rulesync reuse are follow-on design questions. This checkpoint does not settle their
 wire format, storage carrier, supported acquisition formats, or installation protocol.

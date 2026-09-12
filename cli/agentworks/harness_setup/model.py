@@ -26,8 +26,8 @@ class NativeClaim(AgwModel):
     identifier: _Text
     destination: _Text
     source: str | None = None
-    # Read compatibility for settings receipts already produced by this effort.
-    # New setup drops those receipts and never emits these fields with values.
+    # Read compatibility for settings claims in previously stored applied state.
+    # New setup drops those claims and never emits these fields with values.
     sha256: _Hash | None = None
     strategy: str | None = None
     # JSON carries tuples as arrays; only sequence representation is lenient.

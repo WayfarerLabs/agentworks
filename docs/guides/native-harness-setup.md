@@ -50,11 +50,11 @@ changes again between that read and the atomic write. User files are private; wo
 writable by the workspace group. Permission failures do not trigger elevation.
 
 Use non-secret settings sources. Authentication files are not supported settings roles. Captured
-contents and native command output are transferred privately and are not stored in receipts or logs.
-Removing a mapping retains the native file and its current values. Settings mappings do not create
-ownership claims; the setup record tracks completion and the requested policy. It does not restore
-overwritten values. Workspace mapping changes follow workspace creation; applying a new mapping
-requires workspace recreation.
+contents and native command output are transferred privately and are not stored in applied-state
+records or logs. Removing a mapping retains the native file and its current values. Settings
+mappings do not create ownership claims; the setup record tracks completion and the requested
+policy. It does not restore overwritten values. Workspace mapping changes follow workspace creation;
+applying a new mapping requires workspace recreation.
 
 ## Marketplaces and plugins
 
@@ -84,7 +84,7 @@ conflict. Plugin commands run first; the final mapping preserves their controlle
 
 Completed native mutations are observed and recorded individually. Repeat setup leaves matching
 owned installations in place and enables a requested owned plugin if it is disabled. A native
-registration or plugin without an Agentworks ownership receipt is not adopted, even when it matches
+registration or plugin without an Agentworks ownership record is not adopted, even when it matches
 the request. Remove the conflicting association with the native CLI before retrying. Source identity
 drift also requires native remediation before setup can continue. Unrelated built-in or remote
 entries whose source cannot be established are preserved; Agentworks cannot claim or remove those
@@ -98,10 +98,10 @@ garbage collection owns orphaned cache cleanup. Agentworks does not delete guess
 
 An independently removed marketplace can hide a surviving plugin from native inventory. When the
 remaining evidence cannot prove the plugin's ownership, cleanup stays pending with its prior
-receipt. Repair or remove the association using the native CLI, then retry. A failure after a native
-mutation but before its checkpoint may likewise require native remediation; an unrecorded write is
-never silently adopted. Settings retention is intentional and is separate from pending plugin
-cleanup.
+applied-state record. Repair or remove the association using the native CLI, then retry. A failure
+after a native mutation but before its checkpoint may likewise require native remediation; an
+unrecorded write is never silently adopted. Settings retention is intentional and is separate from
+pending plugin cleanup.
 
 ## Native compatibility evidence
 
@@ -122,8 +122,8 @@ refuse mutation instead of being interpreted as empty inventory.
 VM, agent, and workspace deletion follow their existing lifecycle policies. Removing a VM removes
 its contained native files; removing an agent home or workspace directory removes the settings and
 plugins inside it. There is no separate native plugin retirement step before parent deletion. Setup
-receipts, including unreadable or unknown versions, do not add deletion prerequisites. The existing
-database deletion removes the owner's records and any affected child records together.
+applied-state records, including unreadable or unknown versions, do not add deletion prerequisites.
+The existing database deletion removes the owner's records and any affected child records together.
 
 Backend binding failures retain the existing warning-and-local-cleanup behavior of VM deletion. An
 actual platform deletion failure still aborts as before. Agent and workspace remote cleanup retains
@@ -132,7 +132,8 @@ outside that filesystem cleanup; setup does not introduce a new forget command o
 
 Setup and parent deletion share a VM-family mutation guard so they cannot race. This serializes
 mutating operations on the same VM, including owners without harness activations; contention refuses
-with retry guidance. It does not require native receipt discovery before parent deletion.
+with retry guidance. It does not require native applied-state record discovery before parent
+deletion.
 
 Rehome moves project settings with the workspace and holds the same guard across the move. Setup
 records do not block rehome. Their old destination makes readiness stale until owning setup runs

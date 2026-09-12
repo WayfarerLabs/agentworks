@@ -249,7 +249,7 @@ def test_skip_existing_does_not_block_explicit_install(transport: LocalFixtureTr
 
 
 @pytest.mark.parametrize("strategy", ["merge-preserve", "skip-existing"])
-def test_mapping_discards_legacy_settings_receipts_and_preserves_native_claims(
+def test_mapping_discards_legacy_settings_applied_state_and_preserves_native_claims(
     transport: LocalFixtureTransport, strategy: str
 ) -> None:
     tool: NativeTool = "codex"

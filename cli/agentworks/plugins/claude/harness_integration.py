@@ -180,7 +180,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
         return super().config_for(facet)
 
     def user_init(self, invocation: UserSetupInvocation) -> None:
-        """Reconcile this actual user's native setup and ownership receipts."""
+        """Reconcile this actual user's native setup and ownership records."""
         config = None if self.retiring else self._config_as(ClaudeCodeUserConfig)
         setup_user("claude", config, invocation)
 

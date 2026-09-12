@@ -55,7 +55,7 @@ def require_prepared_setup(
     components: tuple[SetupComponent, ...],
     inputs: tuple[SetupInputs, ...],
 ) -> None:
-    """Under the mutation guard, refuse receipts added after an unused plan.
+    """Under the mutation guard, refuse applied-state records added after an unused plan.
 
     Active plans can read newer prior claims in dispatch. A previously skipped
     component has no prepared env, so it must retry at the eager boundary.

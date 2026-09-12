@@ -1,4 +1,4 @@
-"""Parent deletion ignores native receipts while excluding concurrent setup."""
+"""Parent deletion ignores native applied-state records while excluding concurrent setup."""
 
 from contextlib import nullcontext
 from types import SimpleNamespace
@@ -100,13 +100,15 @@ def deletion(db, tmp_path, monkeypatch):
     )
 
 
-def _store_receipt(db, kind, name, receipt) -> None:
-    if receipt == "claims":
+def _store_applied_state(db, kind, name, applied_state) -> None:
+    if applied_state == "claims":
         component = "admin" if kind == "vm" else kind
         write_native_setup(db, kind, name, NativeSetupState(records=(_record(component),)), operation=f"{kind}-create")
     else:
         payload = (
-            VersionedPayload(99, {"future": True}) if receipt == "unknown" else VersionedPayload(1, {"records": False})
+            VersionedPayload(99, {"future": True})
+            if applied_state == "unknown"
+            else VersionedPayload(1, {"records": False})
         )
         db.instance_state.replace_applied_slices(
             kind, name, f"{kind}-create", {AppliedStateKey.HARNESS_NATIVE_SETUP: payload}
@@ -114,9 +116,11 @@ def _store_receipt(db, kind, name, receipt) -> None:
 
 
 @pytest.mark.parametrize("kind,name", [("agent", "agent"), ("workspace", "project")])
-@pytest.mark.parametrize("receipt", ["claims", "unknown", "malformed"])
-def test_parent_deletion_does_not_require_native_receipt_cleanup(db, deletion, monkeypatch, kind, name, receipt):
-    _store_receipt(db, kind, name, receipt)
+@pytest.mark.parametrize("applied_state", ["claims", "unknown", "malformed"])
+def test_parent_deletion_does_not_require_native_applied_state_cleanup(
+    db, deletion, monkeypatch, kind, name, applied_state
+):
+    _store_applied_state(db, kind, name, applied_state)
     monkeypatch.setattr(ShellIntegration, "user_init", lambda *a: pytest.fail("individual plugin cleanup"))
     monkeypatch.setattr(ShellIntegration, "workspace_init", lambda *a: pytest.fail("individual plugin cleanup"))
     if kind == "agent":
@@ -129,12 +133,12 @@ def test_parent_deletion_does_not_require_native_receipt_cleanup(db, deletion, m
     assert deletion.logs[0].closed
 
 
-@pytest.mark.parametrize("receipt", ["claims", "unknown", "malformed"])
+@pytest.mark.parametrize("applied_state", ["claims", "unknown", "malformed"])
 @pytest.mark.parametrize("outcome", ["success", "binding-failed", "delete-failed"])
-def test_vm_deletion_preserves_existing_backend_failure_policy(db, deletion, monkeypatch, receipt, outcome):
+def test_vm_deletion_preserves_existing_backend_failure_policy(db, deletion, monkeypatch, applied_state, outcome):
     owners = [("vm", "box"), ("agent", "agent"), ("workspace", "project")]
     for kind, name in owners:
-        _store_receipt(db, kind, name, receipt)
+        _store_applied_state(db, kind, name, applied_state)
     previous = {kind: db.instance_state.get_applied_slices(kind, name) for kind, name in owners}
     removed = []
 
@@ -179,7 +183,7 @@ def test_deletion_refuses_vm_family_contention_before_native_mutation(db, deleti
 
 
 def test_orphan_workspace_deletion_does_not_require_native_target(db, deletion):
-    _store_receipt(db, "workspace", "project", "claims")
+    _store_applied_state(db, "workspace", "project", "claims")
     db._conn.execute("PRAGMA foreign_keys = OFF")
     db._conn.execute("DELETE FROM vms WHERE name = 'box'")
     db._conn.commit()
@@ -190,7 +194,7 @@ def test_orphan_workspace_deletion_does_not_require_native_target(db, deletion):
 
 @pytest.mark.parametrize("kind,name", [("agent", "agent"), ("workspace", "project")])
 def test_remote_cleanup_failure_keeps_existing_best_effort_parent_deletion(db, deletion, monkeypatch, kind, name):
-    _store_receipt(db, kind, name, "claims")
+    _store_applied_state(db, kind, name, "claims")
     deletion.target.run.side_effect = SSHError("unreachable")
     if kind == "agent":
         monkeypatch.setattr("agentworks.agents.initializer.delete_agent_on_vm", deletion.delete_agent_on_vm)
@@ -204,12 +208,12 @@ def test_remote_cleanup_failure_keeps_existing_best_effort_parent_deletion(db, d
     assert deletion.logs[0].closed
 
 
-@pytest.mark.parametrize("receipt", ["none", "claims", "malformed", "future"])
-def test_rehome_holds_its_vm_guard_without_interpreting_receipts(db, deletion, monkeypatch, receipt):
+@pytest.mark.parametrize("applied_state", ["none", "claims", "malformed", "future"])
+def test_rehome_holds_its_vm_guard_without_interpreting_applied_state(db, deletion, monkeypatch, applied_state):
     from agentworks.workspaces.manager import rehome_workspace
 
-    if receipt != "none":
-        _store_receipt(db, "workspace", "project", receipt)
+    if applied_state != "none":
+        _store_applied_state(db, "workspace", "project", applied_state)
     previous = db.instance_state.get_applied_slices("workspace", "project")
     calls = []
 

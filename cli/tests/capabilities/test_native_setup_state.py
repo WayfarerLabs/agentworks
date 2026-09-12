@@ -101,7 +101,7 @@ def test_replacement_retains_sibling_records_and_incomplete_prefix(tmp_path):
 
 @pytest.mark.windows
 @pytest.mark.parametrize("future", [False, True])
-def test_restore_preserves_native_receipts_after_setup_releases_database(tmp_path, monkeypatch, future):
+def test_restore_preserves_native_applied_state_after_setup_releases_database(tmp_path, monkeypatch, future):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("agentworks.db.backup.BACKUP_DEADLINE_SECONDS", 0.1)
     pending = replace_setup_record(_state(), _state().records[0].model_copy(update={"pending_cleanup": True}))

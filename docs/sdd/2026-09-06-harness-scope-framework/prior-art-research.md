@@ -51,7 +51,8 @@ establish the following implementation boundaries:
 - Claude inventory carries user/project scope. An unowned project dependency blocks removal of an
   owned marketplace; uninstall retains plugin user data with the native keep-data option.
 - Native commands can modify settings. Mapping publication preserves unrelated changes and refuses
-  unexpected concurrent drift, while retaining already confirmed plugin receipts for recovery.
+  unexpected concurrent drift, while retaining already confirmed plugin applied-state records for
+  recovery.
 - Native source discovery runs in a private temporary home. Actual-user login PATH discovery occurs
   once before staging; prepared env wins. A launcher that cannot operate with an isolated HOME is
   refused without guessing its underlying installation paths.
@@ -62,9 +63,9 @@ establish the following implementation boundaries:
 
 These are Linux local native-command observations, not live Agentworks VM acceptance. Two actual
 users/workspaces, remote transports and native Windows remain separate acceptance surfaces. Native
-command multi-step changes are not atomic; per-step receipts preserve the last confirmed prefix.
-User-independent workspace plugin provisioning remains excluded by the approved applicability
-boundary; a project settings file alone does not prove it.
+command multi-step changes are not atomic; per-step applied-state records preserve the last
+confirmed prefix. User-independent workspace plugin provisioning remains excluded by the approved
+applicability boundary; a project settings file alone does not prove it.
 
 ## Source quality
 

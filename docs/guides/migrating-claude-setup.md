@@ -50,7 +50,7 @@ work; automatic conversion does not move that boundary.
 
 ## Existing native installations
 
-The old installer wrote no ownership receipts. A matching native marketplace or plugin therefore
+The old installer wrote no ownership records. A matching native marketplace or plugin therefore
 remains unowned and is not adopted automatically. Remove a conflicting association explicitly with
 the native CLI, then rerun owning reinit to provision it with recorded ownership. There is no force
 or adoption flag. Review project dependencies before removing marketplaces: Claude's native

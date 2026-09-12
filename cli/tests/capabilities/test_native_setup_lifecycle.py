@@ -331,7 +331,7 @@ def test_config_secret_registration_and_delivery_share_actual_owner(db, vm, nati
         assert len(observed) == 1
 
 
-def test_receipt_appearing_after_empty_preparation_refuses_before_core(db, registry, vm, native, monkeypatch):
+def test_applied_state_appearing_after_empty_preparation_refuses_before_core(db, registry, vm, native, monkeypatch):
     template = ResolvedAgentTemplate("default")
     prepared = prepare_agent_setup(db, registry, vm=vm, name="a", template=template)
     assert prepared is None

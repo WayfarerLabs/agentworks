@@ -90,7 +90,7 @@ def _text(value: object) -> str:
 
 
 def identity(value: object) -> str:
-    """Canonical, non-secret native source identity for compact receipts."""
+    """Canonical, non-secret native source identity for compact applied-state records."""
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 

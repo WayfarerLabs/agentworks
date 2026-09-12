@@ -9,9 +9,9 @@
 
 The operator directed the approved FRD/HLA and implementation to share PR 761. Continue on
 `sdd/harness-scope-framework-hla`; PR 780 is superseded, with its review reports retained and linked
-from the consolidated checkpoint. Config exposure, execution, receipts and migration form one
-working increment. The large diff receives separate configuration, lifecycle, native setup and
-migration review units before the combined handoff. The implementation is intended to merge. A
+from the consolidated checkpoint. Config exposure, execution, applied-state records and migration
+form one working increment. The large diff receives separate configuration, lifecycle, native setup
+and migration review units before the combined handoff. The implementation is intended to merge. A
 complete, green handoff is marked ready to request independent integration testing and review; live
 acceptance is not a prerequisite for that signal. `review-requested` is reserved for unfinished
 draft checkpoints. The earlier design-only delivery intent no longer applies.
@@ -85,9 +85,9 @@ env; the integration lane receives the resource's assembled env through its full
       the required session `start` operation and launch alternatives.
 - [x] Bind env using existing precedence and protected identity variables; extend owning secret
       preflight to cover setup env, including pending targets, without persisting resolved values.
-- [x] Define versioned compact native receipt codecs under the existing instance-state facility,
-      with VM/admin separation and agent/workspace owners; preserve unknown versions and unrelated
-      keys.
+- [x] Define versioned compact native applied-state codecs under the existing instance-state
+      facility, with VM/admin separation and agent/workspace owners; preserve unknown versions and
+      unrelated keys.
 - [x] Serialize observation, native mutation and checkpoint persistence per owning resource across
       processes without holding a state-database transaction over remote work.
 - [x] Invalidate completed evidence before mutation, checkpoint each successful prefix, retain
@@ -108,8 +108,9 @@ env; the integration lane receives the resource's assembled env through its full
 ## Claude and Codex native setup
 
 The integration owns commands, native format parsing, destination roles and observations. Core owns
-source snapshot facilities, transport context and receipt persistence. Plan settings and plugin
-changes together before the first native write; installation commands may modify native settings.
+source snapshot facilities, transport context and applied-state persistence. Plan settings and
+plugin changes together before the first native write; installation commands may modify native
+settings.
 
 - [x] Implement local workstation file snapshots using existing SourceRef spelling and native
       host-path rendering, with stable bytes for the operation and cleanup on success/failure.
@@ -119,7 +120,7 @@ changes together before the first native write; installation commands may modify
       source validation even when skipping, invalid merge destinations, and unsuitable destination
       links.
 - [x] Define native plugin/marketplace query and reconciliation for both integrations; preserve
-      installation identity, scope, drift probes and safe removal facts in receipts.
+      installation identity, scope, drift probes and safe removal facts in applied-state records.
 - [x] Reject conflicting desired plugin/settings state before writes; reconcile matching entries
       once, honoring the effective mapped document after preserve/skip policies.
 - [x] Prove repeated setup converges, source changes take effect on owning reinit, managed removal
@@ -148,10 +149,10 @@ validation, followed by acceptance and SDD closeout. Keep those boxes open until
 satisfies them; ready-for-review does not claim that they already passed.
 
 Use local native plugin/marketplace/settings fixtures so external services cannot confound the
-vertical. Real CLI evidence must observe destinations and receipts, not merely mock the dispatch.
-Read the integration-testing and agw-test-env skills and establish the scoped inventory and budget
-before creating live resources. Native CLI research can use isolated local homes and fixtures,
-without touching the operator's installed plugins or authentication.
+vertical. Real CLI evidence must observe destinations and applied-state records, not merely mock the
+dispatch. Read the integration-testing and agw-test-env skills and establish the scoped inventory
+and budget before creating live resources. Native CLI research can use isolated local homes and
+fixtures, without touching the operator's installed plugins or authentication.
 
 - [ ] Prove VM, admin, agent, workspace and session env and facet mapping, explicit enablement,
       multiple independent configurations, inherited lists and deliberate empty selections (R1-R6,
@@ -210,9 +211,9 @@ batch includes the repeated Muntz findings on the consolidated head. Native impl
 now live in `agentworks.plugins._harness_native`, resolving the R11 placement question without
 changing generic capability dispatch or adding a per-tool abstraction. The redundant
 post-publication settings read is removed; guarded atomic publication still compares the expected
-destination. Both user settings paths share claim matching and retain every matching receipt.
-Readiness probes now take actual destination inputs without constructing setup invocations, and the
-shell reference describes explicit selection accurately.
+destination. Both user settings paths share claim matching and retain every matching applied-state
+record. Readiness probes now take actual destination inputs without constructing setup invocations,
+and the shell reference describes explicit selection accurately.
 
 The prerequisite severity guard remains: it validates the result of an integration hook, whose
 dataclass annotations are not runtime enforcement. New hook-boundary tests demonstrate refusal for
@@ -266,10 +267,11 @@ main's database-use lock and this effort's resolved `Database.path`; automatic s
 merges retain upstream selection and this effort's setup readiness checks.
 
 The added restore cases exercise their shared boundary: replacement is refused while setup holds the
-database open, and pending native receipts and unknown future payloads survive restore after the
-database is closed. The source is opened through a relative path so the resolved native-lock
-identity is exercised too. Implementation has no planned feature work remaining; the ready handoff
-requests independent integration validation. Live acceptance and final locking remain open.
+database open, and pending native applied-state records and unknown future payloads survive restore
+after the database is closed. The source is opened through a relative path so the resolved
+native-lock identity is exercised too. Implementation has no planned feature work remaining; the
+ready handoff requests independent integration validation. Live acceptance and final locking remain
+open.
 
 At `bc8a4685`, the local Linux CI selection passed 8,919 tests with three skips; strict mypy passed
 across 803 production/test files. Ruff lint/format, file lint, rulesync drift, locked-SDD and typer
@@ -280,40 +282,41 @@ fixture results; native Windows CI and independent live backend acceptance are s
 
 ## Operator-directed simplification, 2026-09-11
 
-The operator rejected the new native-receipt restrictions on VM deletion and directed a full KISS
-scan of this effort. Parent deletion follows the existing core lifecycle: deleting a VM, user home,
-or workspace directory removes its contained native files. Setup records do not authorize or veto
-those operations. This ruling supersedes the earlier checked implementation of cleanup before owner
-deletion and the settings-claim retention work recorded above; those entries describe work that was
-completed and is now deliberately removed.
+The operator rejected the new native applied-state restrictions on VM deletion and directed a full
+KISS scan of this effort. Parent deletion follows the existing core lifecycle: deleting a VM, user
+home, or workspace directory removes its contained native files. Setup records do not authorize or
+veto those operations. This ruling supersedes the earlier checked implementation of cleanup before
+owner deletion and the settings-claim retention work recorded above; those entries describe work
+that was completed and is now deliberately removed.
 
 The scan covered lifecycle integration, native helpers, facet/config/schema propagation, migration,
-environment composition, readiness, receipt codecs, and inspection/backup. It removes individual
-plugin retirement before parent deletion, receipt-based workspace rehome refusal, the generic
-destination mismatch mutation gate, per-file/per-key settings ownership bookkeeping, and the
-native-settings changed-key classifier. Settings mappings apply their selected policy to the live
-file; plugin fields remain explicit, and final publication retains its atomic compare-and-swap.
-Plugin and marketplace claims remain because their removal needs actual ownership evidence.
+environment composition, readiness, applied-state codecs, and inspection/backup. It removes
+individual plugin retirement before parent deletion, workspace rehome refusal based on applied
+state, the generic destination mismatch mutation gate, per-file/per-key settings ownership
+bookkeeping, and the native-settings changed-key classifier. Settings mappings apply their selected
+policy to the live file; plugin fields remain explicit, and final publication retains its atomic
+compare-and-swap. Plugin and marketplace claims remain because their removal needs actual ownership
+evidence.
 
 The shared VM-family mutation lock remains: deleting a parent must not race setup inside it.
-Conditional receipt discovery or parent/child lock ordering would introduce more machinery. The
-tradeoff is serialization of mutating operations on the same VM, including ones without harness
-activations. Fresh-account creation checks also remain because failed-create rollback must not
-delete a pre-existing user's home. Explicit activation, no-op facet defaults, scoped secrets, and
-integration-directed readiness retain their approved behavior.
+Conditional applied-state record discovery or parent/child lock ordering would introduce more
+machinery. The tradeoff is serialization of mutating operations on the same VM, including ones
+without harness activations. Fresh-account creation checks also remain because failed-create
+rollback must not delete a pre-existing user's home. Explicit activation, no-op facet defaults,
+scoped secrets, and integration-directed readiness retain their approved behavior.
 
-The receipt codec now validates its already-parsed value directly, avoiding a second JSON parser
-with a different nesting limit. The restore regression changes working directories after opening a
-relative database path, so it now requires the resolved database identity it claims to exercise.
-Native fixture launchers expose their Node runtime inside isolated test homes. The upgrade guide now
-includes both template migrations. Independent live backend acceptance and final SDD locking remain
-open.
+The applied-state codec now validates its already-parsed value directly, avoiding a second JSON
+parser with a different nesting limit. The restore regression changes working directories after
+opening a relative database path, so it now requires the resolved database identity it claims to
+exercise. Native fixture launchers expose their Node runtime inside isolated test homes. The upgrade
+guide now includes both template migrations. Independent live backend acceptance and final SDD
+locking remain open.
 
 The integrated simplification passed 8,930 tests with three skips on Linux using Codex CLI 0.154.0
 and Claude Code 2.1.269. Ruff and strict mypy (803 files) passed. Project review identified stale
 lifecycle and settings-claim prose, now corrected. Independent correctness review passed 232 focused
-tests without a finding. The complexity pass also removed redundant terminal receipt checkpoints and
-an unused setup-preparation parameter.
+tests without a finding. The complexity pass also removed redundant terminal applied-state
+checkpoints and an unused setup-preparation parameter.
 
 Installing native CLI fixtures in CI remains a follow-up: GitHub rejected the prepared workflow
 change because both available credentials lack workflow permission. The reviewed patch is retained
@@ -323,3 +326,12 @@ local evidence, not a claim that CI installs those tools. Independent live accep
 The final checkpoint and signature simplifications passed 74 focused tests. Website Python (160) and
 Node (103) tests and deterministic double builds for both site bases passed. Typer isolation,
 locked-SDD checks and Rulesync generation parity also passed.
+
+## Applied-state terminology cleanup
+
+The operator confirmed the existing boundary: instance state provides shared storage, the core
+harness dispatcher manages completion and checkpoints, and integrations supply native results and
+reconciliation semantics. Documentation, diagnostics, comments and test names now call this applied
+state consistently. The payload, storage keys and runtime behavior are unchanged; this introduces no
+capability-wide reconciliation framework. The instance-state guide also clarifies that native claims
+record plugin and marketplace ownership, not settings-file contents or a settings ownership ledger.

@@ -146,14 +146,14 @@ rulings below remain context for that future design.
 a session instance's target identity, readiness cache, or state namespace; those stay session-bound.
 
 **R9. Applied state is recorded so reinit converges and drift is reported.** The existing
-instance-state facility records versioned metadata receipts per owning resource and integration:
-what native setup was applied, the relevant destinations, selected strategies, ownership, and
-comparison hashes. Readiness consumes these receipts rather than rerunning ancestor setup. Changed
-config or an incomplete operation must not reuse stale receipts as proof of current successful
-setup. State contains metadata, not raw settings, env values, or artifact contents; secrets never
-enter persisted state or resolved configuration. Existing workflow export/restore handling must
-preserve these typed receipt semantics; this adds no VM restore workflow or persisted producer
-model.
+instance-state facility stores versioned applied state per owning resource and integration: what
+native setup was applied, the relevant destinations, selected strategies, ownership, and comparison
+hashes. Readiness consumes these applied-state records rather than rerunning ancestor setup. Changed
+config or an incomplete operation must not reuse stale applied-state records as proof of current
+successful setup. State contains metadata, not raw settings, env values, or artifact contents;
+secrets never enter persisted state or resolved configuration. Existing workflow export/restore
+handling must preserve these typed applied-state semantics; this adds no VM restore workflow or
+persisted producer model.
 
 The same facility drives idempotent cleanup when provisioned plugins, other native setup entries, or
 whole activations are removed. At the owning setup reconciliation operation, compare current desired
@@ -164,9 +164,9 @@ including R15's treatment of settings, remain explicit. Unsupported or unsafe re
 remains with useful evidence. Do not discard required cleanup records or claim success before the
 disposition is known. This governs reconciliation while the owner remains. Deleting a VM, agent, or
 workspace follows its existing lifecycle: the parent filesystem removes its contained native
-effects, and the existing database deletion removes its setup records. Native receipts must not add
-deletion prerequisites, change backend-failure handling, or prevent workspace rehome. Settings
-mappings need no separate ownership ledger because removing a mapping retains the settings.
+effects, and the existing database deletion removes its setup records. Native applied-state records
+must not add deletion prerequisites, change backend-failure handling, or prevent workspace rehome.
+Settings mappings need no separate ownership ledger because removing a mapping retains the settings.
 
 **R10. Upstream prerequisites are reported, never repaired from a session operation.** A session
 integration checks its own upstream prerequisites during readiness using persisted applied state and
@@ -225,9 +225,9 @@ destination. It does not grant ownership of other files or override another inte
 claim. Reinit applies the same policy to current source and destination; removal must never silently
 delete pre-existing settings. Missing/unreadable sources or invalid inputs needed by the selected
 policy produce an owning setup error before this integration changes native settings or plugins.
-Mapping and receipts follow the existing no-persisted-secrets contract; raw workstation settings are
-not stored in resolved config or applied-state payloads. The HLA must settle nested-key/array
-behavior, interaction with explicit plugin config, and cleanup ownership.
+Mapping and applied-state records follow the existing no-persisted-secrets contract; raw workstation
+settings are not stored in resolved config or applied-state payloads. The HLA must settle
+nested-key/array behavior, interaction with explicit plugin config, and cleanup ownership.
 
 **R16. Deferred: shell artifact filesystem delivery.** No artifact directories, workload artifact
 index, discovery variable, publication or cleanup mechanism, or Git exclusions are introduced for
@@ -552,7 +552,7 @@ external service dependencies.
 Explicit selection, multiple setup integrations with separate config, and required/recommended
 prerequisites for the actual bound user are proven. Claude Code and Codex user marketplace/plugin
 setup is demonstrated, user and workspace settings are not flattened, and workstation mappings
-exercise all four R15 policies. Metadata receipts support readiness, drift reporting, and safe
+exercise all four R15 policies. Applied-state records support readiness, drift reporting, and safe
 idempotent removal or explicit retention when desired native setup changes or an activation is
 removed. The ordinary shell session retains its behavior with no-op setup facets. Deferred artifact
 requirements and the withdrawn early session identity slice do not gate this effort.

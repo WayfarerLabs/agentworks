@@ -257,9 +257,9 @@ existing session `config` property may continue narrowing to the session model.
 Owning lifecycles run setup after core provisioning: VM and admin during VM initialization, agent
 during create or reinit, and workspace after its directory and repository are created. Explicitly
 selected setup consumes its owning scope's environment: VM only; VM plus the actual admin or agent;
-or VM plus workspace. Existing receipts also invoke this path when integration activations are
-removed. With neither selections nor receipts, setup does not resolve unused environment secrets.
-Install commands keep their existing environment behavior.
+or VM plus workspace. Existing applied-state records also invoke this path when integration
+activations are removed. With neither selections nor applied-state records, setup does not resolve
+unused environment secrets. Install commands keep their existing environment behavior.
 
 The command registers setup environment and config secrets before its single secret-resolution pass
 and before constructing its SSH logger. An invocation receives the complete scope environment with
@@ -269,16 +269,16 @@ their respective live owners, including resources still pending during session c
 
 A VM-family mutation guard spans core provisioning, integration setup, and failed-create cleanup.
 Setup checkpoints record confirmed native claims through instance state. Fresh agent and workspace
-receipts remain buffered until the owner row and desired overlay commit atomically; failed creation
-cleans up the newly owned native resource. Fresh agent creation refuses an existing unowned Linux
-account or home before arming rollback. Existing agents retain the create-or-converge reinit path.
-VM/admin setup finishes before the final VM initialization and SSH-identity checkpoint.
+applied-state records remain buffered until the owner row and desired overlay commit atomically;
+failed creation cleans up the newly owned native resource. Fresh agent creation refuses an existing
+unowned Linux account or home before arming rollback. Existing agents retain the create-or-converge
+reinit path. VM/admin setup finishes before the final VM initialization and SSH-identity checkpoint.
 
 Session create, start, and restart check the integration's declared setup prerequisites before
 session mutation. These checks inspect evidence and native placement; they do not provision an
 ancestor or resolve additional setup secrets.
 
-#### Setup Prerequisites and Receipts
+#### Setup Prerequisites and Applied State
 
 The session facet's `check_setup(SetupReadiness)` may inspect `.vm`, `.user`, or `.workspace`.
 Evidence is loaded once per requested facet and includes the actual owner, its last setup record,
@@ -293,9 +293,9 @@ there is no operator-authored universal `required_facets` field. This hook is se
 capability's executable-readiness probe.
 
 Setup invocations carry prior claims and a callback for the complete remaining claim set after each
-confirmed mutation. Core persists completion and cleanup evidence in the owning instance-state
-slice; it does not infer native ownership from filenames. Removed activations are invoked with
-absent config for retirement, and failed retirement retains evidence for retry. See
+confirmed ownership change. Core persists completion and cleanup evidence in the owning
+instance-state slice; it does not infer native ownership from filenames. Removed activations are
+invoked with absent config for retirement, and failed retirement retains evidence for retry. See
 [native harness setup](../../../../docs/guides/native-harness-setup.md) for the shipped cleanup
 rules and the [instance-state contract](../../db/README.md) for persistence and inspection.
 

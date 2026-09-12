@@ -83,21 +83,26 @@ operator to a compatible or newer Agentworks release; malformed known payloads r
 repair or known-good-backup guidance. Backup uses the same codecs and distinction when it
 canonicalizes selected applied state.
 
-## Native setup evidence
+## Harness applied state
+
+Harness setup uses the same applied-state storage as VM hardware and SSH state. The core harness
+dispatcher owns completion and checkpoint persistence; integrations report and interpret their
+native results. Harness state is one domain payload within instance state.
 
 The `harness_setup` domain owns the versioned `NativeSetupState` codec. Each integration record
 identifies its component, destination identity, effective declaration, completion and
 pending-cleanup flags, and confirmed native claims. Declarations retain config and secret reference
-names; literal environment values are hashed. Claims contain native identifiers, source identities,
-settings hashes, and written key paths. Settings bytes, resolved secrets, and native command output
-are never stored.
+names; literal environment values are hashed. Claims contain native identifiers, destinations, and
+source identities for managed plugins and marketplaces. Settings mappings do not create ownership
+claims. Settings bytes, resolved secrets, and native command output are never stored.
 
 The dispatcher invalidates prior completion before invoking setup and records each confirmed
-mutation through the integration's checkpoint callback. Failure preserves the latest recorded prefix
-rather than claiming the whole declaration succeeded. Fresh agent and workspace setup buffer these
-records until the owner row and desired overlay can commit in the same transaction. Subsequent
-owning setup uses the prior claims to retire removed activations and associations where the
-integration can prove ownership. Removing a desired declaration does not itself erase its evidence.
+ownership change through the integration's checkpoint callback. Failure preserves the latest
+recorded prefix rather than claiming the whole declaration succeeded. Fresh agent and workspace
+setup buffer these records until the owner row and desired overlay can commit in the same
+transaction. Subsequent owning setup uses the prior claims to retire removed activations and
+associations where the integration can prove ownership. Removing a desired declaration does not
+itself erase its evidence.
 
 `describe` exposes sanitized integration/component names, completion, pending cleanup, and claim
 counts under `lifecycle_evidence`; it performs no native I/O and does not reveal stored config.

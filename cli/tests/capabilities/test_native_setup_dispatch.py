@@ -105,7 +105,7 @@ def test_checkpoint_failure_stops_before_next_integration(setup_case, monkeypatc
     assert not read_native_setup(db, "agent", "agent").records[0].complete
 
 
-def test_buffered_creation_does_not_publish_ownerless_receipts(setup_case):
+def test_buffered_creation_does_not_publish_ownerless_applied_state(setup_case):
     db, inputs, invocation, _, _ = setup_case
     state = run_setup(db, Mock(), inputs, invocation, operation="agent-create", buffered=True)
     assert len(state.records) == 2
@@ -125,7 +125,7 @@ def test_changed_destination_can_be_reconciled_by_owning_integrations(setup_case
     )
 
 
-def test_receipts_omit_env_values_but_detect_declaration_changes(setup_case):
+def test_applied_state_omit_env_values_but_detect_declaration_changes(setup_case):
     from agentworks.env.entry import EnvEntry
 
     db, inputs, invocation, _, _ = setup_case

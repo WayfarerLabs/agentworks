@@ -73,16 +73,16 @@ inspection reports migration pending when template context is unavailable.
 
 ## Native ownership
 
-The old installer provides no ownership receipts. A native installation matching old config is
+The old installer provides no ownership records. A native installation matching old config is
 therefore not automatically owned by Agentworks. Before managing it, report the native identifier
 and destination conflict. The supported initial remediation is explicit operator removal using the
 native CLI, followed by owning reinit to provision and record it. No automatic adoption or general
 force flag is introduced by this migration.
 
-Once new receipts exist, removal of an entry or whole activation can safely reconcile recorded
-claims. Settings mapping policy controls explicit replacement/merge of its declared file; it does
-not claim other plugin installations. Removing a settings mapping retains the current document, as
-specified by R15. Settings mappings do not create ownership claims.
+Once new applied-state records exist, removal of an entry or whole activation can safely reconcile
+recorded claims. Settings mapping policy controls explicit replacement/merge of its declared file;
+it does not claim other plugin installations. Removing a settings mapping retains the current
+document, as specified by R15. Settings mappings do not create ownership claims.
 
 ## Explicit session selection
 
@@ -105,7 +105,7 @@ legacy fields alongside native reconciliation, persisted-overlay handling and up
 not claim migration complete until the real CLI has exercised existing stored overlays and native
 conflicts, as well as newly created resources.
 
-Database automatic backups retain their existing safeguards. Native receipt export/round-trip and
-database restore tests are required; this effort introduces no VM restore workflow. Preserve
-resource-bound invocation independence so the artifact successor can extend it without depending on
-downstream instance discovery.
+Database automatic backups retain their existing safeguards. Native applied-state record
+export/round-trip and database restore tests are required; this effort introduces no VM restore
+workflow. Preserve resource-bound invocation independence so the artifact successor can extend it
+without depending on downstream instance discovery.

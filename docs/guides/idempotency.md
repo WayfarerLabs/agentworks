@@ -165,9 +165,9 @@ Activated workspace integration facets run after workspace directory and reposit
 explicit workspace recreation. Session create, start, and restart inspect declared prerequisites
 without implicitly running any ancestor setup.
 
-Owning setup receives both the effective activation list and prior instance-state receipts. It
-reconciles matching owned effects, retires removed associations where ownership can be established,
-and preserves incomplete or pending cleanup evidence on failure. Removing an activation from config
+Owning setup receives both the effective activation list and prior applied state. It reconciles
+matching owned effects, retires removed associations where ownership can be established, and
+preserves incomplete or pending cleanup evidence on failure. Removing an activation from config
 therefore takes effect at the next owning setup operation, not at configuration load. List omission
 inherits, an authored list replaces the complete inherited list, and `[]` requests no activations.
 
@@ -180,8 +180,9 @@ unowned or project dependencies. A matching pre-existing installation is not ado
 
 Setup and parent deletion share a VM-family mutation guard. Parent deletion uses the existing core
 lifecycle and clears setup records in its database transaction; it does not first uninstall native
-plugins or interpret receipts. Rehome moves project settings with the workspace and does not require
-receipt relocation. Readiness still checks whether recorded setup matches the current destination.
+plugins or interpret applied-state records. Rehome moves project settings with the workspace and
+does not require applied-state record relocation. Readiness still checks whether recorded setup
+matches the current destination.
 
 [Harness facets](harness-facets.md) explains configuration, owning scopes, environment composition,
 and required versus recommended session prerequisites.

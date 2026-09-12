@@ -140,8 +140,8 @@ Inner values win collisions under the normal env merge rules. Core protects `AGE
 values. Setup environment and declared config secrets join the operation's eager resolution before
 remote mutation and logger construction. Each integration receives only its declared config secrets;
 environment arrives separately through the prepared runner. With neither selected activations nor
-prior receipts, this setup path does not resolve otherwise unused environment secrets. Existing
-install commands keep their own execution behavior.
+prior applied-state records, this setup path does not resolve otherwise unused environment secrets.
+Existing install commands keep their own execution behavior.
 
 Session environment retains its existing precedence: session over actual user, over workspace, over
 VM. It is not produced by merging setup configs. The current pipeline has no feature-emission stage
@@ -161,16 +161,18 @@ session integration, and selecting a session integration does not implicitly ena
 setup.
 
 Evidence can be absent, incomplete, stale, unavailable, or current. Current means a completed
-receipt matches the effective declaration and destination identity. It does not mean every native
-byte was revalidated; an integration can add read-only native probes when its prerequisite needs
-them. Prerequisite checks neither reopen workstation settings files nor acquire new setup secrets.
+applied-state record matches the effective declaration and destination identity. It does not mean
+every native byte was revalidated; an integration can add read-only native probes when its
+prerequisite needs them. Prerequisite checks neither reopen workstation settings files nor acquire
+new setup secrets.
 
 ## Inspecting and reconciling setup
 
-Owning setup records confirmed native claims through instance state. Receipts track integration and
-component identity, completion, pending cleanup, and native ownership metadata. Resolved secrets and
-settings contents are not stored. A failure keeps the last confirmed mutation prefix so a retry can
-reconcile what actually completed. Fresh agent and workspace receipts commit with their owner rows.
+Owning setup records confirmed native claims through instance state. Applied-state records track
+integration and component identity, completion, pending cleanup, and native ownership metadata.
+Resolved secrets and settings contents are not stored. A failure keeps the last confirmed mutation
+prefix so a retry can reconcile what actually completed. Fresh agent and workspace applied-state
+records commit with their owner rows.
 
 Use the existing owning inspection commands, such as `agw agent describe worker`,
 `agw workspace describe project`, or `agw vm describe dev`, to inspect the `harness-native-setup`
@@ -180,17 +182,19 @@ repair native drift.
 
 After editing VM/admin or agent activations, run `agw vm reinit <name>` or
 `agw agent reinit <name>`. Removing a declaration becomes native cleanup during the owning
-operation, using its previous receipts. Workspace mappings require explicit recreation to apply
-changes; `workspace repair` only repairs its existing access and Git identity responsibilities.
+operation, using its previous applied-state records. Workspace mappings require explicit recreation
+to apply changes; `workspace repair` only repairs its existing access and Git identity
+responsibilities.
 
 Cleanup only removes effects whose ownership can be established. Removed settings mappings retain
 the document; removed owned plugin associations are reconciled where safe. See
 [native cleanup rules](native-harness-setup.md#deleting-owning-resources) before deleting an owner.
 Parent deletion follows the existing VM, agent, or workspace lifecycle. It removes the contained
 native files with their parent and clears setup records through the existing database deletion. It
-does not first uninstall plugins or require readable setup receipts.
+does not first uninstall plugins or require readable applied-state records.
 
 Setup, deletion, and workspace rehome share a VM-family mutation guard. A competing mutation refuses
-with retry guidance. Rehome moves project settings with the workspace. Existing receipts do not
-block the move; readiness reports stale setup when its recorded destination no longer matches.
-[Idempotency](idempotency.md#harness-setup-reconciliation) describes retry guarantees and limits.
+with retry guidance. Rehome moves project settings with the workspace. Existing applied-state
+records do not block the move; readiness reports stale setup when its recorded destination no longer
+matches. [Idempotency](idempotency.md#harness-setup-reconciliation) describes retry guarantees and
+limits.

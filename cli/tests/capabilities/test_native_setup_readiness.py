@@ -66,7 +66,7 @@ def test_integration_severity_controls_refusal(captured_output):
     assert caught.value.hint == evidence.remediation
 
 
-def test_only_actual_user_current_receipt_satisfies_evidence(tmp_path, monkeypatch):
+def test_only_actual_user_current_applied_state_satisfies_evidence(tmp_path, monkeypatch):
     db = Database(tmp_path / "state.db")
     try:
         vm = db.insert_vm("vm", site="local", hostname="vm")
@@ -151,7 +151,7 @@ def test_invalid_plugin_prerequisite_never_permits_launch(malformed_gap, capture
     ],
 )
 def test_destination_probe_preserves_previously_recorded_identities(db, location, username, recorded):
-    # Receipt identities captured from the prior invocation-based API.
+    # Applied-state record identities captured from the prior invocation-based API.
     vm = replace(db.insert_vm("fixture", site="local", hostname="fixture"), created_at="2026-01-01T00:00:00Z")
     runner = Mock()
     runner.run.side_effect = lambda command, **kwargs: Mock(
