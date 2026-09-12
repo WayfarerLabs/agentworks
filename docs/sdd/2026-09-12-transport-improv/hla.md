@@ -89,7 +89,7 @@ delivery facts, not public feature switches.
 ## Identity and preparation
 
 A target binds one guest identity and one already-selected route for its lifetime. Admin targets may
-request noninteractive elevation; agent targets remain constrained by their actual guest
+request non-interactive elevation; agent targets remain constrained by their actual guest
 permissions. No public per-call username or native-route selector is added to a delivered target.
 Provider-root execution, as with QGA, is demoted to the bound admin identity for ordinary calls.
 
@@ -241,7 +241,7 @@ fabricating a signal. Command labels and job references remain safe to log.
 
 One deadline covers an operation's preparation, dispatch, and observation budget. A wait deadline
 does not cancel a process. A separate cancellation request has its own bounded observation. Retry
-policy remains at the layer that can prove whether redispatch is safe.
+policy remains at the layer that can prove whether repeated dispatch is safe.
 
 ## Alternatives and remaining decisions
 
