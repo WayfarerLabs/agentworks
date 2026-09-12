@@ -1,6 +1,6 @@
 # Current State
 
-- Snapshot date: 2026-09-06, post-0.18.0 and post-wave-4-charter (update at wave boundaries)
+- Snapshot date: 2026-09-12, post-wave-4-merge (PR #761, `7c744828`) (update at wave boundaries)
 - Baseline: released Agentworks 0.14.0 (2026-08-18, live on PyPI; see `phasing.md`'s release map for
   the cut's trail) plus post-release `main`. The release itself carries everything the previous
   baseline enumerated (the phase 1 TOML sunset, the 0.14 expired-compat removals, declarative-schema
@@ -150,37 +150,43 @@ and the manifest surface has no warn-window channel (the standing consequence re
   it, and the 0.14 hard break for direct backend references. The readiness-shape choice for the
   `secret-source` kind is settled and recorded in that SDD's lock.
 
-## Harness integration surface (wave 4 groundwork)
+## Harness integration surface (wave 4, merged)
 
-- The capability exists at the session scope only. `HarnessIntegration`
-  (`cli/agentworks/capabilities/harness_integration/base.py:202`) declares one abstract operation,
-  `start` (`:308`), and the kind descriptor's `required_operations` is `frozenset({"start"})`
-  (`cli/agentworks/capabilities/harness_integration/kinds.py:119`). There are no vm, user, or
-  workspace methods.
-- **The facet vocabulary is not missing; it is declared and unused.** `Capability.config_for`
-  (`cli/agentworks/capabilities/base.py:339`) is a shipped classmethod whose docstring defines a
-  facet as the level a capability is driven at, states that facets are not scopes, records that core
-  owns the mapping, and says the signature takes no facet argument only because no capability offers
-  more than one config yet. `cli/agentworks/capabilities/README.md` carries the same contract. The
-  per-kind config contract lives on the descriptor (`kinds.py:127`,
-  `cli/agentworks/capabilities/descriptor.py:165`); a capability declares its own model through
-  `config_model` and offers it through `config_for`.
-- Resume is not a second method. `HarnessLaunchIntent` (`base.py:71`) carries `CREATE`,
-  `RESUME_ONLY`, `RESUME_OR_NEW`, and `FORCE_NEW` with a `starts_fresh` property, so one `start`
-  serves both paths. The kind's `contract_version` is 3 (`kinds.py:117`), matching all four in-tree
-  integrations.
-- The harness leak into core is still present and is wave 4's acceptance test: `claude_marketplaces`
-  and `claude_plugins` sit on the agent template (`cli/agentworks/agents/templates.py:42`) and on
-  admin config (`cli/agentworks/vms/admin.py:142`), with an `install_claude_plugins` VM-init step
-  (`cli/agentworks/vms/initializer/driver.py:741`, defined at `:764`). The Claude plugin's own
-  module docstring (`cli/agentworks/plugins/claude/__init__.py:28`) already names them as core
-  surfaces that should not be Claude-specific.
-- The instance-state store is in place for applied state: `cli/agentworks/db/instance_state.py`
-  exposes `replace_applied_slices` (`:529`), `clear_applied_slice` (`:575`), and
-  `inspect_owner_state` (`:593`), with `AppliedStateKey` (`:37`) closed at two vm-only keys and
-  `_APPLIED_KEYS_BY_KIND` (`:62`) already carrying `agent`, `workspace`, and `session` as kinds that
-  own no keys yet. Wave 4 registers keys without touching the table, which is what the R2 store
-  review promised.
+Wave 4 merged on 2026-09-12 (PR #761, `7c744828`). Its SDD is **not yet locked**: live VM acceptance
+of the integrations has not been performed by any lane, and the effort owes its closeout.
+
+- **The capability now spans four facets.** `required_operations` is
+  `frozenset({"start", "vm_init", "user_init", "workspace_init"})`
+  (`cli/agentworks/capabilities/harness_integration/kinds.py:121`) and `contract_version` is 4
+  (`:118`), up from 3. The setup methods sit on the base at
+  `cli/agentworks/capabilities/harness_integration/base.py:301`, `:309`, and `:317`, with
+  `check_setup` at `:325` and `start` at `:437`.
+- **An unimplemented facet refuses rather than no-ops.** Those three base methods raise `StateError`
+  naming the integration and the facet. This reversed a saga ruling; see the wave 4 entry in
+  `child-sdds.md` for why the superseded premise failed, and note that
+  `scope-participation-contract.md:72-74` still records the old rule pending reconciliation.
+  Consequence worth knowing: nothing implements the VM facet, so activating any integration there
+  fails, and grok and shell implement no setup facet at all. Claude and Codex implement `user_init`
+  and `workspace_init`.
+- **`config_for` took its facet argument.** `cli/agentworks/capabilities/base.py:340` and
+  `cli/agentworks/capabilities/harness_integration/base.py:242` both declare
+  `config_for(cls, facet: Facet | None = None)`. The default keeps single-config capabilities
+  unchanged, which is what the contract required of the ordinary case.
+- **The harness leak into core is closed, which was wave 4's stated acceptance test.**
+  `claude_marketplaces` and `claude_plugins` no longer sit on the agent template or admin config,
+  and the `install_claude_plugins` VM-init step is gone. They survive only as `LEGACY_CLAUDE_FIELDS`
+  (`cli/agentworks/legacy_claude.py:22`) with migration-facing error handling
+  (`cli/agentworks/instance_overlay_codec.py:83`, `cli/agentworks/schema/errors.py:579`), so an
+  operator's old declaration is diagnosed rather than silently ignored.
+- **Applied state gained its key without touching the table.** `AppliedStateKey` now carries
+  `HARNESS_NATIVE_SETUP = "harness-native-setup"` (`cli/agentworks/db/instance_state.py:37`),
+  registered alongside the existing vm-only keys, which is what the R2 store review promised.
+- **Artifacts did not ship and are the successor's.** No `artifacts` block, artifact kinds, producer
+  API, acquisition, normalized representation, propagation or deferral, content storage, or shell
+  artifact delivery exists, and no placeholder API was left behind. The early `session_uuid` slice
+  was proposed and withdrawn with them, so session and run identity remains settled in
+  `scope-participation-contract.md` and owned by no active effort. Feature capability kinds are
+  likewise future work.
 
 ## Session runtime (observability groundwork)
 
@@ -228,3 +234,12 @@ its branch is deleted. Remaining unmerged drafts on remote branches, both out of
   mechanism there (`subprocess.run(..., text=True)` wrapping stdin in a `TextIOWrapper` that
   rewrites LF to `os.linesep`) was invisible on Linux by construction. Recorded as a known gap, not
   a scheduled item.
+
+- **Green CI does not cover the harness-integration subsystem's native paths.** The wave 4 fixtures
+  skip when the native CLI is absent and CI installs neither `codex` nor `claude`, so roughly 41
+  tests in the subsystem wave 4 just shipped do not run on the runner. Integration testing measured
+  it directly: CI reported 8,878 passed with 44 skipped where a host with both CLIs installed
+  reported 8,930 passed with three skipped, reconciling to the same total. The effort disclosed this
+  rather than claiming the coverage, and retained a prepared patch. It is the same shape as the
+  Linux-only gap above that let a Windows `vm create` break reach a published release: a class of
+  regressions "all checks pass" does not speak to. Open.
