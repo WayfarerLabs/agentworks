@@ -1285,12 +1285,12 @@ def test_legacy_overlay_conversion_waits_for_successful_native_reinit(
             "other",
             {
                 "git_credentials": ["gh"],
-                "harness_integrations": [{"name": "shell"}, {"name": "claude-code", "marketplaces": ["new-base"]}],
+                "harness_integrations": [{"name": "codex"}, {"name": "claude-code", "marketplaces": ["new-base"]}],
             },
         ),
     ]
     config = make_config(agent_manifests=manifests)
-    config = replace(config, enabled_system_plugins=(*config.enabled_system_plugins, "claude"))
+    config = replace(config, enabled_system_plugins=(*config.enabled_system_plugins, "claude", "codex"))
     _seed_vm(db)
     db.insert_agent("dev", "box", "agt-dev", template="default")
     payload = VersionedPayload(1, {"claude_plugins": ["legacy@fixture"], "shell": "zsh"})
@@ -1331,7 +1331,7 @@ def test_legacy_overlay_conversion_waits_for_successful_native_reinit(
             "shell": "zsh",
             "harness_integrations": (
                 [
-                    {"name": "shell"},
+                    {"name": "codex"},
                     {"name": "claude-code", "marketplaces": ["new-base"], "plugins": ["legacy@fixture"]},
                 ]
                 if repoint

@@ -299,13 +299,28 @@ class HarnessIntegration(Capability):
         return self._config is None
 
     def vm_init(self, invocation: VMSetupInvocation) -> None:
-        """Default VM setup has no native effects or ownership claims."""
+        """Reject activation unless the integration implements VM setup."""
+        raise StateError(
+            f"harness integration '{self.name}' does not implement setup facet 'vm'",
+            entity_kind=self.owner_kind,
+            entity_name=self.owner_name,
+        )
 
     def user_init(self, invocation: UserSetupInvocation) -> None:
-        """Default user setup has no native effects or ownership claims."""
+        """Reject activation unless the integration implements user setup."""
+        raise StateError(
+            f"harness integration '{self.name}' does not implement setup facet 'user'",
+            entity_kind=self.owner_kind,
+            entity_name=self.owner_name,
+        )
 
     def workspace_init(self, invocation: WorkspaceSetupInvocation) -> None:
-        """Default workspace setup has no native effects or ownership claims."""
+        """Reject activation unless the integration implements workspace setup."""
+        raise StateError(
+            f"harness integration '{self.name}' does not implement setup facet 'workspace'",
+            entity_kind=self.owner_kind,
+            entity_name=self.owner_name,
+        )
 
     def check_setup(self, evidence: SetupReadiness) -> tuple[SetupGap, ...]:
         """Report upstream prerequisites without changing their native setup.
