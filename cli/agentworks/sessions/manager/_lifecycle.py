@@ -653,6 +653,18 @@ def _launch_existing_session(
                 interaction=interaction,
             )
 
+            from agentworks.harness_setup.readiness import require_setup_ready
+
+            require_setup_ready(
+                db,
+                registry,
+                session_node.harness_integration,
+                vm=vm,
+                workspace=ws,
+                agent_name=session.agent_name,
+                runner=session_target,
+            )
+
         with output.section("Resolving Secrets"):
             # The graph-union boundary resolve (pass 1). Placed AFTER the
             # gates above, symmetric with the env-chain pass below, so a
@@ -712,17 +724,6 @@ def _launch_existing_session(
             admin_target=admin_target,
             agent_target=None if is_admin else session_target,
             secrets=ScopedSecrets(graph_secret_values, session_node.secret_refs()),
-        )
-        from agentworks.harness_setup.readiness import require_setup_ready
-
-        require_setup_ready(
-            db,
-            registry,
-            session_node.harness_integration,
-            vm=vm,
-            workspace=ws,
-            agent_name=session.agent_name,
-            runner=session_target,
         )
         harness_start = require_implemented_start(
             session_node.harness_integration.start(start_ctx, intent=intent),

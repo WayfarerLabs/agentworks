@@ -227,17 +227,20 @@ def _start_session_slice(
         )
     )
 
-    from agentworks.harness_setup.readiness import require_setup_ready
+    # Existing owners were checked before secret resolution. For pending
+    # owners, read their newly applied setup now, before session mutation.
+    if plan.new_workspace or plan.new_agent:
+        from agentworks.harness_setup.readiness import require_setup_ready
 
-    require_setup_ready(
-        db,
-        registry,
-        session_node.harness_integration,
-        vm=vm,
-        workspace=ws,
-        agent_name=resolved_agent_name,
-        runner=agent_target or target,
-    )
+        require_setup_ready(
+            db,
+            registry,
+            session_node.harness_integration,
+            vm=vm,
+            workspace=ws,
+            agent_name=resolved_agent_name,
+            runner=agent_target or target,
+        )
 
     # Compute socket path up front (deterministic from linux_user +
     # session name). Needed for the DB insert since the CHECK
