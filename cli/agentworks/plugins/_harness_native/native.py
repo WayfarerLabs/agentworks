@@ -153,7 +153,7 @@ def _require_owned(claim: NativeClaim | None, source: str | None, *, operation: 
             f"native {operation} already exists without an Agentworks claim; remove it with the native CLI first"
         )
     if source is None or claim.source != source:
-        raise StateError(f"native {operation} differs from its ownership record; resolve the drift with the native CLI")
+        raise StateError(f"native {operation} differs from its ownership claim; resolve the drift with the native CLI")
 
 
 def _check_contributions(
@@ -216,7 +216,7 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
         root = roots.pop()
     destination = root + "/" + _filename(tool)
     if any(claim.destination != root for claim in native_claims):
-        raise StateError("native config home differs from existing ownership records; clean up the previous home first")
+        raise StateError("native config home differs from existing ownership claims; clean up the previous home first")
     sources = [] if config is None else config.marketplaces
     requested = [] if config is None else config.plugins
     if not native_claims and not sources and not requested:

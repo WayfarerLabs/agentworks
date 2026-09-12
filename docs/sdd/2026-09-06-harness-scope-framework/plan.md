@@ -211,9 +211,9 @@ batch includes the repeated Muntz findings on the consolidated head. Native impl
 now live in `agentworks.plugins._harness_native`, resolving the R11 placement question without
 changing generic capability dispatch or adding a per-tool abstraction. The redundant
 post-publication settings read is removed; guarded atomic publication still compares the expected
-destination. Both user settings paths share claim matching and retain every matching applied-state
-record. Readiness probes now take actual destination inputs without constructing setup invocations,
-and the shell reference describes explicit selection accurately.
+destination. Both user settings paths share claim matching and retain every matching claim.
+Readiness probes now take actual destination inputs without constructing setup invocations, and the
+shell reference describes explicit selection accurately.
 
 The prerequisite severity guard remains: it validates the result of an integration hook, whose
 dataclass annotations are not runtime enforcement. New hook-boundary tests demonstrate refusal for
@@ -335,3 +335,8 @@ reconciliation semantics. Documentation, diagnostics, comments and test names no
 state consistently. The payload, storage keys and runtime behavior are unchanged; this introduces no
 capability-wide reconciliation framework. The instance-state guide also clarifies that native claims
 record plugin and marketplace ownership, not settings-file contents or a settings ownership ledger.
+
+Validation: 74 focused tests, Ruff, strict mypy (803 files), file lint and locked-SDD checks passed.
+Project review confirmed the Python changes are limited to terminology and test identifiers. The
+complexity review clarified ownership claims as facts within applied state and checkpoints as
+updates to that state.

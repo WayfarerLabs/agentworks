@@ -14,7 +14,7 @@ from agentworks.instance_description import instance_state_data
 
 @pytest.mark.parametrize("kind", ["vm", "agent", "workspace"])
 @pytest.mark.parametrize("mode", ["complete", "pending", "future", "malformed"])
-def test_native_applied_state_are_inspected_without_io_or_payload_values(db, make_config, monkeypatch, kind, mode):
+def test_native_applied_state_is_inspected_without_io_or_payload_values(db, make_config, monkeypatch, kind, mode):
     from agentworks.agents.manager import agent_description
     from agentworks.instance_description import load_instance_description_registry
     from agentworks.vms.manager.inspect import _vm_instance_state

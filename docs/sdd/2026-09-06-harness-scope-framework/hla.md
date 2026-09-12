@@ -426,7 +426,7 @@ the settings document produced by the selected strategy must not silently fight 
 identities: inconsistent desired declarations are config errors before writes, while matching ones
 are reconciled once. Source values discarded by `skip-existing` or `merge-preserve` are not proposed
 writes and cannot create a conflict by themselves. Treat native plugin commands that also edit
-settings as part of that same plan, with applied-state records for their actual writes.
+settings as part of that same plan, recording confirmed ownership claims in applied state.
 `skip-existing` skips the file mapping, not the separately declared plugin work. The LLD must
 specify native command ordering and protect mapped settings against subsequent plugin-command
 rewrites; activation order is not a last-writer policy.

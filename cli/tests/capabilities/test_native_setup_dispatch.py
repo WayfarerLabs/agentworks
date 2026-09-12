@@ -125,7 +125,7 @@ def test_changed_destination_can_be_reconciled_by_owning_integrations(setup_case
     )
 
 
-def test_applied_state_omit_env_values_but_detect_declaration_changes(setup_case):
+def test_applied_state_omits_env_values_but_detects_declaration_changes(setup_case):
     from agentworks.env.entry import EnvEntry
 
     db, inputs, invocation, _, _ = setup_case
