@@ -4,6 +4,7 @@
 - Delivery vehicle: Draft PR #795 for design review, labeled `sdd:transport-improv`
 - Requirements: [FRD](frd.md)
 - Architecture: [HLA](hla.md)
+- Proposed interfaces and layout: [Execution contract](execution-contract.md)
 
 This plan records the next design decisions without claiming implementation is approved or done.
 Implementation tasks will be expanded after the contracts converge. No lockfile belongs in this
@@ -26,9 +27,10 @@ checkpoint.
 - [ ] Establish Proxmox and WSL2 feasibility under a separately authorized live-test charter. Done
       when each design assumption has observed evidence or an explicit operator disposition.
 - [ ] Have the SSH developer review the proposed #757 boundary and carrier seam. Done when singular
-      ownership of buffered SSH internals, a single-attempt integration path, trust/I/O
-      preservation, and dependency ordering are agreed. This effort does not edit the SSH effort's
-      owned SDD.
+      ownership of the new SSH package, the `Carrier.execute` request/report and I/O contract,
+      trust/configuration preservation, and dependency ordering are agreed. This revises the earlier
+      consolidation proposal; the SSH effort must reconcile its own SDD, which this effort does not
+      edit.
 - [ ] Reconcile PR #789's native recovery path with the common execution service. Done when its
       required behavior has a home without parallel production execution entry points.
 - [ ] Expand the migration inventory and implementation plan. Done when each existing adapter,
@@ -40,6 +42,13 @@ checkpoint.
 - [ ] Plan the independent new-stack build in destination modules. Done when internal test entry
       points exercise its contracts without changing production context delivery or exposing a
       second public plugin API. This is a design task, not an implementation-completion claim.
+- [ ] Finalize package dependencies and the removal inventory. Done when the new SSH and execution
+      implementations and tests run with legacy modules unavailable, including indirect imports,
+      plugin package initialization and retained utility dependencies. Copied code must satisfy the
+      new contract independently; no bridge may call the old stack.
+- [ ] Specify SSH state transition and deletion gates. Done when trust/configuration preservation,
+      concurrent-writer ownership, rollback evidence, and production operation after physical legacy
+      module deletion have testable acceptance criteria. Replacement code reads old data directly.
 - [ ] Map FRD R11's future core/plugin workflows to acceptance cases. Done when each facility has a
       concrete scenario regardless of whether an old-stack caller exists.
 - [ ] Define cutover gates and rollback/state handling. Done when complete workflow evidence,

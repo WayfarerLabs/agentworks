@@ -71,8 +71,12 @@ and
 [HLA](https://github.com/WayfarerLabs/agentworks/blob/2694d31afeaffe32841c995a552c5223add26689/docs/sdd/2026-09-05-ssh-connection-contracts/hla.md)
 in PR #757 cover explicit connections, configuration isolation, trust preservation, and buffered
 execution consolidation while preserving the current interfaces. Outcome redesign and reconnect are
-deferred. The proposed split therefore keeps connection mechanics with that effort and assigns the
-new execution/context contract here, with final SSH integration after its consolidation.
+deferred. That published plan describes consolidation, not an independent replacement. Subsequent
+operator direction requests a new SSH stack too, allowing copied code but forbidding dependencies on
+legacy execution packages. The revised proposal keeps connection mechanics with that effort and
+assigns the common execution/context contract here; both build independently against the
+[proposed seam](execution-contract.md). The SSH developer still needs to review and reconcile the
+changed delivery approach in their own SDD.
 
 The two in-tree production `run_detached` calls are remote Lima provisioning and backup. Lima sets
 `reuse_completed=False` at `capabilities/vm_platform/lima.py:623`; backup creates a fresh directory

@@ -3,7 +3,7 @@
 - Status: Revised draft for operator review
 - Requirements: [FRD](frd.md)
 - Supporting work: [Prior art](prior-art-research.md), [migration](migration-strategy.md),
-  [plan](plan.md)
+  [proposed contract and package layout](execution-contract.md), [plan](plan.md)
 
 ## Architectural decision
 
@@ -17,10 +17,12 @@ does not erase physical differences between SSH, local VM tools, and a guest-age
 backend selection inside a command, and no generic capability registry to negotiate a route.
 
 Build this as a new stack alongside the current one, with separate internal entry points for
-development and validation. Settle and prove the contract before cutting over existing callers.
-Current callers inform the migration; the intended core/plugin workflows in FRD R11 determine what
-the new interface must express. New job observation or script facilities need not wait for an old
-caller to demonstrate a use that the old interface could not support.
+development and validation. Settle and prove the contract before cutting over existing callers. SSH
+is part of that new stack, including its connection policy and subprocess implementation. Copy
+useful code where appropriate, but do not import, wrap, subclass, or call the legacy stack. Current
+callers inform the migration; the intended core/plugin workflows in FRD R11 determine what the new
+interface must express. New job observation or script facilities need not wait for an old caller to
+demonstrate a use that the old interface could not support.
 
 ## Components and ownership
 
@@ -34,8 +36,10 @@ caller to demonstrate a use that the old interface could not support.
 | Owning resource operation  | Retention and lifecycle of a job beyond the initiating call                                                             | Reusing a transport after its route or VM hold closes                  |
 
 These are responsibilities, not a requirement for six class hierarchies. The target composes a
-carrier and small shared helpers. Concrete adapters stay with their current package owners;
-Proxmox-specific API handling stays in the Proxmox plugin.
+carrier and small shared helpers. New core adapters live under `agentworks.execution`; new
+Proxmox-specific delivery stays in the Proxmox plugin. The
+[contract and layout proposal](execution-contract.md) names the package boundaries, interfaces,
+dependency direction, and deletion test for the old stack.
 
 The same execution and job mechanics serve the existing remote Lima placement-host target. Its
 identity is the SSH host and bound host user, not a VM that has yet to be created. The Lima platform
@@ -48,8 +52,9 @@ files. The LLD names portable helper prerequisites and explicit host shell/PATH 
 
 ## Public target contract
 
-The proposed vocabulary is `run`, `script`, `start`, file operations, and `interactive`. Names are
-provisional; the behavioral division is the design:
+The proposed vocabulary is `run`, `script`, `start`, file operations, and `interactive`. The
+[contract proposal](execution-contract.md) gives callable shapes for review; the behavioral division
+is the design:
 
 - `run` takes a program and literal argument sequence and waits for completion.
 - `script` takes explicit script content and waits for completion. It shares execution options with
@@ -300,48 +305,43 @@ One deadline covers an operation's preparation, dispatch, and observation budget
 does not cancel a process. A separate cancellation request has its own bounded observation. Retry
 policy remains at the layer that can prove whether repeated dispatch is safe.
 
-## Coordination with SSH isolation and consolidation
+## Coordination with the new SSH stack
 
 This is the proposed boundary for review with the SSH developer, based on the reduced FRD/HLA in
 [PR #757](https://github.com/WayfarerLabs/agentworks/pull/757) at `2694d31a`. It records this
 effort's integration plan; it does not amend the SSH effort's owned artifacts or claim its
-agreement.
+agreement. The operator now requests a new SSH stack as well. This supersedes our earlier proposal
+to integrate consolidated legacy SSH internals; it requires reconciliation with #757's currently
+published interface-preserving plan before parallel implementation begins.
 
-| Responsibility                                                                                         | Owner                                                        |
-| ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
-| Explicit SSH endpoint, user, identity, agent selection, trust and trust migration                      | SSH effort (#757)                                            |
-| OpenSSH config isolation, common SSH/scp options, forwarding, subprocess I/O and connection keepalives | SSH effort (#757)                                            |
-| Consolidating `ssh.py` and `transports/ssh.py` buffered internals with current interfaces/behavior     | SSH effort (#757)                                            |
-| Remote Lima placement-host connection settings and provider-inner SSH isolation                        | SSH effort (#757)                                            |
-| Application shell policy, commands/scripts, environment, cwd, elevation, sensitive-data policy         | `transport-improv`                                           |
-| Common targets, optional features, files/jobs, results/errors and safe command retry policy            | `transport-improv`                                           |
-| `RunContext` production cutover and core/plugin consumer migration                                     | `transport-improv`                                           |
-| Final new-stack SSH adapter integration after the consolidated runner is available                     | `transport-improv`, using the SSH-owned connection machinery |
+| Responsibility                                                                                         | Owner                                         |
+| ------------------------------------------------------------------------------------------------------ | --------------------------------------------- |
+| Explicit SSH endpoint, user, identity, agent selection, trust and trust migration                      | SSH effort (#757)                             |
+| OpenSSH config isolation, common SSH/scp options, forwarding, subprocess I/O and connection keepalives | SSH effort (#757)                             |
+| New standalone SSH carrier, with no dependency on legacy SSH execution modules                         | SSH effort (#757), proposed revised delivery  |
+| Remote Lima placement-host connection settings and provider-inner SSH isolation                        | SSH effort (#757)                             |
+| Application shell policy, commands/scripts, environment, cwd, elevation, sensitive-data policy         | `transport-improv`                            |
+| Common targets, optional features, files/jobs, results/errors and safe command retry policy            | `transport-improv`                            |
+| `RunContext` production cutover and core/plugin consumer migration                                     | `transport-improv`                            |
+| Final target composition and full-stack production cutover                                             | `transport-improv`, using the new SSH carrier |
 
-During consolidation the SSH effort owns edits to buffered SSH internals. This effort develops its
-common layer and other carriers in separate modules. After the shared runner is available, the
-transport effort owns the bounded integration change that connects the new target API, removes
-superseded execution entry points, and moves common execution policy above the carrier. Connection
-and trust policy remain SSH-owned. Remote Lima's host connection changes precede integration of its
-new execution/job adapter; they need not delay that adapter's design or independent tests.
+The SSH effort builds `execution/carriers/ssh/`; this effort builds the common contract, target,
+helpers, and other carriers. Both develop against the proposed `Carrier.execute` seam in the
+[contract document](execution-contract.md), using independently owned fixtures. Integrating the real
+SSH carrier does not require redesigning a legacy runner first. Remote Lima uses this same new
+carrier for its outer host hop, with its guest invocation prepared by the new remote Lima adapter.
 
-Before implementation, agree on the carrier seam: explicit connection plus prepared remote
-invocation, finite input, I/O mode, and deadline in; observed process status, output, and available
-completion evidence out. It must expose a single-attempt path. It does not compose workspace env,
-select application privilege or shell, resolve `RunContext`, or decide to repeat a mutation. SSH's
-legacy entry points may preserve their existing retry behavior during #757's consolidation; the new
-stack cannot inherit hidden replay underneath its own no-ambiguous-retry guarantee.
+The SSH effort owns connection/trust semantics and their state transition. This effort owns the
+common outcome model and application preparation, including moving or copying policy out of old SSH
+code into its proper new home. The new carrier supplies observed evidence without hidden replay,
+context discovery, or application shell selection. Its low-level result is not `SSHResult` under a
+new name: local process status, observed guest status, and uncertainty remain distinct.
 
-PR #757 preserves the existing result interfaces and corrects misleading status-255 diagnostics.
-This effort owns the common outcome model and maps only evidence the carrier actually provides.
-OpenSSH status 255 alone cannot distinguish a guest exit from connection failure; nested Lima status
-does not identify a failed inner hop. Preserve that uncertainty without adding a completion
-protocol, reconnect mechanism, new SSH library, or second trust implementation.
-
-Prepared environment, sensitive I/O, and shell wrappers currently reside partly in SSH. The
-integration inventory must assign each to either common preparation or carrier delivery and remove
-duplicate application of that policy. Raw SSH I/O and explicit environment delivery primitives can
-remain below the seam; deciding their meaning for an Agentworks operation stays above it.
+There is one SSH policy implementation within the new stack. Temporary independent old/new code
+during development is intentional; sharing the legacy builder to avoid that duplication would
+violate the removal requirement. Production stays on the old stack until cutover.
+Trust/configuration data migration is separately tested and does not call the old SSH runner or
+weaken trust checks.
 
 ## Parallel build and cutover
 
@@ -351,11 +351,16 @@ internal prototype context in those tests, not two public target types in the pr
 Never dispatch a mutating workflow through both stacks to compare results.
 
 Prove the new layer against SSH, QGA, and placement-host differences early, then cover the remaining
-adapters and complete workflows. Integrate #757's connection machinery once its agreed seam is
-available. Only after the new stack's acceptance gates pass does a coherent cutover change
-factories, context producers/consumers, plugin delivery, and direct service entry points. Remove the
-old stack and temporary bridges in that cutover increment. The detailed gates and treatment of
-existing jobs are in the [migration strategy](migration-strategy.md).
+adapters and complete workflows. Integrate the new SSH carrier once its agreed seam is available.
+Only after the new stack's acceptance gates pass does a coherent cutover change factories, context
+producers/consumers, plugin delivery, and direct service entry points. Remove the old stack and
+temporary bridges in that cutover increment. The detailed gates and treatment of existing jobs are
+in the [migration strategy](migration-strategy.md).
+
+Independence is an acceptance gate before cutover: the new-stack tests must run with the retired
+modules unavailable. After cutover, the complete production build and workflows must still work
+after physical deletion of those modules. A compatibility facade that reaches back into them is not
+an acceptable intermediate implementation of the new stack.
 
 This permits development coexistence without a released old/new selector or two plugin execution
 APIs. The current PR remains a design checkpoint; implementation landing units are decided in the
@@ -371,8 +376,9 @@ A universal full transport would misrepresent QGA interaction. Retaining the cur
 contract would push required file/script/job mechanics back into callers. The proposed target keeps
 those operations common while making the small set of real optional I/O features explicit.
 
-Before implementation, resolve the request/result signatures, readiness no-staging enforcement, job
-storage/ownership/retention and process-group protocol, shell startup/lookup behavior, transfer
-bounds and path policy, and WSL2 lifetime evidence. Review the proposed integration seam with the
-SSH developer and re-inventory then-current callers before implementation. The new API remains
-driven by the execution contract rather than by preserving the old runner's structure.
+Before implementation, finalize the proposed request/result signatures, readiness no-staging
+enforcement, job storage/ownership/retention and process-group protocol, shell startup/lookup
+behavior, transfer bounds and path policy, and WSL2 lifetime evidence. Review the proposed
+integration seam with the SSH developer and re-inventory then-current callers before implementation.
+The new API remains driven by the execution contract rather than by preserving the old runner's
+structure.
