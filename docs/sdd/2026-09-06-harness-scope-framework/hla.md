@@ -206,17 +206,18 @@ first-party.
 These are the proposed facet assignments for all four shipped integrations. Existing session models
 keep their fields, types, defaults, merge behavior, and launch semantics. Each block still carries
 its integration's literal `name`; the hosting resource chooses the facet, so config never nests
-under a `facets` key. "No fields" below means a name-only activation, not a claim that the facet
-cannot perform work. Claude Code and Codex now both have user and workspace setup config,
-independent of their existing session settings. Shell and Grok retain no-op defaults at all setup
-facets; the VM facet remains part of the framework even when current integrations need no VM work.
+under a `facets` key. Claude Code and Codex have user and workspace setup config, independent of
+their existing session settings. Their default-only activations are supported. Shell and Grok are
+session-only integrations. All four integrations leave VM setup unimplemented, so activating any of
+them at the VM facet fails. The VM facet remains part of the framework for integrations that
+implement it; config schema availability alone does not establish operation support.
 
-| Integration name | VM config | User config                                                                                           | Workspace config                           | Session config fields beyond `name`                                                                                                                                                                                                                  |
-| ---------------- | --------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `claude-code`    | No fields | `marketplaces: list[str] = []`, `plugins: list[str] = []`, `settings: SettingsMapping or None = None` | `settings: SettingsMapping or None = None` | `permission_mode`, `model`, `reasoning_effort`, `goal`, `initial_prompt`, `agent`, `append_system_prompt`, `remote_control`, `vim_mode`, `terminal_bell`, `extra_args`                                                                               |
-| `codex`          | No fields | `marketplaces: list[str] = []`, `plugins: list[str] = []`, `settings: SettingsMapping or None = None` | `settings: SettingsMapping or None = None` | `model`, `sandbox`, `approval_policy`, `profile`, `network`, `approvals_reviewer`, `reasoning_effort`, `goal`, `initial_prompt`, `agent`, `developer_instructions`, `vim_mode`, `writable_dirs`, `web_search`, `disable_strict_config`, `extra_args` |
-| `grok-build`     | No fields | No fields                                                                                             | No fields                                  | `permission_mode`, `model`, `reasoning_effort`, `sandbox`, `goal`, `initial_prompt`, `agent`, `rules`, `extra_args`                                                                                                                                  |
-| `shell`          | No fields | No fields                                                                                             | No fields                                  | `command`, `resume_command`, `required_commands`                                                                                                                                                                                                     |
+| Integration name | VM config   | User config                                                                                           | Workspace config                           | Session config fields beyond `name`                                                                                                                                                                                                                  |
+| ---------------- | ----------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `claude-code`    | Unsupported | `marketplaces: list[str] = []`, `plugins: list[str] = []`, `settings: SettingsMapping or None = None` | `settings: SettingsMapping or None = None` | `permission_mode`, `model`, `reasoning_effort`, `goal`, `initial_prompt`, `agent`, `append_system_prompt`, `remote_control`, `vim_mode`, `terminal_bell`, `extra_args`                                                                               |
+| `codex`          | Unsupported | `marketplaces: list[str] = []`, `plugins: list[str] = []`, `settings: SettingsMapping or None = None` | `settings: SettingsMapping or None = None` | `model`, `sandbox`, `approval_policy`, `profile`, `network`, `approvals_reviewer`, `reasoning_effort`, `goal`, `initial_prompt`, `agent`, `developer_instructions`, `vim_mode`, `writable_dirs`, `web_search`, `disable_strict_config`, `extra_args` |
+| `grok-build`     | Unsupported | Unsupported                                                                                           | Unsupported                                | `permission_mode`, `model`, `reasoning_effort`, `sandbox`, `goal`, `initial_prompt`, `agent`, `rules`, `extra_args`                                                                                                                                  |
+| `shell`          | Unsupported | Unsupported                                                                                           | Unsupported                                | `command`, `resume_command`, `required_commands`                                                                                                                                                                                                     |
 
 Session defaults remain concrete: shell uses empty strings and an empty command list; the three AI
 integrations default nullable options to `None`, boolean switches to `False`, and lists to `[]`.
@@ -260,7 +261,6 @@ spec:
       settings:
         source: file::~/.config/agentworks/codex-user.toml
         strategy: merge-preserve
-    - name: shell
 ---
 apiVersion: agentworks/v1
 kind: workspace-template
@@ -276,7 +276,6 @@ spec:
       settings:
         source: file::~/.config/agentworks/codex-project.toml
         strategy: skip-existing
-    - name: shell
 ---
 apiVersion: agentworks/v1
 kind: session-template
@@ -290,12 +289,12 @@ spec:
 ```
 
 Creating a user from `team-claude` installs both CLIs through core setup, prepares its env, then
-invokes Claude and Codex user facets with their own marketplace/plugin lists. The name-only shell
-activation explicitly selects its no-op setup. Codex maps the selected workstation file to its
-native user settings using the stated strategy. Creating a workspace from `team-project` runs
-Claude, Codex, and shell workspace facets with separate config; Claude and Codex map their project
-settings, while shell performs no setup work. A name-only activation enables default behavior and is
-distinct from omitting the integration.
+invokes Claude and Codex user facets with their own marketplace/plugin lists. Codex maps the
+selected workstation file to its native user settings using the stated strategy. Creating a
+workspace from `team-project` runs Claude and Codex workspace facets with separate config to map
+their project settings. A name-only activation enables a supported facet's default behavior and is
+distinct from omitting the integration. Shell setup activation would fail because its setup facets
+are unimplemented.
 
 A `team-review` session using those resources gets session config, applicable env, and upstream
 readiness facts; user config does not become launch flags. The same user block is valid on the
@@ -325,9 +324,9 @@ name: shell
 
 Absent integration activations at setup scopes do not by themselves prevent these sessions from
 launching. Each checks its executable and any upstream prerequisite the integration declares.
-Name-only shell or Grok setup calls remain no-ops, and the explicit default shell retains its
-ordinary launch behavior. No artifact input, deferral result, shell discovery variable, or artifact
-cleanup method is introduced.
+Name-only shell or Grok setup activation fails explicitly; the default shell retains its ordinary
+launch behavior without setup activation. No artifact input, deferral result, shell discovery
+variable, or artifact cleanup method is introduced.
 
 ## Same config shape, separate native scopes
 
@@ -445,15 +444,16 @@ subsequent changes require workspace recreation until an owner-authorized reinit
 Retain `vm_init`, `user_init`, and `workspace_init` as the method names. Each receives a typed
 invocation for its facet and reports applied facts through a manager-owned checkpoint channel.
 Methods return normally on success and raise through the existing error framing on failure. Base
-setup defaults perform no work and report no applied facts. Core records successful completion when
-the selected facet returns; a no-op default does not prove a native condition beyond what actually
-ran. The session `start` method retains `HarnessLaunchIntent` and the current launch-result
+setup methods raise an unsupported-facet error identifying the integration and facet. Core records
+successful completion only when an implemented facet returns successfully, including default-only or
+already-satisfied setup that needs no changes. This does not prove a native condition beyond what
+actually ran. The session `start` method retains `HarnessLaunchIntent` and the current launch-result
 alternatives. No artifact parameters, output collections, or final-deferral check are added.
 
 The contract version increments from 3 across the descriptor and all four first-party integrations.
-`start` remains the required operation; inherited setup defaults satisfy R3 without a
-supported-scope registry. Existing session probe obligations remain on the session path. There is no
-new session cleanup operation for deferred artifact work.
+`start` remains the required operation; inherited setup methods reject unsupported invocations under
+R3 without a supported-facet registry. Existing session probe obligations remain on the session
+path. There is no new session cleanup operation for deferred artifact work.
 
 Construct an integration binding for one owning resource and facet. A present activation supplies
 its effective config; an absent activation supplies prior ownership for retirement without
@@ -502,7 +502,11 @@ resource independence, and unresolved delivery policies. The successor may exten
 this framework adds no placeholder artifact API or state. Its resource-bound invocations and owning
 lifecycles must preserve that independence, without downstream discovery or session-driven ancestor
 setup. The workspace facet serves native project settings here; it does not impose a future artifact
-route.
+route. Without a VM facet activation, core preserves all defined inputs as unhandled and routes them
+directly to the session. An inactive intermediate facet likewise passes its applicable inputs
+through to the session. Resolve this lazily for the selected integration and actual ancestors,
+without inventing successful setup records, implicit activation, or duplicate VM delivery through
+user and workspace. The FRD records the remaining representation and final-handling decisions.
 
 The operator's leading follow-on proposal is a declarative `artifact-bundle` resource that owns
 ingestion and normalized contents. Other resources would consume bundles by ID rather than each
@@ -555,9 +559,9 @@ Before the first native mutation, invalidate the prior completed setup marker wh
 ownership facts needed for reconciliation. Checkpoint confirmed ownership changes before continuing;
 core acknowledges only after persistence succeeds. A failure leaves the recorded prefix and
 incomplete status available for retry, including a failed same-input reinit. Mark setup complete
-only after the facet returns successfully. A no-op selected facet can record completion but cannot
-invent native installation evidence. Readiness evaluates the relevant native conditions as well as
-this record, with severity chosen by the consuming integration.
+only after an implemented facet returns successfully. An implemented facet needing no changes can
+record completion but cannot invent native installation evidence. Readiness evaluates the relevant
+native conditions as well as this record, with severity chosen by the consuming integration.
 
 Reconciliation compares desired setup with prior applied ownership and the live destination. Native
 plugin and marketplace changes remove obsolete owned resources wherever safe removal is supported,
@@ -676,9 +680,10 @@ policies using non-secret workstation fixtures.
 The vertical uses ordinary local native plugin/marketplace fixtures and workstation settings files,
 with declared env observed by setup commands and the session workload. It proves the shared user
 method for admin and agents, native user/project settings destinations, unchanged reinit, safe
-removal, and required/recommended readiness. The VM facet is invoked even when it is a no-op.
-Artifact and feature machinery is not needed to prove this flow. Native plugin ownership probes and
-command ordering belong in the LLD and must be verified against the actual CLIs.
+removal, and required/recommended readiness. A local test integration implements the VM facet to
+verify dispatch and env delivery; shipped integrations reject unsupported VM activation. Artifact
+and feature machinery is not needed to prove this flow. Native plugin ownership probes and command
+ordering belong in the LLD and must be verified against the actual CLIs.
 
 Update first-party manifests and upgrade guidance in the implementation change. Retire old template
 fields and the two core install call sites together; do not leave two active configuration paths.
@@ -710,14 +715,14 @@ persistence, shell artifact publication, and early session UUID delivery are out
 Implementation evidence must exercise the real CLI and a live backend where setup changes the guest,
 with local fixtures avoiding external service dependencies:
 
-| Requirement    | Acceptance evidence                                                                                                                                                                              |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| R1, R2, R6     | Core setup precedes explicitly selected facets; setup and launch observe the correct env at all five scopes, including VM and the actual admin or agent user.                                    |
-| R3, R4, R5, R8 | Session-only integrations stay compatible; no-op setup facets work; each resource validates its own facet schema; registration errors and invocation isolation are enforced.                     |
-| R9             | Unchanged reinit converges; plugin/activation removal consumes ownership; drift, interrupted writes, failed same-input setup, version skew, deletion, and competing mutations preserve evidence. |
-| R10            | Required, recommended, and absent prerequisites block, warn, or proceed for the bound resource; another user's setup cannot satisfy them and session start never repairs setup.                  |
-| R11, R13       | Claude's fields and persisted overlays migrate; admin and agent use the same user facet; core loses its Claude-specific paths; failed workspace setup unwinds and retry succeeds.                |
-| R14, R15       | Claude and Codex user plugin/marketplace setup and distinct user/workspace settings mappings work, including all four strategies and unsupported workspace plugin config rejection.              |
+| Requirement    | Acceptance evidence                                                                                                                                                                                                    |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1, R2, R6     | Core setup precedes explicitly selected facets; setup and launch observe the correct env at all five scopes, including VM and the actual admin or agent user.                                                          |
+| R3, R4, R5, R8 | Session-only integrations stay compatible; unsupported activations fail and implemented empty setup succeeds; each resource validates its own facet schema; registration errors and invocation isolation are enforced. |
+| R9             | Unchanged reinit converges; plugin/activation removal consumes ownership; drift, interrupted writes, failed same-input setup, version skew, deletion, and competing mutations preserve evidence.                       |
+| R10            | Required, recommended, and absent prerequisites block, warn, or proceed for the bound resource; another user's setup cannot satisfy them and session start never repairs setup.                                        |
+| R11, R13       | Claude's fields and persisted overlays migrate; admin and agent use the same user facet; core loses its Claude-specific paths; failed workspace setup unwinds and retry succeeds.                                      |
+| R14, R15       | Claude and Codex user plugin/marketplace setup and distinct user/workspace settings mappings work, including all four strategies and unsupported workspace plugin config rejection.                                    |
 
 R7, R12, and R16's artifact functionality is deferred and does not gate this effort. The framework
 must not require a feature capability or an artifact declaration to satisfy this vertical.

@@ -26,7 +26,12 @@ Agentworks integration layer with the harness it drives.
 
 The integration contract has VM, user, workspace, and session facets. Owning setup lifecycles
 configure native tooling before a session launches; the session facet chooses the workload command.
-See [harness facets](../../../../docs/guides/harness-facets.md) for complete configuration examples.
+The base setup methods reject activation of an unimplemented facet with an error naming the
+integration and facet. Implement only supported setup methods; an implemented method can succeed
+without changes for default-only or already-satisfied config. An inactive integration with no prior
+owned effects to retire is skipped and not marked applied. A config model, including a name-only
+schema, does not establish facet support. See
+[harness facets](../../../../docs/guides/harness-facets.md) for complete configuration examples.
 
 And note that regardless of integration, all sessions run inside the standard tmux session. This
 provides both access to stdin/stdout/stderr for interactivity as well as the persistent execution

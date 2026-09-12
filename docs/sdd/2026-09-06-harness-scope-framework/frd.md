@@ -86,7 +86,7 @@ and the answer is the capability's.
   configuration there, and who expect VM and agent reinit to converge and workspace creation to
   apply its native harness settings without accumulating drift.
 - **Integration authors** (first-party today; external plugins are wave 8), who implement only the
-  setup facets their harness needs and get no-op defaults for the rest.
+  setup facets their harness needs; activating an unimplemented facet fails explicitly.
 - **Core maintainers**, who need the harness-specific knowledge out of core surfaces.
 
 ## Functional requirements
@@ -104,11 +104,15 @@ integration API. `user_init` is a single surface invoked for the admin user duri
 reinit, and for each agent during agent init and reinit; the invocation context says which user, and
 one method body serves both.
 
-**R3. Unimplemented setup facets are no-ops, not errors.** The base class provides no-op defaults.
-An integration implements the setup facets it needs; the existing session launch contract remains
-required. The shell integration keeps its ordinary session behavior and uses no-op setup defaults.
-This supersedes the originating perspective's absence-means-unsupported rule: review and testing
-catch a mistyped override. R10's explicit consuming prerequisites still apply.
+**R3. Activating an unimplemented setup facet is a hard error.** The base setup methods raise an
+unsupported-facet error identifying the integration and facet. Integrations implement only the
+facets they support; a supported facet may legitimately finish without changes when defaults request
+no work or the desired state already exists. Offering no config fields does not establish support.
+An absent activation is skipped unless prior owned effects need retirement under R9; it never
+synthesizes successful setup. The existing session launch contract remains required, and
+session-only integrations remain usable without setup activation. R10's explicit consuming
+prerequisites still apply. This supersedes the earlier no-op base-method ruling under the operator's
+2026-09-11 decision.
 
 **R4. Integrations declare config per facet.** Config follows the same four facets the methods do,
 for the same reason: a capability declares a fixed set of facet configs exactly as it declares a
@@ -231,9 +235,10 @@ nested-key/array behavior, interaction with explicit plugin config, and cleanup 
 
 **R16. Deferred: shell artifact filesystem delivery.** No artifact directories, workload artifact
 index, discovery variable, publication or cleanup mechanism, or Git exclusions are introduced for
-shell by this effort. Its setup facets remain no-ops under R3. The early `session_uuid` persistence
-and invocation-context slice was justified only by artifact ownership and is no longer required or
-delivered here. The saga coordinates ownership of that identity work with sibling efforts.
+shell by this effort. Its unimplemented setup facets reject activation under R3. The early
+`session_uuid` persistence and invocation-context slice was justified only by artifact ownership and
+is no longer required or delivered here. The saga coordinates ownership of that identity work with
+sibling efforts.
 
 ## Settled constraints, not to be reopened
 
@@ -440,12 +445,25 @@ session combines direct VM-to-session input with applicable user and workspace r
 for anything it cannot handle. The operator reopened the earlier mandatory-error policy: the
 successor must settle when an unresolved item blocks launch or receives another explicit treatment.
 
-The successor must still specify core handling of skipped intermediate integrations without silent
-loss or implicit activation, distinguish origin from destination-specific applicability, and avoid
-duplicate effects when paths meet. Handling for one user or workspace cannot discharge another's
-obligations. These principles guide that SDD, not a deferral protocol delivered here. The workspace
-facet remains in this SDD for native project settings; retaining it does not require VM artifacts to
-route through it.
+The operator further settled the inactive-facet fallback on 2026-09-11. Without an activation of the
+integration's VM facet, no integration-produced route exists: core preserves all defined inputs as
+unhandled and delivers them directly to the session facet. It does not guess user versus workspace
+placement or broadcast the inputs down both branches. An inactive intermediate facet likewise leaves
+its applicable routed inputs unhandled for the session. These cases do not invoke an integration or
+synthesize successful applied state.
+
+Resolution can be lazy for the integration selected by a session and that session's actual
+ancestors. Agent initialization need not enumerate inactive integrations or materialize their
+passthrough results. Active ancestors provide their stored results without rerunning setup, while
+inactive ancestors preserve inputs and immutable origin. Completion of setup is distinct from
+handling an input; even an implemented facet that makes no native changes cannot implicitly claim
+all inputs. Session handling must not silently provision shared user or workspace state.
+
+The successor must specify the representation, distinguish origin from destination-specific
+applicability, and avoid duplicate delivery or effects when paths meet. Handling for one user or
+workspace cannot discharge another's obligations. These principles guide that SDD, not a deferral
+protocol delivered here. The workspace facet remains in this SDD for native project settings;
+retaining it does not require VM artifacts to route through it.
 
 ## Operator terminology refinement, 2026-09-08
 
@@ -483,11 +501,11 @@ inline.
    `docs/sdd/2026-08-31-session-console-lifecycle/locked.md`, which states the harness-integration
    contract "remains version 1". That artifact is locked and belongs to another effort, so it is
    flagged here rather than edited. `kinds.py:117` reads `contract_version=3`, matching all four
-   in-tree integrations. Adding per-scope methods changes the contract and needs a version bump;
-   whether the new methods join `required_operations` (today `frozenset({"start"})`, `kinds.py:119`)
-   is an R3 question, and the no-op-default rule argues they should not. Note that these versions
-   are internal: every implementation is first-party, so the bump is a mechanical sweep, not an
-   ecosystem event.
+   in-tree integrations. Adding per-scope methods changes the contract and needs a version bump; the
+   new methods need not join `required_operations` (today `frozenset({"start"})`, `kinds.py:119`).
+   Integrations may implement a subset of facets; the base methods reject unsupported invocations
+   under the revised R3 rule. Note that these versions are internal: every implementation is
+   first-party, so the bump is a mechanical sweep, not an ecosystem event.
 4. **The facet vocabulary and `config_for` are already in the code, so do not reintroduce them.**
    `Capability.config_for` is a shipped classmethod (`cli/agentworks/capabilities/base.py:339`)
    whose docstring already defines a facet as the level a capability is driven at (vm, user,
@@ -554,5 +572,6 @@ prerequisites for the actual bound user are proven. Claude Code and Codex user m
 setup is demonstrated, user and workspace settings are not flattened, and workstation mappings
 exercise all four R15 policies. Applied-state records support readiness, drift reporting, and safe
 idempotent removal or explicit retention when desired native setup changes or an activation is
-removed. The ordinary shell session retains its behavior with no-op setup facets. Deferred artifact
-requirements and the withdrawn early session identity slice do not gate this effort.
+removed. The ordinary shell session retains its behavior without setup activation. Unsupported setup
+activations fail explicitly. Deferred artifact requirements and the withdrawn early session identity
+slice do not gate this effort.

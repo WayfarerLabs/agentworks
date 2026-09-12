@@ -30,8 +30,12 @@ system = ["claude", "codex"]
 
 VM, admin, agent, and workspace templates accept an ordered `harness_integrations` list. Every entry
 is an **integration activation**: a `name` tag followed by any explicit facet configuration.
-Name-only entries activate the facet with defaults. Multiple supported integrations can coexist,
-each with its own config. Merely enabling the system plugin does not run setup anywhere.
+Name-only entries activate a supported facet with defaults. Multiple supported integrations can
+coexist, each with its own config. Merely enabling the system plugin does not run setup anywhere.
+Activating an unimplemented facet fails during owning setup with an error identifying the
+integration and facet. With no prior owned effects to retire, leaving it inactive skips invocation
+and creates no successful setup record. An implemented facet can succeed without changes when its
+defaults request no work or its desired state already exists.
 
 Activation describes the resource's effective declaration. It does not prove that setup has run or
 succeeded; readiness uses setup evidence separately. This is distinct from VM activation, which
@@ -90,8 +94,9 @@ Session selection has its existing tagged-object merge semantics: restating the 
 session config according to its model; selecting a different name starts that integration's config
 anew. Config for integration activations at setup scopes never rolls into a session's config, even
 when both name the same integration. Each host validates its own facet. Claude and Codex user facets
-accept settings, marketplaces, and plugins; their workspace facets accept settings. VM facets and
-the shell/Grok setup facets currently accept name-only entries and perform no native writes.
+accept settings, marketplaces, and plugins; their workspace facets accept settings. All shipped VM
+facets and the shell/Grok setup facets are unimplemented and reject activation. Shell and Grok
+remain available for session-only use. A name-only config schema does not imply facet support.
 
 For separate project settings, select both workspace facets and give each its own workstation
 source. Create these source documents before workspace creation; this declaration does not change

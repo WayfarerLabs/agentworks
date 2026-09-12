@@ -102,8 +102,9 @@ env; the integration lane receives the resource's assembled env through its full
       standalone and session-created workspaces; no workspace reinit or residue-adoption path.
 - [x] Add typed required/recommended upstream gaps to session readiness using actual bindings,
       current completion evidence and inexpensive native probes; report owning remediation.
-- [ ] Exercise shell no-op setup and launch through real CLI, including setup env delivery, explicit
-      enablement and absence of implicit ancestor setup during start/restart.
+- [ ] Exercise unsupported setup refusal and shell session launch through the real CLI, plus setup
+      env delivery through implemented facets and absence of implicit ancestor setup at
+      start/restart.
 
 ## Claude and Codex native setup
 
@@ -369,3 +370,23 @@ rollback. Independent project, complexity and correctness reviews of the correct
 project reviewer reproduced the fixed ordering and both original findings are closed. The one
 authorized iteration is complete pending its exact-head GitHub checks. The separate R3 review
 disagreement awaits the operator's ruling; live acceptance and final SDD locking remain open.
+
+## Operator-directed unsupported-facet correction, 2026-09-11
+
+The operator resolved B4 by requiring a hard error for activation of an unimplemented facet. This
+supersedes R3's earlier successful base no-ops, including the completed implementation milestone
+above. Implemented facets can still succeed with default-only or already-satisfied config; inactive
+integrations are skipped and do not receive successful applied state. The correction needs no
+support registry or performed-work flag. Shell and Grok remain session-only; Claude and Codex
+implement user and workspace setup, and all shipped VM setup facets remain unimplemented.
+
+The successor direction now records lazy passthrough for inactive integrations. Without a VM facet
+activation, all defined inputs remain unhandled and go directly to the session, with origin
+preserved and no broadcast through user and workspace. Inactive intermediate facets likewise leave
+their applicable inputs for the session. This is future design direction, not an artifact API in
+this PR. The saga-owned earlier no-op ruling needs reconciliation by its owner; the FRD records the
+operator's superseding decision here.
+
+- [ ] Reject unsupported setup invocation and cover failure state, skipped activation, and
+      successful implemented setup without changes.
+- [ ] Update FRD, HLA, examples and permanent guidance, then run checks and independent reviews.
