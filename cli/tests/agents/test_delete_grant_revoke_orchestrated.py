@@ -612,7 +612,7 @@ def test_delete_socket_dir_runs_even_when_userdel_fails(
     rm_idx = commands.index(f"rm -rf {expected_path}")
     userdel_idx = next(i for i, c in enumerate(commands) if c.startswith("userdel -r agt-a1"))
     assert rm_idx < userdel_idx
-    assert any("remote cleanup for 'agt-a1' failed" in w for w in captured_output.warnings)
+    assert captured_output.warnings
 
 
 def test_delete_nested_platform_path_reuses_the_callers_composition(

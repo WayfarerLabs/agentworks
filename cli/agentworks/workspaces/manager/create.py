@@ -256,12 +256,16 @@ def create_workspace(
         interaction=interaction,
     )
     nodes = walk(pending_workspace)
-    # The walk supplies the boundary union (the site's config secrets;
-    # a workspace template's env secrets are runtime inputs, delivered
-    # where sessions run, so they stay out of it: hermetic
-    # provisioning, the same pin the vm-template node carries).
+    # The walk supplies site config secrets. Explicit workspace setup joins
+    # its VM + workspace env chain below, before this same resolve boundary.
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
+
+    from agentworks.harness_setup.lifecycle import prepare_workspace_setup
+
+    setup_inputs = prepare_workspace_setup(db, registry, vm=vm, name=ws_name, template=template)
+    if setup_inputs is not None:
+        setup_inputs.register(resolver, registry)
 
     scope = _workspace_scope(db, vm, ws_name)
 
@@ -291,6 +295,8 @@ def create_workspace(
             name=ws_name,
             vm=vm,
             template=template,
+            setup_inputs=setup_inputs,
+            setup_values=resolver.values,
             overlay=overlay,
         )
         # Bookkeeping only, deliberately not via a realization log:

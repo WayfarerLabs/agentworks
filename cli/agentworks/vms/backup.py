@@ -187,7 +187,14 @@ def backup_vm(
                 # be laundered into an apparently valid archive.
                 applied_state_data = []
                 for record in applied_slices:
-                    payload = canonicalize_vm_applied_slice(record)
+                    from agentworks.db import AppliedStateKey
+                    from agentworks.harness_setup.state import canonicalize_native_setup
+
+                    payload = (
+                        canonicalize_native_setup(record)
+                        if record.key is AppliedStateKey.HARNESS_NATIVE_SETUP
+                        else canonicalize_vm_applied_slice(record)
+                    )
                     applied_state_data.append(
                         {
                             "instance_kind": record.instance_kind,

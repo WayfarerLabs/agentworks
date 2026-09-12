@@ -145,9 +145,11 @@ VM_PLATFORM_DESCRIPTOR = CapabilityKindDescriptor(
     # so every platform's config is mapping-shaped and carries its own
     # name as the tag that selects it.
     config_schema=ConfigContract(base=AgwModel, discriminator="name"),
-    manifest_section=HostSurface(
-        host_kind="vm-site",
-        naming_field="platform",
+    manifest_sections=(
+        HostSurface(
+            host_kind="vm-site",
+            naming_field="platform",
+        ),
     ),
 )
 """The vm-platform record in the capability-kind descriptor table

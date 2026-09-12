@@ -356,7 +356,6 @@ def vm_exec(
             load_config(),
             name,
             ctx.args,
-            workspace_name=workspace,
             interaction=interaction,
         )
         sys.stdout.write(result.stdout)

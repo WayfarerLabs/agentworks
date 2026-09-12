@@ -295,6 +295,12 @@ def create_vm(
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
 
+    from agentworks.harness_setup.lifecycle import prepare_vm_setup
+
+    setup_inputs = prepare_vm_setup(db, name=vm_name, template=vm_tmpl, admin=admin)
+    for setup_input in setup_inputs:
+        setup_input.register(resolver, registry)
+
     scope = OperationScope(level=ScopeLevel.VM, system_slug=slug, vm=vm_name)
 
     def scoped_ctx(
@@ -311,13 +317,9 @@ def create_vm(
             secrets=ScopedSecrets(resolver.values, secret_names),
         )
 
-    # PREFLIGHT-ALL, then the one boundary resolve: tailscale auth,
-    # git-credential tokens, and the site's config secrets (proxmox's
-    # API token) in a single prompt session. Provisioning is hermetic:
-    # operator [admin.env] / [vm_templates.*.env] secrets are NOT
-    # prompted here (they are runtime inputs, resolved at the shells'
-    # own composition roots), which is why the template node's
-    # secret_refs carry only the Tailscale key.
+    # Provisioning credentials and explicitly active setup env/config secrets
+    # join one boundary pass. Install-command runners remain hermetic; with
+    # neither desired setup nor prior applied-state records, unused operator env stays out.
     with output.section("Preflight"):
         from agentworks.git_credentials import announce_git_credentials
 
@@ -358,7 +360,13 @@ def create_vm(
     # in either phase to the same operator-facing outcome.
     from contextlib import ExitStack
 
+    from agentworks.harness_setup.locking import native_mutation_guard
+
     with ExitStack() as init_stack:
+        setup_guard = init_stack.enter_context(native_mutation_guard(db.path, vm_name))
+        from agentworks.harness_setup.lifecycle import require_prepared_setup
+
+        require_prepared_setup(db, "vm", vm_name, ("vm", "admin"), setup_inputs)
         with output.section("Provisioning"):
             # Provisioning-phase runup: the platform's own authenticated
             # pre-check before create() mutates anything (proxmox authenticates
@@ -445,7 +453,11 @@ def create_vm(
                 logger = SSHLogger(
                     vm_name,
                     "vm-create",
-                    redactions=(tailscale_auth_key, *git_redactions),
+                    redactions=tuple(
+                        dict.fromkeys(
+                            (tailscale_auth_key, *git_redactions, *(resolver.values.values() if setup_inputs else ()))
+                        )
+                    ),
                 )
             except (KeyboardInterrupt, UserAbort):
                 log.unwind()
@@ -654,6 +666,9 @@ def create_vm(
                 logger,
                 debian_release=observed_release,
                 operation=_mgr.VMInitializationOperation.VM_CREATE,
+                setup_inputs=setup_inputs,
+                setup_guard=setup_guard,
+                setup_values=resolver.values,
             )
         except (KeyboardInterrupt, UserAbort):
             _warn_init_cancel(vm_name)
@@ -739,11 +754,24 @@ def reinit_vm(
     vm_node = live_vm_node(db, config, registry, vm)
 
     # Resolve the VM's template so init uses the right values
-    from agentworks.instance_specs import ensure_effective_references_enabled, get_vm_instance_overlays
+    from agentworks.instance_specs import decode_stored_vm_overlays, ensure_effective_references_enabled
+    from agentworks.legacy_claude import legacy_component
+    from agentworks.vms.admin_templates import resolve_template_with_provenance as resolve_admin_base
     from agentworks.vms.template import effective_references
     from agentworks.vms.templates import resolve_template_with_provenance
 
-    stored_overlays = get_vm_instance_overlays(db, vm.name)
+    original_overlay = db.instance_state.get_desired_overlay("vm", vm.name)
+    base = resolve_admin_base(registry, vm.admin_template).value.harness_integrations
+    stored_overlays = (
+        None if original_overlay is None else decode_stored_vm_overlays(original_overlay, legacy_user_base=base)
+    )
+    legacy_conversion = (
+        (original_overlay, stored_overlays.payload)
+        if original_overlay is not None
+        and stored_overlays is not None
+        and legacy_component(original_overlay) is not None
+        else None
+    )
     stored_vm_overlay = None if stored_overlays is None else stored_overlays.vm
     layered_reinit_vm_tmpl = resolve_template_with_provenance(
         registry,
@@ -835,6 +863,12 @@ def reinit_vm(
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
 
+    from agentworks.harness_setup.lifecycle import prepare_vm_setup
+
+    setup_inputs = prepare_vm_setup(db, name=name, template=reinit_vm_tmpl, admin=admin)
+    for setup_input in setup_inputs:
+        setup_input.register(resolver, registry)
+
     scope = OperationScope(
         level=ScopeLevel.VM,
         system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
@@ -856,11 +890,8 @@ def reinit_vm(
         )
 
     with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
-        # The preflight boundary: git tokens and any site config secret
-        # (proxmox's API token) resolve in one prompt session.
-        # Provisioning is hermetic: no operator-env secrets are
-        # prompted at reinit; they get prompted at the use site (vm
-        # shell, session create, etc.).
+        # Credentials and active setup env/config secrets share one eager
+        # boundary. Install-command runners keep their existing environment.
         with output.section("Preflight"):
             from agentworks.git_credentials import announce_git_credentials
 
@@ -896,9 +927,13 @@ def reinit_vm(
         # The activation gate and any conditional Tailscale rejoin finish
         # before this logger exists. The rejoin path separately enforces that
         # its auth-key-bearing transport has no logger, so this operation log's
-        # complete secret set is exactly the secret-backed credential inputs
-        # used by initialization.
-        logger = SSHLogger(name, "vm-reinit", redactions=git_redactions)
+        # redaction set includes credentials and every resolved setup input
+        # before any incremental initialization log write.
+        logger = SSHLogger(
+            name,
+            "vm-reinit",
+            redactions=tuple(dict.fromkeys((*git_redactions, *(resolver.values.values() if setup_inputs else ())))),
+        )
         ts_target = transport(vm, config, default_timeout=60, logger=logger)
 
         home = f"/home/{vm.admin_username}"
@@ -924,6 +959,9 @@ def reinit_vm(
                     logger,
                     debian_release=verified_release,
                     operation=_mgr.VMInitializationOperation.VM_REINIT,
+                    legacy_conversion=legacy_conversion,
+                    setup_inputs=setup_inputs,
+                    setup_values=resolver.values,
                 )
             except KeyboardInterrupt:
                 output.warn(

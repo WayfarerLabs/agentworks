@@ -248,9 +248,10 @@ def _shipped_roots() -> Iterator[type[BaseModel]]:
         yield spec_model(kind)
     for descriptor in capability_descriptors():
         for name in registered_implementations(descriptor.kind):
-            model = capability_config_model(descriptor.kind, name)
-            if model is not None:
-                yield model
+            for facet in descriptor.config_facets or (None,):
+                model = capability_config_model(descriptor.kind, name, facet=facet)
+                if model is not None:
+                    yield model
 
 
 def _subjects() -> list[type[BaseModel]]:

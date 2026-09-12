@@ -26,7 +26,7 @@ def merge_resolved_template_layer[T](
     """
     from agentworks.env.entry import EnvEntry
     from agentworks.instance_overlay_codec import OVERLAY_EXCLUDED_FIELDS
-    from agentworks.schema import merge_model
+    from agentworks.schema import CapabilityBlock, merge_model
 
     declaration_fields = type(declaration).model_fields
     merge_fields = tuple(
@@ -55,6 +55,10 @@ def merge_resolved_template_layer[T](
         raw["env"] = {
             key: EnvEntry.model_validate(value) for key, value in cast("dict[str, object]", raw["env"]).items()
         }
+    if "harness_integrations" in raw:
+        raw["harness_integrations"] = [
+            CapabilityBlock.model_validate(value) for value in cast("list[object]", raw["harness_integrations"])
+        ]
     return cast("T", replace(cast("Any", target), **raw)), operations
 
 

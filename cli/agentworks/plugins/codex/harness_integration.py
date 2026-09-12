@@ -117,13 +117,33 @@ from agentworks.capabilities.harness_integration.base import (
     require_commands,
 )
 from agentworks.errors import StateError
+from agentworks.plugins._harness_native.native import setup_user, setup_workspace
+from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
 from agentworks.plugins.codex.recorder import home_word, notify_value_word, provision_fragment, thread_tail
 from agentworks.schema import AgwModel, MergeStrategy
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
+    from pydantic import BaseModel
+
     from agentworks.capabilities.base import RunContext
+    from agentworks.capabilities.descriptor import Facet
+    from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, WorkspaceSetupInvocation
     from agentworks.transports import Transport
+
+
+class CodexUserConfig(NativeUserConfig):
+    """Native Codex setup for one actual user."""
+
+    name: Literal["codex"]
+    """The harness integration selected for this user's facet."""
+
+
+class CodexWorkspaceConfig(NativeWorkspaceConfig):
+    """Native Codex project settings."""
+
+    name: Literal["codex"]
+    """The harness integration selected for this workspace's facet."""
 
 
 class CodexConfig(AgwModel):
@@ -369,7 +389,7 @@ class _Layer2(NamedTuple):
 class CodexIntegration(HarnessIntegration):
     """Runs Codex, resuming or launching fresh per on-disk state."""
 
-    contract_version: ClassVar[int] = 3
+    contract_version: ClassVar[int] = 4
     name: ClassVar[str] = "codex"
     description: ClassVar[str] = "Run Codex, resuming its session when one exists"
     config_model: ClassVar[type[CodexConfig]] = CodexConfig
@@ -403,6 +423,25 @@ class CodexIntegration(HarnessIntegration):
     # taking effect, and it is why the pane may come up in a different
     # conversation than last time.
     _dropped_stale: bool = False
+
+    @classmethod
+    def config_for(cls, facet: Facet | None = None) -> type[BaseModel] | None:
+        """Select independent config for user, workspace, or session setup."""
+        if facet == "user":
+            return CodexUserConfig
+        if facet == "workspace":
+            return CodexWorkspaceConfig
+        return super().config_for(facet)
+
+    def user_init(self, invocation: UserSetupInvocation) -> None:
+        """Reconcile this actual user's native setup and ownership claims."""
+        config = None if self.retiring else self._config_as(CodexUserConfig)
+        setup_user("codex", config, invocation)
+
+    def workspace_init(self, invocation: WorkspaceSetupInvocation) -> None:
+        """Map project settings without installing user-scoped plugins."""
+        config = None if self.retiring else self._config_as(CodexWorkspaceConfig)
+        setup_workspace("codex", config, invocation)
 
     @property
     def config(self) -> CodexConfig:

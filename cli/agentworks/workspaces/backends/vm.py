@@ -194,13 +194,15 @@ def delete_vm_workspace(
     caller has removed the agent members; ``groupdel`` removes the group
     regardless of remaining supplementary members (the admin's included).
     """
+    import shlex
+
     from agentworks.ssh import SSHError
 
     assert vm.tailscale_host is not None
     target = transport(vm, config, logger=logger)
 
     try:
-        target.run(f"rm -rf {workspace_path}", sudo=True, timeout=30)
+        target.run(f"rm -rf {shlex.quote(workspace_path)}", sudo=True, timeout=30)
         session = console_session_name(ws_name)
         target.run(f"rm -f ~/.config/tmuxinator/{session}.yml", check=False, timeout=10)
         # Remove the workspace's Linux group. check=False so a group that

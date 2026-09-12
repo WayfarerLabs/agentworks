@@ -14,6 +14,7 @@ from typer.testing import CliRunner
 from agentworks.cli import app
 from agentworks.schema import CapabilityBlock
 from agentworks.ssh import SSHResult
+from tests.conftest import registry_with_shell
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -200,7 +201,6 @@ def test_vm_exec_platform_emits_captured_streams_and_shell_exit_code(
     assert result.stdout == "buffered-out"
     assert result.stderr == "buffered-err"
     assert captured["_args"][2:] == ("box", ["printf", "payload"])
-    assert captured["workspace_name"] is None
 
 
 def test_vm_exec_platform_workspace_mutex_precedes_cli_dependencies(
@@ -262,11 +262,10 @@ def test_doctor_vm_sites_defers_on_pending_migration(db: Database, monkeypatch: 
     from agentworks.capabilities.descriptor import descriptor_for
     from agentworks.capabilities.publish import publish_capability_rows
     from agentworks.manifests import builtin as builtin_manifests
-    from agentworks.resources import Registry
     from tests.conftest import stub_platform_support
 
     stub_platform_support(monkeypatch)
-    registry = Registry.empty()
+    registry = registry_with_shell()
     builtin_manifests.publish_to(registry)
     publish_capability_rows(registry, descriptor_for("vm-platform"))
     registry.finalize()
@@ -332,11 +331,10 @@ def test_doctor_vm_sites_group(db: Database, monkeypatch: pytest.MonkeyPatch, tm
     from agentworks.capabilities.descriptor import descriptor_for
     from agentworks.capabilities.publish import publish_capability_rows
     from agentworks.manifests import builtin as builtin_manifests
-    from agentworks.resources import Registry
     from tests.conftest import stub_platform_support
 
     stub_platform_support(monkeypatch)
-    registry = Registry.empty()
+    registry = registry_with_shell()
     builtin_manifests.publish_to(registry)
     publish_capability_rows(registry, descriptor_for("vm-platform"))
     registry.finalize()
@@ -384,7 +382,7 @@ def test_doctor_vm_sites_not_ready_and_preflight_rows(
     from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
     from agentworks.errors import ConfigError
     from agentworks.manifests import builtin as builtin_manifests
-    from agentworks.resources import Origin, Registry
+    from agentworks.resources import Origin
     from agentworks.vms.sites import VMSiteDecl
     from tests.conftest import stub_platform_support
 
@@ -401,7 +399,7 @@ def test_doctor_vm_sites_not_ready_and_preflight_rows(
     monkeypatch.setattr(LimaPlatform, "not_ready", classmethod(_lima_readiness))
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
 
-    registry = Registry.empty()
+    registry = registry_with_shell()
     builtin_manifests.publish_to(registry)
     publish_capability_rows(registry, descriptor_for("vm-platform"))
     registry.add(
@@ -447,7 +445,6 @@ def test_doctor_warns_on_references_to_not_ready_sites(
     from agentworks.capabilities.publish import publish_capability_rows
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
     from agentworks.manifests import builtin as builtin_manifests
-    from agentworks.resources import Registry
     from tests.conftest import stub_platform_support
 
     stub_platform_support(monkeypatch)
@@ -460,7 +457,7 @@ def test_doctor_warns_on_references_to_not_ready_sites(
     )
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
 
-    registry = Registry.empty()
+    registry = registry_with_shell()
     builtin_manifests.publish_to(registry)
     publish_capability_rows(registry, descriptor_for("vm-platform"))
     registry.finalize()

@@ -33,7 +33,7 @@ class _SecretfulConfig(AgwModel):
 class _SecretlessCap(Capability):
     name: ClassVar[str] = "plain"
     description: ClassVar[str] = "no config, no secrets"
-    owner_kind: ClassVar[str] = "thing"
+    owner_kind: str = "thing"
     contract_version: ClassVar[int] = 1
     config_model: ClassVar[type[AgwModel]] = _NoConfig
 
@@ -41,7 +41,7 @@ class _SecretlessCap(Capability):
 class _SecretCap(Capability):
     name: ClassVar[str] = "secretful"
     description: ClassVar[str] = "declares one secret"
-    owner_kind: ClassVar[str] = "thing"
+    owner_kind: str = "thing"
     contract_version: ClassVar[int] = 1
     config_model: ClassVar[type[AgwModel]] = _SecretfulConfig
 
@@ -92,7 +92,7 @@ def test_idempotency_marker_reads_through_overrides() -> None:
     class _Base(Capability):
         name: ClassVar[str] = "b"
         description: ClassVar[str] = ""
-        owner_kind: ClassVar[str] = "thing"
+        owner_kind: str = "thing"
         contract_version: ClassVar[int] = 1
         config_model: ClassVar[type[AgwModel]] = _NoConfig
 

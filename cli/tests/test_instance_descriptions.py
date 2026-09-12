@@ -880,3 +880,39 @@ def test_live_instance_structured_values_render_as_ascii_yaml(
 
     assert all(line.isascii() for line in captured_output.detail)
     assert yaml.safe_load("\n".join(captured_output.detail)) == value
+
+
+def test_legacy_agent_inspection_explains_pending_conversion_without_writing(db, make_config):
+    from agentworks.agents.manager import agent_description
+    from agentworks.instance_description import InstanceStateIssueCode
+
+    _seed_vm(db)
+    db.insert_agent("dev", "box", "agt-dev", template="default")
+    payload = VersionedPayload(1, {"claude_plugins": ["one@fixture"], "shell": "zsh"})
+    db.instance_state.put_desired_overlay("agent", "dev", payload)
+    original = db.instance_state.get_desired_overlay("agent", "dev")
+    state = agent_description(db, make_config(), name="dev").instance_state
+    assert any(issue.code is InstanceStateIssueCode.INSTANCE_SPEC_MIGRATION_PENDING for issue in state.issues)
+    assert state.declarations[0].current.status == "resolved"
+    assert state.declarations[0].current.spec["harness_integrations"] == [
+        {"name": "claude-code", "plugins": ["one@fixture"]}
+    ]
+    assert db.instance_state.get_desired_overlay("agent", "dev") == original
+
+
+def test_legacy_vm_inspection_preserves_vm_component_and_record(db, make_config):
+    from agentworks.instance_description import InstanceStateIssueCode
+
+    _seed_vm(db)
+    payload = VersionedPayload(2, {"vm": {"cpus": 8}, "admin": {"claude_plugins": ["one@fixture"]}})
+    db.instance_state.put_desired_overlay("vm", "box", payload)
+    original = db.instance_state.get_desired_overlay("vm", "box")
+    state, _ = _vm_state(db, make_config())
+    assert any(issue.code is InstanceStateIssueCode.INSTANCE_SPEC_MIGRATION_PENDING for issue in state.issues)
+    assert state.declarations[0].current.status == "resolved"
+    assert state.declarations[1].current.status == "resolved"
+    assert state.declarations[0].current.spec["cpus"] == 8
+    assert state.declarations[1].current.spec["harness_integrations"] == [
+        {"name": "claude-code", "plugins": ["one@fixture"]}
+    ]
+    assert db.instance_state.get_desired_overlay("vm", "box") == original

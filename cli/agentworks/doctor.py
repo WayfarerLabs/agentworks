@@ -39,6 +39,8 @@ class Status(Enum):
 class InstanceStateHealthFactType(StrEnum):
     """Closed tags for instance-state facts attached to doctor checks."""
 
+    MIGRATION_PENDING = "migration-pending"
+
     LIFECYCLE_COMPARISON = "lifecycle-comparison"
     COVERAGE = "coverage"
     MALFORMED_RECORD = "malformed-record"

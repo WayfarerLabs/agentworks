@@ -19,7 +19,8 @@ import pytest
 from agentworks.apt import AptPackageEntry
 from agentworks.errors import ConfigError, StateError
 from agentworks.plugins import plugin_enablement_source
-from agentworks.resources import Origin, Registry
+from agentworks.resources import Origin
+from tests.conftest import registry_with_shell
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -51,7 +52,7 @@ def _config(*enabled: str) -> Config:
 @pytest.mark.parametrize("occupant", ["operator", "builtin", "plugin"])
 def test_weak_incoming_over_occupied_slot_is_a_noop(occupant: str) -> None:
     origins = {"operator": _operator(), "builtin": _builtin(), "plugin": _plugin("alpha")}
-    registry = Registry.empty()
+    registry = registry_with_shell()
     registry.add("apt-package", "gh", _entry("occupant"), origins[occupant])
     # A weak plugin row landing on the occupied slot is a silent no-op: no
     # collision check runs, nothing errors, the occupant stands.
@@ -66,7 +67,7 @@ def test_weak_incoming_over_reserved_kind_occupant_does_not_error() -> None:
     from agentworks.source_location import SourceLocation
 
     decl = SecretDecl(name="s1", description="d", declared_at=SourceLocation(file=Path("x.toml"), line=1))
-    registry = Registry.empty()
+    registry = registry_with_shell()
     registry.add("secret", "s1", decl, _operator())
     registry.add("secret", "s1", decl, _plugin("alpha"), weak=True)  # no raise
     assert registry.lookup("secret", "s1").origin.variant == "operator-declared"
@@ -79,7 +80,7 @@ def test_weak_into_free_slot_lands() -> None:
     # That the landed row is RECORDED weak is proven observably by
     # test_weak_survivor_with_no_source_is_a_state_error (the finalize guard
     # fires only for a recorded weak survivor), so this pins just the landing.
-    registry = Registry.empty()
+    registry = registry_with_shell()
     registry.add("apt-package", "gh", _entry("weak"), _plugin("alpha"), weak=True)
     assert registry.lookup("apt-package", "gh").description == "weak"
 
@@ -90,7 +91,7 @@ def test_weak_into_free_slot_lands() -> None:
 @pytest.mark.parametrize("strong", ["operator", "builtin", "plugin"])
 def test_strong_over_weak_replaces_silently(strong: str) -> None:
     origins = {"operator": _operator(), "builtin": _builtin(), "plugin": _plugin("alpha")}
-    registry = Registry.empty()
+    registry = registry_with_shell()
     registry.add("apt-package", "gh", _entry("weak"), _plugin("beta"), weak=True)
     # A strong row replaces the weak one with no collision check; that the key
     # leaves the weak set is proven observably by
@@ -106,7 +107,7 @@ def test_strong_over_weak_replaces_silently(strong: str) -> None:
 def test_two_weak_rows_first_published_wins_no_error() -> None:
     # The acknowledged tradeoff: two DISABLED plugins sharing a name silently
     # keep the first-published row (no curation error while both are off).
-    registry = Registry.empty()
+    registry = registry_with_shell()
     registry.add("apt-package", "gh", _entry("first"), _plugin("alpha"), weak=True)
     registry.add("apt-package", "gh", _entry("second"), _plugin("beta"), weak=True)
     assert registry.lookup("apt-package", "gh").description == "first"
@@ -118,7 +119,7 @@ def test_two_weak_rows_first_published_wins_no_error() -> None:
 def test_weak_survivor_with_no_source_is_a_state_error() -> None:
     # A weak row that finalize sees with NO disabling mark is a framework bug
     # (a publisher declared a row weak without a source to disable it).
-    registry = Registry.empty()
+    registry = registry_with_shell()
     registry.add("apt-package", "gh", _entry("weak"), _plugin("alpha"), weak=True)
     with pytest.raises(StateError, match="weak implies disabled"):
         registry.finalize()  # no enablement source -> the weak row is not disabled
@@ -129,7 +130,7 @@ def test_weak_survivor_disabled_by_source_finalizes_clean() -> None:
     # present-but-disabled.
     from agentworks.resources.graph import Enablement
 
-    registry = Registry.empty()
+    registry = registry_with_shell()
     registry.add("apt-package", "gh", _entry("weak"), _plugin("alpha"), weak=True)
     registry.finalize(enablement_sources=[plugin_enablement_source(_config())])  # alpha not enabled
     assert registry.graph.enablement_of("apt-package", "gh") is Enablement.disabled
@@ -139,7 +140,7 @@ def test_strong_replaced_weak_does_not_trip_the_guard() -> None:
     # A weak row later replaced by a strong (enabled) row must not trip the
     # guard: the key left the weak set on replacement, so finalize with no
     # source is clean.
-    registry = Registry.empty()
+    registry = registry_with_shell()
     registry.add("apt-package", "gh", _entry("weak"), _plugin("alpha"), weak=True)
     registry.add("apt-package", "gh", _entry("operator"), _operator())
     registry.finalize()  # no StateError
@@ -150,7 +151,7 @@ def test_strong_replaced_weak_does_not_trip_the_guard() -> None:
 
 
 def test_two_enabled_plugin_strong_rows_still_collide() -> None:
-    registry = Registry.empty()
+    registry = registry_with_shell()
     registry.add("apt-package", "gh", _entry("alpha"), _plugin("alpha"))
     with pytest.raises(ConfigError, match="published by two system plugins"):
         registry.add("apt-package", "gh", _entry("beta"), _plugin("beta"))

@@ -12,7 +12,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
 from agentworks.capabilities.conformance import conformance_error
-from agentworks.capabilities.descriptor import descriptor_for
+from agentworks.capabilities.descriptor import Facet, descriptor_for
 from agentworks.capabilities.secret_backend import (
     InteractionBroker,
     LookupDescription,
@@ -275,7 +275,7 @@ def test_forbidden_references_are_checked_on_the_offered_config_model() -> None:
         mapping_model = GoodMapping
 
         @classmethod
-        def config_for(cls) -> type[BaseModel]:
+        def config_for(cls, facet: Facet | None = None) -> type[BaseModel]:
             return SourceConfigWithDirectSecretRef
 
     assert conformance_error(DESCRIPTOR, OfferingForbiddenReference) is not None
@@ -289,7 +289,7 @@ def test_an_unoffered_declared_model_does_not_drive_reference_conformance() -> N
         mapping_model = GoodMapping
 
         @classmethod
-        def config_for(cls) -> type[BaseModel]:
+        def config_for(cls, facet: Facet | None = None) -> type[BaseModel]:
             return GoodConfig
 
     assert conformance_error(DESCRIPTOR, OfferingCleanConfig) is None

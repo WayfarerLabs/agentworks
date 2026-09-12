@@ -24,12 +24,8 @@ Both rows are present-but-disabled until an operator opts in with
 ``shell`` remains the default harness integration, so the common session path is
 unaffected by this migration.
 
-Not migrated in this effort (a conscious partial migration, per
-migration-strategy section 1): the ``claude_marketplaces`` /
-``claude_plugins`` agent-template and admin fields and the
-``install_claude_plugins`` VM-init step. They are Claude-Code-specific but
-are neither a capability impl nor a declarable resource, so the plugin unit
-as built (R6) has no seat for them; they keep working from core regardless.
+Native marketplaces, plugins, and settings belong to explicit user integration
+activations. Workspace integration activations map project settings.
 """
 
 from __future__ import annotations

@@ -153,7 +153,8 @@ class SSHLogger:
         """
         return format_host_path(self.path)
 
-    def _sanitize(self, text: str) -> str:
+    def sanitize(self, text: str) -> str:
+        """Apply the operation redactions before publishing diagnostics or state."""
         for secret in self._redact:
             text = text.replace(secret, "[REDACTED]")
         return text
@@ -257,7 +258,7 @@ class SSHLogger:
             level=logging.INFO,
             pathname="",
             lineno=0,
-            msg=self._sanitize(text),
+            msg=self.sanitize(text),
             args=(),
             exc_info=None,
         )

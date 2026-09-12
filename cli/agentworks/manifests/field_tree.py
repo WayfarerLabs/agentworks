@@ -26,6 +26,8 @@ from agentworks.errors import StateError
 from agentworks.schema import UNSET, element_annotation, iter_field_docs, render_type
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentworks.schema import FieldDoc, UnionArm
 
 #: What a value looks like when the model says only its type. Angle
@@ -225,7 +227,12 @@ class FieldEntry:
         return _placeholder(self.type_label)
 
 
-def field_tree(model: type[BaseModel], capability_kind: str | None = None) -> tuple[FieldEntry, ...]:
+def field_tree(
+    model: type[BaseModel],
+    capability_kind: str | None = None,
+    *,
+    hosted_kinds: Mapping[str, str] | None = None,
+) -> tuple[FieldEntry, ...]:
     """``model``'s fields as a tree, with union arms expanded in place.
 
     Every arm with no address of its own is expanded, because nothing else
@@ -237,15 +244,18 @@ def field_tree(model: type[BaseModel], capability_kind: str | None = None) -> tu
     ``capability_kind`` names the capability whose implementations a
     discriminated union's arms ARE, when they are: it is what lets an
     alternative carry the address that documents it and the implementation's
-    own one-liner rather than its config model's docstring.
+    own one-liner rather than its config model's docstring. ``hosted_kinds``
+    assigns a capability kind to each top-level hosting field.
     """
-    return _tree(model, capability_kind, ())
+    return _tree(model, capability_kind, (), hosted_kinds=hosted_kinds)
 
 
 def _tree(
     model: type[BaseModel],
     capability_kind: str | None,
     expanding: tuple[type[BaseModel], ...],
+    *,
+    hosted_kinds: Mapping[str, str] | None = None,
 ) -> tuple[FieldEntry, ...]:
     """One level of :func:`field_tree`, told which models are already open
     above it.
@@ -280,7 +290,9 @@ def _tree(
         by_path[doc.path] = []
         _open_union_element(doc, by_path)
     expanding = (*expanding, model)
-    return tuple(_resolved(entry, by_path, capability_kind, expanding) for entry in roots)
+    return tuple(
+        _resolved(entry, by_path, (hosted_kinds or {}).get(entry.name, capability_kind), expanding) for entry in roots
+    )
 
 
 def root_entry(model: type[BaseModel], entries: tuple[FieldEntry, ...]) -> FieldEntry | None:
@@ -501,18 +513,13 @@ def _alternative(
     *,
     first: bool,
     kind: str | None,
-    implementations: dict[str, _Implementation],
+    implementations: dict[tuple[str, type[BaseModel]], _Implementation],
     expanding: tuple[type[BaseModel], ...],
 ) -> Alternative:
     """One arm, with whichever of the three ways of being readable it
     has. See :class:`Alternative`."""
     name = arm.tag or arm.doc.title
-    impl = implementations.get(name) if arm.tag is not None else None
-    if impl is not None and impl.model is not arm.doc.model:
-        # A tag COLLISION, not an implementation: some other union in this
-        # tree happens to have an arm spelled like a seated one. See
-        # :func:`_implementations` for why identity is the question.
-        impl = None
+    impl = implementations.get((name, arm.doc.model)) if arm.tag is not None else None
     target = f"{kind}/{name}" if impl is not None else None
     recurring = arm.doc.model in expanding
     return Alternative(
@@ -554,7 +561,7 @@ def _shows_fields(target: str | None, *, first: bool) -> bool:
     return first or target is None
 
 
-def _implementations(capability_kind: str | None) -> dict[str, _Implementation]:
+def _implementations(capability_kind: str | None) -> dict[tuple[str, type[BaseModel]], _Implementation]:
     """Every implementation of ``capability_kind`` this host has, by the
     name that selects it.
 
@@ -577,15 +584,18 @@ def _implementations(capability_kind: str | None) -> dict[str, _Implementation]:
     """
     if capability_kind is None:
         return {}
-    from agentworks.capabilities.config import offered_model, registered_implementations
+    from agentworks.capabilities.config import config_model_for, registered_implementations
+    from agentworks.capabilities.descriptor import descriptor_for
 
-    implementations: dict[str, _Implementation] = {}
+    implementations: dict[tuple[str, type[BaseModel]], _Implementation] = {}
     for name, impl in registered_implementations(capability_kind).items():
         description = getattr(impl, "description", None)
-        implementations[name] = _Implementation(
-            model=offered_model(impl),
-            summary=description if isinstance(description, str) and description else None,
-        )
+        for facet in descriptor_for(capability_kind).config_facets or (None,):
+            model = config_model_for(impl, facet=facet)
+            implementations[name, model] = _Implementation(
+                model=model,
+                summary=description if isinstance(description, str) and description else None,
+            )
     return implementations
 
 

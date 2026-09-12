@@ -69,14 +69,14 @@ class ShellConfig(AgwModel):
 class ShellIntegration(HarnessIntegration):
     """Runs an operator command (or a login shell) as the session."""
 
-    contract_version: ClassVar[int] = 3
+    contract_version: ClassVar[int] = 4
     name: ClassVar[str] = "shell"
     description: ClassVar[str] = "Run an operator command or a login shell"
     prose: ClassVar[TopicProse | None] = TopicProse(
         title="Shell sessions",
         overview="""
         Runs whatever you tell it to. With no `command`, the session is a bare login
-        shell, which is what a session-template that selects no integration gets.
+        shell. Select `shell` explicitly or inherit the built-in default session template.
 
         `resume_command` is what ordinary `agw session start` and `restart` run, falling back to
         `command` when it is empty. That pair is enough to drive a harness with no

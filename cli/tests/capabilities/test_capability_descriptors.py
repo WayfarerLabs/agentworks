@@ -36,7 +36,7 @@ from agentworks.capabilities.publish import publish_capability_rows
 from agentworks.capabilities.secret_backend.kinds import SecretBackendEntry
 from agentworks.capabilities.vm_platform import VMPlatformEntry
 from agentworks.errors import StateError
-from agentworks.manifests.decode import _hosting_descriptors
+from agentworks.manifests.spec_model import hosted_capabilities
 from agentworks.resources.graph import Readiness, _capability_node_readiness
 from agentworks.resources.kind import KIND_REGISTRY
 from agentworks.resources.registry import Registry
@@ -312,24 +312,17 @@ def test_manifest_sections_match_the_decoders_host_surfaces() -> None:
     surface changes which specs are read as capability blocks, which is why
     this is a literal.
     """
-    assert {host: (d.kind, d.manifest_section.naming_field) for host, d in _hosting_descriptors().items()} == {
-        "vm-site": ("vm-platform", "platform"),
-        "git-credential": ("git-credential-provider", "provider"),
-        "session-template": ("harness-integration", "harness_integration"),
-        "secret-source": ("secret-backend", "backend"),
+    expected = {
+        "vm-site": ("vm-platform", "platform", None),
+        "git-credential": ("git-credential-provider", "provider", None),
+        "session-template": ("harness-integration", "harness_integration", "session"),
+        "secret-source": ("secret-backend", "backend", None),
     }
-
-    host_kinds = [d.manifest_section.host_kind for d in _descriptors()]
-    assert len(host_kinds) == len(set(host_kinds)), (
-        f"two capability kinds claim the same host: {host_kinds}. Decode keys its "
-        f"fold dispatch by host_kind, so the second record would silently "
-        f"overwrite the first and one host's fold would vanish."
-    )
-    source_host = descriptor_for("secret-backend").manifest_section
-    assert (source_host.host_kind, source_host.naming_field) == (
-        "secret-source",
-        "backend",
-    )
+    for kind, fields in expected.items():
+        [(descriptor, host)] = hosted_capabilities(kind)
+        assert (descriptor.kind, host.naming_field, host.facet) == fields
+    hosts = [(h.host_kind, h.naming_field) for d in _descriptors() for h in d.manifest_sections]
+    assert len(hosts) == len(set(hosts))
 
 
 # -- The kind's config contract ---------------------------------------------

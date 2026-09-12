@@ -42,12 +42,32 @@ from agentworks.capabilities.harness_integration.base import (
     require_commands,
 )
 from agentworks.errors import StateError
+from agentworks.plugins._harness_native.native import setup_user, setup_workspace
+from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
 from agentworks.schema import AgwModel, MergeStrategy
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
+    from pydantic import BaseModel
+
     from agentworks.capabilities.base import RunContext
+    from agentworks.capabilities.descriptor import Facet
+    from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, WorkspaceSetupInvocation
     from agentworks.transports import Transport
+
+
+class ClaudeCodeUserConfig(NativeUserConfig):
+    """Native ClaudeCode setup for one actual user."""
+
+    name: Literal["claude-code"]
+    """The harness integration selected for this user's facet."""
+
+
+class ClaudeCodeWorkspaceConfig(NativeWorkspaceConfig):
+    """Native ClaudeCode project settings."""
+
+    name: Literal["claude-code"]
+    """The harness integration selected for this workspace's facet."""
 
 
 class ClaudeCodeConfig(AgwModel):
@@ -129,7 +149,7 @@ _PROJECTS_DIR = "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"
 class ClaudeCodeIntegration(HarnessIntegration):
     """Runs Claude Code, resuming or launching fresh per on-disk state."""
 
-    contract_version: ClassVar[int] = 3
+    contract_version: ClassVar[int] = 4
     name: ClassVar[str] = "claude-code"
     description: ClassVar[str] = "Run Claude Code, resuming its session when one exists"
     config_model: ClassVar[type[ClaudeCodeConfig]] = ClaudeCodeConfig
@@ -149,6 +169,25 @@ class ClaudeCodeIntegration(HarnessIntegration):
     # Set by _resume_or_launch on each start/restart; drives the ordinary
     # HarnessStart note. None until the op runs (nothing decided yet).
     _resumed: bool | None = None
+
+    @classmethod
+    def config_for(cls, facet: Facet | None = None) -> type[BaseModel] | None:
+        """Select independent config for user, workspace, or session setup."""
+        if facet == "user":
+            return ClaudeCodeUserConfig
+        if facet == "workspace":
+            return ClaudeCodeWorkspaceConfig
+        return super().config_for(facet)
+
+    def user_init(self, invocation: UserSetupInvocation) -> None:
+        """Reconcile this actual user's native setup and ownership claims."""
+        config = None if self.retiring else self._config_as(ClaudeCodeUserConfig)
+        setup_user("claude", config, invocation)
+
+    def workspace_init(self, invocation: WorkspaceSetupInvocation) -> None:
+        """Map project settings without installing user-scoped plugins."""
+        config = None if self.retiring else self._config_as(ClaudeCodeWorkspaceConfig)
+        setup_workspace("claude", config, invocation)
 
     @property
     def config(self) -> ClaudeCodeConfig:

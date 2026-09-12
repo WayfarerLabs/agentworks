@@ -24,7 +24,6 @@ from agentworks.errors import ConfigError, StateError, UserAbort
 from agentworks.manifests import ManifestSet, load_manifests
 from agentworks.origin import Origin
 from agentworks.plugins import Plugin, seated_plugin
-from agentworks.resources.registry import Registry
 from agentworks.schema import AgwRootModel, CapabilityBlock, NonEmptyStr, RefOwner, SecretRef
 from agentworks.secrets.base import SecretDecl
 from agentworks.secrets.sources import (
@@ -35,6 +34,7 @@ from agentworks.secrets.sources import (
     source_provenance,
     validate_source_mapping,
 )
+from tests.conftest import registry_with_shell
 from tests.plugins._fixtures import ConformingSecretBackend
 
 
@@ -261,7 +261,7 @@ def test_finalization_normalizes_invalid_lookup_descriptions_without_provider_te
     tmp_path: Path,
     backend: type[ConformingSecretBackend],
 ) -> None:
-    registry = Registry.empty()
+    registry = registry_with_shell()
     origin = Origin.operator_declared(file=tmp_path / "resources.yaml", line=1)
     source_name = "selected"
     registry.add(
@@ -292,7 +292,7 @@ def test_finalization_normalizes_invalid_lookup_descriptions_without_provider_te
 
 
 def test_finalization_preserves_lookup_description_protected_exit_by_identity(tmp_path: Path) -> None:
-    registry = Registry.empty()
+    registry = registry_with_shell()
     origin = Origin.operator_declared(file=tmp_path / "resources.yaml", line=1)
     registry.add(
         "secret-source",
@@ -796,7 +796,7 @@ def test_source_key_miss_schedule_preserves_cross_row_first_target_order(
     tmp_path: Path,
     mapping_first: bool,
 ) -> None:
-    registry = Registry.empty()
+    registry = registry_with_shell()
     origin = Origin.operator_declared(file=tmp_path / "resources.yaml", line=1)
     secret = SecretDecl(
         name="mapping-host",
@@ -822,7 +822,7 @@ def test_source_key_miss_schedule_preserves_cross_row_first_target_order(
 
 
 def test_same_target_mapping_validation_and_candidate_emit_one_diagnostic(tmp_path: Path) -> None:
-    registry = Registry.empty()
+    registry = registry_with_shell()
     registry.add(
         "secret",
         "mapping-host",
@@ -860,7 +860,7 @@ def test_mapping_key_collection_runs_for_later_materialized_host(
         )
 
     monkeypatch.setattr(type(secret_kind), "synthesize", synthesize)
-    registry = Registry.empty()
+    registry = registry_with_shell()
     origin = Origin.operator_declared(file=tmp_path / "resources.yaml", line=1)
     registry.add(
         "apt-package",
@@ -902,7 +902,7 @@ def test_known_false_source_validates_but_emits_no_candidate_edge(tmp_path: Path
         )
     )
     manifests = load_manifests(resources)
-    registry = Registry.empty()
+    registry = registry_with_shell()
     from agentworks.capabilities.publish import publish_capability_rows
     from agentworks.secrets.sources import publish_builtin_secret_sources
 

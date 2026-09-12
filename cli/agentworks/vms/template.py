@@ -16,7 +16,7 @@ from pydantic import Field
 
 from agentworks.declared_resource import DeclaredResource
 from agentworks.env.entry import EnvTable, env_references
-from agentworks.schema import NonEmptyStr, ResourceRef, SecretRef
+from agentworks.schema import CapabilityBlock, MergeStrategy, NonEmptyStr, ResourceRef, SecretRef
 from agentworks.schema.reference import RefRelationship
 
 if TYPE_CHECKING:
@@ -38,6 +38,7 @@ def effective_references(
     provenance: Mapping[ProvenancePath, tuple[LayerSource, ...]],
 ) -> tuple[ResourceReference, ...]:
     """References required by one effective VM declaration."""
+    from agentworks.capabilities.harness_integration.activations import activation_references
     from agentworks.resources.reference import ResourceReference as _ResourceReq
     from agentworks.value_provenance import longest_prefix_value
 
@@ -75,6 +76,7 @@ def effective_references(
             source_kind=source[0],
         )
     )
+    refs.extend(activation_references(effective.harness_integrations, facet="vm", source=source, provenance=provenance))
     return tuple(refs)
 
 
@@ -158,6 +160,10 @@ class VMTemplate(DeclaredResource):
     ) = None
     """Names of ``system-install-command`` resources run during VM init."""
 
+    harness_integrations: Annotated[list[CapabilityBlock], MergeStrategy.REPLACE] | None = None
+    """Ordered integrations explicitly activated for native vm setup.
+    An authored list replaces the inherited list; an empty list activates none."""
+
     env: EnvTable = Field(default_factory=dict)
     """Environment variables exported on this VM, as a plaintext value or
     a ``{secret: <name>}`` reference per key. Merged child-overrides-parent
@@ -210,3 +216,17 @@ class VMTemplate(DeclaredResource):
         # field-merging stays in ``agentworks.vms.templates``.
         refs.extend(inherits_reference(parent, source) for parent in self.inherits)
         return refs
+
+    def validate_config(self, context: FinalizeContext) -> None:
+        """Validate the effective native integration activations for this resource."""
+        from agentworks.capabilities.harness_integration.activations import validate_activations
+        from agentworks.vms.templates import effective_template_with_provenance
+
+        layered = effective_template_with_provenance({**context.rows_of("vm-template"), self.name: self}, self.name)
+        validate_activations(
+            layered.value.harness_integrations,
+            facet="vm",
+            source=("vm-template", self.name),
+            provenance=layered.provenance,
+            location=self.error_location,
+        )

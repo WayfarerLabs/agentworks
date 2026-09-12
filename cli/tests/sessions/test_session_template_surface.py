@@ -353,6 +353,13 @@ def test_root_replacement_resets_all_omitted_session_fields() -> None:
         "child": _ReplacingSessionTemplate(name="child", inherits=["base"]),
     }
 
+    with pytest.raises(ConfigError):
+        resolve_from_dict_with_provenance(templates, "child")
+    templates["child"] = _ReplacingSessionTemplate(
+        name="child",
+        inherits=["base"],
+        harness_integration=CapabilityBlock.of("shell"),
+    )
     resolution = resolve_from_dict_with_provenance(templates, "child")
 
     assert resolution.value.description == "Login shell"
@@ -434,6 +441,7 @@ def test_multi_parent_silent_parent_does_not_wipe(tmp_path: Path) -> None:
         metadata:
           name: env-only
         spec:
+          inherits: [default]
           env:
             FOO: bar
         ---
@@ -458,6 +466,7 @@ def test_session_env_values_merge_as_complete_env_entry_models() -> None:
     templates = {
         "base": SessionTemplate(
             name="base",
+            harness_integration=CapabilityBlock.of("shell"),
             env={
                 "TOKEN": EnvEntry({"secret": "base-token"}),
                 "BASE_ONLY": EnvEntry({"value": "preserved"}),
@@ -532,3 +541,19 @@ def test_harness_integration_row_lists_its_declaring_template(tmp_path: Path) ->
         and edge.relationship is RefRelationship.USES
         for edge in result.edges
     )
+
+
+def test_custom_silent_session_lineage_requires_selection(tmp_path: Path) -> None:
+    config = _config(tmp_path, "")
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    (manifests / "silent.yaml").write_text(
+        "apiVersion: agentworks/v1\nkind: session-template\nmetadata:\n  name: silent\nspec: {}\n"
+    )
+    with pytest.raises(ConfigError):
+        build_registry(config, load_manifests(manifests))
+    with pytest.raises(ConfigError):
+        resolve_from_dict({"silent": SessionTemplate(name="silent")}, "silent")
+
+    inherited = resolve_from_dict({"child": SessionTemplate(name="child", inherits=["default"])}, "child")
+    assert inherited.harness_integration == "shell"

@@ -30,7 +30,7 @@ from agentworks.resources.access import ensure_recipe_enabled
 from agentworks.resources.graph import DisabledMark, Enablement, EnablementSource
 from agentworks.resources.reference import RefRelationship
 from agentworks.vms.template import VMTemplate
-from tests.conftest import ManifestDoc
+from tests.conftest import ManifestDoc, registry_with_shell
 from tests.resources.test_graph import _write_cfg
 
 if TYPE_CHECKING:
@@ -123,7 +123,7 @@ def test_enablement_still_propagates_across_the_inheritance_edge() -> None:
     fixture plugin, so what is under test is the gate and not a plugin's
     opt-in wiring.
     """
-    registry = Registry.empty()
+    registry = registry_with_shell()
     origin = Origin.built_in(source="tests.inheritance")
     registry.add("vm-template", "base", VMTemplate(name="base"), origin)
     registry.add("vm-template", "kid", VMTemplate(name="kid", inherits=["base"]), origin)
@@ -148,7 +148,7 @@ def test_the_gate_does_not_refuse_over_an_ancestor_leaf_the_child_overrode() -> 
     """
     from agentworks.secrets.base import SecretDecl
 
-    registry = Registry.empty()
+    registry = registry_with_shell()
     origin = Origin.built_in(source="tests.inheritance")
     registry.add("vm-template", "base", VMTemplate(name="base"), origin)
     registry.add("vm-template", "kid", VMTemplate(name="kid", inherits=["base"], tailscale_auth_key="kid-key"), origin)

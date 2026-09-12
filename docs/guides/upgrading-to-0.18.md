@@ -1,8 +1,20 @@
 # Upgrading to 0.18
 
 Agentworks 0.18 makes session and console lifecycle explicit and makes live status an explicit list
-enrichment. Most operators need only replace old commands in scripts; resource declarations and
-stored session/console definitions do not change.
+enrichment. Harness setup also moves into explicit integration activations. Stored session/console
+definitions retain their lifecycle representation; check template declarations for the changes
+below.
+
+## Update harness template declarations
+
+Replace `claude_marketplaces` and `claude_plugins` on VM/admin and agent templates with the Claude
+user integration's `marketplaces` and `plugins` fields under `harness_integrations`. See
+[Migrating Claude setup](migrating-claude-setup.md) for examples and the stored-overlay migration.
+
+Every effective session template must select `harness_integration`, either directly or through
+inheritance. The built-in `default` template explicitly selects `shell`; a custom lineage that does
+not inherit a selection must add one, such as `harness_integration: {name: shell}`. See
+[Harness facets](harness-facets.md) for independent setup and session selections.
 
 Existing running sessions acquire the new process-start fingerprint lazily when a lifecycle command
 needs that identity for safe teardown or replacement. Inspection commands such as

@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Literal
 
 from agentworks.errors import ValidationError
 from agentworks.manifests.field_tree import Alternative, FieldEntry, field_tree, root_entry
-from agentworks.manifests.spec_model import hosted_capability, metadata_model, spec_model
+from agentworks.manifests.spec_model import hosted_capabilities, metadata_model, spec_model
 from agentworks.resources import KIND_REGISTRY
 from agentworks.schema import UNSET
 from agentworks.topics import prose_of, summary_of
@@ -125,7 +125,7 @@ def reference_for(target: str) -> SchemaReference:
 def kind_reference(kind: str) -> SchemaReference:
     """The field reference for one declarable kind: its document's
     ``metadata`` and ``spec`` blocks."""
-    descriptor = hosted_capability(kind)
+    hosts = {host.naming_field: descriptor.kind for descriptor, host in hosted_capabilities(kind)}
     return SchemaReference(
         target=kind,
         kind=kind,
@@ -133,7 +133,7 @@ def kind_reference(kind: str) -> SchemaReference:
         category="declarable",
         **_prose_of(KIND_REGISTRY[kind]),
         metadata=_named(field_tree(metadata_model(kind)), kind),
-        spec=field_tree(spec_model(kind), None if descriptor is None else descriptor.kind),
+        spec=field_tree(spec_model(kind), hosted_kinds=hosts),
         alternatives=(),
         root_value=None,
     )
@@ -283,11 +283,21 @@ def _implementation(descriptor: CapabilityKindDescriptor, name: str) -> type:
     return impl
 
 
-def _implementation_documentation_model(_kind: str, _name: str, impl: type) -> type[BaseModel]:
-    """The primary config model one capability implementation offers."""
-    from agentworks.capabilities.config import offered_model
+def _implementation_documentation_model(kind: str, name: str, impl: type) -> type[BaseModel]:
+    """One config for ordinary capabilities; all facet answers for harnesses."""
+    from agentworks.capabilities.config import config_model_for
+    from agentworks.manifests.spec_model import built_model, class_name
+    from agentworks.schema import AgwModel
 
-    return offered_model(impl)
+    descriptor = _descriptor_for(kind)
+    if not descriptor.config_facets:
+        return config_model_for(impl)
+    return built_model(
+        f"{class_name(name)}Facets",
+        base=AgwModel,
+        doc=None,
+        fields={facet: (config_model_for(impl, facet=facet), ...) for facet in descriptor.config_facets},
+    )
 
 
 def _descriptor_for(kind: str) -> CapabilityKindDescriptor:

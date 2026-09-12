@@ -30,6 +30,7 @@ from agentworks.resources.inspect import list_resources
 from agentworks.resources.registry import Registry
 from agentworks.schema import CapabilityBlock
 from agentworks.sessions.template import SessionTemplate
+from tests.conftest import registry_with_shell
 from tests.plugins._fixtures import ConformingHarnessIntegration
 
 if TYPE_CHECKING:
@@ -64,7 +65,7 @@ def _build(monkeypatch: pytest.MonkeyPatch, *enabled: str, operator_rows: bool =
     plugin = _plugin()
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
     config = _config(*enabled)
-    registry = Registry.empty()
+    registry = registry_with_shell()
     publish_plugins(registry, config)
     if operator_rows:
         registry.add(
@@ -175,7 +176,7 @@ def test_ensure_recipe_enabled_excludes_capability_nodes(monkeypatch: pytest.Mon
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
     config = _config()  # harness integration not enabled, so its capability row is disabled
     with seated_plugin(plugin):
-        registry = Registry.empty()
+        registry = registry_with_shell()
         publish_plugins(registry, config)
         registry.add(
             "session-template",
@@ -208,13 +209,13 @@ def test_operator_row_wins_over_disabled_plugin_manifest_both_orders(monkeypatch
         return UserInstallCommandEntry(name="fixture-user-cmd", description="operator", command="echo op")
 
     # Order A (operator first, then the weak plugin row via publish_plugins):
-    reg_a = Registry.empty()
+    reg_a = registry_with_shell()
     reg_a.add("user-install-command", "fixture-user-cmd", _op_cmd(), _operator())
     publish_plugins(reg_a, config)  # the plugin's weak row must NOT displace / error
     assert reg_a.lookup("user-install-command", "fixture-user-cmd").origin.variant == "operator-declared"
 
     # Order B (plugin first via publish_plugins, then the operator row):
-    reg_b = Registry.empty()
+    reg_b = registry_with_shell()
     publish_plugins(reg_b, config)
     reg_b.add("user-install-command", "fixture-user-cmd", _op_cmd(), _operator())
     assert reg_b.lookup("user-install-command", "fixture-user-cmd").origin.variant == "operator-declared"
@@ -226,7 +227,7 @@ def test_operator_row_wins_over_disabled_plugin_manifest_both_orders(monkeypatch
 def test_reserved_name_bundle_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     plugin = _plugin("reserved-plugin", anchor=_RESERVED_ANCHOR)
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
-    registry = Registry.empty()
+    registry = registry_with_shell()
     with pytest.raises(ConfigError) as exc:
         publish_plugins(registry, _config("reserved-plugin"))  # even enabled, rejected
     message = str(exc.value)
@@ -238,7 +239,7 @@ def test_reserved_name_bundle_is_rejected(monkeypatch: pytest.MonkeyPatch) -> No
 def test_unbundleable_kind_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     plugin = _plugin("excluded-plugin", anchor=_EXCLUDED_ANCHOR)
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
-    registry = Registry.empty()
+    registry = registry_with_shell()
     with pytest.raises(ConfigError) as exc:
         publish_plugins(registry, _config())  # not enabled: rejection is publish-time, not gated
     message = str(exc.value)
@@ -258,7 +259,7 @@ def test_enable_every_shipped_plugin_finalizes_clean(monkeypatch: pytest.MonkeyP
     b = _plugin("plugin-b", anchor=f"{__package__}._manifest_fixture")  # an apt-source fixture
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {a.name: a, b.name: b})
     config = _config("plugin-a", "plugin-b")
-    registry = Registry.empty()
+    registry = registry_with_shell()
     publish_plugins(registry, config)
     registry.finalize(enablement_sources=[plugin_enablement_source(config)])
     assert registry.graph.enablement_of("agent-template", "fixture-agent-tmpl") is Enablement.enabled

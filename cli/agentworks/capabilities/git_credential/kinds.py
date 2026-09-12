@@ -178,9 +178,11 @@ GIT_CREDENTIAL_PROVIDER_DESCRIPTOR = CapabilityKindDescriptor(
     readiness=_readiness,
     publisher_source="agentworks.capabilities.git_credential",
     config_schema=ConfigContract(base=AgwModel, discriminator="name"),
-    manifest_section=HostSurface(
-        host_kind="git-credential",
-        naming_field="provider",
+    manifest_sections=(
+        HostSurface(
+            host_kind="git-credential",
+            naming_field="provider",
+        ),
     ),
 )
 """The git-credential-provider record in the capability-kind descriptor

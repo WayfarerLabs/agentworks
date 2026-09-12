@@ -19,6 +19,7 @@ from agentworks.vms.sites import (
     resolve_site,
     site_manifest_hint,
 )
+from tests.conftest import registry_with_shell
 
 
 @pytest.fixture(autouse=True)
@@ -34,7 +35,7 @@ def _enabled_everywhere(monkeypatch: pytest.MonkeyPatch) -> None:
 def _registry(*sites: VMSiteDecl) -> Registry:
     from tests.conftest import publish_all_platforms
 
-    registry = Registry.empty()
+    registry = registry_with_shell()
     builtin_manifests.publish_to(registry)
     # Publish all four capability rows regardless of the test host.
     publish_all_platforms(registry)
@@ -161,11 +162,10 @@ def test_select_site_infers_the_single_declared_site(
 ) -> None:
     """Exactly one declared site: use it silently (the zero-config
     case: a default install has only its host's bundled site)."""
-    from agentworks.resources import Registry
     from agentworks.vms.sites import select_site
     from tests.conftest import publish_all_platforms
 
-    registry = Registry.empty()
+    registry = registry_with_shell()
     publish_all_platforms(registry)
     registry.add(
         "vm-site",
@@ -212,11 +212,10 @@ def test_select_site_errors_between_several_when_non_interactive(
 
 def test_select_site_errors_when_none_declared() -> None:
     from agentworks.errors import ValidationError
-    from agentworks.resources import Registry
     from agentworks.vms.sites import select_site
     from tests.conftest import publish_all_platforms
 
-    registry = Registry.empty()
+    registry = registry_with_shell()
     publish_all_platforms(registry)
     registry.finalize()
     with pytest.raises(ValidationError, match="no vm-sites are ready"):
