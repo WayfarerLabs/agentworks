@@ -9,16 +9,21 @@ The current delivery implementations are SSH, Lima, remote Lima, WSL2, and Proxm
 and GCP reuse SSH for native access. The public abstraction has two tiers; `RunContext` currently
 delivers the richer tier only.
 
-| Current owner                                                  | Target change                                                                                   |
-| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `transports/base.py`, concrete transports, Proxmox transport   | Common execution target above carrier delivery; explicit optional interaction.                  |
-| `transports/__init__.py`, VM platform native/provision results | Construct the new target under the same explicit route ownership.                               |
-| `capabilities/base.py`, VM/agent/session context constructors  | Deliver the new target type through existing identity accessors.                                |
-| Capability readiness and operations, setup invocation runners  | Consume the common type without rebuilding transports or context authority.                     |
-| `harness_setup/runner.py`                                      | Move prepared environment policy into shared target defaults; retire forwarding implementation. |
-| `remote_exec.py`, backup, initialization, native logout        | Use managed job start/observe/wait/dispose with explicit retention.                             |
-| VM/agent exec and shell, sessions/consoles                     | Preserve command/stdin and terminal behavior while using shared execution and feature checks.   |
-| SSH-named shared result/error/logger types                     | Move generic execution facts into transport-neutral vocabulary.                                 |
+SSH also reaches remote Lima placement hosts. `lima.py:551` constructs this target, `:616` starts
+detached VM provisioning on it before the guest exists, and `:704` cancels that work during
+rollback. This host target participates in the shared execution/job migration without being
+delivered as a guest target through `RunContext`; its macOS-compatible userspace must be preserved.
+
+| Current owner                                                                   | Target change                                                                                          |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `transports/base.py`, concrete transports, Proxmox transport                    | Common execution target above carrier delivery; explicit optional interaction.                         |
+| `transports/__init__.py`, VM platform native/provision results                  | Construct the new target under the same explicit route ownership.                                      |
+| `capabilities/base.py`, VM/agent/session context constructors                   | Deliver the new target type through existing identity accessors.                                       |
+| Capability readiness and operations, setup invocation runners                   | Consume the common type without rebuilding transports or context authority.                            |
+| `harness_setup/runner.py`                                                       | Move prepared environment policy into shared target defaults; retire forwarding implementation.        |
+| `remote_exec.py`, backup, remote Lima host provisioning/rollback, native logout | Use managed job start/observe/wait/dispose with explicit retention and actual execution-host identity. |
+| VM/agent exec and shell, sessions/consoles                                      | Preserve command/stdin and terminal behavior while using shared execution and feature checks.          |
+| SSH-named shared result/error/logger types                                      | Move generic execution facts into transport-neutral vocabulary.                                        |
 
 ## Sequence
 

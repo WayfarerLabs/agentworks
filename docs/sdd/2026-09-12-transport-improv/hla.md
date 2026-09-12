@@ -31,6 +31,12 @@ These are responsibilities, not a requirement for six class hierarchies. The tar
 carrier and small shared helpers. Concrete adapters stay with their current package owners;
 Proxmox-specific API handling stays in the Proxmox plugin.
 
+The same execution and job mechanics serve the existing remote Lima placement-host target. Its
+identity is the SSH host and bound host user, not a VM that has yet to be created. The Lima platform
+owns this target inside provisioning and rollback; it is not delivered through guest admin/agent
+accessors in `RunContext`. This preserves an existing use of SSH without adding arbitrary host
+discovery or a second detached implementation.
+
 ## Public target contract
 
 The proposed vocabulary is `run`, `script`, `start`, file operations, and `interactive`. Names are
@@ -104,16 +110,18 @@ Derived environment views retain the same identity, route, optional features, an
 
 Sensitive values travel through protected finite input or restricted staging, never interpolated
 into argv. Script source and program stdin have separate storage/delivery even when both need
-staging. Sensitive execution defaults to discarded streams, including remote job output. Any
-temporary sensitive material is private to the executing identity and removed under an owned
-lifecycle; disconnect-related cleanup debt remains visible for the next authorized operation. This
-is protection against incidental disclosure, not a sandbox against guest root or malicious
-in-process plugins.
+staging. Sensitive execution defaults to discarded streams, including remote job output. Existing
+interactive/streaming operations explicitly select live presentation under their own output policy;
+the transport neither silently suppresses that stream nor claims it cannot reflect workload secrets.
+That selection does not authorize logging or persisting the stream. Any temporary sensitive material
+is private to the executing identity and removed under an owned lifecycle; disconnect-related
+cleanup debt remains visible for the next authorized operation. This is protection against
+incidental disclosure, not a sandbox against guest root or malicious in-process plugins.
 
 ## Delivery and bootstrap
 
-The internal carrier interface describes dispatch of a prepared guest invocation with finite input
-and observation of completion. A synchronous CLI carrier and QGA's dispatch/poll carrier satisfy the
+The internal carrier interface describes dispatch of a prepared invocation with finite input and
+observation of completion. A synchronous CLI carrier and QGA's dispatch/poll carrier satisfy the
 same observable contract. Their internal handles need not share a wire protocol.
 
 Shared fallback transfer uses bounded, encoded chunks and guest-side staging when direct transfer is
@@ -128,6 +136,12 @@ available at provisioning. The LLD must enumerate the minimal shell/tools used b
 helpers and demonstrate that delivering those helpers does not depend on themselves. No Phase B
 package install or Tailscale access can be a hidden prerequisite.
 
+The existing remote Lima placement-host consumer must also work on its supported host userspace,
+including macOS. Shared job/file helpers must not assume Debian paths, GNU-only command options, or
+guest identity files on that target. The LLD names portable helper prerequisites and host-specific
+preparation where needed; it preserves explicit host login/PATH setup used to locate `limactl`.
+Managed Debian guest guarantees remain unchanged, and host access does not require a guest context.
+
 Read-only readiness probes use a direct invocation or bounded reads. They cannot trigger the
 staging/spooling/job fallback that writes guest files. Readiness call sites choose bounded probes;
 the LLD must provide a way to prevent implicit preparation writes in a readiness target. This is an
@@ -141,14 +155,17 @@ unqualified recursive-delete default. Atomicity and crash durability are distinc
 ## Detached jobs and lifetimes
 
 Managed jobs are a shared execution facility, replacing `remote_exec.py` and hand-built `nohup` call
-sites. The initial implementation direction is a small staged guest wrapper using existing userspace
-detachment and process-group mechanisms, with identity-private records for launch, stdout/stderr,
-and completion. It is not a service scheduler or replacement for sessions.
+sites. The initial implementation direction is a small staged wrapper on the execution host using
+existing userspace detachment and process-group mechanisms, with identity-private records for
+launch, stdout/stderr, and completion. It is not a service scheduler or replacement for sessions.
 
 Each launch has a fresh identifier. An explicit existing reference means observe that launch;
-identical command text or a reused pathname does not. The guest publishes launch/completion facts
-atomically. A reference identifies the VM instance, guest identity, boot, and job, without secrets
-or an embedded connection. PID alone is insufficient proof of ownership.
+identical command text or a reused pathname does not. The wrapper publishes launch/completion facts
+atomically. A reference binds the actual execution host, execution identity, boot incarnation, and
+job, without secrets or an embedded connection. Managed guest targets additionally bind VM instance
+identity; placement-host jobs do not invent a VM identity. PID alone is insufficient proof of
+ownership. The owning resource operation stores references needed across invocations; the exact
+storage belongs in its LLD, not a new general job registry.
 
 Starting, waiting, observing output, requesting cancellation, and disposing artifacts are separate
 operations. Waiting never deletes the evidence needed for another authorized observer. Cancellation
