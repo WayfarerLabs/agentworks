@@ -359,3 +359,13 @@ approved R3 no-op contract: a current applied declaration does not claim native 
 installation. The merge-preserve policy retains existing values as requested; source edits require
 merge-overwrite when they should replace existing values. Neither changes as part of the preflight
 correction.
+
+The integrated correction at `8d9c112e` passed 8,946 tests with three skips using the installed
+Codex CLI 0.153.4 and Claude Code 2.1.265. Ruff and strict mypy (804 files) passed, as did file
+lint, locked-SDD and Typer-isolation checks, website Python (160) and Node (103) tests, and
+deterministic builds for both site bases. The 16 new manager cases cover existing and pending
+owners, refusal before secret resolution, one recommendation warning, preserved runtime and
+rollback. Independent project, complexity and correctness reviews of the correction are clean; the
+project reviewer reproduced the fixed ordering and both original findings are closed. The one
+authorized iteration is complete pending its exact-head GitHub checks. The separate R3 review
+disagreement awaits the operator's ruling; live acceptance and final SDD locking remain open.
