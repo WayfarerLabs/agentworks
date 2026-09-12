@@ -175,9 +175,9 @@ clear without manufacturing one rule per fact. Hints are supplied through the ar
 automatic emission by install commands, env declarations or features is separate future work.
 
 **R7. Keep sessions and owners isolated.** Session publication under a user's home must respect that
-user's access boundaries and must not unintentionally affect another session in the same workspace. Define
-cleanup and replacement behavior for session restart, deletion and name reuse. A session consumes
-applicable ancestor results without repairing ancestor setup implicitly.
+user's access boundaries and must not unintentionally affect another session in the same workspace.
+Define cleanup and replacement behavior for session restart, deletion and name reuse. A session
+consumes applicable ancestor results without repairing ancestor setup implicitly.
 
 **R8. Reconcile owned effects.** Repeated setup converges. Removing a reference, changing a bundle,
 removing an activation or deleting an owning resource has an explicit outcome for previously

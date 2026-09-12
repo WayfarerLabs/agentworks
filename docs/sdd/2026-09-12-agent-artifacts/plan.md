@@ -45,8 +45,8 @@ not a speculative list of subsystems now.
       speculative reconciliation machinery or source-specific propagation formats.
 - [ ] Run independent project and complexity reviews, complete the applicable checks, and publish
       the HLA checkpoint for operator and saga review.
-- [ ] Obtain HLA approval, then replace the initial implementation outline with concrete work
-      units, necessary LLDs, acceptance scenarios and delivery boundaries.
+- [ ] Obtain HLA approval, then replace the initial implementation outline with concrete work units,
+      necessary LLDs, acceptance scenarios and delivery boundaries.
 
 ## Implementation outline, pending design
 
@@ -57,3 +57,11 @@ not a speculative list of subsystems now.
 - [ ] Validate the approved source, routing, isolation, update, removal and failure matrix using
       local fixtures and authorized live resources; independently verify cleanup.
 - [ ] Reconcile all requirements against observed evidence and lock this SDD at actual completion.
+
+## Seed review evidence
+
+Independent project and complexity reviews of `7c744828..5fff8a0c` found no material issues. The
+project review's minor signature request was incorporated into the saga coordination message. Both
+reviews confirmed that new scope remains proposed and the predecessor's seven acceptance/cleanup
+obligations remain open. No code or live resources were changed. The seed handoff records repository
+checks and final-head CI separately; this is not artifact implementation or acceptance evidence.
