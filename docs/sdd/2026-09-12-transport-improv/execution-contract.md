@@ -39,9 +39,11 @@ no anonymous `background=True` or caller-written `nohup` requirement.
 Shared keyword options are `sudo`, `env`, `cwd`, `stdin`, `output`, `sensitive`, and `deadline`.
 Foreground calls also accept `check`; `wait` accepts it when collecting a job result. Elevation is
 non-interactive and requires both the bound elevation grant and guest authority. A VM admin account
-alone does not authorize `sudo=True`. Shell defaults are absent unless deliberately bound by the
-operation; a script without either an explicit policy or that bound default is rejected. `Shell`
-separates interpreter choice from login and interactive startup as specified in the HLA.
+alone does not authorize the API's `sudo=True` option. This does not block sudo invoked inside an
+otherwise allowed command under an account that already has that guest authority. Shell defaults are
+absent unless deliberately bound by the operation; a script without either an explicit policy or
+that bound default is rejected. `Shell` separates interpreter choice from login and interactive
+startup as specified in the HLA.
 
 Finite byte input works on every target; omission means EOF, not inherited console input. Foreground
 calls may explicitly select `Input.live(source)` for non-terminal piped or duplex work on a channel
@@ -84,14 +86,14 @@ the view itself has no forwarding `run`, `upload`, or other all-authority conven
 | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
 | `commands()` returning `CommandAccess` or `None` | `run`, `script`, `interactive`, subject to the bound action and elevation restrictions.                       |
 | `files()` returning `FileAccess` or `None`       | Upload/write and download operations, including directory forms; read and write can be granted independently. |
-| `jobs()` returning `JobAccess` or `None`         | `start`, observation/output/wait, cancellation and disposal, independently restrictable for owned jobs.       |
+| `jobs()` returning `JobAccess` or `None`         | `start`, observation/output/wait, cancellation and disposal, independently granted for owned jobs.            |
 
 These are small typed interfaces over shared execution mechanics, not new transport subclasses or a
 generic permissions registry. Withhold a whole interface when none of its actions is granted. For a
-partially granted interface, expose its bound allowed actions as passive metadata and reject an
-ungranted method with `AuthorizationError` before preparation, local/remote file I/O or dispatch,
-regardless of `check`. Do not dynamically delete Python methods or rely on callers checking metadata
-to enforce the restriction. Exact grant value representations belong in the LLD.
+partially granted interface, expose its bound allowed actions as passive metadata and reject a
+method lacking a grant with `AuthorizationError` before preparation, local/remote file I/O or
+dispatch, regardless of `check`. Do not dynamically delete Python methods or rely on callers
+checking metadata to enforce the restriction. Exact grant value representations belong in the LLD.
 
 The composition root binds recipient, identity, route, permitted actions and elevation once before
 delivery. Future plugin policy supplies that decision; a plugin-supplied name, `OperationScope`, or
@@ -105,7 +107,8 @@ may use internal command delivery for staging without exposing `CommandAccess`; 
 stage source without exposing `FileAccess`. Internal helpers cannot be requested as a back door to
 arbitrary execution through a file-only interface. Validate that boundary, not that no internal
 command was used. As FRD R9 states, an arbitrary foreground or detached execution grant already
-conveys the execution user's filesystem powers, and these in-process views are not a plugin sandbox.
+conveys the execution account's guest authority, including filesystem and configured sudo powers;
+these in-process views are not a plugin sandbox.
 
 The public surface does not expose SSH credentials, provider task IDs, or a carrier constructor.
 `RunContext.admin_target()` and `.agent_target()` become `ExecutionTarget | None` at cutover, with

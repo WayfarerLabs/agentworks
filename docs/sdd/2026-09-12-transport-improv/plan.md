@@ -18,10 +18,10 @@ checkpoint.
       secrets, shell defaults, and lifetime behavior have no conflicting owners.
 - [ ] Specify permission-scoped interface composition and bound action checks. Done when command,
       file and job interfaces can be withheld independently, upload/download and job observation/
-      cancellation can be distinguished, and admin access does not imply root elevation. Restricted
-      view tests must prove refusal before effects, preserved restrictions in derived views, and no
-      public unrestricted-target escape. Grant configuration/evaluation and hostile plugin isolation
-      remain separate future work.
+      cancellation can be distinguished, and admin access does not imply API-performed root
+      elevation. Restricted view tests must prove refusal before effects, preserved restrictions in
+      derived views, and no public unrestricted-target escape. Grant configuration/evaluation and
+      hostile plugin isolation remain separate future work.
 - [ ] Write execution/context and file/job low-level designs. Done when exact request/result shapes,
       no-staging readiness, bootstrap prerequisites, transfer bounds/path policy, job ownership,
       cancellation, retention, and stale-record handling are specified. Include the existing macOS
