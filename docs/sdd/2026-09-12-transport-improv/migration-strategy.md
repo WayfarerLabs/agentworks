@@ -1,6 +1,6 @@
 # Transport Improvements: Migration Outline
 
-- Status: Revised draft; parallel build followed by complete production cutover
+- Status: Revised draft; contract proof, design reconciliation, parallel build, complete cutover
 - Baseline: `7c744828184ccb0ad9ffd90a8a02226384fb384e`, inspected 2026-09-12
 
 ## Inventory and destination
@@ -14,6 +14,11 @@ detached VM provisioning on it before the guest exists, and `:704` cancels that 
 rollback. This host target participates in the shared execution/job migration without being
 delivered as a guest target through `RunContext`; its macOS-compatible userspace must be preserved.
 
+The destination is reusable SSH-backed platform access. Remote Lima supplies its first management
+commands and guest-hop integration; the shared SSH carrier and host target do not depend on Lima.
+Another platform can compose the same host access without inheriting Lima behavior or introducing
+another SSH runner. Existing host/guest identities and operation lifetimes remain distinct.
+
 | Current owner                                                                   | Target change                                                                                          |
 | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
 | `transports/base.py`, concrete transports, Proxmox transport                    | Common execution target above carrier delivery; explicit optional interaction.                         |
@@ -25,7 +30,13 @@ delivered as a guest target through `RunContext`; its macOS-compatible userspace
 | VM/agent exec and shell, sessions/consoles                                      | Preserve command/stdin and terminal behavior while using shared execution and feature checks.          |
 | SSH-named shared result/error/logger types                                      | Move generic execution facts into transport-neutral vocabulary.                                        |
 
-## Parallel build
+## Parallel build after the proof gate
+
+The [design and delivery plan](plan.md) owns the mandatory sequence and proof matrix. First agree
+and prove the small shared contract, then incorporate findings into both efforts' artifacts. Broad
+parallel implementation starts only after that gate, not while stream separation or shell bootstrap
+is being independently improvised. The OpenSSH 8.5 floor and its applicable locations are recorded
+before proof acceptance. The proof is not full-platform acceptance or a production cutover.
 
 Build the destination execution stack in separate modules while the old production path remains
 operational. New internal entry points and test composition roots exercise common requests/results,
@@ -42,8 +53,11 @@ Develop against the [proposed carrier contract and destination layout](execution
 proposed revised SSH assignment is a new carrier and connection/trust implementation under
 `execution/carriers/ssh/`, not consolidation of the old runner. This effort builds shared semantics
 and the other adapters, then composes the new SSH carrier. This differs from #757's currently
-published plan and awaits its developer's review. No old execution code is called from the new
-stack, directly or indirectly. Copying and adapting useful code and tests is permitted.
+published plan; the SSH developer supports the revised assignment in feedback relayed by the
+operator, and their artifacts still need reconciliation after the proof. No old execution code is
+called from the new stack, directly or indirectly. Copying useful code and tests is permitted.
+Transport owns applying reusable SSH policy in platform-host access, Lima adapters/provisioning and
+provider-inner paths; SSH owns the policy/guarantees and independent connection/trust migration.
 
 Old and new implementation code intentionally coexist during development; production continues using
 only the old stack until the coherent cutover. Configuration and trust records are retained state,
@@ -58,15 +72,14 @@ workflows on isolated resources, never by sending one production request down bo
 
 ## Sequence and cutover gates
 
-1. Settle the FRD/HLA and confirm the new-stack ownership/seam agreement with the SSH developer.
-   Resolve execution/context and file/job LLDs, including shell startup and guest/host
-   prerequisites.
-2. Build the new stack independently. Exercise literal commands, selected-shell scripts, sensitive
-   input, files, and jobs against at least SSH, Proxmox QGA, and placement-host execution early.
-   Complete the remaining adapters before claiming platform coverage.
-3. Integrate the independently built SSH carrier. Verify the single-attempt primitive, explicit
-   connection policy, and truthful status-255 handling; apply environment, shell, elevation, and
-   suppression exactly once. Run new-stack tests with the legacy execution modules unavailable.
+1. Pass the plan's small-contract proof gate under its own authorized charter. No legacy
+   consolidation is a prerequisite, and an unresolved shell/input/output boundary blocks expansion.
+2. Reconcile both SDDs against the proof and publish the agreed implementation boundary. Finalize
+   execution/context and file/job LLDs and remaining platform feasibility before broad development.
+3. Build in parallel and integrate the independent SSH carrier, shared execution, and all supported
+   adapters. Verify single-attempt delivery and truthful status-255 handling; apply preparation
+   exactly once. Run new-stack tests with legacy modules unavailable, and test reusable
+   platform-host composition independently from Lima-specific management commands.
 4. Validate complete new-stack workflows through internal entry points: provisioning, native
    recovery with Tailscale unavailable, plugin operations, backup, and interactive attachment.
    Validate new context delivery independently while the production context still uses the old API.
@@ -135,8 +148,8 @@ acknowledged detached launch; later observation opens a fresh authorized context
   does not establish that old code can read new state. Prefer a forward repair when it cannot.
 - A context target can outlive its route accidentally. Lifetime checks and later-observation tests
   must cover both normal exit and exceptions.
-- In-flight SSH changes can move migration sites. Agree on the revised new-carrier assignment with
-  the SSH developer before implementation; do not assume #757 has already adopted this proposal.
+- In-flight SSH changes can move migration sites. Reconcile the artifacts after the shared proof;
+  developer support for the direction does not mean #757 already records the proven contract.
 - Contract versions and any job persistence changes require an explicit compatibility decision after
   the caller inventory. This draft does not assume that aliases or a database migration are
   necessary.

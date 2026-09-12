@@ -75,8 +75,19 @@ deferred. That published plan describes consolidation, not an independent replac
 operator direction requests a new SSH stack too, allowing copied code but forbidding dependencies on
 legacy execution packages. The revised proposal keeps connection mechanics with that effort and
 assigns the common execution/context contract here; both build independently against the
-[proposed seam](execution-contract.md). The SSH developer still needs to review and reconcile the
-changed delivery approach in their own SDD.
+[proposed seam](execution-contract.md). In feedback relayed by the operator after reviewing
+`0a4c3746`, the SSH developer supports that assignment and recommends proving the seam first,
+unifying input ownership, and assigning platform integration to the transport effort. The operator
+directs this revision and clarifies that Remote Lima is the first consumer of generalized SSH-backed
+platform access. This is design input and direction, not runtime evidence or an already-updated PR
+#757.
+
+The [plan](plan.md) therefore gates broad parallel work on an end-to-end buffered proof and a
+bounded QGA case, followed by reconciliation of both SDDs. The operator specifies OpenSSH 8.5 as the
+minimum; the proof inventory must record the floor's applicable executable locations and server
+compatibility. The new input/stream ownership contract and platform-host composition are described
+in the contract and HLA, without adding a virtualization framework or claiming exact SSH exit/drop
+classification.
 
 The two in-tree production `run_detached` calls are remote Lima provisioning and backup. Lima sets
 `reuse_completed=False` at `capabilities/vm_platform/lima.py:623`; backup creates a fresh directory
