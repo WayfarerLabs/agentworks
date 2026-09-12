@@ -246,8 +246,8 @@ harness has a suitable mechanism, and explicit unsupported outcomes where it doe
 capability merely from a similarly named harness setting or from files being present. Include worked
 examples for native placement, deferral, inactive ancestors and two concurrent sessions. The matrix
 must identify any first-delivery limitation before the HLA is approved. State the evidence that
-counts as handled in each case, including shell's explicit file consumption and the appropriate
-native loading or availability contract for rules, skills and agents.
+counts as handled in each case, including shell's file publication and discoverability and the
+appropriate native loading or availability contract for rules, skills and agents.
 
 **R6. Give hints an appropriate representation.** Integrations may aggregate small hints into a
 native rule or include them in launch context when supported. Keep hint provenance and lifecycle
