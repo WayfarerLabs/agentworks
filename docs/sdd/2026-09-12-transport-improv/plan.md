@@ -17,7 +17,9 @@ checkpoint.
       secrets, and lifetime behavior have no conflicting owners.
 - [ ] Write execution/context and file/job low-level designs. Done when exact request/result shapes,
       no-staging readiness, bootstrap prerequisites, transfer bounds/path policy, job ownership,
-      cancellation, retention, and stale-record handling are specified.
+      cancellation, retention, and stale-record handling are specified. Include the existing macOS
+      placement-host provisioning/rollback path and its helper prerequisites; it uses the shared job
+      mechanism before any guest target exists.
 - [ ] Establish Proxmox and WSL2 feasibility under a separately authorized live-test charter. Done
       when each design assumption has observed evidence or an explicit operator disposition.
 - [ ] Reconcile the reviewed API against ongoing SSH work and PR #789. Done when reusable work,

@@ -36,6 +36,8 @@ In scope for the eventual implementation:
 - Delivery of execution targets through `RunContext`, including context construction and consumers.
 - Existing helper and caller migration, including setup runners, initialization, backup, recovery,
   VM/agent execution, and session/console attachment.
+- Existing placement-host execution used by remote Lima provisioning and interrupt cleanup,
+  including work that runs before the VM exists. This is not a new managed-host product surface.
 
 Outside this effort:
 
@@ -110,6 +112,12 @@ streaming and terminal operations retain their explicitly documented stream sema
 Sensitive input, environment, or script content must not appear in command arguments, logs,
 exceptions, or persisted job references. Output that could reflect sensitive values is suppressed by
 default in results, logs, and guest artifacts. Required diagnostics use non-sensitive calls.
+
+The owning operation may explicitly select live output for an authorized interactive or streaming
+flow, preserving ordinary exec and session attachment even when their environment contains secrets.
+That raw presentation can reflect secrets printed by the workload; suppression is not promised for
+the selected stream. It does not enable transport logging or retained output artifacts. Merely
+binding a secret-bearing environment must not silently blank an existing interactive operation.
 
 Provider payload and output limits cannot silently truncate results or impose an unusable ceiling on
 core scripts and files. The implementation uses bounded transfer or spooling where needed, reports

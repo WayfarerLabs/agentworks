@@ -52,6 +52,12 @@ The native cloud builders in `plugins/aws/platform.py:694`, `plugins/azure/platf
 `plugins/gcp/platform.py:571` return public-IP SSH targets. Native access therefore bypasses
 Tailscale, but it still relies on SSH in the guest.
 
+`cli/agentworks/capabilities/vm_platform/lima.py:551` builds a placement-host SSH target; `:616`
+passes it to `run_detached` for provisioning before guest creation, and `:704` calls `kill_detached`
+during rollback. Shared execution/job mechanics therefore need to represent the actual execution
+host and preserve supported host userspace, including macOS. Guest-only identity and Debian tool
+assumptions would miss an existing caller.
+
 Issue #788 and PR #789 were read as problem and implementation evidence. The PR demonstrates the
 need to separate native recovery from canonical repair, while its proposed limited native CLI path
 motivates shared execution semantics. Its published test reports are external evidence, not runs
