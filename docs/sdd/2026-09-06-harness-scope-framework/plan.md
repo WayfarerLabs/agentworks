@@ -340,3 +340,22 @@ Validation: 74 focused tests, Ruff, strict mypy (803 files), file lint and locke
 Project review confirmed the Python changes are limited to terminology and test identifiers. The
 complexity review clarified ownership claims as facts within applied state and checkpoints as
 updates to that state.
+
+## Greenfield review and authorized iteration
+
+The operator commissioned an independent review of the total PR alongside published feedback and
+authorized one iteration if needed. The reviewer examined all 177 changed files from main `c7dce3d4`
+through `3be6e977`, without prior review comments or conclusions. Separate isolated selections
+passed 2,383 tests with one skip. This is local review evidence, not live acceptance.
+
+The review found that session setup prerequisites were checked after secret resolution for existing
+owners. The accepted correction moves that check to the existing preflight boundary while retaining
+post-creation checks for pending owners. A smaller guide correction states the permissions applied
+on publication and the preservation of permissions on unchanged or skipped settings files. The setup
+invocation docstring also limits checkpoint requirements to ownership changes.
+
+Published feedback is considered in the same iteration. The empty-facet disagreement concerns the
+approved R3 no-op contract: a current applied declaration does not claim native software
+installation. The merge-preserve policy retains existing values as requested; source edits require
+merge-overwrite when they should replace existing values. Neither changes as part of the preflight
+correction.

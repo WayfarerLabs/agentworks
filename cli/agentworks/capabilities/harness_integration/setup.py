@@ -15,9 +15,9 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, kw_only=True)
 class SetupInvocation:
-    """Core supplies execution and acknowledges each confirmed native mutation.
+    """Core supplies execution and acknowledges confirmed ownership changes.
 
-    Checkpoint the complete remaining claim set after each mutation. Returning
+    Checkpoint the complete remaining claim set after each ownership change. Returning
     from the callback means persistence succeeded; an exception stops further
     writes. Initial creation may buffer until the owning row is inserted.
     """

@@ -46,8 +46,9 @@ numbers are rejected. Destinations must be regular files reached without travers
 Publication uses a private sibling temporary file, checks the observed destination hash, and renames
 atomically. Traversal respects search-only ancestors. After plugin commands finish, merge policies
 use the current settings and preserve the native associations. Publication refuses if the file
-changes again between that read and the atomic write. User files are private; workspace files are
-writable by the workspace group. Permission failures do not trigger elevation.
+changes again between that read and the atomic write. Publication sets user files to mode `0600` and
+workspace files to mode `0660` with the workspace group. Unchanged or skipped files retain their
+existing permissions. Permission failures do not trigger elevation.
 
 Use non-secret settings sources. Authentication files are not supported settings roles. Captured
 contents and native command output are transferred privately and are not stored in applied-state
