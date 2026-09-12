@@ -30,6 +30,9 @@ not a speculative list of subsystems now.
 - [x] Identify predecessor acceptance separately from future framework changes and record the
       successor's proposed first delivery and open decisions.
 - [ ] Obtain operator acceptance of the FRD scope and resolve first-delivery source choices.
+- [x] Incorporate operator terminology corrections and research the agent persona naming proposal;
+      record the recommendation in [prior-art research](prior-art-research.md). Persona naming
+      remains pending agreement, and this narrow pass does not complete the research below.
 - [ ] Write `prior-art-research.md`: evaluate Rulesync's model and generators, Agent Skills package
       conventions, source acquisition options, and the actual native artifact mechanisms of each
       shipped harness. Cite primary sources and mark unsupported claims explicitly.

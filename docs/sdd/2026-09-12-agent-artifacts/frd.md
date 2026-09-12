@@ -54,12 +54,27 @@ These are recorded operator decisions, not new proposals in this seed. The prede
 [successor context](../2026-09-06-harness-scope-framework/frd.md#future-artifact-context-not-this-efforts-contract)
 and this session's authenticated direction are their source.
 
-### Artifact kinds and acquisition boundary
+### Artifact types and acquisition boundary
 
 Hints are small contextual facts, such as the availability of an environment variable or configured
 GitHub authentication. They remain distinct from rules, skills and a session's initial prompt. A
-producer needing stronger behavior can emit a rule or skill. The model must also account for
-subagent definitions, and leave room for limited hooks and MCP configuration later.
+producer needing stronger behavior can emit a rule or skill. A rule is guidance always loaded into
+context wherever that rule applies. A skill is standard
+[Agent Skills](https://agentskills.io/specification) content: a directory with a `SKILL.md` entry
+document and any supporting files, preserving the standard's metadata and progressive disclosure
+model. Loading a rule does not guarantee obedience; publishing files for shell retains the delivery
+limitation described below.
+
+The model must also account for reusable agent definitions, and leave room for limited hooks and MCP
+configuration later. **Agent persona** is the recommended name for that artifact type, pending
+operator agreement; the [terminology research](prior-art-research.md) explains why it covers both
+primary and delegated use without colliding with Agentworks' agent resource. It includes behavioral
+instructions and supported execution settings, not just personality. Native support for either use
+must be stated per integration; the name does not promise both in every harness.
+
+Use **artifact type** for these categories. Reserve **kind** for resource kinds, including the
+proposed `artifact-bundle` resource kind. An artifact is a logical input and may comprise several
+files; an artifact bundle is a reusable collection of those inputs.
 
 Workstation files, Git references and potentially packaged distributions are acquisition concerns.
 Once acquired, all sources enter one normalized representation; integrations do not carry separate
@@ -86,15 +101,31 @@ identity and producer. Origin facet follows core's scope-to-facet mapping; confi
 author an independent, potentially contradictory facet of origin. Bundle identity and consumer
 origin are separate facts.
 
+### Operations and outcomes
+
+- **Produce** means introduce artifact inputs, initially through core declarations and later
+  potentially through features. A facet does not produce artifacts; it handles, applies or defers
+  inputs. Translating inputs into native files is application and preserves their origin.
+- **Apply** is the one idempotent operation that brings owned native effects into agreement with
+  current inputs, including creation, updates and cleanup where possible. Reconciliation describes
+  that behavior; it is not a separate operation or lifecycle stage.
+- **Handle** means fulfill an input's delivery obligation for the applicable owner so it needs no
+  further propagation along that path. It is an outcome, not another mutation operation.
+- **Defer** means leave an input unhandled for a later facet, with its reason and route. A route
+  selects the next facet; placement is the native destination. Neither changes the input's origin.
+
+Applied state is the existing instance-state record of provisioned configuration and owned effects.
+It supports idempotent application; successful setup alone does not prove artifact handling.
+
 ### Routing and inactive integrations
 
-An activated producing facet can apply inputs and return what it defers, with reasons and intended
+An activated integration facet can apply inputs and return what it defers, with reasons and intended
 next facets. A VM facet can route to user, workspace or directly to session. It chooses solely from
 its own inputs and responsibilities, without discovering downstream instances or checking whether
 those descendants activate the integration.
 
 Each owner calculates its result independently for its current inputs. Later consumers reuse it;
-creating another user, workspace or session does not rerun the producer or consume its result
+creating another user, workspace or session does not rerun the ancestor facet or consume its result
 globally. A user facet processes applicable VM inputs without consulting workspaces or sessions. The
 session combines direct VM input and applicable user/workspace results. Handling for one user or
 workspace cannot discharge another's obligations.
@@ -122,9 +153,9 @@ setup. The future user feature capability is named `user-features` for both admi
 Integrations must be explicitly activated, including defaults-only configuration. Applying artifacts
 must respect the selected owner's actual identity and native placement. Session handling must not
 silently provision shared user or workspace state. Existing instance state supports idempotent
-reconciliation and cleanup of previously provisioned effects wherever ownership and native tooling
-make that possible. Parent deletion retains the existing core lifecycle; artifact bookkeeping must
-not become a prerequisite for deleting a VM and everything within it.
+application and cleanup of previously provisioned effects wherever ownership and native tooling make
+that possible. Parent deletion retains the existing core lifecycle; artifact bookkeeping must not
+become a prerequisite for deleting a VM and everything within it.
 
 The shell integration publishes artifacts as files with a documented discovery contract. There is no
 session filesystem: session-specific files belong beneath the actual user's home in an
@@ -150,11 +181,11 @@ uses consistent captured inputs. Errors identify the source and consumer without
 credentials or content. A packaged distribution source remains a later extension unless research
 shows an existing format makes it a small, justified addition.
 
-**R3. Normalize hints, rules, skills and subagent definitions.** Carry these four kinds through one
-internal representation with source provenance and complete supporting files. Preserve binary assets
-while normalizing text line endings. Acquisition must reject package paths that escape the declared
-boundary; the design must state link and file-type handling. Hooks and MCP configuration are
-recognized extension directions, not first-delivery functionality.
+**R3. Normalize hints, rules, skills and agent personas (proposed name).** Carry these four artifact
+types through one internal representation with source provenance and complete supporting files.
+Preserve binary assets while normalizing text line endings. Acquisition must reject package paths
+that escape the declared boundary; the design must state link and file-type handling. Hooks and MCP
+configuration are recognized extension directions, not first-delivery functionality.
 
 **R4. Apply and defer through explicit facets.** Implement the carried-forward owner-independent
 routing model, including lazy inactive-facet passthrough, direct-to-session fallback when VM
@@ -162,7 +193,7 @@ activation is absent, and convergence of user/workspace paths without duplicate 
 origin and destination applicability separately. Define deterministic ordering and collision
 behavior for multiple bundles and producers before implementation.
 
-**R5. Publish honestly through the shipped integrations.** Specify an artifact-kind and facet
+**R5. Publish honestly through the shipped integrations.** Specify an artifact type and facet
 support matrix for shell, Claude Code, Codex and Grok Build. Implement native delivery where the
 harness has a suitable mechanism, and explicit unsupported outcomes where it does not. Do not infer
 capability merely from a similarly named harness setting or from files being present. Include worked
@@ -179,7 +210,7 @@ user's access boundaries and must not unintentionally affect another session in 
 Define cleanup and replacement behavior for session restart, deletion and name reuse. A session
 consumes applicable ancestor results without repairing ancestor setup implicitly.
 
-**R8. Reconcile owned effects.** Repeated setup converges. Removing a reference, changing a bundle,
+**R8. Apply idempotently.** Repeated setup converges. Removing a reference, changing a bundle,
 removing an activation or deleting an owning resource has an explicit outcome for previously
 provisioned artifacts. Remove owned effects where safe; retain and diagnose ambiguous or unowned
 content. Preserve recoverable progress after failure through the existing instance-state facility.
@@ -216,9 +247,11 @@ worked manifests and migration guidance with the behavior they explain.
    error with integration-supplied reasons, but the prior decision deliberately left room for an
    explicit softer outcome. This seed does not settle that policy.
 3. Approve the researched native support matrix before committing to first-delivery coverage. Define
-   honest outcomes for harnesses that cannot express a kind or placement.
+   honest outcomes for harnesses that cannot express an artifact type or placement.
 4. Set source refresh, stable content identity, ordering and name-collision semantics in the HLA.
    These must compose with resource reuse and concurrent sessions without global consumption.
+5. Confirm **agent persona** as the name for reusable agent definitions. This is a terminology
+   recommendation; the normalized fields and primary/delegated support remain design work.
 
 ## Definition of done
 
