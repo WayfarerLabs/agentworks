@@ -76,7 +76,7 @@ and consoles. Required core workflows cannot depend on native optional features.
 ### R2. Commands and scripts
 
 Callers can execute a program with literal arguments or explicitly submit a script. Argument
-boundaries, empty arguments, quotes, whitespace, and shell metacharacters are preserved. Literal
+boundaries, empty arguments, quotes, whitespace, and shell special characters are preserved. Literal
 arguments are never implicitly interpreted as a script.
 
 Scripts support compound commands, pipelines, redirects, and multiple lines with one documented

@@ -60,7 +60,7 @@ performed for this draft.
 ## Claims not relied upon
 
 - A common API makes every backend interactive.
-- Timeout means a guest process stopped, or makes redispatch safe.
+- Timeout means a guest process stopped, or makes repeated dispatch safe.
 - PyInfra supplies the missing Proxmox carrier or Agentworks context policy.
 - A provider PID is a durable, safely cancellable job identity.
 - A detached process keeps WSL2 running after its workstation hold is released.
