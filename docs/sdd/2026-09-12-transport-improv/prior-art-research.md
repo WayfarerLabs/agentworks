@@ -79,8 +79,8 @@ assigns the common execution/context contract here; both build independently aga
 `0a4c3746`, the SSH developer supports that assignment and recommends proving the seam first,
 unifying input ownership, and assigning platform integration to the transport effort. The operator
 directs this revision and clarifies that Remote Lima is the first consumer of generalized SSH-backed
-platform access. This is design input and direction, not runtime evidence or an already-updated PR
-#757.
+platform access. This is design input and direction, not runtime evidence or a claim that the SSH
+artifacts have already been updated.
 
 The [plan](plan.md) therefore gates broad parallel work on an end-to-end buffered proof and a
 bounded QGA case, followed by reconciliation of both SDDs. The operator specifies OpenSSH 8.5 as the

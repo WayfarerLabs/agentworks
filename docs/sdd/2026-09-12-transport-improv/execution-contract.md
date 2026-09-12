@@ -176,7 +176,7 @@ or the operation deadline. Returning or raising leaves no background pump using 
 The shared preparation layer owns its temporary finite sources and closes them after the carrier
 finishes. There is no hidden rewind, reuse, or retry of a consumed input source.
 
-Input pumping and output draining are concurrent where the carrier requires it. Backpressure must
+Input pumping and output draining are concurrent where the carrier requires it. Flow control must
 bound buffering without deadlocking duplex commands. Supplied live sources and sinks must satisfy a
 bounded-cancellation contract; an arbitrary blocking callback cannot be advertised as honoring a
 deadline. The proof must settle the concrete stream shape, including short writes and EOF, before
@@ -219,8 +219,8 @@ before implementation; the low-level evidence model is not a weaker public outpu
 
 The operator's OpenSSH minimum is 8.5. Before accepting the proof, the SSH design records exactly
 which binaries and execution locations this covers, including workstation and platform-host clients
-and any provider-launched inner clients. Server compatibility is recorded separately; do not infer
-an unreviewed server-version requirement from a client-side check.
+and any provider-launched inner clients. Server compatibility is recorded separately; do not infer a
+new server-version requirement from a client-side check.
 
 Proposed construction is `SSHCarrier(connection: SSHConnection)`. The connection is a new immutable
 value with explicit host/port, account, configured identity and independently selected agent,
