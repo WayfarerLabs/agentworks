@@ -1,5 +1,95 @@
 # Changelog
 
+## [0.19.0](https://github.com/WayfarerLabs/agentworks/compare/v0.18.0...v0.19.0) (2026-09-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* **cli:** agw session resume, agw console attach --recreate, and agw session list --no-status are no longer accepted.
+
+### Features
+
+* **capabilities:** select harness config by facet ([b591817](https://github.com/WayfarerLabs/agentworks/commit/b5918177106e47f4a98bb91b6bbb3bc925602386))
+* **cli:** add explicit harness launch policies ([f193745](https://github.com/WayfarerLabs/agentworks/commit/f1937456b35bfd2490f51c672427e555e97af19e))
+* **cli:** remove lifecycle compatibility wrappers ([8b2d8c7](https://github.com/WayfarerLabs/agentworks/commit/8b2d8c79a8628441098ffed3715e14f9c6341d3d))
+* **cli:** report runnable uptime ([0c8cf6b](https://github.com/WayfarerLabs/agentworks/commit/0c8cf6bc77dd49a2a30440cde0326f37a3980689))
+* **cli:** report runnable uptime ([bbd295a](https://github.com/WayfarerLabs/agentworks/commit/bbd295a4f231fe6a1140c7fa145bf7b378a5c7e5))
+* **cli:** sort list-like output ([4808545](https://github.com/WayfarerLabs/agentworks/commit/4808545f64e1137df6aab6f18f862e6e5c8e9632))
+* **cli:** support configurable list sorting ([9ae22a8](https://github.com/WayfarerLabs/agentworks/commit/9ae22a85d3ca9cdbb6c989b45bc61ac1d63874ec))
+* configure harness integrations across resource facets ([7c74482](https://github.com/WayfarerLabs/agentworks/commit/7c744828184ccb0ad9ffd90a8a02226384fb384e))
+* **harness:** bind explicit setup attachments by resource ([28b8d91](https://github.com/WayfarerLabs/agentworks/commit/28b8d91b690b2a13ea61baec2e252f50fb457e7e))
+* **harness:** compute native settings from workstation snapshots ([ed10a0b](https://github.com/WayfarerLabs/agentworks/commit/ed10a0bb188472979e5f13329ca86cca702f9cef))
+* **harness:** define native setup invocation and ownership records ([be88ad6](https://github.com/WayfarerLabs/agentworks/commit/be88ad65e6ff794ea4f9629d0f5e3a5964917060))
+* **harness:** dispatch ordered setup with mutation receipts ([4814007](https://github.com/WayfarerLabs/agentworks/commit/48140078ad89b81130eef5ca081fd2e0fc5724c7))
+* **harness:** enforce integration-declared setup prerequisites ([6261023](https://github.com/WayfarerLabs/agentworks/commit/6261023477f31d7f3bf8376c11c6ce51bc98b464))
+* **harness:** persist native setup evidence in instance state ([bcca20a](https://github.com/WayfarerLabs/agentworks/commit/bcca20a8633ec6fbf24fc142460b3a2c0b53709d))
+* **harness:** preserve native ownership through resource deletion ([e33699c](https://github.com/WayfarerLabs/agentworks/commit/e33699c580ae290044f3416cf55b0cfec09a818c))
+* **harness:** run native setup in owning resource lifecycles ([989ec3a](https://github.com/WayfarerLabs/agentworks/commit/989ec3aa61cc7b766c63e4ed2bd3ebde83347fd1))
+* **harness:** scope setup config secret delivery ([5e51b88](https://github.com/WayfarerLabs/agentworks/commit/5e51b882c42b71c9de51babe8b5e3d055f28c352))
+* migrate stored Claude setup into user attachments ([c3d3f23](https://github.com/WayfarerLabs/agentworks/commit/c3d3f233528654e3b954277007d3abd0d9fd643d))
+* reconcile native harness user and workspace setup ([25e9725](https://github.com/WayfarerLabs/agentworks/commit/25e97255366b1d907cd250e369b6ea1c3e3f4e2a))
+* **vm-platform:** require native execution transport ([b22cc49](https://github.com/WayfarerLabs/agentworks/commit/b22cc49c984aa91e8205e035c5766b5a2aede90a))
+* **vm-platform:** require native execution transport ([595386c](https://github.com/WayfarerLabs/agentworks/commit/595386c7cca42a8b699e30747cbdf6ef1ccb3b3e))
+
+
+### Bug Fixes
+
+* **agents:** guard reinit intent before legacy conversion ([f7347cf](https://github.com/WayfarerLabs/agentworks/commit/f7347cf13a98f6e16496d9ac7b3d2380913c1ade))
+* **cli:** avoid stale runnable uptime ([1f9981c](https://github.com/WayfarerLabs/agentworks/commit/1f9981c28045f2b9a891d0ec29ebfb26015cfe38))
+* **cli:** close empty session user names ([4864771](https://github.com/WayfarerLabs/agentworks/commit/4864771af7e5f3e3fcf7b145a7765c1a8b7277ab))
+* **cli:** harden runnable start observations ([5e02b19](https://github.com/WayfarerLabs/agentworks/commit/5e02b19a4917a8820bd4a7f09ff2d7856c3dcf0c))
+* **cli:** keep stdout binding at CLI edge ([3019ec8](https://github.com/WayfarerLabs/agentworks/commit/3019ec857777e3898e4398bbf012a0820ee58ea3))
+* **cli:** keep stdout machine-pure during a stderr confirm on Windows ([1af3aaf](https://github.com/WayfarerLabs/agentworks/commit/1af3aaf55cf760a3052927e961ebebb398777aac))
+* **cli:** mark contradictory session users unknown ([3d172eb](https://github.com/WayfarerLabs/agentworks/commit/3d172eb5791ed0f552c1fa32df648feeff6d0795))
+* **cli:** own binary stdout for JSON output ([2f0426c](https://github.com/WayfarerLabs/agentworks/commit/2f0426cfde63b023fc8741f49405cbbc0ac94b65))
+* **cli:** preserve start cleanup invariants ([777d24e](https://github.com/WayfarerLabs/agentworks/commit/777d24eb78c5f9beb02d71a6aff4a9219d001f72))
+* **cli:** show session uptime in status lists ([da133da](https://github.com/WayfarerLabs/agentworks/commit/da133da1bb7c5c74d6da715e7870cbcf23902576))
+* **cli:** show session uptime in status lists ([ddd375c](https://github.com/WayfarerLabs/agentworks/commit/ddd375cfa27609b1cae8c6d078247afac03d8ade))
+* **cli:** show session users in list ([e8c249d](https://github.com/WayfarerLabs/agentworks/commit/e8c249d6bb13d8358682accdfc2c0b9f1c72c6b7))
+* **cli:** show target users in session lists ([bb818c0](https://github.com/WayfarerLabs/agentworks/commit/bb818c0afc5501043c28a997ff0134f5f6fee6b1))
+* **cli:** start only stopped sessions in bulk ([c632229](https://github.com/WayfarerLabs/agentworks/commit/c63222913dcaef030d1b399e3507411eefaf375d))
+* close runnable status feedback ([d810296](https://github.com/WayfarerLabs/agentworks/commit/d810296179f55223c81e621be6092405ce40799a))
+* **console:** reject ambiguous window indices ([02233c6](https://github.com/WayfarerLabs/agentworks/commit/02233c6fbdf1e287d5c37552d22f8b1d97a92225))
+* **console:** restore configured window order ([1d1f201](https://github.com/WayfarerLabs/agentworks/commit/1d1f201c4449bbbe6f5ce9609760179d51f5f5ba))
+* **console:** restore configured window order ([0c41c2a](https://github.com/WayfarerLabs/agentworks/commit/0c41c2a18dace7f5ef5584a3de3605278c66cf71))
+* **console:** surface window reorder failures ([e556307](https://github.com/WayfarerLabs/agentworks/commit/e556307b7d10ef95b2345903db6ecf8edf8c4790))
+* discover native harness executables through user login PATH ([7f4a79b](https://github.com/WayfarerLabs/agentworks/commit/7f4a79b5c6cff8c691cb73acccd23ef90d0d0277))
+* harden degraded recovery ([60420bc](https://github.com/WayfarerLabs/agentworks/commit/60420bc684c9aa1cf6d52229de6aa00809e8a51e))
+* **harness:** compare marketplace source identity precisely ([b456848](https://github.com/WayfarerLabs/agentworks/commit/b456848a67fed057b46c55d79513ccf644c1feed))
+* **harness:** preserve parent deletion behavior ([bcda1c6](https://github.com/WayfarerLabs/agentworks/commit/bcda1c674f9bdbdbb3da8b1b74a1c847e0600c2f))
+* **harness:** preserve prepared setup env across elevation ([5797e51](https://github.com/WayfarerLabs/agentworks/commit/5797e51102074a915a0b00730bbe25a038d6e481))
+* **harness:** reject unimplemented setup facets ([40ce6b4](https://github.com/WayfarerLabs/agentworks/commit/40ce6b4c6a8d3acc2b1841858541f706811f704f))
+* make degraded runnable recovery resilient ([c7dce3d](https://github.com/WayfarerLabs/agentworks/commit/c7dce3d4f8fd76ace69ab353bec42a8c760a902c))
+* **manifests:** also reject drive-relative --write paths on Windows ([240ac23](https://github.com/WayfarerLabs/agentworks/commit/240ac23cc2f39012d4629e29141d2325e34717d9))
+* **manifests:** reject driveless-rooted --write paths on Windows ([146f1be](https://github.com/WayfarerLabs/agentworks/commit/146f1bea732f6aab32dac4b1f009e7aef5941b44))
+* **proxmox:** bound waits and clean setup failures ([87b1c1e](https://github.com/WayfarerLabs/agentworks/commit/87b1c1e2e24dde1afb9a1e47517476a9b88b88a8))
+* **proxmox:** distinguish invalid qga status ([95193a0](https://github.com/WayfarerLabs/agentworks/commit/95193a0a2d57580cb7a1d0ee022c51d9a69bb189))
+* **proxmox:** harden native execution diagnostics ([00793b2](https://github.com/WayfarerLabs/agentworks/commit/00793b21da7b36bbf64044bf31e09e227b4539c7))
+* **proxmox:** harden setup compatibility ([65ab647](https://github.com/WayfarerLabs/agentworks/commit/65ab647b89f1406ddb6fde0d5e9b0fdd6e7d6448))
+* **proxmox:** normalize QGA status booleans ([a4371c0](https://github.com/WayfarerLabs/agentworks/commit/a4371c01a67a3b9d557f9e667481771af4bbf2cd))
+* **proxmox:** unify qga status validation ([4c52f23](https://github.com/WayfarerLabs/agentworks/commit/4c52f23bdd1fbbf7556ad1473b85ffa4124ec66a))
+* recover degraded runnable inventory ([397b82a](https://github.com/WayfarerLabs/agentworks/commit/397b82a096dfa7d935430d6887a87d125993a8f0))
+* **sessions:** check setup before resolving launch secrets ([8d9c112](https://github.com/WayfarerLabs/agentworks/commit/8d9c112ef7b7f60835481ae0265e81bc553fd6f9))
+* simplify runnable status boundaries ([fda51af](https://github.com/WayfarerLabs/agentworks/commit/fda51af87a511eabe7f01c4c802a5d96d70cf24e))
+* simplify runnable status boundaries ([8475c8a](https://github.com/WayfarerLabs/agentworks/commit/8475c8a80442acd2f1f2322de437b99d562a01ed))
+
+
+### Documentation
+
+* **cli:** clarify bulk session start help ([192f1a9](https://github.com/WayfarerLabs/agentworks/commit/192f1a95b35b1b22d110bcbbc3f320a1cd53c285))
+* **cli:** correct list JSON ordering ([1cfc9ab](https://github.com/WayfarerLabs/agentworks/commit/1cfc9ab608cfaaf88466c389d00df84a6d5707eb))
+* **harness:** align ownership checkpoint contract ([9ba5a97](https://github.com/WayfarerLabs/agentworks/commit/9ba5a97fb2fde5dd7d771514b8bedb3653ad7e90))
+* **harness:** clarify activation reference wording ([97651d3](https://github.com/WayfarerLabs/agentworks/commit/97651d3fe161ae07b30603c3fe835df763c468cf))
+* **harness:** clarify publication and checkpoint guarantees ([e77d1a2](https://github.com/WayfarerLabs/agentworks/commit/e77d1a24f7f7b086fafc0ed1e4dc91d4fedd7cb8))
+* **harness:** distinguish ownership claims from applied state ([3be6e97](https://github.com/WayfarerLabs/agentworks/commit/3be6e977bbb42c5b4b7c2d40bda8361650fd3ff4))
+* **harness:** explain facet ownership and native lifecycle evidence ([8d28e15](https://github.com/WayfarerLabs/agentworks/commit/8d28e1505935ea71ae98e783d24f8a5199f6bd45))
+* **harness:** name integration activations and generalize facet terminology ([8cc10af](https://github.com/WayfarerLabs/agentworks/commit/8cc10af5faf4574fc76a558fdc9eb6f3df3c6cc8))
+* **harness:** require implemented facets and record inactive routing ([e1bc29f](https://github.com/WayfarerLabs/agentworks/commit/e1bc29fcffa8572e75655f4bfb1d47361c976944))
+* **harness:** use applied state terminology consistently ([8253a4c](https://github.com/WayfarerLabs/agentworks/commit/8253a4c0924ef2b0c512967ea6b57777eb95c96b))
+* **harness:** use one integration activation term consistently ([4666480](https://github.com/WayfarerLabs/agentworks/commit/46664803066a73c3a0bb865df29d4e925c2c8a2d))
+* **sdd:** record native transport implementation ([913d509](https://github.com/WayfarerLabs/agentworks/commit/913d509fd0827d17058b784a73d462ea1fa58596))
+* **tests:** clarify the requires_posix_shell marker's role ([76c91fc](https://github.com/WayfarerLabs/agentworks/commit/76c91fcd1f08c03b57c05c19d6b0288d0b89d391))
+
 ## [0.18.0](https://github.com/WayfarerLabs/agentworks/compare/v0.17.0...v0.18.0) (2026-09-05)
 
 
