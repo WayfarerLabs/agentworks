@@ -224,7 +224,10 @@ the established lifecycle boundary. Descriptive `OperationScope` names never bec
 locate or manufacture an execution target.
 
 Preflight and runup retain their read-only contracts and existing timing. Targets supplied there
-must not implicitly install helpers, stage scripts, or launch jobs. Execution targets and their
+must not implicitly install helpers, stage scripts, or launch jobs. Their controlled preparation
+must not request shell startup files or depend on startup side effects. Carrier/account hooks that
+run before the payload are documented connection prerequisites, not initialization supplied by this
+API or a guarantee that arbitrary account hooks are read-only. Execution targets and their
 operation-scoped resources cannot remain usable after the owning lifetime closes. A later job
 observation receives a fresh authorized context; a saved job reference carries no credentials.
 
@@ -262,8 +265,9 @@ generic scheduling, or a second orchestration system are not implied by supporti
 
 Shell acceptance includes fixed `sh` and `bash`, user-default selection, login versus non-login
 startup, and elevated user-shell resolution. Changing carriers must not change those choices;
-literal arguments and script stdin remain intact. Readiness probes must not execute user startup
-files merely to prepare an invocation.
+literal arguments and script stdin remain intact. Readiness probes must not request user startup
+files or depend on their side effects to prepare an invocation. Acceptance distinguishes this
+controlled preparation from carrier/account bootstrap behavior described in R9.
 
 Cutover acceptance exercises complete workflows through the new stack before switching production
 entry points, then proves those entry points and plugin contexts use it exclusively. Future-facing

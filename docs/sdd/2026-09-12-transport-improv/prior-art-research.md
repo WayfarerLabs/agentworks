@@ -87,6 +87,12 @@ architecture, and uses one channel-feature description for early checks and open
 Implementation conformance still checks actual behavior; there is no second declaration to
 synchronize.
 
+The [OpenSSH server manual](https://man.openbsd.org/sshd.8) documents execution through the
+account's shell and account/server hooks before the requested command. This is why the shell policy
+separates Agentworks-controlled payload/helper preparation from carrier bootstrap: an inner wrapper
+cannot prevent hooks that have already run. Readiness does not request startup evaluation or depend
+on its side effects, but the API does not certify arbitrary account hooks as read-only.
+
 ## Claims not relied upon
 
 - A common API makes every backend interactive.
