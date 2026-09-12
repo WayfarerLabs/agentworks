@@ -45,14 +45,28 @@ The composition root binds which interfaces and actions a recipient receives. Th
 all required semantics, while command, file, and job access are separately exposed views, not
 separate execution implementations. Transport feature descriptions never stand in for permissions.
 
-The same execution and job mechanics serve the existing remote Lima placement-host target. Its
-identity is the SSH host and bound host user, not a VM that has yet to be created. The Lima platform
-owns this target inside provisioning and rollback; it is not delivered through guest admin/agent
-accessors in `RunContext`. This preserves an existing use of SSH without adding arbitrary host
-discovery or a second detached implementation. Its shared job/file helpers must preserve supported
-host userspace, including macOS, without assuming Debian paths, GNU-only options, or guest identity
-files. The LLD names portable helper prerequisites and explicit host shell/PATH preparation for
-`limactl`.
+### SSH-backed VM platform access
+
+SSH can reach a platform host to run management tools, not only a guest to run a workload. Reuse the
+same explicit SSH connection, bound execution target, and file/job mechanics for that host. Remote
+Lima is the first platform consumer; neither the SSH carrier nor host target contains Lima-specific
+configuration, VM selection, or lifecycle logic. Another platform can bind the same host access and
+provide its own management commands without importing the Lima adapter.
+
+The composition is `platform operation -> bound host target over SSH -> platform tooling`, with a
+further guest hop only when that tooling requires one. The platform owns selecting its host,
+explicit shell/PATH preparation, management commands, guest selection, and provisioning/rollback
+lifetime. Its host identity is the actual host and user, not a VM that has yet to be created. Host
+access is delivered to the owning platform operation, not substituted into guest admin/agent
+accessors in `RunContext`. Optional forwarding uses the SSH effort's reusable resource primitive
+when a platform needs it; no new platform or forwarding use is required by this draft.
+
+This is a reusable composition pattern, not a generic virtualization adapter hierarchy, host
+registry, or new managed-host product. Shared helpers preserve supported host userspace, including
+macOS, without Debian paths, GNU-only options, or guest identity-file assumptions. Remote Lima
+supplies the first real acceptance case: `limactl` provisioning before guest creation, host jobs and
+cleanup, and provider-owned inner SSH behavior. The transport effort applies and validates SSH
+policy at those platform boundaries; the SSH effort owns the reusable policy and its guarantees.
 
 ## Public target contract
 
@@ -329,29 +343,31 @@ policy remains at the layer that can prove whether repeated dispatch is safe.
 
 ## Coordination with the new SSH stack
 
-This is the proposed boundary for review with the SSH developer, based on the reduced FRD/HLA in
+This boundary follows the SSH developer's feedback relayed by the operator, following the FRD/HLA in
 [PR #757](https://github.com/WayfarerLabs/agentworks/pull/757) at `2694d31a`. It records this
-effort's integration plan; it does not amend the SSH effort's owned artifacts or claim its
-agreement. The operator now requests a new SSH stack as well. This supersedes our earlier proposal
-to integrate consolidated legacy SSH internals; it requires reconciliation with #757's currently
-published interface-preserving plan before parallel implementation begins.
+effort's integration plan and records the developer's support for the independent carrier
+assignment. It does not amend the SSH effort's owned artifacts or claim the seam is already proven.
+This supersedes integration of consolidated legacy SSH internals; both efforts must incorporate
+proof findings into their designs before broad parallel implementation begins.
 
 | Responsibility                                                                                         | Owner                                         |
 | ------------------------------------------------------------------------------------------------------ | --------------------------------------------- |
 | Explicit SSH endpoint, user, identity, agent selection, trust and trust migration                      | SSH effort (#757)                             |
 | OpenSSH config isolation, common SSH/scp options, forwarding, subprocess I/O and connection keepalives | SSH effort (#757)                             |
-| New standalone SSH carrier, with no dependency on legacy SSH execution modules                         | SSH effort (#757), proposed revised delivery  |
-| Remote Lima placement-host connection settings and provider-inner SSH isolation                        | SSH effort (#757)                             |
+| New standalone SSH carrier, with no dependency on legacy SSH execution modules                         | SSH effort (#757)                             |
+| Applying SSH policy in platform-host access, Lima adapters/provisioning and provider-inner paths       | `transport-improv`                            |
 | Application shell policy, commands/scripts, environment, cwd, elevation, sensitive-data policy         | `transport-improv`                            |
 | Common targets, optional features, files/jobs, results/errors and safe command retry policy            | `transport-improv`                            |
 | `RunContext` production cutover and core/plugin consumer migration                                     | `transport-improv`                            |
 | Final target composition and full-stack production cutover                                             | `transport-improv`, using the new SSH carrier |
 
 The SSH effort builds `execution/carriers/ssh/`; this effort builds the common contract, target,
-helpers, and other carriers. Both develop against the proposed `Carrier.execute` seam in the
-[contract document](execution-contract.md), using independently owned fixtures. Integrating the real
-SSH carrier does not require redesigning a legacy runner first. Remote Lima uses this same new
-carrier for its outer host hop, with its guest invocation prepared by the new remote Lima adapter.
+helpers, and other carriers. First they prove the small `Carrier.execute` seam in the
+[contract document](execution-contract.md) through one joint end-to-end slice, with a bounded QGA
+case checking the non-SSH shape. The transport effort owns shared preparation and public outcomes;
+the SSH effort owns the proof's connection/delivery portion. This is not a legacy consolidation
+prerequisite. After the [proof gate](plan.md) passes and both designs incorporate its findings,
+independent work proceeds against the same pinned contract and shared acceptance cases.
 
 The SSH effort owns connection/trust semantics and their state transition. This effort owns the
 common outcome model and application preparation, including moving or copying policy out of old SSH
@@ -366,6 +382,11 @@ Trust/configuration data migration is separately tested and does not call the ol
 weaken trust checks.
 
 ## Parallel build and cutover
+
+The order is mandatory: settle the small seam, prove it, reconcile both SDDs, build in parallel,
+validate complete workflows, then cut over and delete. The [plan](plan.md) owns the gate criteria.
+Only the bounded proof precedes reconciliation; broad adapter/helper development waits. The current
+authorization is to rewrite design artifacts, not to run that proof or start implementation.
 
 Use the destination package structure for the new stack, with development/test composition roots
 that exercise its contracts while production factories and `RunContext` retain the old stack. Use an

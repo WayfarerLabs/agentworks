@@ -26,8 +26,12 @@ Subsequent operator direction establishes intentional shell selection, requireme
 core and plugin workflows, and building a new execution stack alongside the old before cutting over.
 This includes a new SSH implementation, not a wrapper around the legacy SSH runner. Working code may
 be copied and adapted, but the new stack must not call or depend on the legacy execution stack. The
-proposed coordination with the SSH effort is described in the HLA for its developer to review; this
-document does not change that effort's requirements or ownership.
+coordination with the SSH effort is described in the HLA; this document does not edit that effort's
+owned artifacts. Following the SSH developer's feedback, the operator requests a small contract
+proof before broad parallel implementation, one owner for carrier input, and reusable SSH-backed
+platform access with Remote Lima as its first consumer. The operator specifies an OpenSSH minimum of
+8.5; the SSH design must make the applicable executable locations explicit before the proof gate
+closes.
 
 The operator intends future third-party plugin permissions to determine what `RunContext` exposes.
 This design supports separately granted operations and identities now, without implementing the
@@ -47,8 +51,10 @@ In scope for the eventual implementation:
 - Delivery of execution targets through `RunContext`, including context construction and consumers.
 - Existing helper and caller migration, including setup runners, initialization, backup, recovery,
   VM/agent execution, and session/console attachment.
-- Existing placement-host execution used by remote Lima provisioning and interrupt cleanup,
-  including work that runs before the VM exists. This is not a new managed-host product surface.
+- A reusable SSH-backed VM platform access pattern, first exercised by Remote Lima placement-host
+  provisioning and interrupt cleanup, including work before the VM exists. Other platform adapters
+  must be able to reuse this access without depending on Lima. New platform implementations and a
+  managed-host product surface are not implied.
 
 Outside this effort:
 
@@ -87,6 +93,12 @@ Availability describes what the channel implements, not current connectivity, au
 permission, or guest health. A temporarily broken required operation is an operational failure, not
 an unsupported feature. Canonical channels must retain the interaction needed by Agentworks sessions
 and consoles. Required core workflows cannot depend on native optional features.
+
+SSH access to a VM platform is distinct from SSH access to a guest. Platform operations bind the
+host connection, execution identity and lifetime; platform-specific tooling and any subsequent guest
+hop remain that platform's responsibility. Host work cannot require a VM identity before creation or
+borrow authority from a guest target. Remote Lima is the first consumer, not a concept built into
+the SSH carrier or a restriction on who can reuse the pattern.
 
 ### R2. Commands and scripts
 
@@ -268,6 +280,13 @@ Build the new execution stack alongside the operational old stack, validate it i
 cut production callers over to the settled contract. Temporary coexistence is an implementation
 strategy, not two supported public execution APIs or an operator-selectable transport version. The
 new path must not execute a mutation through both stacks for comparison.
+
+Before broad parallel implementation, demonstrate the small shared contract end to end, including
+shell bootstrap, input/source separation, guest output separation and no-staging readiness. The
+[plan](plan.md) defines the proof gate and the following design reconciliation, independent build,
+workflow validation and complete cutover. Unresolved seam behavior must not be independently
+invented by the two efforts. The proof is not full-platform acceptance or authority to begin it in
+this documentation-only revision.
 
 The new stack includes SSH connection and delivery machinery. It is independently usable without
 legacy execution packages installed: no imports, inheritance, forwarding calls, or indirect runtime

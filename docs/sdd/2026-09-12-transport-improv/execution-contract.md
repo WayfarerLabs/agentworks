@@ -6,8 +6,9 @@
 
 This is the proposed implementation boundary for parallel work. It gives concrete interface shapes
 without claiming the shell bootstrap, file transfer, or job protocol LLDs are complete. Agree on
-this seam before either effort builds against it. The transport effort owns the common contracts;
-the SSH effort owns its new carrier implementation. Neither imports the legacy execution stack.
+this seam, then pass the [small-contract proof gate](plan.md) before broad parallel implementation.
+The transport effort owns the common contracts; the SSH effort owns its new carrier implementation.
+Neither imports the legacy execution stack.
 
 ## Caller contract
 
@@ -145,12 +146,12 @@ plugin can implement it but ordinary capability consumers cannot use it to bypas
 Optional terminal/live-streaming behavior is selected explicitly through `CarrierIO` and refused
 before dispatch when absent from the channel's one immutable feature description.
 
-| Value                | Contract                                                                                                                                                                                                                                                     |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `PreparedInvocation` | Literal bootstrap argv, finite input source, and safe diagnostic label. Application shell, final identity, env and cwd are already prepared above the carrier. Any helper interpreter is explicit. Payload-bearing fields have no diagnostic representation. |
-| `CarrierIO`          | Capture with explicit bounds, discard, explicit byte-stream sinks, or terminal attachment. Input endpoint and terminal behavior are explicit; sensitive input cannot accidentally inherit a terminal or logging sink.                                        |
-| `Deadline`           | Remaining total budget, passed through local startup, dispatch and observation; never restarted for each poll. An explicitly unbounded operation remains distinct from a default.                                                                            |
-| `CarrierReport`      | Dispatch evidence (`not_sent`, `sent`, or `unknown`), completion evidence, observed guest status if known, carrier/local status separately, available output with completeness/provenance, and safe diagnostics.                                             |
+| Value                | Contract                                                                                                                                                                                                                                                    |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PreparedInvocation` | Literal bootstrap argv and safe diagnostic label, with no stdin field. Application shell, final identity, env and cwd are already prepared above the carrier. Any helper interpreter is explicit. Payload-bearing fields have no diagnostic representation. |
+| `CarrierIO`          | One explicit input choice: EOF, finite source, live source, or terminal endpoint. Output is bounded capture, discard, explicit byte-stream sinks, or terminal presentation. Carries effective sensitivity and authorized presentation policy.               |
+| `Deadline`           | Remaining total budget, passed through local startup, dispatch and observation; never restarted for each poll. An explicitly unbounded operation remains distinct from a default.                                                                           |
+| `CarrierReport`      | Dispatch evidence (`not_sent`, `sent`, or `unknown`), completion evidence, observed guest status if known, carrier/local status separately, available output with completeness/provenance, and safe diagnostics.                                            |
 
 `sent` means the delivery request was submitted, not that the application started or finished.
 `not_sent` requires positive evidence that no remote dispatch could have occurred. Completion is
@@ -158,10 +159,39 @@ reported only from evidence about the submitted invocation. A local SSH process 
 by itself proof of guest completion. For nested delivery, the outer report proves only the outer
 invocation; the remote Lima adapter cannot manufacture guest status from an ambiguous inner hop.
 
-`CarrierIO` carries the effective sensitivity and any explicitly authorized live presentation.
-Finite prepared input and an explicit live input source are mutually exclusive; the latter is
-available only for the live-stdio feature or explicit terminal attachment. Neither mode inherits
-workstation stdin accidentally.
+### Input and stream ownership
+
+All carrier input lives in `CarrierIO`, as one choice rather than fields that conflict across
+objects. EOF closes the carrier-owned input channel immediately. A finite source supplies a bounded
+byte sequence and then EOF. A live source requires direct live stdio support, and a terminal
+endpoint requires terminal support. Neither inherits workstation stdin accidentally. Terminal
+attachment selects terminal presentation, not an application shell, and cannot claim separate
+byte-exact guest stdout/stderr. Input/output pairing and sensitivity checks occur before dispatch.
+
+The caller owns sources, sinks and terminal endpoints it supplies; the carrier borrows them for the
+duration of `execute` and never closes them. The carrier alone consumes the selected input for that
+attempt, and owns/closes the pipes and other local delivery resources it creates. EOF on a source
+closes the outgoing input channel, not the caller's stream; observation continues until completion
+or the operation deadline. Returning or raising leaves no background pump using a borrowed stream.
+The shared preparation layer owns its temporary finite sources and closes them after the carrier
+finishes. There is no hidden rewind, reuse, or retry of a consumed input source.
+
+Input pumping and output draining are concurrent where the carrier requires it. Backpressure must
+bound buffering without deadlocking duplex commands. Supplied live sources and sinks must satisfy a
+bounded-cancellation contract; an arbitrary blocking callback cannot be advertised as honoring a
+deadline. The proof must settle the concrete stream shape, including short writes and EOF, before
+the two implementations proceed independently.
+
+A source/sink failure is a local I/O failure with safe partial execution evidence and explicit
+output completeness. Stop pumping, perform bounded local cleanup, and report the failure; do not
+retry, report successful overall execution, or claim that cleanup stopped the guest. If guest
+completion was independently observed, retain that fact alongside the I/O failure. Control-flow
+interruption still propagates as described below. No failed sink becomes a silent output discard.
+
+Public script source and application stdin remain distinct. Preparation may encode a bootstrap input
+carrying both, or use permitted staging, but only `CarrierIO` supplies the carrier input and the
+script must receive its own application bytes/EOF. The proof must demonstrate the selected
+mechanism, including sensitive-input suppression and a readiness path that stages nothing.
 
 Each call makes at most one dispatch attempt. Idempotent status polling is allowed; reconnecting and
 resending the invocation is not. On timeout or connection loss, the carrier returns the available
@@ -187,6 +217,11 @@ before implementation; the low-level evidence model is not a weaker public outpu
 
 ### SSH binding
 
+The operator's OpenSSH minimum is 8.5. Before accepting the proof, the SSH design records exactly
+which binaries and execution locations this covers, including workstation and platform-host clients
+and any provider-launched inner clients. Server compatibility is recorded separately; do not infer
+an unreviewed server-version requirement from a client-side check.
+
 Proposed construction is `SSHCarrier(connection: SSHConnection)`. The connection is a new immutable
 value with explicit host/port, account, configured identity and independently selected agent,
 host-key lookup identity, trust-file policy, and permitted connection options. It contains resolved
@@ -207,6 +242,20 @@ execution/job evidence establishes the guest outcome. No new SSH library, reconn
 connection pool is implied. Optional SCP acceleration uses the same new connection/trust option
 builder and remains beneath common file publication semantics; it is not necessary to implement the
 mandatory carrier seam.
+
+### SSH-backed platform-host binding
+
+The same `SSHCarrier(SSHConnection)` can back a platform operation's host target or a guest target.
+It accepts no Lima configuration or VM-platform discriminator. Platform composition binds the host
+identity, environment/shell policy and lifetime using the common target machinery; no guest identity
+is needed for pre-creation management work. Remote Lima is the first adapter to consume this
+pattern, not its owner or the route through which another platform must obtain host access.
+
+Platform adapters own management-tool invocation, any inner guest hop, and application of reusable
+SSH policy to those paths. Host completion proves only the host invocation; a guest outcome needs
+evidence from the inner delivery. Shared host files/jobs use actual host identity and supported host
+userspace. Reuse this composition rather than introducing another SSH runner or a generic
+virtualization framework.
 
 ## Filesystem and package layout
 
@@ -233,7 +282,7 @@ cli/agentworks/
         trust.py                trust policy and preservation of existing records
         forwarding.py           explicitly owned forwarding resources
       lima.py                   new host-local carrier
-      remote_lima.py            new nested delivery using the new SSH carrier
+      remote_lima.py            first platform consumer of reusable SSH host access
       wsl2.py                   new workstation-local carrier
   plugins/proxmox/execution.py  new QGA adapter, no legacy transport imports
   capabilities/base.py         existing RunContext, updated at cutover
