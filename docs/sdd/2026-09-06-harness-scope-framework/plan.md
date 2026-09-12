@@ -368,8 +368,9 @@ deterministic builds for both site bases. The 16 new manager cases cover existin
 owners, refusal before secret resolution, one recommendation warning, preserved runtime and
 rollback. Independent project, complexity and correctness reviews of the correction are clean; the
 project reviewer reproduced the fixed ordering and both original findings are closed. The one
-authorized iteration is complete pending its exact-head GitHub checks. The separate R3 review
-disagreement awaits the operator's ruling; live acceptance and final SDD locking remain open.
+authorized iteration is complete pending its exact-head GitHub checks. At that handoff the separate
+R3 disagreement still awaited the operator; the ruling below supersedes it. Live acceptance and
+final SDD locking remain open.
 
 ## Operator-directed unsupported-facet correction, 2026-09-11
 
@@ -387,6 +388,20 @@ their applicable inputs for the session. This is future design direction, not an
 this PR. The saga-owned earlier no-op ruling needs reconciliation by its owner; the FRD records the
 operator's superseding decision here.
 
-- [ ] Reject unsupported setup invocation and cover failure state, skipped activation, and
+- [x] Reject unsupported setup invocation and cover failure state, skipped activation, and
       successful implemented setup without changes.
-- [ ] Update FRD, HLA, examples and permanent guidance, then run checks and independent reviews.
+- [x] Update FRD, HLA, examples and permanent guidance, then run checks and independent reviews.
+
+Implementation `40ce6b4c` adds only the three base-method errors; existing dispatch records
+incomplete setup on failure and handles retirement. The final worker suite passed 8,980 tests with
+three skips, Ruff lint/format and strict mypy (804 files). Both affected modules passed 81 tests
+again in the integrated lead tree. File lint, locked-SDD and Typer-isolation checks, local Rulesync
+parity, website Python (160) and Node (103) tests, and both deterministic double builds passed.
+Installed native fixture tools remain Codex CLI 0.153.4 and Claude Code 2.1.265.
+
+Independent project and complexity reviews of `fd796bf1..40ce6b4c` are clean; each passed the 81
+affected tests in its own environment. The complexity reviewer restored the old base methods in its
+scratch tree and observed all 20 unsupported-activation cases fail, then restored the reviewed code.
+This closes B4 under the operator's decision without new runtime routing machinery. The directed
+correction is complete; the handoff records final-head CI separately. Independent live backend
+acceptance, saga-owner pickup, and final SDD locking remain open.
