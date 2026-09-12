@@ -61,13 +61,58 @@ Claude Code from the shared concept. Native filenames and configuration keys kee
 - Writing a file proves its content entered model context: not established. The support matrix must
   distinguish native loading from shell's explicit filesystem delivery contract.
 
+## Recovered acquisition safety design
+
+The [seed-time review](https://github.com/WayfarerLabs/agentworks/pull/794#issuecomment-5647882851)
+identified acquisition work removed when the predecessor deferred artifacts. The primary historical
+source is its
+[HLA at commit 5fd6a542, lines 613-700](https://github.com/WayfarerLabs/agentworks/blob/5fd6a542/docs/sdd/2026-09-06-harness-scope-framework/hla.md#L613-L700).
+That commit is reachable from merged main. It can also be read locally:
+
+```sh
+git show 5fd6a542:docs/sdd/2026-09-06-harness-scope-framework/hla.md
+```
+
+These are recovered design constraints, not implemented behavior or new live-test evidence. The FRD
+carries their safety requirements forward. This record preserves the concrete cases and the former
+design choices that the bundle ingestion design must account for.
+
+| Concern                 | Recovered constraint and design consequence                                                                                                                                                                                             |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Revision consistency    | Resolve a repository/reference once per capture to an immutable commit; every selected path uses it. Record requested ref and resolved commit without credentials.                                                                      |
+| Non-executing Git reads | Use workstation authentication and committed tree contents without repository hooks, checkout filters or export substitutions. Do not use guest credentials.                                                                            |
+| Complete selection      | Do not honor `export-ignore` by silently dropping selected members. Reject selected submodules and unresolved LFS pointers.                                                                                                             |
+| File metadata           | Preserve relative paths and executable intent from Git/local file modes; include them in normalized content identity.                                                                                                                   |
+| Repository metadata     | A Git object reader does not export `.git`. Reject Git metadata actually present in a selected local package instead of silently excluding it.                                                                                          |
+| Package boundaries      | Explicit skill root, full standard metadata and supporting files; no recursive skill discovery. Refuse links, special files, absolute/escaping paths and portable-path collisions. Never execute skill scripts to validate the package. |
+| Text normalization      | Normalize hint/rule text and `SKILL.md` to UTF-8/LF, including CRLF and lone CR, before validation, hashing and delivery. Do not rewrite the source. LF is Agentworks policy, not an Agent Skills requirement.                          |
+| Byte preservation       | Normalize supporting files only under the explicit text classifier below. Keep unknown formats opaque even if UTF-8 decoding succeeds. The ASCII-only PDF case is a required preservation fixture.                                      |
+| Stable capture          | Validate before native writes; share captured content across integrations and downstream scopes. No live source mounts or repeated fetching by integrations. A failed capture cannot claim an old snapshot as newly captured.           |
+| Bounded lifecycle       | Limit acquisition time, storage, member count, member/total size and depth; reject observed local mutation and clean temporary storage on both success and failure.                                                                     |
+
+The former classifier recognized `.md`, `.txt`, `.py`, `.sh`, `.bash`, `.zsh`, `.ps1`, `.js`,
+`.mjs`, `.cjs`, `.ts`, `.json`, `.jsonc`, `.yaml`, `.yml` and `.toml`, and required valid UTF-8
+without NUL. Other supporting members stayed byte-for-byte intact, including extensionless scripts.
+Exact contained paths in the former `preserve_bytes` control could exempt recognized supporting
+files, but never `SKILL.md`. Preserve that byte-sensitive fixture use case when choosing the new
+bundle configuration shape; do not treat a successful text decode as permission to rewrite an
+unknown format. The persisted normalized representation must preserve both opaque bytes and text.
+
+The old source spelling, declaration map, refresh-on-reinit schedule and snapshot codec are
+historical proposals, not selected interfaces for this SDD. The new `artifact-bundle` resource owns
+ingestion; source refresh and the normalized carrier still need design. Likewise, the old helper
+names are research leads, not a claim that current transfer helpers implement package capture.
+
 ## Remaining research
 
 - Specify which agent persona fields are portable or native.
 - Research Rulesync's canonical representations and generators, including its agent definitions.
 - Compare acquisition and distribution formats and define capture/update behavior.
+- Design ingestion against the recovered safety constraints, including conservative text
+  classification and byte-preserving fixtures, without restoring the old declaration/wire design.
 - Complete the artifact type and facet matrix for every shipped integration, including primary
-  versus delegated persona support and unsupported delivery outcomes.
+  versus delegated persona support and unsupported delivery outcomes. State what counts as handled
+  for shell file delivery and for each native loading mechanism.
 
 ## Sources
 

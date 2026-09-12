@@ -89,6 +89,46 @@ still design decisions. Evaluate Rulesync's canonical model and generation machi
 reuse is not an approved runtime dependency. Agentworks retains ownership of resource scopes,
 activation, routing and provisioned-resource lifecycle.
 
+### Acquisition safety carried forward
+
+The predecessor designed concrete acquisition safeguards before artifacts were deferred. They remain
+design inputs for this successor, recovered in
+[prior-art research](prior-art-research.md#recovered-acquisition-safety-design). Preserve these
+safeguards when designing bundle ingestion; the historical declaration syntax and refresh schedule
+are not selected by carrying them forward.
+
+- Capture consistent content before native writes. Resolve each Git repository/reference to an
+  immutable commit for a capture operation, and read its selected members at that revision. Keep
+  credential-free source identity, requested reference, selected path and resolved commit as
+  provenance. Integrations receive captured content, not source references to fetch themselves.
+- Acquire on the workstation with its existing authentication. Do not execute repository hooks,
+  checkout filters or bundled scripts during acquisition, apply export substitutions, or omit
+  export-ignored members. Credentials must not enter declarations, persisted provenance or
+  diagnostics. Guest authentication is not an acquisition input.
+- Preserve the complete selected package, including relative paths and executable-file intent from
+  file modes. Reject selected submodule entries and unresolved Git LFS pointers instead of claiming
+  a complete package. Git acquisition does not export `.git`; a local package containing Git
+  metadata is rejected rather than silently trimmed.
+- Select skill roots explicitly and preserve their standard metadata and supporting tree. Refuse
+  links, special files, absolute or escaping member paths, and portable-path collisions. Validate
+  package content without recursively discovering and installing unrelated skills.
+- Normalize designated text to UTF-8 and Unix LF, including CRLF and lone CR, before validation,
+  content identity and delivery. Never rewrite sources. Supporting members use a closed text
+  classification; successful UTF-8 decoding alone is insufficient. Unknown formats, including an
+  ASCII-only PDF, remain opaque bytes. Preserve byte-sensitive supporting fixtures even when their
+  suffix is recognized as text; `SKILL.md` itself must retain its required text normalization.
+- Content identity includes normalized bytes, member paths and executable intent, not timestamps or
+  acquisition provenance. Equivalent local and Git content must not cause a native rewrite merely
+  because its source changed. Persisted content must round-trip text and opaque bytes.
+- Bound capture time, storage, member count, individual and total size, and traversal depth. Reject
+  observed local mutation during capture, clean temporary acquisition storage on success and
+  failure, and never pass stale content off as a successful new capture.
+
+The design must make the byte-preservation control concrete. The predecessor called it
+`preserve_bytes`; its spelling and location in bundle configuration remain open. The historical
+classifier and the failure cases it protects are retained in the research so they are not lost while
+the new ingestion interface is designed.
+
 ### Scope, facet and placement
 
 A scope identifies an owning resource and its context. A facet is a scoped part of a capability.
@@ -164,6 +204,12 @@ session filesystem: session-specific files belong beneath the actual user's home
 and identity/reuse semantics belong in the design. File publication must not be described as proof
 that a shell workload interpreted or obeyed the content.
 
+For shell, successful publication and discoverability fulfill delivery. For a model harness, the
+native delivery mechanism must provide the artifact's promised loading or availability semantics.
+The support matrix must state these handling criteria per integration and artifact type, so the
+shared outcome **handled** does not imply identical consumption behavior. Neither outcome proves
+that a workload obeyed the content.
+
 ## Proposed first delivery scope
 
 The following requirements are proposals for this new SDD. They make the agreed direction concrete
@@ -199,7 +245,9 @@ support matrix for shell, Claude Code, Codex and Grok Build. Implement native de
 harness has a suitable mechanism, and explicit unsupported outcomes where it does not. Do not infer
 capability merely from a similarly named harness setting or from files being present. Include worked
 examples for native placement, deferral, inactive ancestors and two concurrent sessions. The matrix
-must identify any first-delivery limitation before the HLA is approved.
+must identify any first-delivery limitation before the HLA is approved. State the evidence that
+counts as handled in each case, including shell's explicit file consumption and the appropriate
+native loading or availability contract for rules, skills and agents.
 
 **R6. Give hints an appropriate representation.** Integrations may aggregate small hints into a
 native rule or include them in launch context when supported. Keep hint provenance and lifecycle
@@ -209,7 +257,13 @@ automatic emission by install commands, env declarations or features is separate
 **R7. Keep sessions and owners isolated.** Session publication under a user's home must respect that
 user's access boundaries and must not unintentionally affect another session in the same workspace.
 Define cleanup and replacement behavior for session restart, deletion and name reuse. A session
-consumes applicable ancestor results without repairing ancestor setup implicitly.
+consumes applicable ancestor results without repairing ancestor setup implicitly. Use the saga's
+[session identity contract](../2026-08-04-next-steps/scope-participation-contract.md#session-and-run-identity)
+when designing durable session ownership. It distinguishes `session_uuid` from per-incarnation
+`run_id`; neither the reusable session name nor VM `boot_id` is a substitute. Verify implementation
+availability and coordinate missing ownership with the saga lead before the HLA depends on it,
+rather than inventing an artifact-specific identity. This seed does not claim those IDs have
+shipped.
 
 **R8. Apply idempotently.** Repeated setup converges. Removing a reference, changing a bundle,
 removing an activation or deleting an owning resource has an explicit outcome for previously
