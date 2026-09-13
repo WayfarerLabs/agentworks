@@ -388,3 +388,25 @@ def test_uncaptured_ancestor_refuses_before_secrets(lifecycle, monkeypatch, oper
             lifecycle.restart()
     assert "resolve" not in lifecycle.events and "resolve_env" not in lifecycle.events
     assert "kill" not in lifecycle.events and not lifecycle.files()
+
+
+def test_new_agent_does_not_hide_known_vm_artifact_gap(lifecycle, monkeypatch):
+    from agentworks.vms.templates import ResolvedVMTemplate
+
+    monkeypatch.setattr(
+        "agentworks.vms.templates.resolve_live_template",
+        lambda *a, **k: ResolvedVMTemplate("default", artifacts=ArtifactsConfig(bundles=["team"])),
+    )
+    lifecycle.events.clear()
+    with pytest.raises(StateError) as error:
+        manager.create_session(
+            lifecycle.db,
+            lifecycle.config,
+            name="s2",
+            workspace="ws1",
+            new_agent=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+    assert error.value.entity_kind == "vm" and error.value.entity_name == "vm1"
+    assert "resolve" not in lifecycle.events and "resolve_env" not in lifecycle.events
+    assert lifecycle.db.get_agent("s2") is None and lifecycle.db.get_session("s2") is None

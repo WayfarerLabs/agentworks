@@ -226,11 +226,17 @@ def _preflight_and_resolve(
                 runner=agent_target or target,
             )
 
-            from agentworks.artifacts.routing import session_artifacts
+        from agentworks.artifacts.routing import check_existing_session_ancestors
 
-            session_artifacts(
-                db, graph.registry, vm, plan.existing_ws, plan.agent_name, graph.template.harness_integration, ()
-            )
+        check_existing_session_ancestors(
+            db,
+            graph.registry,
+            vm,
+            plan.existing_ws,
+            plan.agent_name,
+            graph.template.harness_integration,
+            pending_user=plan.new_agent,
+        )
 
     with output.section("Resolving Secrets"):
         graph.resolver.resolve()

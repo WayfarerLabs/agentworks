@@ -26,7 +26,9 @@ Keep the PR draft while work remains. Use `review-requested` for a coherent HLA 
 same PR, and remove it before incorporating changes or continuing implementation. Requirements and
 HLA approval remain explicit checkpoints; sharing a PR does not approve either. Carry
 `sdd:agent-artifacts` and `saga:next-steps` throughout. Mark ready without `review-requested` only
-when the implementation and required validation are complete and the whole PR is ready to land.
+when implementation and local gates are complete, with merge intent. The ready transition requests
+the standard integration-testing pipeline; its remaining live acceptance must finish before merge,
+and pending CI and acceptance are disclosed at handoff.
 
 ## Requirements and research
 
@@ -208,8 +210,8 @@ checks and final-head CI separately; this is not artifact implementation or acce
 
 ## Implementation private review evidence
 
-The first complete private review inspected `3b4ea08b` against `7c744828` in three isolated
-work trees. The lead accepted the concrete project, Muntz and correctness findings:
+The first complete private review inspected `3b4ea08b` against `7c744828` in three isolated work
+trees. The lead accepted the concrete project, Muntz and correctness findings:
 
 - Session deletion now holds the existing VM mutation guard through runtime teardown, file cleanup
   and row deletion, then releases it before independent parent cleanup.
@@ -234,8 +236,32 @@ work trees. The lead accepted the concrete project, Muntz and correctness findin
 
 The pre-correction full Linux suite passed 9,224 tests with three skips. The lead's lifecycle and
 publication corrections passed 52 focused tests and source/test mypy; capture and codec developers
-supplied their separate regression evidence. Final combined gates and re-review remain pending.
-Windows capture execution, live VM/user isolation, and actual native consumption/resume acceptance
-are not established by these local results. No operator live-test inventory has been supplied; local
+supplied their separate regression evidence. Final combined gates and re-review are recorded below.
+Windows capture execution, live VM/user isolation, and native discovery/resume acceptance are not
+established by these local results. No operator live-test inventory has been supplied; local
 isolated-HOME CLI acceptance proceeds independently. The SDD remains unlocked while its acceptance
 obligations are open.
+
+## Final implementation evidence
+
+Muntz and general correctness reviews were clean at `53bd6eca`. Project re-review found one remaining
+mixed-owner preflight case: a pending new agent postponed validation of an existing VM's artifact
+capture. Creation now checks each existing ancestor independently before secrets, using the same
+routing primitives as final session preparation. That correction passed 44 lifecycle/routing tests
+and focused mypy. Source corrections preserve reads through traverse-only ancestors and validate
+acquisition provenance before producing inputs that cross the persisted codec. Final private
+confirmation of the mixed-owner correction remains pending.
+
+A separate tester drove the public CLI in an isolated HOME, using real DB APIs only to create owner
+and capture fixtures. Resource discovery, schema/explain/sample, reference validation, guide
+rendering, actual-lineage artifact inspection, missing/stale/unavailable capture reporting and
+inactive VM passthrough passed. Inspection continued to work after deletion of its original source
+and omitted artifact bodies. SQLite created its standard shared-memory and empty WAL sidecars on
+first read; logical DB, resource and configuration content did not change. Fixture HOME and tester
+checkout were independently verified removed. No operator state, VM, SSH or model was touched.
+
+The ready handoff requests the normal PR integration-testing pipeline under the operator's stated
+protocol. Its live VM, two-user ownership and native-tool acceptance remain explicit pre-merge
+obligations. No live inventory was supplied to this lead, so those checkboxes remain open and this
+SDD has no lockfile. This records an acceptance dependency, not known remaining implementation work.
+The predecessor's acceptance is separate and unchanged.

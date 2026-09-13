@@ -212,19 +212,8 @@ def session_artifacts(
     local: tuple[ArtifactInput, ...],
 ) -> RoutingResult:
     """Join one actual owner diamond without consuming or rerunning ancestors."""
-    if workspace.vm_name != vm.name:
-        raise StateError("artifact routing requires the session's actual workspace on its VM")
-    vm_inputs = _vm_inputs(db, registry, vm)
-    user_inputs = _user_inputs(db, registry, vm, vm_inputs, agent_name)
-    workspace_inputs = _workspace_inputs(db, registry, workspace, vm_inputs)
-    vm_view = _require(inspect_owner_artifacts(db, registry, vm_inputs, integration_name))
-    user_route = deferred_inputs(vm_view, "user")
-    workspace_route = deferred_inputs(vm_view, "workspace")
-    assert user_route is not None and workspace_route is not None
-    user_view = _require(inspect_owner_artifacts(db, registry, user_inputs, integration_name, inherited=user_route))
-    workspace_view = _require(
-        inspect_owner_artifacts(db, registry, workspace_inputs, integration_name, inherited=workspace_route)
-    )
+    vm_view, user_view, workspace_view = _ancestor_views(db, registry, vm, workspace, agent_name, integration_name)
+    assert user_view is not None and workspace_view is not None
     inherited = session_inherited_inputs(vm_view, user_view, workspace_view)
     assert inherited is not None
     result = _unique((*inherited, *local))
@@ -235,6 +224,52 @@ def session_artifacts(
             files.extend(view.record.artifact_files)
             active.append(view.owner.facet)
     return RoutingResult(result, tuple(files), tuple(active))
+
+
+def check_existing_session_ancestors(
+    db: Database,
+    registry: Registry,
+    vm: VMRow,
+    workspace: WorkspaceRow | None,
+    agent_name: str | None,
+    integration_name: str,
+    *,
+    pending_user: bool = False,
+) -> None:
+    """Check known ancestors before secrets, even when another owner is pending."""
+    _ancestor_views(db, registry, vm, workspace, agent_name, integration_name, pending_user=pending_user)
+
+
+def _ancestor_views(
+    db: Database,
+    registry: Registry,
+    vm: VMRow,
+    workspace: WorkspaceRow | None,
+    agent_name: str | None,
+    integration_name: str,
+    *,
+    pending_user: bool = False,
+) -> tuple[ArtifactOwnerView, ArtifactOwnerView | None, ArtifactOwnerView | None]:
+    if workspace is not None and workspace.vm_name != vm.name:
+        raise StateError("artifact routing requires the session's actual workspace on its VM")
+    vm_inputs = _vm_inputs(db, registry, vm)
+    vm_view = _require(inspect_owner_artifacts(db, registry, vm_inputs, integration_name))
+    user_view = workspace_view = None
+    if not pending_user:
+        user_inputs = _user_inputs(db, registry, vm, vm_inputs, agent_name)
+        user_view = _require(
+            inspect_owner_artifacts(
+                db, registry, user_inputs, integration_name, inherited=deferred_inputs(vm_view, "user")
+            )
+        )
+    if workspace is not None:
+        workspace_inputs = _workspace_inputs(db, registry, workspace, vm_inputs)
+        workspace_view = _require(
+            inspect_owner_artifacts(
+                db, registry, workspace_inputs, integration_name, inherited=deferred_inputs(vm_view, "workspace")
+            )
+        )
+    return vm_view, user_view, workspace_view
 
 
 def session_inherited_inputs(
