@@ -180,9 +180,11 @@ Producer and bundle information remains provenance rather than part of the logic
 
 Within one scope, later selected bundles replace earlier definitions with the same type and key.
 Replacement applies to the complete definition, not individual fields or skill package members.
-Bundle inheritance likewise combines type-map keys and replaces an overridden entry as a whole.
-Inspection must identify the winning source and the sources it replaced. Changed replacements
-produce a concise warning; identical content does not warn. The HLA defines deterministic ordering.
+Bundle inheritance likewise combines type-map keys and replaces an overridden entry as a whole
+through ordinary resource resolution. Definitions discarded during inheritance are not acquired.
+When composing selected, resolved bundles, inspection must identify the winning source and the
+sources it replaced. Changed replacements produce a concise warning; identical content does not
+warn. The HLA defines deterministic ordering.
 
 Deferral preserves this separation. A receiving facet gets its local type maps and distinct deferred
 groups identified by their original owning scopes. It must not merge incoming groups into its local

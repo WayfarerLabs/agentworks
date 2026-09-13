@@ -72,6 +72,14 @@ scope's aggregate to native name precedence. Neither the file name nor successfu
 proves that two same-named files are both discoverable; the adapter's native contract must establish
 that or select another faithful representation.
 
+Native identity is type-specific. Claude documents additive rules but name-based skill and persona
+precedence; its plugin skills have a separate native namespace. Codex documents that same-named
+skills can both appear in selectors. These facts do not establish a universal basename collision
+rule. Adapters preserve additive rule/hint bodies and check skill/persona identities independently.
+See [Claude layering](https://code.claude.com/docs/en/features-overview),
+[Claude skills](https://code.claude.com/docs/en/skills), and
+[Codex skill discovery](https://learn.chatgpt.com/docs/build-skills#where-codex-loads-local-skills).
+
 ## Agent personas
 
 The portable persona has a name, description and instruction body. Native options are supplied under

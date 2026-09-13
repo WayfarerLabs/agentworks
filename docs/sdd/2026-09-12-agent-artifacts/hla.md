@@ -143,10 +143,13 @@ each map. Replacing a key retains its position. That ordering makes rendering de
 not establish precedence between actual owners. Future feature emission will use the same
 within-owner composition boundary, with its execution order specified by that future effort.
 
-The winning artifact retains its origin and source provenance, plus compact records identifying
-replaced sources and their content digests. Do not preserve recursive copies of discarded payloads
-as replacement history. Inspection explains replacements from captured evidence. Capture warns when
-content changes under the same key; identical content remains quiet even if its source changes.
+When composing selected, resolved bundles, the winning artifact retains its origin and source
+provenance, plus compact records identifying replaced sources and their content digests. Do not
+preserve recursive copies of discarded payloads as replacement history. Inspection explains
+replacements from captured evidence. Capture warns when content changes under the same key;
+identical content remains quiet even if its source changes. Ordinary bundle inheritance has already
+resolved its entries before capture; discarded parent definitions are neither acquired nor included
+in this content-based replacement history.
 
 References do not activate integrations. Existing explicit activation syntax remains unchanged:
 
