@@ -88,17 +88,17 @@ def publish_artifacts(
     if len(planned) != len(desired) or len(current) != len(previous):
         raise StateError("artifact publication contains duplicate destinations")
     with NativeFiles(runner) as files:
-        observed = {path: files.read(path) for path in dict.fromkeys((*planned, *current))}
+        observed = {path: files.fingerprint(path) for path in dict.fromkeys((*planned, *current))}
         for path in planned:
             data = observed[path]
             prior = current.get(path)
-            if data is not None and (prior is None or hashlib.sha256(data).hexdigest() != prior.sha256):
+            if data is not None and (prior is None or data != (prior.sha256, _mode(prior.executable, group))):
                 raise StateError("artifact destination is unowned or has been modified; existing content was retained")
         for path, prior in tuple(current.items()):
             if path in planned:
                 continue
             data = observed[path]
-            if data is not None and hashlib.sha256(data).hexdigest() != prior.sha256:
+            if data is not None and data != (prior.sha256, _mode(prior.executable, group)):
                 output.warn("An obsolete owned artifact was modified; its file and cleanup evidence were retained.")
                 continue
             if data is not None:
@@ -115,12 +115,12 @@ def publish_artifacts(
                 native_identity=item.native_identity,
             )
             prior = current.get(path)
-            observed_bytes = observed[path]
-            if observed_bytes != item.data or prior is None or prior.executable != item.executable:
+            observed_file = observed[path]
+            if observed_file != (digest, _mode(item.executable, group)):
                 files.publish(
                     path,
                     item.data,
-                    expected=None if observed_bytes is None else hashlib.sha256(observed_bytes).hexdigest(),
+                    expected=None if observed_file is None else observed_file[0],
                     group=group,
                     executable=item.executable,
                 )
@@ -128,3 +128,7 @@ def publish_artifacts(
                 current[path] = record
                 checkpoint(tuple(current.values()))
     return tuple(current.values())
+
+
+def _mode(executable: bool, group: str) -> int:
+    return (0o770 if executable else 0o660) if group else (0o700 if executable else 0o600)

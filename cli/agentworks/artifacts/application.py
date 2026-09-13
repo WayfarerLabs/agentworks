@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Annotated
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from agentworks.artifacts.model import ArtifactFacet
 from agentworks.schema import AgwModel
@@ -38,11 +38,22 @@ class ArtifactFile:
 class OwnedArtifactFile(AgwModel):
     """Confirmed whole-file effects within the owner's existing applied state."""
 
-    path: str
+    path: Annotated[str, Field(max_length=4096)]
     sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
-    origins: Annotated[tuple[str, ...], Field(strict=False)]
+    origins: Annotated[tuple[Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")], ...], Field(strict=False, min_length=1)]
     executable: bool = False
-    native_identity: str | None = None
+    native_identity: Annotated[str, Field(min_length=1, max_length=1024, pattern=r"^[^\x00-\x1f\x7f]+$")] | None = None
+
+    @field_validator("path")
+    @classmethod
+    def _owned_path(cls, value: str) -> str:
+        if (
+            not value.startswith("/")
+            or not value.isprintable()
+            or any(part in ("", ".", "..") for part in value.split("/")[1:])
+        ):
+            raise ValueError("owned artifact paths must be absolute normalized paths")
+        return value
 
 
 @dataclass(frozen=True)

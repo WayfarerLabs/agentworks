@@ -66,6 +66,16 @@ def test_modified_obsolete_file_retains_ownership(target):
         publish_artifacts(target, (artifact(path, b"update"),), owned, lambda files: None, roots=(str(target.home),))
 
 
+def test_modified_file_mode_is_preserved_and_diagnosed(target):
+    path = target.home / "managed"
+    owned = publish_artifacts(target, (artifact(path),), (), lambda files: None, roots=(str(target.home),))
+    path.chmod(0o700)
+    with pytest.raises(StateError):
+        publish_artifacts(target, (artifact(path),), owned, lambda files: None, roots=(str(target.home),))
+    assert publish_artifacts(target, (), owned, lambda files: None, roots=(str(target.home),)) == owned
+    assert path.exists() and path.stat().st_mode & 0o777 == 0o700
+
+
 def test_checkpoint_failure_stops_further_publication(target):
     first, second = target.home / "first", target.home / "second"
 

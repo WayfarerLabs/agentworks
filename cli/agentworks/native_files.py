@@ -34,7 +34,7 @@ try:
         try:
             next_fd = os.open(component, traverse, dir_fd=fd)
         except FileNotFoundError:
-            if op in ('read', 'delete', 'directory'):
+            if op in ('read', 'fingerprint', 'delete', 'directory'):
                 print(json.dumps({'exists': False}))
                 sys.exit(0)
             os.mkdir(component, 0o700 if not group else 0o2770, dir_fd=fd)
@@ -48,6 +48,8 @@ try:
         print(json.dumps({'exists': True}))
         sys.exit(0)
     content = None
+    actual = '-'
+    mode = 0
     try:
         source_fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
     except FileNotFoundError:
@@ -56,7 +58,17 @@ try:
         with os.fdopen(source_fd, 'rb') as source:
             if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
                 sys.exit(1)
-            content = source.read()
+            mode = stat.S_IMODE(os.fstat(source.fileno()).st_mode)
+            if op == 'read':
+                content = source.read()
+            else:
+                digest = hashlib.sha256()
+                while chunk := source.read(256 * 1024):
+                    digest.update(chunk)
+                actual = digest.hexdigest()
+    if op == 'fingerprint':
+        print(json.dumps({'exists': actual != '-', 'sha256': actual, 'mode': mode}))
+        sys.exit(0)
     if op == 'read':
         if content is not None:
             output_fd = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -64,11 +76,10 @@ try:
                 output.write(content)
         print(json.dumps({'exists': content is not None}))
     else:
-        actual = '-' if content is None else hashlib.sha256(content).hexdigest()
         if actual != expected:
             sys.exit(2)
         if op == 'delete':
-            if content is not None:
+            if actual != '-':
                 os.unlink(parts[-1], dir_fd=fd)
             sys.exit(0)
         gid = -1 if not group else grp.getgrnam(group).gr_gid
@@ -102,7 +113,11 @@ finally:
 
 def native_path(path: str) -> str:
     """Validate an external guest path before interpreting its components."""
-    if not path.startswith("/") or "\x00" in path or any(part in ("", ".", "..") for part in path.split("/")[1:]):
+    if (
+        not path.startswith("/")
+        or not path.isprintable()
+        or any(part in ("", ".", "..") for part in path.split("/")[1:])
+    ):
         raise StateError("native settings require an absolute, normalized guest path")
     return str(PurePosixPath(path))
 
@@ -243,3 +258,27 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
             raise StateError("owned native file changed; retaining it for operator inspection")
         if not result.ok:
             raise StateError("owned native file could not be removed safely")
+
+    def fingerprint(self, destination: str) -> tuple[str, int] | None:
+        """Stream a guarded file's hash and mode without copying or logging its body."""
+        command = shlex.join(
+            ["python3", "-c", _FILE_PROGRAM, "fingerprint", native_path(destination), "-", "-", "", "0"]
+        )
+        result = self.runner.run(command, check=False)
+        if not result.ok:
+            raise StateError("artifact destination is inaccessible or contains an unsuitable file or link")
+        try:
+            observed = json.loads(result.stdout)
+            if observed["exists"] is False:
+                return None
+            digest, mode = observed["sha256"], observed["mode"]
+            if (
+                observed["exists"] is not True
+                or not isinstance(digest, str)
+                or len(digest) != 64
+                or type(mode) is not int
+            ):
+                raise ValueError
+            return digest, mode
+        except (ValueError, KeyError, TypeError):
+            raise ExternalError("invalid artifact destination observation") from None
