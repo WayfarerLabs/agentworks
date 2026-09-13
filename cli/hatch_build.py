@@ -8,6 +8,7 @@ from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
 _CURATED_SOURCES = {
     "README.md": "agentworks/_guide_sources/README.md",
+    "docs/guides/harness-facets.md": "agentworks/_guide_sources/docs/guides/harness-facets.md",
     "docs/manifesto.md": "agentworks/_guide_sources/docs/manifesto.md",
 }
 

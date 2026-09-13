@@ -7,7 +7,8 @@ index-order: 45
 
 Artifact bundles supply hints, rules, standard skills, and agents (agent personas) without making
 producers depend on a particular harness. An owning scope selects bundles; explicitly activated
-integration facets decide native placement or defer to a later facet.
+integration facets decide native placement or defer to a later facet. For the scope/facet model,
+activation, environment, and prerequisites, see `agw guide show concept-harness-integrations`.
 
 Start with `agw resource explain artifact-bundle` and `agw resource sample artifact-bundle`. Use the
 owning template's `resource explain` output for `artifacts.bundles` and integration activation.
@@ -17,6 +18,8 @@ or fetching content. Recorded application is evidence of a past operation, not c
 context.
 
 <!-- agw:include path="artifacts/README.md" heading="Select an owner and a handler" -->
+
+<!-- agw:include path="artifacts/README.md" heading="A minimal bundle and consumer" -->
 
 <!-- agw:include path="artifacts/README.md" heading="Sources and refresh" -->
 
@@ -32,6 +35,8 @@ inspects. It cannot verify that a later native settings layer reenables an artif
 combination is unsupported even when the native tool would allow it. Inspect the effective native
 policy before changing restrictions; the error does not establish that the tool itself disables the
 artifact.
+
+<!-- agw:include path="artifacts/README.md" heading="Inspect before changing state" -->
 
 Before reinitializing or recreating an owner, establish authorization for that operation and inspect
 its current declaration and effects. Reinit can install, update, and remove owned files; workspace
