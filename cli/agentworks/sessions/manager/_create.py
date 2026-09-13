@@ -226,9 +226,9 @@ def _preflight_and_resolve(
                 runner=agent_target or target,
             )
 
-        from agentworks.artifacts.routing import check_existing_session_ancestors
+        from agentworks.artifacts.routing import require_session_ancestors
 
-        check_existing_session_ancestors(
+        require_session_ancestors(
             db,
             graph.registry,
             vm,

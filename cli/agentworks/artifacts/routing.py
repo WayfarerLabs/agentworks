@@ -212,7 +212,9 @@ def session_artifacts(
     local: tuple[ArtifactInput, ...],
 ) -> RoutingResult:
     """Join one actual owner diamond without consuming or rerunning ancestors."""
-    vm_view, user_view, workspace_view = _ancestor_views(db, registry, vm, workspace, agent_name, integration_name)
+    vm_view, user_view, workspace_view = require_session_ancestors(
+        db, registry, vm, workspace, agent_name, integration_name
+    )
     assert user_view is not None and workspace_view is not None
     inherited = session_inherited_inputs(vm_view, user_view, workspace_view)
     assert inherited is not None
@@ -226,21 +228,7 @@ def session_artifacts(
     return RoutingResult(result, tuple(files), tuple(active))
 
 
-def check_existing_session_ancestors(
-    db: Database,
-    registry: Registry,
-    vm: VMRow,
-    workspace: WorkspaceRow | None,
-    agent_name: str | None,
-    integration_name: str,
-    *,
-    pending_user: bool = False,
-) -> None:
-    """Check known ancestors before secrets, even when another owner is pending."""
-    _ancestor_views(db, registry, vm, workspace, agent_name, integration_name, pending_user=pending_user)
-
-
-def _ancestor_views(
+def require_session_ancestors(
     db: Database,
     registry: Registry,
     vm: VMRow,
@@ -250,6 +238,7 @@ def _ancestor_views(
     *,
     pending_user: bool = False,
 ) -> tuple[ArtifactOwnerView, ArtifactOwnerView | None, ArtifactOwnerView | None]:
+    """Resolve and check known session ancestors, skipping only pending owners."""
     if workspace is not None and workspace.vm_name != vm.name:
         raise StateError("artifact routing requires the session's actual workspace on its VM")
     vm_inputs = _vm_inputs(db, registry, vm)

@@ -177,9 +177,9 @@ records this implementation assignment for the saga and dependent efforts.
 - [x] Update permanent source/capability/state docs, operator guides, sample bundle/owner manifests,
       CLI help/completions, generated resource schemas and migration guidance with shipped behavior.
       Include the native support matrix, capture/refresh rules and VM-plus-user activation example.
-- [ ] Run required repository/CLI gates and relevant behavioral tests, package/build checks and
+- [x] Run required repository/CLI gates and relevant behavioral tests, package/build checks and
       deterministic website builds. Record actual exits and distinguish local, CI and live evidence.
-- [ ] Run independent project, Muntz and general correctness/security reviews on isolated pinned
+- [x] Run independent project, Muntz and general correctness/security reviews on isolated pinned
       work trees; critically assess and resolve material findings before handoff.
 - [ ] Run scoped live acceptance using an operator-provided inventory and budget; snapshot first,
       exercise the public CLI and native placement boundaries, and independently verify cleanup.
@@ -244,13 +244,13 @@ obligations are open.
 
 ## Final implementation evidence
 
-Muntz and general correctness reviews were clean at `53bd6eca`. Project re-review found one remaining
-mixed-owner preflight case: a pending new agent postponed validation of an existing VM's artifact
-capture. Creation now checks each existing ancestor independently before secrets, using the same
-routing primitives as final session preparation. That correction passed 44 lifecycle/routing tests
-and focused mypy. Source corrections preserve reads through traverse-only ancestors and validate
-acquisition provenance before producing inputs that cross the persisted codec. Final private
-confirmation of the mixed-owner correction remains pending.
+Muntz and general correctness reviews were clean at `53bd6eca`. Project re-review found one
+remaining mixed-owner preflight case: a pending new agent postponed validation of an existing VM's
+artifact capture. Creation now checks each existing ancestor independently before secrets, using the
+same routing primitives as final session preparation. That correction passed 44 lifecycle/routing
+tests and focused mypy. Source corrections preserve reads through traverse-only ancestors and
+validate acquisition provenance before producing inputs that cross the persisted codec. Final
+private confirmation of the mixed-owner correction remains pending.
 
 A separate tester drove the public CLI in an isolated HOME, using real DB APIs only to create owner
 and capture fixtures. Resource discovery, schema/explain/sample, reference validation, guide
@@ -265,3 +265,20 @@ protocol. Its live VM, two-user ownership and native-tool acceptance remain expl
 obligations. No live inventory was supplied to this lead, so those checkboxes remain open and this
 SDD has no lockfile. This records an acceptance dependency, not known remaining implementation work.
 The predecessor's acceptance is separate and unchanged.
+
+Final local gate exits at `cd92efd3`: Ruff 0, format 0, full source/test mypy 0, pytest 0 (9,277
+passed, seven skipped), and wheel/source-distribution build 0. File lint, locked-SDD check and
+Rulesync drift check passed. Website Python and Node tests passed; both root and project-base double
+builds and their diffs returned 0. CI's Typer isolation command returned 0. Four capture locking
+tests require Windows; other skips retain their own platform conditions. No local result substitutes
+for the pending Windows CI run.
+
+| Requirement | Implemented boundary                                                                       | Evidence and remaining acceptance                                                                      |
+| ----------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| R1          | Bundle declarations, references, owner inheritance and discovery                           | Resource/schema tests and isolated public CLI                                                          |
+| R2-R3       | Bounded workstation/Git capture, normalized complete packages, shared persisted validation | Source/codec regressions; Windows execution pending                                                    |
+| R4          | Actual-owner routing, one destination, lazy inactive passthrough                           | Routing tests and source-free public inspection                                                        |
+| R5-R6       | Native support matrix, hints aggregation and explicit unsupported results                  | Renderer/probe tests and native CLI observations; scoped native acceptance pending                     |
+| R7-R8       | Session/run identity, private placement, staged restart and owned cleanup                  | Migration/backup, publication and real-manager lifecycle tests; two-user VM acceptance pending         |
+| R9          | Qualified errors and read-only actual-lineage inspection                                   | Lifecycle errors and isolated public CLI acceptance                                                    |
+| R10         | Local artifacts, local Git and dedicated test integrations                                 | Local gates complete; ready handoff requests remaining scoped VM/native acceptance without model calls |
