@@ -62,7 +62,7 @@ class ArtifactApplication:
 
     files: tuple[ArtifactFile, ...] = ()
     deferred: tuple[ArtifactDeferral, ...] = ()
-    environment: tuple[tuple[str, str], ...] = ()
+    artifacts_dir: str | None = None
 
 
 @dataclass(frozen=True, kw_only=True)

@@ -789,7 +789,8 @@ def _launch_existing_session(
         artifact_application = validate_session_application(
             harness_start.artifacts, prepared_artifacts.context, integration=template.harness_integration
         )
-        session_env.update(artifact_application.environment)
+        if artifact_application.artifacts_dir is not None:
+            session_env["AGENTWORKS_ARTIFACTS_DIR"] = artifact_application.artifacts_dir
         stage_session_artifacts(
             db, name, template.harness_integration, session_target, prepared_artifacts, artifact_application
         )

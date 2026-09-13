@@ -343,7 +343,8 @@ def _start_session_slice(
             artifact_application = validate_session_application(
                 harness_start.artifacts, prepared_artifacts.context, integration=template.harness_integration
             )
-            session_env.update(artifact_application.environment)
+            if artifact_application.artifacts_dir is not None:
+                session_env["AGENTWORKS_ARTIFACTS_DIR"] = artifact_application.artifacts_dir
             command = _mgr._substitute_template_vars(
                 harness_start.command,
                 {"session_name": name, "workspace_name": workspace_name},

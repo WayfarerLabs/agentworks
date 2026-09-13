@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral, ArtifactFile, OwnedArtifactFile
+from agentworks.artifacts.model import ALLOWED_DEFERRALS
 from agentworks.errors import StateError
 from agentworks.native_files import NativeFiles, native_path
 
@@ -25,17 +26,14 @@ def validate_application(
         raise StateError("integration did not return an artifact application")
     identities = {item.identity for item in inputs}
     origins = {item.origin.identity for item in inputs}
-    routes = {"vm": {"user", "workspace", "session"}, "user": {"session"}, "workspace": {"session"}, "session": set()}
     deferred: set[str] = set()
     paths: set[str] = set()
-    if not all(
-        isinstance(value, tuple) for value in (application.files, application.deferred, application.environment)
-    ):
+    if not all(isinstance(value, tuple) for value in (application.files, application.deferred)):
         raise StateError("integration returned malformed artifact application sequences")
     for item in application.deferred:
         if not isinstance(item, ArtifactDeferral) or item.input_id not in identities or item.input_id in deferred:
             raise StateError("integration deferred an unknown or duplicate artifact input")
-        if item.destination not in routes[facet]:
+        if item.destination not in ALLOWED_DEFERRALS[facet]:
             if facet == "session":
                 artifact = next(value for value in inputs if value.identity == item.input_id)
                 origin = artifact.origin
@@ -58,14 +56,10 @@ def validate_application(
         if path.casefold() in paths:
             raise StateError("integration returned conflicting artifact destinations")
         paths.add(path.casefold())
-    names: set[str] = set()
-    for pair in application.environment:
-        if not isinstance(pair, tuple) or len(pair) != 2 or not all(isinstance(value, str) for value in pair):
-            raise StateError("integration returned malformed artifact environment")
-        name, value = pair
-        if name != "AGENTWORKS_ARTIFACTS_DIR" or name in names or "\x00" in value or facet != "session":
-            raise StateError("integration returned an unsupported artifact environment field")
-        names.add(name)
+    if application.artifacts_dir is not None:
+        if not isinstance(application.artifacts_dir, str) or facet != "session":
+            raise StateError("integration returned an unsupported artifact directory")
+        native_path(application.artifacts_dir)
     return application
 
 

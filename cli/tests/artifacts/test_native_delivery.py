@@ -23,6 +23,8 @@ from agentworks.artifacts.model import (
 from agentworks.artifacts.native.common import native_home, validate_ancestor_names
 from agentworks.artifacts.native.probe import probe_native
 from agentworks.artifacts.native.shell import shell_artifacts
+from agentworks.artifacts.publication import validate_application
+from agentworks.artifacts.session import validate_session_application
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
 from agentworks.errors import ConfigError, StateError
 from agentworks.plugins.claude import artifacts as claude
@@ -104,8 +106,32 @@ def test_shell_index_has_only_this_run_inputs_and_private_relative_paths():
     index = json.loads(next(file.data for file in result.files if file.path.endswith("/index.json")))
     assert index["artifacts"][0]["files"] == [f"skills/review/{member.path}" for member in item.content.members]
     assert index["artifacts"][0]["origin"]["resource_name"] == "s1"
-    assert result.environment == (("AGENTWORKS_ARTIFACTS_DIR", "/private/run"),)
+    assert result.artifacts_dir == "/private/run"
+    assert shell_artifacts((item,), "/outer").artifacts_dir is None
     assert shell_artifacts((), "/private/run", session=True) == ArtifactApplication()
+
+
+@pytest.mark.parametrize(
+    "directory", [42, (), "", "relative/run", "/private/../run", "/private//run", "/private/\x00run"]
+)
+def test_plugin_artifact_directory_requires_an_absolute_normalized_path(directory):
+    with pytest.raises(StateError):
+        validate_application(ArtifactApplication(artifacts_dir=directory), (), "session", integration="fixture")
+
+
+@pytest.mark.parametrize("facet", ["vm", "user", "workspace"])
+def test_outer_facet_cannot_supply_a_session_artifact_directory(facet):
+    with pytest.raises(StateError):
+        validate_application(ArtifactApplication(artifacts_dir="/private/run"), (), facet, integration="fixture")
+
+
+def test_session_artifact_directory_is_bound_to_the_prepared_run():
+    prepared = context(artifact(ArtifactType.HINT))
+    application = shell_artifacts(prepared.inputs, prepared.directory, session=True)
+    assert validate_session_application(application, prepared, integration="shell") is application
+    for directory in ("/outside", prepared.directory + "/nested", prepared.directory + "-other"):
+        with pytest.raises(StateError):
+            validate_session_application(replace(application, artifacts_dir=directory), prepared, integration="shell")
 
 
 def test_codex_outer_routes_context_and_installs_standard_skills_and_personas():

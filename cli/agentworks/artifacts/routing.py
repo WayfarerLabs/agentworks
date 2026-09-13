@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+from agentworks.artifacts.model import ALLOWED_DEFERRALS
 from agentworks.artifacts.state import CapturedArtifacts, declaration_digest, read_captures
 from agentworks.errors import ConfigError, StateError
 from agentworks.harness_setup.inputs import SetupInputs
@@ -156,10 +157,7 @@ def inspect_owner_artifacts(
             record,
             prepared,
         )
-    allowed: tuple[ArtifactFacet, ...] = ("user", "workspace", "session") if inputs.component == "vm" else ("session",)
-    if inputs.component == "session":
-        allowed = ()
-    if any(item.destination not in allowed for item in record.deferred):
+    if any(item.destination not in ALLOWED_DEFERRALS[inputs.facet] for item in record.deferred):
         return ArtifactOwnerView(
             inputs,
             captured,

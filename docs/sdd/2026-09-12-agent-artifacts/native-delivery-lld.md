@@ -15,10 +15,13 @@ integration selects the exact file bytes, paths, executable intent and native id
 publishes those files and retains ownership in the existing applied-state slice. Retirement returns
 an empty plan, letting core remove previously owned artifact files.
 
-Session launch returns the same application with its native command. All artifact argv values use
-`quote_literal_argv`, including JSON and TOML values, so core command-template substitution cannot
-interpret literal `{{...}}` in artifact content. Initial prompts keep their existing
-fresh-conversation behavior. Artifact guidance applies to each launched process, including resume.
+Session launch returns the same application with its native command. The optional `artifacts_dir`
+field must identify the core-provided private run directory; core exposes it as
+`AGENTWORKS_ARTIFACTS_DIR` in the launch environment. Outer facets cannot set this field. All
+artifact argv values use `quote_literal_argv`, including JSON and TOML values, so core
+command-template substitution cannot interpret literal `{{...}}` in artifact content. Initial
+prompts keep their existing fresh-conversation behavior. Artifact guidance applies to each launched
+process, including resume.
 
 The adapters do not call one another, fetch sources or modify captured inputs. The modules under
 `artifacts/native/` are rendering/probe utilities used by integrations. Core routing does not import

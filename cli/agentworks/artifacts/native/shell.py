@@ -61,6 +61,4 @@ def shell_artifacts(inputs: tuple[ArtifactInput, ...], root: str, *, session: bo
         )
     if inputs:
         files.append(artifact_file(f"{root}/index.json", json_text({"artifacts": entries}), inputs))
-    return ArtifactApplication(
-        tuple(files), environment=(("AGENTWORKS_ARTIFACTS_DIR", root),) if session and inputs else ()
-    )
+    return ArtifactApplication(tuple(files), artifacts_dir=root if session and inputs else None)

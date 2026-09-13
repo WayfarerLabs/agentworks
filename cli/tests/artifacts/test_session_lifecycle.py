@@ -84,6 +84,57 @@ def test_shell_restart_publishes_under_actual_home_and_records_run(lifecycle):
     assert record.complete and record.artifact_inputs
 
 
+@pytest.mark.parametrize("operation", ["create", "restart"])
+def test_launch_environment_exposes_only_the_prepared_run_directory(lifecycle, monkeypatch, operation):
+    from agentworks.sessions import tmux
+
+    launch = tmux.create_session
+    observed = []
+
+    def inspect(*args, **kwargs):
+        observed.append(dict(kwargs["env"]))
+        return launch(*args, **kwargs)
+
+    monkeypatch.setattr(tmux, "create_session", inspect)
+    if operation == "create":
+        lifecycle.db.insert_agent_grant("a1", "ws1", "explicit")
+        monkeypatch.setattr("agentworks.agents.manager._assert_agent_ssh_works", lambda *a, **k: None)
+        manager.create_session(
+            lifecycle.db,
+            lifecycle.config,
+            name="s2",
+            workspace="ws1",
+            agent="a1",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+    else:
+        lifecycle.restart()
+    current = lifecycle.db.get_session("s2" if operation == "create" else "s1")
+    assert current is not None and current.run_id is not None
+    directory = lifecycle.target.home / ".agentworks-artifacts" / "session" / current.session_uuid / current.run_id
+    assert len(observed) == 1
+    assert observed[0]["AGENTWORKS_ARTIFACTS_DIR"] == str(directory)
+    assert (directory / "index.json").is_file()
+
+
+def test_forged_artifact_directory_preserves_running_session(lifecycle, monkeypatch):
+    lifecycle.restart()
+    previous = lifecycle.db.get_session("s1")
+    files = lifecycle.files()
+    lifecycle.events.clear()
+    monkeypatch.setattr(
+        ShellIntegration,
+        "start",
+        lambda *a, **k: HarnessStart("", artifacts=ArtifactApplication(artifacts_dir="/outside")),
+    )
+    with pytest.raises(StateError):
+        lifecycle.restart()
+    current = lifecycle.db.get_session("s1")
+    assert current is not None and previous is not None and current.run_id == previous.run_id
+    assert files == lifecycle.files() and all(file.exists() for file in files)
+    assert "kill" not in lifecycle.events and "tmux_create" not in lifecycle.events
+
+
 def test_restart_stages_new_files_before_kill_and_cleans_old_after(lifecycle, monkeypatch):
     lifecycle.restart()
     previous = lifecycle.db.get_session("s1")

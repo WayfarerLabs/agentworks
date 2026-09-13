@@ -13,6 +13,12 @@ if TYPE_CHECKING:
 
 ArtifactComponent = Literal["vm", "admin", "agent", "workspace", "session"]
 ArtifactFacet = Literal["vm", "user", "workspace", "session"]
+ALLOWED_DEFERRALS: dict[ArtifactFacet, tuple[ArtifactFacet, ...]] = {
+    "vm": ("user", "workspace", "session"),
+    "user": ("session",),
+    "workspace": ("session",),
+    "session": (),
+}
 
 
 class ArtifactType(StrEnum):
@@ -70,7 +76,7 @@ class ArtifactContent:
 
 @dataclass(frozen=True)
 class ArtifactOrigin:
-    """Consuming owner identity; a declaration cannot supply a contradictory facet."""
+    """Identity of the owner consuming a bundle entry."""
 
     component: ArtifactComponent
     resource_kind: str
@@ -83,16 +89,6 @@ class ArtifactOrigin:
     def identity(self) -> str:
         address = [self.component, self.resource_kind, self.resource_name, self.producer, self.bundle, self.entry]
         return hashlib.sha256(json.dumps(address, separators=(",", ":")).encode()).hexdigest()
-
-    @property
-    def facet(self) -> ArtifactFacet:
-        if self.component in ("admin", "agent"):
-            return "user"
-        if self.component == "vm":
-            return "vm"
-        if self.component == "workspace":
-            return "workspace"
-        return "session"
 
 
 @dataclass(frozen=True)

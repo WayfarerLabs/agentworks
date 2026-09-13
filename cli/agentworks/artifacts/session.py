@@ -103,6 +103,8 @@ def validate_session_application(
     application: object, context: SessionArtifactContext, *, integration: str
 ) -> ArtifactApplication:
     result = validate_application(application, context.inputs, "session", integration=integration)
+    if result.artifacts_dir is not None and result.artifacts_dir != context.directory:
+        raise StateError("session artifact directory must identify its private run directory")
     ancestors = {item.path.casefold() for item in context.ancestor_files}
     if any(item.path.casefold() in ancestors for item in result.files):
         raise StateError("session artifacts conflict with an ancestor artifact destination")
