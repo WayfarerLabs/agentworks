@@ -519,7 +519,7 @@ record of earlier implementation. The PR is draft while the amendment is being i
 - [x] Update fixtures, examples, permanent guides and generated schemas. Verify same-key cross-type
       coexistence, within-owner overrides, source switches in inheritance, immutable groups,
       multi-hop deferral, native collisions, replacement inspection and cleanup/failure behavior.
-- [ ] Run the independent private review lanes and required gates on the completed state; record
+- [x] Run the independent private review lanes and required gates on the completed state; record
       actual review/tool limits and native evidence. Publish a complete handoff and mark ready
       without `review-requested`; do not hold implementation-ready work in draft for live testing.
 - [ ] Assess the ready handoff's complete feedback batch. One further authorized iteration remains
@@ -599,3 +599,18 @@ lead-requested production-wrapper check also reproduced the OS argument limit wi
 request through the transport's existing non-sensitive stdin path succeeded, retaining probe output
 and reducing the command to 20,372 bytes. Both corrections stay within existing interfaces and this
 private fix batch. Their final validation and handoff remain pending.
+
+All three private review lanes are clean on the final correction at `14a4b133`. Complexity
+independently ran 13 targeted tests, including the production-wrapper large-package regression.
+Project and independent correctness reviews reproduced the prior argument-limit failure and verified
+the corrected stdin request/response path, consistent implied-directory refusal and existing
+transport compatibility. Their independent shell checks used controlled dependencies, not live VM
+acceptance. Full CLI validation passed 9,478 tests with seven skips; source/test Ruff, format and
+mypy (844 files), package build and file lint returned zero. All CI jobs passed on `14a4b133`.
+Website, Rulesync, locked-SDD and Typer-isolation evidence above remains applicable; these final
+probe changes do not alter those inputs.
+
+Iteration 1 of the newest two authorized iterations is complete. Publish the coherent ready handoff
+without `review-requested` and monitor its full feedback batch; one further published feedback/fix
+iteration remains if needed. Native VM, two-user and lifecycle acceptance remains open, so this
+records implementation readiness and does not lock the artifact SDD or merge the PR.
