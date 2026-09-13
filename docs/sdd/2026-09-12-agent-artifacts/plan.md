@@ -589,3 +589,13 @@ The correction is Codex-specific refusal outside the supported root/package entr
 existing and proposed package members counted consistently in the bounded inventory. No new artifact
 identity model, persisted state or global discovery mechanism is introduced. Final validation and
 handoff remain pending.
+
+The Codex recursive correction at `16c40a24` passed 9,473 CLI tests with seven skips and 76 focused
+probe tests. Complexity review was clean and verified that all nine targeted regression cases fail
+against the previous probe. Final review identified one remaining prospective/existing mismatch for
+an implied directory named `SKILL.md`; the same refusal must apply before publication. A
+lead-requested production-wrapper check also reproduced the OS argument limit with a valid
+510-member package: the probe request was embedded in a 270,652-byte shell command. Sending that
+request through the transport's existing non-sensitive stdin path succeeded, retaining probe output
+and reducing the command to 20,372 bytes. Both corrections stay within existing interfaces and this
+private fix batch. Their final validation and handoff remain pending.
