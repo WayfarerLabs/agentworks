@@ -47,18 +47,22 @@ def facet_case(db, monkeypatch, component):
     monkeypatch.setattr(
         "agentworks.harness_setup.dispatch.ensure_harness_integration_enabled", lambda registry, name: None
     )
+    monkeypatch.setattr("agentworks.artifacts.routing.setup_artifacts", lambda *args: ())
     return inputs, invocation
 
 
-@pytest.mark.parametrize(
-    ("component", "integration"),
-    [(component, name) for component in ("vm", "admin", "agent", "workspace") for name in ("shell", "grok-build")]
-    + [("vm", name) for name in ("claude-code", "codex")],
-)
+@pytest.mark.parametrize("component", ["vm", "admin", "agent", "workspace"])
 @pytest.mark.parametrize("buffered", [False, True])
-def test_unimplemented_activation_fails_without_successful_record(db, facet_case, integration, buffered):
+def test_unimplemented_activation_fails_without_successful_record(db, facet_case, buffered, monkeypatch):
+    class Unsupported(ConformingHarnessIntegration):
+        name = "unsupported"
+        description = "Session-only test integration"
+
+    integration = "unsupported"
+    monkeypatch.setattr("agentworks.harness_setup.dispatch.harness_integration_for", lambda name: Unsupported)
     inputs, invocation = facet_case
     inputs = replace(inputs, activations=(CapabilityBlock.of(integration),))
+    monkeypatch.setattr(SetupInputs, "declaration", lambda *args: {})
     with pytest.raises(StateError) as error:
         run_setup(db, Mock(), inputs, invocation, operation="fixture-setup", buffered=buffered)
     assert error.value.entity_kind == inputs.kind
@@ -111,6 +115,7 @@ def test_retirement_removes_legacy_claim_free_unsupported_record(db, facet_case)
 
 @pytest.fixture
 def setup_case(tmp_path, monkeypatch):
+    monkeypatch.setattr("agentworks.artifacts.routing.setup_artifacts", lambda *args: ())
     events = []
     failures: set[str] = set()
 
@@ -124,6 +129,9 @@ def setup_case(tmp_path, monkeypatch):
             invocation.checkpoint(claims)
             if self.name in failures:
                 raise RuntimeError("injected interruption")
+            from agentworks.artifacts.application import ArtifactApplication
+
+            return ArtifactApplication()
 
     class Second(First):
         name = "second"

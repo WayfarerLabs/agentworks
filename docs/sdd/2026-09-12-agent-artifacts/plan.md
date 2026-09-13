@@ -85,7 +85,7 @@ records this implementation assignment for the saga and dependent efforts.
 
 - [x] Resolve the existing session-identity ownership dependency against current saga and child
       work; record the implementing slice without changing another effort's requirements.
-- [ ] Write [source and codec LLD](source-codec-lld.md): declarations, source selection, capture
+- [x] Write [source and codec LLD](source-codec-lld.md): declarations, source selection, capture
       bounds, text/byte rules, typed inputs, identity and versioned persistence.
 - [ ] Write [native delivery LLD](native-delivery-lld.md): typed facet results, native
       paths/options, ownership claims, private session publication and compatibility checks for each
@@ -98,21 +98,21 @@ records this implementation assignment for the saga and dependent efforts.
 
 ### 2. Bundle resources, capture and normalization
 
-- [ ] Register `artifact-bundle` as an ordinary declared resource and add `artifacts.bundles` to VM,
+- [x] Register `artifact-bundle` as an ordinary declared resource and add `artifacts.bundles` to VM,
       admin, agent, workspace and session declarations, resolved templates, reference discovery and
       schema generation. Omission inherits, a supplied list replaces, duplicates fail, and resolving
       a declaration never acquires its source.
-- [ ] Extend shared source handling for bounded workstation and Git package capture. Use immutable
+- [x] Extend shared source handling for bounded workstation and Git package capture. Use immutable
       commit/object reads with workstation auth, consistent per-operation Git resolution and
       complete selected packages. Do not run hooks, filters or bundled scripts, or omit
       export-ignored files.
-- [ ] Preserve standard skills and persona metadata, supporting paths, executable intent and binary
+- [x] Preserve standard skills and persona metadata, supporting paths, executable intent and binary
       bytes. Normalize designated UTF-8 text to LF; make `preserve_bytes` concrete and exclude
       `SKILL.md` from that override. Reject unsafe paths, portable collisions, links, special files,
       local Git metadata, selected submodules, unresolved LFS pointers and observed local mutation.
-- [ ] Deliver one immutable normalized input representation and lossless bounded state codec with
+- [x] Deliver one immutable normalized input representation and lossless bounded state codec with
       content identity independent of source provenance and consuming origin.
-- [ ] Prove source/normalization contracts with local fixtures: mutable refs vs commit pins,
+- [x] Prove source/normalization contracts with local fixtures: mutable refs vs commit pins,
       repository subpaths, complete packages, CRLF/lone CR, executable scripts, text-like binary
       fixtures including ASCII-only PDF, byte preservation, capture failure and temporary cleanup.
 
@@ -125,7 +125,7 @@ records this implementation assignment for the saga and dependent efforts.
       identities, typed deferrals and session applied evidence; preserve existing plugin claims.
 - [ ] Prepare completed env and applicable artifact inputs before each integration. Validate plugin
       results for unchanged origin, input membership, one legal next facet and no duplicate routes.
-- [ ] Implement lazy resolution through the actual VM, user, workspace and session path. An inactive
+- [x] Implement lazy resolution through the actual VM, user, workspace and session path. An inactive
       VM routes directly to session; inactive intermediate facets pass through; handled payloads do
       not reach descendants. Results remain reusable independently for every descendant owner.
 - [ ] Base freshness only on supplied inputs and existing config/env dependencies. Diagnose missing,
@@ -178,7 +178,7 @@ records this implementation assignment for the saga and dependent efforts.
 - [ ] Run required repository/CLI gates and relevant behavioral tests, package/build checks and
       deterministic website builds. Record actual exits and distinguish local, CI and live evidence.
 - [ ] Run independent project, Muntz and general correctness/security reviews on isolated pinned
-      worktrees; critically assess and resolve material findings before handoff.
+      work trees; critically assess and resolve material findings before handoff.
 - [ ] Run scoped live acceptance using an operator-provided inventory and budget; snapshot first,
       exercise the public CLI and native placement boundaries, and independently verify cleanup.
 - [ ] Audit R1-R10 and the complete approved matrix against evidence, complete owned cleanup and

@@ -127,7 +127,7 @@ class ConformingHarnessIntegration(HarnessIntegration):
     """A concrete ``HarnessIntegration``. Subclasses add ``name`` /
     ``description``."""
 
-    contract_version = 4
+    contract_version = 5
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)

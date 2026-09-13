@@ -199,7 +199,9 @@ not identify an owning resource or authorize deletion of another owner's files.
 ## Facet results, routing and freshness
 
 Extend the current setup invocation objects with immutable prepared artifact inputs. Setup hooks
-return a typed deferral result after their idempotent application. A successful result lists only
+return a typed application containing integration-selected file publications and deferrals. Core
+executes the common guarded whole-file writes and checkpoints ownership; integrations retain native
+format and placement decisions. The result lists only
 what remains unhandled; omitted inputs are handled for that integration and owner. Core validates
 the result at the plugin boundary: inputs must belong to the invocation, origin must be unchanged,
 routes must be legal, and each input can be deferred once. No separate acknowledgment list is added.
