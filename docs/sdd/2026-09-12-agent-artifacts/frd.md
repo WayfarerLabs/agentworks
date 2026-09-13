@@ -6,7 +6,8 @@ Draft requirements. This effort builds on
 [harness-scope-framework](../2026-09-06-harness-scope-framework/frd.md) and participates in the
 [next-steps saga](../2026-08-04-next-steps/target-state.md). The proposed first-delivery scope and
 open decisions remain subject to requirements and HLA review. Implementation has not started; see
-the [plan](plan.md) for design checkpoints and delivery.
+the [plan](plan.md) for design checkpoints and delivery. Design constraints carry forward settled
+decisions; explicitly marked proposals and open choices still require review.
 
 ## Problem and intended outcome
 

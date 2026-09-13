@@ -181,7 +181,8 @@ Each VM item has one next facet: user, workspace or session. User and workspace 
 session. Routing to a sibling or back outward is invalid. First-party VM facets perform routing
 without native file placement: native integrations route toward user handling, while shell can route
 directly to session publication. The implementation must explicitly supply these VM hooks;
-activation of an unimplemented hook remains a hard error.
+activation of an unimplemented hook remains a hard error. Shell implements its VM hook so explicit
+VM activation remains valid, even though its route matches inactive passthrough.
 
 The VM never examines downstream instances or activations. Its reusable result is evaluated for the
 actual user/workspace when those owners run. Handling for one user does not consume the VM result
@@ -191,6 +192,11 @@ For an inactive VM facet, core routes its captured inputs directly to session. I
 down both branches. An inactive user/workspace facet leaves its applicable routed and local inputs
 unhandled for session. Resolution is lazy for the selected integration and actual ancestor path; no
 inactive activation records or eager enumeration of every integration are required.
+
+Consequently, native user placement of VM-declared artifacts requires both VM activation to route
+them toward user and user activation to handle them there. User activation alone cannot intercept a
+VM item routed directly to session. Artifacts declared on the user itself need only user activation
+for native user placement. The shipped guide and examples must teach this distinction.
 
 Passthrough is launch-safe when no retained artifact effects compromise the selected integration's
 promised delivery. A removed activation with such effects or incomplete artifact cleanup remains
@@ -311,9 +317,11 @@ config is prompt-mediated and does not promise full persona settings. Preserve t
 the CLI guidance and inspection output instead of claiming primary/delegated parity.
 
 Shell exposes the session publication index through `AGENTWORKS_ARTIFACTS_DIR`; its index records
-types, relative files and provenance, and can point to known ancestor publication indexes. Those
-references come from applied metadata, not retransmission of handled payloads. Publication and
-discoverability fulfill shell delivery; shell does not claim to load rules into model context.
+types, relative files and provenance for that session/run only. Ancestor publications use fixed
+locations: `~/.agentworks-artifacts/user/` for the actual user and
+`<workspace>/.agentworks-artifacts/` for the workspace. Document these locations without adding
+ancestor-index pointers or retransmitting handled payloads. Publication and discoverability fulfill
+shell delivery; shell does not claim to load rules into model context.
 
 Across integrations, hints may be combined into a single context fragment. Rules remain
 always-context guidance within their applicability. Standard skills retain their package and
