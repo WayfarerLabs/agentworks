@@ -378,7 +378,12 @@ def render_artifacts(inspection: ArtifactInspection) -> None:
                     )
         for integration in owner.integrations:
             activation = "activated" if integration.activated else "inactive"
-            output.info(f"  {integration.name}: {activation}; {integration.status}; {integration.reason}")
+            details = [activation]
+            if integration.status != activation:
+                details.append(integration.status)
+            if integration.reason:
+                details.append(integration.reason)
+            output.info(f"  {integration.name}: {'; '.join(details)}")
             for input_id in integration.passthrough_inputs:
                 output.info(f"    Core passthrough: {input_id[:12]} to {integration.passthrough_destination}")
             for input_id in integration.recorded_handled:

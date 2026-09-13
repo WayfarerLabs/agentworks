@@ -434,3 +434,24 @@ zero. No implementation changes follow the reviewed head; the final commit recor
 Additional round 1 of 2 (overall round 4) is complete. The coherent handoff returns PR #794 to ready
 without `review-requested`; one additional authorized fix round remains. Monitor its published
 feedback and CI. Scoped native VM/two-user acceptance remains required, so the SDD stays unlocked.
+
+## Additional feedback round 5
+
+The operator authorized another two rounds, including this one. The previous handoff's saga, Muntz
+and live integration-test reports are complete, and more than an hour elapsed before starting. The
+tester observed inactive VM-to-user routing in human and JSON inspection on a live VM; it reported
+no blockers. This adds inspection evidence, not downstream native placement or isolation.
+
+The round clarifies the intended handling contract in the FRD/HLA and permanent documentation:
+omission from the deferral list is the integration's handling report; the integration must actually
+deliver through a supported native mechanism. File-or-deferral coverage would reject valid argv
+carriers, and an acknowledgment ledger would not establish consumption. Native setup readiness and
+artifact freshness remain separate checks in the required session preparation path; no new bypass
+was identified. The duplicate inactive status and empty trailing field are a small presentation fix.
+
+- [ ] Clarify handling versus proof of consumption without changing the result contract; remove
+      duplicate/empty inspection fields while preserving JSON.
+- [ ] Gather remaining reachable local native persona/carrier evidence without model calls; retain
+      the scoped VM/two-user acceptance gap where no environment is supplied.
+- [ ] Complete private review and relevant gates, publish a coherent ready handoff, and assess the
+      next feedback batch within this newest two-round allowance.
