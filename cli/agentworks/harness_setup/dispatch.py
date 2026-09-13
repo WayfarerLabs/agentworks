@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Literal, cast
 from pydantic import ValidationError
 
 from agentworks import output
-from agentworks.artifacts.application import OwnedArtifactFile
 from agentworks.artifacts.publication import publish_artifacts, validate_application
 from agentworks.artifacts.state import write_capture
 from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled, harness_integration_for
@@ -27,6 +26,7 @@ from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupR
 from agentworks.harness_setup.state import read_native_setup, replace_setup_record, write_native_setup
 
 if TYPE_CHECKING:
+    from agentworks.artifacts.application import OwnedArtifactFile
     from agentworks.db import Database, VMRow
     from agentworks.harness_setup.inputs import SetupInputs
     from agentworks.harness_setup.locking import NativeMutationGuard
@@ -71,7 +71,7 @@ def run_setup(
     expected = {"vm": VMSetupInvocation, "user": UserSetupInvocation, "workspace": WorkspaceSetupInvocation}
     if not isinstance(invocation, expected[inputs.facet]):
         raise StateError("native setup invocation does not match its facet")
-    facet = cast("Literal["vm", "user", "workspace"]", inputs.facet)
+    facet = cast('Literal["vm", "user", "workspace"]', inputs.facet)
     with native_mutation_guard(db.path, invocation.vm.name, held=held):
         if inputs.artifact_snapshot is not None and not buffered:
             write_capture(db, inputs.kind, inputs.name, inputs.component, inputs.artifact_snapshot, operation=operation)
