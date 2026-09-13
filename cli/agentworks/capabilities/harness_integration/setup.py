@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
+    from agentworks.artifacts.model import ArtifactInput
     from agentworks.db import VMRow
     from agentworks.harness_setup.model import NativeClaim, SetupFacet, SetupRecord
     from agentworks.transports import Transport
@@ -26,6 +27,7 @@ class SetupInvocation:
     runner: Transport
     prior: SetupRecord | None
     checkpoint: Callable[[tuple[NativeClaim, ...]], None]
+    artifacts: tuple[ArtifactInput, ...] = ()
     environment: Mapping[str, str] = field(default_factory=dict, repr=False)
     secrets: Mapping[str, str] = field(default_factory=dict, repr=False)
 
