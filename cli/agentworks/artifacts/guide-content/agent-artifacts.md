@@ -21,6 +21,8 @@ context.
 
 <!-- agw:include path="artifacts/README.md" heading="A minimal bundle and consumer" -->
 
+<!-- agw:include path="artifacts/README.md" heading="Composition and names" -->
+
 <!-- agw:include path="artifacts/README.md" heading="Sources and refresh" -->
 
 <!-- agw:include path="artifacts/README.md" heading="Native delivery" -->
