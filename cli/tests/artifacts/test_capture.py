@@ -53,7 +53,8 @@ def test_complete_skill_text_and_opaque_roundtrip(tmp_path):
     assert members["asset.pdf"].data == b"%PDF-ASCII\r\nopaque\r"
     assert members["fixture.txt"].data == b"original\r\n"
     assert members["script"].data.endswith(b"\r")
-    assert members["script"].executable
+    if os.name != "nt":
+        assert members["script"].executable
     assert decode_inputs(json.loads(json.dumps(encode_inputs(inputs)))) == inputs
     metadata = content.metadata
     metadata["name"] = "changed"
@@ -85,6 +86,7 @@ def test_portable_collisions(paths):
         validate_member_set(paths)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows symlinks require optional privileges")
 def test_symlinks_metadata_and_special_files_are_rejected(tmp_path):
     root = skill(tmp_path)
     link = root / "link"
@@ -186,6 +188,7 @@ def repository(tmp_path, monkeypatch):
     git(repo, "config", "user.email", "fixture@example.test")
     git(repo, "config", "user.name", "Fixture")
     root = skill(repo)
+    (root / "SKILL.md").write_bytes((root / "SKILL.md").read_bytes() + b"$Format:%H$\n")
     (root / ".gitattributes").write_text("*.txt export-ignore\n*.md export-subst\n*.dat filter=fixture\n")
     (root / "kept.txt").write_text("keep me\r\n")
     (root / "opaque.dat").write_bytes(b"$Format:%H$\r\n")
@@ -221,6 +224,7 @@ def test_git_committed_objects_complete_revision_shared_and_source_independent(r
     assert members["opaque.dat"] == b"$Format:%H$\r\n"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows symlinks require optional privileges")
 def test_git_links_submodules_and_lfs_are_rejected(repository):
     (repository / "review" / "link").symlink_to("SKILL.md")
     git(repository, "add", ".")
@@ -348,6 +352,7 @@ def test_source_credentials_rejected_before_declaration_persistence():
     assert "password" not in str(failure.value)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows does not expose POSIX executable mode changes")
 def test_rule_source_mode_is_part_of_identity(tmp_path):
     path = tmp_path / "rule.md"
     path.write_text("Read instructions.\n")
