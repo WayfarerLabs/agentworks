@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from agentworks.artifacts.bundle import ArtifactBundle
     from agentworks.artifacts.declarations import ArtifactsConfig
     from agentworks.db.instance_state import InstanceKind, JsonObject
+    from agentworks.package_sources import PackageCapture
     from agentworks.resources.registry import Registry
 
 _COMPONENTS: dict[InstanceKind, tuple[ArtifactComponent, ...]] = {
@@ -29,12 +30,26 @@ _COMPONENTS: dict[InstanceKind, tuple[ArtifactComponent, ...]] = {
 }
 
 
+class UnsupportedArtifactCaptureVersionError(StateError):
+    """This release cannot interpret the stored artifact capture domain payload."""
+
+
 @dataclass(frozen=True)
 class CapturedArtifacts:
     """An owning component's declaration fingerprint and immutable source snapshot."""
 
     declaration: str
     inputs: tuple[ArtifactInput, ...]
+
+
+def _validate_owner(capture: CapturedArtifacts, kind: InstanceKind, name: str, component: ArtifactComponent) -> None:
+    if component not in _COMPONENTS[kind] or re.fullmatch(r"[0-9a-f]{64}", capture.declaration) is None:
+        raise ValueError
+    if any(
+        (item.origin.component, item.origin.resource_kind, item.origin.resource_name) != (component, kind, name)
+        for item in capture.inputs
+    ):
+        raise ValueError
 
 
 def declaration_digest(registry: Registry, config: ArtifactsConfig) -> str:
@@ -47,15 +62,22 @@ def declaration_digest(registry: Registry, config: ArtifactsConfig) -> str:
 
 
 def capture_owner(
-    registry: Registry, kind: InstanceKind, name: str, component: ArtifactComponent, config: ArtifactsConfig
+    registry: Registry,
+    kind: InstanceKind,
+    name: str,
+    component: ArtifactComponent,
+    config: ArtifactsConfig,
+    *,
+    operation: PackageCapture | None = None,
 ) -> CapturedArtifacts:
-    """Acquire the current local declaration only at its owning lifecycle operation."""
+    """Acquire and validate persistence before buffered captures can cause native effects."""
     bundles = []
     for bundle_name in config.bundles:
         bundle: ArtifactBundle = registry.lookup("artifact-bundle", bundle_name)
         bundles.append((bundle_name, bundle.artifacts))
     try:
-        inputs = capture_artifacts(bundles, ArtifactOrigin(component, kind, name))
+        inputs = capture_artifacts(bundles, ArtifactOrigin(component, kind, name), operation=operation)
+        encode_inputs(inputs)
     except SourceRefError as error:
         raise StateError(str(error), entity_kind=kind, entity_name=name) from None
     return CapturedArtifacts(declaration_digest(registry, config), inputs)
@@ -81,7 +103,10 @@ def decode_captures(record: AppliedStateSlice) -> dict[ArtifactComponent, Captur
     if record.key is not AppliedStateKey.ARTIFACT_INPUTS:
         raise TypeError("artifact capture requires its matching applied slice")
     if record.payload.payload_version != 1:
-        raise StateError("artifact captures require a different Agentworks version")
+        raise UnsupportedArtifactCaptureVersionError(
+            "artifact captures require a different Agentworks version",
+            hint="Use a release that understands this artifact capture. The stored evidence was retained.",
+        )
     try:
         payload = record.payload.value
         components = payload["components"]
@@ -94,16 +119,12 @@ def decode_captures(record: AppliedStateSlice) -> dict[ArtifactComponent, Captur
             if set(value) != {"declaration", "content"}:
                 raise ValueError
             declaration = value["declaration"]
-            if not isinstance(declaration, str) or re.fullmatch(r"[0-9a-f]{64}", declaration) is None:
+            if not isinstance(declaration, str):
                 raise ValueError
             inputs = decode_inputs(value["content"])
-            if any(
-                (item.origin.component, item.origin.resource_kind, item.origin.resource_name)
-                != (component, record.instance_kind, record.instance_name)
-                for item in inputs
-            ):
-                raise ValueError
-            result[component] = CapturedArtifacts(declaration, inputs)
+            snapshot = CapturedArtifacts(declaration, inputs)
+            _validate_owner(snapshot, record.instance_kind, record.instance_name, component)
+            result[component] = snapshot
         return result
     except (KeyError, TypeError, ValueError, SourceRefError, RecursionError):
         raise StateError("stored artifact capture is malformed") from None
@@ -125,13 +146,20 @@ def write_capture(
     *,
     operation: str,
 ) -> None:
-    if component not in _COMPONENTS[kind]:
-        raise StateError("artifact capture component does not belong to its owner")
+    """Validate direct writer inputs before replacing any previously readable capture."""
+    try:
+        _validate_owner(capture, kind, name, component)
+    except ValueError:
+        raise StateError(
+            "artifact capture does not match its owner declaration", entity_kind=kind, entity_name=name
+        ) from None
     captures = read_captures(db, kind, name)
     captures[component] = capture
-    db.instance_state.replace_applied_slices(
-        kind, name, operation, {AppliedStateKey.ARTIFACT_INPUTS: encode_captures(captures)}
-    )
+    try:
+        payload = encode_captures(captures)
+    except SourceRefError:
+        raise StateError("artifact capture cannot be persisted", entity_kind=kind, entity_name=name) from None
+    db.instance_state.replace_applied_slices(kind, name, operation, {AppliedStateKey.ARTIFACT_INPUTS: payload})
 
 
 def canonicalize_captures(record: AppliedStateSlice) -> VersionedPayload:

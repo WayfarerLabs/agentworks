@@ -151,6 +151,7 @@ def _report_instance_state(
     inspection: InstanceStateInspection,
 ) -> None:
     """Append value-free integrity and SSH comparison checks from one fleet read."""
+    from agentworks.artifacts.state import UnsupportedArtifactCaptureVersionError, decode_captures
     from agentworks.db import AppliedStateKey, InstanceRecordMetadata
     from agentworks.doctor import (
         HealthCheck,
@@ -306,8 +307,6 @@ def _report_instance_state(
                 if applied_record.metadata.owner_exists:
                     ssh_evidence[applied_record.record.instance_name] = (decoded, metadata)
             elif applied_record.record.key is AppliedStateKey.ARTIFACT_INPUTS:
-                from agentworks.artifacts.state import decode_captures
-
                 decode_captures(applied_record.record)
                 add(
                     Status.OK,
@@ -331,7 +330,11 @@ def _report_instance_state(
                     if incomplete
                     else None,
                 )
-        except (UnsupportedAppliedStateVersionError, UnsupportedNativeSetupVersionError):
+        except (
+            UnsupportedAppliedStateVersionError,
+            UnsupportedNativeSetupVersionError,
+            UnsupportedArtifactCaptureVersionError,
+        ):
             add(
                 Status.INFO,
                 label(metadata),

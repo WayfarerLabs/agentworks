@@ -5,6 +5,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import re
+from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, cast
@@ -20,7 +21,6 @@ from agentworks.artifacts.model import (
     ArtifactType,
 )
 from agentworks.package_sources import (
-    DEFAULT_CAPTURE_LIMITS,
     CaptureLimits,
     PackageCapture,
     validate_artifact_source,
@@ -60,31 +60,36 @@ def capture_artifacts(
     bundles: Sequence[tuple[str, Mapping[str, ArtifactSpec]]],
     origin: ArtifactOrigin,
     *,
-    limits: CaptureLimits = DEFAULT_CAPTURE_LIMITS,
+    limits: CaptureLimits | None = None,
+    operation: PackageCapture | None = None,
 ) -> tuple[ArtifactInput, ...]:
     """Capture an owner's declared bundles once, in declaration order.
 
     Source errors omit source strings and content. The bundle and entry address
     identify the declaration to repair without repeating possibly secret input.
     No previous snapshot can substitute for a failed operation.
+    A borrowed operation shares revision resolution and bounds across components;
+    its caller owns cleanup and its configured limits remain authoritative.
     """
+    if operation is not None and limits is not None:
+        raise ValueError("a borrowed capture operation already defines its limits")
     result: list[ArtifactInput] = []
-    with PackageCapture(limits) as operation:
+    with nullcontext(operation) if operation is not None else PackageCapture(limits or CaptureLimits()) as active:
         for bundle_name, entries in bundles:
             for entry, spec in entries.items():
                 try:
-                    operation.check()
+                    active.check()
                     artifact_type = ArtifactType(spec.type)
                     source = spec.source
                     if source is None:
                         assert spec.type in ("hint", "rule")
                         assert spec.text is not None
                         encoded = spec.text.encode("utf-8")
-                        operation.account(len(encoded))
+                        active.account(len(encoded))
                         content = ArtifactContent(artifact_type, entry, text=normalize_text(encoded))
                         provenance = ArtifactProvenance()
                     else:
-                        package = operation.capture(source)
+                        package = active.capture(source)
                         content = _content(artifact_type, entry, package, spec.preserve_bytes)
                         provenance = ArtifactProvenance(
                             package.source, package.requested_ref, package.selected_path, package.commit

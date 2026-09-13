@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+import base64
+from dataclasses import asdict, replace
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -23,15 +25,31 @@ def captured_skill(tmp_path: Path) -> ArtifactInput:
     )[0]
 
 
+def altered_payload(original: ArtifactInput, altered: ArtifactInput) -> dict[str, object]:
+    """Tamper with a readable wire record, retaining hashes valid for the altered values."""
+    payload = encode_inputs((original,))
+    row = cast("list[dict[str, object]]", payload["inputs"])[0]
+    row["content"] = {
+        **asdict(altered.content),
+        "digest": altered.content.digest,
+        "members": [
+            {**asdict(member), "data": base64.b64encode(member.data).decode("ascii")}
+            for member in altered.content.members
+        ],
+    }
+    row["provenance"] = asdict(altered.provenance)
+    row["identity"] = altered.identity
+    return payload
+
+
 @pytest.mark.parametrize("field", ["hooks", "mcpServers", "mcp_servers"])
 def test_decode_rejects_execution_metadata_with_valid_hashes(tmp_path: Path, field: str) -> None:
     item = captured_skill(tmp_path)
     member = item.content.members[0]
     data = member.data.replace(b"description:", f"{field}: {{command: external-command}}\ndescription:".encode())
     altered = replace(item, content=replace(item.content, members=(replace(member, data=data),)))
-    # Encoding recalculates both hashes, so the refusal must enforce semantics.
     with pytest.raises(SourceRefError):
-        decode_inputs(encode_inputs((altered,)))
+        decode_inputs(altered_payload(item, altered))
 
 
 @pytest.mark.parametrize("field", ["name", "description", "text", "metadata_json", "native_options_json"])
@@ -40,7 +58,7 @@ def test_decode_rejects_fields_inconsistent_with_entrypoint(tmp_path: Path, fiel
     value = '{"unexpected":true}' if field.endswith("_json") else "different"
     altered = replace(item, content=replace(item.content, **{field: value}))
     with pytest.raises(SourceRefError):
-        decode_inputs(encode_inputs((altered,)))
+        decode_inputs(altered_payload(item, altered))
 
 
 @pytest.mark.parametrize("change", ["missing", "renamed", "binary", "unnormalized"])
@@ -58,7 +76,7 @@ def test_decode_requires_normalized_skill_entrypoint(tmp_path: Path, change: str
         members = (replace(member, data=member.data.replace(b"\n", b"\r\n"), text=False),)
     altered = replace(item, content=replace(item.content, members=members))
     with pytest.raises(SourceRefError):
-        decode_inputs(encode_inputs((altered,)))
+        decode_inputs(altered_payload(item, altered))
 
 
 @pytest.mark.parametrize(
@@ -75,7 +93,7 @@ def test_decode_rejects_credential_bearing_provenance(tmp_path: Path, source: st
     altered = replace(item, provenance=replace(item.provenance, source=source))
     assert altered.identity == item.identity
     with pytest.raises(SourceRefError) as error:
-        decode_inputs(encode_inputs((altered,)))
+        decode_inputs(altered_payload(item, altered))
     assert "private-token" not in str(error.value)
 
 
@@ -115,4 +133,4 @@ def test_agent_capture_and_decode_reject_nested_execution_metadata(tmp_path: Pat
         item, content=replace(item.content, members=(replace(item.content.members[0], data=unsafe.encode()),))
     )
     with pytest.raises(SourceRefError):
-        decode_inputs(encode_inputs((altered,)))
+        decode_inputs(altered_payload(item, altered))

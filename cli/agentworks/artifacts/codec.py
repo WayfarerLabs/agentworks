@@ -19,7 +19,7 @@ from agentworks.artifacts.model import (
     ArtifactProvenance,
     ArtifactType,
 )
-from agentworks.package_sources import CaptureLimits, validate_member_set
+from agentworks.package_sources import MAX_MEMBER_PATH_LENGTH, CaptureLimits, validate_member_set
 from agentworks.sources import SourceRefError
 
 _LIMITS = CaptureLimits()
@@ -33,7 +33,7 @@ class _Record(BaseModel):
 
 
 class _Member(_Record):
-    path: SmallString
+    path: Annotated[StrictStr, Field(max_length=MAX_MEMBER_PATH_LENGTH)]
     data: Annotated[StrictStr, Field(max_length=_MAX_ENCODED_MEMBER)]
     executable: StrictBool
     text: StrictBool
@@ -79,7 +79,11 @@ class _Envelope(_Record):
 
 
 def encode_inputs(inputs: tuple[ArtifactInput, ...]) -> dict[str, object]:
-    """Encode typed inputs losslessly; no native state or source access is involved."""
+    """Validate the persisted write boundary against the same schema used on read.
+
+    No native state or source access is involved. Acquisition also calls this before
+    handing a buffered capture to lifecycle operations that can have native effects.
+    """
     from dataclasses import asdict
 
     result: list[dict[str, object]] = []
@@ -110,7 +114,9 @@ def encode_inputs(inputs: tuple[ArtifactInput, ...]) -> dict[str, object]:
                 "identity": item.identity,
             }
         )
-    return {"version": 1, "inputs": result}
+    payload: dict[str, object] = {"version": 1, "inputs": result}
+    decode_inputs(payload)
+    return payload
 
 
 def decode_inputs(payload: object) -> tuple[ArtifactInput, ...]:
