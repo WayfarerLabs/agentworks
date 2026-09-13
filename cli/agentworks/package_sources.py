@@ -34,6 +34,7 @@ class CaptureLimits:
 
 
 DEFAULT_CAPTURE_LIMITS = CaptureLimits()
+MAX_MEMBER_PATH_LENGTH = 4096
 
 
 @dataclass(frozen=True)
@@ -58,8 +59,8 @@ _RESERVED = re.compile(r"^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)", re.IGNOR
 def validate_member_path(path: str, *, depth: int = 32) -> None:
     """Validate filesystem/Git/codec input against portable package containment."""
     parts = path.split("/")
-    if not path or len(parts) > depth:
-        raise SourceRefError("artifact member path is empty or exceeds traversal depth")
+    if not path or len(path) > MAX_MEMBER_PATH_LENGTH or len(parts) > depth:
+        raise SourceRefError("artifact member path is empty or exceeds its length or traversal depth limit")
     for part in parts:
         if (
             not part
@@ -162,6 +163,11 @@ class PackageCapture:
         try:
             package = self._git(reference) if reference.kind == "git" else self._local(reference)
             validate_member_set([member.path for member in package.members], depth=self.limits.depth)
+            for member in package.members:
+                if member.data.startswith(
+                    (b"version https://git-lfs.github.com/spec/v1\n", b"version https://git-lfs.github.com/spec/v1\r\n")
+                ):
+                    raise SourceRefError("artifact package contains an unresolved Git LFS pointer")
             return package
         except (OSError, ValueError, UnicodeError, subprocess.SubprocessError):
             raise SourceRefError("could not capture artifact source") from None
@@ -300,6 +306,28 @@ class PackageCapture:
                 visit(path, relative, verify=True)
         return CapturedPackage(tuple(result), str(path))
 
+    def _storage_size(self) -> int:
+        """Account for Git storage while temporary files and directories disappear."""
+        size = 0
+        pending = [self.root]
+        while pending:
+            self.check()
+            directory = pending.pop()
+            try:
+                with os.scandir(directory) as entries:
+                    for entry in entries:
+                        try:
+                            info = entry.stat(follow_symlinks=False)
+                        except FileNotFoundError:
+                            continue
+                        if stat.S_ISDIR(info.st_mode):
+                            pending.append(Path(entry.path))
+                        elif stat.S_ISREG(info.st_mode):
+                            size += info.st_size
+            except FileNotFoundError:
+                continue
+        return size
+
     def _run(self, repository: Path, *args: str, output_limit: int | None = None) -> bytes:
         self.check()
         maximum = self.limits.member_bytes if output_limit is None else output_limit
@@ -336,12 +364,17 @@ class PackageCapture:
         environment["GIT_TERMINAL_PROMPT"] = "0"
         with tempfile.TemporaryFile(dir=self.root) as stdout, tempfile.TemporaryFile(dir=self.root) as stderr:
             process = subprocess.Popen(
-                command, stdout=stdout, stderr=stderr, env=environment, start_new_session=os.name == "posix"
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=stdout,
+                stderr=stderr,
+                env=environment,
+                start_new_session=os.name == "posix",
             )
             try:
                 while process.poll() is None:
                     self.check()
-                    size = sum(item.stat().st_size for item in self.root.rglob("*") if item.is_file())
+                    size = self._storage_size()
                     if (
                         size > self.limits.storage_bytes
                         or os.fstat(stdout.fileno()).st_size > maximum
@@ -350,7 +383,7 @@ class PackageCapture:
                         raise SourceRefError("artifact Git acquisition exceeded its storage limit")
                     time.sleep(0.01)
                 self.check()
-                size = sum(item.stat().st_size for item in self.root.rglob("*") if item.is_file())
+                size = self._storage_size()
                 if size > self.limits.storage_bytes:
                     raise SourceRefError("artifact Git acquisition exceeded its storage limit")
                 if process.returncode:
@@ -424,10 +457,6 @@ class PackageCapture:
             size = int(self._run(repository, "cat-file", "-s", object_name))
             self.account(size)
             data = self._run(repository, "cat-file", "blob", object_name)
-            if data.startswith(b"version https://git-lfs.github.com/spec/v1\n") or data.startswith(
-                b"version https://git-lfs.github.com/spec/v1\r\n"
-            ):
-                raise SourceRefError("artifact Git package contains an unresolved Git LFS pointer")
             result.append(PackageMember(path, data, mode == b"100755"))
         return CapturedPackage(tuple(result), reference.path, reference.subpath, reference.ref, commit)
 
