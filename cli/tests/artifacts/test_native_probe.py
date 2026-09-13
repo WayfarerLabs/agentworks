@@ -775,9 +775,12 @@ def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(
 
 
 @pytest.mark.parametrize("layout", ["nested-entrypoint", "symlink", "special", "limit"])
-def test_markerless_skill_inventory_still_refuses_unsupported_candidates(tmp_path, layout):
+@pytest.mark.parametrize("root_marker", [False, True])
+def test_codex_skill_inventory_still_refuses_unsupported_candidates(tmp_path, layout, root_marker):
     root = tmp_path / "home/.agents/skills/removed"
     root.mkdir(parents=True)
+    if root_marker:
+        (root / "SKILL.md").write_text("---\nname: removed\ndescription: fixture\n---\nbody\n")
     (root / "notes.txt").write_text("ordinary notes")
     nested = root / "support"
     nested.mkdir()
@@ -791,3 +794,74 @@ def test_markerless_skill_inventory_still_refuses_unsupported_candidates(tmp_pat
         for index in range(510):
             (nested / f"note-{index}.txt").write_text("ordinary notes")
     assert "unreadable-native-inventory" in probe(tmp_path)["problems"]
+
+
+@pytest.mark.parametrize("relative", ["SKILL.md", "outer/examples/other/SKILL.md"])
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize("extra_name", ["outer", "review"])
+def test_codex_refuses_entrypoints_outside_direct_packages_even_with_an_outer_marker(
+    tmp_path, relative, existing, extra_name
+):
+    from agentworks.artifacts.application import ArtifactFile
+    from agentworks.artifacts.native.probe import _proposed_sizes
+
+    root = tmp_path / "home/.agents/skills"
+    outer = root / "outer/SKILL.md"
+    extra = root / relative
+    files = tuple(
+        ArtifactFile(
+            str(path),
+            f"---\nname: {name}\ndescription: fixture\n---\nbody\n".encode(),
+            ("a" * 64,),
+            native_identity="skill:outer",
+        )
+        for path, name in ((outer, "outer"), (extra, extra_name))
+    )
+    if existing:
+        for file in files:
+            path = Path(file.path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(file.data)
+        result = probe(tmp_path)
+    else:
+        result = probe(tmp_path, paths=tuple(file.path for file in files), proposed=_proposed_sizes(files, "codex"))
+    assert "unreadable-native-inventory" in result["problems"]
+
+
+def test_codex_counts_proposed_members_and_directories_before_first_publication(tmp_path):
+    from agentworks.artifacts.application import ArtifactFile
+    from agentworks.artifacts.native.probe import _proposed_sizes
+
+    root = tmp_path / "home/.agents/skills/review"
+    files = (
+        ArtifactFile(
+            str(root / "SKILL.md"),
+            b"---\nname: review\ndescription: fixture\n---\nbody\n",
+            ("a" * 64,),
+            native_identity="skill:review",
+        ),
+        *(
+            ArtifactFile(str(root / f"support/note-{index}.txt"), b"notes", ("a" * 64,), native_identity="skill:review")
+            for index in range(510)
+        ),
+    )
+    # Package directory, entrypoint and support directory consume three of the 512 entries.
+    accepted = files[:-1]
+    planned = _proposed_sizes(files, "codex")
+    assert (
+        "unreadable-native-inventory"
+        in probe(tmp_path, paths=tuple(file.path for file in files), proposed=planned)["problems"]
+    )
+    accepted_paths = tuple(file.path for file in accepted)
+    assert probe(tmp_path, paths=accepted_paths, proposed=planned)["problems"] == []
+    for file in accepted:
+        path = Path(file.path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(file.data)
+    entries = {accepted[0].path: "skill:review"}
+    assert probe(tmp_path, entries=entries)["problems"] == []
+    # Replacement paths count once, but one new member exceeds the same bound before and after writing.
+    assert probe(tmp_path, entries=entries, paths=accepted_paths, proposed=planned)["problems"] == []
+    assert "unreadable-native-inventory" in probe(tmp_path, entries=entries, paths=(files[-1].path,))["problems"]
+    Path(files[-1].path).write_bytes(files[-1].data)
+    assert "unreadable-native-inventory" in probe(tmp_path, entries=entries)["problems"]

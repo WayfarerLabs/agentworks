@@ -171,27 +171,29 @@ try:
             for directory in skill_root.iterdir():
                 existing_entries.add(str(directory))
                 scanned += 1
-                if scanned > 512 or directory.is_symlink():
+                if scanned > 512 or directory.is_symlink() or (tool == 'codex' and directory.name == 'SKILL.md'):
                     raise ValueError()
                 if not directory.is_dir():
                     continue
                 marker = directory / 'SKILL.md'
                 if marker.is_symlink() or (marker.exists() and not marker.is_file()):
                     raise ValueError()
-                if not marker.exists():
-                    # Cleanup may leave unowned files and supporting directories.
-                    # Ordinary files are not skills; nested entrypoints remain unsupported.
+                if tool == 'codex' or not marker.exists():
+                    # Codex recursively discovers skills even beneath another entrypoint.
+                    # Cleanup may also leave ordinary unowned files, which are not skills.
                     pending = [directory]
                     while pending:
                         for leftover in pending.pop().iterdir():
                             existing_entries.add(str(leftover))
                             scanned += 1
-                            if scanned > 512 or leftover.is_symlink() or leftover.name == 'SKILL.md':
+                            if (scanned > 512 or leftover.is_symlink() or
+                                    (leftover.name == 'SKILL.md' and leftover != marker)):
                                 raise ValueError()
                             if leftover.is_dir():
                                 pending.append(leftover)
                             elif not leftover.is_file():
                                 raise ValueError()
+                if not marker.exists():
                     continue
                 candidates.append(('skill', marker, directory.name))
                 if len(candidates) > 512:
@@ -213,6 +215,19 @@ try:
                     raise ValueError()
     proposed = {}
     proposed_entries = set()
+    if tool == 'codex':
+        # Count every future package member and implied directory, as the recursive scan will.
+        for spelling in dict.fromkeys((*request['paths'], *request['proposed'])):
+            path = pathlib.Path(spelling)
+            for kind, root in discovery_roots:
+                if kind != 'skill' or path == root or not path.is_relative_to(root):
+                    continue
+                if path.name == 'SKILL.md' and path.parent.parent != root:
+                    raise ValueError()
+                for member in (path, *path.parents):
+                    if member == root:
+                        break
+                    proposed_entries.add(str(member))
     for spelling, size in request['proposed'].items():
         path = pathlib.Path(spelling)
         for kind, root in discovery_roots:

@@ -57,6 +57,12 @@ retirement ordering only, a legacy owned file with native skill identity and bas
 identifies an entrypoint whose owned supporting members retire first. Deeper entrypoints precede
 shallower ones, preserving retryable discovery without granting directory-pruning authority.
 
+Codex's native adapter refuses skill entrypoints outside `<skill-root>/<package>/SKILL.md` in its
+known discovery roots, including nested entrypoints within otherwise valid packages. Its bounded
+inventory counts package members and directories against the existing 512-entry limit, including
+proposed files and implied directories before publication. This is a Codex delivery support limit;
+capture still permits ordinary supporting members within its independent package limits.
+
 ## Source acquisition
 
 `package_sources.py` extends the shared source facility beside `sources.py`. It reuses `SourceRef`

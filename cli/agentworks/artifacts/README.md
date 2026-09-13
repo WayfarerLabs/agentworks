@@ -181,14 +181,18 @@ name and competing paths. This check still runs when all applicable inputs were 
 
 Inventory covers selected skill/persona types, with at most 512 directory entries, YAML headers up
 to 32 KiB each and 1 MiB combined, and Codex persona TOML files up to 32 MiB each and 64 MiB
-combined. Before publication, preflight checks existing and proposed entrypoints together, counting
-a replaced path once, so an accepted plan fits the next inventory. Generated Codex persona files
-obey the same per-file bound. YAML metadata rejects aliases, anchors and nesting deeper than 32
-levels before constructing values. Directories without a root `SKILL.md` are walked within the same
-entry budget: ordinary files are ignored, while nested `SKILL.md` candidates, symlinks and special
-files are refused. This permits unowned notes to survive skill retirement without keeping the
-removed skill active. Symlinked or nested candidate layouts are explicitly unsupported. These are
-conservative Agentworks support limits, not claims that those layouts are invalid native
+combined. For Codex, Agentworks recursively checks package contents and accepts skill entrypoints
+only at `<skill-root>/<package>/SKILL.md`. Its 512-entry budget includes supporting files and
+directories, including proposed members and their implied directories. The Claude and Grok adapters
+do not scan beneath a present package entrypoint. These native support limits do not restrict the
+generic capture format. Before publication, preflight checks existing and proposed entries together,
+counting a replaced path once, so an accepted plan fits the next inventory. Generated Codex persona
+files obey the same per-file bound. YAML metadata rejects aliases, anchors and nesting deeper than
+32 levels before constructing values. Directories without a root `SKILL.md` are walked within the
+same entry budget: ordinary files are ignored, while nested `SKILL.md` candidates, symlinks and
+special files are refused. This permits unowned notes to survive skill retirement without keeping
+the removed skill active. Symlinked or nested candidate layouts are explicitly unsupported. These
+are conservative Agentworks support limits, not claims that those layouts are invalid native
 configurations. The inventory does not claim to cover additional ancestor repository roots,
 third-party plugin locations, or changes after preflight. Unknown native discovery extensions
 require separate verification; a successful preflight is not an exhaustive native inventory.
