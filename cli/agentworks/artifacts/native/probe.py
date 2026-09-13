@@ -43,7 +43,15 @@ else:
         problems.append('unsupported-native-version')
 if executable and request['flags']:
     help_result = subprocess.run([executable, '--help'], text=True, capture_output=True, timeout=20)
-    if help_result.returncode or any(flag not in help_result.stdout for flag in request['flags']):
+    help_text = help_result.stdout
+    if tool == 'claude':
+        # Claude documents the file carrier with an optional suffix in its help.
+        help_text = help_text.replace('--append-system-prompt[-file]',
+                                      '--append-system-prompt --append-system-prompt-file')
+    if help_result.returncode or any(
+        not re.search(r'(?<![\w-])' + re.escape(flag) + r'(?![\w-])', help_text)
+        for flag in request['flags']
+    ):
         problems.append('unsupported-native-cli')
 roots = [] if request['workspace_only'] else [pathlib.Path(native_home)]
 workspace = request['workspace']
