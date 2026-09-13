@@ -58,6 +58,12 @@ flowchart TB
     VF -->|Deferred directly to session| SC
     UF -->|Still deferred to session| SC
     WF -->|Still deferred to session| SC
+
+    %% Align local bundle inputs with their owning scope in the flow.
+    VF ~~~ UB
+    VF ~~~ WB
+    UF ~~~ SB
+    WF ~~~ SB
 ```
 
 Each deferred artifact takes one route, so VM inputs are not copied down both branches. The session
