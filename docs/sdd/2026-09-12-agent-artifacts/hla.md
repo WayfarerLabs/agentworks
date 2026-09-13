@@ -192,11 +192,13 @@ down both branches. An inactive user/workspace facet leaves its applicable route
 unhandled for session. Resolution is lazy for the selected integration and actual ancestor path; no
 inactive activation records or eager enumeration of every integration are required.
 
-Passthrough is launch-safe only when the facet was never activated or its previous effects have been
-retired. A removed activation with retained owned output or incomplete cleanup remains actionable
-applied state. Require the owning cleanup operation before launch can treat it as absent; for a
-workspace, that means recreation under the current lifecycle. Do not duplicate retained native
-content through session passthrough or manufacture records for never-activated facets.
+Passthrough is launch-safe when no retained artifact effects compromise the selected integration's
+promised delivery. A removed activation with such effects or incomplete artifact cleanup remains
+actionable applied state. Require the owning cleanup operation before treating those effects as
+absent; for a workspace, that means recreation under the current lifecycle. Do not duplicate
+retained artifact content through session passthrough or manufacture records for never-activated
+facets. This check adds no barrier for unrelated plugin/settings evidence or artifact-free launches;
+existing required/recommended setup semantics continue to govern that evidence.
 
 At convergence, identify inputs by immutable origin and entry identity, not by display name or
 content alone. A repeated path to the same input is an invalid route result rather than another
@@ -317,9 +319,9 @@ Across integrations, hints may be combined into a single context fragment. Rules
 always-context guidance within their applicability. Standard skills retain their package and
 progressive discovery semantics. Native policy that prevents promised discovery or loading must be
 diagnosed; mere file existence is not a substitute for the documented delivery contract. Native
-launch overrides that replace or disable the artifact carrier must be rejected before teardown;
-for example, raw arguments must not silently replace composed developer instructions. Each adapter
-owns conflict checks for its generated native options.
+launch overrides that replace or disable the artifact carrier must be rejected before teardown; for
+example, raw arguments must not silently replace composed developer instructions. Each adapter owns
+conflict checks for its generated native options.
 
 ## Inspection and worked behavior
 
@@ -368,7 +370,8 @@ Worked cases the HLA and subsequent tests share:
    applies/removes owned outputs. Only descendants whose actual prepared inputs change become stale.
    Inspection explains the mismatch and launch requests the applicable owner setup operation,
    explicitly workspace recreation when required, instead of silently mixing revisions or repairing
-   ancestors. A removed activation with retained effects still requires retirement before passthrough.
+   ancestors. A removed activation with retained effects still requires retirement before
+   passthrough.
 
 ## Implementation boundaries and review gates
 

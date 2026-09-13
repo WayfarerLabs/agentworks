@@ -43,7 +43,7 @@ when the implementation and required validation are complete and the whole PR is
 - [x] Recover the predecessor's acquisition safeguards into the FRD and prior-art research, with the
       historical commit reference and concrete byte-preservation cases. This preserves design
       context; it does not claim implementation or completion of acquisition research.
-- [ ] Write `prior-art-research.md`: evaluate Rulesync's model and generators, Agent Skills package
+- [x] Write `prior-art-research.md`: evaluate Rulesync's model and generators, Agent Skills package
       conventions, source acquisition options, and the actual native artifact mechanisms of each
       shipped harness. Cite primary sources and mark unsupported claims explicitly.
 - [ ] Resolve the final-session disposition with the operator and present the native support matrix.
@@ -55,12 +55,12 @@ when the implementation and required validation are complete and the whole PR is
       ownership and lazy routing, integration APIs, native placement, final disposition and cleanup.
       It includes `agw artifacts show`, the core-to-integration pipeline and the later producer
       boundary.
-- [ ] Include worked manifests and the VM/user/workspace/session flow, with inactive facets,
+- [x] Include worked manifests and the VM/user/workspace/session flow, with inactive facets,
       multiple consumers, duplicate-route prevention and session name reuse.
 - [ ] Check the saga's `session_uuid`/`run_id` contract and implementation ownership with the saga
       lead before selecting durable session artifact ownership in the HLA. Do not introduce a
       separate artifact identity to fill an unowned session-identity dependency.
-- [ ] Record migration from the merged facet API and existing native setup without reintroducing
+- [x] Record migration from the merged facet API and existing native setup without reintroducing
       speculative reconciliation machinery or source-specific propagation formats.
 - [ ] Run independent project and complexity reviews, complete the applicable checks, and publish
       the HLA checkpoint for operator and saga review.
