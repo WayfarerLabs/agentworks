@@ -70,8 +70,8 @@ receives its own artifacts plus the three applicable sets of deferrals. If its f
 handle an artifact, core applies the approved final-session error policy.
 
 The facet boxes show activated integrations. Without activation, core passes artifacts through: an
-inactive VM routes directly to session; an inactive user or workspace passes its applicable inputs
-to session. It does not invoke a missing facet or implicitly activate one. The
+inactive VM routes to user; an inactive user or workspace passes its applicable inputs to session.
+It does not invoke a missing facet or implicitly activate one. The
 [routing contract](#facet-results-routing-and-freshness) specifies those cases and stale results.
 
 Env preparation, persistence and native publication mechanics are described separately below. Env
@@ -210,22 +210,23 @@ Each VM item has one next facet: user, workspace or session. User and workspace 
 session. Routing to a sibling or back outward is invalid. First-party VM facets perform routing
 without native file placement: native integrations route toward user handling, while shell can route
 directly to session publication. The implementation must explicitly supply these VM hooks;
-activation of an unimplemented hook remains a hard error. Shell implements its VM hook so explicit
-VM activation remains valid, even though its route matches inactive passthrough.
+activation of an unimplemented hook remains a hard error. Shell implements its VM hook to route
+directly to session; leaving that facet inactive instead uses the core default toward user.
 
 The VM never examines downstream instances or activations. Its reusable result is evaluated for the
 actual user/workspace when those owners run. Handling for one user does not consume the VM result
 for another. Only the session joins its own actual user and workspace branches.
 
-For an inactive VM facet, core routes its captured inputs directly to session. It does not copy them
-down both branches. An inactive user/workspace facet leaves its applicable routed and local inputs
-unhandled for session. Resolution is lazy for the selected integration and actual ancestor path; no
-inactive activation records or eager enumeration of every integration are required.
+For an inactive VM facet, core routes its captured inputs to user. It does not copy them down both
+branches. An inactive user/workspace facet leaves its applicable routed and local inputs unhandled
+for session. Resolution is lazy for the selected integration and actual ancestor path; no inactive
+activation records or eager enumeration of every integration are required.
 
-Consequently, native user placement of VM-declared artifacts requires both VM activation to route
-them toward user and user activation to handle them there. User activation alone cannot intercept a
-VM item routed directly to session. Artifacts declared on the user itself need only user activation
-for native user placement. The shipped guide and examples must teach this distinction.
+Consequently, user activation alone can handle VM-declared artifacts through the default route, as
+well as artifacts declared on that user. An activated VM facet can deliberately choose a different
+route. Each actual user handles its own applicable inputs without consuming the VM result globally.
+Changing the applicable inputs makes a prior active user result stale until that owning setup runs;
+session launch never repairs it implicitly. The shipped guide and examples teach these cases.
 
 Passthrough is launch-safe when no retained artifact effects compromise the selected integration's
 promised delivery. A removed activation with such effects or incomplete artifact cleanup remains
@@ -391,8 +392,9 @@ Default output explains metadata without dumping artifact bodies or secret value
 Worked cases the HLA and subsequent tests share:
 
 1. **Inactive VM and user.** VM core has captured a rules bundle. Neither ancestor activates Codex.
-   Core carries its input directly to the selected Codex session. The session injects rule text; it
-   performs no implicit user setup. `show` identifies VM origin and the inactive passthrough.
+   Core routes its input to user and lazily passes it through that inactive facet to the selected
+   Codex session. The session injects rule text; it performs no implicit user setup. `show`
+   identifies VM origin and the inactive passthrough.
 2. **Upstream skills.** An agent user activates Codex and applies a skill bundle. Its sessions do
    not receive those skill payloads again. Inspection still lists the user placement and recorded
    handling. Without upstream handling, the same session skill would fail with an unsupported

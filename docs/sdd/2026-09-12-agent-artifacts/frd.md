@@ -197,12 +197,12 @@ globally. A user facet processes applicable VM inputs without consulting workspa
 session combines direct VM input and applicable user/workspace results. Handling for one user or
 workspace cannot discharge another's obligations.
 
-**Without a VM integration activation, all defined inputs remain unhandled and go directly to the
-session facet.** Core does not guess user versus workspace placement or broadcast those inputs down
-both branches. An inactive intermediate facet likewise leaves its applicable routed inputs unhandled
-for the session. Resolution can be lazy for the session's selected integration and actual ancestors;
-agent initialization need not enumerate inactive integrations or store empty passthrough results for
-them. Origin survives every skipped facet.
+**Without a VM integration activation, core routes its defined inputs to the user facet.** This
+default selects one branch; it does not broadcast inputs to the workspace. An inactive user or
+workspace facet passes its applicable routed and local inputs to the session. Resolution can be lazy
+for the session's selected integration and actual ancestors; agent initialization need not enumerate
+inactive integrations or store empty passthrough results for them. Origin survives every skipped
+facet.
 
 An explicitly activated but unimplemented facet is an error. That is distinct from an inactive facet
 and from an implemented facet that needs no native changes. Successful setup alone never means an
@@ -283,10 +283,10 @@ boundary; the design must state link and file-type handling. Hooks and MCP confi
 recognized extension directions, not first-delivery functionality.
 
 **R4. Apply and defer through explicit facets.** Implement the carried-forward owner-independent
-routing model, including lazy inactive-facet passthrough, direct-to-session fallback when VM
-activation is absent, and convergence of user/workspace paths without duplicate delivery. Preserve
-origin and destination applicability separately. Define deterministic ordering and collision
-behavior for multiple bundles and producers before implementation.
+routing model, including lazy inactive-facet passthrough, routing to user when VM activation is
+absent, and convergence of user/workspace paths without duplicate delivery. Preserve origin and
+destination applicability separately. Define deterministic ordering and collision behavior for
+multiple bundles and producers before implementation.
 
 **R5. Publish honestly through the shipped integrations.** Specify an artifact type and facet
 support matrix for shell, Claude Code, Codex and Grok Build. Implement native delivery where the

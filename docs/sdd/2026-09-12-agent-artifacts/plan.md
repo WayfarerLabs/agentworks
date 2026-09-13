@@ -371,3 +371,30 @@ makes no implementation change. Round 3 is complete and the PR returns to ready 
 `review-requested`. The authorized fix budget is now spent; monitor the final handoff and assess any
 further material feedback for operator direction. Windows CI and remaining native/two-user
 acceptance remain open; this SDD remains unlocked.
+
+## Additional authorization: user fallback and guides
+
+The operator superseded the inactive-VM default after round 3: core routes an inactive VM's inputs
+to user. Inactive user and workspace facets continue to pass their applicable inputs to session. An
+activated VM chooses its deferral routes, and activation of an unimplemented facet remains an error.
+Earlier completed milestones record the former behavior; this amendment changes the current contract
+rather than rewriting that history.
+
+Two additional feedback/fix rounds are authorized, including the confirmed Claude preflight fix. The
+first is overall round 4. Keep the PR draft while implementing this coherent change, then repeat
+private project/complexity/correctness review, relevant native diagnostics, gates and ready handoff.
+
+- [ ] Implement the default VM-to-user route with lazy inactive user/workspace passthrough and
+      regression coverage for user-only activation, independent consumers, stale prior results and
+      the diamond.
+- [ ] Correct Claude's abbreviated help-option detection and verify the generated carrier against
+      the actual supported executable with positive and negative controls, without model calls.
+- [ ] Add a harness-integration guide and expand the agent-artifact guide, using validated examples
+      and the ordinary discoverable guide topic mechanism.
+- [ ] Update current FRD/HLA, permanent contracts and examples; send the revised routing decision to
+      the saga owner without rewriting predecessor history.
+- [ ] Complete private reviews, local gates and a coherent ready handoff; assess the next published
+      batch within the two additional rounds.
+
+Scoped VM/native/two-user acceptance still requires operator inventory and a budget. The additional
+fix authorization does not identify a shared host or permit inventing a cloud test environment.

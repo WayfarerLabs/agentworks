@@ -92,7 +92,9 @@ native CLI carriers.
 The native checks use `--version`, applicable `--help` flags and selected configuration facts; no
 model is launched. The initial compatibility baselines are Claude Code 2.1.265, Codex 0.153.4 and
 Grok Build 1.0.10. Older versions or absent carrier flags fail before publication or session
-teardown. These checks establish a supported CLI surface, not proof of model consumption.
+teardown. Claude documents its file carrier as `--append-system-prompt[-file]`; the probe recognizes
+that specific spelling as both supported options while retaining whole-option matching for unknown
+flags. These checks establish a supported CLI surface, not proof of model consumption.
 
 Settings checks concern the selected native identities. An unrelated disabled plugin or skill does
 not require enabling it. Claude rule exclusions are checked against requested rule paths; extended
@@ -151,6 +153,15 @@ conservative boundary, not native disablement. Blindly merging project settings 
 when Codex declines to trust that project. Claude settings merge semantics and Grok
 managed/requirements overlays also remain outside this probe's effective-policy resolution; native
 acceptance must exercise the actual policy environment.
+
+Additional isolated checks on 2026-09-13 exercised the installed binaries with network access
+blocked and no model calls. Claude's actual `agents --json` accepted the renderer's rule and hint
+carrier flags; the public preflight also accepted both after recognizing the bracketed help
+spelling. An unknown flag was rejected by both the native CLI and preflight. These checks establish
+carrier acceptance, not prompt consumption. Codex app-server diagnostics discovered generated user
+and project skills at their respective scopes, then stopped discovering the project skill after its
+file was removed and the list refreshed. This verifies native discovery; it does not establish core
+cleanup or two-user isolation.
 
 Live native acceptance remains required before shipping: verify native discovery, registered
 personas, rule and skill loading paths, fresh/resume carrier selection, native policy refusal and

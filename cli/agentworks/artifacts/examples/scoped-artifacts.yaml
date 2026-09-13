@@ -29,16 +29,14 @@ metadata:
 spec:
   artifacts:
     bundles: [team-artifacts]
-  # VM activation routes these declarations onward for this integration.
-  harness_integrations:
-    - name: codex
+  # With no VM integration activation, core routes these inputs to the user facet.
 ---
 apiVersion: agentworks/v1
 kind: agent-template
 metadata:
   name: artifact-user
 spec:
-  # VM-origin skills reach this facet only through the activated VM route.
+  # User activation alone handles VM-origin skills through the default route.
   harness_integrations:
     - name: codex
 ---

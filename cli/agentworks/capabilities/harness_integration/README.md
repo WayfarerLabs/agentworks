@@ -41,8 +41,8 @@ native formats, placement, compatibility checks and routing decisions. Omitted i
 returning the old `None` result is a contract error even for an empty invocation.
 
 A VM deferral chooses exactly one of user, workspace or session. User/workspace deferrals can only
-target session. Core sends an inactive VM's inputs directly to session and passes an inactive
-user/workspace's applicable inputs onward. It does not rerun ancestor setup during session start.
+target session. Core sends an inactive VM's inputs to user, then passes an inactive user or
+workspace's applicable inputs to session. It does not rerun ancestor setup during session start.
 Missing or stale active artifact results require the owning setup operation.
 
 Before `start`, core calls `prepare_artifacts` with the immutable `SessionArtifactContext` available
@@ -710,9 +710,10 @@ The checklist beyond code, per the repo rules:
 
 Known holes the current contract leaves open on purpose, so the boundaries read as deliberate:
 
-- **Artifacts and features.** The current setup pipeline is core provisioning and scoped env,
-  followed by harness integrations. It has no artifact ingestion, bundles, propagation, deferral, or
-  feature-emission stage. Those are future contracts, not accepted configuration today.
+- **Features and further artifact types.** Core provisioning prepares scoped env and declared
+  artifact bundles before harness integrations handle or defer them. A future feature-emission stage
+  can fit between core and integrations. Core hint emission, hooks and MCP artifacts remain later
+  work; see [agent artifacts](../../artifacts/README.md) for the supported artifact types.
 - **Secrets and integration-owned environment.** The declare-and-receive secret plumbing is in place
   but no shipped integration declares a config secret. The session template's `env` chain, including
   secret-backed entries, is the supported way to put an env var (an API key, a tool config-dir

@@ -25,12 +25,66 @@ joins its VM, actual user, and workspace.
 Enable the selected integration's system plugin when required (for example, add `codex` to
 `plugins.system` in the operator configuration). Plugin availability and facet activation are
 separate choices. Activation is explicit even with default configuration. Core passes through an
-inactive integration's inputs. An inactive VM routes its artifacts directly to the session;
-activating only the user facet cannot intercept them. To deliver VM declarations through native user
-placement, activate the same integration at both VM and user scopes. An activated VM facet can route
-its inputs to user, workspace, or directly to session. Each deferral has one destination, avoiding
-duplicate delivery through the user/workspace diamond. Handled payloads stop at the facet that
-handled them.
+inactive integration's inputs. An inactive VM routes its artifacts to user by default. Activating
+only the user facet can therefore handle VM declarations at that actual user's native location. An
+inactive user or workspace facet passes its applicable inputs onward to session. An activated VM
+facet can route its inputs to user, workspace, or directly to session. Each deferral has one
+destination, avoiding duplicate delivery through the user/workspace diamond. Handled payloads stop
+at the facet that handled them. Each actual user handles the reusable VM inputs independently;
+configuring the administrator does not configure agent users.
+
+## A minimal bundle and consumer
+
+Save these declarations in your operator resources directory. The bundle declares content; the VM
+selects it; the agent activates the handler for that agent's Linux user. Shell is built in, so this
+example does not require another system plugin or a model call.
+
+```yaml
+apiVersion: agentworks/v1
+kind: artifact-bundle
+metadata:
+  name: setup-notes
+spec:
+  artifacts:
+    tools:
+      type: hint
+      text: Project tools are available through mise.
+---
+apiVersion: agentworks/v1
+kind: vm-template
+metadata:
+  name: artifact-vm
+spec:
+  artifacts:
+    bundles: [setup-notes]
+---
+apiVersion: agentworks/v1
+kind: agent-template
+metadata:
+  name: artifact-user
+spec:
+  harness_integrations:
+    - name: shell
+---
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: artifact-session
+spec:
+  harness_integration:
+    name: shell
+```
+
+Select these templates through your normal VM, agent and session declarations or creation workflow.
+The VM has no activated shell facet, so core makes its captured hint available to the user facet.
+Agent setup handles it as a file for that actual user. A shell session under that agent does not
+receive the handled hint again. If the user facet were inactive, the hint would instead reach
+session and be published beneath that user's private session artifact directory. Inactive workspace
+facets likewise pass their applicable inputs to session.
+
+Use `agw artifacts show --agent <agent-name> --integration shell` to inspect the captured input and
+recorded handling. The templates themselves do not create instances. See `agw vm create --help`,
+`agw agent create --help` and `agw session create --help` for your normal instance workflow.
 
 ## Sources and refresh
 
