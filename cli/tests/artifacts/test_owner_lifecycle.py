@@ -21,6 +21,7 @@ from agentworks.artifacts.state import read_captures
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, VMSetupInvocation
 from agentworks.errors import ExternalError, StateError
 from agentworks.harness_setup.dispatch import run_setup
+from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.lifecycle import prepare_agent_setup, prepare_vm_setup, prepare_workspace_setup
 from agentworks.harness_setup.state import read_native_setup
 from agentworks.resources.registry import Registry
@@ -138,7 +139,7 @@ def test_vm_admin_capture_shares_revision_and_refreshes_next_operation(owner, mo
 
     monkeypatch.setattr(PackageCapture, "capture", capture_then_advance)
 
-    def prepare():
+    def prepare() -> tuple[SetupInputs, ...]:
         return prepare_vm_setup(
             owner.db,
             owner.registry,
