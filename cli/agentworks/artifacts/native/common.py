@@ -73,6 +73,7 @@ def skill_files(root: str, item: ArtifactInput, *, namespace: str = "") -> tuple
             (item.origin_identity,),
             executable=member.executable,
             native_identity=identity,
+            package_root=f"{root}/{item.content.name}",
         )
         for member in item.content.members
     )

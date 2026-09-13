@@ -77,6 +77,7 @@ def owned(file, *, origins: tuple[str, ...] | None = None) -> OwnedArtifactFile:
         sha256=hashlib.sha256(file.data).hexdigest(),
         origins=origins or file.origins,
         native_identity=file.native_identity,
+        package_root=file.package_root,
     )
 
 
@@ -88,6 +89,7 @@ def test_outer_skills_preserve_complete_package_bytes_and_executable_intent(rend
         (member.path, member.data, member.executable) for member in item.content.members
     ]
     assert {file.native_identity for file in result.files} == {"skill:review"}
+    assert {file.package_root for file in result.files} == {"/home/alice/.native/skills/review"}
     assert not result.deferred
 
 

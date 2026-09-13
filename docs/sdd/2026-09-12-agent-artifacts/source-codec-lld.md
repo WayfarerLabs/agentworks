@@ -48,6 +48,12 @@ Single-file rules and personas retain their captured member and mode in addition
 text. Inline hints and rules have no source members. Skills retain the entire selected package.
 Acquisition provenance remains separate from these identities.
 
+Native package cleanup boundaries are outside this capture codec. The integration's shared skill
+renderer supplies an exact optional `ArtifactFile.package_root`, retained on each
+`OwnedArtifactFile` through publication and retirement checkpoints. The root contains that file and
+must remain strictly within an owning publication root. Missing legacy roots authorize only file
+retirement; neither the capture codec nor cleanup infers a package root from path spelling.
+
 ## Source acquisition
 
 `package_sources.py` extends the shared source facility beside `sources.py`. It reuses `SourceRef`

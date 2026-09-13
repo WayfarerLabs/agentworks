@@ -511,12 +511,17 @@ def test_large_skill_retirement_does_not_leave_an_inventory_lockout(tmp_path):
                 sha256=hashlib.sha256(data).hexdigest(),
                 origins=("a" * 64,),
                 native_identity="skill:review" if path == keep else "skill:removed",
+                package_root=str(keep.parent if path == keep else removed),
             )
         )
     assert probe(tmp_path, tool="claude", entries={str(keep): "skill:review"})["problems"] == []
     retained = publish_artifacts(
         target,
-        (ArtifactFile(str(keep), contents[keep], ("a" * 64,), native_identity="skill:review"),),
+        (
+            ArtifactFile(
+                str(keep), contents[keep], ("a" * 64,), native_identity="skill:review", package_root=str(keep.parent)
+            ),
+        ),
         tuple(previous),
         lambda files: None,
         roots=(str(target.home),),
@@ -665,3 +670,84 @@ def test_proposed_codex_budget_includes_existing_entries_and_replaces_paths_once
         "unreadable-native-inventory"
         in probe(tmp_path, identities=("agent:review",), proposed=proposed, inventory_bytes=budget - 1)["problems"]
     )
+
+
+def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(tmp_path, db, monkeypatch):
+    from dataclasses import replace
+
+    from agentworks.artifacts.publication import publish_artifacts
+    from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
+    from agentworks.errors import StateError
+    from agentworks.harness_setup.model import SetupRecord
+    from agentworks.native_files import NativeFiles
+    from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
+    from tests.artifacts._fixtures import received
+    from tests.native_setup_fixtures import LocalFixtureTransport
+
+    target = LocalFixtureTransport(tmp_path)
+    probe(tmp_path, tool="claude", identities=())  # Provision the offline native executable.
+    login = tmp_path / "login-shell"
+    login.write_text(
+        login.read_text().replace('[ "$1" = "-lc" ] || exit 9', 'case "$1" in -lc|-lic) ;; *) exit 9 ;; esac')
+    )
+    monkeypatch.setattr("agentworks.plugins.claude.harness_integration.setup_user", lambda *args: None)
+    removed = artifact(ArtifactType.SKILL)
+    kept = artifact(ArtifactType.SKILL, name="kept")
+    kept = replace(
+        kept,
+        content=replace(
+            kept.content,
+            members=tuple(
+                replace(member, data=member.data.replace(b"name: review", b"name: kept"))
+                if member.path == "SKILL.md"
+                else member
+                for member in kept.content.members
+            ),
+        ),
+    )
+    integration = ClaudeCodeIntegration.for_setup(owner_kind="agent", owner_name="worker", facet="user", config={})
+    invocation = UserSetupInvocation(
+        vm=db.insert_vm("vm", "lima", "vm"),
+        runner=target,
+        prior=None,
+        checkpoint=lambda claims: None,
+        username="worker",
+        home=str(target.home),
+        environment=target.environment,
+        artifacts=received(removed, kept),
+    )
+    first = integration.user_init(invocation)
+    current = publish_artifacts(target, first.files, (), lambda files: None, roots=(str(target.home),))
+    checkpoints = [current]
+    invocation = replace(
+        invocation,
+        artifacts=received(kept),
+        prior=SetupRecord(
+            component="agent",
+            integration="claude-code",
+            destination_id="a" * 64,
+            declaration={},
+            artifact_files=current,
+        ),
+    )
+    next_plan = integration.user_init(invocation)
+    remove = NativeFiles.remove
+
+    def interrupted(self, destination, *, expected):
+        if destination.endswith("/review/scripts/check.sh"):
+            raise StateError("fixture interrupted supporting-file retirement")
+        remove(self, destination, expected=expected)
+
+    monkeypatch.setattr(NativeFiles, "remove", interrupted)
+    with pytest.raises(StateError):
+        publish_artifacts(target, next_plan.files, current, checkpoints.append, roots=(str(target.home),))
+    entrypoint = target.home / ".claude/skills/review/SKILL.md"
+    assert entrypoint.exists() and any(file.path == str(entrypoint) for file in checkpoints[-1])
+    monkeypatch.setattr(NativeFiles, "remove", remove)
+    assert invocation.prior is not None
+    invocation = replace(invocation, prior=invocation.prior.model_copy(update={"artifact_files": checkpoints[-1]}))
+    # This actual user_init invokes native preflight before retrying publication.
+    retried = integration.user_init(invocation)
+    finished = publish_artifacts(target, retried.files, checkpoints[-1], checkpoints.append, roots=(str(target.home),))
+    assert not entrypoint.parent.exists()
+    assert all(file.native_identity == "skill:kept" for file in finished)

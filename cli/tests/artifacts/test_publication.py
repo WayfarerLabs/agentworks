@@ -139,8 +139,8 @@ def test_skill_retirement_prunes_only_owned_file_parents_and_retries_interruptio
 
     root = target.home / ".claude/skills/review"
     files = (
-        replace(artifact(root / "SKILL.md"), native_identity="skill:review"),
-        replace(artifact(root / "scripts/nested/check.sh"), native_identity="skill:review"),
+        replace(artifact(root / "SKILL.md"), native_identity="skill:review", package_root=str(root)),
+        replace(artifact(root / "scripts/nested/check.sh"), native_identity="skill:review", package_root=str(root)),
     )
     previous = publish_artifacts(target, files, (), lambda files: None, roots=(str(target.home),))
     checkpoints = [previous]
@@ -157,8 +157,8 @@ def test_skill_retirement_prunes_only_owned_file_parents_and_retries_interruptio
     monkeypatch.setattr(NativeFiles, "prune_empty_parents", interrupted)
     with pytest.raises(StateError):
         publish_artifacts(target, (), previous, checkpoints.append, roots=(str(target.home),))
-    # The entrypoint's record is already retired; the remaining member still supplies its package root.
-    assert [Path(file.path).name for file in checkpoints[-1]] == ["check.sh"]
+    # Supporting members are retired first; the absent entrypoint still records the exact root for retry.
+    assert [Path(file.path).name for file in checkpoints[-1]] == ["SKILL.md"]
     assert not Path(checkpoints[-1][0].path).exists()
     monkeypatch.setattr(NativeFiles, "prune_empty_parents", prune)
     assert publish_artifacts(target, (), checkpoints[-1], checkpoints.append, roots=(str(target.home),)) == ()
@@ -166,19 +166,26 @@ def test_skill_retirement_prunes_only_owned_file_parents_and_retries_interruptio
     assert root.parent.is_dir()
 
 
-def test_skill_retirement_preserves_modified_and_unowned_files(target):
+@pytest.mark.parametrize("legacy_support", [False, True])
+def test_skill_retirement_preserves_modified_and_unowned_files(target, legacy_support):
     from dataclasses import replace
 
     root = target.home / ".claude/skills/review"
     files = tuple(
-        replace(artifact(root / path), native_identity="skill:review")
+        replace(artifact(root / path), native_identity="skill:review", package_root=str(root))
         for path in ("SKILL.md", "scripts/modified.sh", "data/retired.txt")
     )
     previous = publish_artifacts(target, files, (), lambda files: None, roots=(str(target.home),))
+    if legacy_support:
+        previous = tuple(
+            record.model_copy(update={"package_root": None}) if record.path.endswith("/modified.sh") else record
+            for record in previous
+        )
     (root / "scripts/modified.sh").write_text("operator change")
     (root / "data/unowned.txt").write_text("unowned content")
     remaining = publish_artifacts(target, (), previous, lambda files: None, roots=(str(target.home),))
-    assert [Path(file.path).name for file in remaining] == ["modified.sh"]
+    assert [Path(file.path).name for file in remaining] == ["SKILL.md", "modified.sh"]
+    assert (root / "SKILL.md").exists()
     assert (root / "scripts/modified.sh").read_text() == "operator change"
     assert (root / "data/unowned.txt").read_text() == "unowned content"
     assert not (root / "data/retired.txt").exists()
@@ -198,3 +205,72 @@ def test_skill_parent_pruning_refuses_symlinks_and_scope_escape(target):
     with pytest.raises(StateError):
         files.prune_empty_parents(str(outside / "retired"), root=str(root))
     assert outside.is_dir() and (root / "linked").is_symlink()
+
+
+def test_recorded_package_root_never_prunes_same_named_ancestor_components(tmp_path):
+    from agentworks.plugins.claude.artifacts import outer_artifacts
+    from tests.artifacts.test_native_delivery import artifact as native_artifact
+
+    target = LocalFixtureTransport(tmp_path / "skills/review")
+    native_home = target.home / ".claude"
+    package = native_home / "skills/review"
+    plan = outer_artifacts(received(native_artifact(ArtifactType.SKILL)), str(native_home))
+    records = publish_artifacts(target, plan.files, (), lambda files: None, roots=(str(target.home),))
+    assert {file.package_root for file in records} == {str(package)}
+    assert publish_artifacts(target, (), records, lambda files: None, roots=(str(target.home),)) == ()
+    assert not package.exists()
+    assert native_home.is_dir() and package.parent.is_dir() and target.home.is_dir()
+
+
+def test_legacy_records_without_package_root_retire_files_without_guessing(target):
+    import hashlib
+
+    root = target.home / ".claude/skills/review"
+    root.mkdir(parents=True)
+    path = root / "SKILL.md"
+    path.write_bytes(b"legacy bytes")
+    path.chmod(0o600)
+    legacy = OwnedArtifactFile.model_validate(
+        {
+            "path": str(path),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "origins": ["a" * 64],
+            "native_identity": "skill:review",
+        }
+    )
+    assert legacy.package_root is None
+    assert publish_artifacts(target, (), (legacy,), lambda files: None, roots=(str(target.home),)) == ()
+    assert not path.exists() and root.is_dir()
+
+
+@pytest.mark.parametrize("invalid", ["above-owner", "owner", "outside-package", "relative", "wrong-type"])
+def test_package_root_is_validated_before_any_publication(target, invalid):
+    from dataclasses import replace
+
+    package = target.home / ".claude/skills/review"
+    path = package / "SKILL.md"
+    root = {
+        "above-owner": str(target.root),
+        "owner": str(target.home),
+        "outside-package": str(target.home / "other"),
+        "relative": "relative/package",
+        "wrong-type": 42,
+    }[invalid]
+    malformed = replace(artifact(path), native_identity="skill:review", package_root=root)
+    with pytest.raises(StateError):
+        publish_artifacts(target, (malformed,), (), lambda files: None, roots=(str(target.home),))
+    assert not path.exists() and target.commands == []
+
+
+def test_persisted_package_root_cannot_escape_current_publication_scope(target):
+    import hashlib
+
+    path = target.home / ".claude/skills/review/SKILL.md"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"owned")
+    record = OwnedArtifactFile(
+        path=str(path), sha256=hashlib.sha256(b"owned").hexdigest(), origins=("a" * 64,), package_root=str(target.root)
+    )
+    with pytest.raises(StateError):
+        publish_artifacts(target, (), (record,), lambda files: None, roots=(str(target.home),))
+    assert path.read_bytes() == b"owned" and target.commands == []

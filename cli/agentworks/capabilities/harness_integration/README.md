@@ -48,6 +48,14 @@ mechanism; omission is its handling report, not independent proof of consumption
 result and refuses final-session deferrals. Returning the old `None` result is a contract error even
 for an empty invocation.
 
+An `ArtifactFile` may supply an exact `package_root` for guarded empty-parent cleanup. The shared
+skill renderer sets it on every package member, and publication persists it in that member's
+`OwnedArtifactFile`. The normalized root must contain the file and lie strictly within an owning
+publication root. It is a cleanup boundary, not a separate directory ownership record. Retirement
+keeps `SKILL.md` until owned supporting members have retired, then prunes only empty parents up to
+the recorded root before dropping the file's checkpoint evidence. Older records without this field
+retain ordinary guarded file retirement and do not authorize directory pruning.
+
 A VM deferral chooses exactly one of user, workspace or session. User/workspace deferrals can only
 target session. Core sends an inactive VM's inputs to user, then passes an inactive user or
 workspace's applicable inputs to session. It does not rerun ancestor setup during session start.

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -54,6 +53,7 @@ def validate_application(
         if not isinstance(file.origins, tuple) or not file.origins or not set(file.origins) <= origins:
             raise StateError("integration returned a file with unknown artifact origins")
         path = native_path(file.path)
+        _validate_package_root(file)
         if path.casefold() in paths:
             raise StateError("integration returned conflicting artifact destinations")
         paths.add(path.casefold())
@@ -80,10 +80,14 @@ def publish_artifacts(
     """
     if not desired and not previous:
         return ()
-    for destination in [entry.path for entry in desired] + [entry.path for entry in previous]:
-        path = native_path(destination)
-        if not any(path.startswith(native_path(root).rstrip("/") + "/") for root in roots):
+    boundaries = tuple(native_path(root).rstrip("/") + "/" for root in roots)
+    entries: tuple[ArtifactFile | OwnedArtifactFile, ...] = (*desired, *previous)
+    for entry in entries:
+        if not native_path(entry.path).startswith(boundaries):
             raise StateError("artifact destination is outside its owning scope")
+        package_root = _validate_package_root(entry)
+        if package_root is not None and not package_root.startswith(boundaries):
+            raise StateError("artifact package root is outside its owning scope")
     current = {item.path: item for item in previous}
     planned = {item.path: item for item in desired}
     if len(planned) != len(desired) or len(current) != len(previous):
@@ -95,18 +99,22 @@ def publish_artifacts(
             prior = current.get(path)
             if data is not None and (prior is None or data != (prior.sha256, _mode(prior.executable, group))):
                 raise StateError("artifact destination is unowned or has been modified; existing content was retained")
-        for path, prior in tuple(current.items()):
+        retirement = sorted(current.items(), key=lambda item: _is_skill_entrypoint(item[1]))
+        for path, prior in retirement:
             if path in planned:
                 continue
+            if _is_skill_entrypoint(prior) and any(
+                item.path != path and item.path.startswith(str(prior.package_root) + "/") for item in current.values()
+            ):
+                continue  # Keep native discovery valid until every owned supporting member retires.
             data = observed[path]
             if data is not None and data != (prior.sha256, _mode(prior.executable, group)):
                 output.warn("An obsolete owned artifact was modified; its file and cleanup evidence were retained.")
                 continue
             if data is not None:
                 files.remove(path, expected=prior.sha256)
-            package_root = _skill_package_root(prior)
-            if package_root is not None:
-                files.prune_empty_parents(path, root=package_root)
+            if prior.package_root is not None:
+                files.prune_empty_parents(path, root=prior.package_root)
             del current[path]
             checkpoint(tuple(current.values()))
         for path, item in planned.items():
@@ -117,6 +125,7 @@ def publish_artifacts(
                 origins=item.origins,
                 executable=item.executable,
                 native_identity=item.native_identity,
+                package_root=item.package_root,
             )
             prior = current.get(path)
             observed_file = observed[path]
@@ -138,10 +147,17 @@ def _mode(executable: bool, group: str) -> int:
     return (0o770 if executable else 0o660) if group else (0o700 if executable else 0o600)
 
 
-def _skill_package_root(file: OwnedArtifactFile) -> str | None:
-    """Recognize the standard skill package containing this owned member, including retries."""
-    if file.native_identity is None or not file.native_identity.startswith("skill:"):
-        return None
-    name = file.native_identity.rsplit(":", 1)[-1]
-    parents = reversed(PurePosixPath(file.path).parents)
-    return next((str(parent) for parent in parents if parent.name == name and parent.parent.name == "skills"), None)
+def _validate_package_root(file: ArtifactFile | OwnedArtifactFile) -> str | None:
+    """Validate an integration-supplied cleanup boundary without inferring one from a path."""
+    root = file.package_root
+    if root is not None:
+        if not isinstance(root, str):
+            raise StateError("artifact package root must be an absolute normalized path")
+        root = native_path(root)
+        if not file.path.startswith(root + "/"):
+            raise StateError("artifact file is outside its package root")
+    return root
+
+
+def _is_skill_entrypoint(file: OwnedArtifactFile) -> bool:
+    return file.package_root is not None and file.path == file.package_root + "/SKILL.md"

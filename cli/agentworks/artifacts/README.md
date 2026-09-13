@@ -147,11 +147,15 @@ removed: updating an ancestor alone does not retire effects previously applied b
 
 Applied config records identify files and registrations owned by the integration. Refresh removes
 obsolete owned effects where supported. Retired skill files also prune empty parents up to their
-known package root. Nonempty directories and modified or unowned files remain; interrupted cleanup
-retains the file record until pruning can be retried. Existing unowned content and files changed
-since publication require resolution rather than silent replacement. Removing an activation with
-retained effects still needs the owning cleanup operation before passthrough can be considered
-current. Deleting a VM retains the ordinary VM deletion behavior: its filesystem disappears with it.
+recorded package root. The renderer supplies that exact boundary for every skill member; cleanup
+never infers it from directory names. Supporting files retire before `SKILL.md`, which stays owned
+and present while any owned supporting member remains. Nonempty directories and modified or unowned
+files remain; interrupted cleanup retains the file record and package boundary for retry. Older
+records without a package root retire owned files without directory pruning. Existing unowned
+content and files changed since publication require resolution rather than silent replacement.
+Removing an activation with retained effects still needs the owning cleanup operation before
+passthrough can be considered current. Deleting a VM retains the ordinary VM deletion behavior: its
+filesystem disappears with it.
 
 ## Native delivery
 

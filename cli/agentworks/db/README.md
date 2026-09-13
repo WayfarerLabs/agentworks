@@ -105,15 +105,18 @@ itself erase its evidence.
 
 Version 2 of native setup adds prepared artifact identities, single-destination deferrals and owned
 artifact files. File ownership records retain the native path/identity, originating declarations,
-content hash and executable intent. Version-1 plugin/settings evidence remains readable but cannot
-claim that it handled artifact inputs. Core captures use a separate version-2 `artifact-inputs`
-slice with effective declaration fingerprints and one group per actual owner. Each group has four
-type maps, lossless normalized content and compact replacement provenance. Inactive integrations
-reuse that common capture without acquiring their own applied record. The earlier draft capture
-format remains uninterpreted and requires owning reinitialization. Reinitialization replaces that
-capture while retaining separate native file ownership evidence for guarded cleanup; it does not
-adopt legacy bytes or discard their ownership records. Future unsupported capture versions are
-preserved rather than overwritten.
+content hash, executable intent and optional exact `package_root`. A package root is normalized and
+must contain its file; publication also checks it against the owning scope. It remains with each
+file's checkpoint evidence through interrupted cleanup. Older file records without this field can
+retire their owned files, but do not authorize directory pruning. Version-1 plugin/settings evidence
+remains readable but cannot claim that it handled artifact inputs. Core captures use a separate
+version-2 `artifact-inputs` slice with effective declaration fingerprints and one group per actual
+owner. Each group has four type maps, lossless normalized content and compact replacement
+provenance. Inactive integrations reuse that common capture without acquiring their own applied
+record. The earlier draft capture format remains uninterpreted and requires owning reinitialization.
+Reinitialization replaces that capture while retaining separate native file ownership evidence for
+guarded cleanup; it does not adopt legacy bytes or discard their ownership records. Future
+unsupported capture versions are preserved rather than overwritten.
 
 Session rows have a durable unique `session_uuid` and a nullable `run_id`. Migration 38 assigns each
 existing session its UUID once; legacy run IDs remain absent until the next managed launch. Core
