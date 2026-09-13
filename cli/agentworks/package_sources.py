@@ -11,9 +11,11 @@ import re
 import signal
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 import unicodedata
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
@@ -166,44 +168,135 @@ class PackageCapture:
 
     def _local(self, reference: SourceRef) -> CapturedPackage:
         path = Path(os.path.abspath(Path(reference.path).expanduser()))
-        # A linked ancestor is also outside the explicit package boundary.
-        for ancestor in (path, *path.parents):
-            if ancestor.is_symlink():
-                raise SourceRefError("artifact sources cannot contain links")
-        before: dict[Path, tuple[int, int, int, int, int, int]] = {}
+        if sys.platform == "win32":
+            return self._local_windows(path)
+        result: list[PackageMember] = []
+        before: dict[str, tuple[int, int, int, int, int, int]] = {}
+        flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+
+        def visit(parent: int, name: str, relative: str, *, verify: bool = False) -> None:
+            self.check()
+            info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            if not stat.S_ISDIR(info.st_mode) and not stat.S_ISREG(info.st_mode):
+                raise SourceRefError("artifact packages require regular files and directories")
+            if relative:
+                validate_member_path(relative, depth=self.limits.depth)
+            stamp = _stamp(info)
+            if verify:
+                if before.get(relative) != stamp:
+                    raise SourceRefError("artifact source changed during capture")
+            else:
+                before[relative] = stamp
+                if len(before) > self.limits.members * 2 + 1:
+                    raise SourceRefError("artifact capture exceeded its directory entry limit")
+            descriptor = os.open(name, flags, dir_fd=parent)
+            try:
+                if _stamp(os.fstat(descriptor)) != stamp:
+                    raise SourceRefError("artifact source changed during capture")
+                if stat.S_ISDIR(info.st_mode):
+                    children: list[str] = []
+                    with os.scandir(descriptor) as entries:
+                        for entry in entries:
+                            self.check()
+                            children.append(entry.name)
+                            if len(children) > self.limits.members * 2:
+                                raise SourceRefError("artifact capture exceeded its directory entry limit")
+                    for child in sorted(children):
+                        visit(descriptor, child, f"{relative}/{child}" if relative else child, verify=verify)
+                elif not verify:
+                    self.account(info.st_size)
+                    with os.fdopen(os.dup(descriptor), "rb") as stream:
+                        data = stream.read(self.limits.member_bytes + 1)
+                    if len(data) != info.st_size:
+                        raise SourceRefError("artifact source changed during capture")
+                    result.append(PackageMember(relative, data, bool(info.st_mode & 0o111)))
+                if (
+                    _stamp(os.fstat(descriptor)) != stamp
+                    or _stamp(os.stat(name, dir_fd=parent, follow_symlinks=False)) != stamp
+                ):
+                    raise SourceRefError("artifact source changed during capture")
+            finally:
+                os.close(descriptor)
+
+        # Keep every ancestor anchored until the complete package has been rechecked.
+        # O_NOFOLLOW on a full pathname only protects its final component.
+        with ExitStack() as handles:
+            parent = os.open(path.anchor, flags | os.O_DIRECTORY)
+            handles.callback(os.close, parent)
+            ancestors: list[tuple[int, str, tuple[int, int, int]]] = []
+            for name in path.parts[1:-1]:
+                self.check()
+                descriptor = os.open(name, flags | os.O_DIRECTORY, dir_fd=parent)
+                handles.callback(os.close, descriptor)
+                ancestors.append((parent, name, _stamp(os.fstat(descriptor))[:3]))
+                parent = descriptor
+            name = path.name or "."
+            info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            relative = "" if stat.S_ISDIR(info.st_mode) else name
+            visit(parent, name, relative)
+            visit(parent, name, relative, verify=True)
+            for ancestor, name, identity in ancestors:
+                self.check()
+                if _stamp(os.stat(name, dir_fd=ancestor, follow_symlinks=False))[:3] != identity:
+                    raise SourceRefError("artifact source changed during capture")
+        return CapturedPackage(tuple(result), str(path))
+
+    def _local_windows(self, path: Path) -> CapturedPackage:
+        from agentworks._package_source_windows import locked_file
+
+        before: dict[str, tuple[int, int, int, int, int, int]] = {}
         result: list[PackageMember] = []
 
-        def visit(current: Path, relative: str) -> None:
+        def visit(current: Path, relative: str, *, verify: bool = False) -> None:
             self.check()
-            info = current.lstat()
-            before[current] = _stamp(info)
-            if stat.S_ISDIR(info.st_mode):
+            # All parent components remain locked while opening this final component.
+            with locked_file(current) as descriptor:
+                info = os.fstat(descriptor)
+                stamp = _stamp(info)
+                if not stat.S_ISDIR(info.st_mode) and not stat.S_ISREG(info.st_mode):
+                    raise SourceRefError("artifact packages require regular files and directories")
                 if relative:
                     validate_member_path(relative, depth=self.limits.depth)
-                children = sorted(current.iterdir())
-                if len(children) + len(before) > self.limits.members * 2:
-                    raise SourceRefError("artifact capture exceeded its directory entry limit")
-                for child in children:
-                    visit(child, f"{relative}/{child.name}" if relative else child.name)
-                return
-            if not stat.S_ISREG(info.st_mode):
-                raise SourceRefError("artifact packages require regular files and directories")
-            validate_member_path(relative, depth=self.limits.depth)
-            self.account(info.st_size)
-            descriptor = os.open(current, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
-            with os.fdopen(descriptor, "rb") as stream:
-                if _stamp(os.fstat(stream.fileno())) != before[current]:
+                if verify:
+                    if before.get(relative) != stamp:
+                        raise SourceRefError("artifact source changed during capture")
+                else:
+                    before[relative] = stamp
+                    if len(before) > self.limits.members * 2 + 1:
+                        raise SourceRefError("artifact capture exceeded its directory entry limit")
+                if stat.S_ISDIR(info.st_mode):
+                    children: list[str] = []
+                    with os.scandir(current) as entries:
+                        for entry in entries:
+                            self.check()
+                            children.append(entry.name)
+                            if len(children) > self.limits.members * 2:
+                                raise SourceRefError("artifact capture exceeded its directory entry limit")
+                    for child in sorted(children):
+                        visit(current / child, f"{relative}/{child}" if relative else child, verify=verify)
+                elif not verify:
+                    self.account(info.st_size)
+                    with os.fdopen(os.dup(descriptor), "rb") as stream:
+                        data = stream.read(self.limits.member_bytes + 1)
+                    if len(data) != info.st_size:
+                        raise SourceRefError("artifact source changed during capture")
+                    result.append(PackageMember(relative, data, bool(info.st_mode & 0o111)))
+                if _stamp(os.fstat(descriptor)) != stamp:
                     raise SourceRefError("artifact source changed during capture")
-                data = stream.read(self.limits.member_bytes + 1)
-                if len(data) != info.st_size or _stamp(os.fstat(stream.fileno())) != before[current]:
-                    raise SourceRefError("artifact source changed during capture")
-            result.append(PackageMember(relative, data, bool(info.st_mode & 0o111)))
 
-        visit(path, "" if path.is_dir() else path.name)
-        for current, previous in before.items():
-            self.check()
-            if _stamp(current.lstat()) != previous:
-                raise SourceRefError("artifact source changed during capture")
+        with ExitStack() as handles:
+            current = Path(path.anchor)
+            handles.enter_context(locked_file(current))
+            for name in path.parts[1:-1]:
+                self.check()
+                current /= name
+                descriptor = handles.enter_context(locked_file(current))
+                if not stat.S_ISDIR(os.fstat(descriptor).st_mode):
+                    raise SourceRefError("artifact source ancestor is not a directory")
+            with locked_file(path) as descriptor:
+                relative = "" if stat.S_ISDIR(os.fstat(descriptor).st_mode) else path.name
+                visit(path, relative)
+                visit(path, relative, verify=True)
         return CapturedPackage(tuple(result), str(path))
 
     def _run(self, repository: Path, *args: str, output_limit: int | None = None) -> bytes:
@@ -268,7 +361,7 @@ class PackageCapture:
                 return data
             finally:
                 if process.poll() is None:
-                    if os.name == "posix":
+                    if sys.platform != "win32":
                         os.killpg(process.pid, signal.SIGKILL)
                     else:
                         try:

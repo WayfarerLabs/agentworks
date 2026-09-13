@@ -41,6 +41,21 @@ workstation. Local snapshots compare device, inode, mode, size and modification/
 before and after reading, then recheck every visited file and directory. Observed concurrent
 mutation rejects the capture. Links, special files and local `.git` metadata are refused.
 
+On POSIX, capture opens every ancestor from the filesystem root with descriptor-relative
+`O_NOFOLLOW` traversal. Package traversal and its final recheck use these anchored directory
+handles, including for individual source files. Renaming a checked parent cannot redirect a
+later read; changed parent identities reject the capture. Handles are bounded by ancestry and
+package depth and close on success or failure.
+
+Windows has no Python `dir_fd` equivalent. A private Windows helper opens each ancestor from the
+volume root using `CreateFileW` with `FILE_FLAG_OPEN_REPARSE_POINT` and
+`FILE_FLAG_BACKUP_SEMANTICS`, rejects all reparse points, and retains the handles while their paths
+are used. `FILE_SHARE_READ` alone prevents replacement and write access that could turn a held
+directory into a reparse point. A conflicting existing handle fails acquisition. This is the
+containment boundary for Windows pathname enumeration; there is no unchecked path-only fallback.
+See Microsoft's [CreateFileW sharing and reparse semantics](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew).
+The same metadata, complete-package, mutation, and content limits apply on both platforms.
+
 Git acquisition creates an empty bare repository and fetches the selected reference with depth one.
 The same repository/reference pair is resolved once per operation; all its selected entries use that
 immutable commit. Default references select remote HEAD. Reinitialization deliberately reacquires a

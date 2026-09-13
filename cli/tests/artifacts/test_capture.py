@@ -23,6 +23,9 @@ from agentworks.artifacts.declarations import (
 from agentworks.artifacts.model import ArtifactInput, ArtifactOrigin
 from agentworks.package_sources import DEFAULT_CAPTURE_LIMITS, CaptureLimits, PackageCapture, validate_member_set
 from agentworks.sources import SourceRefError
+from tests.conftest import requires_symlinks
+
+pytestmark = pytest.mark.windows
 
 ORIGIN = ArtifactOrigin("agent", "agent", "worker")
 
@@ -86,14 +89,17 @@ def test_portable_collisions(paths):
         validate_member_set(paths)
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Windows symlinks require optional privileges")
-def test_symlinks_metadata_and_special_files_are_rejected(tmp_path):
+@requires_symlinks
+def test_symlinks_are_rejected(tmp_path):
     root = skill(tmp_path)
     link = root / "link"
     link.symlink_to(root / "SKILL.md")
     with pytest.raises(SourceRefError):
         capture(SkillArtifactSpec(source=str(root)))
-    link.unlink()
+
+
+def test_metadata_and_special_files_are_rejected(tmp_path):
+    root = skill(tmp_path)
     (root / ".git").mkdir()
     with pytest.raises(SourceRefError):
         capture(SkillArtifactSpec(source=str(root)))
@@ -125,22 +131,144 @@ def test_capture_limits_and_temporary_cleanup(tmp_path, limits):
     assert not staging.exists()
 
 
+def test_capture_accepts_exact_member_budget(tmp_path):
+    root = skill(tmp_path)
+    (root / "support.txt").write_text("support")
+    with PackageCapture(CaptureLimits(members=2)) as operation:
+        assert len(operation.capture(str(root)).members) == 2
+
+
+def test_capture_failure_releases_source_handles(tmp_path):
+    root = skill(tmp_path)
+    with PackageCapture(CaptureLimits(member_bytes=1)) as operation, pytest.raises(SourceRefError):
+        operation.capture(str(root))
+    root.rename(tmp_path / "moved")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX descriptor lifetime")
+@pytest.mark.parametrize("fail", [False, True])
+def test_capture_closes_all_opened_descriptors(tmp_path, monkeypatch, fail):
+    root = skill(tmp_path)
+    opened = set()
+    original_open, original_close = os.open, os.close
+
+    def record_open(*args, **kwargs):
+        descriptor = original_open(*args, **kwargs)
+        opened.add(descriptor)
+        return descriptor
+
+    def record_close(descriptor):
+        original_close(descriptor)
+        opened.discard(descriptor)
+
+    monkeypatch.setattr(os, "open", record_open)
+    monkeypatch.setattr(os, "close", record_close)
+    with PackageCapture(CaptureLimits(member_bytes=1) if fail else DEFAULT_CAPTURE_LIMITS) as operation:
+        if fail:
+            with pytest.raises(SourceRefError):
+                operation.capture(str(root))
+        else:
+            operation.capture(str(root))
+    assert not opened
+
+
 def test_observed_mutation_is_rejected(tmp_path, monkeypatch):
     root = skill(tmp_path)
-    original = Path.lstat
-    reads = 0
+    original = PackageCapture.account
 
-    def mutate(path, *args, **kwargs):
-        nonlocal reads
-        if path == root / "SKILL.md":
-            reads += 1
-            if reads == 2:
-                path.write_text("changed")
-        return original(path, *args, **kwargs)
+    def mutate(operation, size):
+        original(operation, size)
+        (root / "SKILL.md").write_text("changed")
 
-    monkeypatch.setattr(Path, "lstat", mutate)
+    monkeypatch.setattr(PackageCapture, "account", mutate)
     with pytest.raises(SourceRefError):
         capture(SkillArtifactSpec(source=str(root)))
+
+
+@requires_symlinks
+@pytest.mark.parametrize("part", ["ancestor", "package", "nested", "rule.md"])
+def test_linked_source_components_are_rejected(tmp_path, part):
+    source = tmp_path / "ancestor" / "package" / "nested" / "rule.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("selected content")
+    target = next(item for item in (source, *source.parents) if item.name == part)
+    moved = tmp_path / "moved"
+    target.rename(moved)
+    target.symlink_to(moved, target_is_directory=moved.is_dir())
+    with PackageCapture() as operation, pytest.raises(SourceRefError):
+        operation.capture(str(source))
+
+
+@requires_symlinks
+@pytest.mark.skipif(os.name == "nt", reason="POSIX descriptor-relative race; Windows locks prevent replacement")
+@pytest.mark.parametrize("part", ["ancestor", "package", "nested", "rule.md"])
+@pytest.mark.parametrize("timing", ["before_open", "after_open"])
+def test_component_swap_cannot_capture_outside_payload(tmp_path, monkeypatch, part, timing):
+    import agentworks.package_sources as sources
+
+    source = tmp_path / "ancestor" / "package" / "nested" / "rule.md"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"selected content")
+    outside = tmp_path / "outside" / "package" / "nested" / "rule.md"
+    outside.parent.mkdir(parents=True)
+    outside.write_bytes(b"outside content")
+    target = next(item for item in (source, *source.parents) if item.name == part)
+    replacement = (
+        tmp_path / "outside"
+        if part == "ancestor"
+        else next(item for item in (outside, *outside.parents) if item.name == part)
+    )
+    original = os.open
+    swapped = False
+    payloads = []
+    original_member = sources.PackageMember
+
+    def record(*args):
+        member = original_member(*args)
+        payloads.append(member.data)
+        return member
+
+    def open_and_swap(name, flags, *args, **kwargs):
+        nonlocal swapped
+        if name != part or swapped:
+            return original(name, flags, *args, **kwargs)
+        swapped = True
+        descriptor = original(name, flags, *args, **kwargs) if timing == "after_open" else None
+        target.rename(tmp_path / "original")
+        target.symlink_to(replacement, target_is_directory=replacement.is_dir())
+        return descriptor if descriptor is not None else original(name, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", open_and_swap)
+    monkeypatch.setattr(sources, "PackageMember", record)
+    with PackageCapture() as operation, pytest.raises(SourceRefError):
+        operation.capture(str(source.parent.parent))
+    assert swapped
+    assert b"outside content" not in payloads
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows sharing locks")
+@pytest.mark.parametrize("part", ["ancestor", "package", "nested", "rule.md"])
+def test_windows_capture_locks_each_component_until_read_finishes(tmp_path, monkeypatch, part):
+    source = tmp_path / "ancestor" / "package" / "nested" / "rule.md"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"selected content")
+    target = next(item for item in (source, *source.parents) if item.name == part)
+    original = PackageCapture.account
+    attempted = False
+
+    def attempt_replace(operation, size):
+        nonlocal attempted
+        original(operation, size)
+        attempted = True
+        with pytest.raises(PermissionError):
+            target.rename(tmp_path / "moved")
+
+    monkeypatch.setattr(PackageCapture, "account", attempt_replace)
+    with PackageCapture() as operation:
+        package = operation.capture(str(source.parent.parent))
+    assert attempted
+    assert package.members[0].data == b"selected content"
+    target.rename(tmp_path / "moved")  # All native handles were released.
 
 
 def test_preserve_bytes_cannot_skip_skill_entrypoint(tmp_path):
@@ -187,6 +315,7 @@ def repository(tmp_path, monkeypatch):
     git(repo, "init", "-q")
     git(repo, "config", "user.email", "fixture@example.test")
     git(repo, "config", "user.name", "Fixture")
+    git(repo, "config", "core.autocrlf", "false")
     root = skill(repo)
     (root / "SKILL.md").write_bytes((root / "SKILL.md").read_bytes() + b"$Format:%H$\n")
     (root / ".gitattributes").write_text("*.txt export-ignore\n*.md export-subst\n*.dat filter=fixture\n")
