@@ -145,18 +145,18 @@ therefore survive cleanup without keeping an operator-removed skill discoverable
 Inventory covers the selected types at known user/workspace discovery roots, with at most 512
 inventory entries, 32 KiB per YAML header and 1 MiB of headers in total.
 [Codex recursively discovers skills beneath those roots](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/ext/skills/src/loader/discovery.rs),
-so its check also counts package members and refuses `SKILL.md` outside
-the supported `<root>/<package>/SKILL.md` placement, even when an enclosing package has its own
-entrypoint. Proposed supporting files and implied directories count toward the same bound before
-publication. This is a Codex adapter limit, not a restriction on captured packages for other
-integrations. Codex persona TOML is
-bounded at 32 MiB per file and 64 MiB in total, including the instruction body; generated personas
-obey the same per-file limit. Preflight budgets existing and planned native entries together,
-counting each replacement path once, so publication cannot itself exceed the next inventory's
-limits. Symlinked paths and nested candidate layouts are conservatively refused. Additional
-repository ancestor roots, third-party plugin discovery and changes after preflight need separate
-verification. These are Agentworks support limits, not assertions that other layouts are invalid in
-the native harness, and the check is not a continuous watcher or concurrent-mutation guarantee.
+so its check also counts package members and refuses `SKILL.md` outside the supported
+`<root>/<package>/SKILL.md` placement, even when an enclosing package has its own entrypoint.
+Proposed supporting files and implied directories count toward the same bound before publication.
+This is a Codex adapter limit, not a restriction on captured packages for other integrations. Codex
+persona TOML is bounded at 32 MiB per file and 64 MiB in total, including the instruction body;
+generated personas obey the same per-file limit. Preflight budgets existing and planned native
+entries together, counting each replacement path once, so publication cannot itself exceed the next
+inventory's limits. Symlinked paths and nested candidate layouts are conservatively refused.
+Additional repository ancestor roots, third-party plugin discovery and changes after preflight need
+separate verification. These are Agentworks support limits, not assertions that other layouts are
+invalid in the native harness, and the check is not a continuous watcher or concurrent-mutation
+guarantee.
 
 The initial compatibility baselines are Claude Code 2.1.265, Codex 0.153.4 and Grok Build 1.0.10.
 Older versions or absent carrier flags fail before publication or session teardown. Claude documents
