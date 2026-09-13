@@ -21,36 +21,58 @@ disposition question, not a claim that the earlier discussion already settled it
 
 ## Architecture and flow
 
-An owning scope prepares its own artifacts and applicable env before calling its integration facet.
-Native placement and deferral decisions belong to that integration. Core implements absent-facet
-passthrough and preserves origin. The following graph is for one integration and one actual session;
-other users and workspaces independently reuse the VM result.
+The diagram follows artifacts for one integration through one session's actual ancestors. Each
+boundary is an owning scope; the integration runs the facet named inside it. The actual user is
+either an Agentworks agent user or the admin user, never both in the same path. Other users and
+workspaces independently reuse the VM result.
+
+Bundle references can be declared at every scope. Core captures each scope's local bundle content
+and combines it with only the applicable incoming deferrals before invoking the integration. Solid
+arrows below carry artifact inputs or deferrals. Handled artifacts stop at their facet and do not
+travel to inner scopes.
 
 ```mermaid
-flowchart TD
-    B[Artifact bundle declarations] --> VC[VM core: env and captured artifacts]
-    VC --> VI[VM integration or inactive passthrough]
-    VI -->|VM env and user-routed artifacts| UC[Actual user core: env and own artifacts]
-    VI -->|VM env and workspace-routed artifacts| WC[Workspace core: env and own artifacts]
-    UC --> UI[User integration or inactive passthrough]
-    WC --> WI[Workspace integration or inactive passthrough]
-    VI -->|VM env and direct session deferrals| SC[Session core: resolve env and collect applicable artifacts]
-    UI -->|User env and remaining session deferrals| SC
-    WI -->|Workspace env and remaining session deferrals| SC
-    SB[Session bundle declarations] --> SC
-    SC --> SI[Session integration: native delivery and launch decision]
-    SI -->|No unresolved artifacts| L[Publish session files and launch with env]
-    SI -->|Unresolved artifacts with reasons| E[Core launch error]
-    VI -.-> VS[VM applied state and deferred result]
-    UI -.-> US[User applied state and deferred result]
-    WI -.-> WS[Workspace applied state and deferred result]
-    SI -.-> SS[Session applied state]
+flowchart TB
+    subgraph VM["VM scope"]
+        VB["VM bundle references"] --> VC["Core: prepare artifact inputs"]
+        VC --> VF["Integration: VM facet"]
+    end
+
+    subgraph USER["Agent or admin scope: actual user"]
+        UB["User bundle references"] --> UC["Core: prepare artifact inputs"]
+        UC --> UF["Integration: user facet"]
+    end
+
+    subgraph WORKSPACE["Workspace scope"]
+        WB["Workspace bundle references"] --> WC["Core: prepare artifact inputs"]
+        WC --> WF["Integration: workspace facet"]
+    end
+
+    subgraph SESSION["Session scope"]
+        SB["Session bundle references"] --> SC["Core: prepare artifact inputs"]
+        SC --> SF["Integration: session facet"]
+    end
+
+    VF -->|Deferred to user| UC
+    VF -->|Deferred to workspace| WC
+    VF -->|Deferred directly to session| SC
+    UF -->|Still deferred to session| SC
+    WF -->|Still deferred to session| SC
 ```
 
-The env labels denote scope context, not three env dictionaries merged at the session: the existing
-env resolver still composes actual ancestors with its established precedence. Env is supplied to
-each integration; artifact routing does not alter env semantics. Integration-specific launch env
-additions are final launch output, not new env declarations for descendants.
+Each deferred artifact takes one route, so VM inputs are not copied down both branches. The session
+receives its own artifacts plus the three applicable sets of deferrals. If its facet still cannot
+handle an artifact, core applies the proposed final-session error policy.
+
+The facet boxes show activated integrations. Without activation, core passes artifacts through: an
+inactive VM routes directly to session; an inactive user or workspace passes its applicable inputs
+to session. It does not invoke a missing facet or implicitly activate one. The
+[routing contract](#facet-results-routing-and-freshness) specifies those cases and stale results.
+
+Env preparation, persistence and native publication mechanics are described separately below. Env
+still uses its existing scope resolution and precedence; artifact routing does not change those
+semantics. Core prepares applicable env before invoking each integration, and integration-specific
+launch env additions are final output rather than new declarations for descendants.
 
 At each core box, the future extension point is **core, then features, then integrations**. Future
 producers can add normalized artifacts and env before integrations run. This delivery creates no
