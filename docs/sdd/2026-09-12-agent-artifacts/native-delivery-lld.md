@@ -142,8 +142,14 @@ authority. In directories without a root `SKILL.md`, bounded inventory ignores o
 empty directories while refusing nested skill entrypoints, symlinks and special files. Unowned notes
 therefore survive cleanup without keeping an operator-removed skill discoverable.
 
-Inventory covers the selected types at direct user/workspace discovery roots, with at most 512
-directory entries, 32 KiB per YAML header and 1 MiB of headers in total. Codex persona TOML is
+Inventory covers the selected types at known user/workspace discovery roots, with at most 512
+inventory entries, 32 KiB per YAML header and 1 MiB of headers in total.
+[Codex recursively discovers skills beneath those roots](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/ext/skills/src/loader/discovery.rs),
+so its check also counts package members and refuses `SKILL.md` outside
+the supported `<root>/<package>/SKILL.md` placement, even when an enclosing package has its own
+entrypoint. Proposed supporting files and implied directories count toward the same bound before
+publication. This is a Codex adapter limit, not a restriction on captured packages for other
+integrations. Codex persona TOML is
 bounded at 32 MiB per file and 64 MiB in total, including the instruction body; generated personas
 obey the same per-file limit. Preflight budgets existing and planned native entries together,
 counting each replacement path once, so publication cannot itself exceed the next inventory's

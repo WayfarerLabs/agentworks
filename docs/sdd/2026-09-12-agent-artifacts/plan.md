@@ -579,3 +579,13 @@ and introduce another filesystem operation solely to satisfy an overly strict in
 Instead, the existing bounded walk ignores ordinary files in directories without a root entrypoint
 and still refuses nested skill entrypoints, symlinks, special files and limit overages. The
 corrected implementation and final review remain pending.
+
+All three private lanes were clean on the cleanup-remnant correction at `a64cda55`; complexity
+independently reran 85 focused tests. The full CLI passed 9,460 tests with seven skips, and local
+static/document/package checks passed. A final lead check against Codex 0.153.4's source then found
+that recursive discovery also loads nested `SKILL.md` files inside an otherwise valid package.
+Small existing and proposed package fixtures reproduced preflight accepting an unexamined nested
+identity. The correction is Codex-specific refusal outside the supported root/package entrypoint
+shape, with existing and proposed package members counted consistently in the bounded inventory.
+No new artifact identity model, persisted state or global discovery mechanism is introduced. Final
+validation and handoff remain pending.
