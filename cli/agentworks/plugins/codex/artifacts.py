@@ -100,7 +100,7 @@ def session_artifacts(
     configured: str | None,
     extra_args: Sequence[str],
 ) -> NativeSessionArtifacts:
-    """Render session inputs, validating plugin-supplied persona names for native override paths."""
+    """Render session inputs, validating persona names for native override paths."""
     if context is None or not has_artifacts(context):
         return NativeSessionArtifacts()
     validate_names(context.inputs)

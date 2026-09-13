@@ -455,3 +455,13 @@ was identified. The duplicate inactive status and empty trailing field are a sma
       the scoped VM/two-user acceptance gap where no environment is supplied.
 - [ ] Complete private review and relevant gates, publish a coherent ready handoff, and assess the
       next feedback batch within this newest two-round allowance.
+
+Additional local native acceptance in this round reproduced a Codex session-persona bug: the CLI
+keeps quotes literally in dotted override keys, so the renderer's quoted role name is registered
+under the wrong identity. The existing fresh/resume regression treated the entire override as TOML
+and therefore missed the actual CLI key parsing. Correct the native key encoding and validate the
+rendered identity through actual Codex diagnostics before handoff. This is a private acceptance
+finding within the current round, not a new published feedback batch.
+
+- [ ] Correct Codex session role-key encoding, reject unrepresentable persona names at the native
+      boundary, and verify fresh/resume override behavior against the native parser.

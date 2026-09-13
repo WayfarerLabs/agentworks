@@ -67,6 +67,11 @@ and rejects unsupported fields rather than silently losing their requested behav
 | Codex       | `model` and `model_reasoning_effort` strings                                            | Native discovery TOML includes name/description; session role config layers contain only config fields, with identity/description in the selecting overrides |
 | Grok Build  | `model` string and `tools` string list                                                  | Markdown frontmatter or inline persona JSON                                                                                                                  |
 
+Codex CLI overrides use literal dotted key components, not TOML key syntax. Session role selectors
+therefore use the validated portable persona name directly in `agents.<name>.config_file` and
+`agents.<name>.description`; only their values are TOML-encoded. Unsupported programmatic names are
+rejected before publication rather than creating another nested key or a name containing quotes.
+
 Hooks, MCP definitions and unknown option fields are not accepted through this surface. Registering
 a persona makes its native definition available; it does not silently select the primary persona.
 Existing integration `agent` configuration retains its documented behavior. In particular, Codex
@@ -162,6 +167,18 @@ carrier acceptance, not prompt consumption. Codex app-server diagnostics discove
 and project skills at their respective scopes, then stopped discovering the project skill after its
 file was removed and the list refreshed. This verifies native discovery; it does not establish core
 cleanup or two-user isolation.
+
+Further isolated diagnostics exercised actual Codex role-file discovery at user, project and session
+paths: valid generated files produced no parse warning, while a malformed-file control at each path
+produced a native path-specific warning. A successful `config/read` alone does not establish
+effective role availability. The no-prompt `debug prompt-input` command rendered the exact composed
+developer instructions, establishing native prompt construction without model consumption.
+
+Claude's native validator accepted the generated private plugin manifest. Its plugin inventory
+reported the generated skill twice, and reported no skills after the fixture's `SKILL.md` was
+removed. This establishes native plugin discovery and its refresh behavior, not Agentworks cleanup.
+Available offline diagnostics did not establish Claude persona registration or actual conversation
+resume. These checks used isolated homes, denied native network access and made no model calls.
 
 Live native acceptance remains required before shipping: verify native discovery, registered
 personas, rule and skill loading paths, fresh/resume carrier selection, native policy refusal and
