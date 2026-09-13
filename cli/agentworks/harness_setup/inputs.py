@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
+from agentworks.artifacts.declarations import ArtifactsConfig
+from agentworks.artifacts.state import CapturedArtifacts
 from agentworks.capabilities.config import validate_capability_config
 from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled
 from agentworks.env.compose import compose_env
@@ -36,6 +38,8 @@ class SetupInputs:
     component: SetupComponent
     activations: tuple[CapabilityBlock, ...]
     target: SecretTarget
+    artifacts: ArtifactsConfig = field(default_factory=ArtifactsConfig)
+    artifact_snapshot: CapturedArtifacts | None = None
 
     @property
     def facet(self) -> SetupFacet:

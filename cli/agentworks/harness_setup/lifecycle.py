@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from agentworks.artifacts.declarations import ArtifactsConfig
+from agentworks.artifacts.state import capture_owner, read_captures
 from agentworks.capabilities.harness_integration.setup import (
     SetupInvocation,
     UserSetupInvocation,
@@ -43,9 +45,11 @@ if TYPE_CHECKING:
 
 
 def _needed(
-    db: Database, kind: InstanceKind, name: str, component: SetupComponent, activations: Sequence[CapabilityBlock]
+    db: Database, kind: InstanceKind, name: str, component: SetupComponent, activations: Sequence[CapabilityBlock],
+    artifacts: ArtifactsConfig,
 ) -> bool:
-    return bool(activations) or any(item.component == component for item in read_native_setup(db, kind, name).records)
+    return (bool(activations) or bool(artifacts.bundles) or component in read_captures(db, kind, name)
+            or any(item.component == component for item in read_native_setup(db, kind, name).records))
 
 
 def require_prepared_setup(
@@ -74,18 +78,20 @@ def require_prepared_setup(
 
 
 def prepare_vm_setup(
-    db: Database, *, name: str, template: ResolvedVMTemplate, admin: AdminConfig
+    db: Database, registry: Registry, *, name: str, template: ResolvedVMTemplate, admin: AdminConfig
 ) -> tuple[SetupInputs, ...]:
     """Prepare VM and actual-admin inputs independently, including retirement."""
     result = []
-    if _needed(db, "vm", name, "vm", template.harness_integrations):
+    if _needed(db, "vm", name, "vm", template.harness_integrations, template.artifacts):
         result.append(
-            SetupInputs("vm", name, "vm", tuple(template.harness_integrations), SecretTarget(vm=template.env))
+            SetupInputs("vm", name, "vm", tuple(template.harness_integrations), SecretTarget(vm=template.env),
+                        template.artifacts, capture_owner(registry, "vm", name, "vm", template.artifacts))
         )
-    if _needed(db, "vm", name, "admin", admin.harness_integrations):
+    if _needed(db, "vm", name, "admin", admin.harness_integrations, admin.artifacts):
         result.append(
             SetupInputs(
-                "vm", name, "admin", tuple(admin.harness_integrations), SecretTarget(vm=template.env, admin=admin.env)
+                "vm", name, "admin", tuple(admin.harness_integrations), SecretTarget(vm=template.env, admin=admin.env),
+                admin.artifacts, capture_owner(registry, "vm", name, "admin", admin.artifacts),
             )
         )
     return tuple(result)
@@ -95,13 +101,14 @@ def prepare_agent_setup(
     db: Database, registry: Registry, *, vm: VMRow, name: str, template: ResolvedAgentTemplate
 ) -> SetupInputs | None:
     """Prepare this agent's VM + user chain, without admin or workspace env."""
-    if not _needed(db, "agent", name, "agent", template.harness_integrations):
+    if not _needed(db, "agent", name, "agent", template.harness_integrations, template.artifacts):
         return None
     from agentworks.vms.templates import resolve_live_template
 
     ancestor = resolve_live_template(db, registry, vm.name, vm.template)
     return SetupInputs(
-        "agent", name, "agent", tuple(template.harness_integrations), SecretTarget(vm=ancestor.env, agent=template.env)
+        "agent", name, "agent", tuple(template.harness_integrations), SecretTarget(vm=ancestor.env, agent=template.env),
+        template.artifacts, capture_owner(registry, "agent", name, "agent", template.artifacts),
     )
 
 
@@ -109,7 +116,7 @@ def prepare_workspace_setup(
     db: Database, registry: Registry, *, vm: VMRow, name: str, template: ResolvedTemplate
 ) -> SetupInputs | None:
     """Prepare this project's VM + workspace chain, without either user env."""
-    if not _needed(db, "workspace", name, "workspace", template.harness_integrations):
+    if not _needed(db, "workspace", name, "workspace", template.harness_integrations, template.artifacts):
         return None
     from agentworks.vms.templates import resolve_live_template
 
@@ -120,6 +127,7 @@ def prepare_workspace_setup(
         "workspace",
         tuple(template.harness_integrations),
         SecretTarget(vm=ancestor.env, workspace=template.env),
+        template.artifacts, capture_owner(registry, "workspace", name, "workspace", template.artifacts),
     )
 
 

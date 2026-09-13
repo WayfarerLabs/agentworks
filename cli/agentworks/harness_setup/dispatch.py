@@ -11,6 +11,9 @@ from typing import TYPE_CHECKING
 from pydantic import ValidationError
 
 from agentworks import output
+from agentworks.artifacts.application import OwnedArtifactFile
+from agentworks.artifacts.publication import publish_artifacts, validate_application
+from agentworks.artifacts.state import write_capture
 from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled, harness_integration_for
 from agentworks.capabilities.harness_integration.setup import (
     SetupInvocation,
@@ -69,6 +72,8 @@ def run_setup(
     if not isinstance(invocation, expected[inputs.facet]):
         raise StateError("native setup invocation does not match its facet")
     with native_mutation_guard(db.path, invocation.vm.name, held=held):
+        if inputs.artifact_snapshot is not None and not buffered:
+            write_capture(db, inputs.kind, inputs.name, inputs.component, inputs.artifact_snapshot, operation=operation)
         state = read_native_setup(db, inputs.kind, inputs.name)
         prior = {record.integration: record for record in state.records if record.component == inputs.component}
         if not inputs.activations and not prior:
@@ -107,7 +112,7 @@ def run_setup(
         for name in (*desired, *(name for name in prior if name not in desired)):
             previous = prior.get(name)
             block = desired.get(name)
-            if block is None and previous is not None and not previous.claims:
+            if block is None and previous is not None and not previous.claims and not previous.artifact_files:
                 state = NativeSetupState(
                     records=tuple(
                         record
@@ -141,6 +146,7 @@ def run_setup(
                 destination_id=destination,
                 declaration=declaration,
                 claims=() if previous is None else previous.claims,
+                artifact_files=() if previous is None or previous.destination_id != destination else previous.artifact_files,
             )
             state = replace_setup_record(state, current)
             persist(state)
@@ -155,16 +161,40 @@ def run_setup(
                 state = replace_setup_record(state, current)
                 persist(state)
 
+            from agentworks.artifacts.routing import setup_artifacts
+
+            artifacts = () if block is None else setup_artifacts(db, registry, inputs, invocation.vm, name)
+            current = current.model_copy(update={"artifact_inputs": tuple(item.identity for item in artifacts)})
+            state = replace_setup_record(state, current)
+            persist(state)
+
+            def checkpoint_files(files: tuple[OwnedArtifactFile, ...]) -> None:
+                nonlocal current, state
+                current = current.model_copy(update={"artifact_files": files})
+                state = replace_setup_record(state, current)
+                persist(state)
+
             scoped_secrets = {ref.name: invocation.secrets[ref.name] for ref in integration.config_secret_refs()}
-            call = replace(invocation, prior=previous, checkpoint=checkpoint, secrets=scoped_secrets)
+            call = replace(invocation, prior=previous, checkpoint=checkpoint, secrets=scoped_secrets, artifacts=artifacts)
             if isinstance(call, VMSetupInvocation):
-                integration.vm_init(call)
+                application = integration.vm_init(call)
             elif isinstance(call, UserSetupInvocation):
-                integration.user_init(call)
+                application = integration.user_init(call)
             elif isinstance(call, WorkspaceSetupInvocation):
-                integration.workspace_init(call)
+                application = integration.workspace_init(call)
+            else:
+                raise StateError("unknown native setup invocation")
+            application = validate_application(application, artifacts, inputs.facet)
+            if isinstance(call, VMSetupInvocation) and application.files:
+                raise StateError("VM artifacts must be routed to an inner facet")
+            roots = () if location is None else (location,)
+            owned = publish_artifacts(
+                call.runner, application.files, current.artifact_files, checkpoint_files,
+                roots=roots, group=call.linux_group if isinstance(call, WorkspaceSetupInvocation) else "",
+            )
+            current = current.model_copy(update={"artifact_files": owned, "deferred": application.deferred})
             if block is None:
-                if current.claims:
+                if current.claims or current.artifact_files:
                     current = current.model_copy(update={"pending_cleanup": True})
                     state = replace_setup_record(state, current)
                     output.warn(f"Native cleanup for {name} retains outstanding ownership; retry its owning setup.")
