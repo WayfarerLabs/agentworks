@@ -637,19 +637,19 @@ confirmed that CI's `pytest tests/ -m 'not integration'` selects 9,482 tests at 
 pass/skip split depends on the host; the final local gate below will record the exact CI selection.
 The unfiltered run does not establish artifact live acceptance.
 
-- [ ] Publish skill entrypoints before supporting files and verify interrupted large-package
+- [x] Publish skill entrypoints before supporting files and verify interrupted large-package
       publication can pass preflight and retry for Claude and Grok. Keep retirement ordering
       reversed.
-- [ ] Enforce canonical names at the common normalized/persisted boundary, preserving shell's
+- [x] Enforce canonical names at the common normalized/persisted boundary, preserving shell's
       separate owner directories; share the declaration/capture name pattern and simplify typed-map
       access without changing declaration shape or ordering.
-- [ ] Make final empty-package-root permission denial nonfatal, while retaining retry evidence for
+- [x] Make final empty-package-root permission denial nonfatal, while retaining retry evidence for
       required inner-parent cleanup and unsafe or ambiguous failures. Verify both cases and preserve
       the large-tree inventory invariant without a directory ledger.
-- [ ] Expose current declaring bundles in selection order before capture and with stale captures;
+- [x] Expose current declaring bundles in selection order before capture and with stale captures;
       keep that metadata separate from captured replacements and never acquire sources for
       inspection.
-- [ ] Remove draft-only capture upgrade exceptions and misleading reinitialization guidance. Retain
+- [x] Remove draft-only capture upgrade exceptions and misleading reinitialization guidance. Retain
       optional-root retirement as a current plugin contract and clarify our Codex rendered-TOML
       budget.
 - [ ] Complete private review, exact CI-selected local gates and a coherent ready handoff. Monitor
@@ -661,3 +661,18 @@ allowing their files to be deleted. Dropping those member records and the entryp
 the next inventory's large-tree refusal. Existing records therefore retain required parent-cleanup
 progress; only failure to remove the final empty package root can be warned about without retaining
 that record. No new directory ownership or cleanup ledger is introduced.
+
+The implementation at `cd735e8b` passes the exact CI command `pytest tests/ -m 'not integration'`:
+9,526 passed and seven skipped. Ruff, formatting and mypy over 846 source/test files passed,
+together with changed-document checks. Independent final review and the complete ready handoff
+remain pending.
+
+A subsequent offline Claude 2.1.265 SDK initialization check establishes persona registration that
+the earlier session-list diagnostic could not. Exact production output registered user, workspace
+and session personas twice with their expected names, descriptions and models; removing those files
+and session arguments removed those registrations. A control reproduced native workspace shadowing
+of a same-named user persona, and the production integration refused the collision. All five native
+processes exited zero; an independent check found no remaining owned processes or fixture
+directories. Network access was denied and no user prompt was sent. This proves bounded local
+registration and collision handling, not model behavior, managed-VM lifecycle, two-user isolation or
+conversation resume. Those acceptance items remain open.
