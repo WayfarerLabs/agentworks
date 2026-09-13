@@ -1259,10 +1259,7 @@ def test_unknown_workspace_refuses_with_zero_resolves_and_zero_gate(
     # An orphan session row (its workspace is gone): the FK is relaxed
     # for the insert to reproduce the dangling-reference state.
     db._conn.execute("PRAGMA foreign_keys = OFF")
-    db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode, socket_path) "
-        "VALUES ('orphan', 'ghost-ws', 'default', 'admin', '/tmp/orphan.sock')"
-    )
+    db.insert_session("orphan", "ghost-ws", "default", SessionMode.ADMIN, socket_path="/tmp/orphan.sock")
     db._conn.commit()
     db._conn.execute("PRAGMA foreign_keys = ON")
     _reachable(monkeypatch, False)

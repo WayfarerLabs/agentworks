@@ -15,6 +15,7 @@ from typing import Protocol
 import pytest
 import yaml
 
+from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.db import Database
 from agentworks.manifests.envelope import API_VERSION
 from agentworks.manifests.loader import RESOURCES_DIRNAME
@@ -688,6 +689,7 @@ class _StubSessionTemplate:
 
     name = "default"
     harness_integration = "shell"
+    artifacts = ArtifactsConfig()
     harness_integration_config: dict[str, object] = {}  # noqa: RUF012 - mutable class attr is fine for a stub
     env: dict[str, str] = {}  # noqa: RUF012 - mutable class attr is fine for a stub
 

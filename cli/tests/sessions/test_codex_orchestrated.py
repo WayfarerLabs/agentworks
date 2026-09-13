@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.db import Database, SessionMode, SessionStatus
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
@@ -122,7 +123,11 @@ def _harness_integration_template(monkeypatch: pytest.MonkeyPatch, config: dict[
     from agentworks.sessions import manager as session_manager
 
     resolved = SimpleNamespace(
-        name="codex", harness_integration="codex", harness_integration_config=config or {}, env={}
+        name="codex",
+        harness_integration="codex",
+        harness_integration_config=config or {},
+        env={},
+        artifacts=ArtifactsConfig(),
     )
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: resolved)
 

@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.agents.manager import agent_has_grants, agent_has_sessions, agent_is_unused
-from agentworks.db import PID_STOPPED, Database, SessionRow
+from agentworks.db import PID_STOPPED, Database, SessionMode, SessionRow
 from agentworks.errors import ConnectivityError
 from agentworks.output import Role
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -112,10 +112,7 @@ def test_agent_has_sessions_predicate(db: Database) -> None:
     # An admin session on the same workspace does not keep the agent alive.
     _seed_sessions(db, ["adm"])
     assert agent_has_sessions(db, "bot") is False
-    db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode, agent_name, socket_path) "
-        "VALUES ('s', 'ws-vm1', 'default', 'agent', 'bot', '/tmp/s.sock')"
-    )
+    db.insert_session("s", "ws-vm1", "default", SessionMode.AGENT, agent_name="bot", socket_path="/tmp/s.sock")
     db._conn.commit()
     assert agent_has_sessions(db, "bot") is True
 
@@ -163,10 +160,7 @@ def test_agent_is_unused_predicate(db: Database) -> None:
     db.update_agent_grant_all("bot", False)
     assert agent_is_unused(db, "bot") is True
     # A remaining session alone also makes it "in use".
-    db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode, agent_name, socket_path) "
-        "VALUES ('s', 'ws-vm1', 'default', 'agent', 'bot', '/tmp/s.sock')"
-    )
+    db.insert_session("s", "ws-vm1", "default", SessionMode.AGENT, agent_name="bot", socket_path="/tmp/s.sock")
     db._conn.commit()
     assert agent_is_unused(db, "bot") is False
 
@@ -539,15 +533,12 @@ def test_created_agent_with_remaining_sessions_reports_and_stays(
     _seed_vm(db)
     _seed_agent(db)
     _seed_agent(db, "other-bot")
-    db._conn.executemany(
-        "INSERT INTO sessions (name, workspace_name, template, mode, agent_name, socket_path) "
-        "VALUES (?, 'ws-vm1', 'default', 'agent', ?, ?)",
-        [
-            ("zulu", "bot", "/tmp/zulu.sock"),
-            ("alpha", "bot", "/tmp/alpha.sock"),
-            ("unrelated", "other-bot", "/tmp/unrelated.sock"),
-        ],
-    )
+    for name, agent, socket in (
+        ("zulu", "bot", "/tmp/zulu.sock"),
+        ("alpha", "bot", "/tmp/alpha.sock"),
+        ("unrelated", "other-bot", "/tmp/unrelated.sock"),
+    ):
+        db.insert_session(name, "ws-vm1", "default", SessionMode.AGENT, agent_name=agent, socket_path=socket)
     db._conn.commit()
     calls = _spy_delete_agent(db, monkeypatch)
     prompts = _record_confirm(monkeypatch, answer=True)
@@ -568,10 +559,7 @@ def test_noncreated_agent_with_remaining_sessions_stays_silent(
 ) -> None:
     _seed_vm(db)
     _seed_agent(db)
-    db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode, agent_name, socket_path) "
-        "VALUES ('other', 'ws-vm1', 'default', 'agent', 'bot', '/tmp/other.sock')"
-    )
+    db.insert_session("other", "ws-vm1", "default", SessionMode.AGENT, agent_name="bot", socket_path="/tmp/other.sock")
     db._conn.commit()
     calls = _spy_delete_agent(db, monkeypatch)
     prompts = _record_confirm(monkeypatch, answer=True)
