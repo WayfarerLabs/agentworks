@@ -73,7 +73,9 @@ def probe(
     result = subprocess.run(
         [sys.executable, "-c", _PROBE, json.dumps(request)], env=env, capture_output=True, text=True, check=True
     )
-    return json.loads(result.stdout.removeprefix("AGW_ARTIFACT_PROBE="))
+    observed = json.loads(result.stdout.removeprefix("AGW_ARTIFACT_PROBE="))
+    assert isinstance(observed, dict)
+    return observed
 
 
 @pytest.mark.parametrize(

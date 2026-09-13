@@ -109,7 +109,6 @@ def session_artifacts(
     guidance = tuple(item for item in context.inputs if item.content.type in (ArtifactType.HINT, ArtifactType.RULE))
     if guidance:
         text = context_text(guidance, configured)
-        files.append(artifact_file(f"{context.directory}/instructions.md", text, guidance))
         argv += ["-c", f"developer_instructions={json.dumps(text, ensure_ascii=False)}"]
     for item in context.inputs:
         if item.content.type is ArtifactType.SKILL:

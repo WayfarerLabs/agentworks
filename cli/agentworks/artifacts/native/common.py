@@ -44,6 +44,15 @@ def native_home(home: str, environment: Mapping[str, str], variable: str, defaul
     return path
 
 
+def validate_user_placement(application: ArtifactApplication, home: str) -> None:
+    """Refuse unsupported native-home placement before other user setup mutations."""
+    if any(not file.path.startswith(home.rstrip("/") + "/") for file in application.files):
+        raise ConfigError(
+            "user artifact placement outside HOME is unsupported",
+            hint="Choose a native-home override beneath this user's HOME and retry the owning setup.",
+        )
+
+
 def artifact_file(
     path: str, text: str, inputs: tuple[ArtifactInput, ...], *, identity: str | None = None
 ) -> ArtifactFile:

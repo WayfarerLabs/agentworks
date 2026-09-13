@@ -44,6 +44,7 @@ from agentworks.artifacts.native.common import (
     native_home,
     validate_discovery_paths,
     validate_native_command,
+    validate_user_placement,
 )
 from agentworks.artifacts.native.probe import probe_native
 from agentworks.capabilities.harness_integration.base import (
@@ -240,6 +241,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 root or native_home(invocation.home, invocation.environment, "CLAUDE_CONFIG_DIR", ".claude"),
             )
         )
+        validate_user_placement(plan, invocation.home)
         setup_invocation = (
             replace(invocation, environment={**invocation.environment, "CLAUDE_CONFIG_DIR": root})
             if root

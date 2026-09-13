@@ -122,11 +122,11 @@ _PROBLEM_MESSAGES = {
     "missing-command": "the native command is unavailable in the login environment",
     "unsupported-native-version": "the native version is older than the supported artifact baseline",
     "unsupported-native-cli": "the native CLI lacks a required artifact carrier flag",
-    "native-discovery-exclusions": "native discovery excludes an artifact file",
+    "native-discovery-exclusions": "a configured discovery exclusion matches an artifact file",
     "unsupported-discovery-pattern": "the adapter cannot evaluate an extended native exclusion pattern",
-    "native-plugin-policy": "native policy disables the generated artifact plugin",
-    "native-skill-policy": "native policy disables a supplied skill or its discovery instructions",
-    "native-agent-policy": "native policy disables a supplied agent persona",
+    "native-plugin-policy": "native configuration restricts the generated artifact plugin",
+    "native-skill-policy": "native configuration restricts a supplied skill or its discovery instructions",
+    "native-agent-policy": "native configuration restricts a supplied agent persona",
     "unreadable-native-policy": "native discovery configuration cannot be read or parsed",
 }
 
@@ -177,6 +177,9 @@ def probe_native(
     if problems:
         raise StateError(
             f"{tool} artifact delivery: " + "; ".join(_PROBLEM_MESSAGES[problem] for problem in problems),
-            hint="Inspect the native home, discovery exclusions, disabled artifacts, and installed CLI version.",
+            hint=(
+                "Inspect the native home, relevant restrictions, and installed CLI version. "
+                "This preflight cannot verify whether another native configuration layer overrides a restriction."
+            ),
         )
     return root

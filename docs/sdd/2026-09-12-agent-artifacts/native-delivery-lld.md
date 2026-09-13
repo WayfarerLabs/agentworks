@@ -76,7 +76,15 @@ Preflight resolves the native root in the actual login environment. Declared env
 through the transport's environment channel, not embedded into logged command text. A changed actual
 `HOME` is an error because session publication belongs to the Linux user selected by core. A changed
 native home that no longer discovers an applied ancestor's files requires correction or owning-facet
-reinitialization.
+reinitialization. User artifact publication honors native-home overrides beneath that user's `HOME`.
+A plan that would publish outside `HOME` is explicitly unsupported and fails before settings or
+plugin mutations. Persisted ownership and retirement therefore share the same user boundary. A
+session can still use an external native home when its artifacts remain inline or in the private run
+directory and it has no incompatible ancestor placement.
+
+Codex and Grok guidance is carried directly in native argv; no unused guidance file is published.
+Claude's additive prompt file and Codex's selected role configuration files are consumed by their
+native CLI carriers.
 
 The native checks use `--version`, applicable `--help` flags and selected configuration facts; no
 model is launched. The initial compatibility baselines are Claude Code 2.1.265, Codex 0.153.4 and
@@ -88,7 +96,10 @@ not require enabling it. Claude rule exclusions are checked against requested ru
 exclusion patterns that this adapter cannot interpret are diagnosed explicitly. Codex skill
 selectors and Grok disabled skill names are checked against supplied artifacts. Grok workspace paths
 are checked against Git ignore rules; user files outside that workspace are not fed to the
-workspace's ignore check.
+workspace's ignore check. A relevant restriction in any inspected configuration layer causes a
+conservative refusal. The adapter does not reconstruct native trust or merge precedence, so a later
+layer that reenables an artifact does not clear that refusal. Diagnostics identify a configured
+restriction without claiming it is the native effective policy.
 
 User root resolution precedes rendering. Policy checks follow existing settings application, so
 reinitialization can remove an obsolete exclusion and then publish artifacts. Workspace checks
@@ -129,6 +140,14 @@ Grok's CLI and persona parsing were checked against
 Its inline-agent parser maps the `prompt` field to the persona body and supplies the map key as the
 native name. Its [settings reference](https://docs.x.ai/build/settings/reference) documents disabled
 skill names and per-subagent toggles. No Grok binary was available locally.
+
+An isolated local Codex 0.153.4 check used user `features.multi_agent = false` and a trusted Git
+project with `features.multi_agent = true`. Native `codex features list` reported
+`multi_agent=true`; the artifact preflight refused the user-layer restriction. This confirms the
+conservative boundary, not native disablement. Blindly merging project settings would be incorrect
+when Codex declines to trust that project. Claude settings merge semantics and Grok
+managed/requirements overlays also remain outside this probe's effective-policy resolution; native
+acceptance must exercise the actual policy environment.
 
 Live native acceptance remains required before shipping: verify discovery, progressive skill use,
 actual rule context, selected personas, changed artifact guidance on a real resumed conversation,

@@ -119,6 +119,7 @@ from agentworks.artifacts.native.common import (
     native_home,
     validate_discovery_paths,
     validate_native_command,
+    validate_user_placement,
 )
 from agentworks.artifacts.native.probe import probe_native
 from agentworks.capabilities.harness_integration.base import (
@@ -497,6 +498,7 @@ class CodexIntegration(HarnessIntegration):
                 agents_root=f"{root}/agents",
             )
         )
+        validate_user_placement(plan, invocation.home)
         setup_invocation = (
             replace(invocation, environment={**invocation.environment, "CODEX_HOME": root}) if root else invocation
         )

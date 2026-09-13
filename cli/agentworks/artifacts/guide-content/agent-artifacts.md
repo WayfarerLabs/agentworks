@@ -22,6 +22,17 @@ context.
 
 <!-- agw:include path="artifacts/README.md" heading="Native delivery" -->
 
+Native-home overrides for user artifact files must stay beneath that user's `HOME`. For example,
+`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, or `GROK_HOME` can select another directory there. A user
+artifact plan that would write outside `HOME` is refused before that integration changes settings or
+plugins. Session files still use their private directory beneath `HOME`.
+
+Native preflight conservatively refuses relevant restrictions in the configuration files it
+inspects. It cannot verify that a later native settings layer reenables an artifact, so such a
+combination is unsupported even when the native tool would allow it. Inspect the effective native
+policy before changing restrictions; the error does not establish that the tool itself disables the
+artifact.
+
 Before reinitializing or recreating an owner, establish authorization for that operation and inspect
 its current declaration and effects. Reinit can install, update, and remove owned files; workspace
 recreation replaces a shared owner and needs its normal lifecycle review. If the requested setup is

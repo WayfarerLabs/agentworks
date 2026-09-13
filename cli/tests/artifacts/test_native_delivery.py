@@ -130,13 +130,16 @@ def test_session_guidance_adds_to_configured_text_without_making_it_an_initial_p
     item = artifact(ArtifactType.RULE)
     result = render(context(item), configured="existing setup", extra_args=[])
     assert option in result.argv
-    assert result.application.files[0].data.decode() == "existing setup\n\n" + item.content.text
+    expected = "existing setup\n\n" + item.content.text
     if render is codex.session_artifacts:
         value = result.argv[result.argv.index("-c") + 1]
-        assert tomllib.loads(value)["developer_instructions"] == result.application.files[0].data.decode()
+        assert tomllib.loads(value)["developer_instructions"] == expected
+        assert result.application.files == ()
     elif render is grok.session_artifacts:
-        assert result.argv[result.argv.index("--rules") + 1] == result.application.files[0].data.decode()
+        assert result.argv[result.argv.index("--rules") + 1] == expected
+        assert result.application.files == ()
     else:
+        assert result.application.files[0].data.decode() == expected
         assert result.argv[result.argv.index("--append-system-prompt-file") + 1] == result.application.files[0].path
         assert result.argv[-2:] == ("--system-prompt-snapshot", "off")
 
@@ -364,3 +367,65 @@ def test_quoted_native_command_limit_accounts_for_shell_expansion():
     text = "'" * (16 * 1024)
     with pytest.raises(ConfigError):
         validate_native_command(quote_literal_argv(text))
+
+
+@pytest.mark.parametrize(
+    "implementation,module",
+    [
+        (ClaudeCodeIntegration, "agentworks.plugins.claude.harness_integration"),
+        (CodexIntegration, "agentworks.plugins.codex.harness_integration"),
+        (GrokBuildIntegration, "agentworks.plugins.grok.harness_integration"),
+    ],
+)
+@pytest.mark.parametrize("outside_home", [False, True])
+def test_user_native_home_boundary_precedes_other_setup(db, monkeypatch, implementation, module, outside_home):
+    from importlib import import_module
+
+    from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
+
+    plugin = import_module(module)
+    setup_calls = []
+    if hasattr(plugin, "setup_user"):
+        monkeypatch.setattr(plugin, "setup_user", lambda *args: setup_calls.append(args))
+    root = "/mnt/native" if outside_home else "/home/alice/custom-native"
+    monkeypatch.setattr(plugin, "probe_native", lambda *args, **kwargs: root)
+    integration = implementation.for_setup(owner_kind="agent", owner_name="alice", facet="user", config={})
+    invocation = UserSetupInvocation(
+        vm=db.insert_vm("vm", "lima", "vm"),
+        runner=SimpleNamespace(),
+        prior=None,
+        checkpoint=lambda claims: None,
+        username="alice",
+        home="/home/alice",
+        artifacts=(artifact(ArtifactType.AGENT),),
+    )
+    if outside_home:
+        with pytest.raises(ConfigError):
+            integration.user_init(invocation)
+        assert setup_calls == []
+    else:
+        result = integration.user_init(invocation)
+        assert result.files and all(file.path.startswith(root + "/") for file in result.files)
+        assert len(setup_calls) == (0 if implementation is GrokBuildIntegration else 1)
+
+
+def test_codex_external_home_does_not_block_home_owned_skills(db, monkeypatch):
+    from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
+    from agentworks.plugins.codex import harness_integration as plugin
+
+    monkeypatch.setattr(plugin, "setup_user", lambda *args: None)
+    monkeypatch.setattr(plugin, "probe_native", lambda *args, **kwargs: "/mnt/native")
+    integration = CodexIntegration.for_setup(owner_kind="agent", owner_name="alice", facet="user", config={})
+    result = integration.user_init(
+        UserSetupInvocation(
+            vm=db.insert_vm("vm", "lima", "vm"),
+            runner=SimpleNamespace(),
+            prior=None,
+            checkpoint=lambda claims: None,
+            username="alice",
+            home="/home/alice",
+            artifacts=(artifact(ArtifactType.SKILL), artifact(ArtifactType.HINT, name="setup")),
+        )
+    )
+    assert all(file.path.startswith("/home/alice/.agents/skills/") for file in result.files)
+    assert len(result.deferred) == 1

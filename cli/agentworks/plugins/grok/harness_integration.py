@@ -33,6 +33,7 @@ from agentworks.artifacts.native.common import (
     native_home,
     validate_discovery_paths,
     validate_native_command,
+    validate_user_placement,
 )
 from agentworks.artifacts.native.probe import probe_native
 from agentworks.capabilities.harness_integration.base import (
@@ -185,6 +186,7 @@ class GrokBuildIntegration(HarnessIntegration):
                 invocation.artifacts, root or native_home(invocation.home, invocation.environment, "GROK_HOME", ".grok")
             )
         )
+        validate_user_placement(plan, invocation.home)
 
         if plan.files:
             probe_native(
