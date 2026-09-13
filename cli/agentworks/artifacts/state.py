@@ -6,21 +6,26 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
-from agentworks.artifacts.bundle import ArtifactBundle
 from agentworks.artifacts.capture import capture_artifacts
 from agentworks.artifacts.codec import decode_inputs, encode_inputs
-from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.artifacts.model import ArtifactComponent, ArtifactInput, ArtifactOrigin
 from agentworks.db import AppliedStateKey, AppliedStateSlice, Database, VersionedPayload
-from agentworks.db.instance_state import InstanceKind, JsonObject
 from agentworks.errors import StateError
-from agentworks.resources.registry import Registry
 from agentworks.sources import SourceRefError
 
+if TYPE_CHECKING:
+    from agentworks.artifacts.bundle import ArtifactBundle
+    from agentworks.artifacts.declarations import ArtifactsConfig
+    from agentworks.db.instance_state import InstanceKind, JsonObject
+    from agentworks.resources.registry import Registry
+
 _COMPONENTS: dict[InstanceKind, tuple[ArtifactComponent, ...]] = {
-    "vm": ("vm", "admin"), "agent": ("agent",), "workspace": ("workspace",), "session": ("session",)
+    "vm": ("vm", "admin"),
+    "agent": ("agent",),
+    "workspace": ("workspace",),
+    "session": ("session",),
 }
 
 
@@ -35,7 +40,9 @@ class CapturedArtifacts:
 def declaration_digest(registry: Registry, config: ArtifactsConfig) -> str:
     """Fingerprint effective declarations without opening their sources."""
     selected = [(name, registry.lookup("artifact-bundle", name).artifacts) for name in config.bundles]
-    payload = [(name, {entry: spec.model_dump(mode="json") for entry, spec in entries.items()}) for name, entries in selected]
+    payload = [
+        (name, {entry: spec.model_dump(mode="json") for entry, spec in entries.items()}) for name, entries in selected
+    ]
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
 
 
@@ -55,10 +62,18 @@ def capture_owner(
 
 
 def encode_captures(captures: dict[ArtifactComponent, CapturedArtifacts]) -> VersionedPayload:
-    return VersionedPayload(1, cast("JsonObject", {"components": {
-        component: {"declaration": snapshot.declaration, "content": encode_inputs(snapshot.inputs)}
-        for component, snapshot in captures.items()
-    }}))
+    return VersionedPayload(
+        1,
+        cast(
+            "JsonObject",
+            {
+                "components": {
+                    component: {"declaration": snapshot.declaration, "content": encode_inputs(snapshot.inputs)}
+                    for component, snapshot in captures.items()
+                }
+            },
+        ),
+    )
 
 
 def decode_captures(record: AppliedStateSlice) -> dict[ArtifactComponent, CapturedArtifacts]:
@@ -84,7 +99,8 @@ def decode_captures(record: AppliedStateSlice) -> dict[ArtifactComponent, Captur
             inputs = decode_inputs(value["content"])
             if any(
                 (item.origin.component, item.origin.resource_kind, item.origin.resource_name)
-                != (component, record.instance_kind, record.instance_name) for item in inputs
+                != (component, record.instance_kind, record.instance_name)
+                for item in inputs
             ):
                 raise ValueError
             result[cast("ArtifactComponent", component)] = CapturedArtifacts(declaration, inputs)
@@ -101,14 +117,21 @@ def read_captures(db: Database, kind: InstanceKind, name: str) -> dict[ArtifactC
 
 
 def write_capture(
-    db: Database, kind: InstanceKind, name: str, component: ArtifactComponent,
-    capture: CapturedArtifacts, *, operation: str,
+    db: Database,
+    kind: InstanceKind,
+    name: str,
+    component: ArtifactComponent,
+    capture: CapturedArtifacts,
+    *,
+    operation: str,
 ) -> None:
     if component not in _COMPONENTS[kind]:
         raise StateError("artifact capture component does not belong to its owner")
     captures = read_captures(db, kind, name)
     captures[component] = capture
-    db.instance_state.replace_applied_slices(kind, name, operation, {AppliedStateKey.ARTIFACT_INPUTS: encode_captures(captures)})
+    db.instance_state.replace_applied_slices(
+        kind, name, operation, {AppliedStateKey.ARTIFACT_INPUTS: encode_captures(captures)}
+    )
 
 
 def canonicalize_captures(record: AppliedStateSlice) -> VersionedPayload:

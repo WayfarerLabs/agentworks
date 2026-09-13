@@ -252,13 +252,57 @@ def _start_session_slice(
         expected_socket = agent_socket_path(linux_user, name)
 
     mode_label = f"agent: {resolved_agent_name}" if resolved_agent_name else "admin"
-    with output.section("Starting Session"):
+    from agentworks.harness_setup.locking import native_mutation_guard
+
+    with native_mutation_guard(db.path, vm.name), output.section("Starting Session"):
         output.info(
             f"Starting session '{name}' on workspace '{workspace_name}' ({mode_label}, template: {template.name})..."
         )
 
         retain_unknown_runtime = False
         try:
+            from agentworks.artifacts.session import (
+                commit_session_artifacts,
+                prepare_session_artifacts,
+                stage_session_artifacts,
+                validate_session_application,
+            )
+
+            session_env = _mgr._resolve_session_env(
+                registry,
+                values=secret_values,
+                db=db,
+                vm=vm,
+                ws=ws,
+                session_name=name,
+                session_template=template,
+                mode=mode,
+                agent_name=resolved_agent_name,
+                linux_user=linux_user,
+            )
+            prepared_artifacts = prepare_session_artifacts(
+                db,
+                registry,
+                name=name,
+                template=template,
+                vm=vm,
+                workspace=ws,
+                agent_name=resolved_agent_name,
+                runner=agent_target or target,
+                environment=session_env,
+                linux_user=linux_user,
+                secret_target=_mgr._session_secret_target(
+                    registry,
+                    db=db,
+                    vm=vm,
+                    ws=ws,
+                    session_name=name,
+                    session_template=template,
+                    mode=mode,
+                    agent_name=resolved_agent_name,
+                ),
+            )
+            session_node.harness_integration.prepare_artifacts(prepared_artifacts.context)
             # Everything that creates partial session state (on-VM group
             # membership, implicit-grant row, session row, restricted-config
             # write, tmux session) runs inside this block so a KI /
@@ -296,6 +340,8 @@ def _start_session_slice(
                 harness_integration_name=template.harness_integration,
                 session_name=name,
             )
+            artifact_application = validate_session_application(harness_start.artifacts, prepared_artifacts.context)
+            session_env.update(artifact_application.environment)
             command = _mgr._substitute_template_vars(
                 harness_start.command,
                 {"session_name": name, "workspace_name": workspace_name},
@@ -322,22 +368,16 @@ def _start_session_slice(
                     created_agent=pending_agent is not None,
                     socket_path=expected_socket,
                     harness_integration_state=session_node.harness_integration_state,
+                    session_uuid=prepared_artifacts.context.session_uuid,
+                    run_id=prepared_artifacts.context.run_id,
                 )
                 persist_creation_overlay(db, "session", name, graph.session_overlay)
 
-            deploy_restricted_config(run_command, history_limit=config.session.history_limit)
-            session_env = _mgr._resolve_session_env(
-                registry,
-                values=secret_values,
-                db=db,
-                vm=vm,
-                ws=ws,
-                session_name=name,
-                session_template=template,
-                mode=mode,
-                agent_name=resolved_agent_name,
-                linux_user=linux_user,
+            stage_session_artifacts(
+                db, name, template.harness_integration, agent_target or target, prepared_artifacts, artifact_application
             )
+            commit_session_artifacts(db, name, template.harness_integration, agent_target or target, prepared_artifacts)
+            deploy_restricted_config(run_command, history_limit=config.session.history_limit)
             # Pick the SSH transport for tmux operations:
             # - admin sessions: admin's run_command (unchanged)
             # - agent sessions: agent's run_command (direct
@@ -427,7 +467,19 @@ def _start_session_slice(
             # whose warn prints one clean reason line before the
             # rollback's delete messages start landing.
             if not retain_unknown_runtime:
-                session_node.teardown()
+                from agentworks.artifacts.session import cleanup_session_artifacts
+
+                current_session = db.get_session(name)
+                if current_session is not None:
+                    try:
+                        cleanup_session_artifacts(db, current_session, agent_target or target)
+                    except Exception:
+                        output.warn(
+                            "Session artifact cleanup is incomplete; its row and ownership evidence were retained."
+                        )
+                        retain_unknown_runtime = True
+                if not retain_unknown_runtime:
+                    session_node.teardown()
             raise
 
         # The session's realizing slice is complete: flip the node.

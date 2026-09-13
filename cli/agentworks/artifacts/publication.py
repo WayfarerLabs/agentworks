@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral, ArtifactFile, OwnedArtifactFile
-from agentworks.artifacts.model import ArtifactFacet, ArtifactInput
 from agentworks.errors import StateError
 from agentworks.native_files import NativeFiles, native_path
-from agentworks.transports import Transport
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
+    from agentworks.artifacts.model import ArtifactFacet, ArtifactInput
+    from agentworks.transports import Transport
 
 
 def validate_application(
@@ -24,7 +28,9 @@ def validate_application(
     routes = {"vm": {"user", "workspace", "session"}, "user": {"session"}, "workspace": {"session"}, "session": set()}
     deferred: set[str] = set()
     paths: set[str] = set()
-    if not all(isinstance(value, tuple) for value in (application.files, application.deferred, application.environment)):
+    if not all(
+        isinstance(value, tuple) for value in (application.files, application.deferred, application.environment)
+    ):
         raise StateError("integration returned malformed artifact application sequences")
     for item in application.deferred:
         if not isinstance(item, ArtifactDeferral) or item.input_id not in identities or item.input_id in deferred:
@@ -33,16 +39,16 @@ def validate_application(
             if facet == "session":
                 raise StateError(
                     "integration cannot handle every artifact at the session facet",
-                    hint="Use a supported artifact type or apply it at a supported ancestor facet.",
+                    hint=item.reason,
                 )
             raise StateError("integration returned an invalid artifact route")
         deferred.add(item.input_id)
-    for item in application.files:
-        if not isinstance(item, ArtifactFile) or not isinstance(item.data, bytes) or type(item.executable) is not bool:
+    for file in application.files:
+        if not isinstance(file, ArtifactFile) or not isinstance(file.data, bytes) or type(file.executable) is not bool:
             raise StateError("integration returned malformed artifact file content")
-        if not isinstance(item.origins, tuple) or not item.origins or not set(item.origins) <= origins:
+        if not isinstance(file.origins, tuple) or not file.origins or not set(file.origins) <= origins:
             raise StateError("integration returned a file with unknown artifact origins")
-        path = native_path(item.path)
+        path = native_path(file.path)
         if path.casefold() in paths:
             raise StateError("integration returned conflicting artifact destinations")
         paths.add(path.casefold())
@@ -73,8 +79,8 @@ def publish_artifacts(
     """
     if not desired and not previous:
         return ()
-    for item in (*desired, *previous):
-        path = native_path(item.path)
+    for destination in [entry.path for entry in desired] + [entry.path for entry in previous]:
+        path = native_path(destination)
         if not any(path.startswith(native_path(root).rstrip("/") + "/") for root in roots):
             raise StateError("artifact destination is outside its owning scope")
     current = {item.path: item for item in previous}
@@ -102,14 +108,19 @@ def publish_artifacts(
         for path, item in planned.items():
             digest = hashlib.sha256(item.data).hexdigest()
             record = OwnedArtifactFile(
-                path=path, sha256=digest, origins=item.origins, executable=item.executable, native_identity=item.native_identity
+                path=path,
+                sha256=digest,
+                origins=item.origins,
+                executable=item.executable,
+                native_identity=item.native_identity,
             )
             prior = current.get(path)
-            if observed[path] != item.data or prior is None or prior.executable != item.executable:
+            observed_bytes = observed[path]
+            if observed_bytes != item.data or prior is None or prior.executable != item.executable:
                 files.publish(
                     path,
                     item.data,
-                    expected=None if observed[path] is None else hashlib.sha256(observed[path]).hexdigest(),
+                    expected=None if observed_bytes is None else hashlib.sha256(observed_bytes).hexdigest(),
                     group=group,
                     executable=item.executable,
                 )

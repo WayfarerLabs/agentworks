@@ -9,7 +9,7 @@ from pydantic import Field, JsonValue, model_validator
 from agentworks.artifacts.application import ArtifactDeferral, OwnedArtifactFile
 from agentworks.schema import AgwModel
 
-type SetupFacet = Literal["vm", "user", "workspace"]
+type SetupFacet = Literal["vm", "user", "workspace", "session"]
 type SetupComponent = Literal["vm", "admin", "agent", "workspace", "session"]
 
 _Text = Annotated[str, Field(min_length=1)]

@@ -200,6 +200,9 @@ def delete_session(
         # console_sessions zeroes the join table the moment the session row goes.
         member_consoles = [c.name for c in db.list_consoles_for_session(name)]
 
+        from agentworks.artifacts.session import cleanup_session_artifacts
+
+        cleanup_session_artifacts(db, session, session_target)
         db.delete_session(name)
 
         # Clean up implicit grant for this session

@@ -6,7 +6,7 @@ import hashlib
 import json
 import shlex
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, cast
 
 from pydantic import ValidationError
 
@@ -71,6 +71,7 @@ def run_setup(
     expected = {"vm": VMSetupInvocation, "user": UserSetupInvocation, "workspace": WorkspaceSetupInvocation}
     if not isinstance(invocation, expected[inputs.facet]):
         raise StateError("native setup invocation does not match its facet")
+    facet = cast("Literal["vm", "user", "workspace"]", inputs.facet)
     with native_mutation_guard(db.path, invocation.vm.name, held=held):
         if inputs.artifact_snapshot is not None and not buffered:
             write_capture(db, inputs.kind, inputs.name, inputs.component, inputs.artifact_snapshot, operation=operation)
@@ -98,7 +99,7 @@ def run_setup(
             ensure_harness_integration_enabled(registry, selected.name)
             implementation = harness_integration_for(selected.name)
             bound[selected.name] = implementation.for_setup(
-                owner_kind=inputs.kind, owner_name=inputs.name, facet=inputs.facet, config=selected.config
+                owner_kind=inputs.kind, owner_name=inputs.name, facet=facet, config=selected.config
             )
 
         for integration in bound.values():
@@ -127,7 +128,7 @@ def run_setup(
                 try:
                     ensure_harness_integration_enabled(registry, name)
                     integration = harness_integration_for(name).for_setup(
-                        owner_kind=inputs.kind, owner_name=inputs.name, facet=inputs.facet, config=None
+                        owner_kind=inputs.kind, owner_name=inputs.name, facet=facet, config=None
                     )
                 except (ConfigError, StateError):
                     pending = previous.model_copy(update={"complete": False, "pending_cleanup": True})
@@ -146,7 +147,9 @@ def run_setup(
                 destination_id=destination,
                 declaration=declaration,
                 claims=() if previous is None else previous.claims,
-                artifact_files=() if previous is None or previous.destination_id != destination else previous.artifact_files,
+                artifact_files=()
+                if previous is None or previous.destination_id != destination
+                else previous.artifact_files,
             )
             state = replace_setup_record(state, current)
             persist(state)
@@ -175,7 +178,9 @@ def run_setup(
                 persist(state)
 
             scoped_secrets = {ref.name: invocation.secrets[ref.name] for ref in integration.config_secret_refs()}
-            call = replace(invocation, prior=previous, checkpoint=checkpoint, secrets=scoped_secrets, artifacts=artifacts)
+            call = replace(
+                invocation, prior=previous, checkpoint=checkpoint, secrets=scoped_secrets, artifacts=artifacts
+            )
             if isinstance(call, VMSetupInvocation):
                 application = integration.vm_init(call)
             elif isinstance(call, UserSetupInvocation):
@@ -189,8 +194,12 @@ def run_setup(
                 raise StateError("VM artifacts must be routed to an inner facet")
             roots = () if location is None else (location,)
             owned = publish_artifacts(
-                call.runner, application.files, current.artifact_files, checkpoint_files,
-                roots=roots, group=call.linux_group if isinstance(call, WorkspaceSetupInvocation) else "",
+                call.runner,
+                application.files,
+                current.artifact_files,
+                checkpoint_files,
+                roots=roots,
+                group=call.linux_group if isinstance(call, WorkspaceSetupInvocation) else "",
             )
             current = current.model_copy(update={"artifact_files": owned, "deferred": application.deferred})
             if block is None:

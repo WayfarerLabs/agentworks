@@ -202,14 +202,28 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
         except Exception:
             raise ExternalError("could not capture native settings file") from None
 
-    def publish(self, destination: str, content: bytes, *, expected: str | None, group: str = "", executable: bool = False) -> None:
+    def publish(
+        self, destination: str, content: bytes, *, expected: str | None, group: str = "", executable: bool = False
+    ) -> None:
         """Atomically replace a guarded file only while its observed bytes match."""
         destination = native_path(destination)
         remote, local = self.slot()
         local.write_bytes(content)
         try:
             self.runner.copy_to(local, remote)
-            command = shlex.join(["python3", "-c", _FILE_PROGRAM, "write", destination, remote, expected or "-", group, "1" if executable else "0"])
+            command = shlex.join(
+                [
+                    "python3",
+                    "-c",
+                    _FILE_PROGRAM,
+                    "write",
+                    destination,
+                    remote,
+                    expected or "-",
+                    group,
+                    "1" if executable else "0",
+                ]
+            )
             result = self.runner.run(command, check=False, discard_output=True)
         except Exception:
             raise ExternalError("could not publish native settings file") from None
@@ -220,7 +234,9 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
 
     def remove(self, destination: str, *, expected: str) -> None:
         """Remove only a regular file that still matches its recorded ownership."""
-        command = shlex.join(["python3", "-c", _FILE_PROGRAM, "delete", native_path(destination), "-", expected, "", "0"])
+        command = shlex.join(
+            ["python3", "-c", _FILE_PROGRAM, "delete", native_path(destination), "-", expected, "", "0"]
+        )
         result = self.runner.run(command, check=False, discard_output=True)
         if result.returncode == 2:
             raise StateError("owned native file changed; retaining it for operator inspection")

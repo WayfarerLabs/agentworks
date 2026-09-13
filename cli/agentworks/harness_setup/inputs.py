@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
 from agentworks.artifacts.declarations import ArtifactsConfig
-from agentworks.artifacts.state import CapturedArtifacts
 from agentworks.capabilities.config import validate_capability_config
 from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled
 from agentworks.env.compose import compose_env
@@ -19,6 +18,7 @@ if TYPE_CHECKING:
 
     from pydantic import JsonValue
 
+    from agentworks.artifacts.state import CapturedArtifacts
     from agentworks.db.instance_state import InstanceKind
     from agentworks.harness_setup.model import SetupComponent, SetupFacet
     from agentworks.resources.registry import Registry
@@ -26,7 +26,13 @@ if TYPE_CHECKING:
     from agentworks.secrets.orchestration import SecretTarget
     from agentworks.secrets.resolver import Resolver
 
-_FACET: dict[SetupComponent, SetupFacet] = {"vm": "vm", "admin": "user", "agent": "user", "workspace": "workspace"}
+_FACET: dict[SetupComponent, SetupFacet] = {
+    "vm": "vm",
+    "admin": "user",
+    "agent": "user",
+    "workspace": "workspace",
+    "session": "session",
+}
 
 
 @dataclass(frozen=True)
@@ -67,6 +73,7 @@ class SetupInputs:
             admin=self.target.admin,
             agent=self.target.agent,
             workspace=self.target.workspace,
+            session=self.target.session,
         )
         return {
             **{name: value for name, value in merged.items() if not name.startswith("AGENTWORKS_")},
@@ -88,6 +95,7 @@ class SetupInputs:
             ("admin", self.target.admin),
             ("agent", self.target.agent),
             ("workspace", self.target.workspace),
+            ("session", self.target.session),
         ):
             if scope is not None:
                 env[name] = {

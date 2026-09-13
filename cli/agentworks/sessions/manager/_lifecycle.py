@@ -557,7 +557,12 @@ def _launch_existing_session(
     from agentworks.vms.manager import require_vm_ssh_boundary
 
     require_vm_ssh_boundary(db, config, vm)
-    with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
+    from agentworks.harness_setup.locking import native_mutation_guard
+
+    with (
+        activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)),
+        native_mutation_guard(db.path, vm.name),
+    ):
         if vm.tailscale_host is None:
             raise StateError(
                 f"VM '{vm.name}' has no Tailscale address",
@@ -714,6 +719,51 @@ def _launch_existing_session(
                 interaction=interaction,
             )
 
+        from agentworks.artifacts.session import (
+            commit_session_artifacts,
+            prepare_session_artifacts,
+            stage_session_artifacts,
+            validate_session_application,
+        )
+
+        linux_user = _mgr._resolve_session_linux_user(db, session, vm)
+        session_env = _mgr._resolve_session_env(
+            registry,
+            values=secret_values,
+            db=db,
+            vm=vm,
+            ws=ws,
+            session_name=name,
+            session_template=template,
+            mode=SessionMode(session.mode),
+            agent_name=session.agent_name,
+            linux_user=linux_user,
+        )
+
+        prepared_artifacts = prepare_session_artifacts(
+            db,
+            registry,
+            name=name,
+            template=template,
+            vm=vm,
+            workspace=ws,
+            agent_name=session.agent_name,
+            runner=session_target,
+            environment=session_env,
+            session_uuid=session.session_uuid,
+            linux_user=linux_user,
+            secret_target=_mgr._session_secret_target(
+                registry,
+                db=db,
+                vm=vm,
+                ws=ws,
+                session_name=name,
+                session_template=template,
+                mode=SessionMode(session.mode),
+                agent_name=session.agent_name,
+            ),
+        )
+        session_node.harness_integration.prepare_artifacts(prepared_artifacts.context)
         # Ask the harness for its launch decision before any teardown. A
         # strict resume failure or an unsupported intent therefore leaves an
         # existing runtime intact. Stateful integrations decide from their
@@ -730,6 +780,11 @@ def _launch_existing_session(
             intent=intent,
             harness_integration_name=template.harness_integration,
             session_name=name,
+        )
+        artifact_application = validate_session_application(harness_start.artifacts, prepared_artifacts.context)
+        session_env.update(artifact_application.environment)
+        stage_session_artifacts(
+            db, name, template.harness_integration, session_target, prepared_artifacts, artifact_application
         )
         command = _mgr._substitute_template_vars(
             harness_start.command,
@@ -748,6 +803,7 @@ def _launch_existing_session(
                     force=force,
                 )
 
+            commit_session_artifacts(db, name, template.harness_integration, session_target, prepared_artifacts)
             deploy_restricted_config(run_command, history_limit=config.session.history_limit)
 
             if harness_start.note is not None:
@@ -764,19 +820,6 @@ def _launch_existing_session(
             # beats re-minting a new one each attempt (the id is the
             # session's, whether or not the pane came up).
             db.update_session_harness_integration_state(name, session_node.harness_integration_state)
-            linux_user = _mgr._resolve_session_linux_user(db, session, vm)
-            session_env = _mgr._resolve_session_env(
-                registry,
-                values=secret_values,
-                db=db,
-                vm=vm,
-                ws=ws,
-                session_name=name,
-                session_template=template,
-                mode=SessionMode(session.mode),
-                agent_name=session.agent_name,
-                linux_user=linux_user,
-            )
 
             try:
                 new_sock, pid = create_tmux_session(

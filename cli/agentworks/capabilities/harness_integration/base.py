@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import shlex
 from abc import abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal, Protocol, Self
 
@@ -123,7 +123,7 @@ def require_implemented_start(
         f"invalid result type '{type(result).__name__}' for launch intent '{intent.value}'",
         entity_kind="session",
         entity_name=session_name,
-        hint="Update the harness integration to implement contract version 3.",
+        hint="Update the harness integration to implement contract version 5.",
     )
 
 
@@ -337,6 +337,10 @@ class HarnessIntegration(Capability):
         """
         _ = self._session_binding
         return ()
+
+    def prepare_artifacts(self, context: SessionArtifactContext) -> None:
+        """Bind core-prepared inputs before the integration chooses its launch."""
+        self._session = replace(self._session_binding, artifact_context=context)
 
     @property
     def _session_binding(self) -> SessionBinding:
