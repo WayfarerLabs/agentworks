@@ -66,7 +66,7 @@ def inspect_owner_artifacts(
             capture_status, reason = "missing", "Artifact bundles have not been captured for this owner."
         elif captured is not None and captured.declaration != desired:
             capture_status, reason = "stale", "Captured artifacts do not match the owner's current bundle declarations."
-    except (ConfigError, StateError):
+    except (ConfigError, StateError, KeyError):
         capture_status, reason = "unavailable", "The owner's artifact declarations or captured state are unavailable."
     if integration_name is not None:
         try:
@@ -220,22 +220,14 @@ def session_artifacts(
     vm_view = _require(inspect_owner_artifacts(db, registry, vm_inputs, integration_name))
     user_route = deferred_inputs(vm_view, "user")
     workspace_route = deferred_inputs(vm_view, "workspace")
-    direct = deferred_inputs(vm_view, "session")
-    assert user_route is not None and workspace_route is not None and direct is not None
+    assert user_route is not None and workspace_route is not None
     user_view = _require(inspect_owner_artifacts(db, registry, user_inputs, integration_name, inherited=user_route))
     workspace_view = _require(
         inspect_owner_artifacts(db, registry, workspace_inputs, integration_name, inherited=workspace_route)
     )
-    user_deferred = deferred_inputs(user_view, "session")
-    workspace_deferred = deferred_inputs(workspace_view, "session")
-    assert user_deferred is not None and workspace_deferred is not None
-    selected = _unique((*direct, *user_deferred, *workspace_deferred, *local))
-    selected_ids = {item.identity for item in selected}
-    # Restore declaration order even when VM entries took different diamond paths.
-    ordered = _unique((*_local(vm_view), *_local(user_view), *_local(workspace_view), *local))
-    result = tuple(item for item in ordered if item.identity in selected_ids)
-    if len(result) != len(selected):
-        raise StateError("artifact routing encountered input outside its actual owner graph")
+    inherited = session_inherited_inputs(vm_view, user_view, workspace_view)
+    assert inherited is not None
+    result = _unique((*inherited, *local))
     files: list[OwnedArtifactFile] = []
     active: list[ArtifactFacet] = []
     for view in (vm_view, user_view, workspace_view):
@@ -243,6 +235,23 @@ def session_artifacts(
             files.extend(view.record.artifact_files)
             active.append(view.owner.facet)
     return RoutingResult(result, tuple(files), tuple(active))
+
+
+def session_inherited_inputs(
+    vm: ArtifactOwnerView, user: ArtifactOwnerView, workspace: ArtifactOwnerView
+) -> tuple[ArtifactInput, ...] | None:
+    """Join actual ancestor views in declaration order for launch or inspection."""
+    routes = tuple(deferred_inputs(view, "session") for view in (vm, user, workspace))
+    if any(route is None for route in routes):
+        return None
+    selected = _unique(tuple(item for route in routes if route is not None for item in route))
+    selected_ids = {item.identity for item in selected}
+    # Restore declaration order even when VM entries took different diamond paths.
+    ordered = _unique((*_local(vm), *_local(user), *_local(workspace)))
+    result = tuple(item for item in ordered if item.identity in selected_ids)
+    if len(result) != len(selected):
+        raise StateError("artifact routing encountered input outside its actual owner graph")
+    return result
 
 
 def _require(view: ArtifactOwnerView) -> ArtifactOwnerView:

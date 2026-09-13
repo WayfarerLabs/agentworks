@@ -287,3 +287,113 @@ def test_illegal_persisted_route_is_not_reused(db):
     assert view.status == "unavailable"
     with pytest.raises(StateError):
         fixture.route()
+
+
+def test_session_projection_shares_canonical_diamond_order(db):
+    from agentworks.artifacts.routing import session_inherited_inputs
+    from agentworks.db import SessionMode
+
+    fixture = graph(db, active=("vm",), counts={"vm": 3})
+    fixture.save("vm", routes={"vm-0": "user", "vm-1": "session", "vm-2": "workspace"})
+    vm = inspect_owner_artifacts(db, fixture.registry, fixture.owners["vm"], "shell")
+    user = inspect_owner_artifacts(
+        db, fixture.registry, fixture.owners["agent"], "shell", inherited=deferred_inputs(vm, "user")
+    )
+    workspace = inspect_owner_artifacts(
+        db, fixture.registry, fixture.owners["workspace"], "shell", inherited=deferred_inputs(vm, "workspace")
+    )
+    inherited = session_inherited_inputs(vm, user, workspace)
+    assert inherited == fixture.route().inputs
+    db.insert_session(
+        "session",
+        "workspace",
+        "session",
+        SessionMode.AGENT,
+        agent_name="agent",
+        socket_path="/run/user/1000/session.socket",
+    )
+    local = capture_owner(fixture.registry, "session", "session", "session", fixture.owners["agent"].artifacts)
+    write_capture(db, "session", "session", "session", local, operation="fixture")
+    inputs = SetupInputs(
+        "session",
+        "session",
+        "session",
+        (CapabilityBlock.of("shell"),),
+        SecretTarget(vm={}, agent={}, workspace={}, session={}),
+        artifacts=fixture.owners["agent"].artifacts,
+    )
+    assert inherited is not None
+    record = SetupRecord(
+        component="session",
+        integration="shell",
+        destination_id="d" * 64,
+        declaration=inputs.declaration(CapabilityBlock.of("shell")),
+        complete=True,
+        artifact_inputs=tuple(item.identity for item in (*inherited, *local.inputs)),
+    )
+    write_native_setup(db, "session", "session", NativeSetupState(records=(record,)), operation="fixture")
+    result = inspect_owner_artifacts(db, fixture.registry, inputs, "shell", inherited=inherited)
+    assert result.status == "current"
+    assert result.prepared == (*inherited, *local.inputs)
+    changed = replace(
+        inputs, target=SecretTarget(vm={}, agent={}, workspace={}, session={"NEW": EnvEntry.model_validate("value")})
+    )
+    assert inspect_owner_artifacts(db, fixture.registry, changed, "shell", inherited=inherited).status == "stale"
+
+
+def test_capture_projection_and_routing_do_not_mutate_or_acquire(db, monkeypatch):
+    from agentworks.package_sources import PackageCapture
+
+    fixture = graph(db)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("read-only inspection attempted mutation or source acquisition")
+
+    monkeypatch.setattr(PackageCapture, "capture", forbidden)
+    monkeypatch.setattr(type(db.instance_state), "replace_applied_slices", forbidden)
+    result = fixture.route()
+    assert len(result.inputs) == 3
+    view = inspect_owner_artifacts(db, fixture.registry, fixture.owners["agent"], "shell")
+    assert view.status == "inactive"
+
+
+def test_artifact_free_active_facets_retain_existing_plugin_readiness_semantics(db):
+    fixture = graph(db, active=("vm", "agent", "workspace"), counts={"vm": 0, "agent": 0, "workspace": 0})
+    result = fixture.route()
+    assert result.inputs == ()
+    assert result.active_facets == ()
+
+
+def test_upstream_owned_files_survive_handled_payload_elision(db):
+    fixture = graph(db, active=("agent",))
+    item = fixture.captures["agent"].inputs[0]
+    file = OwnedArtifactFile(
+        path="/home/worker/.agents/skills/review/SKILL.md",
+        sha256="a" * 64,
+        origins=(item.origin.identity,),
+        native_identity="skill:review",
+    )
+    fixture.save("agent", files=(file,))
+    result = fixture.route()
+    assert item.identity not in {value.identity for value in result.inputs}
+    assert result.ancestor_files == (file,)
+    assert result.active_facets == ("user",)
+
+
+def test_missing_parent_route_remains_unknown_at_session_join(db):
+    from agentworks.artifacts.routing import session_inherited_inputs
+
+    fixture = graph(db, active=("vm",))
+    vm = inspect_owner_artifacts(db, fixture.registry, fixture.owners["vm"], "shell")
+    user = inspect_owner_artifacts(db, fixture.registry, fixture.owners["agent"], "shell", inherited=None)
+    workspace = inspect_owner_artifacts(db, fixture.registry, fixture.owners["workspace"], "shell", inherited=None)
+    assert session_inherited_inputs(vm, user, workspace) is None
+
+
+def test_removed_bundle_declaration_remains_inspectable(db):
+    fixture = graph(db)
+    owner = replace(fixture.owners["agent"], artifacts=ArtifactsConfig(bundles=["removed"]))
+    view = inspect_owner_artifacts(db, fixture.registry, owner, "shell")
+    assert view.status == "unavailable"
+    assert view.captured is not None and view.captured.inputs
+    assert view.prepared is None
