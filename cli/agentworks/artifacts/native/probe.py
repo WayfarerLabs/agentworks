@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 # Native help output, settings bodies and artifact instruction bodies are not returned.
 _PROBE = r"""
 import fnmatch, json, os, pathlib, re, shutil, subprocess, sys, tomllib
-request = json.loads(sys.argv[1])
+request = json.load(sys.stdin)
 tool = request['tool']
 home = os.environ.get('HOME', '')
 variable, default = {'claude': ('CLAUDE_CONFIG_DIR', '.claude'),
@@ -222,11 +222,11 @@ try:
             for kind, root in discovery_roots:
                 if kind != 'skill' or path == root or not path.is_relative_to(root):
                     continue
-                if path.name == 'SKILL.md' and path.parent.parent != root:
-                    raise ValueError()
                 for member in (path, *path.parents):
                     if member == root:
                         break
+                    if member.name == 'SKILL.md' and (member != path or path.parent.parent != root):
+                        raise ValueError()
                     proposed_entries.add(str(member))
     for spelling, size in request['proposed'].items():
         path = pathlib.Path(spelling)
@@ -391,8 +391,15 @@ def probe_native(
         "identities": identities,
         "check_policy": check_policy,
     }
-    command = shlex.join(["python3", "-c", _PROBE, json.dumps(request)])
-    result = runner.run(f'"$SHELL" -lic {shlex.quote(command)}', env=dict(environment), check=False, timeout=30)
+    command = shlex.join(["python3", "-c", _PROBE])
+    result = runner.run(
+        f'"$SHELL" -lic {shlex.quote(command)}',
+        env=dict(environment),
+        input_data=json.dumps(request),
+        tty=False,
+        check=False,
+        timeout=30,
+    )
     try:
         lines = [
             line.removeprefix("AGW_ARTIFACT_PROBE=")

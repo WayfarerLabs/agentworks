@@ -61,7 +61,12 @@ Codex's native adapter refuses skill entrypoints outside `<skill-root>/<package>
 known discovery roots, including nested entrypoints within otherwise valid packages. Its bounded
 inventory counts package members and directories against the existing 512-entry limit, including
 proposed files and implied directories before publication. This is a Codex delivery support limit;
-capture still permits ordinary supporting members within its independent package limits.
+capture still permits ordinary supporting members within its independent package limits. Proposed
+members and implied directories receive the same entrypoint-layout checks as existing files.
+
+Native discovery requests travel as JSON through the transport's existing `input_data` stdin channel
+with TTY allocation disabled. The login-shell command remains fixed-size as packages grow; bounded
+inventory metadata still returns through captured stdout for workstation validation.
 
 ## Source acquisition
 

@@ -83,7 +83,7 @@ def probe(
         **(environment or {}),
     }
     result = subprocess.run(
-        [sys.executable, "-c", _PROBE, json.dumps(request)], env=env, capture_output=True, text=True, check=True
+        [sys.executable, "-c", _PROBE], input=json.dumps(request), env=env, capture_output=True, text=True, check=True
     )
     observed = json.loads(result.stdout.removeprefix("AGW_ARTIFACT_PROBE="))
     assert isinstance(observed, dict)
@@ -323,8 +323,10 @@ def test_launch_checks_unmanaged_workspace_collision_with_only_handled_ancestor(
 
     def run(command, *, env, **kwargs):
         argv = shlex.split(shlex.split(command)[-1])
-        observed_requests.append(json.loads(argv[-1]))
-        return subprocess.run(argv, env={**os.environ, **env}, capture_output=True, text=True, check=False)
+        observed_requests.append(json.loads(kwargs["input_data"]))
+        return subprocess.run(
+            argv, input=kwargs["input_data"], env={**os.environ, **env}, capture_output=True, text=True, check=False
+        )
 
     prepared = SessionArtifactContext(
         inputs=ArtifactInputs(),
@@ -796,7 +798,9 @@ def test_codex_skill_inventory_still_refuses_unsupported_candidates(tmp_path, la
     assert "unreadable-native-inventory" in probe(tmp_path)["problems"]
 
 
-@pytest.mark.parametrize("relative", ["SKILL.md", "outer/examples/other/SKILL.md"])
+@pytest.mark.parametrize(
+    "relative", ["SKILL.md", "outer/examples/other/SKILL.md", "outer/examples/SKILL.md/support.txt"]
+)
 @pytest.mark.parametrize("existing", [False, True])
 @pytest.mark.parametrize("extra_name", ["outer", "review"])
 def test_codex_refuses_entrypoints_outside_direct_packages_even_with_an_outer_marker(
@@ -865,3 +869,50 @@ def test_codex_counts_proposed_members_and_directories_before_first_publication(
     assert "unreadable-native-inventory" in probe(tmp_path, entries=entries, paths=(files[-1].path,))["problems"]
     Path(files[-1].path).write_bytes(files[-1].data)
     assert "unreadable-native-inventory" in probe(tmp_path, entries=entries)["problems"]
+
+
+def test_production_probe_streams_large_valid_package_through_login_shell(tmp_path):
+    from agentworks.artifacts.application import ArtifactFile
+    from agentworks.artifacts.native.probe import probe_native
+    from tests.native_setup_fixtures import LocalFixtureTransport
+
+    target = LocalFixtureTransport(tmp_path)
+    probe(tmp_path, identities=())  # Provision only the offline native executable.
+    login = tmp_path / "login-shell"
+    login.write_text(
+        login.read_text().replace('[ "$1" = "-lc" ] || exit 9', 'case "$1" in -lc|-lic) ;; *) exit 9 ;; esac')
+    )
+    root = target.home / ".agents/skills/review"
+    files = (
+        ArtifactFile(
+            str(root / "SKILL.md"),
+            b"---\nname: review\ndescription: fixture\n---\nbody\n",
+            ("a" * 64,),
+            native_identity="skill:review",
+            package_root=str(root),
+        ),
+        *(
+            ArtifactFile(
+                str(root / "support" / (f"note-{index:03}-" + "a" * 64 + ".txt")),
+                b"notes",
+                ("a" * 64,),
+                native_identity="skill:review",
+                package_root=str(root),
+            )
+            for index in range(509)
+        ),
+    )
+    expected_home = str(target.home / ".codex")
+    assert (
+        probe_native(target, tool="codex", environment=target.environment, home=str(target.home), files=files)
+        == expected_home
+    )
+    for file in files:
+        path = Path(file.path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(file.data)
+    assert (
+        probe_native(target, tool="codex", environment=target.environment, home=str(target.home), files=files)
+        == expected_home
+    )
+    assert all(files[-1].path not in command for command in target.commands)
