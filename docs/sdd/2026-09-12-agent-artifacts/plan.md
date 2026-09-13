@@ -358,4 +358,16 @@ retained file. The formerly failing pinned-Git capture passed.
 
 The PR returned to draft before this final authorized round. Both named lanes had reported, so the
 operator's early-start permission applies. The batch includes feedback through the round-start
-comment. Production behavior is unchanged; private review and final validation are pending.
+comment. Production behavior is unchanged. Project, complexity and correctness reviews were clean at
+`832ba62d`. The fixture explicitly exercises cached metadata on Linux; removing vanished-entry
+handling still makes its disappearance regressions fail. Project review ran 75 capture tests with
+four Windows skips; the other lanes ran their focused storage checks.
+
+Final local gates passed: 9,311 tests with seven skips, Ruff, format, full source/test mypy, package
+build, file lint, locked-SDD check, Rulesync drift and Typer isolation. Website code and public
+collateral are unchanged from the preceding green deterministic builds. Linux CI on the preceding
+head passed for Python 3.12, 3.13 and 3.14. The final bookkeeping commit records this evidence and
+makes no implementation change. Round 3 is complete and the PR returns to ready without
+`review-requested`. The authorized fix budget is now spent; monitor the final handoff and assess any
+further material feedback for operator direction. Windows CI and remaining native/two-user
+acceptance remain open; this SDD remains unlocked.
