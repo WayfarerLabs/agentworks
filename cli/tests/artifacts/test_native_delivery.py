@@ -331,9 +331,11 @@ def test_native_launch_carries_literal_artifact_guidance_on_new_and_resumed_thre
 
 
 @pytest.mark.parametrize("fresh", [False, True])
-def test_codex_literal_role_and_guidance_overrides_apply_on_resume_and_new(fresh):
+@pytest.mark.parametrize("name", ["reviewer", "review-2", "123", "r" * 64])
+def test_codex_literal_role_and_guidance_overrides_apply_on_resume_and_new(fresh, name):
     item = artifact(ArtifactType.RULE)
-    persona = artifact(ArtifactType.AGENT, name="reviewer")
+    persona = artifact(ArtifactType.AGENT, name=name)
+    persona = replace(persona, content=replace(persona.content, description='Review "x=y".\n{{session_name}} café'))
     integration = CodexIntegration(
         "codex",
         {"developer_instructions": "configured guidance"},
@@ -353,14 +355,44 @@ def test_codex_literal_role_and_guidance_overrides_apply_on_resume_and_new(fresh
     assert "{{" not in argv_text
     argv = shlex.split(argv_text)
     values = [argv[index + 1] for index, token in enumerate(argv) if token == "-c"]
-    combined = tomllib.loads("\n".join(values))
+    # Codex splits the assignment at the first '=' and parses only its value as TOML:
+    # https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/utils/cli/src/config_override.rs
+    combined = {}
+    for value in values:
+        key, raw_value = value.split("=", 1)
+        combined[key.strip()] = tomllib.loads("value=" + raw_value.strip())["value"]
     assert combined["developer_instructions"] == "configured guidance\n\n" + item.content.text
-    path = combined["agents"]["reviewer"]["config_file"]
+    assert {key for key in combined if key.startswith("agents.")} == {
+        f"agents.{name}.config_file",
+        f"agents.{name}.description",
+    }
+    assert combined[f"agents.{name}.description"] == persona.content.description
+    path = combined[f"agents.{name}.config_file"]
     role = tomllib.loads(
         next(file.data.decode() for file in integration._artifact_plan.application.files if file.path == path)
     )
     assert role["developer_instructions"] == persona.content.text
     assert "name" not in role and "description" not in role
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "review.part",
+        'review"er',
+        "review=er",
+        "review er",
+        "Review",
+        "review_er",
+        "review--er",
+        "-review",
+        "review-",
+        "r" * 65,
+    ],
+)
+def test_codex_session_rejects_persona_names_that_cannot_use_portable_override_keys(name):
+    with pytest.raises(ConfigError):
+        codex.session_artifacts(context(artifact(ArtifactType.AGENT, name=name)), configured=None, extra_args=[])
 
 
 @pytest.mark.parametrize(

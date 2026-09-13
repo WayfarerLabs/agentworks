@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING
 
 import tomli_w
@@ -99,6 +100,7 @@ def session_artifacts(
     configured: str | None,
     extra_args: Sequence[str],
 ) -> NativeSessionArtifacts:
+    """Render session inputs, validating plugin-supplied persona names for native override paths."""
     if context is None or not has_artifacts(context):
         return NativeSessionArtifacts()
     validate_names(context.inputs)
@@ -120,11 +122,17 @@ def session_artifacts(
                 )
             )
         elif item.content.type is ArtifactType.AGENT:
+            name = item.content.name
+            if len(name) > 64 or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name):
+                raise ConfigError(
+                    "Codex session persona names must use at most 64 lowercase letters, digits and single hyphens"
+                )
             path = f"{context.directory}/agents/{item.content.name}.toml"
             files.append(
                 artifact_file(path, _persona(item, role_layer=True), (item,), identity=f"agent:{item.content.name}")
             )
-            key = f"agents.{json.dumps(item.content.name)}"
+            # Codex CLI override keys are dotted paths with literal components, including quotes.
+            key = f"agents.{name}"
             argv += [
                 "-c",
                 f"{key}.config_file={json.dumps(path)}",
