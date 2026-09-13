@@ -771,6 +771,7 @@ class _StubRegistry:
 
     _KIND_ATTRS = {
         "secret": "secrets",
+        "artifact-bundle": "artifact_bundles",
         "vm-template": "vm_templates",
         "agent-template": "agent_templates",
         "workspace-template": "workspace_templates",
