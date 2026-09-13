@@ -304,4 +304,10 @@ warning would also flag expected opaque assets. Native/live acceptance remains o
 
 Both lanes had reported by 06:35 UTC. Under the operator's explicit early-start permission, round 1
 of up to 3 began at 06:38 UTC after returning the PR to draft. Later feedback belongs to the next
-batch. The round's private reviews, final gates and re-handoff are in progress.
+batch. All three private review lanes were clean at `504808aa`. The combined suite passed 9,291
+tests with seven skips. Ruff, format, full source/test mypy, package build, file lint, locked-SDD
+check, Rulesync drift and Typer isolation returned 0. Website Python/Node tests and both site-base
+double builds and diffs returned 0. The final bookkeeping commit records this evidence; no
+implementation follows those private reviews. Round 1 is complete and the PR returns to ready
+without `review-requested` for CI and the remaining acceptance pipeline. Two authorized fix rounds
+remain.
