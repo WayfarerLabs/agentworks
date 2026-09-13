@@ -69,6 +69,8 @@ def run_setup(
     It must already have refused native residue and own failed-create rollback.
     Existing owners checkpoint confirmed ownership changes before another can run.
     """
+    from agentworks.artifacts.routing import inactive_destination, setup_artifacts
+
     expected = {"vm": VMSetupInvocation, "user": UserSetupInvocation, "workspace": WorkspaceSetupInvocation}
     if not isinstance(invocation, expected[inputs.facet]):
         raise StateError("native setup invocation does not match its facet")
@@ -80,7 +82,7 @@ def run_setup(
         prior = {record.integration: record for record in state.records if record.component == inputs.component}
         fallback: tuple[ArtifactFacet, ...] = ()
         if not inputs.activations and inputs.artifact_snapshot is not None and inputs.artifact_snapshot.inputs:
-            fallback = ("user" if inputs.facet == "vm" else "session",)
+            fallback = (inactive_destination(inputs.facet),)
         if not inputs.activations and not prior:
             _warn_artifact_deferrals(inputs, fallback)
             return state
@@ -145,8 +147,6 @@ def run_setup(
             else:
                 integration = bound[name]
                 declaration = inputs.declaration(block)
-
-            from agentworks.artifacts.routing import setup_artifacts
 
             artifacts = () if block is None else setup_artifacts(db, registry, inputs, invocation.vm, name)
 

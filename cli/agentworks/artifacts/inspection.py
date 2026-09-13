@@ -14,7 +14,7 @@ from agentworks.secrets.orchestration import SecretTarget
 
 if TYPE_CHECKING:
     from agentworks.artifacts.declarations import ArtifactsConfig, ArtifactSpec
-    from agentworks.artifacts.model import ArtifactComponent, ArtifactInput
+    from agentworks.artifacts.model import ArtifactComponent, ArtifactFacet, ArtifactInput
     from agentworks.artifacts.routing import ArtifactOwnerView
     from agentworks.db import AgentRow, Database, SessionRow, VMRow, WorkspaceRow
     from agentworks.machine_output import JsonObject
@@ -115,6 +115,7 @@ class IntegrationMetadata:
     recorded_deferred: tuple[DeferralMetadata, ...] = ()
     placements: tuple[PlacementMetadata, ...] = ()
     passthrough_inputs: tuple[str, ...] = ()
+    passthrough_destination: ArtifactFacet | None = None
 
 
 @dataclass(frozen=True)
@@ -318,9 +319,12 @@ def _artifact_metadata(
 
 
 def _integration_metadata(owner: SetupInputs, name: str, view: ArtifactOwnerView) -> IntegrationMetadata:
-    from agentworks.artifacts.routing import deferred_inputs
+    from agentworks.artifacts.routing import deferred_inputs, inactive_destination
 
-    passthrough = deferred_inputs(view, "session") if view.status == "inactive" and owner.component != "session" else ()
+    destination = (
+        inactive_destination(owner.facet) if view.status == "inactive" and owner.component != "session" else None
+    )
+    passthrough = deferred_inputs(view, destination) if destination is not None else ()
     record = view.record
     deferred = (
         ()
@@ -347,6 +351,7 @@ def _integration_metadata(owner: SetupInputs, name: str, view: ArtifactOwnerView
         deferred,
         placements,
         tuple(item.identity for item in passthrough or ()),
+        destination if passthrough else None,
     )
 
 
@@ -375,7 +380,7 @@ def render_artifacts(inspection: ArtifactInspection) -> None:
             activation = "activated" if integration.activated else "inactive"
             output.info(f"  {integration.name}: {activation}; {integration.status}; {integration.reason}")
             for input_id in integration.passthrough_inputs:
-                output.info(f"    Core passthrough: {input_id[:12]} to session")
+                output.info(f"    Core passthrough: {input_id[:12]} to {integration.passthrough_destination}")
             for input_id in integration.recorded_handled:
                 output.info(f"    Recorded handled: {input_id[:12]}")
             for item in integration.recorded_deferred:
@@ -421,7 +426,7 @@ def inspection_data(inspection: ArtifactInspection) -> JsonObject:
                         "reason": item.reason,
                         "recorded_handled": list(item.recorded_handled),
                         "passthrough_inputs": list(item.passthrough_inputs),
-                        "passthrough_destination": "session" if item.passthrough_inputs else None,
+                        "passthrough_destination": item.passthrough_destination,
                         "recorded_deferred": [
                             {"input_id": value.input_id, "destination": value.destination, "reason": value.reason}
                             for value in item.recorded_deferred

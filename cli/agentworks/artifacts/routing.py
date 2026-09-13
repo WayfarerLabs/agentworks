@@ -170,13 +170,17 @@ def inspect_owner_artifacts(
     return ArtifactOwnerView(inputs, captured, capture_status, "current", record=record, prepared=prepared)
 
 
+def inactive_destination(facet: ArtifactFacet) -> ArtifactFacet:
+    """Route inactive VM facets through the user; inner facets pass to session."""
+    return "user" if facet == "vm" else "session"
+
+
 def deferred_inputs(view: ArtifactOwnerView, destination: ArtifactFacet) -> tuple[ArtifactInput, ...] | None:
     """Project one route, preserving input order; unknown evidence stays unknown."""
     if view.status not in ("current", "inactive") or view.prepared is None:
         return None
     if view.status == "inactive":
-        fallback = "user" if view.owner.facet == "vm" else "session"
-        return view.prepared if destination == fallback else ()
+        return view.prepared if destination == inactive_destination(view.owner.facet) else ()
     if view.record is None:
         return ()
     identities = {item.input_id for item in view.record.deferred if item.destination == destination}

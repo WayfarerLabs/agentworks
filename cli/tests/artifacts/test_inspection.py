@@ -309,20 +309,22 @@ def test_integration_config_values_are_excluded_from_both_outputs(db: Database, 
     assert confidential not in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("component", ["agent", "workspace"])
-def test_inactive_inspection_projects_only_applicable_vm_inputs(db: Database, component: str) -> None:
-    from agentworks.artifacts.inspection import inspect_artifacts
+@pytest.mark.parametrize("component", ["vm", "agent", "workspace"])
+@pytest.mark.parametrize("count", [0, 1])
+def test_inactive_inspection_projects_only_applicable_vm_inputs(db: Database, component: str, count: int) -> None:
+    from agentworks.artifacts.inspection import inspect_artifacts, inspection_data
     from agentworks.capabilities.harness_integration.kinds import HarnessIntegrationEntry
     from agentworks.origin import Origin
     from tests.artifacts.test_routing import graph
 
-    fixture = graph(db)
+    fixture = graph(db, counts={"vm": count, "agent": count, "workspace": count})
     fixture.registry.add(
         "harness-integration", "shell", HarnessIntegrationEntry(name="shell"), Origin.built_in(source="test")
     )
     result = inspect_artifacts(
         db,
         fixture.registry,
+        vm_name="vm" if component == "vm" else None,
         agent_name="agent" if component == "agent" else None,
         workspace_name="workspace" if component == "workspace" else None,
         integration_name="shell",
@@ -330,7 +332,13 @@ def test_inactive_inspection_projects_only_applicable_vm_inputs(db: Database, co
     expected = (
         (*fixture.captures["vm"].inputs, *fixture.captures["agent"].inputs)
         if component == "agent"
-        else fixture.captures["workspace"].inputs
+        else fixture.captures[component].inputs
     )
     assert result.owners[-1].integrations[0].status == "inactive"
     assert result.owners[-1].integrations[0].passthrough_inputs == tuple(item.identity for item in expected)
+    destination = ("user" if component == "vm" else "session") if expected else None
+    assert result.owners[-1].integrations[0].passthrough_destination == destination
+    encoded = json.loads(json.dumps(inspection_data(result)))
+    integration = encoded["owners"][-1]["integrations"][0]
+    assert integration["passthrough_inputs"] == [item.identity for item in expected]
+    assert integration["passthrough_destination"] == destination
