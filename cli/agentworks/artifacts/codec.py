@@ -140,6 +140,8 @@ def decode_inputs(payload: object) -> tuple[ArtifactInput, ...]:
                 total_members += 1
             validate_member_set([member.path for member in members], depth=_LIMITS.depth)
             content_row = record.content
+            if len(content_row.text.encode()) > _LIMITS.member_bytes:
+                raise SourceRefError("persisted artifact instructions exceed their size limit")
             if normalize_text(content_row.text.encode()) != content_row.text:
                 raise SourceRefError("persisted artifact text is not normalized")
             if not members:
@@ -207,5 +209,6 @@ def _bound_payload(payload: object) -> None:
             if len(value) > _LIMITS.members:
                 raise SourceRefError("persisted artifact list exceeds its size limit")
             pending.extend((child, depth + 1) for child in value)
-        if size > _LIMITS.storage_bytes:
+        # JSON carries base64 members plus their extracted logical instruction text.
+        if size > _LIMITS.total_bytes * 3:
             raise SourceRefError("persisted artifact capture exceeds its encoded size limit")
