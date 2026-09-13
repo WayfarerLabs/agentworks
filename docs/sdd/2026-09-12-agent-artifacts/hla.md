@@ -201,10 +201,10 @@ not identify an owning resource or authorize deletion of another owner's files.
 Extend the current setup invocation objects with immutable prepared artifact inputs. Setup hooks
 return a typed application containing integration-selected file publications and deferrals. Core
 executes the common guarded whole-file writes and checkpoints ownership; integrations retain native
-format and placement decisions. The result lists only
-what remains unhandled; omitted inputs are handled for that integration and owner. Core validates
-the result at the plugin boundary: inputs must belong to the invocation, origin must be unchanged,
-routes must be legal, and each input can be deferred once. No separate acknowledgment list is added.
+format and placement decisions. The result lists only what remains unhandled; omitted inputs are
+handled for that integration and owner. Core validates the result at the plugin boundary: inputs
+must belong to the invocation, origin must be unchanged, routes must be legal, and each input can be
+deferred once. No separate acknowledgment list is added.
 
 Each VM item has one next facet: user, workspace or session. User and workspace can defer only to
 session. Routing to a sibling or back outward is invalid. First-party VM facets perform routing

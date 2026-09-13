@@ -87,13 +87,13 @@ records this implementation assignment for the saga and dependent efforts.
       work; record the implementing slice without changing another effort's requirements.
 - [x] Write [source and codec LLD](source-codec-lld.md): declarations, source selection, capture
       bounds, text/byte rules, typed inputs, identity and versioned persistence.
-- [ ] Write [native delivery LLD](native-delivery-lld.md): typed facet results, native
+- [x] Write [native delivery LLD](native-delivery-lld.md): typed facet results, native
       paths/options, ownership claims, private session publication and compatibility checks for each
       integration.
-- [ ] Implement the agreed durable `session_uuid` and per-incarnation `run_id` slice, including
+- [x] Implement the agreed durable `session_uuid` and per-incarnation `run_id` slice, including
       migration of existing rows, create/restart/name reuse and backup/restore preservation. Keep
       native conversation identity independent; do not add containment or event-stream machinery.
-- [ ] Bump the harness integration contract and update first-party hooks together. Old hook returns
+- [x] Bump the harness integration contract and update first-party hooks together. Old hook returns
       cannot silently acknowledge artifact inputs; artifact-free stored evidence remains readable.
 
 ### 2. Bundle resources, capture and normalization
@@ -118,36 +118,36 @@ records this implementation assignment for the saga and dependent efforts.
 
 ### 3. Core capture, routing and applied state
 
-- [ ] Capture owner-local inputs in owning operations even without activated integrations. Commit
+- [x] Capture owner-local inputs in owning operations even without activated integrations. Commit
       new-owner captures with their rows; replace existing captures only after successful capture.
       Session consumers never fetch or initialize ancestors. Workspace refresh requires recreation.
-- [ ] Extend the existing instance-state domain and codecs for core captures, applicable input
+- [x] Extend the existing instance-state domain and codecs for core captures, applicable input
       identities, typed deferrals and session applied evidence; preserve existing plugin claims.
-- [ ] Prepare completed env and applicable artifact inputs before each integration. Validate plugin
+- [x] Prepare completed env and applicable artifact inputs before each integration. Validate plugin
       results for unchanged origin, input membership, one legal next facet and no duplicate routes.
 - [x] Implement lazy resolution through the actual VM, user, workspace and session path. An inactive
       VM routes directly to session; inactive intermediate facets pass through; handled payloads do
       not reach descendants. Results remain reusable independently for every descendant owner.
-- [ ] Base freshness only on supplied inputs and existing config/env dependencies. Diagnose missing,
+- [x] Base freshness only on supplied inputs and existing config/env dependencies. Diagnose missing,
       stale or interrupted active results and retained artifact effects awaiting retirement without
       changing unrelated required/recommended setup semantics or blocking parent deletion.
-- [ ] Prove routing with simple test integrations: all VM destinations, inactive/unimplemented
+- [x] Prove routing with simple test integrations: all VM destinations, inactive/unimplemented
       distinctions, the diamond, multiple integrations/consumers, origin preservation, malformed
       results, branch-specific freshness, interrupted setup and removed activations.
 
 ### 4. Native delivery and owned cleanup
 
-- [ ] Implement idempotent whole-file publication/retirement using existing transport and applied
+- [x] Implement idempotent whole-file publication/retirement using existing transport and applied
       state. Preflight destination/name collisions, preserve unowned or drifted content, checkpoint
       confirmed effects, and retry partial work without an acknowledgment ledger or generic engine.
-- [ ] Implement shell publication for all types at user/workspace/session, with fixed ancestor
+- [x] Implement shell publication for all types at user/workspace/session, with fixed ancestor
       locations and the session-only index exposed through `AGENTWORKS_ARTIFACTS_DIR`.
-- [ ] Implement Claude user/project rules, skills and agents; session additive prompt content,
+- [x] Implement Claude user/project rules, skills and agents; session additive prompt content,
       private plugin skills with explicit namespace, and agent definitions through native options.
-- [ ] Implement Codex user/project skills and agents, with hints/rules deferred to session; compose
+- [x] Implement Codex user/project skills and agents, with hints/rules deferred to session; compose
       session developer instructions and private persona config. Refuse private session skills
       explicitly and keep primary-persona limitations honest.
-- [ ] Implement Grok Build user/project rules, skills and agents, plus session rules/personas; honor
+- [x] Implement Grok Build user/project rules, skills and agents, plus session rules/personas; honor
       discovery exclusions and refuse unsupported interactive session skills explicitly.
 - [ ] Validate artifact-specific native options and reject launch overrides that disable or replace
       generated carriers. Verify native discovery and resume behavior against actual executables,
@@ -155,15 +155,15 @@ records this implementation assignment for the saga and dependent efforts.
 
 ### 5. Session lifecycle and inspection
 
-- [ ] Integrate prospective session/run identities, completed env and prepared artifact inputs into
+- [x] Integrate prospective session/run identities, completed env and prepared artifact inputs into
       the launch decision. Reject final deferrals before stopping an existing workload.
-- [ ] Persist ownership before publication; stage each restart in a distinct private run directory,
+- [x] Persist ownership before publication; stage each restart in a distinct private run directory,
       preserve the old workload on preparation failure, retire old files after it stops, and clean
       failed creates/deletions idempotently without adopting same-name replacement files.
-- [ ] Implement `agw artifacts show` with actual-lineage selectors and optional integration filter.
+- [x] Implement `agw artifacts show` with actual-lineage selectors and optional integration filter.
       Include local and ancestor declarations, upstream-handled artifacts, capture provenance,
       recorded native identity/placement and clear missing/stale/interrupted evidence.
-- [ ] Prove inspection does not acquire sources, invoke integrations, contact remotes, expose bodies
+- [x] Prove inspection does not acquire sources, invoke integrations, contact remotes, expose bodies
       or secrets, or mutate state. Reject contradictory selectors and preserve admin/agent
       separation.
 - [ ] Exercise create, restart/resume, failure before teardown, deletion, source/reference removal,
@@ -172,7 +172,7 @@ records this implementation assignment for the saga and dependent efforts.
 
 ### 6. Collateral, review and delivery
 
-- [ ] Update permanent source/capability/state docs, operator guides, sample bundle/owner manifests,
+- [x] Update permanent source/capability/state docs, operator guides, sample bundle/owner manifests,
       CLI help/completions, generated resource schemas and migration guidance with shipped behavior.
       Include the native support matrix, capture/refresh rules and VM-plus-user activation example.
 - [ ] Run required repository/CLI gates and relevant behavioral tests, package/build checks and
@@ -205,3 +205,37 @@ project review's minor signature request was incorporated into the saga coordina
 reviews confirmed that new scope remains proposed and the predecessor's seven acceptance/cleanup
 obligations remain open. No code or live resources were changed. The seed handoff records repository
 checks and final-head CI separately; this is not artifact implementation or acceptance evidence.
+
+## Implementation private review evidence
+
+The first complete private review inspected `3b4ea08b` against `7c744828` in three isolated
+worktrees. The lead accepted the concrete project, Muntz and correctness findings:
+
+- Session deletion now holds the existing VM mutation guard through runtime teardown, file cleanup
+  and row deletion, then releases it before independent parent cleanup.
+- Existing-owner artifact routing is checked before launch secret resolution and checked again
+  during guarded preparation. Final deferral errors identify integration, type, bundle entry and
+  originating owner, retaining the integration's reason.
+- Workspace deletion catches unreadable artifact evidence alongside cleanup failures. Its warning
+  identifies the private session directory and explains that remaining files lose managed cleanup
+  evidence when the session row is removed. This preserves the existing parent-deletion contract; VM
+  deletion gains no artifact cleanup barrier.
+- Codex and Grok no longer publish unused copies of inline session guidance. Session staging no
+  longer repeats the application validation already performed at the plugin boundary.
+- Workstation capture holds directory descriptors or Windows handles so replacing a checked ancestor
+  cannot redirect a later read outside the selected package. Persisted input decoding shares
+  capture's semantic checks, including forbidden execution metadata and credential-free provenance.
+- User artifact publication rejects native directories outside the actual user's home before native
+  setup mutations. Supporting those directories needs an explicit publication-root ownership
+  contract; the current implementation does not infer authority from an adapter's output path.
+  Native discovery checks conservatively refuse relevant configured restrictions when their
+  effective precedence cannot be established. They do not claim to be a native configuration
+  resolver.
+
+The pre-correction full Linux suite passed 9,224 tests with three skips. The lead's lifecycle and
+publication corrections passed 52 focused tests and source/test mypy; capture and codec developers
+supplied their separate regression evidence. Final combined gates and re-review remain pending.
+Windows capture execution, live VM/user isolation, and actual native consumption/resume acceptance
+are not established by these local results. No operator live-test inventory has been supplied; local
+isolated-HOME CLI acceptance proceeds independently. The SDD remains unlocked while its acceptance
+obligations are open.

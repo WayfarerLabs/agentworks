@@ -116,11 +116,11 @@ and the selected integration's reusable results along one actual VM/user/workspa
 Handling an input for one user does not consume the VM result for another user.
 
 `application.py` defines integration results and whole-file ownership. `publication.py` validates
-plugin output and uses the shared guarded `NativeFiles` transport utility. Native formats and
-policy live in integration adapters. Existing unowned files are never adopted merely because
-their bytes match. Changed managed files are retained and diagnosed, with evidence for retry.
+plugin output and uses the shared guarded `NativeFiles` transport utility. Native formats and policy
+live in integration adapters. Existing unowned files are never adopted merely because their bytes
+match. Changed managed files are retained and diagnosed, with evidence for retry.
 
-`session.py` prepares the launch context, stages a new private run before old-runtime teardown,
-then retires obsolete owned files after teardown. No artifact bookkeeping changes VM deletion.
+`session.py` prepares the launch context, stages a new private run before old-runtime teardown, then
+retires obsolete owned files after teardown. No artifact bookkeeping changes VM deletion.
 `agw artifacts show` projects declarations, captures and recorded delivery without claiming to
 observe the target filesystem or prove that a model obeyed the supplied content.

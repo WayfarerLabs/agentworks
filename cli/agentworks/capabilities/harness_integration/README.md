@@ -35,10 +35,10 @@ schema, does not establish facet support. See
 
 Contract version 5 adds artifact delivery. Core captures each owner's `artifacts.bundles` and
 supplies immutable normalized inputs in `SetupInvocation.artifacts`. Setup methods return an
-`ArtifactApplication`: concrete native files plus deferrals for inputs requiring a later facet.
-Core performs guarded whole-file publication and checkpoints confirmed ownership. The integration
-owns native formats, placement, compatibility checks and routing decisions. Omitted inputs are
-handled; returning the old `None` result is a contract error even for an empty invocation.
+`ArtifactApplication`: concrete native files plus deferrals for inputs requiring a later facet. Core
+performs guarded whole-file publication and checkpoints confirmed ownership. The integration owns
+native formats, placement, compatibility checks and routing decisions. Omitted inputs are handled;
+returning the old `None` result is a contract error even for an empty invocation.
 
 A VM deferral chooses exactly one of user, workspace or session. User/workspace deferrals can only
 target session. Core sends an inactive VM's inputs directly to session and passes an inactive
