@@ -99,12 +99,19 @@ def publish_artifacts(
             prior = current.get(path)
             if data is not None and (prior is None or data != (prior.sha256, _mode(prior.executable, group))):
                 raise StateError("artifact destination is unowned or has been modified; existing content was retained")
-        retirement = sorted(current.items(), key=lambda item: _is_skill_entrypoint(item[1]))
+        retirement = sorted(
+            current.items(),
+            key=lambda item: (
+                _skill_entrypoint_directory(item[1]) is not None,
+                -item[0].count("/") if _skill_entrypoint_directory(item[1]) is not None else 0,
+            ),
+        )
         for path, prior in retirement:
             if path in planned:
                 continue
-            if _is_skill_entrypoint(prior) and any(
-                item.path != path and item.path.startswith(str(prior.package_root) + "/") for item in current.values()
+            entrypoint_directory = _skill_entrypoint_directory(prior)
+            if entrypoint_directory is not None and any(
+                item.path != path and item.path.startswith(entrypoint_directory + "/") for item in current.values()
             ):
                 continue  # Keep native discovery valid until every owned supporting member retires.
             data = observed[path]
@@ -159,5 +166,10 @@ def _validate_package_root(file: ArtifactFile | OwnedArtifactFile) -> str | None
     return root
 
 
-def _is_skill_entrypoint(file: OwnedArtifactFile) -> bool:
-    return file.package_root is not None and file.path == file.package_root + "/SKILL.md"
+def _skill_entrypoint_directory(file: OwnedArtifactFile) -> str | None:
+    """Find the owned entrypoint's directory for retirement ordering, never pruning."""
+    if file.package_root is not None:
+        return file.package_root if file.path == file.package_root + "/SKILL.md" else None
+    if file.native_identity and file.native_identity.startswith("skill:") and file.path.endswith("/SKILL.md"):
+        return file.path.rsplit("/", 1)[0]
+    return None

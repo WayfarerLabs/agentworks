@@ -179,16 +179,19 @@ try:
                 if marker.is_symlink() or (marker.exists() and not marker.is_file()):
                     raise ValueError()
                 if not marker.exists():
-                    # Whole-file cleanup leaves empty supporting directory trees.
-                    # Accept only directory-only remnants, bounded by the same entry budget.
+                    # Cleanup may leave unowned files and supporting directories.
+                    # Ordinary files are not skills; nested entrypoints remain unsupported.
                     pending = [directory]
                     while pending:
                         for leftover in pending.pop().iterdir():
                             existing_entries.add(str(leftover))
                             scanned += 1
-                            if scanned > 512 or leftover.is_symlink() or not leftover.is_dir():
+                            if scanned > 512 or leftover.is_symlink() or leftover.name == 'SKILL.md':
                                 raise ValueError()
-                            pending.append(leftover)
+                            if leftover.is_dir():
+                                pending.append(leftover)
+                            elif not leftover.is_file():
+                                raise ValueError()
                     continue
                 candidates.append(('skill', marker, directory.name))
                 if len(candidates) > 512:

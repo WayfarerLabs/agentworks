@@ -151,11 +151,11 @@ recorded package root. The renderer supplies that exact boundary for every skill
 never infers it from directory names. Supporting files retire before `SKILL.md`, which stays owned
 and present while any owned supporting member remains. Nonempty directories and modified or unowned
 files remain; interrupted cleanup retains the file record and package boundary for retry. Older
-records without a package root retire owned files without directory pruning. Existing unowned
-content and files changed since publication require resolution rather than silent replacement.
-Removing an activation with retained effects still needs the owning cleanup operation before
-passthrough can be considered current. Deleting a VM retains the ordinary VM deletion behavior: its
-filesystem disappears with it.
+records without a package root retain this entrypoint ordering using the owned skill entrypoint
+path, but retire files without directory pruning. Existing unowned content and files changed since
+publication require resolution rather than silent replacement. Removing an activation with retained
+effects still needs the owning cleanup operation before passthrough can be considered current.
+Deleting a VM retains the ordinary VM deletion behavior: its filesystem disappears with it.
 
 ## Native delivery
 
@@ -184,8 +184,11 @@ to 32 KiB each and 1 MiB combined, and Codex persona TOML files up to 32 MiB eac
 combined. Before publication, preflight checks existing and proposed entrypoints together, counting
 a replaced path once, so an accepted plan fits the next inventory. Generated Codex persona files
 obey the same per-file bound. YAML metadata rejects aliases, anchors and nesting deeper than 32
-levels before constructing values. Symlinked or nested candidate layouts are explicitly unsupported.
-These are conservative Agentworks support limits, not claims that those layouts are invalid native
+levels before constructing values. Directories without a root `SKILL.md` are walked within the same
+entry budget: ordinary files are ignored, while nested `SKILL.md` candidates, symlinks and special
+files are refused. This permits unowned notes to survive skill retirement without keeping the
+removed skill active. Symlinked or nested candidate layouts are explicitly unsupported. These are
+conservative Agentworks support limits, not claims that those layouts are invalid native
 configurations. The inventory does not claim to cover additional ancestor repository roots,
 third-party plugin locations, or changes after preflight. Unknown native discovery extensions
 require separate verification; a successful preflight is not an exhaustive native inventory.

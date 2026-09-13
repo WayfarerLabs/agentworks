@@ -54,7 +54,9 @@ skill renderer sets it on every package member, and publication persists it in t
 publication root. It is a cleanup boundary, not a separate directory ownership record. Retirement
 keeps `SKILL.md` until owned supporting members have retired, then prunes only empty parents up to
 the recorded root before dropping the file's checkpoint evidence. Older records without this field
-retain ordinary guarded file retirement and do not authorize directory pruning.
+retain guarded file retirement and do not authorize directory pruning. Their owned `SKILL.md`
+entrypoints, identified by native skill identity, still retire after supporting owned files; deeper
+entrypoints retire before shallower ones. Unowned files do not keep an obsolete entrypoint active.
 
 A VM deferral chooses exactly one of user, workspace or session. User/workspace deferrals can only
 target session. Core sends an inactive VM's inputs to user, then passes an inactive user or

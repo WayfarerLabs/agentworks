@@ -166,8 +166,8 @@ def test_skill_retirement_prunes_only_owned_file_parents_and_retries_interruptio
     assert root.parent.is_dir()
 
 
-@pytest.mark.parametrize("legacy_support", [False, True])
-def test_skill_retirement_preserves_modified_and_unowned_files(target, legacy_support):
+@pytest.mark.parametrize("legacy", ["none", "support", "all"])
+def test_skill_retirement_preserves_modified_and_unowned_files(target, legacy):
     from dataclasses import replace
 
     root = target.home / ".claude/skills/review"
@@ -176,9 +176,11 @@ def test_skill_retirement_preserves_modified_and_unowned_files(target, legacy_su
         for path in ("SKILL.md", "scripts/modified.sh", "data/retired.txt")
     )
     previous = publish_artifacts(target, files, (), lambda files: None, roots=(str(target.home),))
-    if legacy_support:
+    if legacy != "none":
         previous = tuple(
-            record.model_copy(update={"package_root": None}) if record.path.endswith("/modified.sh") else record
+            record.model_copy(update={"package_root": None})
+            if legacy == "all" or record.path.endswith("/modified.sh")
+            else record
             for record in previous
         )
     (root / "scripts/modified.sh").write_text("operator change")
@@ -274,3 +276,22 @@ def test_persisted_package_root_cannot_escape_current_publication_scope(target):
     with pytest.raises(StateError):
         publish_artifacts(target, (), (record,), lambda files: None, roots=(str(target.home),))
     assert path.read_bytes() == b"owned" and target.commands == []
+
+
+def test_legacy_skill_entrypoints_retire_deepest_first_after_supporting_members(target):
+    from dataclasses import replace
+
+    root = target.home / ".claude/skills/review"
+    files = tuple(
+        replace(artifact(root / path), native_identity="skill:review")
+        for path in ("SKILL.md", "nested/SKILL.md", "nested/support.txt")
+    )
+    previous = publish_artifacts(target, files, (), lambda files: None, roots=(str(target.home),))
+    checkpoints: list[tuple[OwnedArtifactFile, ...]] = []
+    assert publish_artifacts(target, (), previous, checkpoints.append, roots=(str(target.home),)) == ()
+    assert [[Path(file.path).relative_to(root).as_posix() for file in records] for records in checkpoints] == [
+        ["SKILL.md", "nested/SKILL.md"],
+        ["SKILL.md"],
+        [],
+    ]
+    assert root.is_dir() and (root / "nested").is_dir()

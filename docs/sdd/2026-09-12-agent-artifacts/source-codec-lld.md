@@ -52,7 +52,10 @@ Native package cleanup boundaries are outside this capture codec. The integratio
 renderer supplies an exact optional `ArtifactFile.package_root`, retained on each
 `OwnedArtifactFile` through publication and retirement checkpoints. The root contains that file and
 must remain strictly within an owning publication root. Missing legacy roots authorize only file
-retirement; neither the capture codec nor cleanup infers a package root from path spelling.
+retirement; neither the capture codec nor cleanup infers a package root from path spelling. For
+retirement ordering only, a legacy owned file with native skill identity and basename `SKILL.md`
+identifies an entrypoint whose owned supporting members retire first. Deeper entrypoints precede
+shallower ones, preserving retryable discovery without granting directory-pruning authority.
 
 ## Source acquisition
 

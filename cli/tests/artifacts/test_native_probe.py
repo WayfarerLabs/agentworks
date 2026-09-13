@@ -672,7 +672,11 @@ def test_proposed_codex_budget_includes_existing_entries_and_replaces_paths_once
     )
 
 
-def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(tmp_path, db, monkeypatch):
+@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize("unowned_leftovers", [False, True])
+def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(
+    tmp_path, db, monkeypatch, legacy, unowned_leftovers
+):
     from dataclasses import replace
 
     from agentworks.artifacts.publication import publish_artifacts
@@ -718,6 +722,13 @@ def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(tm
     )
     first = integration.user_init(invocation)
     current = publish_artifacts(target, first.files, (), lambda files: None, roots=(str(target.home),))
+    if legacy:
+        current = tuple(record.model_copy(update={"package_root": None}) for record in current)
+    entrypoint = target.home / ".claude/skills/review/SKILL.md"
+    if unowned_leftovers:
+        (entrypoint.parent / "notes.txt").write_text("operator notes")
+        (entrypoint.parent / "unowned").mkdir()
+        (entrypoint.parent / "unowned/more.txt").write_text("more operator notes")
     checkpoints = [current]
     invocation = replace(
         invocation,
@@ -749,5 +760,34 @@ def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(tm
     # This actual user_init invokes native preflight before retrying publication.
     retried = integration.user_init(invocation)
     finished = publish_artifacts(target, retried.files, checkpoints[-1], checkpoints.append, roots=(str(target.home),))
-    assert not entrypoint.parent.exists()
+    assert not entrypoint.exists()
+    assert entrypoint.parent.exists() == (legacy or unowned_leftovers)
+    if unowned_leftovers:
+        assert (entrypoint.parent / "notes.txt").read_text() == "operator notes"
+        assert (entrypoint.parent / "unowned/more.txt").read_text() == "more operator notes"
     assert all(file.native_identity == "skill:kept" for file in finished)
+    assert invocation.prior is not None
+    invocation = replace(invocation, prior=invocation.prior.model_copy(update={"artifact_files": finished}))
+    subsequent = integration.user_init(invocation)
+    assert (
+        publish_artifacts(target, subsequent.files, finished, checkpoints.append, roots=(str(target.home),)) == finished
+    )
+
+
+@pytest.mark.parametrize("layout", ["nested-entrypoint", "symlink", "special", "limit"])
+def test_markerless_skill_inventory_still_refuses_unsupported_candidates(tmp_path, layout):
+    root = tmp_path / "home/.agents/skills/removed"
+    root.mkdir(parents=True)
+    (root / "notes.txt").write_text("ordinary notes")
+    nested = root / "support"
+    nested.mkdir()
+    if layout == "nested-entrypoint":
+        (nested / "SKILL.md").write_text("---\nname: nested\ndescription: nested skill\n---\nbody\n")
+    elif layout == "symlink":
+        (nested / "linked").symlink_to(root / "notes.txt")
+    elif layout == "special":
+        os.mkfifo(nested / "pipe")
+    else:
+        for index in range(510):
+            (nested / f"note-{index}.txt").write_text("ordinary notes")
+    assert "unreadable-native-inventory" in probe(tmp_path)["problems"]
