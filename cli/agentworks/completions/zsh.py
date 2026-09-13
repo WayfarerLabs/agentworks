@@ -88,6 +88,12 @@ _agentworks_admin_templates() {
     templates=(${(f)"$(agw resource list --kind admin-template --names-only 2>/dev/null | awk -F/ '{print $2}')"})
     _describe 'admin-template' templates
 }""",
+    "harness_integrations": """\
+_agentworks_harness_integrations() {
+    local -a templates
+    templates=(${(f)"$(agw resource list --kind harness-integration --names-only 2>/dev/null | awk -F/ '{print $2}')"})
+    _describe 'harness-integration' templates
+}""",
     "secrets": """\
 _agentworks_secrets() {
     local -a secrets
@@ -127,6 +133,7 @@ COMPLETER_FUNC_NAMES: dict[str, str] = {
     "vm_templates": "_agentworks_vm_templates",
     "agent_templates": "_agentworks_agent_templates",
     "admin_templates": "_agentworks_admin_templates",
+    "harness_integrations": "_agentworks_harness_integrations",
     "agents": "_agentworks_agents",
     "consoles": "_agentworks_consoles",
     "secrets": "_agentworks_secrets",

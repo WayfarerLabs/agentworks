@@ -41,6 +41,7 @@ RESOURCE_LIST_DYNAMIC_COMPLETIONS: tuple[str, ...] = (
     "vm_templates",
     "agent_templates",
     "admin_templates",
+    "harness_integrations",
     "resource_refs",
 )
 DATABASE_BACKED_DYNAMIC_COMPLETERS = frozenset(completer for completer, _path in DATABASE_BACKED_DYNAMIC_COMPLETIONS)
@@ -290,6 +291,11 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("session.delete", "name"): "sessions",
     ("session.logs", "name"): "sessions",
     # Env inspection
+    ("artifacts.show", "integration"): "harness_integrations",
+    ("artifacts.show", "vm"): "vms",
+    ("artifacts.show", "workspace"): "workspaces",
+    ("artifacts.show", "agent"): "agents",
+    ("artifacts.show", "session"): "sessions",
     ("env.show", "vm"): "vms",
     ("env.show", "workspace"): "workspaces",
     ("env.show", "agent"): "agents",

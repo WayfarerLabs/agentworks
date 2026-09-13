@@ -248,6 +248,13 @@ installed schema.
 This is a breaking change from 0.16. [The 0.17 upgrade guide](../docs/guides/upgrading-to-0.17.md)
 covers the paired CLI/resource-directory cutover, per-user reinitialization, and rollback boundary.
 
+Agent artifact declarations and their native placement have a dedicated read-only view:
+`agw artifacts show --session my-session` includes the session and its actual ancestors;
+`--integration codex` narrows the explanation. It shows capture and application evidence without
+fetching content or exposing bodies. Start with `agw guide show concept-agent-artifacts` or the
+[artifact documentation](agentworks/artifacts/README.md) for bundle sources, explicit facet
+activation, worked manifests, and native delivery limits.
+
 Env vars ride their owning resource, as an `env` map in the template's `spec` (the removed TOML
 shape used `[<scope>.env]` subsections), at vm / workspace / admin / agent / session scope. The
 `lima-local` and `wsl2` vm-sites ship built in and their names are reserved.
