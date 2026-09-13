@@ -222,6 +222,13 @@ future automatic emissions construct the same typed inputs without pretending to
 consumers of the same bundle have distinct origins and delivery obligations. A content digest does
 not identify an owning resource or authorize deletion of another owner's files.
 
+This delivery materializes normalized content in memory. Large skill packages make compressed
+storage, lazy loading and deduplication expected follow-up work: retain metadata and hashes while
+loading content only when needed. That work should measure resident and peak memory, retain bounded
+decompression and content verification, and keep compression behind the storage interface. Comparing
+stored hashes can avoid loading content; verifying that bytes match a hash still requires reading
+them. The operator deferred this storage work from the current implementation.
+
 Capture and persisted state retain owner groups. Setup and session invocations expose a local group
 and deferred groups keyed by original owner. A group has the same four-map structure at every
 boundary; iteration helpers for renderers do not introduce a second flat propagation format. The

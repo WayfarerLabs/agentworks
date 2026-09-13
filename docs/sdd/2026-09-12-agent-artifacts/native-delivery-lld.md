@@ -46,6 +46,11 @@ skills remain under the actual user's `.agents/skills`, independently of `CODEX_
 placement uses the workspace root and does not consult an admin's home or native installation as a
 substitute for the future session user.
 
+Shell preserves each original owner under `scopes/<component>/<resource-name>/`, with separate
+`hints`, `rules`, `skills` and `agents` directories. Its index retains those owner groups and type
+maps, so equal keys from different owners resolve to different files. Shell publishes content for
+filesystem consumers; it does not load assistant context.
+
 Skill members retain their captured bytes and executable intent. Adapters neither flatten skills
 into prompts nor omit supporting files. The Claude session plugin is named `agentworks-artifacts`;
 its skills use the native `agentworks-artifacts:<name>` namespace. Its manifest contains only the
@@ -119,12 +124,27 @@ Codex and Grok guidance is carried directly in native argv; no unused guidance f
 Claude's additive prompt file and Codex's selected role configuration files are consumed by their
 native CLI carriers.
 
-The native checks use `--version`, applicable `--help` flags and selected configuration facts; no
-model is launched. The initial compatibility baselines are Claude Code 2.1.265, Codex 0.153.4 and
-Grok Build 1.0.10. Older versions or absent carrier flags fail before publication or session
-teardown. Claude documents its file carrier as `--append-system-prompt[-file]`; the probe recognizes
-that specific spelling as both supported options while retaining whole-option matching for unknown
-flags. These checks establish a supported CLI surface, not proof of model consumption.
+The native checks use `--version`, applicable `--help` flags, selected configuration facts and a
+bounded inventory of relevant skill/persona entrypoints; no model is launched. Inventory compares
+actual metadata names and paths against planned files and already handled ancestor files. YAML
+headers are parsed on the workstation, so the guest needs no YAML dependency; Codex TOML and
+configuration-registered role names use the standard library. Empty directory trees left by owned
+skill cleanup do not constitute competing native entries.
+
+Inventory covers the selected types at direct user/workspace discovery roots, with at most 512
+directory entries, 32 KiB per YAML header and 1 MiB of headers in total. Codex persona TOML is
+bounded at 32 MiB per file and 64 MiB in total, including the instruction body; generated personas
+obey the same per-file limit. Symlinked paths and nested candidate layouts are conservatively
+refused. Additional repository ancestor roots, third-party plugin discovery and changes after
+preflight need separate verification. These are Agentworks support limits, not assertions that other
+layouts are invalid in the native harness, and the check is not a continuous watcher or
+concurrent-mutation guarantee.
+
+The initial compatibility baselines are Claude Code 2.1.265, Codex 0.153.4 and Grok Build 1.0.10.
+Older versions or absent carrier flags fail before publication or session teardown. Claude documents
+its file carrier as `--append-system-prompt[-file]`; the probe recognizes that specific spelling as
+both supported options while retaining whole-option matching for unknown flags. These checks
+establish a supported CLI surface, not proof of model consumption.
 
 Settings checks concern the selected native identities. An unrelated disabled plugin or skill does
 not require enabling it. Claude rule exclusions are checked against requested rule paths; extended

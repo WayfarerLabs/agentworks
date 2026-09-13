@@ -500,23 +500,23 @@ amendment supersedes the flat declaration and propagation shape; completed work 
 record of earlier implementation. The PR is draft while the amendment is being implemented, with no
 `review-requested` label. Ready, rather than a draft checkpoint, will trigger final validation.
 
-- [ ] Align FRD/HLA and LLDs with canonical type-map keys, whole-entry replacement, compact source
+- [x] Align FRD/HLA and LLDs with canonical type-map keys, whole-entry replacement, compact source
       history and scope-preserving propagation; document native shadowing refusal and hints
       delivery.
-- [ ] Implement top-level `hints`, `rules`, `skills` and `agents` maps. Bundle inheritance merges
+- [x] Implement top-level `hints`, `rules`, `skills` and `agents` maps. Bundle inheritance merges
       keys but replaces whole definitions; later selected bundles replace same-type keys within an
       owner. Require skill/persona names to agree with keys and retain bundle-list replacement
       rules.
-- [ ] Carry immutable per-owner type maps through capture, versioned persisted state, routing and
+- [x] Carry immutable per-owner type maps through capture, versioned persisted state, routing and
       integration invocations. Keep local maps separate from groups keyed by original owner through
       multi-hop deferral and diamond convergence. No producer namespaces or parallel flat contract.
-- [ ] Preserve winner and replaced-source provenance for read-only inspection; warn on changed
+- [x] Preserve winner and replaced-source provenance for read-only inspection; warn on changed
       replacement and keep identical content quiet. Retain old owned-file evidence for safe cleanup
       while refusing unsupported older captures honestly.
-- [ ] Update native adapters and shell files to preserve distinct owner contributions. Aggregate
+- [x] Update native adapters and shell files to preserve distinct owner contributions. Aggregate
       hints/rules faithfully and reject native skill/persona shadowing, including handled ancestors
       and existing entries in supported native discovery locations. Bump the integration contract.
-- [ ] Update fixtures, examples, permanent guides and generated schemas. Verify same-key cross-type
+- [x] Update fixtures, examples, permanent guides and generated schemas. Verify same-key cross-type
       coexistence, within-owner overrides, source switches in inheritance, immutable groups,
       multi-hop deferral, native collisions, replacement inspection and cleanup/failure behavior.
 - [ ] Run the independent private review lanes and required gates on the completed state; record
@@ -524,3 +524,21 @@ record of earlier implementation. The PR is draft while the amendment is being i
       without `review-requested`; do not hold implementation-ready work in draft for live testing.
 - [ ] Assess the ready handoff's complete feedback batch. One further authorized iteration remains
       after this round if findings require changes; do not merge or enable automatic merging.
+
+The core increment at `cdf87c0e` passes 379 artifact tests with four platform skips, source/test
+type checks and Ruff. An independent complexity pass reran the artifact suite and verified that
+version-1 captures can be replaced without losing file cleanup evidence. It found no new material
+core issue. Native inventory refinements, collateral, full gates and final review remain pending;
+this is not a handoff of the completed amendment.
+
+The project review then found that database key sorting lost artifact order and that empty
+directories left by skill retirement blocked native inventory. The implementation now records
+per-entry ordinals at the codec boundary and accepts bounded directory-only cleanup remnants.
+Regression coverage exercises actual database routing and retirement followed by another native
+check. Native checks also retain the supported external-native-home session case while preserving
+outer publication containment. Final review and handoff gates remain in progress.
+
+The operator also identified large skill packages as a likely need for compressed storage and lazy
+loading, and explicitly deferred that implementation. Follow-up storage work should consider
+deduplication, resident and peak memory, and content-integrity verification while preserving the
+normalized integration contract. It does not expand this round's acceptance criteria.

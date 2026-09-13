@@ -417,6 +417,8 @@ worked manifests and migration guidance with the behavior they explain.
   service. Artifact bundles and native harness plugins are distinct concepts.
 - A permissions/grants engine for first-party integrations, or a second instance-state system.
 - A mandatory Rulesync runtime dependency or a new archive format chosen without research.
+- Compressed storage, lazy content loading and content deduplication. These are expected follow-up
+  storage work for large skill packages; the operator explicitly deferred them from this delivery.
 
 ## Approved design decisions
 
