@@ -330,3 +330,37 @@ def test_repeated_owner_setup_does_not_rewrite_unchanged_native_files(owner, mon
     current = read_native_setup(owner.db, "agent", "agent").records[0]
     assert current.complete and current.artifact_files == previous.artifact_files
     assert current.artifact_inputs == previous.artifact_inputs
+
+
+def test_user_setup_publishes_vm_inputs_without_vm_activation(db, tmp_path):
+    from agentworks.capabilities.harness_integration.kinds import HarnessIntegrationEntry
+    from agentworks.origin import Origin
+    from tests.artifacts.test_routing import graph
+
+    fixture = graph(db, active=("agent",))
+    fixture.registry.add(
+        "harness-integration", "shell", HarnessIntegrationEntry(name="shell"), Origin.built_in(source="test")
+    )
+    fixture.registry.finalize(probe_host_readiness=False)
+    target = LocalFixtureTransport(tmp_path / "native")
+    invocation = UserSetupInvocation(
+        vm=fixture.vm,
+        runner=target,
+        prior=None,
+        checkpoint=lambda claims: None,
+        username="worker",
+        home=str(target.home),
+    )
+    run_setup(db, fixture.registry, fixture.owners["agent"], invocation, operation="agent-init")
+    record = read_native_setup(db, "agent", "agent").records[0]
+    expected = (*fixture.captures["vm"].inputs, *fixture.captures["agent"].inputs)
+    assert record.complete
+    assert record.artifact_inputs == tuple(item.identity for item in expected)
+    for item in expected:
+        assert any(
+            item.origin.identity in file.origins and Path(file.path).read_bytes() == item.content.text.encode()
+            for file in record.artifact_files
+        )
+    assert all(Path(file.path).is_relative_to(target.home) for file in record.artifact_files)
+    assert not read_native_setup(db, "vm", "vm").records
+    assert [item.origin.component for item in fixture.route().inputs] == ["workspace"]

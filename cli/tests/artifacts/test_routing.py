@@ -124,12 +124,55 @@ def test_inactive_diamond_passes_each_origin_once_without_records(db):
     assert [item.origin.component for item in admin.inputs] == ["vm", "admin", "workspace"]
 
 
-def test_vm_direct_fallback_bypasses_active_user(db):
-    fixture = graph(db, active=("agent",))
-    fixture.save("agent")
-    result = fixture.route()
-    assert [item.origin.component for item in result.inputs] == ["vm", "workspace"]
+@pytest.mark.parametrize("user", ["agent", "admin"])
+def test_inactive_vm_inputs_are_handled_by_actual_active_user(db, user):
+    fixture = graph(db, active=(user,))
+    prepared = setup_artifacts(db, fixture.registry, fixture.owners[user], fixture.vm, "shell")
+    assert prepared == (*fixture.captures["vm"].inputs, *fixture.captures[user].inputs)
+    fixture.save(user, inherited=fixture.captures["vm"].inputs)
+    result = fixture.route(user=None if user == "admin" else user)
+    assert [item.origin.component for item in result.inputs] == ["workspace"]
     assert result.active_facets == ("user",)
+    assert not any(record.component == "vm" for record in read_native_setup(db, "vm", "vm").records)
+
+
+def test_inactive_vm_routes_only_to_user_and_workspace_keeps_local_inputs(db):
+    fixture = graph(db)
+    vm = inspect_owner_artifacts(db, fixture.registry, fixture.owners["vm"], "shell")
+    assert deferred_inputs(vm, "user") == fixture.captures["vm"].inputs
+    assert deferred_inputs(vm, "workspace") == ()
+    assert deferred_inputs(vm, "session") == ()
+    assert setup_artifacts(db, fixture.registry, fixture.owners["workspace"], fixture.vm, "shell") == (
+        fixture.captures["workspace"].inputs
+    )
+
+
+def test_newly_inherited_vm_inputs_require_active_user_setup(db):
+    fixture = graph(db, active=("agent",))
+    previous = fixture.save("agent")
+    inherited = fixture.captures["vm"].inputs
+    view = inspect_owner_artifacts(db, fixture.registry, fixture.owners["agent"], "shell", inherited=inherited)
+    assert view.status == "stale"
+    with pytest.raises(StateError):
+        fixture.route()
+    assert read_native_setup(db, "agent", "agent").records == (previous,)
+    fixture.save("agent", inherited=inherited)
+    assert [item.origin.component for item in fixture.route().inputs] == ["workspace"]
+
+
+@pytest.mark.parametrize("component", ["agent", "workspace"])
+def test_inactive_branch_passes_inherited_and_local_inputs_to_session(db, component):
+    fixture = graph(db, active=("vm",))
+    owner = fixture.owners[component]
+    fixture.save("vm", routes={"vm-0": owner.facet})
+    inherited = fixture.captures["vm"].inputs
+    view = inspect_owner_artifacts(db, fixture.registry, owner, "shell", inherited=inherited)
+    assert deferred_inputs(view, "session") == (*inherited, *fixture.captures[component].inputs)
+    assert deferred_inputs(view, "user") == ()
+    assert deferred_inputs(view, "workspace") == ()
+    result = fixture.route()
+    assert [item.origin.component for item in result.inputs] == ["vm", "agent", "workspace"]
+    assert len({item.identity for item in result.inputs}) == len(result.inputs)
 
 
 def test_diamond_routes_restore_original_vm_declaration_order(db):
@@ -248,9 +291,11 @@ def test_config_and_env_freshness_still_apply(db):
     assert view.status == "stale"
 
 
-def test_independent_consumers_do_not_discharge_other_users(db):
-    fixture = graph(db, active=("vm", "agent"))
-    fixture.save("vm", routes={"vm-0": "user"})
+@pytest.mark.parametrize("active_vm", [False, True])
+def test_independent_consumers_do_not_discharge_other_users(db, active_vm):
+    fixture = graph(db, active=("vm", "agent") if active_vm else ("agent",))
+    if active_vm:
+        fixture.save("vm", routes={"vm-0": "user"})
     fixture.save("agent", inherited=fixture.captures["vm"].inputs)
     first = fixture.route()
     assert [item.origin.component for item in first.inputs] == ["workspace"]
@@ -260,6 +305,11 @@ def test_independent_consumers_do_not_discharge_other_users(db):
     assert other.inputs[0].origin.identity != fixture.captures["agent"].inputs[0].origin.identity
     with pytest.raises(StateError):
         fixture.route(user="other")
+    fixture.owners["other"] = replace(fixture.owners["agent"], name="other")
+    fixture.captures["other"] = other
+    fixture.save("other", inherited=fixture.captures["vm"].inputs)
+    assert fixture.route(user="other").inputs == first.inputs
+    assert fixture.route() == first
 
 
 def test_actual_lineage_conflicts_are_rejected(db):
@@ -373,7 +423,7 @@ def test_upstream_owned_files_survive_handled_payload_elision(db):
         origins=(item.origin.identity,),
         native_identity="skill:review",
     )
-    fixture.save("agent", files=(file,))
+    fixture.save("agent", inherited=fixture.captures["vm"].inputs, files=(file,))
     result = fixture.route()
     assert item.identity not in {value.identity for value in result.inputs}
     assert result.ancestor_files == (file,)

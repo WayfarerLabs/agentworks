@@ -88,6 +88,7 @@ def test_inspection_shows_handled_ancestor_metadata_without_acquisition(db: Data
     item = fixture.captures["agent"].inputs[0]
     fixture.save(
         "agent",
+        inherited=fixture.captures["vm"].inputs,
         files=(
             OwnedArtifactFile(
                 path="/home/worker/.agents/skills/review/SKILL.md",
@@ -113,7 +114,7 @@ def test_inspection_shows_handled_ancestor_metadata_without_acquisition(db: Data
     user = result.owners[1]
     assert user.artifacts[0].origin_id == item.origin.identity
     assert user.integrations[0].status == "current"
-    assert user.integrations[0].recorded_handled == (item.identity,)
+    assert user.integrations[0].recorded_handled == (fixture.captures["vm"].inputs[0].identity, item.identity)
     assert user.integrations[0].placements[0].native_identity == "review"
     encoded = json.dumps(inspection_data(result))
     assert item.content.text not in encoded
@@ -306,3 +307,30 @@ def test_integration_config_values_are_excluded_from_both_outputs(db: Database, 
     assert confidential not in json.dumps(inspection_data(result))
     render_artifacts(result)
     assert confidential not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("component", ["agent", "workspace"])
+def test_inactive_inspection_projects_only_applicable_vm_inputs(db: Database, component: str) -> None:
+    from agentworks.artifacts.inspection import inspect_artifacts
+    from agentworks.capabilities.harness_integration.kinds import HarnessIntegrationEntry
+    from agentworks.origin import Origin
+    from tests.artifacts.test_routing import graph
+
+    fixture = graph(db)
+    fixture.registry.add(
+        "harness-integration", "shell", HarnessIntegrationEntry(name="shell"), Origin.built_in(source="test")
+    )
+    result = inspect_artifacts(
+        db,
+        fixture.registry,
+        agent_name="agent" if component == "agent" else None,
+        workspace_name="workspace" if component == "workspace" else None,
+        integration_name="shell",
+    )
+    expected = (
+        (*fixture.captures["vm"].inputs, *fixture.captures["agent"].inputs)
+        if component == "agent"
+        else fixture.captures["workspace"].inputs
+    )
+    assert result.owners[-1].integrations[0].status == "inactive"
+    assert result.owners[-1].integrations[0].passthrough_inputs == tuple(item.identity for item in expected)

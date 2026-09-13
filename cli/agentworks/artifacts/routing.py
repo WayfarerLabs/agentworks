@@ -175,7 +175,8 @@ def deferred_inputs(view: ArtifactOwnerView, destination: ArtifactFacet) -> tupl
     if view.status not in ("current", "inactive") or view.prepared is None:
         return None
     if view.status == "inactive":
-        return view.prepared if destination == "session" else ()
+        fallback = "user" if view.owner.facet == "vm" else "session"
+        return view.prepared if destination == fallback else ()
     if view.record is None:
         return ()
     identities = {item.input_id for item in view.record.deferred if item.destination == destination}
