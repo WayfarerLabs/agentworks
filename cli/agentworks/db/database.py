@@ -1285,9 +1285,7 @@ class Database:
             vm = self.get_vm(vm_name)
             agents = self.list_agents(vm_name=vm_name)
             workspaces = self.list_workspaces(vm_name=vm_name)
-            ws_names = {ws.name for ws in workspaces}
-            all_sessions = self.list_sessions()
-            sessions = [s for s in all_sessions if s.workspace_name in ws_names]
+            sessions = self.list_sessions(vm_name=vm_name)
             events = self.list_vm_events(vm_name)
             grants_by_agent: dict[str, list[AgentGrantRow]] = {}
             for agent in agents:
@@ -1300,6 +1298,11 @@ class Database:
                     record
                     for workspace in workspaces
                     for record in self.instance_state.get_applied_slices("workspace", workspace.name)
+                ),
+                *(
+                    record
+                    for session in sessions
+                    for record in self.instance_state.get_applied_slices("session", session.name)
                 ),
             )
         finally:

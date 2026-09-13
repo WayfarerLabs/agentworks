@@ -19,7 +19,7 @@ select exactly the VM, its workspaces and agents, and those workspaces' sessions
 payload is decoded. A malformed selected row therefore fails the backup, while a malformed row for
 an unrelated owner cannot block it. These named predicates are part of the repository contract;
 callers do not recreate the polymorphic owner-tree query or filter a decoded global record list. The
-same backup snapshot reads applied slices for the VM, its agents, and its workspaces through
+same backup snapshot reads applied slices for the VM, its agents, workspaces and sessions through
 `get_applied_slices`. Backup decodes and re-encodes each known slice through its owning domain codec
 before exporting it, including native setup evidence for the complete owner tree.
 
