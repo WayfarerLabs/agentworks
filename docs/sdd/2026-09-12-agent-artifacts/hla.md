@@ -25,30 +25,30 @@ boundary is an owning scope; the integration runs the facet named inside it. The
 either an Agentworks agent user or the admin user, never both in the same path. Other users and
 workspaces independently reuse the VM result.
 
-Bundle references can be declared at every scope. Core captures each scope's local bundle content
-and combines it with only the applicable incoming deferrals before invoking the integration. Solid
-arrows below carry artifact inputs or deferrals. Handled artifacts stop at their facet and do not
-travel to inner scopes.
+Bundle references can be declared at every scope. Core composes that owner's local per-type maps and
+supplies applicable incoming deferrals as separate groups identified by original owner. It never
+merges another owner's group into the local maps. Solid arrows below carry artifact inputs or
+deferrals. Handled artifacts stop at their facet and do not travel to inner scopes.
 
 ```mermaid
 flowchart TB
     subgraph VM["VM scope"]
-        VB["VM bundle references"] --> VC["Core: prepare artifact inputs"]
+        VB["VM bundle references"] --> VC["Core: compose local type maps"]
         VC --> VF["Integration: VM facet"]
     end
 
     subgraph USER["Agent or admin scope: actual user"]
-        UB["User bundle references"] --> UC["Core: prepare artifact inputs"]
+        UB["User bundle references"] --> UC["Core: local maps + deferred owner groups"]
         UC --> UF["Integration: user facet"]
     end
 
     subgraph WORKSPACE["Workspace scope"]
-        WB["Workspace bundle references"] --> WC["Core: prepare artifact inputs"]
+        WB["Workspace bundle references"] --> WC["Core: local maps + deferred owner groups"]
         WC --> WF["Integration: workspace facet"]
     end
 
     subgraph SESSION["Session scope"]
-        SB["Session bundle references"] --> SC["Core: prepare artifact inputs"]
+        SB["Session bundle references"] --> SC["Core: local maps + deferred owner groups"]
         SC --> SF["Integration: session facet"]
     end
 
@@ -66,8 +66,10 @@ flowchart TB
 ```
 
 Each deferred artifact takes one route, so VM inputs are not copied down both branches. The session
-receives its own artifacts plus the three applicable sets of deferrals. If its facet still cannot
-handle an artifact, core applies the approved final-session error policy.
+receives its local maps and the applicable deferred groups. VM entries arriving through different
+paths retain their VM owner and occupy disjoint keys within that owner's type maps. The three paths
+do not create three namespaces for the VM. If its facet still cannot handle an artifact, core
+applies the approved final-session error policy.
 
 The facet boxes show activated integrations. Without activation, core passes artifacts through: an
 inactive VM routes to user; an inactive user or workspace passes its applicable inputs to session.
@@ -91,31 +93,32 @@ identity and dependencies, not a new live resource with its own provision/delete
 resource resolution, inheritance, reference inspection and schema generation remain authoritative.
 Resolving a resource never fetches its source.
 
-A bundle names logical entries. Each entry has an artifact type and source; hints and rules may
-instead carry inline text. Skill sources select one standard skill directory. Agent sources select a
-Markdown persona definition with name, description and an instruction body. Supported native persona
-options are adapter-owned fields, not a claim of a universal tool/model vocabulary. Hooks and MCP
-configuration are not accepted through a persona options escape hatch in this delivery.
+A bundle declares top-level `hints`, `rules`, `skills` and `agents` maps under `spec`. Each entry
+has a canonical name and source; the containing map supplies its type, without an entry-level
+discriminator. Hints and rules may instead carry inline text. Skill sources select one standard
+skill directory. Agent sources select a Markdown persona definition with name, description and an
+instruction body. Supported native persona options are adapter-owned fields, not a claim of a
+universal tool/model vocabulary. Hooks and MCP configuration are not accepted through a persona
+options escape hatch in this delivery.
 
-Illustrative declaration shape, with final field validation belonging to the resource LLD:
+The declaration shape is:
 
 ```yaml
 kind: artifact-bundle
 metadata:
   name: team-artifacts
 spec:
-  artifacts:
+  hints:
     workspace-note:
-      type: hint
       text: "This workspace contains the service and its integration tests."
+  rules:
     conventions:
-      type: rule
       source: file::~/agent-content/conventions.md
+  skills:
     review:
-      type: skill
       source: git::https://github.com/example/agent-content.git//skills/review?ref=v1.0.0
+  agents:
     reviewer:
-      type: agent
       source: file::~/agent-content/reviewer.md
 ```
 
@@ -123,8 +126,27 @@ Owning VM, admin, agent, workspace and session declarations reference bundles th
 `artifacts: {bundles: [team-artifacts]}`. The bundle list uses replacement across template
 inheritance, like integration activation lists: omission inherits, a supplied list replaces, and
 `[]` removes inherited references for that owner. Repeated bundle references are rejected. This does
-not suppress another scope's artifacts. Bundle item names are source identities; a skill's native
-name still comes from `SKILL.md`, and an agent's name comes from its definition.
+not suppress another scope's artifacts. A skill's `SKILL.md` name and selected directory, or an
+agent persona's declared name, must agree with the map key. Native namespaces such as a harness
+plugin's skill prefix remain an integration concern.
+
+### Composition within an owner
+
+Resource inheritance combines each bundle's type map by key; an overridden entry replaces the whole
+definition. This permits switching from inline text to a source without retaining mutually exclusive
+fields. During capture, bundles are composed in their declared reference order, with the later whole
+artifact replacing the earlier value for the same type and key. Different types do not collide.
+There is no additional namespace for a supplying bundle or producer.
+
+Traverse types in the fixed order hints, rules, skills, agents, preserving insertion order within
+each map. Replacing a key retains its position. That ordering makes rendering deterministic; it does
+not establish precedence between actual owners. Future feature emission will use the same
+within-owner composition boundary, with its execution order specified by that future effort.
+
+The winning artifact retains its origin and source provenance, plus compact records identifying
+replaced sources and their content digests. Do not preserve recursive copies of discarded payloads
+as replacement history. Inspection explains replacements from captured evidence. Capture warns when
+content changes under the same key; identical content remains quiet even if its source changes.
 
 References do not activate integrations. Existing explicit activation syntax remains unchanged:
 
@@ -140,9 +162,9 @@ spec:
     - name: codex
 ```
 
-Each integration receives the same captured owner inputs and its own ancestor deferrals. It does not
-receive another integration's result. Activations can still carry their independent native config;
-defaults-only activation is sufficient to opt into artifact handling.
+Each integration receives the same captured local group and its own deferred ancestor groups. It
+does not receive another integration's result. Activations can still carry their independent native
+config; defaults-only activation is sufficient to opt into artifact handling.
 
 ### Capture and refresh
 
@@ -179,9 +201,10 @@ provenance, logical origin and normalized content identity are distinct fields.
 
 | Concept           | Meaning                                                                                                         |
 | ----------------- | --------------------------------------------------------------------------------------------------------------- |
-| Bundle snapshot   | Captured bundle identity, entry order, source provenance and normalized entries.                                |
-| Artifact          | Stable bundle entry key, artifact type, typed content and supporting members.                                   |
-| Origin            | Consuming scope/resource, producer and entry address. Core derives the origin facet from its fixed mapping.     |
+| Owner group       | One actual owning scope with immutable hints, rules, skills and agents maps.                                    |
+| Artifact          | Canonical key within the owner's type map, typed content and supporting members.                                |
+| Origin            | Original owning scope/resource, with producer and bundle retained as provenance, not separate namespaces.       |
+| Replacement       | Compact provenance and content identity of a definition replaced within the same owner and type.                |
 | Content identity  | Digest of normalized content, relative member paths and executable intent, excluding timestamps and provenance. |
 | Deferred artifact | An existing input with its origin unchanged, one destination facet and an integration-supplied reason.          |
 
@@ -195,6 +218,18 @@ The normalized representation is independent of source transport. Source readers
 future automatic emissions construct the same typed inputs without pretending to be Git sources. Two
 consumers of the same bundle have distinct origins and delivery obligations. A content digest does
 not identify an owning resource or authorize deletion of another owner's files.
+
+Capture and persisted state retain owner groups. Setup and session invocations expose a local group
+and deferred groups keyed by original owner. A group has the same four-map structure at every
+boundary; iteration helpers for renderers do not introduce a second flat propagation format. The
+logical address is owner, artifact type and canonical key. Content-dependent input identities also
+distinguish revisions for freshness and result validation; producer or bundle changes do not create
+another namespace.
+
+For example, a session can receive its own `rules.setup`, a VM group's `rules.setup` and an agent
+group's `rules.setup`. None replaces another. The VM group stays VM-owned even after passing through
+the user facet. Integrations receive that distinction and must preserve all contributions through
+their native representation or explicitly refuse an unrepresentable combination.
 
 ## Facet results, routing and freshness
 
@@ -250,11 +285,13 @@ retained artifact content through session passthrough or manufacture records for
 facets. This check adds no barrier for unrelated plugin/settings evidence or artifact-free launches;
 existing required/recommended setup semantics continue to govern that evidence.
 
-At convergence, identify inputs by immutable origin and entry identity, not by display name or
-content alone. A repeated path to the same input is an invalid route result rather than another
-delivery. Independent declarations with the same native name remain distinct and undergo native
-collision checks. Stable ordering is VM, actual user, workspace, session, then declared bundle and
-entry order within each origin. Ordering is not last-writer-wins precedence.
+At convergence, identify contributions by original owner, type and key, with the captured revision
+identity used for result validation. A repeated path to the same input is an invalid route result
+rather than another delivery. Disjoint contributions from the same original owner can rejoin that
+owner's deferred group; they cannot overwrite each other. Independently owned groups remain separate
+even when names match. Stable owner traversal is VM, actual user, workspace, session; this is not
+cross-scope override precedence. Native adapters apply their own collision checks after receiving
+the preserved groups, including conflicts with already handled ancestor files.
 
 Persist each activated owner's successful result with the identities of the prepared artifact inputs
 actually supplied to that facet, alongside existing config/env dependencies. Reuse is valid while
@@ -399,9 +436,14 @@ an uncaptured source.
 The projection includes local and applicable ancestor artifacts, even when already handled upstream.
 Show origin, bundle/item, type, captured source revision, current declaration/capture relationship,
 integration activation, recorded handling or deferral reason/route, and native identity/placement.
-Uncaptured bundles remain visible as references with unknown contents. Missing, stale or interrupted
-evidence is explicit; a recorded successful apply is not a live filesystem or model attestation.
-Default output explains metadata without dumping artifact bodies or secret values.
+Show canonical per-type keys within their owning groups, along with the winning source and compact
+replacement history. Deferred entries stay under their original owner; inspection never presents
+them as session-local overrides. Replacement warnings report changed definitions, while identical
+content remains quiet. Read-only inspection obtains these facts from captured state without
+reacquiring replaced sources. Uncaptured bundles remain visible as references with unknown contents.
+Missing, stale or interrupted evidence is explicit; a recorded successful apply is not a live
+filesystem or model attestation. Default output explains metadata without dumping artifact bodies or
+secret values.
 
 Worked cases the HLA and subsequent tests share:
 
@@ -425,6 +467,20 @@ Worked cases the HLA and subsequent tests share:
    explicitly workspace recreation when required, instead of silently mixing revisions or repairing
    ancestors. A removed activation with retained effects still requires retirement before
    passthrough.
+6. **Replacement within a scope.** Two selected bundles define `rules.conventions`. The later bundle
+   replaces the complete earlier definition for that owner; inspection identifies both sources and
+   the winner. The same key in `skills` remains independent. A child bundle can replace inherited
+   inline text with a source without retaining the text field.
+7. **Equal keys across scopes.** VM, agent and session each define `hints.setup`.
+   VM-to-user-to-session deferral keeps the three contributions in their original owner groups. The
+   integration preserves them in its aggregate context. Equal native skill/persona identities
+   instead require a faithful supported native namespace or an explicit refusal, including conflicts
+   with handled ancestors.
+8. **Native shadowing.** The actual user and workspace each supply a `foobar` skill. Their groups
+   stay distinct through core routing. If the harness would select only the workspace definition,
+   the integration refuses that combination unless it can give both faithful, distinct native
+   identities. It must not report both delivered merely because both files exist. Existing native
+   entries at supported discovery locations also participate in this check.
 
 ## Implementation boundaries and review gates
 

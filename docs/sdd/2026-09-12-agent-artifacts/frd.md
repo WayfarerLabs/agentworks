@@ -93,7 +93,11 @@ for the artifact and **agent resource** for the Agentworks resource. Native supp
 delegated use must be stated per integration; the name does not promise both in every harness. The
 model also leaves room for limited hooks and MCP configuration later.
 
-An **artifact bundle** is a reusable collection of artifacts.
+An **artifact bundle** is a reusable collection with separate `hints`, `rules`, `skills` and
+`agents` maps. These are top-level fields of the bundle's `spec`; the containing map supplies the
+artifact type. Each key is the artifact's canonical name. Skill and persona definitions must agree
+with that name, and a skill's selected package directory must also satisfy the Agent Skills naming
+contract.
 
 Workstation files, Git references and potentially packaged distributions are acquisition concerns.
 Once acquired, all sources enter one normalized representation; integrations do not carry separate
@@ -165,6 +169,28 @@ inner invocation needs anything further. Core attaches immutable origin: owning 
 identity and producer. Core derives the origin facet from its fixed scope-to-facet mapping;
 declarations cannot supply another facet of origin. Bundle identity and consumer origin are separate
 facts.
+
+### Names and composition
+
+Each actual owning scope has its own set of artifact type maps. An artifact name is shared by all
+producers of that type at that scope. Bundles and producing resources do not introduce additional
+namespaces. A rule and a skill can share a name, and different scopes can independently contribute
+the same type and name. Producers should choose meaningful names to avoid unintended replacement.
+Producer and bundle information remains provenance rather than part of the logical namespace.
+
+Within one scope, later selected bundles replace earlier definitions with the same type and key.
+Replacement applies to the complete definition, not individual fields or skill package members.
+Bundle inheritance likewise combines type-map keys and replaces an overridden entry as a whole.
+Inspection must identify the winning source and the sources it replaced. Changed replacements
+produce a concise warning; identical content does not warn. The HLA defines deterministic ordering.
+
+Deferral preserves this separation. A receiving facet gets its local type maps and distinct deferred
+groups identified by their original owning scopes. It must not merge incoming groups into its local
+maps or relabel an artifact with the scope through which it passed. A VM artifact deferred through
+the user facet remains VM-originated at the session. Different scopes have no implicit override
+precedence, including the user and workspace branches. Core preserves their contributions; the
+integration selects faithful native placement or aggregation and reports an unsupported combination
+when native mechanisms cannot represent it without loss or unintended effects on other scopes.
 
 ### Operations and outcomes
 
@@ -275,7 +301,8 @@ The following requirements are approved. The HLA and LLDs define their implement
 `artifacts` block on the appropriate owning resources, using ordinary resource references,
 inheritance, validation and discovery. Multiple consumers can reference a bundle without sharing
 completion or placement state. Defining a bundle alone does not install it or activate an
-integration.
+integration. The bundle has top-level per-type maps and supports whole-entry replacement within the
+consuming scope, with no namespace for the supplying bundle or producer.
 
 **R2. Acquire workstation and Git sources.** Support workstation files/directories and Git sources
 in the first delivery. Build on existing dotfiles source conventions and shared workstation source
@@ -290,16 +317,18 @@ source remains a later extension unless research shows an existing format makes 
 justified addition.
 
 **R3. Normalize hints, rules, skills and agents.** Carry these four artifact types through one
-internal representation with source provenance and complete supporting files. Preserve binary assets
-while normalizing text line endings. Acquisition must reject package paths that escape the declared
-boundary; the design must state link and file-type handling. Hooks and MCP configuration are
-recognized extension directions, not first-delivery functionality.
+internal representation using per-type maps grouped by actual owning scope, with source and
+replacement provenance and complete supporting files. Preserve binary assets while normalizing text
+line endings. Acquisition must reject package paths that escape the declared boundary; the design
+must state link and file-type handling. Hooks and MCP configuration are recognized extension
+directions, not first-delivery functionality.
 
 **R4. Apply and defer through explicit facets.** Implement the carried-forward owner-independent
 routing model, including lazy inactive-facet passthrough, routing to user when VM activation is
 absent, and convergence of user/workspace paths without duplicate delivery. Preserve origin and
-destination applicability separately. Define deterministic ordering and collision behavior for
-multiple bundles and producers before implementation.
+destination applicability separately. Keep local maps separate from deferred groups throughout
+propagation. Apply the within-scope replacement contract without losing same-named contributions
+from distinct scopes or creating precedence between sibling scopes.
 
 **R5. Publish honestly through the shipped integrations.** Specify an artifact type and facet
 support matrix for shell, Claude Code, Codex and Grok Build. Implement native delivery where the
@@ -310,10 +339,24 @@ must identify any first-delivery limitation before the HLA is approved. State th
 counts as handled in each case, including shell's file publication and discoverability and the
 appropriate native loading or availability contract for rules, skills and agents.
 
+Native precedence must not silently discard a contribution from another scope. In particular, a
+workspace skill must not hide a same-named user skill that the integration promises to deliver.
+Integrations must account for the native identities and discovery locations of local, deferred and
+already applied ancestor contributions, including existing native entries that can shadow managed
+artifacts. Use faithful aggregation, non-conflicting placement or a supported native namespace;
+otherwise refuse the combination with the competing origins and native identity. A successful file
+write or same-scope replacement rule does not authorize cross-scope native shadowing. Perform checks
+using the actual owners available at that lifecycle stage; the session validates the joined user and
+workspace context without making outer scopes inspect their descendants.
+
 **R6. Give hints an appropriate representation.** Integrations may aggregate small hints into a
-native rule or include them in launch context when supported. Keep hint provenance and lifecycle
-clear without manufacturing one rule per fact. Hints are supplied through the artifact mechanism;
-automatic emission by install commands, env declarations or features is separate future work.
+native rule or include them in launch context when supported. Prefer one clearly named
+`agentworks-hints` rule-like file per native destination where a file is appropriate, rather than a
+separate rule for every hint. The representation must preserve hints from all applicable scopes
+without native filename or identity precedence dropping a group's contribution. Keep provenance and
+lifecycle clear without manufacturing one rule per fact. Hints are supplied through the artifact
+mechanism; automatic emission by install commands, env declarations or features is separate future
+work.
 
 **R7. Keep sessions and owners isolated.** Session publication under a user's home must respect that
 user's access boundaries and must not unintentionally affect another session in the same workspace.
@@ -387,10 +430,11 @@ worked manifests and migration guidance with the behavior they explain.
 
 The operator can acquire a reusable bundle, reference it from actual owning resources, and launch a
 session whose selected integration receives exactly the applicable inputs still needing handling.
-Inactive ancestors and the VM/user/workspace diamond cannot lose or duplicate an input. Supported
-native representations and shell files have the promised placement and lifecycle; unsupported cases
-receive the agreed explicit disposition. Repetition, update, removal, failure and session reuse are
-demonstrated with observed evidence. Operators can use `agw artifacts show` to explain local and
-ancestor declarations, provenance and recorded delivery without changing the system. Permanent
-documentation stands alone, and the predecessor's remaining acceptance is not misrepresented as
-artifact completion.
+Inactive ancestors and the VM/user/workspace diamond cannot lose or duplicate an input. Same-type
+keys replace whole definitions within one scope, with inspectable provenance; names at different
+scopes remain distinct through deferral and native handling. Supported native representations and
+shell files have the promised placement and lifecycle; unsupported cases receive the agreed explicit
+disposition. Repetition, update, removal, failure and session reuse are demonstrated with observed
+evidence. Operators can use `agw artifacts show` to explain local and ancestor declarations,
+provenance and recorded delivery without changing the system. Permanent documentation stands alone,
+and the predecessor's remaining acceptance is not misrepresented as artifact completion.

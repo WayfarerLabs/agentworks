@@ -6,7 +6,7 @@ native plans and acceptance boundaries.
 
 ## Integration boundary
 
-Every first-party integration implements all four facets at contract version 5. VM facets publish no
+Every first-party integration implements all four facets at contract version 6. VM facets publish no
 files. Claude Code, Codex and Grok Build defer VM inputs to the user facet; shell defers them
 directly to the session. Neither decision examines downstream activation.
 
@@ -26,6 +26,11 @@ process, including resume.
 The adapters do not call one another, fetch sources or modify captured inputs. The modules under
 `artifacts/native/` are rendering/probe utilities used by integrations. Core routing does not import
 a plugin or select a native format.
+
+Inputs retain per-type maps in one local owner group and separate deferred groups identified by
+original owner. An adapter may iterate groups, but it must not collapse equal keys from different
+owners into one name map. Within-owner replacement is already resolved by core composition. Native
+rendering must preserve every surviving contribution or explicitly refuse the combination.
 
 ## Files and native identities
 
@@ -48,12 +53,24 @@ generated plugin identity, with no hook or MCP configuration. Codex and interact
 no supported private session skill carrier in this implementation; those inputs remain deferred and
 core rejects the final session result.
 
-Native names are checked across session inputs and persisted ancestor ownership metadata. Multiple
-members belonging to one skill are one identity. Distinct origins claiming the same native skill or
-agent identity are an error, including across user/workspace branches. Session persona definitions
-are retained as individually owned files with their native identity; Claude and Grok still receive
-the combined definitions in one JSON argument. Previously handled ancestor payloads are not
+Native names are checked across local/deferred owner groups and persisted ancestor ownership
+metadata, with supported native discovery locations checked for existing entries that can shadow
+managed delivery. A user skill and a workspace skill named `foobar` remain distinct obligations even
+if the native harness normally chooses one by precedence. Same-scope composition never authorizes
+that cross-scope suppression. Outer setup uses the owners it knows; the session checks the joined
+actual user/workspace context without retroactively running ancestor setup. Multiple members
+belonging to one skill are one identity. Distinct origins claiming the same native skill or agent
+identity are an error, including across user/workspace branches. Session persona definitions are
+retained as individually owned files with their native identity; Claude and Grok still receive the
+combined definitions in one JSON argument. Previously handled ancestor payloads are not
 retransmitted.
+
+Hints aggregate into one rule-like file per native destination where file discovery is supported,
+using an `agentworks-hints` name. Session-only mechanisms may instead aggregate into additive native
+context. Aggregation includes hints from every applicable owner group and must not lose another
+scope's aggregate to native name precedence. Neither the file name nor successful publication alone
+proves that two same-named files are both discoverable; the adapter's native contract must establish
+that or select another faithful representation.
 
 ## Agent personas
 

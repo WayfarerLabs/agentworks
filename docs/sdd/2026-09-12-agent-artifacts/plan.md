@@ -8,6 +8,12 @@ artifacts still unhandled at the session. The effort lead owns architecture, seq
 plan. Implementation proceeds as one complete delivery on the existing branch; local work units and
 commits provide internal checkpoints, with one completed implementation push before handoff.
 
+The current operator amendment replaces the bundle entry map with top-level per-type maps and
+preserves separate owner groups throughout propagation. Same-type keys share the owning scope's
+namespace across producers and bundles; whole-entry replacement is intentional within that scope.
+The operator authorized two further iterations, including this implementation round. The current
+checklist below governs that amendment; previously completed checkboxes remain historical records.
+
 Keep predecessor closeout separate. Its implementation is merged, but seven acceptance/cleanup
 checkboxes remain open in the
 [harness-scope-framework plan](../2026-09-06-harness-scope-framework/plan.md#acceptance-and-closeout).
@@ -187,9 +193,9 @@ records this implementation assignment for the saga and dependent efforts.
       record remaining limitations honestly. Lock this SDD only when its work is actually complete.
 - [x] Push the complete implementation once, update the PR around shipped behavior and evidence, and
       mark ready without `review-requested`. Do not merge or enable automatic merging.
-- [ ] Monitor the ready handoff under the standard feedback window. Up to three PR feedback/fix
-      rounds are authorized by the 2026-09-13 implementation direction; each changed head repeats
-      private review, validation and proper handoff. Escalate scope changes or unavailable evidence.
+- [ ] Monitor the ready handoff under the standard feedback window and the latest
+      operator-authorized iteration allowance recorded below. Each changed head repeats private
+      review, validation and proper handoff. Escalate scope changes or unavailable evidence.
 
 ## HLA checkpoint evidence
 
@@ -453,8 +459,6 @@ was identified. The duplicate inactive status and empty trailing field are a sma
       duplicate/empty inspection fields while preserving JSON.
 - [x] Gather remaining reachable local native persona/carrier evidence without model calls; retain
       the scoped VM/two-user acceptance gap where no environment is supplied.
-- [ ] Complete private review and relevant gates, publish a coherent ready handoff, and assess the
-      next feedback batch within this newest two-round allowance.
 
 Additional local native acceptance in this round reproduced a Codex session-persona bug: the CLI
 keeps quotes literally in dotted override keys, so the renderer's quoted role name is registered
@@ -478,5 +482,45 @@ format and mypy, package build, file lint, locked-SDD and Rulesync checks, Typer
 Python/Node tests and deterministic builds for both site bases. Every gate returned zero. Project
 and complexity reviews are clean; both covered the Codex correction. The additional independent
 correctness lane remains pending because the collaboration service rejected new/resumed review
-agents at its thread limit. This is an unfinished private review, so the PR stays draft without a
-review-request signal. The round is not complete.
+agents at its thread limit. The operator subsequently directed readiness because it triggers the
+integration-testing pipeline; handoff at `78960f46` disclosed that remaining review limit. Published
+saga, Muntz and integration-test reports found no blockers. The tester verified real-VM Claude
+user-scope rule and skill files, ownership and contents; the native first-run screen limited further
+observation. Additional local Grok diagnostics verified user/project rule, skill and persona
+discovery and preflight controls. These reports do not establish complete lifecycle or two-user
+acceptance.
+
+## Typed maps and scope-preserving deferral: iteration 1 of 2
+
+The operator approved separate top-level type maps in `artifact-bundle`, a shared namespace within
+each owning scope/type, whole-definition overrides, and separate local/deferred owner groups. The
+operator also requires integrations to prevent native shadowing across scopes and favors one
+aggregate `agentworks-hints` rule-like file where native file discovery is appropriate. This
+amendment supersedes the flat declaration and propagation shape; completed work above remains a
+record of earlier implementation. The PR is draft while the amendment is being implemented, with no
+`review-requested` label. Ready, rather than a draft checkpoint, will trigger final validation.
+
+- [ ] Align FRD/HLA and LLDs with canonical type-map keys, whole-entry replacement, compact source
+      history and scope-preserving propagation; document native shadowing refusal and hints
+      delivery.
+- [ ] Implement top-level `hints`, `rules`, `skills` and `agents` maps. Bundle inheritance merges
+      keys but replaces whole definitions; later selected bundles replace same-type keys within an
+      owner. Require skill/persona names to agree with keys and retain bundle-list replacement
+      rules.
+- [ ] Carry immutable per-owner type maps through capture, versioned persisted state, routing and
+      integration invocations. Keep local maps separate from groups keyed by original owner through
+      multi-hop deferral and diamond convergence. No producer namespaces or parallel flat contract.
+- [ ] Preserve winner and replaced-source provenance for read-only inspection; warn on changed
+      replacement and keep identical content quiet. Retain old owned-file evidence for safe cleanup
+      while refusing unsupported older captures honestly.
+- [ ] Update native adapters and shell files to preserve distinct owner contributions. Aggregate
+      hints/rules faithfully and reject native skill/persona shadowing, including handled ancestors
+      and existing entries in supported native discovery locations. Bump the integration contract.
+- [ ] Update fixtures, examples, permanent guides and generated schemas. Verify same-key cross-type
+      coexistence, within-owner overrides, source switches in inheritance, immutable groups,
+      multi-hop deferral, native collisions, replacement inspection and cleanup/failure behavior.
+- [ ] Run the independent private review lanes and required gates on the completed state; record
+      actual review/tool limits and native evidence. Publish a complete handoff and mark ready
+      without `review-requested`; do not hold implementation-ready work in draft for live testing.
+- [ ] Assess the ready handoff's complete feedback batch. One further authorized iteration remains
+      after this round if findings require changes; do not merge or enable automatic merging.
