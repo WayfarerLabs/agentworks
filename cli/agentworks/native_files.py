@@ -79,7 +79,8 @@ try:
             output_fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=fd)
             with os.fdopen(output_fd, 'wb') as output:
                 os.fchown(output.fileno(), -1, gid)
-                os.fchmod(output.fileno(), (0o700 if executable == '1' else 0o600) if not group else (0o770 if executable == '1' else 0o660))
+                mode = (0o700 if executable == '1' else 0o600) if not group else (0o770 if executable == '1' else 0o660)
+                os.fchmod(output.fileno(), mode)
                 output.write(replacement)
                 output.flush()
                 os.fsync(output.fileno())

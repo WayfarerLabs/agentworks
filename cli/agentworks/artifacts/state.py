@@ -103,7 +103,7 @@ def decode_captures(record: AppliedStateSlice) -> dict[ArtifactComponent, Captur
                 for item in inputs
             ):
                 raise ValueError
-            result[cast("ArtifactComponent", component)] = CapturedArtifacts(declaration, inputs)
+            result[component] = CapturedArtifacts(declaration, inputs)
         return result
     except (KeyError, TypeError, ValueError, SourceRefError, RecursionError):
         raise StateError("stored artifact capture is malformed") from None

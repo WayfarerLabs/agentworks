@@ -158,7 +158,11 @@ def commit_session_artifacts(
         keep = tuple(item for item in record.artifact_files if item.path.startswith(context.directory + "/"))
         obsolete = tuple(item for item in record.artifact_files if item not in keep)
 
-        def checkpoint(files: tuple[OwnedArtifactFile, ...]) -> None:
+        def checkpoint(
+            files: tuple[OwnedArtifactFile, ...],
+            record: SetupRecord = record,
+            keep: tuple[OwnedArtifactFile, ...] = keep,
+        ) -> None:
             nonlocal state
             updated = record.model_copy(update={"artifact_files": (*keep, *files)})
             state = replace_setup_record(state, updated)
@@ -197,7 +201,7 @@ def cleanup_session_artifacts(db: Database, session: SessionRow, runner: Transpo
     home = native_path(runner.run('printf "%s" "$HOME"').stdout.strip())
     for record in tuple(state.records):
 
-        def checkpoint(files: tuple[OwnedArtifactFile, ...]) -> None:
+        def checkpoint(files: tuple[OwnedArtifactFile, ...], record: SetupRecord = record) -> None:
             nonlocal state
             state = replace_setup_record(state, record.model_copy(update={"artifact_files": files}))
             write_native_setup(db, "session", session.name, state, operation="session-delete")

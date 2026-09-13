@@ -305,6 +305,17 @@ def _report_instance_state(
                 decoded = decode_ssh_identity(applied_record.record)
                 if applied_record.metadata.owner_exists:
                     ssh_evidence[applied_record.record.instance_name] = (decoded, metadata)
+            elif applied_record.record.key is AppliedStateKey.ARTIFACT_INPUTS:
+                from agentworks.artifacts.state import decode_captures
+
+                decode_captures(applied_record.record)
+                add(
+                    Status.OK,
+                    label(metadata),
+                    "artifact inputs captured",
+                    InstanceStateHealthFactType.COVERAGE,
+                    metadata,
+                )
             elif applied_record.record.key is AppliedStateKey.HARNESS_NATIVE_SETUP:
                 native = decode_native_setup(applied_record.record)
                 incomplete = any(not record.complete for record in native.records)

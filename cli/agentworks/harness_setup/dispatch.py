@@ -216,7 +216,8 @@ def run_setup(
                         )
                     )
             else:
-                current = current.model_copy(update={"complete": True})
+                pending_files = any(item.path not in {file.path for file in application.files} for item in owned)
+                current = current.model_copy(update={"complete": not pending_files, "pending_cleanup": pending_files})
                 state = replace_setup_record(state, current)
             persist(state)
         return state

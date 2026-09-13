@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.artifacts.state import capture_owner, read_captures
 from agentworks.capabilities.harness_integration.setup import (
     SetupInvocation,
@@ -27,6 +26,7 @@ from agentworks.secrets.orchestration import SecretTarget
 from agentworks.vms.sites import site_platform_name
 
 if TYPE_CHECKING:
+    from agentworks.artifacts.declarations import ArtifactsConfig
     from collections.abc import Mapping, Sequence
 
     from agentworks.agents.templates import ResolvedAgentTemplate

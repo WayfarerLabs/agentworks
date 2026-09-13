@@ -171,6 +171,23 @@ def delete_workspace(
                             entity_name=name,
                             hint="Resolve the stuck sessions manually before retrying.",
                         )
+                if vm is not None and target is not None:
+                    from agentworks.artifacts.session import cleanup_session_artifacts
+                    from agentworks.harness_setup.state import read_native_setup
+                    from agentworks.sessions.manager import _build_session_target
+
+                    for session in db.list_sessions(workspace_name=name):
+                        if not any(
+                            record.artifact_files for record in read_native_setup(db, "session", session.name).records
+                        ):
+                            continue
+                        try:
+                            session_target = _build_session_target(
+                                session, vm=vm, config=config, db=db, admin_target=target
+                            )
+                            cleanup_session_artifacts(db, session, session_target)
+                        except Exception:
+                            output.warn(f"Private artifact cleanup for session '{session.name}' could not finish.")
                 db.delete_sessions_for_workspace(name)
 
                 # Best-effort: take down dangling 'Waiting for session...' windows in any
