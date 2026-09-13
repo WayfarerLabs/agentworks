@@ -2,12 +2,11 @@
 
 ## Status
 
-Draft requirements. This effort builds on
+Approved requirements (2026-09-13). This effort builds on
 [harness-scope-framework](../2026-09-06-harness-scope-framework/frd.md) and participates in the
-[next-steps saga](../2026-08-04-next-steps/target-state.md). The proposed first-delivery scope and
-open decisions remain subject to requirements and HLA review. Implementation has not started; see
-the [plan](plan.md) for design checkpoints and delivery. Design constraints carry forward settled
-decisions; explicitly marked proposals and open choices still require review.
+[next-steps saga](../2026-08-04-next-steps/target-state.md). The operator approved the
+first-delivery scope and the HLA, including its native support matrix and final-session launch-error
+policy. The [plan](plan.md) tracks implementation and acceptance.
 
 ## Problem and intended outcome
 
@@ -45,10 +44,10 @@ freezes its historical specification, not the code it produced. New behavior and
 contracts belong in this SDD and in permanent documentation alongside the implementing change.
 
 The predecessor remains open for its retained live acceptance and cleanup obligations; see its
-[acceptance plan](../2026-09-06-harness-scope-framework/plan.md#acceptance-and-closeout). This seed
-neither waives those obligations nor transfers them silently. Artifact design can proceed against
-the merged foundation while predecessor acceptance is completed independently. Future artifact work
-is not itself a reason to keep the predecessor unlocked.
+[acceptance plan](../2026-09-06-harness-scope-framework/plan.md#acceptance-and-closeout). This
+effort neither waives those obligations nor transfers them silently. Artifact design can proceed
+against the merged foundation while predecessor acceptance is completed independently. Future
+artifact work is not itself a reason to keep the predecessor unlocked.
 
 ## Users
 
@@ -102,11 +101,11 @@ filesystem, Git and archive ingestion paths. Normalize text line endings to Unix
 complete skill packages, including their supporting files, rather than reducing a skill to its entry
 document.
 
-The leading proposal is a declarative `artifact-bundle` resource that owns ingestion and gives
-consumers an ID to reference. Its exact schema, supported source set and update behavior are still
-design decisions. Evaluate Rulesync's canonical model and generation machinery for reuse; reuse is
-not an approved runtime dependency. Agentworks retains ownership of resource scopes, activation,
-routing and provisioned-resource lifecycle.
+A declarative `artifact-bundle` resource owns ingestion and gives consumers an ID to reference. The
+HLA selects workstation and Git sources with capture during owning setup operations; detailed field
+validation and codec definitions belong in the LLD. Evaluate Rulesync's canonical model and
+generation machinery for reuse; reuse is not an approved runtime dependency. Agentworks retains
+ownership of resource scopes, activation, routing and provisioned-resource lifecycle.
 
 ### Acquisition safety carried forward
 
@@ -209,8 +208,8 @@ An explicitly activated but unimplemented facet is an error. That is distinct fr
 and from an implemented facet that needs no native changes. Successful setup alone never means an
 artifact was handled. No separate per-item acknowledgment ledger is required merely to express
 deferral. The successor must settle the exact result contract and how core detects and reports
-inputs still unhandled at the final session facet. Silent loss is not an acceptable result; whether
-every unresolved input blocks launch remains an open design decision.
+inputs still unhandled at the final session facet. Silent loss is not an acceptable result; the
+approved HLA requires a launch error for every artifact still unhandled at the session.
 
 ### Pipeline and lifecycle
 
@@ -255,10 +254,9 @@ The support matrix must state these handling criteria per integration and artifa
 shared outcome **handled** does not imply identical consumption behavior. Neither outcome proves
 that a workload obeyed the content.
 
-## Proposed first delivery scope
+## First delivery scope
 
-The following requirements are proposals for this new SDD. They make the agreed direction concrete
-without selecting the wire format or native implementation prematurely.
+The following requirements are approved. The HLA and LLDs define their implementation.
 
 **R1. Declare and consume bundles through ordinary resources.** Introduce `artifact-bundle` and an
 `artifacts` block on the appropriate owning resources, using ordinary resource references,
@@ -312,8 +310,8 @@ consumes applicable ancestor results without repairing ancestor setup implicitly
 when designing durable session ownership. It distinguishes `session_uuid` from per-incarnation
 `run_id`; neither the reusable session name nor VM `boot_id` is a substitute. Verify implementation
 availability and coordinate missing ownership with the saga lead before the HLA depends on it,
-rather than inventing an artifact-specific identity. This seed does not claim those IDs have
-shipped.
+rather than inventing an artifact-specific identity. This effort implements the permitted early
+identity slice before artifact publication depends on it.
 
 **R8. Apply idempotently.** Repeated setup converges. Removing a reference, changing a bundle,
 removing an activation or deleting an owning resource has an explicit outcome for previously
@@ -362,17 +360,15 @@ worked manifests and migration guidance with the behavior they explain.
 - A permissions/grants engine for first-party integrations, or a second instance-state system.
 - A mandatory Rulesync runtime dependency or a new archive format chosen without research.
 
-## Decisions for requirements and architecture review
+## Approved design decisions
 
-1. Accept or narrow the proposed first-delivery sources: workstation plus Git, with packaged
-   distribution later. The normalized representation must not depend on this scheduling choice.
-2. Decide final-session handling of unresolved artifacts. The recommended starting point is a launch
-   error with integration-supplied reasons, but the prior decision deliberately left room for an
-   explicit softer outcome. This seed does not settle that policy.
-3. Approve the researched native support matrix before committing to first-delivery coverage. Define
-   honest outcomes for harnesses that cannot express an artifact type or placement.
-4. Set source refresh, stable content identity, ordering and name-collision semantics in the HLA.
-   These must compose with resource reuse and concurrent sessions without global consumption.
+1. First-delivery sources are workstation and Git, with packaged distributions deferred. All source
+   readers converge on the same normalized representation.
+2. Artifacts still unhandled at the final session facet cause a launch error with
+   integration-supplied reasons; there is no silent omission or implied successful delivery.
+3. The HLA's native support matrix governs first delivery, including its explicit unsupported cases.
+4. Capture occurs in the owning setup operation. The HLA's source refresh, content identity,
+   ordering, collision and independent-consumer rules govern implementation.
 
 ## Definition of done
 

@@ -2,10 +2,10 @@
 
 ## Status and architectural choices
 
-Draft HLA responding to the [FRD](frd.md). This checkpoint proposes the architecture for the full
-implementation on PR 794. Approval and the detailed implementation plan follow review; nothing below
-claims shipped artifact behavior. [Prior-art research](prior-art-research.md) separates documented
-native mechanisms from the behavior still requiring native validation.
+Approved HLA responding to the [FRD](frd.md), accepted on 2026-09-13 for the full implementation on
+PR 794. The [implementation plan](plan.md) tracks delivery and acceptance; architectural approval
+does not claim shipped artifact behavior. [Prior-art research](prior-art-research.md) separates
+documented native mechanisms from the behavior still requiring native validation.
 
 The design adds ordinary `artifact-bundle` resources and an `artifacts` block to owning resources.
 Core captures and normalizes inputs once for an owning operation. Harness integrations receive those
@@ -13,11 +13,10 @@ inputs after env preparation and apply or defer them through the existing facet 
 results and file ownership use the existing instance-state facility. `agw artifacts show` explains
 declarations and recorded delivery through the same graph without applying anything.
 
-The proposed first delivery includes workstation and Git sources, hints, rules, standard Agent
+The approved first delivery includes workstation and Git sources, hints, rules, standard Agent
 Skills and agent personas. Packaged distribution readers, automatic core hint emission and feature
-execution follow later. This HLA recommends a launch error for any artifact still unhandled at the
-session, with integration-supplied reasons. That is the proposed resolution of the FRD's open final
-disposition question, not a claim that the earlier discussion already settled it.
+execution follow later. Any artifact still unhandled at the session causes a launch error with
+integration-supplied reasons. This policy was accepted with the HLA approval.
 
 ## Architecture and flow
 
@@ -68,7 +67,7 @@ flowchart TB
 
 Each deferred artifact takes one route, so VM inputs are not copied down both branches. The session
 receives its own artifacts plus the three applicable sets of deferrals. If its facet still cannot
-handle an artifact, core applies the proposed final-session error policy.
+handle an artifact, core applies the approved final-session error policy.
 
 The facet boxes show activated integrations. Without activation, core passes artifacts through: an
 inactive VM routes directly to session; an inactive user or workspace passes its applicable inputs
@@ -281,10 +280,10 @@ cleanup does not become a prerequisite for VM deletion or an unreachable-backend
 
 Use the saga's `session_uuid` for durable session ownership and `run_id` for one workload
 incarnation. The existing session name remains a display/selection key. The current session row does
-not contain these IDs, so the shared identity change needs an implementation owner before artifact
-implementation depends on it. A
-[coordination message](../2026-08-04-next-steps/message-2026-09-13-agent-artifacts-session-identity.md)
-raises that dependency; this HLA does not mint an artifact-specific replacement.
+not contain these IDs. This effort implements the early shared identity slice permitted by the saga
+contract, together with session publication. The
+[coordination record](../2026-08-04-next-steps/message-2026-09-13-agent-artifacts-identity-implementation.md)
+identifies this ownership; no artifact-specific replacement is introduced.
 
 Private publication lives under the actual user's home, conceptually
 `~/.agentworks-artifacts/session/<session_uuid>/<run_id>/`. Parent directories are private to that
@@ -429,15 +428,14 @@ clearly. Existing records without artifact fields can remain valid for artifact-
 but cannot claim artifact capture or handling. Codec migration must preserve existing plugin claims
 and settings behavior, with no broad refactor of VM deletion.
 
-Before implementation, settle the shared session-identity owner and write the bounded source/codec
-and native-adapter LLDs. Validate capture with local Git and filesystem fixtures, including filters,
-LFS/submodule refusal, executable scripts, links, portable collisions, an ASCII-only PDF and byte
-preservation exceptions. Validate routing with simple test integrations, including inactive/stale
-owners and diamond reuse. Validate native discovery, updates, removal, resume and two-user isolation
-against the actual shipped executables and a scoped live backend. Inspection tests must prove no
-acquisition, native invocation or state mutation occurs.
+Before wiring lifecycle consumers, complete the shared session-identity slice and the bounded
+source/codec and native-adapter LLDs. Validate capture with local Git and filesystem fixtures,
+including filters, LFS/submodule refusal, executable scripts, links, portable collisions, an
+ASCII-only PDF and byte preservation exceptions. Validate routing with simple test integrations,
+including inactive/stale owners and diamond reuse. Validate native discovery, updates, removal,
+resume and two-user isolation against the actual shipped executables and a scoped live backend.
+Inspection tests must prove no acquisition, native invocation or state mutation occurs.
 
-This checkpoint asks for agreement on the architecture, particularly capture-on-owner-init,
-single-destination deferrals, the explicit final-session error, native session skill limitations and
-the shared identity dependency. After review, the plan will be expanded into the full implementation
-sequence on this branch and PR.
+The operator approved capture during owning setup, single-destination deferrals, the final-session
+error and the native session skill limitations. The [implementation plan](plan.md) sequences the
+complete delivery on this branch and PR, including the shared identity prerequisite and acceptance.
