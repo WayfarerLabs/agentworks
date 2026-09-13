@@ -14,11 +14,12 @@ if TYPE_CHECKING:
     from agentworks.db import Database
     from agentworks.db.instance_state import InstanceKind, JsonObject
 
-_VERSION = 1
+_VERSION = 2
 _COMPONENTS: dict[str, frozenset[SetupComponent]] = {
     "vm": frozenset({"vm", "admin"}),
     "agent": frozenset({"agent"}),
     "workspace": frozenset({"workspace"}),
+    "session": frozenset({"session"}),
 }
 
 
@@ -35,7 +36,7 @@ def decode_native_setup(record: AppliedStateSlice) -> NativeSetupState:
     """Validate persisted evidence without echoing malformed input contents."""
     if record.key is not AppliedStateKey.HARNESS_NATIVE_SETUP or record.instance_kind not in _COMPONENTS:
         raise TypeError("native setup requires its matching owner slice")
-    if record.payload.payload_version != _VERSION:
+    if record.payload.payload_version not in (1, _VERSION):
         raise UnsupportedNativeSetupVersionError(
             "native setup evidence requires a different Agentworks version",
             hint="Use a release that understands this native setup record. The stored evidence was retained.",

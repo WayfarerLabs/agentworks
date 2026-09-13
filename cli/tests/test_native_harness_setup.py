@@ -22,7 +22,7 @@ from agentworks.harness_setup.model import NativeClaim
 from agentworks.plugins._harness_native.native import setup_user, setup_workspace
 from agentworks.plugins._harness_native.native_cli import NativeCLI, NativeTool
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
-from agentworks.plugins._harness_native.native_files import NativeFiles
+from agentworks.native_files import NativeFiles
 from tests.native_setup_fixtures import (
     LocalFixtureTransport,
     invocation,

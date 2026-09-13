@@ -1,4 +1,4 @@
-"""Private snapshots and atomic publication for plugin-native settings roles."""
+"""Private snapshots and atomic publication for owned native files."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 # replacement cannot redirect reads or publication into another directory tree.
 _FILE_PROGRAM = r"""
 import grp, hashlib, json, os, secrets, stat, sys
-op, destination, staging, expected, group = sys.argv[1:]
+op, destination, staging, expected, group, executable = sys.argv[1:]
 parts = destination.split('/')[1:]
 if not destination.startswith('/') or any(p in ('', '.', '..') for p in parts):
     sys.exit(1)
@@ -34,7 +34,7 @@ try:
         try:
             next_fd = os.open(component, traverse, dir_fd=fd)
         except FileNotFoundError:
-            if op in ('read', 'directory'):
+            if op in ('read', 'delete', 'directory'):
                 print(json.dumps({'exists': False}))
                 sys.exit(0)
             os.mkdir(component, 0o700 if not group else 0o2770, dir_fd=fd)
@@ -67,6 +67,10 @@ try:
         actual = '-' if content is None else hashlib.sha256(content).hexdigest()
         if actual != expected:
             sys.exit(2)
+        if op == 'delete':
+            if content is not None:
+                os.unlink(parts[-1], dir_fd=fd)
+            sys.exit(0)
         gid = -1 if not group else grp.getgrnam(group).gr_gid
         with open(staging, 'rb') as source:
             replacement = source.read()
@@ -75,7 +79,7 @@ try:
             output_fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=fd)
             with os.fdopen(output_fd, 'wb') as output:
                 os.fchown(output.fileno(), -1, gid)
-                os.fchmod(output.fileno(), 0o600 if not group else 0o660)
+                os.fchmod(output.fileno(), (0o700 if executable == '1' else 0o600) if not group else (0o770 if executable == '1' else 0o660))
                 output.write(replacement)
                 output.flush()
                 os.fsync(output.fileno())
@@ -162,6 +166,7 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
                 "-",
                 "-",
                 "",
+                "0",
             ]
         )
         result = self.runner.run(command, check=False)
@@ -179,7 +184,7 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
         """Read a regular native file without emitting its contents into logs."""
         destination = native_path(destination)
         remote, local = self.slot()
-        command = shlex.join(["python3", "-c", _FILE_PROGRAM, "read", destination, remote, "-", ""])
+        command = shlex.join(["python3", "-c", _FILE_PROGRAM, "read", destination, remote, "-", "", "0"])
         result = self.runner.run(command, check=False, discard_output=False)
         if not result.ok:
             raise StateError("native settings path is unreadable or contains an unsuitable file or link")
@@ -197,14 +202,14 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
         except Exception:
             raise ExternalError("could not capture native settings file") from None
 
-    def publish(self, destination: str, content: bytes, *, expected: str | None, group: str = "") -> None:
+    def publish(self, destination: str, content: bytes, *, expected: str | None, group: str = "", executable: bool = False) -> None:
         """Atomically replace a guarded file only while its observed bytes match."""
         destination = native_path(destination)
         remote, local = self.slot()
         local.write_bytes(content)
         try:
             self.runner.copy_to(local, remote)
-            command = shlex.join(["python3", "-c", _FILE_PROGRAM, "write", destination, remote, expected or "-", group])
+            command = shlex.join(["python3", "-c", _FILE_PROGRAM, "write", destination, remote, expected or "-", group, "1" if executable else "0"])
             result = self.runner.run(command, check=False, discard_output=True)
         except Exception:
             raise ExternalError("could not publish native settings file") from None
@@ -212,3 +217,12 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
             raise StateError("native settings changed during setup; retry against the current file")
         if not result.ok:
             raise StateError("native settings publication could not establish the destination ownership or mode")
+
+    def remove(self, destination: str, *, expected: str) -> None:
+        """Remove only a regular file that still matches its recorded ownership."""
+        command = shlex.join(["python3", "-c", _FILE_PROGRAM, "delete", native_path(destination), "-", expected, "", "0"])
+        result = self.runner.run(command, check=False, discard_output=True)
+        if result.returncode == 2:
+            raise StateError("owned native file changed; retaining it for operator inspection")
+        if not result.ok:
+            raise StateError("owned native file could not be removed safely")

@@ -63,4 +63,5 @@ class SessionArtifactContext:
     directory: str
     session_uuid: str
     run_id: str
+    ancestor_files: tuple[OwnedArtifactFile, ...] = ()
     environment: Mapping[str, str] = field(default_factory=dict, repr=False)
