@@ -506,3 +506,19 @@ def test_codec_rejects_boolean_version():
     payload["version"] = True
     with pytest.raises(SourceRefError):
         decode_inputs(payload)
+
+
+@pytest.mark.skipif(not hasattr(os, "O_PATH") and not hasattr(os, "O_SEARCH"), reason="search-only directory handles")
+def test_readable_file_under_unlistable_ancestor_can_be_captured(tmp_path):
+    parent = tmp_path / "traverse-only"
+    parent.mkdir()
+    source = parent / "rule.md"
+    source.write_bytes(b"readable content")
+    parent.chmod(0o111)
+    try:
+        assert source.read_bytes() == b"readable content"
+        with PackageCapture() as operation:
+            captured = operation.capture(str(source))
+        assert captured.members[0].data == b"readable content"
+    finally:
+        parent.chmod(0o700)

@@ -220,13 +220,14 @@ class PackageCapture:
 
         # Keep every ancestor anchored until the complete package has been rechecked.
         # O_NOFOLLOW on a full pathname only protects its final component.
+        ancestor_flags = getattr(os, "O_PATH", getattr(os, "O_SEARCH", os.O_RDONLY)) | os.O_NOFOLLOW | os.O_DIRECTORY
         with ExitStack() as handles:
-            parent = os.open(path.anchor, flags | os.O_DIRECTORY)
+            parent = os.open(path.anchor, ancestor_flags)
             handles.callback(os.close, parent)
             ancestors: list[tuple[int, str, tuple[int, int, int]]] = []
             for name in path.parts[1:-1]:
                 self.check()
-                descriptor = os.open(name, flags | os.O_DIRECTORY, dir_fd=parent)
+                descriptor = os.open(name, ancestor_flags, dir_fd=parent)
                 handles.callback(os.close, descriptor)
                 ancestors.append((parent, name, _stamp(os.fstat(descriptor))[:3]))
                 parent = descriptor

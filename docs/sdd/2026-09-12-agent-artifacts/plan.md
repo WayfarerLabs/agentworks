@@ -209,7 +209,7 @@ checks and final-head CI separately; this is not artifact implementation or acce
 ## Implementation private review evidence
 
 The first complete private review inspected `3b4ea08b` against `7c744828` in three isolated
-worktrees. The lead accepted the concrete project, Muntz and correctness findings:
+work trees. The lead accepted the concrete project, Muntz and correctness findings:
 
 - Session deletion now holds the existing VM mutation guard through runtime teardown, file cleanup
   and row deletion, then releases it before independent parent cleanup.
