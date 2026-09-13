@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
@@ -454,6 +457,99 @@ def test_git_storage_limit_and_failure_cleanup(repository):
         with pytest.raises(SourceRefError):
             operation.capture("git::https://fixture.invalid/repo.git//review")
     assert not staging.exists()
+
+
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n"])
+@pytest.mark.parametrize("single_file", [False, True])
+def test_local_lfs_pointers_are_rejected(tmp_path, newline, single_file):
+    root = skill(tmp_path)
+    pointer = root / "asset.dat"
+    pointer.write_bytes(
+        newline.join([b"version https://git-lfs.github.com/spec/v1", b"oid sha256:abc", b"size 100", b""])
+    )
+    with PackageCapture() as operation, pytest.raises(SourceRefError):
+        operation.capture(str(pointer if single_file else root))
+
+
+@pytest.mark.parametrize("length", [4096, 4097])
+def test_git_member_path_persistence_bound(repository, length):
+    path = "/".join(["x" * 240] * 16) + "/" + "y" * (length - 3856)
+    blob = git(repository, "rev-parse", "HEAD:review/opaque.dat").decode().strip()
+    git(repository, "update-index", "--add", "--cacheinfo", f"100644,{blob},review/{path}")
+    tree = git(repository, "write-tree").decode().strip()
+    commit = git(repository, "commit-tree", tree, "-m", "long member").decode().strip()
+    git(repository, "update-ref", "HEAD", commit)
+    spec = SkillArtifactSpec(source="git::https://fixture.invalid/repo.git//review")
+    if length > 4096:
+        with pytest.raises(SourceRefError):
+            capture(spec)
+    else:
+        inputs = capture(spec)
+        assert path in {member.path for member in inputs[0].content.members}
+        assert decode_inputs(encode_inputs(inputs)) == inputs
+
+
+@pytest.mark.parametrize("vanished", ["file", "directory"])
+def test_git_storage_accounting_tolerates_removed_temporary_entries(monkeypatch, vanished):
+    original = os.scandir
+    with PackageCapture() as operation:
+        (operation.root / "kept").write_bytes(b"abc")
+        removed = operation.root / ("shallow.lock" if vanished == "file" else "temporary")
+        if vanished == "file":
+            removed.write_bytes(b"temporary")
+        else:
+            removed.mkdir()
+
+        @contextmanager
+        def changing_scan(path):
+            if vanished == "directory" and Path(path) == removed:
+                removed.rmdir()
+            with original(path) as entries:
+
+                def changing_entries() -> Iterator[os.DirEntry[str]]:
+                    for entry in entries:
+                        if vanished == "file" and entry.name == removed.name:
+                            removed.unlink()
+                        yield entry
+
+                yield changing_entries()
+
+        with monkeypatch.context() as patch:
+            patch.setattr(os, "scandir", changing_scan)
+            assert operation._storage_size() == 3
+        assert not removed.exists()
+
+
+def test_git_storage_accounting_preserves_io_errors(monkeypatch):
+    with PackageCapture() as operation:
+
+        def denied(path):
+            raise PermissionError(path)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(os, "scandir", denied)
+            with pytest.raises(PermissionError):
+                operation._storage_size()
+
+
+def test_git_process_cannot_consume_operator_stdin(monkeypatch):
+    original = subprocess.Popen
+
+    def reading_process(command, *args, **kwargs):
+        kwargs.setdefault("stdin", subprocess.PIPE)
+        process = original(
+            [sys.executable, "-c", "import sys; sys.stdout.buffer.write(repr(sys.stdin.buffer.read(1)).encode())"],
+            *args,
+            **kwargs,
+        )
+        if process.stdin is not None:
+            process.stdin.write(b"x")
+            process.stdin.close()
+        return process
+
+    monkeypatch.setattr(subprocess, "Popen", reading_process)
+    with PackageCapture() as operation:
+        assert operation._run(operation.root, "version") == b"b''"
 
 
 def test_git_failure_has_no_stale_snapshot(repository):
