@@ -226,6 +226,12 @@ def _preflight_and_resolve(
                 runner=agent_target or target,
             )
 
+            from agentworks.artifacts.routing import session_artifacts
+
+            session_artifacts(
+                db, graph.registry, vm, plan.existing_ws, plan.agent_name, graph.template.harness_integration, ()
+            )
+
     with output.section("Resolving Secrets"):
         graph.resolver.resolve()
     return graph.resolver.values, agent_target

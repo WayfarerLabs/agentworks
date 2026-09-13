@@ -177,17 +177,22 @@ def delete_workspace(
                     from agentworks.sessions.manager import _build_session_target
 
                     for session in db.list_sessions(workspace_name=name):
-                        if not any(
-                            record.artifact_files for record in read_native_setup(db, "session", session.name).records
-                        ):
-                            continue
                         try:
+                            if not any(
+                                record.artifact_files
+                                for record in read_native_setup(db, "session", session.name).records
+                            ):
+                                continue
                             session_target = _build_session_target(
                                 session, vm=vm, config=config, db=db, admin_target=target
                             )
                             cleanup_session_artifacts(db, session, session_target)
                         except Exception:
-                            output.warn(f"Private artifact cleanup for session '{session.name}' could not finish.")
+                            output.warn(
+                                f"Private artifact cleanup for session '{session.name}' could not finish. "
+                                f"Check ~/.agentworks-artifacts/session/{session.session_uuid} in that session user's "
+                                "home; remaining files will no longer have managed cleanup evidence after deletion."
+                            )
                 db.delete_sessions_for_workspace(name)
 
                 # Best-effort: take down dangling 'Waiting for session...' windows in any

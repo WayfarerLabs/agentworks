@@ -187,7 +187,7 @@ def run_setup(
                 application = integration.workspace_init(call)
             else:
                 raise StateError("unknown native setup invocation")
-            application = validate_application(application, artifacts, inputs.facet)
+            application = validate_application(application, artifacts, inputs.facet, integration=name)
             if isinstance(call, VMSetupInvocation) and application.files:
                 raise StateError("VM artifacts must be routed to an inner facet")
             roots = () if location is None else (location,)

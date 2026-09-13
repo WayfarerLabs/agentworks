@@ -229,3 +229,21 @@ def test_rehome_holds_its_vm_guard_without_interpreting_applied_state(db, deleti
     assert calls == ["move"]
 
     assert db.instance_state.get_applied_slices("workspace", "project") == previous
+
+
+@pytest.mark.parametrize("applied_state", ["unknown", "malformed"])
+def test_workspace_delete_keeps_parent_policy_for_unreadable_session_artifacts(
+    db, deletion, monkeypatch, applied_state
+):
+    from agentworks.db import SessionMode
+
+    db.update_vm_tailscale("box", "box")
+    db.insert_session(
+        "session", "project", "shell", SessionMode.AGENT, agent_name="agent", socket_path="/tmp/session.sock"
+    )
+    _store_applied_state(db, "session", "session", applied_state)
+    monkeypatch.setattr("agentworks.sessions.manager.ensure_pids_batch", lambda sessions, **kwargs: sessions)
+    monkeypatch.setattr("agentworks.sessions.manager._teardown_session", lambda *args, **kwargs: None)
+    delete_workspace(db, deletion.config, "project", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
+    assert db.get_workspace("project") is None and db.get_session("session") is None
+    assert deletion.removed == ["workspace"]

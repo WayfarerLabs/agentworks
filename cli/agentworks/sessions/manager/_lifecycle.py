@@ -670,6 +670,11 @@ def _launch_existing_session(
                 runner=session_target,
             )
 
+            # Captured ancestor routing needs no secrets and can refuse now.
+            from agentworks.artifacts.routing import session_artifacts
+
+            session_artifacts(db, registry, vm, ws, session.agent_name, template.harness_integration, ())
+
         with output.section("Resolving Secrets"):
             # The graph-union boundary resolve (pass 1). Placed AFTER the
             # gates above, symmetric with the env-chain pass below, so a
@@ -781,7 +786,9 @@ def _launch_existing_session(
             harness_integration_name=template.harness_integration,
             session_name=name,
         )
-        artifact_application = validate_session_application(harness_start.artifacts, prepared_artifacts.context)
+        artifact_application = validate_session_application(
+            harness_start.artifacts, prepared_artifacts.context, integration=template.harness_integration
+        )
         session_env.update(artifact_application.environment)
         stage_session_artifacts(
             db, name, template.harness_integration, session_target, prepared_artifacts, artifact_application

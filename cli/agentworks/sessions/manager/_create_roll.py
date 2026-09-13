@@ -340,7 +340,9 @@ def _start_session_slice(
                 harness_integration_name=template.harness_integration,
                 session_name=name,
             )
-            artifact_application = validate_session_application(harness_start.artifacts, prepared_artifacts.context)
+            artifact_application = validate_session_application(
+                harness_start.artifacts, prepared_artifacts.context, integration=template.harness_integration
+            )
             session_env.update(artifact_application.environment)
             command = _mgr._substitute_template_vars(
                 harness_start.command,

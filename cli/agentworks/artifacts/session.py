@@ -99,8 +99,10 @@ def prepare_session_artifacts(
     return PreparedSessionArtifacts(context, capture, setup_inputs)
 
 
-def validate_session_application(application: object, context: SessionArtifactContext) -> ArtifactApplication:
-    result = validate_application(application, context.inputs, "session")
+def validate_session_application(
+    application: object, context: SessionArtifactContext, *, integration: str
+) -> ArtifactApplication:
+    result = validate_application(application, context.inputs, "session", integration=integration)
     ancestors = {item.path.casefold() for item in context.ancestor_files}
     if any(item.path.casefold() in ancestors for item in result.files):
         raise StateError("session artifacts conflict with an ancestor artifact destination")
@@ -119,7 +121,6 @@ def stage_session_artifacts(
 ) -> None:
     """Publish the prospective run while retaining files the old runtime can use."""
     context = prepared.context
-    validate_session_application(application, context)
     state = read_native_setup(db, "session", name)
     if not context.inputs and not application.files and not state.records:
         return

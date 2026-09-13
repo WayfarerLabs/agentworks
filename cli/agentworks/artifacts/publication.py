@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 
 def validate_application(
-    application: object, inputs: tuple[ArtifactInput, ...], facet: ArtifactFacet
+    application: object, inputs: tuple[ArtifactInput, ...], facet: ArtifactFacet, *, integration: str
 ) -> ArtifactApplication:
     """Validate the registered plugin's output without accepting new artifact inputs."""
     if not isinstance(application, ArtifactApplication):
@@ -37,8 +37,14 @@ def validate_application(
             raise StateError("integration deferred an unknown or duplicate artifact input")
         if item.destination not in routes[facet]:
             if facet == "session":
+                artifact = next(value for value in inputs if value.identity == item.input_id)
+                origin = artifact.origin
                 raise StateError(
-                    "integration cannot handle every artifact at the session facet",
+                    f"integration '{integration}' cannot apply {artifact.content.type.value} "
+                    f"'{origin.bundle}/{origin.entry}' from {origin.component} "
+                    f"{origin.resource_kind}/{origin.resource_name} at the session facet",
+                    entity_kind=origin.resource_kind,
+                    entity_name=origin.resource_name,
                     hint=item.reason,
                 )
             raise StateError("integration returned an invalid artifact route")

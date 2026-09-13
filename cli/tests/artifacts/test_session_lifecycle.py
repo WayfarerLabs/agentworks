@@ -341,3 +341,50 @@ def test_shell_launch_receives_discovery_env_after_complete_publication(lifecycl
     monkeypatch.setattr(tmux, "create_session", create)
     lifecycle.restart()
     assert observed == ["ready"]
+
+
+def test_session_delete_refuses_while_vm_native_mutation_is_held(lifecycle):
+    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+
+    lifecycle.restart()
+    files = lifecycle.files()
+    lifecycle.events.clear()
+    with native_mutation_guard(lifecycle.db.path, "vm1"), pytest.raises(NativeSetupBusyError):
+        manager.delete_session(
+            lifecycle.db, lifecycle.config, name="s1", yes=True, interaction=TtyInteractionPolicy.REFUSE
+        )
+    assert lifecycle.db.get_session("s1") is not None
+    assert all(path.exists() for path in files)
+    assert "kill" not in lifecycle.events
+
+
+@pytest.mark.parametrize("operation", ["start", "restart", "create"])
+def test_uncaptured_ancestor_refuses_before_secrets(lifecycle, monkeypatch, operation):
+    from agentworks.vms.templates import ResolvedVMTemplate
+
+    monkeypatch.setattr(
+        "agentworks.vms.templates.resolve_live_template",
+        lambda *a, **k: ResolvedVMTemplate("default", artifacts=ArtifactsConfig(bundles=["team"])),
+    )
+    if operation == "start":
+        monkeypatch.setattr(manager, "check_session_status", lambda *a, **k: SessionStatus.STOPPED)
+    if operation == "create":
+        lifecycle.db.insert_agent_grant("a1", "ws1", "explicit")
+        monkeypatch.setattr("agentworks.agents.manager._assert_agent_ssh_works", lambda *a, **k: None)
+    lifecycle.events.clear()
+    with pytest.raises(StateError):
+        if operation == "create":
+            manager.create_session(
+                lifecycle.db,
+                lifecycle.config,
+                name="s2",
+                workspace="ws1",
+                agent="a1",
+                interaction=TtyInteractionPolicy.REFUSE,
+            )
+        elif operation == "start":
+            manager.start_session(lifecycle.db, lifecycle.config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
+        else:
+            lifecycle.restart()
+    assert "resolve" not in lifecycle.events and "resolve_env" not in lifecycle.events
+    assert "kill" not in lifecycle.events and not lifecycle.files()

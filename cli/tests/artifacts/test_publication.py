@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import pytest
 
-from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral, ArtifactFile
+from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral, ArtifactFile, OwnedArtifactFile
 from agentworks.artifacts.model import ArtifactContent, ArtifactInput, ArtifactOrigin, ArtifactProvenance, ArtifactType
 from agentworks.artifacts.publication import publish_artifacts, validate_application
 from agentworks.errors import StateError
@@ -20,13 +21,13 @@ def target(tmp_path):
     return LocalFixtureTransport(tmp_path / "target")
 
 
-def artifact(path, data=b"content", *, executable=False):
+def artifact(path: Path, data: bytes = b"content", *, executable: bool = False) -> ArtifactFile:
     return ArtifactFile(str(path), data, ("a" * 64,), executable=executable)
 
 
 def test_owned_file_update_mode_and_idempotent_removal(target):
     path = target.home / "skills/review/run.sh"
-    checkpoints = []
+    checkpoints: list[tuple[OwnedArtifactFile, ...]] = []
     first = publish_artifacts(target, (artifact(path),), (), checkpoints.append, roots=(str(target.home),))
     assert path.read_bytes() == b"content"
     before = path.stat().st_mtime_ns
@@ -109,7 +110,9 @@ def test_deferred_input_must_be_known_unique_and_routed_inward():
         ArtifactOrigin("vm", "vm", "box"),
     )
     deferred = ArtifactDeferral(input_id=item.identity, destination="user", reason="native user placement")
-    assert validate_application(ArtifactApplication(deferred=(deferred,)), (item,), "vm").deferred == (deferred,)
+    assert validate_application(
+        ArtifactApplication(deferred=(deferred,)), (item,), "vm", integration="fixture"
+    ).deferred == (deferred,)
     for facet, inputs, result in (
         ("vm", (), ArtifactApplication(deferred=(deferred,))),
         ("vm", (item,), ArtifactApplication(deferred=(deferred, deferred))),
@@ -117,7 +120,7 @@ def test_deferred_input_must_be_known_unique_and_routed_inward():
         ("session", (item,), ArtifactApplication(deferred=(deferred,))),
     ):
         with pytest.raises(StateError):
-            validate_application(result, inputs, facet)
+            validate_application(result, inputs, facet, integration="fixture")
 
 
 def test_body_is_not_exposed_through_transport_log(target):
