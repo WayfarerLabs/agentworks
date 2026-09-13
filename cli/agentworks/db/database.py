@@ -6,6 +6,7 @@ import json
 import sqlite3
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 import agentworks.db as _db
 from agentworks.db.converters import (
@@ -20,6 +21,7 @@ from agentworks.db.converters import (
     _to_workspace,
 )
 from agentworks.db.migrations import LATEST_VERSION, MIGRATIONS, MigrationContext
+from agentworks.db.models import _canonical_session_identity
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -814,12 +816,17 @@ class Database:
         created_agent: bool = False,
         socket_path: str | None = None,
         harness_integration_state: dict[str, object] | None = None,
+        *,
+        session_uuid: str | None = None,
+        run_id: str | None = None,
     ) -> SessionRow:
+        session_uuid = str(uuid4()) if session_uuid is None else _canonical_session_identity(session_uuid)
+        run_id = None if run_id is None else _canonical_session_identity(run_id)
         self._conn.execute(
             "INSERT INTO sessions "
             "(name, workspace_name, template, mode, agent_name, created_workspace, "
-            "created_agent, socket_path, harness_integration_state)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "created_agent, socket_path, harness_integration_state, session_uuid, run_id)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 workspace_name,
@@ -830,12 +837,26 @@ class Database:
                 int(created_agent),
                 socket_path,
                 json.dumps(harness_integration_state or {}),
+                session_uuid,
+                run_id,
             ),
         )
         self._commit_unless_in_tx()
         result = self.get_session(name)
         assert result is not None
         return result
+
+    def set_session_run_id(self, name: str, run_id: str) -> None:
+        """Record a prospective managed launch without asserting runtime success."""
+        run_id = _canonical_session_identity(run_id)
+        result = self._conn.execute("UPDATE sessions SET run_id = ? WHERE name = ?", (run_id, name))
+        if result.rowcount != 1:
+            if self._tx_depth == 0:
+                self._conn.rollback()
+            from agentworks.errors import StateError
+
+            raise StateError(f"session '{name}' no longer exists", entity_kind="session", entity_name=name)
+        self._commit_unless_in_tx()
 
     def get_session(self, name: str) -> SessionRow | None:
         row = self._conn.execute(
