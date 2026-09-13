@@ -249,8 +249,11 @@ remaining mixed-owner preflight case: a pending new agent postponed validation o
 artifact capture. Creation now checks each existing ancestor independently before secrets, using the
 same routing primitives as final session preparation. That correction passed 44 lifecycle/routing
 tests and focused mypy. Source corrections preserve reads through traverse-only ancestors and
-validate acquisition provenance before producing inputs that cross the persisted codec. Final
-private confirmation of the mixed-owner correction remains pending.
+validate acquisition provenance before producing inputs that cross the persisted codec. All three
+private review lanes confirmed the correction and subsequent forwarding-wrapper removal at
+`3b0563ce`, with no unresolved material findings. Both callers now use one
+`require_session_ancestors` helper. Its 44 targeted tests, Ruff, format and mypy passed. The final
+project review's stale pending-confirmation note is corrected here; no implementation changed.
 
 A separate tester drove the public CLI in an isolated HOME, using real DB APIs only to create owner
 and capture fixtures. Resource discovery, schema/explain/sample, reference validation, guide
