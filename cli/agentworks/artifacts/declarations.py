@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Annotated, Literal, Self
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
+from agentworks.package_sources import validate_artifact_source
 from agentworks.schema import AgwModel, MergeStrategy, NonBlankStr, ResourceRef
+from agentworks.sources import SourceRefError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -17,6 +19,19 @@ if TYPE_CHECKING:
 
 
 class _ArtifactSpec(AgwModel):
+    model_config = ConfigDict(hide_input_in_errors=True)
+
+    @field_validator("source", check_fields=False)
+    @classmethod
+    def _source_reference(cls, source: str | None) -> str | None:
+        """Keep credentials out of persisted declarations and rendered errors."""
+        if source is not None:
+            try:
+                validate_artifact_source(source)
+            except SourceRefError as error:
+                raise ValueError(str(error)) from None
+        return source
+
     preserve_bytes: list[NonBlankStr] = Field(default_factory=list)
     """Relative paths or globs for supporting files whose bytes must not be normalized.
     A skill's SKILL.md always uses normalized UTF-8 text."""

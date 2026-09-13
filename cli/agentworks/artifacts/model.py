@@ -50,11 +50,11 @@ class ArtifactContent:
 
     @property
     def metadata(self) -> dict[str, object]:
-        return cast(dict[str, object], json.loads(self.metadata_json))
+        return cast("dict[str, object]", json.loads(self.metadata_json))
 
     @property
     def native_options(self) -> dict[str, object]:
-        return cast(dict[str, object], json.loads(self.native_options_json))
+        return cast("dict[str, object]", json.loads(self.native_options_json))
 
     @property
     def digest(self) -> str:
@@ -113,8 +113,15 @@ class ArtifactInput:
 
     @property
     def identity(self) -> str:
-        address = [self.origin.component, self.origin.resource_kind, self.origin.resource_name,
-                   self.origin.producer, self.origin.bundle, self.origin.entry, self.content.digest]
+        address = [
+            self.origin.component,
+            self.origin.resource_kind,
+            self.origin.resource_name,
+            self.origin.producer,
+            self.origin.bundle,
+            self.origin.entry,
+            self.content.digest,
+        ]
         return hashlib.sha256(json.dumps(address, separators=(",", ":")).encode()).hexdigest()
 
 
