@@ -23,6 +23,7 @@ from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING, cast
 
+from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.errors import unknown_template_error
 from agentworks.schema import merge_model
 
@@ -52,6 +53,7 @@ class ResolvedSessionTemplate:
 
     name: str
     description: str = "Login shell"
+    artifacts: ArtifactsConfig = field(default_factory=ArtifactsConfig)
     env: dict[str, EnvEntry] = field(default_factory=dict)
     harness_integration: str = DEFAULT_HARNESS_INTEGRATION
     harness_integration_config: dict[str, object] = field(default_factory=dict)
@@ -440,11 +442,14 @@ def _merge_template(
 
     previous: dict[str, object] = {
         "description": target.description,
+        "artifacts": target.artifacts.model_dump(mode="python"),
         "env": {key: entry.model_dump(mode="python") for key, entry in target.env.items()},
     }
     incoming: dict[str, object] = {}
     if tmpl.description is not None:
         incoming["description"] = tmpl.description
+    if tmpl.artifacts is not None:
+        incoming["artifacts"] = tmpl.artifacts.model_dump(mode="python", exclude_unset=True)
     if tmpl.env:
         incoming["env"] = {key: entry.model_dump(mode="python") for key, entry in tmpl.env.items()}
     merged, operations = merge_model(type(tmpl), previous, incoming)
@@ -455,4 +460,5 @@ def _merge_template(
         key: EnvEntry.model_validate(value)
         for key, value in cast("dict[str, object]", raw.get("env", defaults.env)).items()
     }
-    return replace(target, description=description, env=env), operations
+    artifacts = ArtifactsConfig.model_validate(raw.get("artifacts", defaults.artifacts))
+    return replace(target, description=description, env=env, artifacts=artifacts), operations

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import agentworks.agents.kinds  # noqa: F401
 import agentworks.apt  # noqa: F401
+import agentworks.artifacts.kinds  # noqa: F401
 import agentworks.capabilities.git_credential.kinds  # noqa: F401
 import agentworks.capabilities.harness_integration.kinds  # noqa: F401
 import agentworks.capabilities.secret_backend.kinds  # noqa: F401

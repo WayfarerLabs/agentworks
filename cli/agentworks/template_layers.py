@@ -24,6 +24,7 @@ def merge_resolved_template_layer[T](
     merged according to the declaration model, with ``None`` retaining its
     domain meaning of absence.
     """
+    from agentworks.artifacts.declarations import ArtifactsConfig
     from agentworks.env.entry import EnvEntry
     from agentworks.instance_overlay_codec import OVERLAY_EXCLUDED_FIELDS
     from agentworks.schema import CapabilityBlock, merge_model
@@ -36,6 +37,8 @@ def merge_resolved_template_layer[T](
     )
     merge_field_names = frozenset(field.name for field in merge_fields)
     previous = {field.name: getattr(target, field.name) for field in merge_fields}
+    if "artifacts" in merge_field_names:
+        previous["artifacts"] = cast("ArtifactsConfig", previous["artifacts"]).model_dump(mode="python")
     if "env" in merge_field_names:
         previous["env"] = {
             key: entry.model_dump(mode="python") for key, entry in cast("dict[str, EnvEntry]", previous["env"]).items()
@@ -51,6 +54,8 @@ def merge_resolved_template_layer[T](
     for field in merge_fields:
         if field.name not in raw:
             raw[field.name] = _field_default(field)
+    if "artifacts" in raw:
+        raw["artifacts"] = ArtifactsConfig.model_validate(raw["artifacts"])
     if "env" in raw:
         raw["env"] = {
             key: EnvEntry.model_validate(value) for key, value in cast("dict[str, object]", raw["env"]).items()

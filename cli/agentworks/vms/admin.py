@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Annotated
 from pydantic import Field, ValidationInfo, model_validator
 from pydantic.json_schema import SkipJsonSchema
 
+from agentworks.artifacts.declarations import ArtifactsConfig, artifact_references
 from agentworks.declared_resource import DeclaredResource
 from agentworks.env.entry import EnvTable, env_references
 from agentworks.git_credentials.credential import credential_references
@@ -45,6 +46,7 @@ def effective_references(
 
     by_env = {key: declared_by for key in effective.env if (declared_by := owner(("env", key))) is not None}
     refs: list[ResourceReference] = list(env_references(effective.env, source, by_env))
+    refs.extend(artifact_references(effective.artifacts, source, provenance))
     by_credential = {
         name: declared_by
         for index, name in enumerate(effective.git_credentials)
@@ -146,6 +148,9 @@ class AdminConfig(DeclaredResource):
     harness_integrations: Annotated[list[CapabilityBlock], MergeStrategy.REPLACE] = Field(default_factory=list)
     """Ordered integrations explicitly activated for native user setup.
     An instance list replaces this template selection; an empty list activates none."""
+
+    artifacts: ArtifactsConfig = Field(default_factory=ArtifactsConfig)
+    """Artifact bundles selected for the VM admin user."""
 
     env: EnvTable = Field(default_factory=dict)
     """Environment variables exported whenever a shell is opened as the

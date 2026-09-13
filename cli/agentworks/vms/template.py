@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Annotated
 
 from pydantic import Field
 
+from agentworks.artifacts.declarations import ArtifactsConfig, artifact_references
 from agentworks.declared_resource import DeclaredResource
 from agentworks.env.entry import EnvTable, env_references
 from agentworks.schema import CapabilityBlock, MergeStrategy, NonEmptyStr, ResourceRef, SecretRef
@@ -48,6 +49,7 @@ def effective_references(
 
     by_env = {key: declared_by for key in effective.env if (declared_by := owner(("env", key))) is not None}
     refs: list[ResourceReference] = list(env_references(effective.env, source, by_env))
+    refs.extend(artifact_references(effective.artifacts, source, provenance))
     refs.extend(
         _ResourceReq(
             name=name,
@@ -163,6 +165,9 @@ class VMTemplate(DeclaredResource):
     harness_integrations: Annotated[list[CapabilityBlock], MergeStrategy.REPLACE] | None = None
     """Ordered integrations explicitly activated for native vm setup.
     An authored list replaces the inherited list; an empty list activates none."""
+
+    artifacts: ArtifactsConfig | None = None
+    """Artifact bundles selected at this scope; an omitted selection inherits."""
 
     env: EnvTable = Field(default_factory=dict)
     """Environment variables exported on this VM, as a plaintext value or
