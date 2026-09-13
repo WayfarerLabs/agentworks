@@ -522,3 +522,13 @@ def test_readable_file_under_unlistable_ancestor_can_be_captured(tmp_path):
         assert captured.members[0].data == b"readable content"
     finally:
         parent.chmod(0o700)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows rejects control characters in directory names")
+def test_unrepresentable_source_provenance_refuses_capture(tmp_path):
+    parent = tmp_path / "parent\nname"
+    parent.mkdir()
+    source = parent / "rule.md"
+    source.write_text("readable rule")
+    with pytest.raises(SourceRefError):
+        capture_artifacts([("team", {"rule": RuleArtifactSpec(source=str(source))})], ORIGIN)

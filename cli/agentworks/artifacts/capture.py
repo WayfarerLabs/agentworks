@@ -89,6 +89,7 @@ def capture_artifacts(
                         provenance = ArtifactProvenance(
                             package.source, package.requested_ref, package.selected_path, package.commit
                         )
+                    validate_provenance(provenance)
                     result.append(ArtifactInput(content, provenance, replace(origin, bundle=bundle_name, entry=entry)))
                 except SourceRefError as error:
                     raise SourceRefError(

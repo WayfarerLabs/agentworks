@@ -149,7 +149,8 @@ when Codex declines to trust that project. Claude settings merge semantics and G
 managed/requirements overlays also remain outside this probe's effective-policy resolution; native
 acceptance must exercise the actual policy environment.
 
-Live native acceptance remains required before shipping: verify discovery, progressive skill use,
-actual rule context, selected personas, changed artifact guidance on a real resumed conversation,
-native policy refusal and cleanup. File existence or a green renderer test must not be reported as
-proof that a model consumed an artifact.
+Live native acceptance remains required before shipping: verify native discovery, registered
+personas, rule and skill loading paths, fresh/resume carrier selection, native policy refusal and
+cleanup through native diagnostics and a scoped VM. R10 excludes model calls and external
+marketplaces from this acceptance. File existence, native diagnostics and green renderer tests must
+not be reported as proof that a model consumed an artifact.
