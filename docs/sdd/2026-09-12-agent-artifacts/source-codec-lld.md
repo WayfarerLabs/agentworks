@@ -6,22 +6,43 @@ boundary. It does not define native placement, routing results or DB ownership.
 ## API and immutable content
 
 `capture_artifacts(bundles, origin, limits=...)` accepts an ordered sequence of bundle names and
-ordered entry maps, plus the consuming owner's `ArtifactOrigin`. It returns a tuple of
-`ArtifactInput` values. The caller resolves ordinary bundle resources and supplies actual owner
-identity. Capture fills bundle and entry addresses without changing the origin seed.
+resolved `ArtifactBundle` values, plus the consuming owner's `ArtifactOrigin`. Each bundle has four
+type maps: hints, rules, skills and agents. It returns one `ArtifactGroup` with the actual
+`ArtifactOwner` and four immutable maps keyed by canonical artifact name. Capture fills bundle and
+entry provenance without changing the origin owner.
 
-The model uses frozen dataclasses and tuples. `ArtifactContent` contains type, name, description,
-normalized instruction text and complete `ArtifactMember` values. Each member has a relative path,
-bytes, executable intent and its text-classification result. Metadata and native persona options use
-canonical JSON strings; the `metadata` and `native_options` properties return independent ordinary
-dictionaries for native generation. An integration cannot modify another consumer's nested metadata
-through the shared input.
+`resolve_bundle` uses ordinary resource layers and merge machinery for `inherits`. Type maps merge
+by key; their entry models use whole-value replacement. Inherited losers are discarded before
+capture, so their sources are not acquired or recorded as replacement payloads.
+
+Capture composes selected resolved bundles in reference order. A later same-type/key definition
+replaces the whole earlier entry within that owner, including skill members. Replacements retain
+compact losing origin, acquisition provenance and content digest, without full bodies or recursive
+chains. Changed content warns; identical content stays quiet while updating winning provenance.
+Traversal uses hints, rules, skills, then agents, preserving map insertion order. Replacing an entry
+retains its key position; there is no precedence across types.
+
+`ArtifactInputs` is the integration boundary for setup and session context: a local group plus
+immutable deferred groups keyed by original owner. Deferral selects entries without changing their
+owner. Different scopes retain distinct groups even when type and key match. `.groups()` traverses
+deferred groups then local; `.items()` traverses their type maps without storing a parallel flat
+representation. Native adapters own faithful placement, aggregation or explicit collision refusal.
+
+The model uses frozen dataclasses, tuples and defensive immutable map copies. `ArtifactContent`
+contains type, name, description, normalized instruction text and complete `ArtifactMember` values.
+Each member has a relative path, bytes, executable intent and its text-classification result.
+Metadata and native persona options use canonical JSON strings; the `metadata` and `native_options`
+properties return independent ordinary dictionaries for native generation. An integration cannot
+modify another consumer's nested metadata through the shared input.
 
 `content.digest` hashes length-framed logical fields and sorted member paths, executable intent and
 bytes. Source location, requested revision, resolved revision and timestamps do not participate.
-`origin.identity` hashes the consuming component, resource kind/name, producer and bundle/entry
-address. `input.identity` combines that address with the content digest. Core derives the facet from
-the component: admin and agent use user; VM, workspace and session use their matching facets.
+`input.origin_identity` hashes the actual owner, artifact type and canonical key. Producer and
+bundle remain provenance and do not create namespaces. `input.identity` combines logical identity
+with the content digest for freshness. Identical content from a new winning source retains its input
+identity, and current capture provenance remains authoritative over retained setup evidence. Core
+derives the facet from the component: admin and agent use user; VM, workspace and session use their
+matching facets.
 
 Single-file rules and personas retain their captured member and mode in addition to their logical
 text. Inline hints and rules have no source members. Skills retain the entire selected package.
@@ -91,11 +112,12 @@ is rejected; its entrypoint always normalizes. Hints, rules and persona instruct
 use normalized text regardless of their source filename.
 
 Skills require root `SKILL.md` frontmatter with standard name/description and a nonempty instruction
-body. The name matches the explicitly selected directory. Standard optional metadata, including
-license, compatibility, allowed tools and string-valued metadata maps, is retained. Persona Markdown
-requires name, description and instructions. Its optional `native_options` maps integration names to
-native option objects. Native integrations validate their own supported option schemas. Hooks and
-MCP configuration are not accepted in this delivery.
+body. The name matches the map key and the explicitly selected directory. Standard optional
+metadata, including license, compatibility, allowed tools and string-valued metadata maps, is
+retained. Persona Markdown requires name, description and instructions; the name matches the
+containing agents-map key. Its optional `native_options` maps integration names to native option
+objects. Native integrations validate their own supported option schemas. Hooks and MCP
+configuration are not accepted in this delivery.
 
 Frontmatter rejects YAML anchors/aliases and bounds size and nesting before loading. Metadata must
 be finite JSON, with bounded canonical encoding. Capture produces the same source-independent model
@@ -110,29 +132,40 @@ monitored with acquisition storage, and read into memory only within its limit. 
 failure terminates acquisition, removes staging and raises an error. No prior snapshot is returned
 as a fresh capture.
 
-`encode_inputs` returns a version-1 JSON object containing inputs, origins, provenance and content.
-It validates that object through the same decoder before returning, so a writer cannot save a
-capture that a subsequent reader rejects. Owning acquisition also performs this validation before
-returning buffered inputs that can cause native effects. Direct persisted writers retain their own
-validation boundary and leave the previous record unchanged on refusal. Member bytes use strict
-base64, including designated text; the text flag records normalization. `decode_inputs` accepts only
-the supported version, rejects extra fields and wrong primitive types, bounds the input structure
-before decoding, validates relative paths and metadata, and checks total member/byte limits and
-recomputed content/input identities. Capture and decoding use the same entrypoint parser: stored
-metadata, body, native options and identity fields must match the retained members, and forbidden
-execution metadata is rejected even when all hashes are consistent. Provenance is checked as a
-credential-free Git repository with its selection, ref and resolved commit, an absolute workstation
-path, or inline content. These checks do not contact the source. The owning state layer
-distinguishes an unsupported domain version from corrupt content. Doctor reports an unsupported
-domain version as uninterpreted evidence, not corruption, and backup retains its uninterpreted
-payload. There is no DB access, native invocation or source reacquisition in the codec.
+`encode_inputs` returns a version-2 JSON object containing the owner and four type maps. Entries
+contain content, origins, provenance, input identity, compact replacement evidence and an ordinal
+within their type map. Ordinals preserve declared order through the DB serializer, which sorts JSON
+object keys. Decode requires contiguous unique ordinals and restores map insertion order. Internal
+content type/name and origin owner/entry must agree with the containing group and map key. It
+validates that object through the same decoder before returning, so a writer cannot save a capture
+that a subsequent reader rejects. Owning acquisition also performs this validation before returning
+buffered inputs that can cause native effects. Direct persisted writers retain their own validation
+boundary and leave the previous record unchanged on refusal. Member bytes use strict base64,
+including designated text; the text flag records normalization. `decode_inputs` accepts only the
+supported version, rejects extra fields and wrong primitive types, bounds the input structure before
+decoding, validates relative paths and metadata, and checks total member/byte limits and recomputed
+content/input identities. Capture and decoding use the same entrypoint parser: stored metadata,
+body, native options and identity fields must match the retained members, and forbidden execution
+metadata is rejected even when all hashes are consistent. Provenance is checked as a credential-free
+Git repository with its selection, ref and resolved commit, an absolute workstation path, or inline
+content. These checks do not contact the source. The owning state layer distinguishes an unsupported
+domain version from corrupt content. Doctor reports an unsupported domain version as uninterpreted
+evidence, not corruption, and backup retains its uninterpreted payload. Owning reinitialization may
+replace the unsupported version-1 draft capture, while independent native owned-file records remain
+available for guarded update and cleanup. Unsupported future versions cannot be overwritten by this
+path. Declaration syntax makes a clean break with the former flat map. There is no DB access, native
+invocation or source reacquisition in the codec.
 
 ## Verification
 
 Local tests exercise complete skill packages, CRLF and lone-CR normalization, opaque PDFs,
 byte-preserved text fixtures, executable identity, immutable metadata, source-independent identity,
-versioned round trips and corrupt state. Filesystem fixtures exercise path collisions, links,
-special files, metadata directories, mutation and operation bounds. Local Git fixtures exercise
-shared revision capture, pinned commits, refresh, selected links/submodules/LFS, export attributes,
-filters/hooks, credential redaction, failure and temporary-storage cleanup. Public Git grammar is
-unchanged by test transport redirection; tests use no model or backend service.
+versioned grouped round trips and corrupt state. Composition tests cover whole-entry inheritance
+without acquiring discarded sources, same-owner replacement, canonical names, compact provenance,
+quiet identical replacements, original-owner deferral and cross-scope equal-name preservation.
+Lifecycle tests cover provenance-only refresh and cleanup with unsupported draft captures.
+Filesystem fixtures exercise path collisions, links, special files, metadata directories, mutation
+and operation bounds. Local Git fixtures exercise shared revision capture, pinned commits, refresh,
+selected links/submodules/LFS, export attributes, filters/hooks, credential redaction, failure and
+temporary-storage cleanup. Public Git grammar is unchanged by test transport redirection; tests use
+no model or backend service.

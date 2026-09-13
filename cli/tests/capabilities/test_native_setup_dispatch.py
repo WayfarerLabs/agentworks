@@ -5,6 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from agentworks.artifacts.model import ArtifactInputs
 from agentworks.capabilities.harness_integration.setup import (
     SetupInvocation,
     UserSetupInvocation,
@@ -47,7 +48,7 @@ def facet_case(db, monkeypatch, component):
     monkeypatch.setattr(
         "agentworks.harness_setup.dispatch.ensure_harness_integration_enabled", lambda registry, name: None
     )
-    monkeypatch.setattr("agentworks.artifacts.routing.setup_artifacts", lambda *args: ())
+    monkeypatch.setattr("agentworks.artifacts.routing.setup_artifacts", lambda *args: ArtifactInputs())
     return inputs, invocation
 
 
@@ -115,7 +116,7 @@ def test_retirement_removes_legacy_claim_free_unsupported_record(db, facet_case)
 
 @pytest.fixture
 def setup_case(tmp_path, monkeypatch):
-    monkeypatch.setattr("agentworks.artifacts.routing.setup_artifacts", lambda *args: ())
+    monkeypatch.setattr("agentworks.artifacts.routing.setup_artifacts", lambda *args: ArtifactInputs())
     events = []
     failures: set[str] = set()
 
@@ -260,14 +261,19 @@ def test_inactive_capture_notice_requires_local_artifacts(db, facet_case, monkey
         ArtifactType,
     )
     from agentworks.artifacts.state import CapturedArtifacts
+    from tests.artifacts._fixtures import group
 
     inputs, invocation = facet_case
     item = ArtifactInput(
         ArtifactContent(ArtifactType.HINT, "fixture", text="fixture"),
         ArtifactProvenance(),
-        ArtifactOrigin(inputs.component, inputs.kind, inputs.name),
+        ArtifactOrigin(inputs.component, inputs.kind, inputs.name, entry="fixture"),
     )
-    snapshot = None if capture == "absent" else CapturedArtifacts("a" * 64, (item,) if capture == "nonempty" else ())
+    snapshot = (
+        None
+        if capture == "absent"
+        else CapturedArtifacts("a" * 64, group(item) if capture == "nonempty" else group(owner=item.origin.owner))
+    )
     inputs = replace(inputs, artifact_snapshot=snapshot)
     warning = Mock()
     monkeypatch.setattr("agentworks.harness_setup.dispatch.output.warn", warning)
@@ -288,6 +294,7 @@ def test_deferral_notice_follows_successful_application(db, facet_case, monkeypa
         ArtifactProvenance,
         ArtifactType,
     )
+    from tests.artifacts._fixtures import received
 
     inputs, invocation = facet_case
     artifacts = tuple(
@@ -317,7 +324,7 @@ def test_deferral_notice_follows_successful_application(db, facet_case, monkeypa
             return application
 
     monkeypatch.setattr("agentworks.harness_setup.dispatch.harness_integration_for", lambda name: Deferring)
-    monkeypatch.setattr("agentworks.artifacts.routing.setup_artifacts", lambda *args: artifacts)
+    monkeypatch.setattr("agentworks.artifacts.routing.setup_artifacts", lambda *args: received(*artifacts))
     monkeypatch.setattr(SetupInputs, "declaration", lambda *args: {})
     inputs = replace(inputs, activations=(CapabilityBlock.of("deferring"),))
     warning = Mock()
@@ -327,7 +334,7 @@ def test_deferral_notice_follows_successful_application(db, facet_case, monkeypa
             "agentworks.harness_setup.dispatch.publish_artifacts", Mock(side_effect=RuntimeError("fixture publication"))
         )
     elif outcome == "pending-cleanup":
-        leftover = OwnedArtifactFile(path="/home/fixture/old", sha256="a" * 64, origins=(artifacts[0].origin.identity,))
+        leftover = OwnedArtifactFile(path="/home/fixture/old", sha256="a" * 64, origins=(artifacts[0].origin_identity,))
         monkeypatch.setattr("agentworks.harness_setup.dispatch.publish_artifacts", lambda *a, **k: (leftover,))
     if outcome in ("hook-failure", "publication-failure"):
         with pytest.raises(RuntimeError):

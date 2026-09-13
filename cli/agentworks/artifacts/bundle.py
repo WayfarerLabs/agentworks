@@ -59,6 +59,7 @@ def resolve_bundle(registry: Registry, name: str) -> LayeredResolution[ArtifactB
         resolution_layers,
         run_layer_fold,
     )
+    from agentworks.resources.resolved_spec import resolved_spec_default_paths
     from agentworks.schema import merge_model
 
     rows = dict(registry.iter_kind_items("artifact-bundle"))
@@ -91,7 +92,7 @@ def resolve_bundle(registry: Registry, name: str) -> LayeredResolution[ArtifactB
         {},
         declared,
         merge,
-        default_paths=(("hints",), ("rules",), ("skills",), ("agents",)),
+        default_paths=resolved_spec_default_paths(ArtifactBundle),
         default_resource_kind="artifact-bundle",
     )
     value = ArtifactBundle.model_validate({**folded.value, "name": name})

@@ -18,6 +18,9 @@ if TYPE_CHECKING:
     from agentworks.artifacts.model import ArtifactFacet, ArtifactInput, ArtifactInputs
 
 
+MAX_CODEX_PERSONA_BYTES = 32 * 1024 * 1024
+
+
 @dataclass(frozen=True)
 class NativeSessionArtifacts:
     """Files and literal argv tokens for one native launch, including resume."""
@@ -77,15 +80,20 @@ def skill_files(root: str, item: ArtifactInput, *, namespace: str = "") -> tuple
 
 def validate_names(inputs: ArtifactInputs) -> None:
     """Reject colliding native names at the integration input boundary."""
-    seen: set[tuple[ArtifactType, str]] = set()
+    seen: dict[tuple[ArtifactType, str], ArtifactInput] = {}
     for item in inputs.items():
         name = item.content.name
         if not name or PurePosixPath(name).name != name or name in (".", "..") or "\x00" in name:
             raise ConfigError("artifact native names must be single path components")
         key = item.content.type, name
         if item.content.type in (ArtifactType.SKILL, ArtifactType.AGENT) and key in seen:
-            raise ConfigError(f"multiple artifacts claim native {item.content.type.value} name '{name}'")
-        seen.add(key)
+            previous = seen[key].origin.owner
+            current = item.origin.owner
+            raise ConfigError(
+                f"multiple artifacts claim native {item.content.type.value} name '{name}': "
+                f"{previous.component}:{previous.resource_name} and {current.component}:{current.resource_name}"
+            )
+        seen[key] = item
 
 
 def persona_options(item: ArtifactInput, integration: str, allowed: Mapping[str, type]) -> dict[str, object]:
@@ -123,15 +131,17 @@ def json_text(value: object) -> str:
 
 def validate_ancestor_names(context: SessionArtifactContext, application: ArtifactApplication) -> None:
     """Reject native shadowing between independently applied ancestor branches and this run."""
-    origins_by_name: dict[str, set[str]] = {}
+    files_by_name: dict[str, OwnedArtifactFile | ArtifactFile] = {}
     files: tuple[OwnedArtifactFile | ArtifactFile, ...] = (*context.ancestor_files, *application.files)
     for file in files:
         if file.native_identity is None:
             continue
-        origins = set(file.origins)
-        prior = origins_by_name.setdefault(file.native_identity, origins)
-        if prior != origins:
-            raise ConfigError(f"multiple scopes claim native artifact identity '{file.native_identity}'")
+        prior = files_by_name.setdefault(file.native_identity, file)
+        if set(prior.origins) != set(file.origins):
+            raise ConfigError(
+                f"multiple scopes claim native artifact identity '{file.native_identity}': "
+                f"{prior.path!r} and {file.path!r}"
+            )
 
 
 def has_artifacts(context: SessionArtifactContext | None) -> bool:

@@ -25,13 +25,18 @@ class _ArtifactBundleKind:
     prose: TopicProse = TopicProse(
         title="Artifact bundles",
         overview="""
-        An artifact-bundle declares an ordered set of hints, rules, skills, and agents
-        (agent personas). Hints provide small pieces of setup context; rules are always
+        An artifact-bundle declares hints, rules, skills, and agents (agent personas)
+        in four maps keyed by canonical artifact name. Hints provide small pieces of setup context; rules are always
         loaded into context. Skills use the standard Agent Skills directory format.
 
         Select bundles through `artifacts.bundles` on VM, admin, agent, workspace, or
         session declarations. An omitted list inherits; a supplied list replaces the
         inherited list, including an empty list. Selections at other scopes remain intact.
+
+        Bundle `inherits` merges each type map by key, replacing an overridden definition
+        completely. Within an owner, later selected bundles replace the same type and key.
+        Contributions from different owning scopes remain separate, including after deferral.
+        Skill and persona frontmatter names must agree with their map keys.
 
         Hints and rules accept exactly one inline `text` or file `source`. Skills name an
         explicit directory with SKILL.md. Agent personas name a Markdown source with name

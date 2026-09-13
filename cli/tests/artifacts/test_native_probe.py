@@ -11,7 +11,9 @@ from pathlib import Path
 import pytest
 
 from agentworks.artifacts.model import ArtifactType
+from agentworks.artifacts.native.common import MAX_CODEX_PERSONA_BYTES
 from agentworks.artifacts.native.probe import _PROBE, _inventory_problems
+from agentworks.package_sources import CaptureLimits
 from agentworks.plugins.claude.artifacts import session_artifacts
 from tests.artifacts.test_native_delivery import artifact, context
 from tests.conftest import requires_posix_shell
@@ -27,6 +29,7 @@ def probe(
     identities: tuple[str, ...] = ("skill:review",),
     paths: tuple[str, ...] = (),
     entries: dict[str, str] | None = None,
+    inventory_bytes: int = CaptureLimits().total_bytes,
     workspace_only: bool = False,
     flags: tuple[str, ...] = (),
     session_plugin: bool = False,
@@ -56,6 +59,8 @@ def probe(
     workspace.mkdir(exist_ok=True)
     request = {
         "tool": tool,
+        "codex_persona_bytes": MAX_CODEX_PERSONA_BYTES,
+        "inventory_bytes": inventory_bytes,
         "home": str(home),
         "workspace": str(workspace),
         "paths": paths,
@@ -80,7 +85,9 @@ def probe(
     )
     observed = json.loads(result.stdout.removeprefix("AGW_ARTIFACT_PROBE="))
     assert isinstance(observed, dict)
-    observed["problems"].extend(_inventory_problems(observed["inventory"], identities, entries or {}))
+    observed["problems"].extend(
+        problem.code for problem in _inventory_problems(observed["inventory"], identities, entries or {})
+    )
     return observed
 
 
@@ -197,3 +204,265 @@ def test_claude_supported_carriers_do_not_bypass_plugin_policy(tmp_path):
         settings={"enabledPlugins": {"agentworks-artifacts@fixture": False}},
     )
     assert result["problems"] == ["native-plugin-policy"]
+
+
+@pytest.mark.parametrize("tool", ["claude", "codex", "grok"])
+@pytest.mark.parametrize("kind", ["skill", "agent"])
+def test_inventory_uses_native_metadata_name_instead_of_unmanaged_filename(tmp_path, tool, kind):
+    native = ".claude" if tool == "claude" else ".codex" if tool == "codex" else ".grok"
+    if kind == "skill":
+        path = (
+            tmp_path
+            / "workspace"
+            / (".agents" if tool == "codex" else native)
+            / "skills"
+            / "other-directory"
+            / "SKILL.md"
+        )
+    else:
+        path = tmp_path / "workspace" / native / "agents" / ("different.toml" if tool == "codex" else "different.md")
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        'name = "review"\ndeveloper_instructions = "unmanaged"\n'
+        if tool == "codex" and kind == "agent"
+        else "---\nname: 'review'\ndescription: Unmanaged\n---\nbody\n"
+    )
+    result = probe(tmp_path, tool=tool, identities=(f"{kind}:review",))
+    assert "native-artifact-collision" in result["problems"]
+    assert "body" not in json.dumps(result["inventory"])
+    unrelated = probe(tmp_path, tool=tool, identities=(f"{kind}:unrelated",))
+    assert unrelated["problems"] == []
+
+
+@pytest.mark.parametrize("tool", ["claude", "codex", "grok"])
+def test_owned_entry_is_exempt_only_when_its_current_native_name_matches(tmp_path, tool):
+    native = ".claude" if tool == "claude" else ".codex" if tool == "codex" else ".grok"
+    path = tmp_path / "home" / native / "agents" / ("review.toml" if tool == "codex" else "review.md")
+    path.parent.mkdir(parents=True)
+    content = 'name = "review"\n' if tool == "codex" else "---\nname: review\n---\nbody\n"
+    path.write_text(content)
+    entries = {str(path): "agent:review"}
+    assert (
+        probe(tmp_path, tool=tool, identities=("agent:review",), paths=(str(path),), entries=entries)["problems"] == []
+    )
+    path.write_text(content.replace("review", "renamed"))
+    assert (
+        "native-artifact-identity-mismatch"
+        in probe(tmp_path, tool=tool, identities=("agent:review",), paths=(str(path),), entries=entries)["problems"]
+    )
+
+
+def test_config_registered_codex_role_cannot_override_selected_persona(tmp_path):
+    configured = {"agents": {"review": {"config_file": "/unmanaged/review.toml"}}}
+    assert "native-artifact-collision" in probe(tmp_path, settings=configured, identities=("agent:review",))["problems"]
+    assert (
+        probe(
+            tmp_path,
+            settings=configured,
+            identities=("agent:review",),
+            entries={"/unmanaged/review.toml": "agent:review"},
+        )["problems"]
+        == []
+    )
+
+
+@pytest.mark.parametrize("layout", ["nested", "symlink", "bad-yaml"])
+def test_ambiguous_native_inventory_refuses_instead_of_skipping_candidates(tmp_path, layout):
+    root = tmp_path / "workspace/.claude/agents"
+    root.mkdir(parents=True)
+    if layout == "nested":
+        (root / "nested").mkdir()
+        (root / "nested/agent.md").write_text("---\nname: review\n---\nbody\n")
+    elif layout == "symlink":
+        outside = tmp_path / "other.md"
+        outside.write_text("---\nname: review\n---\nbody\n")
+        (root / "agent.md").symlink_to(outside)
+    else:
+        (root / "agent.md").write_text("---\nname: [invalid\n---\nbody\n")
+    assert "unreadable-native-inventory" in probe(tmp_path, tool="claude", identities=("agent:review",))["problems"]
+    # An unselected artifact type does not widen preflight's inventory.
+    assert probe(tmp_path, tool="claude", identities=("skill:unrelated",))["problems"] == []
+
+
+@pytest.mark.parametrize("kind", [ArtifactType.SKILL, ArtifactType.AGENT])
+def test_launch_checks_unmanaged_workspace_collision_with_only_handled_ancestor(tmp_path, monkeypatch, kind):
+    import shlex
+    from types import SimpleNamespace
+
+    from agentworks.artifacts.application import SessionArtifactContext
+    from agentworks.artifacts.model import ArtifactInputs
+    from agentworks.capabilities.base import RunContext
+    from agentworks.capabilities.harness_integration import HarnessLaunchIntent
+    from agentworks.errors import StateError
+    from agentworks.plugins.claude.artifacts import outer_artifacts
+    from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
+    from tests.artifacts._fixtures import received
+    from tests.artifacts.test_native_delivery import owned
+
+    home, workspace = tmp_path / "home", tmp_path / "workspace"
+    item = artifact(kind)
+    application = outer_artifacts(received(item), str(home / ".claude"))
+    for file in application.files:
+        path = Path(file.path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(file.data)
+    collision = (
+        workspace / ".claude" / ("skills/other-name/SKILL.md" if kind is ArtifactType.SKILL else "agents/other-name.md")
+    )
+    collision.parent.mkdir(parents=True)
+    collision.write_text("---\nname: review\ndescription: Other definition\n---\nbody\n")
+    probe(tmp_path, tool="claude", identities=())  # Provision only the fake native executable.
+    environment = {
+        "HOME": str(home),
+        "PATH": str(tmp_path / "bin") + os.pathsep + os.environ["PATH"],
+        "CLAUDE_CONFIG_DIR": str(home / ".claude"),
+    }
+    observed_requests = []
+
+    def run(command, *, env, **kwargs):
+        argv = shlex.split(shlex.split(command)[-1])
+        observed_requests.append(json.loads(argv[-1]))
+        return subprocess.run(argv, env={**os.environ, **env}, capture_output=True, text=True, check=False)
+
+    prepared = SessionArtifactContext(
+        inputs=ArtifactInputs(),
+        home=str(home),
+        directory=str(home / "private"),
+        session_uuid="u",
+        run_id="r",
+        ancestor_files=tuple(owned(file) for file in application.files),
+        environment=environment,
+    )
+    integration = ClaudeCodeIntegration(
+        "claude",
+        {},
+        session_name="s1",
+        vm_name="vm",
+        workspace_name="ws",
+        workspace_path=str(workspace),
+        target=None,
+        admin=True,
+        state={},
+        artifact_context=prepared,
+    )
+    monkeypatch.setattr(
+        integration, "_resume_or_launch", lambda *args, **kwargs: pytest.fail("launch reached after collision")
+    )
+    with pytest.raises(StateError):
+        integration.start(RunContext(admin_target=SimpleNamespace(run=run)), intent=HarnessLaunchIntent.CREATE)
+    assert len(observed_requests) == 1
+    assert not prepared.inputs
+    assert set(observed_requests[0]["entries"]) == {file.path for file in application.files if file.native_identity}
+    assert collision.exists()
+
+
+def test_codex_registered_role_layer_without_name_is_valid_inventory(tmp_path):
+    path = tmp_path / "home/.codex/agents/role-layer.toml"
+    path.parent.mkdir(parents=True)
+    path.write_text('developer_instructions = "Role layer without auto-discovery metadata"\n')
+    settings = {"agents": {"review": {"config_file": "agents/role-layer.toml"}}}
+    assert probe(tmp_path, settings=settings, identities=("agent:unrelated",))["problems"] == []
+    assert (
+        probe(tmp_path, settings=settings, identities=("agent:review",), entries={str(path): "agent:review"})[
+            "problems"
+        ]
+        == []
+    )
+    assert "native-artifact-collision" in probe(tmp_path, settings=settings, identities=("agent:review",))["problems"]
+
+
+def test_codex_generated_outer_persona_above_header_limit_remains_discoverable(tmp_path):
+    from dataclasses import replace
+
+    from agentworks.plugins.codex.artifacts import outer_artifacts
+    from tests.artifacts._fixtures import received
+
+    item = artifact(ArtifactType.AGENT)
+    item = replace(item, content=replace(item.content, text="Long instructions.\n" * 4000))
+    application = outer_artifacts(
+        received(item),
+        skills_root=str(tmp_path / "home/.agents/skills"),
+        agents_root=str(tmp_path / "home/.codex/agents"),
+    )
+    file = application.files[0]
+    assert len(file.data) > 32768
+    path = Path(file.path)
+    path.parent.mkdir(parents=True)
+    path.write_bytes(file.data)
+    assert probe(tmp_path, identities=("agent:review",), entries={file.path: "agent:review"})["problems"] == []
+
+
+def test_inventory_collision_retains_native_identity_and_competing_path():
+    path = "/workspace/.claude/agents/alternate.md"
+    problems = _inventory_problems(
+        [{"kind": "agent", "path": path, "frontmatter": "name: review"}],
+        ("agent:review",),
+        {"/home/alice/.claude/agents/review.md": "agent:review"},
+    )
+    assert len(problems) == 1
+    assert (problems[0].identity, problems[0].path) == ("agent:review", path)
+
+
+def test_codex_inventory_bounds_combined_toml_bytes(tmp_path):
+    root = tmp_path / "home/.codex/agents"
+    root.mkdir(parents=True)
+    body = 'name = "unrelated"\ndeveloper_instructions = "instructions"\n'
+    for name in ("first", "second"):
+        (root / f"{name}.toml").write_text(body)
+    total = 2 * len(body.encode())
+    assert probe(tmp_path, identities=("agent:review",), inventory_bytes=total)["problems"] == []
+    assert (
+        "unreadable-native-inventory"
+        in probe(tmp_path, identities=("agent:review",), inventory_bytes=total - 1)["problems"]
+    )
+
+
+def test_removed_skill_support_directories_do_not_block_remaining_native_skill(tmp_path):
+    from agentworks.native_files import NativeFiles
+    from tests.native_setup_fixtures import LocalFixtureTransport
+
+    transport = LocalFixtureTransport(tmp_path)
+    root = tmp_path / "home/.claude/skills"
+    removed = root / "removed"
+    removed.mkdir(parents=True)
+    (removed / "SKILL.md").write_text("---\nname: removed\n---\nbody\n")
+    (removed / "scripts/nested").mkdir(parents=True)
+    (removed / "scripts/nested/check.sh").write_text("exit 0\n")
+    remaining = root / "review/SKILL.md"
+    remaining.parent.mkdir()
+    remaining.write_text("---\nname: review\n---\nbody\n")
+    # NativeFiles owns whole files, so successful cleanup preserves support directories.
+    native = NativeFiles(transport)
+    for path in (removed / "SKILL.md", removed / "scripts/nested/check.sh"):
+        import hashlib
+
+        native.remove(str(path), expected=hashlib.sha256(path.read_bytes()).hexdigest())
+    assert (removed / "scripts/nested").is_dir()
+    assert probe(tmp_path, tool="claude", entries={str(remaining): "skill:review"})["problems"] == []
+
+
+@pytest.mark.parametrize("tool,native", [("claude", ".claude"), ("codex", ".codex"), ("grok", ".grok")])
+def test_workspace_native_parent_symlink_is_refused_before_reading_metadata(tmp_path, tool, native):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside"
+    (outside / "agents").mkdir(parents=True)
+    marker = outside / "agents" / ("other.toml" if tool == "codex" else "other.md")
+    marker.write_text('name = "review"\n' if tool == "codex" else "---\nname: review\n---\n")
+    (workspace / native).symlink_to(outside, target_is_directory=True)
+    result = probe(tmp_path, tool=tool, identities=("agent:review",))
+    assert "unreadable-native-inventory" in result["problems"]
+    assert result["inventory"] == []
+
+
+@pytest.mark.parametrize("scope", ["home", "workspace"])
+def test_codex_skills_parent_symlink_is_refused_before_reading_metadata(tmp_path, scope):
+    anchor = tmp_path / scope
+    anchor.mkdir()
+    outside = tmp_path / "outside"
+    (outside / "skills/review").mkdir(parents=True)
+    (outside / "skills/review/SKILL.md").write_text("---\nname: review\n---\n")
+    (anchor / ".agents").symlink_to(outside, target_is_directory=True)
+    result = probe(tmp_path)
+    assert "unreadable-native-inventory" in result["problems"]
+    assert result["inventory"] == []

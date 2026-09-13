@@ -320,8 +320,8 @@ def test_independent_consumers_do_not_discharge_other_users(db, active_vm):
     other = capture_owner(fixture.registry, "agent", "other", "agent", fixture.owners["agent"].artifacts)
     write_capture(db, "agent", "other", "agent", other, operation="fixture")
     assert (
-        tuple(other.inputs.items())[0].origin.identity
-        != tuple(fixture.captures["agent"].inputs.items())[0].origin.identity
+        tuple(other.inputs.items())[0].origin_identity
+        != tuple(fixture.captures["agent"].inputs.items())[0].origin_identity
     )
     with pytest.raises(StateError):
         fixture.route(user="other")
@@ -479,3 +479,59 @@ def test_removed_bundle_declaration_remains_inspectable(db):
     assert view.status == "unavailable"
     assert view.captured is not None and view.captured.inputs
     assert view.prepared is None
+
+
+def test_provenance_only_capture_refresh_uses_current_winner_with_retained_handling(db):
+    from agentworks.artifacts.inspection import _artifact_metadata
+
+    fixture = graph(db, active=("vm",))
+    previous = fixture.captures["vm"]
+    item = next(previous.inputs.items())
+    record = fixture.save("vm", routes={item.content.name: "session"})
+    fixture.registry.add(
+        "artifact-bundle",
+        "replacement",
+        ArtifactBundle(name="replacement", hints={item.content.name: HintArtifactSpec(text=item.content.text)}),
+        Origin.built_in(source="replacement-fixture"),
+    )
+    config = ArtifactsConfig(bundles=["replacement"])
+    fixture.owners["vm"] = replace(fixture.owners["vm"], artifacts=config)
+    refreshed = capture_owner(fixture.registry, "vm", "vm", "vm", config)
+    newer = next(refreshed.inputs.items())
+    assert newer.identity == item.identity
+    write_capture(db, "vm", "vm", "vm", refreshed, operation="refresh")
+    view = inspect_owner_artifacts(db, fixture.registry, fixture.owners["vm"], "shell")
+    assert view.status == "current" and view.record == record
+    assert view.prepared is not None and next(view.prepared.items()) == newer
+    rows = _artifact_metadata(fixture.registry, config, view)
+    assert rows[0].bundle == "replacement" and rows[0].declared
+    assert read_native_setup(db, "vm", "vm").records == (record,)
+
+
+def test_database_round_trip_retains_map_order_and_current_routing(db):
+    from agentworks.artifacts.state import read_captures
+
+    fixture = graph(db, active=("vm",))
+    fixture.registry.add(
+        "artifact-bundle",
+        "ordered",
+        ArtifactBundle(
+            name="ordered", hints={"zebra": HintArtifactSpec(text="zebra"), "alpha": HintArtifactSpec(text="alpha")}
+        ),
+        Origin.built_in(source="ordered-fixture"),
+    )
+    config = ArtifactsConfig(bundles=["ordered"])
+    fixture.owners["vm"] = replace(fixture.owners["vm"], artifacts=config)
+    capture = capture_owner(fixture.registry, "vm", "vm", "vm", config)
+    fixture.captures["vm"] = capture
+    write_capture(db, "vm", "vm", "vm", capture, operation="setup")
+    record = fixture.save("vm", routes={"zebra": "session", "alpha": "session"})
+    loaded = read_captures(db, "vm", "vm")["vm"]
+    assert list(loaded.inputs.hints) == ["zebra", "alpha"]
+    view = inspect_owner_artifacts(db, fixture.registry, fixture.owners["vm"], "shell")
+    assert view.status == "current" and view.record == record
+    assert view.prepared is not None
+    assert [item.content.name for item in view.prepared.items()] == ["zebra", "alpha"]
+    deferred = deferred_inputs(view, "session")
+    assert deferred is not None
+    assert list(deferred[capture.inputs.owner].hints) == ["zebra", "alpha"]

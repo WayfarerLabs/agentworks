@@ -496,3 +496,28 @@ def test_codex_external_home_does_not_block_home_owned_skills(db, monkeypatch):
     )
     assert all(file.path.startswith("/home/alice/.agents/skills/") for file in result.files)
     assert len(result.deferred) == 1
+
+
+def test_codex_persona_serialization_rejects_output_beyond_inventory_bound(monkeypatch):
+    item = artifact(ArtifactType.AGENT)
+    rendered = codex.outer_artifacts(received(item), skills_root="/skills", agents_root="/agents")
+    limit = len(rendered.files[0].data)
+    monkeypatch.setattr(codex, "MAX_CODEX_PERSONA_BYTES", limit)
+    assert codex.outer_artifacts(received(item), skills_root="/skills", agents_root="/agents") == rendered
+    monkeypatch.setattr(codex, "MAX_CODEX_PERSONA_BYTES", limit - 1)
+    with pytest.raises(ConfigError):
+        codex.outer_artifacts(received(item), skills_root="/skills", agents_root="/agents")
+
+
+def test_shell_index_preserves_declared_key_order_with_fixed_type_order():
+    inputs = received(
+        artifact(ArtifactType.RULE, name="zebra"),
+        artifact(ArtifactType.RULE, name="alpha"),
+        artifact(ArtifactType.HINT, name="zebra"),
+        artifact(ArtifactType.HINT, name="alpha"),
+    )
+    application = shell_artifacts(inputs, "/private", session=True)
+    index = json.loads(next(file.data for file in application.files if file.path.endswith("/index.json")))
+    owner = index["groups"][0]
+    assert list(owner) == ["owner", "hints", "rules", "skills", "agents"]
+    assert list(owner["hints"]) == list(owner["rules"]) == ["zebra", "alpha"]

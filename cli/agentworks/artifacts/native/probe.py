@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import json
 import shlex
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import yaml
 
+from agentworks.artifacts.native.common import MAX_CODEX_PERSONA_BYTES
 from agentworks.errors import StateError
+from agentworks.package_sources import CaptureLimits
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -63,67 +66,32 @@ if workspace:
     roots.append(pathlib.Path(workspace) / default)
 if not request['check_policy']:
     roots = []
+
+def check_discovery_path(path, anchor):
+    # Do not inspect native metadata through links beneath the actual owning root.
+    relative = path.relative_to(anchor)
+    if anchor.is_symlink():
+        raise ValueError()
+    for component in relative.parts:
+        anchor = anchor / component
+        if anchor.is_symlink():
+            raise ValueError()
+
+safe_roots = []
+for root in roots:
+    try:
+        anchor = pathlib.Path(home) if root == pathlib.Path(native_home) else pathlib.Path(workspace)
+        check_discovery_path(root, anchor)
+        if tool == 'codex' and any(':' not in name for name in skill_names):
+            skill_root = anchor / '.agents' / 'skills'
+            check_discovery_path(skill_root, anchor)
+        safe_roots.append(root)
+    except Exception:
+        problems.append('unreadable-native-inventory')
+roots = safe_roots
 inventory = []
 known_entries = request['entries']
-try:
-    candidates = []
-    scanned = 0
-    for root in roots:
-        skill_root = (root.parent / '.agents' / 'skills') if tool == 'codex' else root / 'skills'
-        if tool == 'codex' and root == pathlib.Path(native_home):
-            skill_root = pathlib.Path(home) / '.agents' / 'skills'
-        if any(':' not in name for name in skill_names) and skill_root.exists():
-            if skill_root.is_symlink():
-                raise ValueError()
-            for directory in skill_root.iterdir():
-                scanned += 1
-                if scanned > 512 or directory.is_symlink():
-                    raise ValueError()
-                if not directory.is_dir():
-                    continue
-                marker = directory / 'SKILL.md'
-                if marker.is_symlink() or not marker.is_file():
-                    raise ValueError()
-                candidates.append(('skill', marker, directory.name))
-                if len(candidates) > 512:
-                    raise ValueError()
-        agent_root = root / 'agents'
-        if agent_names and agent_root.exists():
-            if agent_root.is_symlink():
-                raise ValueError()
-            for path in agent_root.iterdir():
-                scanned += 1
-                if scanned > 512 or path.is_symlink() or path.is_dir():
-                    raise ValueError()
-                if path.suffix == ('.toml' if tool == 'codex' else '.md') and path.is_file():
-                    candidates.append(('agent', path, path.stem))
-                if len(candidates) > 512:
-                    raise ValueError()
-    total = 0
-    for kind, path, fallback in candidates:
-        with path.open('rb') as source:
-            raw = source.read(32769)
-        if tool == 'codex' and kind == 'agent':
-            if len(raw) > 32768:
-                raise ValueError()
-            name = tomllib.loads(raw.decode()).get('name')
-            if not isinstance(name, str):
-                raise ValueError()
-            inventory.append({'kind': kind, 'path': str(path), 'name': name})
-        else:
-            lines = raw.splitlines(keepends=True)
-            frontmatter = ''
-            if lines and lines[0].strip() == b'---':
-                end = next((index for index, line in enumerate(lines[1:], 1) if line.strip() == b'---'), None)
-                if end is None:
-                    raise ValueError()
-                frontmatter = b''.join(lines[1:end]).decode('utf-8')
-            total += len(frontmatter.encode())
-            if total > 1048576:
-                raise ValueError()
-            inventory.append({'kind': kind, 'path': str(path), 'fallback_name': fallback, 'frontmatter': frontmatter})
-except Exception:
-    problems.append('unreadable-native-inventory')
+registered_agents = {}
 paths = []
 for root in roots:
     paths.extend([root / 'settings.json', root / 'settings.local.json'] if tool == 'claude' else [root / 'config.toml'])
@@ -149,14 +117,12 @@ for path in paths:
                 problems.append('native-plugin-policy')
         elif tool == 'codex':
             for name, agent in document.get('agents', {}).items():
-                if name in agent_names and (
-                    not isinstance(agent, dict)
-                    or known_entries.get(os.path.normpath(
-                        os.path.join(str(path.parent), str(agent.get('config_file', '')))
-                    ))
-                    != 'agent:' + name
-                ):
-                    problems.append('native-artifact-collision')
+                selected_path = ''
+                if isinstance(agent, dict) and isinstance(agent.get('config_file'), str):
+                    selected_path = os.path.normpath(os.path.join(str(path.parent), agent['config_file']))
+                    registered_agents.setdefault(selected_path, []).append(name)
+                if name in agent_names and known_entries.get(selected_path) != 'agent:' + name:
+                    inventory.append({'kind': 'agent', 'path': str(path), 'name': name})
             skills = document.get('skills', {})
             if skill_names and skills.get('include_instructions') is False:
                 problems.append('native-skill-policy')
@@ -182,6 +148,84 @@ for path in paths:
         pass
     except Exception:
         problems.append('unreadable-native-policy')
+try:
+    candidates = []
+    scanned = 0
+    for root in roots:
+        skill_root = (root.parent / '.agents' / 'skills') if tool == 'codex' else root / 'skills'
+        if tool == 'codex' and root == pathlib.Path(native_home):
+            skill_root = pathlib.Path(home) / '.agents' / 'skills'
+        if any(':' not in name for name in skill_names) and skill_root.exists():
+            if skill_root.is_symlink():
+                raise ValueError()
+            for directory in skill_root.iterdir():
+                scanned += 1
+                if scanned > 512 or directory.is_symlink():
+                    raise ValueError()
+                if not directory.is_dir():
+                    continue
+                marker = directory / 'SKILL.md'
+                if marker.is_symlink() or (marker.exists() and not marker.is_file()):
+                    raise ValueError()
+                if not marker.exists():
+                    # Whole-file cleanup leaves empty supporting directory trees.
+                    # Accept only directory-only remnants, bounded by the same entry budget.
+                    pending = [directory]
+                    while pending:
+                        for leftover in pending.pop().iterdir():
+                            scanned += 1
+                            if scanned > 512 or leftover.is_symlink() or not leftover.is_dir():
+                                raise ValueError()
+                            pending.append(leftover)
+                    continue
+                candidates.append(('skill', marker, directory.name))
+                if len(candidates) > 512:
+                    raise ValueError()
+        agent_root = root / 'agents'
+        if agent_names and agent_root.exists():
+            if agent_root.is_symlink():
+                raise ValueError()
+            for path in agent_root.iterdir():
+                scanned += 1
+                if scanned > 512 or path.is_symlink() or path.is_dir():
+                    raise ValueError()
+                if path.suffix == ('.toml' if tool == 'codex' else '.md') and path.is_file():
+                    candidates.append(('agent', path, path.stem))
+                if len(candidates) > 512:
+                    raise ValueError()
+    total = 0
+    codex_total = 0
+    for kind, path, fallback in candidates:
+        limit = request['codex_persona_bytes'] if tool == 'codex' and kind == 'agent' else 32768
+        if tool == 'codex' and kind == 'agent':
+            limit = min(limit, request['inventory_bytes'] - codex_total)
+        with path.open('rb') as source:
+            raw = source.read(limit + 1)
+        if tool == 'codex' and kind == 'agent':
+            if len(raw) > limit:
+                raise ValueError()
+            codex_total += len(raw)
+            name = tomllib.loads(raw.decode()).get('name')
+            if name is None:
+                aliases = registered_agents.get(str(path), [])
+                name = next((alias for alias in aliases if alias in agent_names), next(iter(aliases), None))
+            if not isinstance(name, str):
+                raise ValueError()
+            inventory.append({'kind': kind, 'path': str(path), 'name': name})
+        else:
+            lines = raw.splitlines(keepends=True)
+            frontmatter = ''
+            if lines and lines[0].strip() == b'---':
+                end = next((index for index, line in enumerate(lines[1:], 1) if line.strip() == b'---'), None)
+                if end is None:
+                    raise ValueError()
+                frontmatter = b''.join(lines[1:end]).decode('utf-8')
+            total += len(frontmatter.encode())
+            if total > 1048576:
+                raise ValueError()
+            inventory.append({'kind': kind, 'path': str(path), 'fallback_name': fallback, 'frontmatter': frontmatter})
+except Exception:
+    problems.append('unreadable-native-inventory')
 if tool == 'grok' and workspace and request['paths']:
     result = subprocess.run(['git', '-C', workspace, 'rev-parse', '--show-toplevel'], capture_output=True, text=True)
     if result.returncode == 0:
@@ -236,6 +280,8 @@ def probe_native(
     identities = tuple(entries.values())
     request = {
         "tool": tool,
+        "codex_persona_bytes": MAX_CODEX_PERSONA_BYTES,
+        "inventory_bytes": CaptureLimits().total_bytes,
         "home": home,
         "workspace": workspace,
         "paths": tuple(file.path for file in files),
@@ -263,10 +309,21 @@ def probe_native(
             raise ValueError()
     except (ValueError, KeyError, IndexError, TypeError):
         raise StateError(f"could not verify {tool} artifact discovery on the launch target") from None
-    problems.extend(_inventory_problems(observed.get("inventory"), identities, entries))
+    inventory_problems = _inventory_problems(observed.get("inventory"), identities, entries)
+    problems.extend(problem.code for problem in inventory_problems)
+    details = []
+    for problem in inventory_problems:
+        if problem.identity:
+            managed = [
+                f"{file.path!r} (origins: {', '.join(file.origins)})"
+                for file in files
+                if file.native_identity == problem.identity or file.path == problem.path
+            ]
+            details.append(f"Native {problem.identity!r} at {problem.path!r}; managed artifacts: {', '.join(managed)}")
     if problems:
         raise StateError(
-            f"{tool} artifact delivery: " + "; ".join(_PROBLEM_MESSAGES[problem] for problem in problems),
+            f"{tool} artifact delivery: "
+            + "; ".join([*(_PROBLEM_MESSAGES[problem] for problem in problems), *details]),
             hint=(
                 "Inspect the native home, relevant restrictions, and installed CLI version. "
                 "This preflight cannot verify whether another native configuration layer overrides a restriction."
@@ -275,12 +332,22 @@ def probe_native(
     return root
 
 
-def _inventory_problems(inventory: object, identities: tuple[str, ...], entries: Mapping[str, str]) -> list[str]:
+@dataclass(frozen=True)
+class _InventoryProblem:
+    code: str
+    identity: str = ""
+    path: str = ""
+
+
+def _inventory_problems(
+    inventory: object, identities: tuple[str, ...], entries: Mapping[str, str]
+) -> list[_InventoryProblem]:
     """Interpret bounded target metadata without requiring a YAML parser on the guest."""
     try:
         if not isinstance(inventory, list) or len(inventory) > 512:
             raise ValueError
         selected = set(identities)
+        total = 0
         for row in inventory:
             if (
                 not isinstance(row, dict)
@@ -293,6 +360,9 @@ def _inventory_problems(inventory: object, identities: tuple[str, ...], entries:
                 header = row.get("frontmatter")
                 if not isinstance(header, str) or len(header.encode()) > 32768:
                     raise ValueError
+                total += len(header.encode())
+                if total > 1048576:
+                    raise ValueError
                 metadata = yaml.safe_load(header) if header else {}
                 if not isinstance(metadata, dict):
                     raise ValueError
@@ -303,10 +373,10 @@ def _inventory_problems(inventory: object, identities: tuple[str, ...], entries:
             expected = entries.get(row["path"])
             if expected is not None:
                 if native_identity != expected:
-                    return ["native-artifact-identity-mismatch"]
+                    return [_InventoryProblem("native-artifact-identity-mismatch", expected, row["path"])]
                 continue
             if native_identity in selected:
-                return ["native-artifact-collision"]
+                return [_InventoryProblem("native-artifact-collision", native_identity, row["path"])]
         return []
     except (ValueError, TypeError, yaml.YAMLError, RecursionError):
-        return ["unreadable-native-inventory"]
+        return [_InventoryProblem("unreadable-native-inventory")]

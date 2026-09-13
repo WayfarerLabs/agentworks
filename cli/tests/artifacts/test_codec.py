@@ -139,3 +139,11 @@ def test_agent_capture_and_decode_reject_nested_execution_metadata(tmp_path: Pat
     )
     with pytest.raises(SourceRefError):
         decode_inputs(altered_payload(item, altered))
+
+
+@pytest.mark.parametrize("ordinal", [-1, True, 1, "0"])
+def test_decode_rejects_invalid_map_ordinals(tmp_path: Path, ordinal: object) -> None:
+    payload = encode_inputs(group(captured_skill(tmp_path)))
+    cast("dict[str, dict[str, object]]", payload["skills"])["review"]["ordinal"] = ordinal
+    with pytest.raises(SourceRefError):
+        decode_inputs(payload)

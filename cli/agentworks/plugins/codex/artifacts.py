@@ -11,6 +11,7 @@ import tomli_w
 from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral, ArtifactFile
 from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import (
+    MAX_CODEX_PERSONA_BYTES,
     NativeSessionArtifacts,
     artifact_file,
     context_text,
@@ -41,7 +42,10 @@ def _persona(item: ArtifactInput, *, role_layer: bool = False) -> str:
     }
     if not role_layer:
         values.update(name=item.content.name, description=item.content.description)
-    return tomli_w.dumps(values)
+    rendered = tomli_w.dumps(values)
+    if len(rendered.encode()) > MAX_CODEX_PERSONA_BYTES:
+        raise ConfigError("Codex persona exceeds the supported native configuration file size")
+    return rendered
 
 
 def outer_artifacts(inputs: ArtifactInputs, *, skills_root: str, agents_root: str) -> ArtifactApplication:

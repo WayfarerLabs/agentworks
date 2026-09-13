@@ -263,9 +263,12 @@ def test_reinit_refreshes_source_and_failed_capture_cannot_publish_old_success(o
     assert not read_native_setup(owner.db, "agent", "agent").records
 
 
+@pytest.mark.parametrize("legacy_capture", [False, True])
 @pytest.mark.parametrize("modified", [False, True])
 @pytest.mark.parametrize("remove_activation", [False, True])
-def test_owned_effect_removal_uses_native_state_and_blocks_pending_cleanup(owner, modified, remove_activation):
+def test_owned_effect_removal_uses_native_state_and_blocks_pending_cleanup(
+    owner, modified, remove_activation, legacy_capture
+):
     owner.db.insert_agent("agent", "vm", "worker", template="configured")
     workspace = owner.db.insert_workspace("project", str(owner.target.root / "project"), "vm", "project")
     template = ResolvedAgentTemplate(
@@ -279,6 +282,19 @@ def test_owned_effect_removal_uses_native_state_and_blocks_pending_cleanup(owner
     run_setup(owner.db, owner.registry, inputs, user_call(owner), operation="agent-init")
     previous = read_native_setup(owner.db, "agent", "agent").records[0]
     assert previous.complete and len(previous.artifact_files) == 2
+    if legacy_capture:
+        from agentworks.artifacts.state import UnsupportedArtifactCaptureVersionError
+        from agentworks.db import AppliedStateKey, VersionedPayload
+
+        owner.db.instance_state.replace_applied_slices(
+            "agent",
+            "agent",
+            "legacy-fixture",
+            {AppliedStateKey.ARTIFACT_INPUTS: VersionedPayload(1, {"components": {}})},
+        )
+        with pytest.raises(UnsupportedArtifactCaptureVersionError):
+            read_captures(owner.db, "agent", "agent")
+        assert read_native_setup(owner.db, "agent", "agent").records[0] == previous
     managed = Path(previous.artifact_files[0].path)
     if modified:
         managed.write_text("operator change")
@@ -301,7 +317,15 @@ def test_owned_effect_removal_uses_native_state_and_blocks_pending_cleanup(owner
         assert len(state.records[0].artifact_files) == 1
         assert view.status == ("retirement" if remove_activation else "incomplete")
         with pytest.raises(StateError):
-            session_artifacts(owner.db, owner.registry, owner.vm, workspace, "agent", "shell", ())
+            session_artifacts(
+                owner.db,
+                owner.registry,
+                owner.vm,
+                workspace,
+                "agent",
+                "shell",
+                ArtifactGroup(ArtifactOwner("session", "session", "s1")),
+            )
     else:
         assert not managed.exists()
         assert not state.records if remove_activation else state.records[0].complete

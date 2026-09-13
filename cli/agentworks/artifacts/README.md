@@ -45,9 +45,8 @@ kind: artifact-bundle
 metadata:
   name: setup-notes
 spec:
-  artifacts:
+  hints:
     tools:
-      type: hint
       text: Project tools are available through mise.
 ---
 apiVersion: agentworks/v1
@@ -85,6 +84,27 @@ facets likewise pass their applicable inputs to session.
 Use `agw artifacts show --agent <agent-name> --integration shell` to inspect the captured input and
 recorded handling. The templates themselves do not create instances. See `agw vm create --help`,
 `agw agent create --help` and `agw session create --help` for your normal instance workflow.
+
+## Composition and names
+
+Bundles contain four maps: `hints`, `rules`, `skills`, and `agents`. Each map key is the artifact's
+canonical name. Skill and persona frontmatter must agree with that key; skill names also match the
+selected directory. Names use at most 64 lowercase letters, digits and single hyphens.
+
+A bundle can `inherits` other bundles through ordinary resource inheritance. Each type map merges by
+key, replacing an overridden definition completely. A child `source` replaces a parent's inline
+`text`; an overridden skill replaces the entire package. Discarded parent sources are not acquired.
+
+Within one owner, later entries in `artifacts.bundles` replace earlier definitions with the same
+type and key. Inspection retains compact evidence of those replacements. Changed content emits a
+warning; identical content stays quiet and still records the winning source. Traversal uses hints,
+rules, skills, then agents, preserving key insertion order within each map. Replacement keeps that
+key's position. Different artifact types do not compete.
+
+Each actual owner keeps its own group. A deferred VM group remains a VM group through user and
+session routing; it never becomes part of the receiver's local group. The same type and key from
+different scopes remain separate contributions. Integrations must preserve them through supported
+native placement or aggregation, or refuse ambiguous delivery explicitly.
 
 ## Sources and refresh
 
@@ -140,9 +160,27 @@ retains the ordinary VM deletion behavior: its filesystem disappears with it.
 | Codex       | Native skills and agent definitions; hints/rules defer | Added developer instructions and private agent configuration; skills require earlier native handling |
 | Grok Build  | Native rules, skills, and agent definitions            | Added rules and agent definitions; skills require earlier native handling                            |
 
-Native identity can differ from bundle entry identity, including plugin skill namespaces. Inspection
-shows recorded native names and locations. Rules remain unconditional; filename similarity alone
-does not establish that a harness loads them as context.
+The map key supplies the native name, with a native namespace where required, such as Claude's
+session skill plugin. Inspection shows recorded names and locations. Shell uses scope directories
+and a grouped index, so equal names from different owners remain separately accessible. Claude and
+Grok combine hints in `agentworks-hints.md` and same-key rules in a rule file at each destination.
+Their user and project rule discovery is additive. Codex adds deferred hints and rules to session
+developer instructions.
+
+The native adapters refuse ambiguous skill or persona identities across scopes, including already
+handled ancestors. Before managed launch, a bounded inventory also checks existing native entries in
+the known user and direct workspace discovery roots. It reads native metadata names, including Codex
+configuration registrations, rather than assuming filenames are names. Conflicts identify the native
+name and competing paths. This check still runs when all applicable inputs were handled upstream.
+
+Inventory covers selected skill/persona types, with at most 512 directory entries, YAML headers up
+to 32 KiB each and 1 MiB combined, and Codex persona TOML files up to 32 MiB each and 64 MiB
+combined. Generated Codex persona files obey that same bound. Symlinked or nested candidate layouts
+are explicitly unsupported. These are conservative Agentworks support limits, not claims that those
+layouts are invalid native configurations. The inventory does not claim to cover additional ancestor
+repository roots, third-party plugin locations, or changes after preflight. Unknown native discovery
+extensions require separate verification; a successful preflight is not an exhaustive native
+inventory.
 
 There is no separate session filesystem. Session publication uses the actual user's private
 `~/.agentworks-artifacts/session/<session_uuid>/<run_id>/` directory. It avoids exposing session
@@ -165,8 +203,9 @@ agw artifacts show --session review --integration codex
 
 Inspection includes applicable ancestor content, even artifacts already handled upstream. It shows
 current declarations, captured revisions, activation, recorded handling and deferral, and native
-placement. Missing captures remain unknown. Stale, interrupted, or malformed evidence cannot become
-an empty successful result. Selectors must describe one actual lineage.
+placement, current winning provenance and compact replacement evidence. Missing captures remain
+unknown. Stale, interrupted, or malformed evidence cannot become an empty successful result.
+Selectors must describe one actual lineage.
 
 The command reads existing state and declarations. It does not fetch sources, apply integrations,
 resolve secrets, or attest to the current filesystem or model context. Artifact bodies are omitted.
@@ -176,9 +215,9 @@ To change setup, first establish authorization for the owning operation and insp
 
 `capture.py` acquires workstation files/trees or immutable Git objects through `package_sources.py`.
 It normalizes designated UTF-8 text to LF, preserves binary bytes and executable intent, and emits
-the frozen values in `model.py`. Skills are complete standard Agent Skills packages. Agents are
-agent personas. Sources are edge concerns: routing and integration APIs consume the same normalized
-inputs regardless of their source.
+the frozen groups and values in `model.py`. Skills are complete standard Agent Skills packages.
+Agents are agent personas. Sources are edge concerns: routing and integration APIs consume the same
+normalized inputs regardless of their source.
 
 `codec.py` validates the bounded lossless wire representation. `state.py` records one common core
 capture per owner component in the existing instance-state store. `routing.py` reads that capture

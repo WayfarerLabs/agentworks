@@ -76,6 +76,7 @@ class _Replacement(_Record):
 
 
 class _Input(_Record):
+    ordinal: Annotated[StrictInt, Field(ge=0, lt=_LIMITS.members)]
     content: _Content
     origin: _Origin
     provenance: _Provenance
@@ -109,7 +110,9 @@ def encode_inputs(inputs: ArtifactGroup) -> dict[str, object]:
     result: dict[str, dict[str, object]] = {kind.value + "s": {} for kind in ArtifactType}
     for item in inputs.items():
         content = item.content
-        result[content.type.value + "s"][content.name] = {
+        entries = result[content.type.value + "s"]
+        entries[content.name] = {
+            "ordinal": len(entries),
             "content": {
                 "type": content.type.value,
                 "name": content.name,
@@ -152,7 +155,11 @@ def decode_inputs(payload: object) -> ArtifactGroup:
         total_bytes = 0
         total_members = 0
         for artifact_type in ArtifactType:
-            for name, record in getattr(envelope, artifact_type.value + "s").items():
+            entries = getattr(envelope, artifact_type.value + "s")
+            ordered = sorted(entries.items(), key=lambda entry: entry[1].ordinal)
+            if [record.ordinal for _, record in ordered] != list(range(len(ordered))):
+                raise SourceRefError("persisted artifact map order is invalid")
+            for name, record in ordered:
                 members: list[ArtifactMember] = []
                 for row in record.content.members:
                     if total_bytes + len(row.data) * 3 // 4 > _LIMITS.total_bytes + 2:

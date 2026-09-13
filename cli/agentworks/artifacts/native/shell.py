@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict
 from typing import TYPE_CHECKING
 
@@ -48,5 +49,11 @@ def shell_artifacts(inputs: ArtifactInputs, root: str, *, session: bool = False)
             }
         groups.append({"owner": asdict(group.owner), **maps})
     if inputs:
-        files.append(artifact_file(f"{root}/index.json", json_text({"groups": groups}), tuple(inputs.items())))
+        files.append(
+            artifact_file(
+                f"{root}/index.json",
+                json.dumps({"groups": groups}, ensure_ascii=False, indent=2) + "\n",
+                tuple(inputs.items()),
+            )
+        )
     return ArtifactApplication(tuple(files), artifacts_dir=root if session and inputs else None)

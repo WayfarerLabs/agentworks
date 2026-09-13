@@ -100,11 +100,6 @@ class ArtifactOrigin:
     def owner(self) -> ArtifactOwner:
         return ArtifactOwner(self.component, self.resource_kind, self.resource_name)
 
-    @property
-    def identity(self) -> str:
-        address = [self.component, self.resource_kind, self.resource_name, self.producer, self.bundle, self.entry]
-        return hashlib.sha256(json.dumps(address, separators=(",", ":")).encode()).hexdigest()
-
 
 @dataclass(frozen=True)
 class ArtifactProvenance:

@@ -33,16 +33,20 @@ owned effects to retire is skipped and not marked applied. A config model, inclu
 schema, does not establish facet support. See
 [harness facets](../../../../docs/guides/harness-facets.md) for complete configuration examples.
 
-Contract version 5 adds artifact delivery. Core captures each owner's `artifacts.bundles` and
-supplies immutable normalized inputs in `SetupInvocation.artifacts`. Setup methods return an
-`ArtifactApplication`: concrete native files plus deferrals for inputs requiring a later facet. Core
-performs guarded whole-file publication and checkpoints confirmed ownership. The integration owns
-native formats, placement, compatibility checks and routing decisions. A successful application
-reports inputs omitted from its deferral list as handled. The integration must fulfill that delivery
-obligation, through native files, launch arguments or another supported native mechanism; omission
-is its handling report, not independent proof of consumption. Core validates the result and refuses
-final-session deferrals. Returning the old `None` result is a contract error even for an empty
-invocation.
+Contract version 6 supplies grouped artifact delivery. Core captures each owner's
+`artifacts.bundles` into an immutable `ArtifactGroup` with hints, rules, skills and agents maps.
+`SetupInvocation.artifacts` is an `ArtifactInputs` value: one local group and deferred groups keyed
+by their original owner. `SessionArtifactContext.inputs` uses the same boundary. Later selected
+bundles replace whole same-type/key definitions within an owner; different owners never overwrite
+each other. An integration must consume those groups without flattening away equal names. Setup
+methods return an `ArtifactApplication`: concrete native files plus deferrals for inputs requiring a
+later facet. Core performs guarded whole-file publication and checkpoints confirmed ownership. The
+integration owns native formats, placement, compatibility checks and routing decisions. A successful
+application reports inputs omitted from its deferral list as handled. The integration must fulfill
+that delivery obligation, through native files, launch arguments or another supported native
+mechanism; omission is its handling report, not independent proof of consumption. Core validates the
+result and refuses final-session deferrals. Returning the old `None` result is a contract error even
+for an empty invocation.
 
 A VM deferral chooses exactly one of user, workspace or session. User/workspace deferrals can only
 target session. Core sends an inactive VM's inputs to user, then passes an inactive user or
@@ -51,8 +55,8 @@ Missing or stale active artifact results require the owning setup operation.
 
 Before `start`, core calls `prepare_artifacts` with the immutable `SessionArtifactContext` available
 on the session binding. This includes completed environment, actual home, prospective session/run
-IDs, remaining inputs and ancestor file ownership metadata. Return the session application in
-`HarnessStart.artifacts`. Core refuses final deferrals before replacing a running workload and
+IDs, grouped remaining inputs and ancestor file ownership metadata. Return the session application
+in `HarnessStart.artifacts`. Core refuses final deferrals before replacing a running workload and
 restricts session file publication to that run's private directory under the actual user's home.
 Generated literal argv values must use `quote_literal_argv` so artifact text is not interpreted as
 Agentworks template substitutions. Native conversation IDs remain integration-owned.
