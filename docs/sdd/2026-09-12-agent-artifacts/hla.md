@@ -217,6 +217,17 @@ The VM never examines downstream instances or activations. Its reusable result i
 actual user/workspace when those owners run. Handling for one user does not consume the VM result
 for another. Only the session joins its own actual user and workspace branches.
 
+Application timing follows the handler. Applying native files updates that location immediately;
+whether a running harness reloads them is outside core's guarantee. A deferral updates only reusable
+inputs, so existing descendants retain their prior delivery until the receiving setup or managed
+session launch runs. Owning setup reports this timing when returning deferrals, or when capturing
+local inputs for inactive passthrough, without scanning downstream activation or scheduling repairs.
+User setup and managed session start/restart provide their ordinary refresh points. Workspace setup
+has only creation: existing workspaces cannot refresh artifacts in place, and diagnostics must not
+invent a workspace reinit/repair path. Recreating a workspace remains a separate lifecycle decision.
+Changed or removed inputs still use existing stale-evidence and owned-cleanup checks at the
+receiver.
+
 For an inactive VM facet, core routes its captured inputs to user. It does not copy them down both
 branches. An inactive user/workspace facet leaves its applicable routed and local inputs unhandled
 for session. Resolution is lazy for the selected integration and actual ancestor path; no inactive

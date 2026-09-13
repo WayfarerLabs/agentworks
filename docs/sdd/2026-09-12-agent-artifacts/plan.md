@@ -398,3 +398,10 @@ private project/complexity/correctness review, relevant native diagnostics, gate
 
 Scoped VM/native/two-user acceptance still requires operator inventory and a budget. The additional
 fix authorization does not identify a shared host or permit inventing a cloud test environment.
+
+During round 4, the operator also called out the refresh asymmetry: applied native files may be
+reloaded by a running harness, while deferred updates wait for receiving setup or session start.
+Workspace setup has no in-place refresh. This clarification joins the current round:
+
+- [ ] Document application versus deferral timing, including removal and the workspace limitation;
+      add concise owning-setup warnings without downstream scans or unsupported remediation.

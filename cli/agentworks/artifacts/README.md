@@ -111,6 +111,20 @@ have no reinit operation; recreate the workspace when its artifact setup must ch
 creation and managed launch prepare session-owned inputs. A stale ancestor requires its own setup
 operation; starting a descendant does not repair it implicitly.
 
+Applying files at an owning facet changes its native locations during that setup. A running workload
+may pick up those files if its harness supports reloading them; Agentworks does not promise live
+reload. Deferral instead records inputs for a later facet and does not update existing descendants.
+User-routed changes take effect when the actual user's setup runs. Session-routed changes take
+effect on a subsequent managed start or restart, after any stale ancestors have been refreshed.
+Running sessions retain their existing delivery until then.
+
+Workspace-routed changes have a stricter limit: workspace setup runs only during creation. There is
+no workspace reinit, and workspace repair does not refresh artifacts. A stale existing workspace
+cannot adopt those changes in place. Choosing to recreate it is a separate lifecycle decision, not
+an automatic response to an artifact update. Setup warns about the delayed application of deferred
+inputs without inspecting or modifying downstream owners. This timing also matters when inputs are
+removed: updating an ancestor alone does not retire effects previously applied by a descendant.
+
 Applied config records identify files and registrations owned by the integration. Refresh removes
 obsolete owned effects where supported. Existing unowned content and files changed since publication
 require resolution rather than silent replacement. Removing an activation with retained effects

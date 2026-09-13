@@ -187,6 +187,17 @@ locations or passes them to each consuming session. Workspace placement is share
 of that workspace, so session-only content belongs in the private session directory under the actual
 user's home.
 
+Applying files at a facet updates its native locations during that setup. Whether a running workload
+reloads them depends on the harness. Deferring inputs updates only the reusable result; existing
+descendants and running sessions keep their prior delivery until the receiving user's setup or
+managed session start/restart runs. Stale ancestors must be refreshed in their own lifecycle order.
+
+Workspace setup runs only at creation. There is no workspace reinit, and workspace repair does not
+refresh artifacts. An existing workspace cannot adopt changed workspace-routed inputs in place;
+recreation is a separate lifecycle decision. Setup warns about deferred application without scanning
+or changing descendants. Removal has the same timing boundary: ancestor refresh does not remove
+files previously applied by a descendant.
+
 See `agw guide show concept-agent-artifacts` for bundle examples, source capture, native support,
 and inspection. `agw artifacts show` includes upstream handling even when handled payloads no longer
 flow to a descendant.

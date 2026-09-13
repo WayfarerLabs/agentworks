@@ -523,7 +523,9 @@ spec:
       plugins: [nerftools-default@nerftools]
 ```
 
-See [native harness setup](../docs/guides/native-harness-setup.md) for settings policies and native
+Use `agw guide show concept-harness-integrations` for scopes, facets, activation and deferred
+application, or read [the harness integration guide](../docs/guides/harness-facets.md). See
+[native harness setup](../docs/guides/native-harness-setup.md) for settings policies and native
 ownership, and [the Claude setup migration guide](../docs/guides/migrating-claude-setup.md) for
 existing declarations and stored instance overlays.
 

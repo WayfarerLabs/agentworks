@@ -204,6 +204,16 @@ for the session's selected integration and actual ancestors; agent initializatio
 inactive integrations or store empty passthrough results for them. Origin survives every skipped
 facet.
 
+Applying an artifact updates the handling facet's native locations during its setup. Live reload by
+an already running workload is harness-specific and is not guaranteed. Deferral records inputs for
+later application; it does not refresh existing descendants. Owning setup must warn when it defers
+inputs, including inactive-owner passthrough of locally captured inputs, without enumerating or
+mutating descendants. User-routed updates require that actual user's setup; session-routed updates
+require a subsequent managed start or restart after stale ancestor setup is resolved. Workspace
+setup runs only on creation: there is no workspace reinit, and neither repair nor an upstream reinit
+can refresh an existing workspace's applied artifacts. Diagnostics must describe that limitation
+without suggesting unsupported workspace operations. Removal follows the same descendant timing.
+
 An explicitly activated but unimplemented facet is an error. That is distinct from an inactive facet
 and from an implemented facet that needs no native changes. Successful setup alone never means an
 artifact was handled. No separate per-item acknowledgment ledger is required merely to express
