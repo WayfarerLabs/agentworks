@@ -5,7 +5,8 @@
 The operator authorized starting this successor on 2026-09-12 after PR 761 merged. The requirements
 seed carries settled operator direction and clearly marked proposals; acceptance of new requirements
 and the HLA remains with the operator. The effort lead owns architecture, sequencing and this plan.
-Implementation has not started.
+Implementation has not started. The current deliverable is the [HLA](hla.md), incorporating the
+revised FRD. Expand the full implementation sequence after this design checkpoint is reviewed.
 
 Keep predecessor closeout separate. Its implementation is merged, but seven acceptance/cleanup
 checkboxes remain open in the
@@ -16,12 +17,16 @@ Do not change the saga's existing ledger or contracts; route coordination to the
 
 ## Delivery
 
-Publish the FRD seed and this initial plan in a dedicated PR based on merged main. It is intended to
-merge as a seed and therefore receives a ready handoff after checks and private review. Carry
-`sdd:agent-artifacts` and `saga:next-steps`. Publishing a draft requirement does not itself accept
-it. The subsequent HLA is a separate draft checkpoint using `review-requested`; promote it only
-after authenticated approval. Decide implementation PR boundaries from the reviewed architecture,
-not a speculative list of subsystems now.
+Operator decision, 2026-09-12: keep requirements, research, HLA and the entire implementation on
+branch `sdd/agent-artifacts` and [PR 794](https://github.com/WayfarerLabs/agentworks/pull/794). This
+supersedes the earlier plan and handoffs that treated the seed as a separate merge increment. No
+separate design merge is planned; the operator does not see a coordination need for one here.
+
+Keep the PR draft while work remains. Use `review-requested` for a coherent HLA checkpoint on this
+same PR, and remove it before incorporating changes or continuing implementation. Requirements and
+HLA approval remain explicit checkpoints; sharing a PR does not approve either. Carry
+`sdd:agent-artifacts` and `saga:next-steps` throughout. Mark ready without `review-requested` only
+when the implementation and required validation are complete and the whole PR is ready to land.
 
 ## Requirements and research
 
@@ -46,8 +51,10 @@ not a speculative list of subsystems now.
 
 ## Design checkpoint
 
-- [ ] Write an HLA covering bundle resources, acquisition and capture, normalized representation,
+- [x] Write an HLA covering bundle resources, acquisition and capture, normalized representation,
       ownership and lazy routing, integration APIs, native placement, final disposition and cleanup.
+      It includes `agw artifacts show`, the core-to-integration pipeline and the later producer
+      boundary.
 - [ ] Include worked manifests and the VM/user/workspace/session flow, with inactive facets,
       multiple consumers, duplicate-route prevention and session name reuse.
 - [ ] Check the saga's `session_uuid`/`run_id` contract and implementation ownership with the saga

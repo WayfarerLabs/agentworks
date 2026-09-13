@@ -2,16 +2,17 @@
 
 ## Status and terminology decision
 
-Terminology research, 2026-09-12. This first pass addresses the operator's naming questions and the
-skill content standard. Acquisition options, Rulesync reuse and the complete native support matrix
-remain open research work. No runtime dependency, wire schema or implementation is approved.
+Research for the initial HLA, checked 2026-09-12 and 2026-09-13. It covers terminology, existing
+Agentworks source handling, Rulesync reuse, and documented native delivery mechanisms. Native
+behavior still needs implementation-time verification against installed versions; this is not live
+acceptance evidence.
 
-The operator accepted **agents** as shorthand for **agent personas** on 2026-09-12. An agent persona
-is a reusable definition of an agent's behavior, whether used for a primary agent or delegated work
-where the harness supports it. The definition may include instructions and supported execution
-settings. This terminology does not imply a shared standard format. Keep **subagent** for an agent
-executing delegated work. Use **agent persona** and **agent resource** where the artifact and the
-existing Agentworks resource could otherwise be confused.
+**Agents** is shorthand for **agent personas**. An agent persona is a reusable definition of an
+agent's behavior, whether used for a primary agent or delegated work where the harness supports it.
+The definition may include instructions and supported execution settings. This terminology does not
+imply a shared standard format. Keep **subagent** for an agent executing delegated work. Use **agent
+persona** and **agent resource** where the artifact and the existing Agentworks resource could
+otherwise be confused.
 
 ## Findings and design implications
 
@@ -25,7 +26,7 @@ needed.
 
 Decision: use standard Agent Skills content, preserving the whole package during acquisition and
 normalization. Do not invent a parallel skill document format. Text normalization to Unix LF must
-preserve binary supporting assets. The operator's rule definition has different loading semantics:
+preserve binary supporting assets. The artifact rule definition has different loading semantics:
 rule guidance is always loaded into context wherever it applies; skills disclose content as needed.
 
 ### Claude Code supports primary and delegated use of a definition
@@ -99,21 +100,122 @@ when choosing the new bundle configuration shape; do not treat a successful text
 permission to rewrite an unknown format. The persisted normalized representation must preserve both
 opaque bytes and text.
 
-The old source spelling, declaration map, refresh-on-reinit schedule and snapshot codec are
-historical proposals, not selected interfaces for this SDD. The new `artifact-bundle` resource owns
-ingestion; source refresh and the normalized carrier still need design. Likewise, the old helper
-names are research leads, not a claim that current transfer helpers implement package capture.
+The old source spelling, declaration map, refresh schedule and snapshot codec are historical
+proposals. The [HLA](hla.md) makes its own current choices under the new `artifact-bundle` resource;
+recovering the safety constraints did not itself approve the old interfaces. Likewise, the old
+helper names are research leads, not a claim that current transfer helpers implement package
+capture.
 
-## Remaining research
+## Existing source and inspection boundaries
 
-- Specify which agent persona fields are portable or native.
-- Research Rulesync's canonical representations and generators, including its agent definitions.
-- Compare acquisition and distribution formats and define capture/update behavior.
-- Design ingestion against the recovered safety constraints, including conservative text
-  classification and byte-preserving fixtures, without restoring the old declaration/wire design.
-- Complete the artifact type and facet matrix for every shipped integration, including primary
-  versus delegated persona support and unsupported delivery outcomes. State what counts as handled
-  for shell file delivery and for each native loading mechanism.
+At `1e11e6ee`, [sources.py](../../../cli/agentworks/sources.py) supplies `SourceRef` and parsing for
+workstation paths, `file::` and Git references with a subpath/revision. Its
+`snapshot_workstation_file` is a precedent for reading bytes on the invoking workstation before
+native writes. Reuse these conventions and shared primitives where their contracts fit.
+
+The dotfiles transfer functions have a different contract. `fetch_dir` ignores Git subpaths, and its
+Git path operates on a mutable guest checkout. Agent dotfiles can execute an installer. The simple
+workstation snapshot helper follows links and does not capture a directory's executable metadata or
+detect observed mutation across a package capture. Those behaviors cannot implement the FRD's
+acquisition boundary unchanged. Extend common source handling with validated package capture; do not
+call the dotfiles installation workflow as artifact ingestion or change its existing behavior
+incidentally. These are code observations, not live acquisition tests.
+
+[agw env show](../../../cli/agentworks/cli/commands/env.py) provides familiar scope selectors and a
+thin command over a typed service. Its [service](../../../cli/agentworks/env/show.py) shows resolved
+env winners, accepts overrides of inferred parents, and supplies admin env without an agent. Those
+semantics are not artifact routing: artifacts need actual parent relationships, all relevant
+origins, and declared versus applied evidence. Reuse resource resolution and the evidence concepts
+in [instance_description.py](../../../cli/agentworks/instance_description.py) and
+[instance state](../../../cli/agentworks/db/instance_state.py), with a dedicated artifact
+projection.
+
+## Rulesync reuse decision
+
+[Rulesync's source declarations](https://rulesync.dyoshikawa.com/guide/declarative-sources.html)
+separate acquisition from generation and record resolved revisions. Its source-selection and
+distribution examples are useful prior art; this HLA chooses workstation and Git inputs, leaving
+packaged distributions as a later reader of the same normalized form.
+
+[File formats](https://rulesync.dyoshikawa.com/reference/file-formats) provide a useful common
+persona model: name, description, instruction body and tool-specific options. However, local source
+discovery follows links, remote discovery can skip links, and its own precedence/cleanup choices
+differ from this FRD's complete-package refusal and owner routing. Reuse the concepts and standard
+skill content, not those ingestion or lifecycle semantics. Full Rulesync format compatibility is not
+implied.
+
+The [programmatic API](https://rulesync.dyoshikawa.com/api/programmatic-api) is a Node/TypeScript
+generation API. Calling it would introduce a runtime boundary and still require Agentworks-owned
+acquisition, scope routing and applied-state handling. The HLA therefore proposes small native
+adapters in the existing Python integrations, without a Rulesync runtime dependency. Revisit shared
+generation code only if a concrete adapter warrants it; a broad import/export service is not part of
+this delivery.
+
+## Native delivery findings
+
+### Claude Code
+
+[Memory documentation](https://code.claude.com/docs/en/memory) supports unconditional Markdown rules
+in user and project `.claude/rules` directories when conditional paths are omitted.
+[Skills documentation](https://code.claude.com/docs/en/skills) covers user, project and plugin Agent
+Skills. The [CLI reference](https://code.claude.com/docs/en/cli-reference) documents a session-only
+plugin directory and an additive system-prompt file. These allow private session publication without
+installing a project plugin or modifying shared settings.
+
+Plugin skills acquire a namespace; that visible name must be reported rather than silently
+pretending it is unchanged. Session personas can use `--agents` JSON, avoiding plugin-specific
+persona-field omissions. The subagent documentation cited above establishes primary and delegated
+use, but does not make every native option portable.
+
+Resume can reuse a saved system prompt. The documented `--system-prompt-snapshot off` changes that
+behavior; the native compatibility tests must establish the supported version and prove changed
+rules take effect. Merely rewriting an appended prompt file is insufficient evidence.
+
+### Codex
+
+[AGENTS.md discovery](https://learn.chatgpt.com/docs/agent-configuration/agents-md) has override
+files and a combined size limit, so writing an extra user/project file is not an additive rule
+mechanism. The
+[configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference.md) documents
+`developer_instructions` for additional guidance and `agents.<name>.config_file` for a role's TOML
+file. Per-invocation overrides can therefore carry rule text and point at private persona files;
+native verification still gates implementation claims.
+
+[Skills](https://learn.chatgpt.com/docs/build-skills) are discovered under user and repository
+`.agents/skills`. The [official schema](https://developers.openai.com/codex/config-schema.json)
+describes `skills.config.path` as a selector, not an arbitrary discovery path. No session-only skill
+discovery mechanism is established here. The HLA treats that placement as unsupported instead of
+simulating a native skill through prompt text.
+
+[CODEX_HOME](https://learn.chatgpt.com/docs/config-file/environment-variables) redirects
+credentials, sessions and other state as well as configuration; using it as an artifact-only root
+would hide a larger lifecycle change. Native `.codex/rules` files govern execution policy, not the
+context rules defined in this SDD. Neither mechanism is the chosen artifact delivery path.
+
+### Grok Build
+
+The shipped integration targets [xai-org/grok-build](https://github.com/xai-org/grok-build).
+[Project rules](https://docs.x.ai/build/features/project-rules) document user/project discovery and
+gitignore exclusions.
+[Skills and plugins](https://docs.x.ai/build/features/skills-plugins-marketplaces) document
+user/project skill directories, with some metadata fields not enforced. Preserve standard skill
+content, and do not promise those fields enforce runtime permissions.
+
+The [CLI reference](https://docs.x.ai/build/cli/reference) documents additive `--rules` text. The
+[CLI source](https://github.com/xai-org/grok-build/blob/37949780c144e37df692e3d669051a21fec24f20/crates/codegen/xai-grok-pager/src/app/cli.rs)
+exposes top-level `--agent` and `--agents`, but the inspected `--plugin-dir` declaration belongs to
+the ACP subcommand. Broad plugin documentation alone does not establish private skill loading in the
+interactive command Agentworks launches. The HLA leaves interactive session skills unsupported until
+that exact entry point is proven, and requires native verification of persona injection.
+
+## Remaining native verification and detailed design
+
+- Verify the matrix against installed native versions, including resume, discovery exclusions,
+  persona options and Claude plugin skill names. No model/API calls were made for this research.
+- Specify the supported persona option schemas and normalized codec, preserving the recovered
+  acquisition constraints and byte-sensitive fixtures.
+- Keep Codex and Grok interactive session skill delivery unsupported unless a documented and tested
+  native mechanism is established. Do not redirect their whole user home or emulate native skills.
 
 ## Sources
 

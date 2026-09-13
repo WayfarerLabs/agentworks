@@ -1,28 +1,36 @@
 # Agent artifacts: functional requirements
 
-## Status and authority
+## Status
 
-Requirements seed, 2026-09-12. The operator directed the harness-scope-framework lead to begin this
-separate successor after PR 761 merged. This document carries forward decisions made in that effort
-and proposes the first delivery scope for review. The proposed scope and open choices below are not
-yet accepted requirements. No artifact implementation or wire format is approved by this seed.
-
-The predecessor is [harness-scope-framework](../2026-09-06-harness-scope-framework/frd.md); this
-child participates in the [next-steps saga](../2026-08-04-next-steps/target-state.md). The effort
-lead owns the response and draft requirements; accepted requirements belong to the operator. Saga
-sequencing and its ledger remain the saga lead's to maintain.
+Draft requirements. This effort builds on
+[harness-scope-framework](../2026-09-06-harness-scope-framework/frd.md) and participates in the
+[next-steps saga](../2026-08-04-next-steps/target-state.md). The proposed first-delivery scope and
+open decisions remain subject to requirements and HLA review. Implementation has not started; see
+the [plan](plan.md) for design checkpoints and delivery.
 
 ## Problem and intended outcome
 
 Agentworks can configure harnesses at VM, user, workspace and session facets, but it cannot yet
-carry reusable agent knowledge through those facets. Operators must use dotfiles, repository files,
-or launch prompts to make rules, skills and environment knowledge available to a harness. Those
-approaches obscure where an item belongs and when it has already been applied.
+collect and deliver agent artifacts through those facets. An **artifact** is a logical unit of
+content supplied to a harness: a hint, rule, skill or agent persona. It may comprise several files.
+Some artifacts belong in model context; others must be available for use when needed.
 
-An operator should declare artifact bundles once, reference them from the resources that need them,
-and let the selected harness integration apply them at the appropriate facet. Acquisition choices
-must converge before propagation. Core must preserve origin and route unresolved inputs without
-knowing native harness layouts, duplicating delivery, or implicitly activating integrations.
+This effort addresses two related needs:
+
+1. Operators need to bring reusable artifacts into Agentworks, combine them across its resource
+   scopes, and use them with different harnesses. Integration developers translate the common inputs
+   into native representations; operators should not maintain a separate copy per harness.
+2. Agentworks functionality needs to tell workloads what it provides. Core setup and extension
+   surfaces should be able to emit facts such as "mise is available", "gh is authenticated with a
+   GitHub App", or "XYZ holds the API key for foobar", without knowing each harness's files or
+   prompt format. These hints describe availability, not the secret values themselves.
+
+Both needs use one artifact pipeline. The first delivery introduces explicitly declared bundles;
+automatic emissions from other core functionality and, later, features will enter that same
+pipeline. Operators should receive the relevant supplied and generated artifacts in the appropriate
+context or native discovery mechanism. Core preserves origin and routes unresolved inputs; each
+harness integration owns native placement. Acquisition choices converge before propagation, without
+duplicate delivery or implicit integration activation.
 
 ## Relationship to the completed implementation
 
@@ -31,7 +39,7 @@ activations, facet configuration, owner-bound setup, native settings/plugin reco
 prerequisites, and instance-state storage. It deliberately supplies no artifact declaration,
 normalized bundle, propagation, deferral, or publication mechanism.
 
-This effort may extend that implementation and its facet interfaces. Locking the predecessor SDD
+This effort will extend that implementation and its facet interfaces. Locking the predecessor SDD
 freezes its historical specification, not the code it produced. New behavior and any changed
 contracts belong in this SDD and in permanent documentation alongside the implementing change.
 
@@ -43,18 +51,30 @@ is not itself a reason to keep the predecessor unlocked.
 
 ## Users
 
-- Operators who supply reusable rules, skills and small facts about an Agentworks environment.
-- Harness integration authors who translate those inputs into their harness's native representation.
-- Agents and administrators who need the intended information available for their actual user and
-  session without changing other users' environments.
+- Operators who want their workloads to receive all relevant artifacts, both those they supply and
+  those their Agentworks setup emits, within the intended user and session boundaries.
+- Harness integration developers who translate common artifacts into native harness representations.
+- Agentworks developers who expose core or extension functionality to workloads through artifacts
+  without writing harness-specific delivery logic.
 
-## Decisions carried forward
+## Design constraints
 
-These are recorded operator decisions, not new proposals in this seed. The predecessor's
-[successor context](../2026-09-06-harness-scope-framework/frd.md#future-artifact-context-not-this-efforts-contract)
-and this session's authenticated direction are their source.
+These constraints build on the predecessor's
+[successor context](../2026-09-06-harness-scope-framework/frd.md#future-artifact-context-not-this-efforts-contract).
 
 ### Artifact types and acquisition boundary
+
+Harnesses use several forms of supplied content: guidance loaded into context, reusable procedures
+with supporting files, and definitions for specialized agents. Portable formats and generation tools
+reduce the need to maintain these separately for every harness. The
+[Agent Skills standard](https://agentskills.io/home), originally developed by Anthropic and released
+as an open standard, packages reusable instructions and resources for on-demand use.
+[Rulesync](https://github.com/dyoshikawa/rulesync) manages common source files and generates
+tool-specific configuration, including rules, skills and subagents.
+
+Agentworks builds on these ideas with delivery governed by its resource scopes and integration
+facets. Its artifact types distinguish contextual facts from persistent guidance and reusable
+capabilities. The same types serve explicitly supplied content and future automatic emissions:
 
 Hints are small contextual facts, such as the availability of an environment variable or configured
 GitHub authentication. They remain distinct from rules, skills and a session's initial prompt. A
@@ -65,17 +85,15 @@ document and any supporting files, preserving the standard's metadata and progre
 model. Loading a rule does not guarantee obedience; publishing files for shell retains the delivery
 limitation described below.
 
-**Agents** is the agreed shorthand for **agent personas**: reusable definitions containing
-behavioral instructions and supported execution settings. They can serve primary or delegated agents
-where the harness supports it; see the [terminology research](prior-art-research.md). In artifact
-discussions, an agent means this definition. Where resource ownership could be ambiguous, say
-**agent persona** for the artifact and **agent resource** for the Agentworks resource. Native
-support for primary and delegated use must be stated per integration; the name does not promise both
-in every harness. The model also leaves room for limited hooks and MCP configuration later.
+**Agents** is shorthand for **agent personas**: reusable definitions containing behavioral
+instructions and supported execution settings. They can serve primary or delegated agents where the
+harness supports it; see the [terminology research](prior-art-research.md). In artifact discussions,
+an agent means this definition. Where resource ownership could be ambiguous, say **agent persona**
+for the artifact and **agent resource** for the Agentworks resource. Native support for primary and
+delegated use must be stated per integration; the name does not promise both in every harness. The
+model also leaves room for limited hooks and MCP configuration later.
 
-Use **artifact type** for these categories. Reserve **kind** for resource kinds, including the
-proposed `artifact-bundle` resource kind. An artifact is a logical input and may comprise several
-files; an artifact bundle is a reusable collection of those inputs.
+An **artifact bundle** is a reusable collection of artifacts.
 
 Workstation files, Git references and potentially packaged distributions are acquisition concerns.
 Once acquired, all sources enter one normalized representation; integrations do not carry separate
@@ -83,11 +101,11 @@ filesystem, Git and archive ingestion paths. Normalize text line endings to Unix
 complete skill packages, including their supporting files, rather than reducing a skill to its entry
 document.
 
-The operator's leading proposal is a declarative `artifact-bundle` resource that owns ingestion and
-gives consumers an ID to reference. Its exact schema, supported source set and update behavior are
-still design decisions. Evaluate Rulesync's canonical model and generation machinery for reuse;
-reuse is not an approved runtime dependency. Agentworks retains ownership of resource scopes,
-activation, routing and provisioned-resource lifecycle.
+The leading proposal is a declarative `artifact-bundle` resource that owns ingestion and gives
+consumers an ID to reference. Its exact schema, supported source set and update behavior are still
+design decisions. Evaluate Rulesync's canonical model and generation machinery for reuse; reuse is
+not an approved runtime dependency. Agentworks retains ownership of resource scopes, activation,
+routing and provisioned-resource lifecycle.
 
 ### Acquisition safety carried forward
 
@@ -131,6 +149,12 @@ the new ingestion interface is designed.
 
 ### Scope, facet and placement
 
+The predecessor established this vocabulary. The permanent
+[capability contract](../../../cli/agentworks/capabilities/README.md#stage-1-declare) defines a
+facet generally; the
+[harness integration contract](../../../cli/agentworks/capabilities/harness_integration/README.md#a-note-on-scope)
+defines the specific harness facets and their owners.
+
 A scope identifies an owning resource and its context. A facet is a scoped part of a capability.
 Harness integrations use VM, user, workspace and session facets; admin and agent scopes use the same
 user facet for their respective actual users. The admin user is not an ancestor of an agent. User
@@ -138,15 +162,17 @@ and workspace are separate ancestors of a session, not a nested pair.
 
 Native placement at the defining scope is the ordinary case. The integration decides whether an
 inner invocation needs anything further. Core attaches immutable origin: owning scope, resource
-identity and producer. Origin facet follows core's scope-to-facet mapping; configuration does not
-author an independent, potentially contradictory facet of origin. Bundle identity and consumer
-origin are separate facts.
+identity and producer. Core derives the origin facet from its fixed scope-to-facet mapping;
+declarations cannot supply another facet of origin. Bundle identity and consumer origin are separate
+facts.
 
 ### Operations and outcomes
 
-- **Produce** means introduce artifact inputs, initially through core declarations and later
-  potentially through features. A facet does not produce artifacts; it handles, applies or defers
-  inputs. Translating inputs into native files is application and preserves their origin.
+- **Produce** means introduce artifact inputs through explicit declarations and, later, emissions
+  that are a side effect of other functionality. Bundle declarations explicitly acquire artifacts;
+  core functionality and future features can emit them while doing their own work. A facet does not
+  produce artifacts; it handles, applies or defers inputs. Translating inputs into native files is
+  application and preserves their origin.
 - **Apply** is the one idempotent operation that brings owned native effects into agreement with
   current inputs, including creation, updates and cleanup where possible. Reconciliation describes
   that behavior; it is not a separate operation or lifecycle stage.
@@ -183,13 +209,22 @@ and from an implemented facet that needs no native changes. Successful setup alo
 artifact was handled. No separate per-item acknowledgment ledger is required merely to express
 deferral. The successor must settle the exact result contract and how core detects and reports
 inputs still unhandled at the final session facet. Silent loss is not an acceptable result; whether
-every unresolved input blocks launch remains an open operator choice.
+every unresolved input blocks launch remains an open design decision.
 
 ### Pipeline and lifecycle
 
-Start with core env and artifact declarations, then harness integrations. Features may later run
-between the two. This effort does not introduce features or add hint emission to unrelated core
-setup. The future user feature capability is named `user-features` for both admin and agent users.
+The required order at each facet is **core, then harness integrations**. Core prepares env and
+artifacts before an integration runs; both flow downstream from where they are declared. Each
+integration receives the completed applicable env and its local artifacts plus applicable ancestor
+artifacts still needing handling. Artifact routing respects the separate user/workspace branches and
+the inactive-facet rules above; artifacts do not acquire env's override semantics.
+
+The planned extension is **core, then features, then harness integrations**. Features will consume
+the env available to them and may add env and artifacts before the integrations run. Core emissions
+will use the same artifact input boundary as explicit declarations. This effort establishes that
+boundary; implementing automatic hints from other core functionality and executing features are
+follow-on work. The future user feature capability is named `user-features` for both admin and agent
+users.
 
 Integrations must be explicitly activated, including defaults-only configuration. Applying artifacts
 must respect the selected owner's actual identity and native placement. Session handling must not
@@ -198,11 +233,20 @@ application and cleanup of previously provisioned effects wherever ownership and
 that possible. Parent deletion retains the existing core lifecycle; artifact bookkeeping must not
 become a prerequisite for deleting a VM and everything within it.
 
-The shell integration publishes artifacts as files with a documented discovery contract. There is no
-session filesystem: session-specific files belong beneath the actual user's home in an
-`.agentworks-artifacts` area with a session component, not in the shared workspace. The exact layout
-and identity/reuse semantics belong in the design. File publication must not be described as proof
-that a shell workload interpreted or obeyed the content.
+A session runs as an existing Linux user in a workspace. Both the user and the workspace may be
+shared with other sessions; a session has no separate filesystem or private home of its own.
+Sessions of the same agent resource already share access through that Linux user. A directory named
+after one session cannot create a security boundary between those sessions.
+
+Session-specific artifacts therefore belong beneath the actual user's home in an
+`.agentworks-artifacts` area with a session component. This adds no new access for the same user's
+other sessions. Placing those files in a shared workspace would instead expose them to other agent
+resources with access to that workspace, even when the path includes a session name. Native delivery
+must still ensure that session-specific content takes effect only for the intended workload. The
+exact layout and identity/reuse semantics belong in the design.
+
+The shell integration publishes artifacts as files with a documented discovery contract. File
+publication must not be described as proof that a shell workload interpreted or obeyed the content.
 
 For shell, successful publication and discoverability fulfill delivery. For a model harness, the
 native delivery mechanism must provide the artifact's promised loading or availability semantics.
@@ -222,11 +266,16 @@ completion or placement state. Defining a bundle alone does not install it or ac
 integration.
 
 **R2. Acquire workstation and Git sources.** Support workstation files/directories and Git sources
-in the first delivery. Define how a Git reference selects a revision and package root, when source
-changes are captured, and how an operator deliberately updates captured content. A setup operation
-uses consistent captured inputs. Errors identify the source and consumer without revealing
-credentials or content. A packaged distribution source remains a later extension unless research
-shows an existing format makes it a small, justified addition.
+in the first delivery. Build on existing dotfiles source conventions and shared workstation source
+handling where they meet artifact capture requirements; evaluate and extend those common parts
+before introducing another acquisition path. The
+[reuse analysis](prior-art-research.md#existing-source-and-inspection-boundaries) identifies why
+dotfiles' guest checkout/install behavior cannot itself serve as artifact capture. Define how a Git
+reference selects a revision and package root, when source changes are captured, and how an operator
+deliberately updates captured content. A setup operation uses consistent captured inputs. Errors
+identify the source and consumer without revealing credentials or content. A packaged distribution
+source remains a later extension unless research shows an existing format makes it a small,
+justified addition.
 
 **R3. Normalize hints, rules, skills and agents.** Carry these four artifact types through one
 internal representation with source provenance and complete supporting files. Preserve binary assets
@@ -274,9 +323,27 @@ ownership ledger.
 
 **R9. Explain unresolved delivery.** Diagnostics identify the selected integration, original owner,
 artifact and the reason it remains unhandled. Core enforces the final-session disposition chosen in
-the HLA; omission, warning or success must not disguise dropped inputs. Inspection and reference
-commands must not acquire artifacts, contact remotes, read settings sources or mutate setup merely
-to explain declared configuration.
+the HLA; omission, warning or success must not disguise dropped inputs.
+
+Provide **`agw artifacts show`**, following the scope-selection conventions of `agw env show`, to
+explain artifacts for a VM, an admin or agent user, a workspace, or a session. Include local inputs
+and all applicable parent scopes by default. Resolve the selected owner's actual ancestors: a
+session includes its VM, actual user and workspace; a workspace does not acquire a user ancestor,
+and an agent user does not inherit from the admin user. Reject selectors that describe conflicting
+lineages rather than presenting a hypothetical composition as the selected owner's state.
+
+Show artifact type and identity, bundle/source provenance, original scope and resource, integration
+activation, and recorded handling, deferral reasons/routes and native placement where available.
+Include artifacts already handled upstream, so operators can explain the whole path even though
+those payloads no longer reach the session. Distinguish current declarations from captured content
+and recorded application evidence. Uncaptured bundle contents and missing or stale evidence must be
+shown as unknown, unavailable or not applied as appropriate, never as an empty successful result.
+
+Inspection reads declarations and existing instance state. It must not acquire artifacts, fetch
+sources, contact remotes, run integration setup or mutate state to manufacture an answer. Recorded
+application does not prove current native files or model consumption. Reuse existing resource
+resolution and instance-state evidence rather than introducing a separate acknowledgment ledger.
+Exact selectors and output details belong in the HLA and CLI design.
 
 **R10. Validate without unrelated external services.** Use simple local artifacts, local Git
 repositories and dedicated test integrations to prove ingestion, routing and cleanup. Exercise real
@@ -313,5 +380,7 @@ session whose selected integration receives exactly the applicable inputs still 
 Inactive ancestors and the VM/user/workspace diamond cannot lose or duplicate an input. Supported
 native representations and shell files have the promised placement and lifecycle; unsupported cases
 receive the agreed explicit disposition. Repetition, update, removal, failure and session reuse are
-demonstrated with observed evidence. Permanent documentation stands alone, and the predecessor's
-remaining acceptance is not misrepresented as artifact completion.
+demonstrated with observed evidence. Operators can use `agw artifacts show` to explain local and
+ancestor declarations, provenance and recorded delivery without changing the system. Permanent
+documentation stands alone, and the predecessor's remaining acceptance is not misrepresented as
+artifact completion.
