@@ -384,15 +384,15 @@ Two additional feedback/fix rounds are authorized, including the confirmed Claud
 first is overall round 4. Keep the PR draft while implementing this coherent change, then repeat
 private project/complexity/correctness review, relevant native diagnostics, gates and ready handoff.
 
-- [ ] Implement the default VM-to-user route with lazy inactive user/workspace passthrough and
+- [x] Implement the default VM-to-user route with lazy inactive user/workspace passthrough and
       regression coverage for user-only activation, independent consumers, stale prior results and
       the diamond.
-- [ ] Correct Claude's abbreviated help-option detection and verify the generated carrier against
+- [x] Correct Claude's abbreviated help-option detection and verify the generated carrier against
       the actual supported executable with positive and negative controls, without model calls.
-- [ ] Add a harness-integration guide and expand the agent-artifact guide, using validated examples
+- [x] Add a harness-integration guide and expand the agent-artifact guide, using validated examples
       and the ordinary discoverable guide topic mechanism.
-- [ ] Update current FRD/HLA, permanent contracts and examples; send the revised routing decision to
-      the saga owner without rewriting predecessor history.
+- [x] Update current FRD/HLA, permanent contracts and examples; add the revised routing decision as
+      a coordination message for the saga owner without rewriting predecessor history.
 - [ ] Complete private reviews, local gates and a coherent ready handoff; assess the next published
       batch within the two additional rounds.
 
@@ -403,5 +403,34 @@ During round 4, the operator also called out the refresh asymmetry: applied nati
 reloaded by a running harness, while deferred updates wait for receiving setup or session start.
 Workspace setup has no in-place refresh. This clarification joins the current round:
 
-- [ ] Document application versus deferral timing, including removal and the workspace limitation;
+- [x] Document application versus deferral timing, including removal and the workspace limitation;
       add concise owning-setup warnings without downstream scans or unsupported remediation.
+
+The combined implementation is `7288462b`. Private review caught an inspection projection that still
+assumed inactive inputs went to session. It now reports the actual passthrough destination in both
+human and JSON output; routing, notices and inspection share one inactive-route function. The JSON
+shape is unchanged. The reviewer who reproduced the defect confirmed its correction with 79 focused
+inspection/dispatch tests.
+
+The packaged guides render in both human and agent modes from an installed wheel; wheel, source
+distribution and rebuilt wheel retain canonical source parity. Eight guide example manifests and 22
+command signposts were checked against the real schemas/CLI. Independent native retesting at
+`6bd3a348` confirmed Claude 2.1.265 accepts the exact rendered carrier twice and rejects partial or
+unknown flags; Codex 0.153.4 accepts its full flag and rejects a partial spelling. No model calls or
+network access were used. These observations do not replace the remaining VM/two-user acceptance.
+
+Final private project, complexity and correctness review is clean at `7288462b`; each lane covered
+the later warning and inspection deltas. The complexity lane's deletion experiments demonstrate that
+the completion guard, warning emission and actual inspection route are exercised. The optional
+message-only-commit suggestion is acknowledged; the coordination message stays with this authorized
+same-PR contract change and will arrive with it on main.
+
+Final local gates passed: 9,350 tests with seven skips, full source/test Ruff, format and mypy,
+package build, file lint and Typer isolation. The round also passed the locked-SDD and Rulesync
+checks, Python/Node website tests, and deterministic double builds for both site bases. Guide
+packaging tests rebuilt the source distribution and rendered installed topics. All commands returned
+zero. No implementation changes follow the reviewed head; the final commit records completion.
+
+Additional round 1 of 2 (overall round 4) is complete. The coherent handoff returns PR #794 to ready
+without `review-requested`; one additional authorized fix round remains. Monitor its published
+feedback and CI. Scoped native VM/two-user acceptance remains required, so the SDD stays unlocked.
