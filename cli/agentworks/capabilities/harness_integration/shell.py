@@ -15,6 +15,9 @@ from typing import TYPE_CHECKING, ClassVar, Literal
 
 from pydantic import Field
 
+from agentworks.artifacts.application import ArtifactApplication
+from agentworks.artifacts.native.common import defer
+from agentworks.artifacts.native.shell import shell_artifacts
 from agentworks.capabilities.harness_integration.base import (
     HarnessIntegration,
     HarnessLaunchIntent,
@@ -27,7 +30,15 @@ from agentworks.schema import AgwModel
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
+    from pydantic import BaseModel
+
     from agentworks.capabilities.base import RunContext
+    from agentworks.capabilities.descriptor import Facet
+    from agentworks.capabilities.harness_integration.setup import (
+        UserSetupInvocation,
+        VMSetupInvocation,
+        WorkspaceSetupInvocation,
+    )
     from agentworks.transports import Transport
 
 
@@ -66,10 +77,16 @@ class ShellConfig(AgwModel):
     Inheritance combines parent and child entries."""
 
 
+class ShellSetupConfig(AgwModel):
+    """Activate shell artifact publication at an outer facet."""
+
+    name: Literal["shell"]
+
+
 class ShellIntegration(HarnessIntegration):
     """Runs an operator command (or a login shell) as the session."""
 
-    contract_version: ClassVar[int] = 4
+    contract_version: ClassVar[int] = 5
     name: ClassVar[str] = "shell"
     description: ClassVar[str] = "Run an operator command or a login shell"
     prose: ClassVar[TopicProse | None] = TopicProse(
@@ -92,6 +109,33 @@ class ShellIntegration(HarnessIntegration):
 
     config_model: ClassVar[type[ShellConfig]] = ShellConfig
 
+    @classmethod
+    def config_for(cls, facet: Facet | None = None) -> type[BaseModel] | None:
+        return ShellSetupConfig if facet in ("vm", "user", "workspace") else ShellConfig
+
+    def vm_init(self, invocation: VMSetupInvocation) -> ArtifactApplication:
+        return (
+            ArtifactApplication()
+            if self.retiring
+            else defer(
+                invocation.artifacts, "session", "Shell publishes VM artifacts in the consuming session directory"
+            )
+        )
+
+    def user_init(self, invocation: UserSetupInvocation) -> ArtifactApplication:
+        return (
+            ArtifactApplication()
+            if self.retiring
+            else shell_artifacts(invocation.artifacts, f"{invocation.home}/.agentworks-artifacts/user")
+        )
+
+    def workspace_init(self, invocation: WorkspaceSetupInvocation) -> ArtifactApplication:
+        return (
+            ArtifactApplication()
+            if self.retiring
+            else shell_artifacts(invocation.artifacts, f"{invocation.root}/.agentworks-artifacts")
+        )
+
     @property
     def config(self) -> ShellConfig:
         """This session's validated shell config."""
@@ -112,7 +156,11 @@ class ShellIntegration(HarnessIntegration):
         if intent is HarnessLaunchIntent.RESUME_ONLY:
             return HarnessStartNotImplemented()
         command = self.config.command if intent.starts_fresh else self.config.resume_command or self.config.command
-        return HarnessStart(command)
+        context = self._session_binding.artifact_context
+        application = (
+            shell_artifacts(context.inputs, context.directory, session=True) if context else ArtifactApplication()
+        )
+        return HarnessStart(command, artifacts=application)
 
     def _probe_target(self, transport: Transport) -> None:
         require_commands(

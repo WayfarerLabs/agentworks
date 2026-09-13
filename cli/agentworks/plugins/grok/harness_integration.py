@@ -24,6 +24,9 @@ from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 
 from pydantic import Field
 
+from agentworks.artifacts.application import ArtifactApplication
+from agentworks.artifacts.native.common import NativeSessionArtifacts, defer, has_artifacts, native_home
+from agentworks.artifacts.native.probe import probe_native
 from agentworks.capabilities.harness_integration.base import (
     HarnessIntegration,
     HarnessLaunchIntent,
@@ -32,12 +35,27 @@ from agentworks.capabilities.harness_integration.base import (
     require_commands,
 )
 from agentworks.errors import StateError
+from agentworks.plugins.grok.artifacts import outer_artifacts, session_artifacts
 from agentworks.schema import AgwModel, MergeStrategy
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
+    from pydantic import BaseModel
+
     from agentworks.capabilities.base import RunContext
+    from agentworks.capabilities.descriptor import Facet
+    from agentworks.capabilities.harness_integration.setup import (
+        UserSetupInvocation,
+        VMSetupInvocation,
+        WorkspaceSetupInvocation,
+    )
     from agentworks.transports import Transport
+
+
+class GrokBuildSetupConfig(AgwModel):
+    """Activate an artifact-only native facet."""
+
+    name: Literal["grok-build"]
 
 
 class GrokBuildConfig(AgwModel):
@@ -105,7 +123,7 @@ _SESSIONS_DIR = "${GROK_HOME:-$HOME/.grok}/sessions"
 class GrokBuildIntegration(HarnessIntegration):
     """Run Grok Build, resuming its persisted session when one exists."""
 
-    contract_version: ClassVar[int] = 4
+    contract_version: ClassVar[int] = 5
     name: ClassVar[str] = "grok-build"
     description: ClassVar[str] = "Run Grok Build, resuming its session when one exists"
     config_model: ClassVar[type[GrokBuildConfig]] = GrokBuildConfig
@@ -122,6 +140,49 @@ class GrokBuildIntegration(HarnessIntegration):
     )
 
     _resumed: bool | None = None
+    _artifact_plan: NativeSessionArtifacts = NativeSessionArtifacts()
+
+    @classmethod
+    def config_for(cls, facet: Facet | None = None) -> type[BaseModel] | None:
+        return GrokBuildSetupConfig if facet in ("vm", "user", "workspace") else GrokBuildConfig
+
+    def vm_init(self, invocation: VMSetupInvocation) -> ArtifactApplication:
+        return (
+            ArtifactApplication()
+            if self.retiring
+            else defer(invocation.artifacts, "user", "Grok Build discovers native artifacts for an actual user")
+        )
+
+    def user_init(self, invocation: UserSetupInvocation) -> ArtifactApplication:
+        root = (
+            probe_native(invocation.runner, tool="grok", environment=invocation.environment, home=invocation.home)
+            if invocation.artifacts and not self.retiring
+            else ""
+        )
+        return (
+            ArtifactApplication()
+            if self.retiring
+            else outer_artifacts(
+                invocation.artifacts, root or native_home(invocation.home, invocation.environment, "GROK_HOME", ".grok")
+            )
+        )
+
+    def workspace_init(self, invocation: WorkspaceSetupInvocation) -> ArtifactApplication:
+        plan = (
+            ArtifactApplication()
+            if self.retiring
+            else outer_artifacts(invocation.artifacts, f"{invocation.root}/.grok")
+        )
+        if plan.files:
+            probe_native(
+                invocation.runner,
+                tool="grok",
+                environment=invocation.environment,
+                workspace=invocation.root,
+                paths=tuple(file.path for file in plan.files),
+                workspace_only=True,
+            )
+        return plan
 
     @property
     def config(self) -> GrokBuildConfig:
@@ -135,6 +196,27 @@ class GrokBuildIntegration(HarnessIntegration):
         intent: HarnessLaunchIntent = HarnessLaunchIntent.RESUME_OR_NEW,
     ) -> HarnessStart:
         """Choose the requested fresh, strict-resume, or fallback policy."""
+        self._artifact_plan = session_artifacts(
+            self._session_binding.artifact_context,
+            configured=self.config.rules,
+            extra_args=self.config.extra_args,
+        )
+        artifact_context = self._session_binding.artifact_context
+        if artifact_context is not None and has_artifacts(artifact_context):
+            runner = ctx.admin_target() if self._admin else ctx.agent_target()
+            if runner is None:
+                raise StateError("artifact delivery requires the actual native launch target")
+            probe_native(
+                runner,
+                tool="grok",
+                environment=artifact_context.environment,
+                home=artifact_context.home,
+                workspace=self._workspace_path,
+                paths=tuple(file.path for file in artifact_context.ancestor_files),
+                flags=tuple(token for token in self._artifact_plan.argv if token.startswith("--")),
+                session_plugin="--plugin-dir" in self._artifact_plan.argv,
+            )
+
         command = self._resume_or_launch(ctx, intent=intent)
         if intent is HarnessLaunchIntent.FORCE_NEW:
             note = "Fresh Grok Build session requested. Starting a new one without resuming prior state..."
@@ -144,7 +226,7 @@ class GrokBuildIntegration(HarnessIntegration):
             note = "Existing Grok Build session found. Resuming..."
         else:
             note = "No existing Grok Build session. Starting a new one..."
-        return HarnessStart(command, note)
+        return HarnessStart(command, note, self._artifact_plan.application)
 
     def _resume_or_launch(self, ctx: RunContext, *, intent: HarnessLaunchIntent) -> str:
         fresh = intent.starts_fresh
@@ -169,8 +251,9 @@ class GrokBuildIntegration(HarnessIntegration):
         parts = [shlex.quote(token) for token in (*identity, *self._managed_flags())]
         if self.config.agent is not None:
             parts += ["--agent", quote_literal_argv(self.config.agent)]
-        if self.config.rules is not None:
+        if self.config.rules is not None and "--rules" not in self._artifact_plan.argv:
             parts += ["--rules", quote_literal_argv(self.config.rules)]
+        parts += [quote_literal_argv(token) for token in self._artifact_plan.argv]
         parts += [shlex.quote(token) for token in self.config.extra_args]
         if not resume and (prompt := self._fresh_prompt()) is not None:
             parts += ["--", quote_literal_argv(prompt)]
