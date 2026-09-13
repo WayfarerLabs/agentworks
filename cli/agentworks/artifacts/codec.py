@@ -13,10 +13,13 @@ from agentworks.artifacts.capture import content_from_members, normalize_text, v
 from agentworks.artifacts.model import (
     ArtifactComponent,
     ArtifactContent,
+    ArtifactGroup,
     ArtifactInput,
     ArtifactMember,
     ArtifactOrigin,
+    ArtifactOwner,
     ArtifactProvenance,
+    ArtifactReplacement,
     ArtifactType,
 )
 from agentworks.package_sources import MAX_MEMBER_PATH_LENGTH, CaptureLimits, validate_member_set
@@ -66,19 +69,36 @@ class _Provenance(_Record):
     commit: Annotated[StrictStr, Field(pattern=r"^(?:[a-f0-9]{40}|[a-f0-9]{64})?$")]
 
 
+class _Replacement(_Record):
+    origin: _Origin
+    provenance: _Provenance
+    digest: Annotated[StrictStr, Field(pattern=r"^[a-f0-9]{64}$")]
+
+
 class _Input(_Record):
     content: _Content
     origin: _Origin
     provenance: _Provenance
     identity: Annotated[StrictStr, Field(pattern=r"^[a-f0-9]{64}$")]
+    replacements: Annotated[list[_Replacement], Field(max_length=_LIMITS.members)]
+
+
+class _Owner(_Record):
+    component: ArtifactComponent
+    resource_kind: SmallString
+    resource_name: SmallString
 
 
 class _Envelope(_Record):
-    version: Annotated[StrictInt, Field(ge=1, le=1)]
-    inputs: Annotated[list[_Input], Field(max_length=_LIMITS.members)]
+    version: Annotated[StrictInt, Field(ge=2, le=2)]
+    owner: _Owner
+    hints: dict[SmallString, _Input]
+    rules: dict[SmallString, _Input]
+    skills: dict[SmallString, _Input]
+    agents: dict[SmallString, _Input]
 
 
-def encode_inputs(inputs: tuple[ArtifactInput, ...]) -> dict[str, object]:
+def encode_inputs(inputs: ArtifactGroup) -> dict[str, object]:
     """Validate the persisted write boundary against the same schema used on read.
 
     No native state or source access is involved. Acquisition also calls this before
@@ -86,40 +106,39 @@ def encode_inputs(inputs: tuple[ArtifactInput, ...]) -> dict[str, object]:
     """
     from dataclasses import asdict
 
-    result: list[dict[str, object]] = []
-    for item in inputs:
+    result: dict[str, dict[str, object]] = {kind.value + "s": {} for kind in ArtifactType}
+    for item in inputs.items():
         content = item.content
-        result.append(
-            {
-                "content": {
-                    "type": content.type.value,
-                    "name": content.name,
-                    "description": content.description,
-                    "text": content.text,
-                    "metadata_json": content.metadata_json,
-                    "native_options_json": content.native_options_json,
-                    "digest": content.digest,
-                    "members": [
-                        {
-                            "path": member.path,
-                            "data": base64.b64encode(member.data).decode("ascii"),
-                            "executable": member.executable,
-                            "text": member.text,
-                        }
-                        for member in content.members
-                    ],
-                },
-                "origin": asdict(item.origin),
-                "provenance": asdict(item.provenance),
-                "identity": item.identity,
-            }
-        )
-    payload: dict[str, object] = {"version": 1, "inputs": result}
+        result[content.type.value + "s"][content.name] = {
+            "content": {
+                "type": content.type.value,
+                "name": content.name,
+                "description": content.description,
+                "text": content.text,
+                "metadata_json": content.metadata_json,
+                "native_options_json": content.native_options_json,
+                "digest": content.digest,
+                "members": [
+                    {
+                        "path": member.path,
+                        "data": base64.b64encode(member.data).decode("ascii"),
+                        "executable": member.executable,
+                        "text": member.text,
+                    }
+                    for member in content.members
+                ],
+            },
+            "origin": asdict(item.origin),
+            "provenance": asdict(item.provenance),
+            "identity": item.identity,
+            "replacements": [asdict(value) for value in item.replacements],
+        }
+    payload: dict[str, object] = {"version": 2, "owner": asdict(inputs.owner), **result}
     decode_inputs(payload)
     return payload
 
 
-def decode_inputs(payload: object) -> tuple[ArtifactInput, ...]:
+def decode_inputs(payload: object) -> ArtifactGroup:
     """Validate persisted JSON across executions, including corrupt or old records.
 
     Errors intentionally omit Pydantic details because rejected inputs may contain
@@ -128,66 +147,80 @@ def decode_inputs(payload: object) -> tuple[ArtifactInput, ...]:
     try:
         _bound_payload(payload)
         envelope = _Envelope.model_validate(payload)
-        result: list[ArtifactInput] = []
+        owner = ArtifactOwner(**envelope.owner.model_dump())
+        result: dict[str, dict[str, ArtifactInput]] = {kind.value + "s": {} for kind in ArtifactType}
         total_bytes = 0
         total_members = 0
-        for record in envelope.inputs:
-            members: list[ArtifactMember] = []
-            for row in record.content.members:
-                if total_bytes + len(row.data) * 3 // 4 > _LIMITS.total_bytes + 2:
-                    raise SourceRefError("persisted artifacts exceed their total content limit")
-                data = base64.b64decode(row.data, validate=True)
-                if len(data) > _LIMITS.member_bytes:
-                    raise SourceRefError("persisted artifact exceeds its member size limit")
-                if row.text and normalize_text(data).encode() != data:
+        for artifact_type in ArtifactType:
+            for name, record in getattr(envelope, artifact_type.value + "s").items():
+                members: list[ArtifactMember] = []
+                for row in record.content.members:
+                    if total_bytes + len(row.data) * 3 // 4 > _LIMITS.total_bytes + 2:
+                        raise SourceRefError("persisted artifacts exceed their total content limit")
+                    data = base64.b64decode(row.data, validate=True)
+                    if len(data) > _LIMITS.member_bytes:
+                        raise SourceRefError("persisted artifact exceeds its member size limit")
+                    if row.text and normalize_text(data).encode() != data:
+                        raise SourceRefError("persisted artifact text is not normalized")
+                    members.append(ArtifactMember(row.path, data, row.executable, row.text))
+                    total_bytes += len(data)
+                    total_members += 1
+                validate_member_set([member.path for member in members], depth=_LIMITS.depth)
+                content_row = record.content
+                if len(content_row.text.encode()) > _LIMITS.member_bytes:
+                    raise SourceRefError("persisted artifact instructions exceed their size limit")
+                if normalize_text(content_row.text.encode()) != content_row.text:
                     raise SourceRefError("persisted artifact text is not normalized")
-                members.append(ArtifactMember(row.path, data, row.executable, row.text))
-                total_bytes += len(data)
-                total_members += 1
-            validate_member_set([member.path for member in members], depth=_LIMITS.depth)
-            content_row = record.content
-            if len(content_row.text.encode()) > _LIMITS.member_bytes:
-                raise SourceRefError("persisted artifact instructions exceed their size limit")
-            if normalize_text(content_row.text.encode()) != content_row.text:
-                raise SourceRefError("persisted artifact text is not normalized")
-            if not members:
-                total_bytes += len(content_row.text.encode())
-                total_members += 1
-            if total_bytes > _LIMITS.total_bytes or total_members > _LIMITS.members:
-                raise SourceRefError("persisted artifacts exceed their total content limit")
-            for value in (content_row.metadata_json, content_row.native_options_json):
-                _validate_metadata(value)
-            content = ArtifactContent(
-                ArtifactType(content_row.type),
-                content_row.name,
-                content_row.description,
-                content_row.text,
-                tuple(members),
-                content_row.metadata_json,
-                content_row.native_options_json,
-            )
-            origin = ArtifactOrigin(**record.origin.model_dump())
-            provenance = ArtifactProvenance(**record.provenance.model_dump())
-            validate_provenance(provenance)
-            if content.members:
-                expected = content_from_members(
-                    content.type, origin.entry, content.members, provenance.selected_path or provenance.source
+                if not members:
+                    total_bytes += len(content_row.text.encode())
+                    total_members += 1
+                if total_bytes > _LIMITS.total_bytes or total_members > _LIMITS.members:
+                    raise SourceRefError("persisted artifacts exceed their total content limit")
+                for value in (content_row.metadata_json, content_row.native_options_json):
+                    _validate_metadata(value)
+                content = ArtifactContent(
+                    ArtifactType(content_row.type),
+                    content_row.name,
+                    content_row.description,
+                    content_row.text,
+                    tuple(members),
+                    content_row.metadata_json,
+                    content_row.native_options_json,
                 )
-            elif content.type in (ArtifactType.HINT, ArtifactType.RULE) and content.text.strip():
-                expected = ArtifactContent(content.type, origin.entry, text=content.text)
-            else:
-                raise SourceRefError("persisted artifact is missing its entrypoint")
-            if expected != content:
-                raise SourceRefError("persisted artifact metadata does not match its entrypoint")
-            if bool(content.members) != (provenance.source != "inline"):
-                raise SourceRefError("persisted artifact source does not match its content")
-            item = ArtifactInput(content, provenance, origin)
-            if item.identity != record.identity or content.digest != content_row.digest:
-                raise SourceRefError("persisted artifact identity does not match its content")
-            if any(previous.identity == item.identity for previous in result):
-                raise SourceRefError("persisted artifacts contain duplicate input identities")
-            result.append(item)
-        return tuple(result)
+                origin = ArtifactOrigin(**record.origin.model_dump())
+                provenance = ArtifactProvenance(**record.provenance.model_dump())
+                validate_provenance(provenance)
+                if content.members:
+                    expected = content_from_members(
+                        content.type, origin.entry, content.members, provenance.selected_path or provenance.source
+                    )
+                elif content.type in (ArtifactType.HINT, ArtifactType.RULE) and content.text.strip():
+                    expected = ArtifactContent(content.type, origin.entry, text=content.text)
+                else:
+                    raise SourceRefError("persisted artifact is missing its entrypoint")
+                if expected != content:
+                    raise SourceRefError("persisted artifact metadata does not match its entrypoint")
+                if bool(content.members) != (provenance.source != "inline"):
+                    raise SourceRefError("persisted artifact source does not match its content")
+                replacements = tuple(
+                    ArtifactReplacement(
+                        ArtifactOrigin(**value.origin.model_dump()),
+                        ArtifactProvenance(**value.provenance.model_dump()),
+                        value.digest,
+                    )
+                    for value in record.replacements
+                )
+                for previous in replacements:
+                    validate_provenance(previous.provenance)
+                    if previous.origin.owner != owner or previous.origin.entry != name:
+                        raise SourceRefError("persisted replacement does not match its artifact owner and name")
+                if content.type != artifact_type or content.name != name:
+                    raise SourceRefError("persisted artifact does not match its containing type map and key")
+                item = ArtifactInput(content, provenance, origin, replacements)
+                if item.identity != record.identity or content.digest != content_row.digest:
+                    raise SourceRefError("persisted artifact identity does not match its content")
+                result[artifact_type.value + "s"][name] = item
+        return ArtifactGroup(owner, **result)
     except (ValidationError, ValueError, TypeError, binascii.Error, UnicodeError, RecursionError):
         raise SourceRefError("invalid or unsupported persisted artifact capture") from None
 

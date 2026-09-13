@@ -8,9 +8,10 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
+from agentworks.artifacts.bundle import resolve_bundle
 from agentworks.artifacts.capture import capture_artifacts
 from agentworks.artifacts.codec import decode_inputs, encode_inputs
-from agentworks.artifacts.model import ArtifactComponent, ArtifactInput, ArtifactOrigin
+from agentworks.artifacts.model import ArtifactComponent, ArtifactGroup, ArtifactOrigin, ArtifactType
 from agentworks.db import AppliedStateKey, AppliedStateSlice, Database, VersionedPayload
 from agentworks.errors import StateError
 from agentworks.sources import SourceRefError
@@ -39,25 +40,37 @@ class CapturedArtifacts:
     """An owning component's declaration fingerprint and immutable source snapshot."""
 
     declaration: str
-    inputs: tuple[ArtifactInput, ...]
+    inputs: ArtifactGroup
 
 
 def _validate_owner(capture: CapturedArtifacts, kind: InstanceKind, name: str, component: ArtifactComponent) -> None:
     if component not in _COMPONENTS[kind] or re.fullmatch(r"[0-9a-f]{64}", capture.declaration) is None:
         raise ValueError
+    if (capture.inputs.owner.component, capture.inputs.owner.resource_kind, capture.inputs.owner.resource_name) != (
+        component,
+        kind,
+        name,
+    ):
+        raise ValueError
     if any(
         (item.origin.component, item.origin.resource_kind, item.origin.resource_name) != (component, kind, name)
-        for item in capture.inputs
+        for item in capture.inputs.items()
     ):
         raise ValueError
 
 
 def declaration_digest(registry: Registry, config: ArtifactsConfig) -> str:
     """Fingerprint effective declarations without opening their sources."""
-    selected = [(name, registry.lookup("artifact-bundle", name).artifacts) for name in config.bundles]
-    payload = [
-        (name, {entry: spec.model_dump(mode="json") for entry, spec in entries.items()}) for name, entries in selected
-    ]
+    payload = []
+    for name in config.bundles:
+        bundle = resolve_bundle(registry, name).value
+        maps = {
+            kind.value + "s": {
+                key: spec.model_dump(mode="json") for key, spec in getattr(bundle, kind.value + "s").items()
+            }
+            for kind in ArtifactType
+        }
+        payload.append((name, maps))
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
 
 
@@ -73,8 +86,8 @@ def capture_owner(
     """Acquire and validate persistence before buffered captures can cause native effects."""
     bundles = []
     for bundle_name in config.bundles:
-        bundle: ArtifactBundle = registry.lookup("artifact-bundle", bundle_name)
-        bundles.append((bundle_name, bundle.artifacts))
+        bundle: ArtifactBundle = resolve_bundle(registry, bundle_name).value
+        bundles.append((bundle_name, bundle))
     try:
         inputs = capture_artifacts(bundles, ArtifactOrigin(component, kind, name), operation=operation)
         encode_inputs(inputs)
@@ -85,7 +98,7 @@ def capture_owner(
 
 def encode_captures(captures: dict[ArtifactComponent, CapturedArtifacts]) -> VersionedPayload:
     return VersionedPayload(
-        1,
+        2,
         cast(
             "JsonObject",
             {
@@ -102,10 +115,10 @@ def decode_captures(record: AppliedStateSlice) -> dict[ArtifactComponent, Captur
     """Validate persisted input content and its actual owner without echoing values."""
     if record.key is not AppliedStateKey.ARTIFACT_INPUTS:
         raise TypeError("artifact capture requires its matching applied slice")
-    if record.payload.payload_version != 1:
+    if record.payload.payload_version != 2:
         raise UnsupportedArtifactCaptureVersionError(
             "artifact captures require a different Agentworks version",
-            hint="Use a release that understands this artifact capture. The stored evidence was retained.",
+            hint="Reinitialize the owning scope to capture current declarations. Stored file ownership was retained.",
         )
     try:
         payload = record.payload.value
@@ -153,7 +166,15 @@ def write_capture(
         raise StateError(
             "artifact capture does not match its owner declaration", entity_kind=kind, entity_name=name
         ) from None
-    captures = read_captures(db, kind, name)
+    try:
+        captures = read_captures(db, kind, name)
+    except UnsupportedArtifactCaptureVersionError:
+        records = db.instance_state.get_applied_slices(kind, name)
+        if any(
+            record.key is AppliedStateKey.ARTIFACT_INPUTS and record.payload.payload_version != 1 for record in records
+        ):
+            raise
+        captures = {}
     captures[component] = capture
     try:
         payload = encode_captures(captures)
@@ -163,6 +184,6 @@ def write_capture(
 
 
 def canonicalize_captures(record: AppliedStateSlice) -> VersionedPayload:
-    if record.payload.payload_version != 1:
+    if record.payload.payload_version != 2:
         return record.payload
     return encode_captures(decode_captures(record))

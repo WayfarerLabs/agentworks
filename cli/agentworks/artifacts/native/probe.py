@@ -6,15 +6,19 @@ import json
 import shlex
 from typing import TYPE_CHECKING
 
+import yaml
+
 from agentworks.errors import StateError
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
+    from agentworks.artifacts.application import ArtifactFile, OwnedArtifactFile
     from agentworks.transports import Transport
 
 # Executed in the same login-shell environment as the native workload. Only selected
-# non-secret discovery facts escape; native help output and settings bodies do not.
+# bounded artifact frontmatter and discovery facts return for local identity checks.
+# Native help output, settings bodies and artifact instruction bodies are not returned.
 _PROBE = r"""
 import fnmatch, json, os, pathlib, re, shutil, subprocess, sys, tomllib
 request = json.loads(sys.argv[1])
@@ -59,6 +63,67 @@ if workspace:
     roots.append(pathlib.Path(workspace) / default)
 if not request['check_policy']:
     roots = []
+inventory = []
+known_entries = request['entries']
+try:
+    candidates = []
+    scanned = 0
+    for root in roots:
+        skill_root = (root.parent / '.agents' / 'skills') if tool == 'codex' else root / 'skills'
+        if tool == 'codex' and root == pathlib.Path(native_home):
+            skill_root = pathlib.Path(home) / '.agents' / 'skills'
+        if any(':' not in name for name in skill_names) and skill_root.exists():
+            if skill_root.is_symlink():
+                raise ValueError()
+            for directory in skill_root.iterdir():
+                scanned += 1
+                if scanned > 512 or directory.is_symlink():
+                    raise ValueError()
+                if not directory.is_dir():
+                    continue
+                marker = directory / 'SKILL.md'
+                if marker.is_symlink() or not marker.is_file():
+                    raise ValueError()
+                candidates.append(('skill', marker, directory.name))
+                if len(candidates) > 512:
+                    raise ValueError()
+        agent_root = root / 'agents'
+        if agent_names and agent_root.exists():
+            if agent_root.is_symlink():
+                raise ValueError()
+            for path in agent_root.iterdir():
+                scanned += 1
+                if scanned > 512 or path.is_symlink() or path.is_dir():
+                    raise ValueError()
+                if path.suffix == ('.toml' if tool == 'codex' else '.md') and path.is_file():
+                    candidates.append(('agent', path, path.stem))
+                if len(candidates) > 512:
+                    raise ValueError()
+    total = 0
+    for kind, path, fallback in candidates:
+        with path.open('rb') as source:
+            raw = source.read(32769)
+        if tool == 'codex' and kind == 'agent':
+            if len(raw) > 32768:
+                raise ValueError()
+            name = tomllib.loads(raw.decode()).get('name')
+            if not isinstance(name, str):
+                raise ValueError()
+            inventory.append({'kind': kind, 'path': str(path), 'name': name})
+        else:
+            lines = raw.splitlines(keepends=True)
+            frontmatter = ''
+            if lines and lines[0].strip() == b'---':
+                end = next((index for index, line in enumerate(lines[1:], 1) if line.strip() == b'---'), None)
+                if end is None:
+                    raise ValueError()
+                frontmatter = b''.join(lines[1:end]).decode('utf-8')
+            total += len(frontmatter.encode())
+            if total > 1048576:
+                raise ValueError()
+            inventory.append({'kind': kind, 'path': str(path), 'fallback_name': fallback, 'frontmatter': frontmatter})
+except Exception:
+    problems.append('unreadable-native-inventory')
 paths = []
 for root in roots:
     paths.extend([root / 'settings.json', root / 'settings.local.json'] if tool == 'claude' else [root / 'config.toml'])
@@ -83,6 +148,15 @@ for path in paths:
             ):
                 problems.append('native-plugin-policy')
         elif tool == 'codex':
+            for name, agent in document.get('agents', {}).items():
+                if name in agent_names and (
+                    not isinstance(agent, dict)
+                    or known_entries.get(os.path.normpath(
+                        os.path.join(str(path.parent), str(agent.get('config_file', '')))
+                    ))
+                    != 'agent:' + name
+                ):
+                    problems.append('native-artifact-collision')
             skills = document.get('skills', {})
             if skill_names and skills.get('include_instructions') is False:
                 problems.append('native-skill-policy')
@@ -120,7 +194,9 @@ if tool == 'grok' and workspace and request['paths']:
                 problems.append('native-discovery-exclusions')
             elif ignored.returncode != 1:
                 problems.append('unreadable-native-policy')
-print('AGW_ARTIFACT_PROBE=' + json.dumps({'home': home, 'native_home': native_home, 'problems': sorted(set(problems))}))
+print('AGW_ARTIFACT_PROBE=' + json.dumps({
+    'home': home, 'native_home': native_home, 'problems': sorted(set(problems)), 'inventory': inventory
+}))
 """
 
 
@@ -135,6 +211,9 @@ _PROBLEM_MESSAGES = {
     "native-plugin-policy": "native configuration restricts the generated artifact plugin",
     "native-skill-policy": "native configuration restricts a supplied skill or its discovery instructions",
     "native-agent-policy": "native configuration restricts a supplied agent persona",
+    "native-artifact-identity-mismatch": "a supplied native artifact file now declares a different name",
+    "native-artifact-collision": "another native skill or persona claims a supplied artifact name",
+    "unreadable-native-inventory": "native skill or persona inventory exceeds supported layout or metadata limits",
     "unreadable-native-policy": "native discovery configuration cannot be read or parsed",
 }
 
@@ -146,19 +225,21 @@ def probe_native(
     environment: Mapping[str, str],
     home: str | None = None,
     workspace: str = "",
-    paths: tuple[str, ...] = (),
+    files: Sequence[ArtifactFile | OwnedArtifactFile] = (),
     flags: tuple[str, ...] = (),
     session_plugin: bool = False,
     workspace_only: bool = False,
-    identities: tuple[str, ...] = (),
     check_policy: bool = True,
 ) -> str:
     """Check the actual native home and relevant native policy without starting a model."""
+    entries = {file.path: file.native_identity for file in files if file.native_identity}
+    identities = tuple(entries.values())
     request = {
         "tool": tool,
         "home": home,
         "workspace": workspace,
-        "paths": paths,
+        "paths": tuple(file.path for file in files),
+        "entries": entries,
         "flags": flags,
         "session_plugin": session_plugin,
         "workspace_only": workspace_only,
@@ -182,6 +263,7 @@ def probe_native(
             raise ValueError()
     except (ValueError, KeyError, IndexError, TypeError):
         raise StateError(f"could not verify {tool} artifact discovery on the launch target") from None
+    problems.extend(_inventory_problems(observed.get("inventory"), identities, entries))
     if problems:
         raise StateError(
             f"{tool} artifact delivery: " + "; ".join(_PROBLEM_MESSAGES[problem] for problem in problems),
@@ -191,3 +273,40 @@ def probe_native(
             ),
         )
     return root
+
+
+def _inventory_problems(inventory: object, identities: tuple[str, ...], entries: Mapping[str, str]) -> list[str]:
+    """Interpret bounded target metadata without requiring a YAML parser on the guest."""
+    try:
+        if not isinstance(inventory, list) or len(inventory) > 512:
+            raise ValueError
+        selected = set(identities)
+        for row in inventory:
+            if (
+                not isinstance(row, dict)
+                or row.get("kind") not in ("skill", "agent")
+                or not isinstance(row.get("path"), str)
+            ):
+                raise ValueError
+            name = row.get("name")
+            if name is None:
+                header = row.get("frontmatter")
+                if not isinstance(header, str) or len(header.encode()) > 32768:
+                    raise ValueError
+                metadata = yaml.safe_load(header) if header else {}
+                if not isinstance(metadata, dict):
+                    raise ValueError
+                name = metadata.get("name", row.get("fallback_name") if row["kind"] == "skill" else None)
+            if not isinstance(name, str) or not name:
+                raise ValueError
+            native_identity = f"{row['kind']}:{name}"
+            expected = entries.get(row["path"])
+            if expected is not None:
+                if native_identity != expected:
+                    return ["native-artifact-identity-mismatch"]
+                continue
+            if native_identity in selected:
+                return ["native-artifact-collision"]
+        return []
+    except (ValueError, TypeError, yaml.YAMLError, RecursionError):
+        return ["unreadable-native-inventory"]

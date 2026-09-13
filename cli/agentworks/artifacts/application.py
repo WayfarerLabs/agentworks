@@ -7,13 +7,11 @@ from typing import TYPE_CHECKING, Annotated
 
 from pydantic import Field, field_validator
 
-from agentworks.artifacts.model import ArtifactFacet
+from agentworks.artifacts.model import ArtifactFacet, ArtifactInputs
 from agentworks.schema import AgwModel
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-
-    from agentworks.artifacts.model import ArtifactInput
 
 
 class ArtifactDeferral(AgwModel):
@@ -69,7 +67,7 @@ class ArtifactApplication:
 class SessionArtifactContext:
     """Core-prepared immutable inputs and identities for a prospective launch."""
 
-    inputs: tuple[ArtifactInput, ...]
+    inputs: ArtifactInputs
     home: str
     directory: str
     session_uuid: str

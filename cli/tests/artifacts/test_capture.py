@@ -14,6 +14,7 @@ from typing import Any, cast
 
 import pytest
 
+from agentworks.artifacts.bundle import ArtifactBundle
 from agentworks.artifacts.capture import capture_artifacts
 from agentworks.artifacts.codec import decode_inputs, encode_inputs
 from agentworks.artifacts.declarations import (
@@ -23,9 +24,10 @@ from agentworks.artifacts.declarations import (
     RuleArtifactSpec,
     SkillArtifactSpec,
 )
-from agentworks.artifacts.model import ArtifactInput, ArtifactOrigin
+from agentworks.artifacts.model import ArtifactGroup, ArtifactOrigin
 from agentworks.package_sources import DEFAULT_CAPTURE_LIMITS, CaptureLimits, PackageCapture, validate_member_set
 from agentworks.sources import SourceRefError
+from tests.artifacts._fixtures import group
 from tests.conftest import requires_symlinks
 
 pytestmark = pytest.mark.windows
@@ -41,9 +43,20 @@ def skill(tmp_path: Path) -> Path:
 
 
 def capture(
-    spec: ArtifactSpec, *, origin: ArtifactOrigin = ORIGIN, limits: CaptureLimits = DEFAULT_CAPTURE_LIMITS
-) -> tuple[ArtifactInput, ...]:
-    return capture_artifacts([("team", {"review": spec})], origin, limits=limits)
+    spec: ArtifactSpec,
+    *,
+    origin: ArtifactOrigin = ORIGIN,
+    limits: CaptureLimits = DEFAULT_CAPTURE_LIMITS,
+    name: str = "review",
+) -> ArtifactGroup:
+    field = {
+        HintArtifactSpec: "hints",
+        RuleArtifactSpec: "rules",
+        SkillArtifactSpec: "skills",
+        AgentArtifactSpec: "agents",
+    }[type(spec)]
+    bundle = ArtifactBundle(name="team", **{field: {name: spec}})
+    return capture_artifacts([("team", bundle)], origin, limits=limits)
 
 
 def test_complete_skill_text_and_opaque_roundtrip(tmp_path):
@@ -53,7 +66,7 @@ def test_complete_skill_text_and_opaque_roundtrip(tmp_path):
     (root / "script").write_bytes(b"#!/bin/sh\r\nexit 0\r")
     (root / "script").chmod(0o755)
     inputs = capture(SkillArtifactSpec(source=str(root), preserve_bytes=["fixture.*"]))
-    content = inputs[0].content
+    content = tuple(inputs.items())[0].content
     members = {member.path: member for member in content.members}
     assert b"\r" not in members["SKILL.md"].data
     assert members["asset.pdf"].data == b"%PDF-ASCII\r\nopaque\r"
@@ -70,7 +83,7 @@ def test_complete_skill_text_and_opaque_roundtrip(tmp_path):
 def test_content_identity_excludes_provenance_and_includes_executable(tmp_path):
     root = skill(tmp_path)
     (root / "script.sh").write_text("echo hi\n")
-    item = capture(SkillArtifactSpec(source=str(root)))[0]
+    item = tuple(capture(SkillArtifactSpec(source=str(root))).items())[0]
     other = replace(item, provenance=replace(item.provenance, source="elsewhere"))
     assert other.content.digest == item.content.digest
     assert other.identity == item.identity
@@ -291,11 +304,11 @@ def test_persona_metadata_and_options_are_immutable(tmp_path):
     path.write_text(
         "---\nname: reviewer\ndescription: Review\nnative_options:\n  codex:\n    model: example\n---\nCheck changes.\n"
     )
-    item = capture(AgentArtifactSpec(source=str(path)))[0]
+    item = tuple(capture(AgentArtifactSpec(source=str(path)), name="reviewer").items())[0]
     assert item.content.name == "reviewer"
     assert item.content.native_options == {"codex": {"model": "example"}}
     assert item.content.text == "Check changes.\n"
-    assert decode_inputs(encode_inputs((item,))) == (item,)
+    assert decode_inputs(encode_inputs(group(item))) == group(item)
 
 
 @pytest.mark.parametrize("metadata", ["hooks: {}", "mcpServers: {}", "x: &x [*x]", "compatibility: [wrong]"])
@@ -346,11 +359,20 @@ def test_git_committed_objects_complete_revision_shared_and_source_independent(r
 
     monkeypatch.setattr(PackageCapture, "_run", record)
     spec = SkillArtifactSpec(source="git::https://fixture.invalid/repo.git//review")
-    items = capture_artifacts([("team", {"a": spec, "b": spec})], ORIGIN)
+    items = capture_artifacts(
+        [
+            ("first", ArtifactBundle(name="first", skills={"review": spec})),
+            ("second", ArtifactBundle(name="second", skills={"review": spec})),
+        ],
+        ORIGIN,
+    )
     assert sum(args[0] == "fetch" for args in calls) == 1
-    assert items[0].provenance.commit == git(repository, "rev-parse", "HEAD").decode().strip()
-    assert items[0].content.digest == capture(SkillArtifactSpec(source=str(repository / "review")))[0].content.digest
-    members = {member.path: member.data for member in items[0].content.members}
+    assert tuple(items.items())[0].provenance.commit == git(repository, "rev-parse", "HEAD").decode().strip()
+    assert (
+        tuple(items.items())[0].content.digest
+        == tuple(capture(SkillArtifactSpec(source=str(repository / "review"))).items())[0].content.digest
+    )
+    members = {member.path: member.data for member in tuple(items.items())[0].content.members}
     assert members["kept.txt"] == b"keep me\n"
     assert members["opaque.dat"] == b"$Format:%H$\r\n"
 
@@ -382,10 +404,10 @@ def test_git_links_submodules_and_lfs_are_rejected(repository):
 
 def test_codec_rejects_old_corrupt_and_ambiguous_state():
     payload = encode_inputs(capture(HintArtifactSpec(text="hello")))
-    old = {**payload, "version": 2}
+    old = {**payload, "version": 1}
     with pytest.raises(SourceRefError):
         decode_inputs(old)
-    row = cast(list[dict[str, Any]], payload["inputs"])[0]
+    row = cast(dict[str, dict[str, Any]], payload["hints"])["review"]
     row["content"]["text"] = "changed"
     with pytest.raises(SourceRefError):
         decode_inputs(payload)
@@ -397,7 +419,7 @@ def test_codec_rejects_old_corrupt_and_ambiguous_state():
 
 def test_codec_binary_corruption_and_total_bound(tmp_path):
     payload = encode_inputs(capture(SkillArtifactSpec(source=str(skill(tmp_path)))))
-    cast(list[dict[str, Any]], payload["inputs"])[0]["content"]["members"][0]["data"] = "%%%"
+    cast(dict[str, dict[str, Any]], payload["skills"])["review"]["content"]["members"][0]["data"] = "%%%"
     with pytest.raises(SourceRefError):
         decode_inputs(payload)
     with pytest.raises(SourceRefError):
@@ -422,12 +444,12 @@ def test_source_diagnostics_do_not_repeat_credentials(source):
 def test_git_immutable_ref_and_refresh(repository):
     first = git(repository, "rev-parse", "HEAD").decode().strip()
     pinned = SkillArtifactSpec(source=f"git::https://fixture.invalid/repo.git//review?ref={first}")
-    before = capture(pinned)[0]
+    before = tuple(capture(pinned).items())[0]
     (repository / "review" / "new.txt").write_text("new revision")
     git(repository, "add", ".")
     git(repository, "commit", "-qm", "update")
-    assert capture(pinned)[0].content.digest == before.content.digest
-    updated = capture(SkillArtifactSpec(source="git::https://fixture.invalid/repo.git//review"))[0]
+    assert tuple(capture(pinned).items())[0].content.digest == before.content.digest
+    updated = tuple(capture(SkillArtifactSpec(source="git::https://fixture.invalid/repo.git//review")).items())[0]
     assert updated.content.digest != before.content.digest
     assert updated.provenance.commit != first
 
@@ -446,7 +468,7 @@ def test_git_filters_hooks_and_export_substitution_do_not_run(repository, monkey
     monkeypatch.setenv("GIT_CONFIG_VALUE_0", f"touch '{sentinel}'")
     monkeypatch.setenv("GIT_CONFIG_KEY_1", "filter.fixture.required")
     monkeypatch.setenv("GIT_CONFIG_VALUE_1", "true")
-    result = capture(SkillArtifactSpec(source="git::https://fixture.invalid/repo.git//review"))[0]
+    result = tuple(capture(SkillArtifactSpec(source="git::https://fixture.invalid/repo.git//review")).items())[0]
     assert "kept.txt" in {member.path for member in result.content.members}
     assert not sentinel.exists()
 
@@ -485,7 +507,7 @@ def test_git_member_path_persistence_bound(repository, length):
             capture(spec)
     else:
         inputs = capture(spec)
-        assert path in {member.path for member in inputs[0].content.members}
+        assert path in {member.path for member in tuple(inputs.items())[0].content.members}
         assert decode_inputs(encode_inputs(inputs)) == inputs
 
 
@@ -568,7 +590,7 @@ def test_git_failure_has_no_stale_snapshot(repository):
 def test_native_option_mutation_does_not_escape_input(tmp_path):
     path = tmp_path / "agent.md"
     path.write_text("---\nname: review\ndescription: Review\nnative_options:\n  codex:\n    model: x\n---\nDo it.\n")
-    content = capture(AgentArtifactSpec(source=str(path)))[0].content
+    content = tuple(capture(AgentArtifactSpec(source=str(path))).items())[0].content
     first = cast(dict[str, Any], content.native_options)
     first["codex"]["model"] = "changed"
     assert content.native_options == {"codex": {"model": "x"}}
@@ -586,9 +608,9 @@ def test_source_credentials_rejected_before_declaration_persistence():
 def test_rule_source_mode_is_part_of_identity(tmp_path):
     path = tmp_path / "rule.md"
     path.write_text("Read instructions.\n")
-    before = capture(RuleArtifactSpec(source=str(path)))[0]
+    before = tuple(capture(RuleArtifactSpec(source=str(path))).items())[0]
     path.chmod(0o755)
-    after = capture(RuleArtifactSpec(source=str(path)))[0]
+    after = tuple(capture(RuleArtifactSpec(source=str(path))).items())[0]
     assert before.content.text == after.content.text
     assert before.content.digest != after.content.digest
     assert after.content.members[0].executable
@@ -597,7 +619,7 @@ def test_rule_source_mode_is_part_of_identity(tmp_path):
 def test_rule_unknown_suffix_is_still_designated_text(tmp_path):
     path = tmp_path / "context.custom"
     path.write_bytes(b"Always follow\r\nthese instructions.\r")
-    content = capture(RuleArtifactSpec(source=str(path)))[0].content
+    content = tuple(capture(RuleArtifactSpec(source=str(path))).items())[0].content
     assert content.members[0].data == b"Always follow\nthese instructions.\n"
     assert content.members[0].text
 
@@ -632,4 +654,6 @@ def test_unrepresentable_source_provenance_refuses_capture(tmp_path):
     source = parent / "rule.md"
     source.write_text("readable rule")
     with pytest.raises(SourceRefError):
-        capture_artifacts([("team", {"rule": RuleArtifactSpec(source=str(source))})], ORIGIN)
+        capture_artifacts(
+            [("team", ArtifactBundle(name="team", rules={"rule": RuleArtifactSpec(source=str(source))}))], ORIGIN
+        )

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from agentworks.artifacts.state import capture_owner, read_captures
+from agentworks.artifacts.state import UnsupportedArtifactCaptureVersionError, capture_owner, read_captures
 from agentworks.capabilities.harness_integration.setup import (
     SetupInvocation,
     UserSetupInvocation,
@@ -53,6 +53,11 @@ def _needed(
     activations: Sequence[CapabilityBlock],
     artifacts: ArtifactsConfig,
 ) -> bool:
+    if not activations and not artifacts.bundles:
+        try:
+            read_captures(db, kind, name)
+        except UnsupportedArtifactCaptureVersionError:
+            return True
     return (
         bool(activations)
         or bool(artifacts.bundles)

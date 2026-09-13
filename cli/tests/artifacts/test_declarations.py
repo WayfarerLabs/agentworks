@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 @pytest.mark.parametrize("content", [{}, {"text": "x", "source": "x.md"}, {"text": " "}, {"source": ""}])
 def test_context_artifacts_require_exactly_one_nonblank_input(artifact_type: str, content: dict[str, str]) -> None:
     with pytest.raises(ValidationError):
-        ArtifactBundle.model_validate({"name": "team", "artifacts": {"one": {"type": artifact_type, **content}}})
+        ArtifactBundle.model_validate({"name": "team", artifact_type + "s": {"one": content}})
 
 
 @pytest.mark.parametrize(
@@ -46,25 +46,32 @@ def test_context_artifacts_require_exactly_one_nonblank_input(artifact_type: str
 )
 def test_invalid_artifact_declarations_are_rejected(entry: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
-        ArtifactBundle.model_validate({"name": "team", "artifacts": {"one": entry}})
+        ArtifactBundle.model_validate(
+            {
+                "name": "team",
+                str(entry["type"]) + "s": {"one": {key: value for key, value in entry.items() if key != "type"}},
+            }
+        )
 
 
 def test_bundle_manifest_preserves_type_content_and_entry_order() -> None:
-    entries = {
-        "note": {"type": "hint", "text": "A setup note"},
-        "conventions": {"type": "rule", "source": "file::rules.md"},
-        "review": {
-            "type": "skill",
-            "source": "git::https://example.com/repo.git//skills/review?ref=v1",
-            "preserve_bytes": ["fixtures/**"],
+    maps: dict[str, dict[str, dict[str, object]]] = {
+        "hints": {"note": {"text": "A setup note"}},
+        "rules": {"conventions": {"source": "file::rules.md"}},
+        "skills": {
+            "review": {
+                "source": "git::https://example.com/repo.git//skills/review?ref=v1",
+                "preserve_bytes": ["fixtures/**"],
+            }
         },
-        "reviewer": {"type": "agent", "source": "file::reviewer.md"},
+        "agents": {"reviewer": {"source": "file::reviewer.md"}},
     }
-    bundle = decode("artifact-bundle", "team", {"artifacts": entries})
+    bundle = decode("artifact-bundle", "team", maps)
     assert isinstance(bundle, ArtifactBundle)
-    assert list(bundle.artifacts) == list(entries)
-    for name, expected in entries.items():
-        assert bundle.artifacts[name].model_dump(exclude_unset=True) == expected
+    for kind, entries in maps.items():
+        assert list(getattr(bundle, kind)) == list(entries)
+        for name, expected in entries.items():
+            assert getattr(bundle, kind)[name].model_dump(exclude_unset=True) == expected
 
 
 @pytest.mark.parametrize("bundles", [["team", "team"], [" "]])
@@ -166,7 +173,7 @@ def test_bundle_reference_uses_ordinary_registry_miss_policy(declared: bool) -> 
             ArtifactBundle.model_validate(
                 {
                     "name": "team",
-                    "artifacts": {"review": {"type": "skill", "source": "missing/directory"}},
+                    "skills": {"review": {"source": "missing/directory"}},
                 }
             ),
             origin,

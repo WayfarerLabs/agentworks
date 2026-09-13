@@ -413,7 +413,7 @@ class _Layer2(NamedTuple):
 class CodexIntegration(HarnessIntegration):
     """Runs Codex, resuming or launching fresh per on-disk state."""
 
-    contract_version: ClassVar[int] = 5
+    contract_version: ClassVar[int] = 6
     name: ClassVar[str] = "codex"
     description: ClassVar[str] = "Run Codex, resuming its session when one exists"
     config_model: ClassVar[type[CodexConfig]] = CodexConfig
@@ -509,8 +509,7 @@ class CodexIntegration(HarnessIntegration):
                 tool="codex",
                 environment=invocation.environment,
                 home=invocation.home,
-                paths=tuple(file.path for file in plan.files),
-                identities=tuple(file.native_identity for file in plan.files if file.native_identity),
+                files=plan.files,
             )
         return plan
 
@@ -533,9 +532,8 @@ class CodexIntegration(HarnessIntegration):
                 tool="codex",
                 environment=invocation.environment,
                 workspace=invocation.root,
-                paths=tuple(file.path for file in plan.files),
+                files=plan.files,
                 workspace_only=True,
-                identities=tuple(file.native_identity for file in plan.files if file.native_identity),
             )
         return plan
 
@@ -602,8 +600,7 @@ class CodexIntegration(HarnessIntegration):
                 environment=artifact_context.environment,
                 home=artifact_context.home,
                 workspace=self._workspace_path,
-                paths=tuple(file.path for file in files),
-                identities=tuple(file.native_identity for file in files if file.native_identity),
+                files=files,
                 flags=self._artifact_plan.required_flags,
                 session_plugin="--plugin-dir" in self._artifact_plan.argv,
             )

@@ -10,7 +10,7 @@ from agentworks.agents.template import AgentTemplate
 from agentworks.artifacts.application import ArtifactDeferral, OwnedArtifactFile
 from agentworks.artifacts.bundle import ArtifactBundle
 from agentworks.artifacts.declarations import ArtifactsConfig, HintArtifactSpec
-from agentworks.artifacts.model import ArtifactInput
+from agentworks.artifacts.model import ArtifactGroup, ArtifactInputs, ArtifactOwner
 from agentworks.artifacts.routing import (
     deferred_inputs,
     inspect_owner_artifacts,
@@ -31,6 +31,7 @@ from agentworks.secrets.orchestration import SecretTarget
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.template import VMTemplate
 from agentworks.workspaces.template import WorkspaceTemplate
+from tests.artifacts._fixtures import group
 
 
 @dataclass
@@ -46,24 +47,26 @@ class Graph:
         self,
         owner: str,
         *,
-        inherited: tuple[ArtifactInput, ...] = (),
+        inherited: ArtifactGroup | None = None,
         routes: dict[str, str] | None = None,
         complete: bool = True,
         files: tuple[OwnedArtifactFile, ...] = (),
     ) -> SetupRecord:
         inputs = self.owners[owner]
-        prepared = (*inherited, *self.captures[owner].inputs)
+        prepared = ArtifactInputs(
+            local=self.captures[owner].inputs, deferred={} if inherited is None else {inherited.owner: inherited}
+        )
         record = SetupRecord(
             component=inputs.component,
             integration="shell",
             destination_id="d" * 64,
             declaration=inputs.declaration(CapabilityBlock.of("shell")),
             complete=complete,
-            artifact_inputs=tuple(item.identity for item in prepared),
+            artifact_inputs=tuple(item.identity for item in prepared.items()),
             artifact_files=files,
             deferred=tuple(
                 ArtifactDeferral(input_id=item.identity, destination=routes[item.origin.entry], reason="later")
-                for item in prepared
+                for item in prepared.items()
                 if routes is not None and item.origin.entry in routes
             ),
         )
@@ -72,7 +75,15 @@ class Graph:
         return record
 
     def route(self, *, user: str | None = "agent"):
-        return session_artifacts(self.db, self.registry, self.vm, self.workspace, user, "shell", ())
+        return session_artifacts(
+            self.db,
+            self.registry,
+            self.vm,
+            self.workspace,
+            user,
+            "shell",
+            ArtifactGroup(ArtifactOwner("session", "session", "s1")),
+        )
 
 
 def graph(db: Database, *, active: tuple[str, ...] = (), counts: dict[str, int] | None = None) -> Graph:
@@ -89,7 +100,7 @@ def graph(db: Database, *, active: tuple[str, ...] = (), counts: dict[str, int] 
             f"{component}-{index}": HintArtifactSpec(text=f"{component} {index}")
             for index in range((counts or {}).get(component, 1))
         }
-        registry.add("artifact-bundle", bundle_name, ArtifactBundle(name=bundle_name, artifacts=entries), origin)
+        registry.add("artifact-bundle", bundle_name, ArtifactBundle(name=bundle_name, hints=entries), origin)
         config = ArtifactsConfig(bundles=[bundle_name])
         activations = [CapabilityBlock.of("shell")] if component in active else []
         model = {"vm": VMTemplate, "admin": AdminConfig, "agent": AgentTemplate, "workspace": WorkspaceTemplate}[
@@ -116,22 +127,23 @@ def graph(db: Database, *, active: tuple[str, ...] = (), counts: dict[str, int] 
 def test_inactive_diamond_passes_each_origin_once_without_records(db):
     fixture = graph(db)
     result = fixture.route()
-    assert [item.origin.component for item in result.inputs] == ["vm", "agent", "workspace"]
+    assert [item.origin.component for item in result.inputs.items()] == ["vm", "agent", "workspace"]
     assert result.active_facets == ()
     assert not result.ancestor_files
     assert not read_native_setup(db, "vm", "vm").records
     admin = fixture.route(user=None)
-    assert [item.origin.component for item in admin.inputs] == ["vm", "admin", "workspace"]
+    assert [item.origin.component for item in admin.inputs.items()] == ["vm", "admin", "workspace"]
 
 
 @pytest.mark.parametrize("user", ["agent", "admin"])
 def test_inactive_vm_inputs_are_handled_by_actual_active_user(db, user):
     fixture = graph(db, active=(user,))
     prepared = setup_artifacts(db, fixture.registry, fixture.owners[user], fixture.vm, "shell")
-    assert prepared == (*fixture.captures["vm"].inputs, *fixture.captures[user].inputs)
+    assert prepared.local == fixture.captures[user].inputs
+    assert prepared.deferred == {fixture.captures["vm"].inputs.owner: fixture.captures["vm"].inputs}
     fixture.save(user, inherited=fixture.captures["vm"].inputs)
     result = fixture.route(user=None if user == "admin" else user)
-    assert [item.origin.component for item in result.inputs] == ["workspace"]
+    assert [item.origin.component for item in result.inputs.items()] == ["workspace"]
     assert result.active_facets == ("user",)
     assert not any(record.component == "vm" for record in read_native_setup(db, "vm", "vm").records)
 
@@ -139,11 +151,11 @@ def test_inactive_vm_inputs_are_handled_by_actual_active_user(db, user):
 def test_inactive_vm_routes_only_to_user_and_workspace_keeps_local_inputs(db):
     fixture = graph(db)
     vm = inspect_owner_artifacts(db, fixture.registry, fixture.owners["vm"], "shell")
-    assert deferred_inputs(vm, "user") == fixture.captures["vm"].inputs
-    assert deferred_inputs(vm, "workspace") == ()
-    assert deferred_inputs(vm, "session") == ()
-    assert setup_artifacts(db, fixture.registry, fixture.owners["workspace"], fixture.vm, "shell") == (
-        fixture.captures["workspace"].inputs
+    assert deferred_inputs(vm, "user") == {fixture.captures["vm"].inputs.owner: fixture.captures["vm"].inputs}
+    assert deferred_inputs(vm, "workspace") == {}
+    assert deferred_inputs(vm, "session") == {}
+    assert setup_artifacts(db, fixture.registry, fixture.owners["workspace"], fixture.vm, "shell") == ArtifactInputs(
+        local=fixture.captures["workspace"].inputs
     )
 
 
@@ -151,13 +163,15 @@ def test_newly_inherited_vm_inputs_require_active_user_setup(db):
     fixture = graph(db, active=("agent",))
     previous = fixture.save("agent")
     inherited = fixture.captures["vm"].inputs
-    view = inspect_owner_artifacts(db, fixture.registry, fixture.owners["agent"], "shell", inherited=inherited)
+    view = inspect_owner_artifacts(
+        db, fixture.registry, fixture.owners["agent"], "shell", inherited={inherited.owner: inherited}
+    )
     assert view.status == "stale"
     with pytest.raises(StateError):
         fixture.route()
     assert read_native_setup(db, "agent", "agent").records == (previous,)
     fixture.save("agent", inherited=inherited)
-    assert [item.origin.component for item in fixture.route().inputs] == ["workspace"]
+    assert [item.origin.component for item in fixture.route().inputs.items()] == ["workspace"]
 
 
 @pytest.mark.parametrize("component", ["agent", "workspace"])
@@ -166,31 +180,34 @@ def test_inactive_branch_passes_inherited_and_local_inputs_to_session(db, compon
     owner = fixture.owners[component]
     fixture.save("vm", routes={"vm-0": owner.facet})
     inherited = fixture.captures["vm"].inputs
-    view = inspect_owner_artifacts(db, fixture.registry, owner, "shell", inherited=inherited)
-    assert deferred_inputs(view, "session") == (*inherited, *fixture.captures[component].inputs)
-    assert deferred_inputs(view, "user") == ()
-    assert deferred_inputs(view, "workspace") == ()
+    view = inspect_owner_artifacts(db, fixture.registry, owner, "shell", inherited={inherited.owner: inherited})
+    assert deferred_inputs(view, "session") == {
+        inherited.owner: inherited,
+        fixture.captures[component].inputs.owner: fixture.captures[component].inputs,
+    }
+    assert deferred_inputs(view, "user") == {}
+    assert deferred_inputs(view, "workspace") == {}
     result = fixture.route()
-    assert [item.origin.component for item in result.inputs] == ["vm", "agent", "workspace"]
-    assert len({item.identity for item in result.inputs}) == len(result.inputs)
+    assert [item.origin.component for item in result.inputs.items()] == ["vm", "agent", "workspace"]
+    assert len({item.identity for item in result.inputs.items()}) == sum(1 for _ in result.inputs.items())
 
 
 def test_diamond_routes_restore_original_vm_declaration_order(db):
     fixture = graph(db, active=("vm",), counts={"vm": 3})
     fixture.save("vm", routes={"vm-0": "user", "vm-1": "session", "vm-2": "workspace"})
     result = fixture.route()
-    assert [item.origin.entry for item in result.inputs] == ["vm-0", "vm-1", "vm-2", "agent-0", "workspace-0"]
-    assert len({item.identity for item in result.inputs}) == len(result.inputs)
+    assert [item.origin.entry for item in result.inputs.items()] == ["vm-0", "vm-1", "vm-2", "agent-0", "workspace-0"]
+    assert len({item.identity for item in result.inputs.items()}) == sum(1 for _ in result.inputs.items())
 
 
 def test_each_branch_handles_only_its_prepared_inputs(db):
     fixture = graph(db, active=("vm", "agent", "workspace"), counts={"vm": 3})
     fixture.save("vm", routes={"vm-0": "user", "vm-1": "session", "vm-2": "workspace"})
     vm_items = fixture.captures["vm"].inputs
-    fixture.save("agent", inherited=(vm_items[0],))
-    fixture.save("workspace", inherited=(vm_items[2],), routes={"workspace-0": "session"})
+    fixture.save("agent", inherited=group(vm_items.hints["vm-0"]))
+    fixture.save("workspace", inherited=group(vm_items.hints["vm-2"]), routes={"workspace-0": "session"})
     result = fixture.route()
-    assert [item.origin.entry for item in result.inputs] == ["vm-1", "workspace-0"]
+    assert [item.origin.entry for item in result.inputs.items()] == ["vm-1", "workspace-0"]
     assert result.active_facets == ("vm", "user", "workspace")
 
 
@@ -199,9 +216,9 @@ def test_setup_routes_only_requested_vm_branch_and_uses_prospective_capture(db):
     fixture.save("vm", routes={"vm-0": "workspace", "vm-1": "user"})
     owner = replace(fixture.owners["agent"], artifact_snapshot=fixture.captures["agent"])
     result = setup_artifacts(db, fixture.registry, owner, fixture.vm, "shell")
-    assert [item.origin.entry for item in result] == ["vm-1", "agent-0"]
+    assert [item.origin.entry for item in result.items()] == ["vm-1", "agent-0"]
     project = setup_artifacts(db, fixture.registry, fixture.owners["workspace"], fixture.vm, "shell")
-    assert [item.origin.entry for item in project] == ["vm-0", "workspace-0"]
+    assert [item.origin.entry for item in project.items()] == ["vm-0", "workspace-0"]
 
 
 @pytest.mark.parametrize("condition", ["missing", "incomplete", "stale", "legacy"])
@@ -237,13 +254,13 @@ def test_missing_capture_is_unknown_and_empty_legacy_owner_is_empty(db):
     view = inspect_owner_artifacts(db, fixture.registry, owner, "shell")
     assert view.status == "missing" and view.captured is None
     empty = inspect_owner_artifacts(db, fixture.registry, replace(owner, artifacts=ArtifactsConfig()), "shell")
-    assert empty.status == "inactive" and empty.prepared == ()
+    assert empty.status == "inactive" and not empty.prepared
 
 
 def test_removed_activation_with_owned_artifacts_requires_retirement(db):
     fixture = graph(db)
-    item = fixture.captures["agent"].inputs[0]
-    file = OwnedArtifactFile(path="/home/worker/.agents/rule.md", sha256="a" * 64, origins=(item.origin.identity,))
+    item = tuple(fixture.captures["agent"].inputs.items())[0]
+    file = OwnedArtifactFile(path="/home/worker/.agents/rule.md", sha256="a" * 64, origins=(item.origin_identity,))
     fixture.save("agent", files=(file,))
     view = inspect_owner_artifacts(db, fixture.registry, fixture.owners["agent"], "shell")
     assert view.status == "retirement"
@@ -257,7 +274,7 @@ def test_unrelated_plugin_claims_do_not_block_passthrough(db):
     plugin = NativeClaim(role="plugin", identifier="one", destination="native")
     changed = record.model_copy(update={"claims": (plugin,), "complete": False, "pending_cleanup": True})
     write_native_setup(db, "agent", "agent", NativeSetupState(records=(changed,)), operation="fixture")
-    assert len(fixture.route().inputs) == 3
+    assert sum(1 for _ in fixture.route().inputs.items()) == 3
 
 
 def test_unavailable_parent_route_does_not_manufacture_current_empty_input(db):
@@ -270,17 +287,17 @@ def test_unavailable_parent_route_does_not_manufacture_current_empty_input(db):
 def test_workspace_only_vm_change_does_not_stale_user_branch(db):
     fixture = graph(db, active=("vm", "agent"), counts={"vm": 2})
     fixture.save("vm", routes={"vm-0": "user", "vm-1": "workspace"})
-    first, second = fixture.captures["vm"].inputs
-    fixture.save("agent", inherited=(first,))
+    first, second = fixture.captures["vm"].inputs.items()
+    fixture.save("agent", inherited=group(first))
     changed = replace(second, content=replace(second.content, text="changed workspace-only input"))
     previous = fixture.captures["vm"]
-    current = replace(previous, inputs=(first, changed))
+    current = replace(previous, inputs=group(first, changed))
     fixture.captures["vm"] = current
     write_capture(db, "vm", "vm", "vm", current, operation="fixture")
     fixture.save("vm", routes={"vm-0": "user", "vm-1": "workspace"})
     result = fixture.route()
-    assert [item.origin.entry for item in result.inputs] == ["vm-1", "workspace-0"]
-    assert result.inputs[0].content.text == "changed workspace-only input"
+    assert [item.origin.entry for item in result.inputs.items()] == ["vm-1", "workspace-0"]
+    assert tuple(result.inputs.items())[0].content.text == "changed workspace-only input"
 
 
 def test_config_and_env_freshness_still_apply(db):
@@ -298,11 +315,14 @@ def test_independent_consumers_do_not_discharge_other_users(db, active_vm):
         fixture.save("vm", routes={"vm-0": "user"})
     fixture.save("agent", inherited=fixture.captures["vm"].inputs)
     first = fixture.route()
-    assert [item.origin.component for item in first.inputs] == ["workspace"]
+    assert [item.origin.component for item in first.inputs.items()] == ["workspace"]
     db.insert_agent("other", "vm", "other", template="agent")
     other = capture_owner(fixture.registry, "agent", "other", "agent", fixture.owners["agent"].artifacts)
     write_capture(db, "agent", "other", "agent", other, operation="fixture")
-    assert other.inputs[0].origin.identity != fixture.captures["agent"].inputs[0].origin.identity
+    assert (
+        tuple(other.inputs.items())[0].origin.identity
+        != tuple(fixture.captures["agent"].inputs.items())[0].origin.identity
+    )
     with pytest.raises(StateError):
         fixture.route(user="other")
     fixture.owners["other"] = replace(fixture.owners["agent"], name="other")
@@ -319,14 +339,26 @@ def test_actual_lineage_conflicts_are_rejected(db):
     with pytest.raises(StateError):
         fixture.route(user="foreign")
     with pytest.raises(StateError):
-        session_artifacts(db, fixture.registry, other_vm, fixture.workspace, None, "shell", ())
+        session_artifacts(
+            db,
+            fixture.registry,
+            other_vm,
+            fixture.workspace,
+            None,
+            "shell",
+            ArtifactGroup(ArtifactOwner("session", "session", "s1")),
+        )
 
 
 def test_duplicate_input_paths_are_refused(db):
     fixture = graph(db)
-    with pytest.raises(StateError):
+    with pytest.raises(ValueError):
         inspect_owner_artifacts(
-            db, fixture.registry, fixture.owners["agent"], "shell", inherited=fixture.captures["agent"].inputs
+            db,
+            fixture.registry,
+            fixture.owners["agent"],
+            "shell",
+            inherited={fixture.captures["agent"].inputs.owner: fixture.captures["agent"].inputs},
         )
 
 
@@ -353,7 +385,7 @@ def test_session_projection_shares_canonical_diamond_order(db):
         db, fixture.registry, fixture.owners["workspace"], "shell", inherited=deferred_inputs(vm, "workspace")
     )
     inherited = session_inherited_inputs(vm, user, workspace)
-    assert inherited == fixture.route().inputs
+    assert inherited == fixture.route().inputs.deferred
     db.insert_session(
         "session",
         "workspace",
@@ -379,12 +411,12 @@ def test_session_projection_shares_canonical_diamond_order(db):
         destination_id="d" * 64,
         declaration=inputs.declaration(CapabilityBlock.of("shell")),
         complete=True,
-        artifact_inputs=tuple(item.identity for item in (*inherited, *local.inputs)),
+        artifact_inputs=tuple(item.identity for item in ArtifactInputs(local=local.inputs, deferred=inherited).items()),
     )
     write_native_setup(db, "session", "session", NativeSetupState(records=(record,)), operation="fixture")
     result = inspect_owner_artifacts(db, fixture.registry, inputs, "shell", inherited=inherited)
     assert result.status == "current"
-    assert result.prepared == (*inherited, *local.inputs)
+    assert result.prepared == ArtifactInputs(local=local.inputs, deferred=inherited)
     changed = replace(
         inputs, target=SecretTarget(vm={}, agent={}, workspace={}, session={"NEW": EnvEntry.model_validate("value")})
     )
@@ -402,7 +434,7 @@ def test_capture_projection_and_routing_do_not_mutate_or_acquire(db, monkeypatch
     monkeypatch.setattr(PackageCapture, "capture", forbidden)
     monkeypatch.setattr(type(db.instance_state), "replace_applied_slices", forbidden)
     result = fixture.route()
-    assert len(result.inputs) == 3
+    assert sum(1 for _ in result.inputs.items()) == 3
     view = inspect_owner_artifacts(db, fixture.registry, fixture.owners["agent"], "shell")
     assert view.status == "inactive"
 
@@ -410,22 +442,22 @@ def test_capture_projection_and_routing_do_not_mutate_or_acquire(db, monkeypatch
 def test_artifact_free_active_facets_retain_existing_plugin_readiness_semantics(db):
     fixture = graph(db, active=("vm", "agent", "workspace"), counts={"vm": 0, "agent": 0, "workspace": 0})
     result = fixture.route()
-    assert result.inputs == ()
+    assert not result.inputs
     assert result.active_facets == ()
 
 
 def test_upstream_owned_files_survive_handled_payload_elision(db):
     fixture = graph(db, active=("agent",))
-    item = fixture.captures["agent"].inputs[0]
+    item = tuple(fixture.captures["agent"].inputs.items())[0]
     file = OwnedArtifactFile(
         path="/home/worker/.agents/skills/review/SKILL.md",
         sha256="a" * 64,
-        origins=(item.origin.identity,),
+        origins=(item.origin_identity,),
         native_identity="skill:review",
     )
     fixture.save("agent", inherited=fixture.captures["vm"].inputs, files=(file,))
     result = fixture.route()
-    assert item.identity not in {value.identity for value in result.inputs}
+    assert item.identity not in {value.identity for value in result.inputs.items()}
     assert result.ancestor_files == (file,)
     assert result.active_facets == ("user",)
 

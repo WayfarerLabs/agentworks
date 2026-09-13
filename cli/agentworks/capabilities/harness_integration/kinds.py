@@ -115,7 +115,7 @@ def _readiness(name: str, impl: Any) -> Readiness:
 
 HARNESS_INTEGRATION_DESCRIPTOR = CapabilityKindDescriptor(
     kind="harness-integration",
-    contract_version=5,
+    contract_version=6,
     implementation_contract=HarnessIntegration,
     registry=_registry,
     required_operations=frozenset({"start", "vm_init", "user_init", "workspace_init"}),

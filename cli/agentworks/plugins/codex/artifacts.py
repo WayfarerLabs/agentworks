@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from agentworks.artifacts.application import SessionArtifactContext
-    from agentworks.artifacts.model import ArtifactInput
+    from agentworks.artifacts.model import ArtifactInput, ArtifactInputs
 
 
 _OPTIONS = {"model": str, "model_reasoning_effort": str}
@@ -44,11 +44,11 @@ def _persona(item: ArtifactInput, *, role_layer: bool = False) -> str:
     return tomli_w.dumps(values)
 
 
-def outer_artifacts(inputs: tuple[ArtifactInput, ...], *, skills_root: str, agents_root: str) -> ArtifactApplication:
+def outer_artifacts(inputs: ArtifactInputs, *, skills_root: str, agents_root: str) -> ArtifactApplication:
     validate_names(inputs)
     files: list[ArtifactFile] = []
     deferred = []
-    for item in inputs:
+    for item in inputs.items():
         content = item.content
         if content.type is ArtifactType.SKILL:
             files.extend(skill_files(skills_root, item))
@@ -108,11 +108,13 @@ def session_artifacts(
     files: list[ArtifactFile] = []
     argv: list[str] = []
     deferred = []
-    guidance = tuple(item for item in context.inputs if item.content.type in (ArtifactType.HINT, ArtifactType.RULE))
+    guidance = tuple(
+        item for item in context.inputs.items() if item.content.type in (ArtifactType.HINT, ArtifactType.RULE)
+    )
     if guidance:
         text = context_text(guidance, configured)
         argv += ["-c", f"developer_instructions={json.dumps(text, ensure_ascii=False)}"]
-    for item in context.inputs:
+    for item in context.inputs.items():
         if item.content.type is ArtifactType.SKILL:
             deferred.append(
                 ArtifactDeferral(

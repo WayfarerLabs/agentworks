@@ -33,6 +33,7 @@ from agentworks.plugins.codex import artifacts as codex
 from agentworks.plugins.codex.harness_integration import CodexIntegration
 from agentworks.plugins.grok import artifacts as grok
 from agentworks.plugins.grok.harness_integration import GrokBuildIntegration
+from tests.artifacts._fixtures import received
 
 
 def artifact(
@@ -61,7 +62,7 @@ def artifact(
 
 def context(*inputs: ArtifactInput, ancestors: tuple[OwnedArtifactFile, ...] = ()) -> SessionArtifactContext:
     return SessionArtifactContext(
-        inputs=inputs,
+        inputs=received(*inputs),
         home="/home/alice",
         directory="/home/alice/.agentworks-artifacts/session/u/r",
         session_uuid="u",
@@ -82,7 +83,7 @@ def owned(file, *, origins: tuple[str, ...] | None = None) -> OwnedArtifactFile:
 @pytest.mark.parametrize("render", [claude.outer_artifacts, grok.outer_artifacts])
 def test_outer_skills_preserve_complete_package_bytes_and_executable_intent(render):
     item = artifact(ArtifactType.SKILL)
-    result = render((item,), "/home/alice/.native")
+    result = render(received(item), "/home/alice/.native")
     assert [(file.path.rsplit("/review/", 1)[1], file.data, file.executable) for file in result.files] == [
         (member.path, member.data, member.executable) for member in item.content.members
     ]
@@ -94,7 +95,7 @@ def test_outer_skills_preserve_complete_package_bytes_and_executable_intent(rend
 def test_rules_are_unconditional_and_hints_do_not_collide_with_named_rule(render):
     hint = artifact(ArtifactType.HINT)
     rule = artifact(ArtifactType.RULE, name="hints")
-    result = render((hint, rule), "/native")
+    result = render(received(hint, rule), "/native")
     assert len({file.path for file in result.files}) == 2
     assert all(file.data.endswith(hint.content.text.encode()) for file in result.files)
     assert all(file.path.count("/") == 3 for file in result.files)
@@ -102,13 +103,15 @@ def test_rules_are_unconditional_and_hints_do_not_collide_with_named_rule(render
 
 def test_shell_index_has_only_this_run_inputs_and_private_relative_paths():
     item = artifact(ArtifactType.SKILL)
-    result = shell_artifacts((item,), "/private/run", session=True)
+    result = shell_artifacts(received(item), "/private/run", session=True)
     index = json.loads(next(file.data for file in result.files if file.path.endswith("/index.json")))
-    assert index["artifacts"][0]["files"] == [f"skills/review/{member.path}" for member in item.content.members]
-    assert index["artifacts"][0]["origin"]["resource_name"] == "s1"
+    assert index["groups"][0]["skills"]["review"]["files"] == [
+        f"scopes/session/s1/skills/review/{member.path}" for member in item.content.members
+    ]
+    assert index["groups"][0]["skills"]["review"]["origin"]["resource_name"] == "s1"
     assert result.artifacts_dir == "/private/run"
-    assert shell_artifacts((item,), "/outer").artifacts_dir is None
-    assert shell_artifacts((), "/private/run", session=True) == ArtifactApplication()
+    assert shell_artifacts(received(item), "/outer").artifacts_dir is None
+    assert shell_artifacts(received(), "/private/run", session=True) == ArtifactApplication()
 
 
 @pytest.mark.parametrize(
@@ -116,13 +119,15 @@ def test_shell_index_has_only_this_run_inputs_and_private_relative_paths():
 )
 def test_plugin_artifact_directory_requires_an_absolute_normalized_path(directory):
     with pytest.raises(StateError):
-        validate_application(ArtifactApplication(artifacts_dir=directory), (), "session", integration="fixture")
+        validate_application(ArtifactApplication(artifacts_dir=directory), received(), "session", integration="fixture")
 
 
 @pytest.mark.parametrize("facet", ["vm", "user", "workspace"])
 def test_outer_facet_cannot_supply_a_session_artifact_directory(facet):
     with pytest.raises(StateError):
-        validate_application(ArtifactApplication(artifacts_dir="/private/run"), (), facet, integration="fixture")
+        validate_application(
+            ArtifactApplication(artifacts_dir="/private/run"), received(), facet, integration="fixture"
+        )
 
 
 def test_session_artifact_directory_is_bound_to_the_prepared_run():
@@ -136,7 +141,9 @@ def test_session_artifact_directory_is_bound_to_the_prepared_run():
 
 def test_codex_outer_routes_context_and_installs_standard_skills_and_personas():
     items = tuple(artifact(type, name=type.value) for type in ArtifactType)
-    result = codex.outer_artifacts(items, skills_root="/home/a/.agents/skills", agents_root="/home/a/.codex/agents")
+    result = codex.outer_artifacts(
+        received(*items), skills_root="/home/a/.agents/skills", agents_root="/home/a/.codex/agents"
+    )
     assert {entry.input_id for entry in result.deferred} == {item.identity for item in items[:2]}
     assert {entry.destination for entry in result.deferred} == {"session"}
     role = tomllib.loads(next(file.data.decode() for file in result.files if file.path.endswith(".toml")))
@@ -223,18 +230,18 @@ def test_raw_native_overrides_cannot_replace_artifact_carrier(render, args):
 def test_native_name_collision_does_not_silently_shadow_another_scope():
     item = artifact(ArtifactType.AGENT)
     other = replace(item, origin=ArtifactOrigin("agent", "agent", "alice", bundle="another", entry="review"))
-    earlier = claude.outer_artifacts((other,), "/home/alice/.claude")
+    earlier = claude.outer_artifacts(received(other), "/home/alice/.claude")
     with pytest.raises(ConfigError):
         claude.session_artifacts(
             context(item, ancestors=tuple(owned(file) for file in earlier.files)), configured=None, extra_args=[]
         )
     # Multiple members of the same skill are a single native claim.
-    skill = claude.outer_artifacts((artifact(ArtifactType.SKILL),), "/home/alice/.claude")
+    skill = claude.outer_artifacts(received(artifact(ArtifactType.SKILL)), "/home/alice/.claude")
     validate_ancestor_names(context(ancestors=tuple(owned(file) for file in skill.files)), ArtifactApplication())
 
 
 def test_ancestor_guidance_also_disables_claude_saved_prompt_on_resume():
-    files = claude.outer_artifacts((artifact(ArtifactType.RULE),), "/home/alice/.claude").files
+    files = claude.outer_artifacts(received(artifact(ArtifactType.RULE)), "/home/alice/.claude").files
     result = claude.session_artifacts(
         context(ancestors=tuple(owned(file) for file in files)), configured=None, extra_args=[]
     )
@@ -260,7 +267,9 @@ def test_native_probe_passes_environment_separately_and_rejects_policy_failures(
         return SimpleNamespace(
             returncode=0,
             stdout="AGW_ARTIFACT_PROBE="
-            + json.dumps({"native_home": "/home/a/.claude", "problems": ["native-discovery-exclusions"]}),
+            + json.dumps(
+                {"native_home": "/home/a/.claude", "problems": ["native-discovery-exclusions"], "inventory": []}
+            ),
         )
 
     with pytest.raises(StateError):
@@ -277,7 +286,7 @@ def test_native_probe_passes_environment_separately_and_rejects_policy_failures(
 def test_vm_deferral_preserves_input_identity_without_descendant_knowledge(implementation):
     integration = implementation.for_setup(owner_name="box", owner_kind="vm", facet="vm", config={})
     item = artifact(ArtifactType.RULE)
-    result = integration.vm_init(SimpleNamespace(artifacts=(item,)))
+    result = integration.vm_init(SimpleNamespace(artifacts=received(item)))
     assert result.files == ()
     assert result.deferred[0].input_id == item.identity
     assert result.deferred[0].destination == ("session" if implementation is ShellIntegration else "user")
@@ -455,7 +464,7 @@ def test_user_native_home_boundary_precedes_other_setup(db, monkeypatch, impleme
         checkpoint=lambda claims: None,
         username="alice",
         home="/home/alice",
-        artifacts=(artifact(ArtifactType.AGENT),),
+        artifacts=received(artifact(ArtifactType.AGENT)),
     )
     if outside_home:
         with pytest.raises(ConfigError):
@@ -482,7 +491,7 @@ def test_codex_external_home_does_not_block_home_owned_skills(db, monkeypatch):
             checkpoint=lambda claims: None,
             username="alice",
             home="/home/alice",
-            artifacts=(artifact(ArtifactType.SKILL), artifact(ArtifactType.HINT, name="setup")),
+            artifacts=received(artifact(ArtifactType.SKILL), artifact(ArtifactType.HINT, name="setup")),
         )
     )
     assert all(file.path.startswith("/home/alice/.agents/skills/") for file in result.files)

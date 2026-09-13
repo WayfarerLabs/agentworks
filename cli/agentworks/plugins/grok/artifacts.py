@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from agentworks.artifacts.application import SessionArtifactContext
-    from agentworks.artifacts.model import ArtifactInput
+    from agentworks.artifacts.model import ArtifactInput, ArtifactInputs
 
 
 # Only options represented by the interactive JSON and Markdown agent surfaces.
@@ -42,25 +42,29 @@ def _persona(item: ArtifactInput) -> dict[str, object]:
     }
 
 
-def outer_artifacts(inputs: tuple[ArtifactInput, ...], root: str) -> ArtifactApplication:
+def outer_artifacts(inputs: ArtifactInputs, root: str) -> ArtifactApplication:
     validate_names(inputs)
     files = []
-    hints = tuple(item for item in inputs if item.content.type is ArtifactType.HINT)
+    hints = tuple(item for item in inputs.items() if item.content.type is ArtifactType.HINT)
     if hints:
         files.append(
             artifact_file(f"{root}/rules/agentworks-hints.md", "# Agentworks setup\n\n" + context_text(hints), hints)
         )
-    for item in inputs:
-        content = item.content
-        if content.type is ArtifactType.RULE:
-            files.append(
-                artifact_file(
-                    f"{root}/rules/agentworks-rule-{content.name}.md",
-                    f"# {content.name}\n\n{content.text}",
-                    (item,),
-                )
+    rules: dict[str, list[ArtifactInput]] = {}
+    for group in inputs.groups():
+        for name, item in group.rules.items():
+            rules.setdefault(name, []).append(item)
+    for name, contributions in rules.items():
+        files.append(
+            artifact_file(
+                f"{root}/rules/agentworks-rule-{name}.md",
+                f"# {name}\n\n" + context_text(tuple(contributions)),
+                tuple(contributions),
             )
-        elif content.type is ArtifactType.SKILL:
+        )
+    for item in inputs.items():
+        content = item.content
+        if content.type is ArtifactType.SKILL:
             files.extend(skill_files(f"{root}/skills", item))
         elif content.type is ArtifactType.AGENT:
             options = _persona(item)
@@ -103,11 +107,13 @@ def session_artifacts(
     files = []
     argv: list[str] = []
     deferred = []
-    guidance = tuple(item for item in context.inputs if item.content.type in (ArtifactType.HINT, ArtifactType.RULE))
+    guidance = tuple(
+        item for item in context.inputs.items() if item.content.type in (ArtifactType.HINT, ArtifactType.RULE)
+    )
     if guidance:
         text = context_text(guidance, configured)
         argv += ["--rules", text]
-    agents = tuple(item for item in context.inputs if item.content.type is ArtifactType.AGENT)
+    agents = tuple(item for item in context.inputs.items() if item.content.type is ArtifactType.AGENT)
     if agents:
         definitions = {item.content.name: _persona(item) for item in agents}
         for item in agents:
@@ -120,7 +126,7 @@ def session_artifacts(
                 )
             )
         argv += ["--agents", json.dumps(definitions, ensure_ascii=False)]
-    for item in context.inputs:
+    for item in context.inputs.items():
         if item.content.type is ArtifactType.SKILL:
             deferred.append(
                 ArtifactDeferral(

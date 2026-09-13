@@ -58,7 +58,7 @@ def lifecycle(tmp_path, monkeypatch):
     db, events = _restart_fixture(tmp_path, monkeypatch)
     target = LocalFixtureTransport(tmp_path / "native")
     _patch_transports(monkeypatch, target, target)
-    bundle = ArtifactBundle(name="team", artifacts={"setup": HintArtifactSpec(text="Use the project tools.\n")})
+    bundle = ArtifactBundle(name="team", hints={"setup": HintArtifactSpec(text="Use the project tools.\n")})
     template = ResolvedSessionTemplate(name="shell-artifacts", artifacts=ArtifactsConfig(bundles=["team"]))
     monkeypatch.setattr(manager, "_resolve_template", lambda *a, **k: template)
     config = SimpleNamespace(session=SimpleNamespace(history_limit=1), artifact_bundles={"team": bundle})
@@ -79,7 +79,7 @@ def test_shell_restart_publishes_under_actual_home_and_records_run(lifecycle):
     root = lifecycle.target.home / ".agentworks-artifacts" / "session" / current.session_uuid / current.run_id
     assert all(file.is_relative_to(root) and file.exists() for file in files)
     index = json.loads((root / "index.json").read_text())
-    assert index["artifacts"][0]["origin"]["component"] == "session"
+    assert index["groups"][0]["owner"]["component"] == "session"
     record = read_native_setup(lifecycle.db, "session", "s1").records[0]
     assert record.complete and record.artifact_inputs
 
@@ -180,7 +180,7 @@ def test_source_failure_preserves_old_runtime_run_and_files(lifecycle):
     previous = lifecycle.db.get_session("s1")
     files = lifecycle.files()
     lifecycle.config.artifact_bundles["team"] = ArtifactBundle(
-        name="team", artifacts={"setup": HintArtifactSpec(source="/missing/artifact-source.txt")}
+        name="team", hints={"setup": HintArtifactSpec(source="/missing/artifact-source.txt")}
     )
     lifecycle.events.clear()
     with pytest.raises(StateError):
@@ -205,7 +205,9 @@ def test_remaining_deferral_refuses_before_runtime_or_file_changes(lifecycle, mo
             artifacts=ArtifactApplication(
                 deferred=(
                     ArtifactDeferral(
-                        input_id=context.inputs[0].identity, destination="session", reason="unsupported fixture"
+                        input_id=tuple(context.inputs.items())[0].identity,
+                        destination="session",
+                        reason="unsupported fixture",
                     ),
                 )
             ),

@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from agentworks.artifacts.application import OwnedArtifactFile, SessionArtifactContext
-    from agentworks.artifacts.model import ArtifactFacet, ArtifactInput
+    from agentworks.artifacts.model import ArtifactFacet, ArtifactInput, ArtifactInputs
 
 
 @dataclass(frozen=True)
@@ -27,10 +27,10 @@ class NativeSessionArtifacts:
     required_flags: tuple[str, ...] = ()
 
 
-def defer(inputs: tuple[ArtifactInput, ...], destination: ArtifactFacet, reason: str) -> ArtifactApplication:
+def defer(inputs: ArtifactInputs, destination: ArtifactFacet, reason: str) -> ArtifactApplication:
     return ArtifactApplication(
         deferred=tuple(
-            ArtifactDeferral(input_id=item.identity, destination=destination, reason=reason) for item in inputs
+            ArtifactDeferral(input_id=item.identity, destination=destination, reason=reason) for item in inputs.items()
         )
     )
 
@@ -57,7 +57,7 @@ def artifact_file(
     path: str, text: str, inputs: tuple[ArtifactInput, ...], *, identity: str | None = None
 ) -> ArtifactFile:
     return ArtifactFile(
-        path, text.encode("utf-8"), tuple(item.origin.identity for item in inputs), native_identity=identity
+        path, text.encode("utf-8"), tuple(item.origin_identity for item in inputs), native_identity=identity
     )
 
 
@@ -67,7 +67,7 @@ def skill_files(root: str, item: ArtifactInput, *, namespace: str = "") -> tuple
         ArtifactFile(
             f"{root}/{item.content.name}/{member.path}",
             member.data,
-            (item.origin.identity,),
+            (item.origin_identity,),
             executable=member.executable,
             native_identity=identity,
         )
@@ -75,10 +75,10 @@ def skill_files(root: str, item: ArtifactInput, *, namespace: str = "") -> tuple
     )
 
 
-def validate_names(inputs: tuple[ArtifactInput, ...]) -> None:
+def validate_names(inputs: ArtifactInputs) -> None:
     """Reject colliding native names at the integration input boundary."""
     seen: set[tuple[ArtifactType, str]] = set()
-    for item in inputs:
+    for item in inputs.items():
         name = item.content.name
         if not name or PurePosixPath(name).name != name or name in (".", "..") or "\x00" in name:
             raise ConfigError("artifact native names must be single path components")

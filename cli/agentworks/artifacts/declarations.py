@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, Literal, Self
+from typing import TYPE_CHECKING, Annotated, ClassVar, Self
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 class _ArtifactSpec(AgwModel):
     model_config = ConfigDict(hide_input_in_errors=True)
+    merge_strategy: ClassVar[MergeStrategy] = MergeStrategy.REPLACE
 
     @field_validator("source", check_fields=False)
     @classmethod
@@ -68,22 +69,13 @@ class _TextArtifactSpec(_ArtifactSpec):
 class HintArtifactSpec(_TextArtifactSpec):
     """Small contextual information about the Agentworks setup."""
 
-    type: Literal["hint"] = "hint"
-    """Artifact type."""
-
 
 class RuleArtifactSpec(_TextArtifactSpec):
     """Instructions always loaded into the agent's context."""
 
-    type: Literal["rule"] = "rule"
-    """Artifact type."""
-
 
 class SkillArtifactSpec(_ArtifactSpec):
     """A complete standard Agent Skills directory with SKILL.md at its root."""
-
-    type: Literal["skill"] = "skill"
-    """Artifact type."""
 
     source: NonBlankStr = Field(examples=["file::~/agent-content/skills/review"])
     """Explicit workstation directory or Git subdirectory containing SKILL.md."""
@@ -92,17 +84,11 @@ class SkillArtifactSpec(_ArtifactSpec):
 class AgentArtifactSpec(_ArtifactSpec):
     """An agent persona with a name, description, and instruction body."""
 
-    type: Literal["agent"] = "agent"
-    """Artifact type."""
-
     source: NonBlankStr = Field(examples=["file::~/agent-content/reviewer.md"])
     """Workstation or Git Markdown definition with name and description frontmatter."""
 
 
-type ArtifactSpec = Annotated[
-    HintArtifactSpec | RuleArtifactSpec | SkillArtifactSpec | AgentArtifactSpec,
-    Field(discriminator="type"),
-]
+type ArtifactSpec = HintArtifactSpec | RuleArtifactSpec | SkillArtifactSpec | AgentArtifactSpec
 
 
 class ArtifactsConfig(AgwModel):

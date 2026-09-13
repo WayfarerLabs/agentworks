@@ -9,11 +9,13 @@ from typing import cast
 
 import pytest
 
+from agentworks.artifacts.bundle import ArtifactBundle
 from agentworks.artifacts.capture import capture_artifacts
 from agentworks.artifacts.codec import decode_inputs, encode_inputs
 from agentworks.artifacts.declarations import AgentArtifactSpec, SkillArtifactSpec
 from agentworks.artifacts.model import ArtifactInput, ArtifactMember, ArtifactOrigin, ArtifactType
 from agentworks.sources import SourceRefError
+from tests.artifacts._fixtures import group
 
 
 def captured_skill(tmp_path: Path) -> ArtifactInput:
@@ -21,14 +23,15 @@ def captured_skill(tmp_path: Path) -> ArtifactInput:
     root.mkdir()
     (root / "SKILL.md").write_text("---\nname: review\ndescription: Review code\n---\nRead it.\n")
     return capture_artifacts(
-        [("team", {"review": SkillArtifactSpec(source=str(root))})], ArtifactOrigin("agent", "agent", "worker")
-    )[0]
+        [("team", ArtifactBundle(name="team", skills={"review": SkillArtifactSpec(source=str(root))}))],
+        ArtifactOrigin("agent", "agent", "worker"),
+    ).skills["review"]
 
 
 def altered_payload(original: ArtifactInput, altered: ArtifactInput) -> dict[str, object]:
     """Tamper with a readable wire record, retaining hashes valid for the altered values."""
-    payload = encode_inputs((original,))
-    row = cast("list[dict[str, object]]", payload["inputs"])[0]
+    payload = encode_inputs(group(original))
+    row = cast("dict[str, dict[str, object]]", payload[original.content.type.value + "s"])[original.content.name]
     row["content"] = {
         **asdict(altered.content),
         "digest": altered.content.digest,
@@ -109,7 +112,7 @@ def test_decode_accepts_git_provenance_without_source_access(tmp_path: Path) -> 
             commit="a" * 40,
         ),
     )
-    assert decode_inputs(encode_inputs((altered,))) == (altered,)
+    assert decode_inputs(encode_inputs(group(altered))) == group(altered)
 
 
 @pytest.mark.parametrize("field", ["hooks", "mcpServers", "mcp_servers"])
@@ -118,8 +121,9 @@ def test_agent_capture_and_decode_reject_nested_execution_metadata(tmp_path: Pat
     safe = "---\nname: review\ndescription: Review code\n---\nRead it.\n"
     source.write_text(safe)
     item = capture_artifacts(
-        [("team", {"review": AgentArtifactSpec(source=str(source))})], ArtifactOrigin("agent", "agent", "worker")
-    )[0]
+        [("team", ArtifactBundle(name="team", agents={"review": AgentArtifactSpec(source=str(source))}))],
+        ArtifactOrigin("agent", "agent", "worker"),
+    ).agents["review"]
     assert item.content.type == ArtifactType.AGENT
     unsafe = safe.replace(
         "description:", f"metadata:\n  nested:\n    {field}: {{command: external-command}}\ndescription:"
@@ -127,7 +131,8 @@ def test_agent_capture_and_decode_reject_nested_execution_metadata(tmp_path: Pat
     source.write_text(unsafe)
     with pytest.raises(SourceRefError):
         capture_artifacts(
-            [("team", {"review": AgentArtifactSpec(source=str(source))})], ArtifactOrigin("agent", "agent", "worker")
+            [("team", ArtifactBundle(name="team", agents={"review": AgentArtifactSpec(source=str(source))}))],
+            ArtifactOrigin("agent", "agent", "worker"),
         )
     altered = replace(
         item, content=replace(item.content, members=(replace(item.content.members[0], data=unsafe.encode()),))

@@ -10,6 +10,7 @@ import pytest
 from agentworks.artifacts.inspection import resolve_context
 from agentworks.db import SessionMode
 from agentworks.errors import NotFoundError, ValidationError
+from tests.artifacts._fixtures import group
 
 if TYPE_CHECKING:
     from agentworks.db import Database
@@ -85,7 +86,7 @@ def test_inspection_shows_handled_ancestor_metadata_without_acquisition(db: Data
     from tests.artifacts.test_routing import graph
 
     fixture = graph(db, active=("agent",))
-    item = fixture.captures["agent"].inputs[0]
+    item = tuple(fixture.captures["agent"].inputs.items())[0]
     fixture.save(
         "agent",
         inherited=fixture.captures["vm"].inputs,
@@ -93,7 +94,7 @@ def test_inspection_shows_handled_ancestor_metadata_without_acquisition(db: Data
             OwnedArtifactFile(
                 path="/home/worker/.agents/skills/review/SKILL.md",
                 sha256="a" * 64,
-                origins=(item.origin.identity,),
+                origins=(item.origin_identity,),
                 native_identity="review",
             ),
         ),
@@ -112,9 +113,12 @@ def test_inspection_shows_handled_ancestor_metadata_without_acquisition(db: Data
     assert [owner.scope for owner in result.owners] == ["vm", "agent"]
     assert result.owners[0].integrations[0].status == "inactive"
     user = result.owners[1]
-    assert user.artifacts[0].origin_id == item.origin.identity
+    assert user.artifacts[0].origin_id == item.origin_identity
     assert user.integrations[0].status == "current"
-    assert user.integrations[0].recorded_handled == (fixture.captures["vm"].inputs[0].identity, item.identity)
+    assert user.integrations[0].recorded_handled == (
+        tuple(fixture.captures["vm"].inputs.items())[0].identity,
+        item.identity,
+    )
     assert user.integrations[0].placements[0].native_identity == "review"
     encoded = json.dumps(inspection_data(result))
     assert item.content.text not in encoded
@@ -193,7 +197,7 @@ def test_cli_json_reads_existing_state_without_publication_or_disclosing_bodies(
     data = json.loads(result.stdout)
     assert data["command"] == "artifacts.show"
     assert [owner["scope"] for owner in data["data"]["owners"]] == ["vm", "agent"]
-    assert fixture.captures["agent"].inputs[0].content.text not in result.stdout
+    assert tuple(fixture.captures["agent"].inputs.items())[0].content.text not in result.stdout
     assert tuple(db.instance_state.get_applied_slices("agent", "agent")) == before
 
 
@@ -231,8 +235,8 @@ def test_session_inspection_uses_runtime_diamond_order(db: Database) -> None:
     fixture = graph(db, active=("vm", "agent", "workspace"), counts={"vm": 3})
     vm = fixture.captures["vm"].inputs
     fixture.save("vm", routes={"vm-0": "user", "vm-1": "workspace", "vm-2": "session"})
-    fixture.save("agent", inherited=(vm[0],), routes={"vm-0": "session", "agent-0": "session"})
-    fixture.save("workspace", inherited=(vm[1],), routes={"vm-1": "session", "workspace-0": "session"})
+    fixture.save("agent", inherited=group(vm.hints["vm-0"]), routes={"vm-0": "session", "agent-0": "session"})
+    fixture.save("workspace", inherited=group(vm.hints["vm-1"]), routes={"vm-1": "session", "workspace-0": "session"})
     db.insert_session("review", "workspace", "default", SessionMode.AGENT, agent_name="agent", socket_path="/socket")
     block = CapabilityBlock.of("shell")
     owner = SetupInputs(
@@ -245,13 +249,13 @@ def test_session_inspection_uses_runtime_diamond_order(db: Database) -> None:
         destination_id="d" * 64,
         declaration=owner.declaration(block),
         complete=True,
-        artifact_inputs=tuple(item.identity for item in prepared),
+        artifact_inputs=tuple(item.identity for item in prepared.items()),
     )
     write_native_setup(db, "session", "review", NativeSetupState(records=(record,)), operation="fixture")
     result = inspect_artifacts(db, fixture.registry, session_name="review")
     assert [owner.scope for owner in result.owners] == ["vm", "agent", "workspace", "session"]
     assert result.owners[-1].integrations[0].status == "current"
-    assert result.owners[-1].integrations[0].recorded_handled == tuple(item.identity for item in prepared)
+    assert result.owners[-1].integrations[0].recorded_handled == tuple(item.identity for item in prepared.items())
 
 
 def test_worked_manifests_build_without_acquiring_their_sources(tmp_path, monkeypatch) -> None:
@@ -270,7 +274,7 @@ def test_worked_manifests_build_without_acquiring_their_sources(tmp_path, monkey
     monkeypatch.setattr("agentworks.artifacts.capture.capture_artifacts", forbid)
     registry = load_request_registry(load_config(path), include_live_resources=False, probe_host_readiness=False)
     bundle = registry.lookup("artifact-bundle", "team-artifacts")
-    assert {entry.type for entry in bundle.artifacts.values()} == {"hint", "rule", "skill", "agent"}
+    assert all(getattr(bundle, kind) for kind in ("hints", "rules", "skills", "agents"))
 
 
 def test_removed_bundle_reference_preserves_unknown_and_historical_metadata(db: Database) -> None:
@@ -330,9 +334,9 @@ def test_inactive_inspection_projects_only_applicable_vm_inputs(db: Database, co
         integration_name="shell",
     )
     expected = (
-        (*fixture.captures["vm"].inputs, *fixture.captures["agent"].inputs)
+        (*fixture.captures["vm"].inputs.items(), *fixture.captures["agent"].inputs.items())
         if component == "agent"
-        else fixture.captures[component].inputs
+        else tuple(fixture.captures[component].inputs.items())
     )
     assert result.owners[-1].integrations[0].status == "inactive"
     assert result.owners[-1].integrations[0].passthrough_inputs == tuple(item.identity for item in expected)

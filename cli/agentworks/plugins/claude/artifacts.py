@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from agentworks.artifacts.application import SessionArtifactContext
-    from agentworks.artifacts.model import ArtifactInput
+    from agentworks.artifacts.model import ArtifactInput, ArtifactInputs
 
 
 _OPTIONS = {"model": str, "tools": list, "disallowedTools": list, "maxTurns": int}
@@ -41,26 +41,29 @@ def _persona(item: ArtifactInput) -> dict[str, object]:
     }
 
 
-def outer_artifacts(inputs: tuple[ArtifactInput, ...], root: str) -> ArtifactApplication:
+def outer_artifacts(inputs: ArtifactInputs, root: str) -> ArtifactApplication:
     validate_names(inputs)
     files = []
-    hints = tuple(item for item in inputs if item.content.type is ArtifactType.HINT)
+    hints = tuple(item for item in inputs.items() if item.content.type is ArtifactType.HINT)
     if hints:
         files.append(
             artifact_file(f"{root}/rules/agentworks-hints.md", "# Agentworks setup\n\n" + context_text(hints), hints)
         )
-    for item in inputs:
-        content = item.content
-        if content.type is ArtifactType.RULE:
-            # Do not carry rule metadata into YAML: a paths key would make it conditional.
-            files.append(
-                artifact_file(
-                    f"{root}/rules/agentworks-rule-{content.name}.md",
-                    f"# {content.name}\n\n{content.text}",
-                    (item,),
-                )
+    rules: dict[str, list[ArtifactInput]] = {}
+    for group in inputs.groups():
+        for name, item in group.rules.items():
+            rules.setdefault(name, []).append(item)
+    for name, contributions in rules.items():
+        files.append(
+            artifact_file(
+                f"{root}/rules/agentworks-rule-{name}.md",
+                f"# {name}\n\n" + context_text(tuple(contributions)),
+                tuple(contributions),
             )
-        elif content.type is ArtifactType.SKILL:
+        )
+    for item in inputs.items():
+        content = item.content
+        if content.type is ArtifactType.SKILL:
             files.extend(skill_files(f"{root}/skills", item))
         elif content.type is ArtifactType.AGENT:
             options = _persona(item)
@@ -106,14 +109,14 @@ def session_artifacts(
     )
     files = []
     argv: list[str] = []
-    guidance = tuple(item for item in inputs if item.content.type in (ArtifactType.HINT, ArtifactType.RULE))
+    guidance = tuple(item for item in inputs.items() if item.content.type in (ArtifactType.HINT, ArtifactType.RULE))
     if guidance:
         path = f"{context.directory}/instructions.md"
         files.append(artifact_file(path, context_text(guidance, configured), guidance))
         argv += ["--append-system-prompt-file", path]
     if guidance or any("/rules/" in file.path for file in context.ancestor_files):
         argv += ["--system-prompt-snapshot", "off"]
-    skills = tuple(item for item in inputs if item.content.type is ArtifactType.SKILL)
+    skills = tuple(item for item in inputs.items() if item.content.type is ArtifactType.SKILL)
     if skills:
         plugin = f"{context.directory}/plugin"
         files.append(
@@ -126,7 +129,7 @@ def session_artifacts(
         for item in skills:
             files.extend(skill_files(f"{plugin}/skills", item, namespace="agentworks-artifacts:"))
         argv += ["--plugin-dir", plugin]
-    agents = tuple(item for item in inputs if item.content.type is ArtifactType.AGENT)
+    agents = tuple(item for item in inputs.items() if item.content.type is ArtifactType.AGENT)
     if agents:
         value = {item.content.name: _persona(item) for item in agents}
         for item in agents:

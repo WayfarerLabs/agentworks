@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
-from agentworks.artifacts.model import ALLOWED_DEFERRALS
+from agentworks.artifacts.model import ALLOWED_DEFERRALS, ArtifactInputs
 from agentworks.artifacts.state import CapturedArtifacts, declaration_digest, read_captures
 from agentworks.errors import ConfigError, StateError
 from agentworks.harness_setup.inputs import SetupInputs
@@ -13,8 +14,10 @@ from agentworks.harness_setup.state import read_native_setup
 from agentworks.secrets.orchestration import SecretTarget
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentworks.artifacts.application import OwnedArtifactFile
-    from agentworks.artifacts.model import ArtifactFacet, ArtifactInput
+    from agentworks.artifacts.model import ArtifactFacet, ArtifactGroup, ArtifactOwner
     from agentworks.db import Database, VMRow, WorkspaceRow
     from agentworks.harness_setup.model import SetupRecord
     from agentworks.resources.registry import Registry
@@ -33,12 +36,12 @@ class ArtifactOwnerView:
     status: ArtifactStatus
     reason: str = ""
     record: SetupRecord | None = None
-    prepared: tuple[ArtifactInput, ...] | None = None
+    prepared: ArtifactInputs | None = None
 
 
 @dataclass(frozen=True)
 class RoutingResult:
-    inputs: tuple[ArtifactInput, ...]
+    inputs: ArtifactInputs
     ancestor_files: tuple[OwnedArtifactFile, ...] = ()
     active_facets: tuple[ArtifactFacet, ...] = ()
 
@@ -49,7 +52,7 @@ def inspect_owner_artifacts(
     inputs: SetupInputs,
     integration_name: str | None = None,
     *,
-    inherited: tuple[ArtifactInput, ...] | None = (),
+    inherited: Mapping[ArtifactOwner, ArtifactGroup] | None = MappingProxyType({}),
 ) -> ArtifactOwnerView:
     """Project persisted evidence without fetching or repairing any owner.
 
@@ -94,8 +97,8 @@ def inspect_owner_artifacts(
             "An ancestor's artifact routing result is unavailable.",
             record,
         )
-    local = captured.inputs if captured is not None else ()
-    prepared = _unique((*inherited, *local))
+    local = captured.inputs if captured is not None else None
+    prepared = ArtifactInputs(local=local, deferred=inherited)
     if integration_name is None:
         return ArtifactOwnerView(inputs, captured, capture_status, "current", prepared=prepared)
     block = next((block for block in inputs.activations if block.name == integration_name), None)
@@ -147,7 +150,7 @@ def inspect_owner_artifacts(
             record,
             prepared,
         )
-    if declaration != record.declaration or tuple(item.identity for item in prepared) != record.artifact_inputs:
+    if declaration != record.declaration or tuple(item.identity for item in prepared.items()) != record.artifact_inputs:
         return ArtifactOwnerView(
             inputs,
             captured,
@@ -175,34 +178,41 @@ def inactive_destination(facet: ArtifactFacet) -> ArtifactFacet:
     return "user" if facet == "vm" else "session"
 
 
-def deferred_inputs(view: ArtifactOwnerView, destination: ArtifactFacet) -> tuple[ArtifactInput, ...] | None:
+def deferred_inputs(view: ArtifactOwnerView, destination: ArtifactFacet) -> dict[ArtifactOwner, ArtifactGroup] | None:
     """Project one route, preserving input order; unknown evidence stays unknown."""
     if view.status not in ("current", "inactive") or view.prepared is None:
         return None
     if view.status == "inactive":
-        return view.prepared if destination == inactive_destination(view.owner.facet) else ()
+        return (
+            {group.owner: group for group in view.prepared.groups() if group}
+            if destination == inactive_destination(view.owner.facet)
+            else {}
+        )
     if view.record is None:
-        return ()
+        return {}
     identities = {item.input_id for item in view.record.deferred if item.destination == destination}
-    return tuple(item for item in view.prepared if item.identity in identities)
+    selected = (group.select(identities) for group in view.prepared.groups())
+    return {group.owner: group for group in selected if group}
 
 
 def setup_artifacts(
     db: Database, registry: Registry, inputs: SetupInputs, vm: VMRow, integration_name: str
-) -> tuple[ArtifactInput, ...]:
+) -> ArtifactInputs:
     """Prepare a facet's local capture plus only its applicable VM route."""
     if inputs.kind == "vm" and inputs.name != vm.name:
         raise StateError("artifact setup requires the actual owning VM")
-    local = _require(inspect_owner_artifacts(db, registry, inputs)).prepared or ()
+    prepared = _require(inspect_owner_artifacts(db, registry, inputs)).prepared
+    assert prepared is not None
+    local = prepared.local
     if inputs.component == "vm":
-        return local
+        return prepared
     if inputs.component not in ("admin", "agent", "workspace"):
         raise StateError("artifact setup requires a VM, user or workspace facet")
     ancestor = _vm_inputs(db, registry, vm)
     view = _require(inspect_owner_artifacts(db, registry, ancestor, integration_name))
     inherited = deferred_inputs(view, inputs.facet)
     assert inherited is not None
-    return _unique((*inherited, *local))
+    return ArtifactInputs(local=local, deferred=inherited)
 
 
 def session_artifacts(
@@ -212,7 +222,7 @@ def session_artifacts(
     workspace: WorkspaceRow,
     agent_name: str | None,
     integration_name: str,
-    local: tuple[ArtifactInput, ...],
+    local: ArtifactGroup,
 ) -> RoutingResult:
     """Join one actual owner diamond without consuming or rerunning ancestors."""
     vm_view, user_view, workspace_view = require_session_ancestors(
@@ -221,7 +231,7 @@ def session_artifacts(
     assert user_view is not None and workspace_view is not None
     inherited = session_inherited_inputs(vm_view, user_view, workspace_view)
     assert inherited is not None
-    result = _unique((*inherited, *local))
+    result = ArtifactInputs(local=local, deferred=inherited)
     files: list[OwnedArtifactFile] = []
     active: list[ArtifactFacet] = []
     for view in (vm_view, user_view, workspace_view):
@@ -266,17 +276,24 @@ def require_session_ancestors(
 
 def session_inherited_inputs(
     vm: ArtifactOwnerView, user: ArtifactOwnerView, workspace: ArtifactOwnerView
-) -> tuple[ArtifactInput, ...] | None:
-    """Join actual ancestor views in declaration order for launch or inspection."""
+) -> dict[ArtifactOwner, ArtifactGroup] | None:
+    """Join deferred routes by original owner, retaining each owner's map order."""
     routes = tuple(deferred_inputs(view, "session") for view in (vm, user, workspace))
     if any(route is None for route in routes):
         return None
-    selected = _unique(tuple(item for route in routes if route is not None for item in route))
-    selected_ids = {item.identity for item in selected}
-    # Restore declaration order even when VM entries took different diamond paths.
-    ordered = _unique((*_local(vm), *_local(user), *_local(workspace)))
-    result = tuple(item for item in ordered if item.identity in selected_ids)
-    if len(result) != len(selected):
+    selected = [
+        item.identity for route in routes if route is not None for group in route.values() for item in group.items()
+    ]
+    if len(set(selected)) != len(selected):
+        raise StateError("artifact routing delivered the same input along more than one path")
+    selected_ids = set(selected)
+    result = {}
+    for view in (vm, user, workspace):
+        if view.captured is not None:
+            group = view.captured.inputs.select(selected_ids)
+            if group:
+                result[group.owner] = group
+    if sum(1 for group in result.values() for _ in group.items()) != len(selected):
         raise StateError("artifact routing encountered input outside its actual owner graph")
     return result
 
@@ -291,16 +308,6 @@ def _require(view: ArtifactOwnerView) -> ArtifactOwnerView:
             remedy = f"Run 'agw vm reinit {view.owner.name}'."
         raise StateError(view.reason, entity_kind=view.owner.kind, entity_name=view.owner.name, hint=remedy)
     return view
-
-
-def _local(view: ArtifactOwnerView) -> tuple[ArtifactInput, ...]:
-    return view.captured.inputs if view.captured is not None else ()
-
-
-def _unique(inputs: tuple[ArtifactInput, ...]) -> tuple[ArtifactInput, ...]:
-    if len({item.identity for item in inputs}) != len(inputs):
-        raise StateError("artifact routing delivered the same input along more than one path")
-    return inputs
 
 
 def _vm_inputs(db: Database, registry: Registry, vm: VMRow) -> SetupInputs:

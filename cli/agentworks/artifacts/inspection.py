@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.artifacts.bundle import resolve_bundle
+from agentworks.artifacts.model import ArtifactType
 from agentworks.errors import NotFoundError, StateError, ValidationError
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.state import read_native_setup
@@ -14,7 +16,13 @@ from agentworks.secrets.orchestration import SecretTarget
 
 if TYPE_CHECKING:
     from agentworks.artifacts.declarations import ArtifactsConfig, ArtifactSpec
-    from agentworks.artifacts.model import ArtifactComponent, ArtifactFacet, ArtifactInput
+    from agentworks.artifacts.model import (
+        ArtifactComponent,
+        ArtifactFacet,
+        ArtifactGroup,
+        ArtifactOwner,
+        ArtifactReplacement,
+    )
     from agentworks.artifacts.routing import ArtifactOwnerView
     from agentworks.db import AgentRow, Database, SessionRow, VMRow, WorkspaceRow
     from agentworks.machine_output import JsonObject
@@ -89,6 +97,7 @@ class ArtifactMetadata:
     requested_ref: str | None = None
     revision: str | None = None
     selected_path: str | None = None
+    replacements: tuple[ArtifactReplacement, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -251,7 +260,7 @@ def inspect_artifacts(
         for name in names:
             views: dict[ArtifactComponent, ArtifactOwnerView] = {}
             for owner in owners:
-                inherited: tuple[ArtifactInput, ...] | None = ()
+                inherited: dict[ArtifactOwner, ArtifactGroup] | None = {}
                 if owner.component in ("admin", "agent", "workspace"):
                     inherited = deferred_inputs(views["vm"], "workspace" if owner.component == "workspace" else "user")
                 elif owner.component == "session":
@@ -283,37 +292,45 @@ def inspect_artifacts(
 def _artifact_metadata(
     registry: Registry, config: ArtifactsConfig, view: ArtifactOwnerView
 ) -> tuple[ArtifactMetadata, ...]:
-    entries: dict[tuple[str, str], ArtifactSpec] = {}
+    entries: dict[tuple[str, str], tuple[str, ArtifactSpec]] = {}
     for bundle in config.bundles:
         try:
-            declaration = registry.lookup("artifact-bundle", bundle)
+            declaration = resolve_bundle(registry, bundle).value
         except KeyError:
-            continue  # The bundle reference remains visible with unavailable capture evidence.
-        entries.update(((bundle, entry), spec) for entry, spec in declaration.artifacts.items())
+            continue  # Missing bundle references remain visible in the owner declaration.
+        for kind in ArtifactType:
+            entries.update(
+                ((kind.value, name), (bundle, spec)) for name, spec in getattr(declaration, kind.value + "s").items()
+            )
     rows = []
-    captured = () if view.captured is None else view.captured.inputs
+    captured = () if view.captured is None else view.captured.inputs.items()
     seen = set()
     for item in captured:
-        key = (item.origin.bundle, item.origin.entry)
-        seen.add(key)
+        key = (item.content.type.value, item.content.name)
+        selected = entries.get(key)
+        declared = selected is not None and selected[0] == item.origin.bundle
+        if declared:
+            seen.add(key)
         rows.append(
             ArtifactMetadata(
-                *key,
+                item.origin.bundle,
+                item.content.name,
                 item.content.type.value,
-                key in entries,
+                declared,
                 item.identity,
-                item.origin.identity,
+                item.origin_identity,
                 item.content.name,
                 item.provenance.source,
                 item.provenance.requested_ref or None,
                 item.provenance.commit or None,
                 item.provenance.selected_path or None,
+                item.replacements,
             )
         )
     rows.extend(
-        ArtifactMetadata(bundle, entry, spec.type, True)
-        for (bundle, entry), spec in entries.items()
-        if (bundle, entry) not in seen
+        ArtifactMetadata(bundle, name, kind, True)
+        for (kind, name), (bundle, _) in entries.items()
+        if (kind, name) not in seen
     )
     return tuple(rows)
 
@@ -324,7 +341,7 @@ def _integration_metadata(owner: SetupInputs, name: str, view: ArtifactOwnerView
     destination = (
         inactive_destination(owner.facet) if view.status == "inactive" and owner.component != "session" else None
     )
-    passthrough = deferred_inputs(view, destination) if destination is not None else ()
+    passthrough = deferred_inputs(view, destination) if destination is not None else {}
     record = view.record
     deferred = (
         ()
@@ -350,7 +367,7 @@ def _integration_metadata(owner: SetupInputs, name: str, view: ArtifactOwnerView
         handled,
         deferred,
         placements,
-        tuple(item.identity for item in passthrough or ()),
+        tuple(item.identity for group in (passthrough or {}).values() for item in group.items()),
         destination if passthrough else None,
     )
 
@@ -369,6 +386,11 @@ def render_artifacts(inspection: ArtifactInspection) -> None:
             output.info(
                 f"  {artifact.type} {artifact.bundle}/{artifact.entry}: {content}; {current}; revision {revision}"
             )
+            for previous in artifact.replacements:
+                output.info(
+                    f"    Replaced bundle {previous.origin.bundle}: {previous.digest[:12]}; "
+                    f"source {previous.provenance.source}"
+                )
             if artifact.source is not None:
                 output.info(f"    Source: {artifact.source}; native name: {artifact.native_name}")
                 if artifact.selected_path:
@@ -420,6 +442,18 @@ def inspection_data(inspection: ArtifactInspection) -> JsonObject:
                         "requested_ref": item.requested_ref,
                         "revision": item.revision,
                         "selected_path": item.selected_path,
+                        "replacements": [
+                            {
+                                "bundle": previous.origin.bundle,
+                                "producer": previous.origin.producer,
+                                "source": previous.provenance.source,
+                                "requested_ref": previous.provenance.requested_ref,
+                                "selected_path": previous.provenance.selected_path,
+                                "revision": previous.provenance.commit,
+                                "digest": previous.digest,
+                            }
+                            for previous in item.replacements
+                        ],
                     }
                     for item in owner.artifacts
                 ],

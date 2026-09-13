@@ -6,20 +6,19 @@ kind: artifact-bundle
 metadata:
   name: team-artifacts
 spec:
-  artifacts:
+  hints:
     setup-note:
-      type: hint
       text: Project tools are available through mise.
+  rules:
     conventions:
-      type: rule
       source: file::~/agent-content/conventions.md
+  skills:
     review:
-      type: skill
       source: git::https://github.com/example/agent-content.git//skills/review?ref=v1.0.0
       preserve_bytes:
         - fixtures/**
+  agents:
     reviewer:
-      type: agent
       source: file::~/agent-content/reviewer.md
 ---
 apiVersion: agentworks/v1

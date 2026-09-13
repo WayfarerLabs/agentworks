@@ -14,18 +14,18 @@ from agentworks.native_files import NativeFiles, native_path
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from agentworks.artifacts.model import ArtifactFacet, ArtifactInput
+    from agentworks.artifacts.model import ArtifactFacet, ArtifactInputs
     from agentworks.transports import Transport
 
 
 def validate_application(
-    application: object, inputs: tuple[ArtifactInput, ...], facet: ArtifactFacet, *, integration: str
+    application: object, inputs: ArtifactInputs, facet: ArtifactFacet, *, integration: str
 ) -> ArtifactApplication:
     """Validate the registered plugin's output without accepting new artifact inputs."""
     if not isinstance(application, ArtifactApplication):
         raise StateError("integration did not return an artifact application")
-    identities = {item.identity for item in inputs}
-    origins = {item.origin.identity for item in inputs}
+    identities = {item.identity for item in inputs.items()}
+    origins = {item.origin_identity for item in inputs.items()}
     deferred: set[str] = set()
     paths: set[str] = set()
     if not all(isinstance(value, tuple) for value in (application.files, application.deferred)):
@@ -35,7 +35,7 @@ def validate_application(
             raise StateError("integration deferred an unknown or duplicate artifact input")
         if item.destination not in ALLOWED_DEFERRALS[facet]:
             if facet == "session":
-                artifact = next(value for value in inputs if value.identity == item.input_id)
+                artifact = next(value for value in inputs.items() if value.identity == item.input_id)
                 origin = artifact.origin
                 raise StateError(
                     f"integration '{integration}' cannot apply {artifact.content.type.value} "

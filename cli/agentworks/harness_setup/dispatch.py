@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Literal, cast
 from pydantic import ValidationError
 
 from agentworks import output
+from agentworks.artifacts.model import ArtifactInputs
 from agentworks.artifacts.publication import publish_artifacts, validate_application
 from agentworks.artifacts.state import write_capture
 from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled, harness_integration_for
@@ -148,14 +149,16 @@ def run_setup(
                 integration = bound[name]
                 declaration = inputs.declaration(block)
 
-            artifacts = () if block is None else setup_artifacts(db, registry, inputs, invocation.vm, name)
+            artifacts = (
+                ArtifactInputs() if block is None else setup_artifacts(db, registry, inputs, invocation.vm, name)
+            )
 
             current = SetupRecord(
                 component=inputs.component,
                 integration=name,
                 destination_id=destination,
                 declaration=declaration,
-                artifact_inputs=tuple(item.identity for item in artifacts),
+                artifact_inputs=tuple(item.identity for item in artifacts.items()),
                 claims=() if previous is None else previous.claims,
                 artifact_files=()
                 if previous is None or previous.destination_id != destination

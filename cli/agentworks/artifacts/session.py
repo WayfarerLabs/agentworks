@@ -133,7 +133,7 @@ def stage_session_artifacts(
         integration=integration,
         destination_id=hashlib.sha256(context.directory.encode()).hexdigest(),
         declaration=prepared.setup_inputs.declaration(prepared.setup_inputs.activations[0]),
-        artifact_inputs=tuple(item.identity for item in context.inputs),
+        artifact_inputs=tuple(item.identity for item in context.inputs.items()),
         artifact_files=retained,
     )
 

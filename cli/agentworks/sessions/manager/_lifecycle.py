@@ -671,9 +671,18 @@ def _launch_existing_session(
             )
 
             # Captured ancestor routing needs no secrets and can refuse now.
+            from agentworks.artifacts.model import ArtifactGroup, ArtifactOwner
             from agentworks.artifacts.routing import session_artifacts
 
-            session_artifacts(db, registry, vm, ws, session.agent_name, template.harness_integration, ())
+            session_artifacts(
+                db,
+                registry,
+                vm,
+                ws,
+                session.agent_name,
+                template.harness_integration,
+                ArtifactGroup(ArtifactOwner("session", "session", name)),
+            )
 
         with output.section("Resolving Secrets"):
             # The graph-union boundary resolve (pass 1). Placed AFTER the

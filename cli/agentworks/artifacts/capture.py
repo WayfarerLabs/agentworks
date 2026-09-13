@@ -12,12 +12,16 @@ from typing import TYPE_CHECKING, cast
 
 import yaml
 
+from agentworks import output
+from agentworks.artifacts.declarations import HintArtifactSpec, RuleArtifactSpec
 from agentworks.artifacts.model import (
     ArtifactContent,
+    ArtifactGroup,
     ArtifactInput,
     ArtifactMember,
     ArtifactOrigin,
     ArtifactProvenance,
+    ArtifactReplacement,
     ArtifactType,
 )
 from agentworks.package_sources import (
@@ -28,9 +32,9 @@ from agentworks.package_sources import (
 from agentworks.sources import SourceRefError
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Sequence
 
-    from agentworks.artifacts.declarations import ArtifactSpec
+    from agentworks.artifacts.bundle import ArtifactBundle
     from agentworks.package_sources import CapturedPackage
 
 _TEXT_SUFFIXES = frozenset(
@@ -57,12 +61,12 @@ _NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
 def capture_artifacts(
-    bundles: Sequence[tuple[str, Mapping[str, ArtifactSpec]]],
+    bundles: Sequence[tuple[str, ArtifactBundle]],
     origin: ArtifactOrigin,
     *,
     limits: CaptureLimits | None = None,
     operation: PackageCapture | None = None,
-) -> tuple[ArtifactInput, ...]:
+) -> ArtifactGroup:
     """Capture an owner's declared bundles once, in declaration order.
 
     Source errors omit source strings and content. The bundle and entry address
@@ -73,34 +77,53 @@ def capture_artifacts(
     """
     if operation is not None and limits is not None:
         raise ValueError("a borrowed capture operation already defines its limits")
-    result: list[ArtifactInput] = []
+    result: dict[str, dict[str, ArtifactInput]] = {kind.value + "s": {} for kind in ArtifactType}
+    changed: list[tuple[str, str, str]] = []
     with nullcontext(operation) if operation is not None else PackageCapture(limits or CaptureLimits()) as active:
-        for bundle_name, entries in bundles:
-            for entry, spec in entries.items():
-                try:
-                    active.check()
-                    artifact_type = ArtifactType(spec.type)
-                    source = spec.source
-                    if source is None:
-                        assert spec.type in ("hint", "rule")
-                        assert spec.text is not None
-                        encoded = spec.text.encode("utf-8")
-                        active.account(len(encoded))
-                        content = ArtifactContent(artifact_type, entry, text=normalize_text(encoded))
-                        provenance = ArtifactProvenance()
-                    else:
-                        package = active.capture(source)
-                        content = _content(artifact_type, entry, package, spec.preserve_bytes)
-                        provenance = ArtifactProvenance(
-                            package.source, package.requested_ref, package.selected_path, package.commit
+        for bundle_name, bundle in bundles:
+            for artifact_type in ArtifactType:
+                entries = getattr(bundle, artifact_type.value + "s")
+                selected = result[artifact_type.value + "s"]
+                for entry, spec in entries.items():
+                    try:
+                        active.check()
+                        source = spec.source
+                        if source is None:
+                            assert isinstance(spec, (HintArtifactSpec, RuleArtifactSpec))
+                            assert spec.text is not None
+                            encoded = spec.text.encode("utf-8")
+                            active.account(len(encoded))
+                            content = ArtifactContent(artifact_type, entry, text=normalize_text(encoded))
+                            provenance = ArtifactProvenance()
+                        else:
+                            package = active.capture(source)
+                            content = _content(artifact_type, entry, package, spec.preserve_bytes)
+                            provenance = ArtifactProvenance(
+                                package.source, package.requested_ref, package.selected_path, package.commit
+                            )
+                        validate_provenance(provenance)
+                        previous = selected.get(entry)
+                        replacements: tuple[ArtifactReplacement, ...] = ()
+                        if previous is not None:
+                            replacements = (
+                                *previous.replacements,
+                                ArtifactReplacement(previous.origin, previous.provenance, previous.content.digest),
+                            )
+                            if previous.content.digest != content.digest:
+                                changed.append((artifact_type.value, entry, bundle_name))
+                        selected[entry] = ArtifactInput(
+                            content, provenance, replace(origin, bundle=bundle_name, entry=entry), replacements
                         )
-                    validate_provenance(provenance)
-                    result.append(ArtifactInput(content, provenance, replace(origin, bundle=bundle_name, entry=entry)))
-                except SourceRefError as error:
-                    raise SourceRefError(
-                        f"artifact {bundle_name}/{entry} for {origin.component} {origin.resource_name}: {error}"
-                    ) from None
-    return tuple(result)
+                    except SourceRefError as error:
+                        raise SourceRefError(
+                            f"artifact {bundle_name}/{entry} for {origin.component} {origin.resource_name}: {error}"
+                        ) from None
+    for artifact_type_name, entry, bundle_name in changed:
+        output.warn(
+            f"Artifact {artifact_type_name} '{entry}' for {origin.component} {origin.resource_name} "
+            f"was replaced by bundle '{bundle_name}'."
+        )
+    return ArtifactGroup(origin.owner, **result)
 
 
 def normalize_text(data: bytes) -> str:
@@ -157,6 +180,8 @@ def content_from_members(
             raise SourceRefError("a skill source must select the package containing SKILL.md")
         metadata, body = _frontmatter(normalize_text(entrypoints[0].data))
         name, description = _identity(metadata)
+        if name != entry:
+            raise SourceRefError("skill name must match its artifact map key")
         selected_name = PurePosixPath(selected_path.replace("\\", "/")).name
         if selected_name != name:
             raise SourceRefError("skill name must match its selected package directory")
@@ -166,6 +191,8 @@ def content_from_members(
         raise SourceRefError("an agent source must select one persona Markdown file")
     metadata, body = _frontmatter(normalize_text(members[0].data))
     name, description = _identity(metadata)
+    if name != entry:
+        raise SourceRefError("agent name must match its artifact map key")
     options = metadata.pop("native_options", {})
     if not isinstance(options, dict) or any(not isinstance(value, dict) for value in options.values()):
         raise SourceRefError("agent native_options must map integrations to option objects")

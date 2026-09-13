@@ -14,6 +14,8 @@ if TYPE_CHECKING:
 
     from agentworks.declared_resource import DeclaredResource
     from agentworks.resources.reference import ResourceReference
+    from agentworks.resources.registry import Registry
+    from agentworks.resources.resolved_spec import ResolvedSpec
 
 
 @dataclass(frozen=True)
@@ -47,6 +49,13 @@ class _ArtifactBundleKind:
     auto_declare_names: frozenset[str] | None = None
     category: Literal["declarable", "capability"] = "declarable"
     builtin_override: Literal["allow", "reserved"] = "allow"
+
+    def resolve_for_show(self, registry: Registry, name: str) -> ResolvedSpec:
+        from agentworks.artifacts.bundle import resolve_bundle
+        from agentworks.resources.access import ResourceIdentity
+        from agentworks.resources.resolved_spec import project_resolved_spec
+
+        return project_resolved_spec(resolve_bundle(registry, name), ResourceIdentity(self.kind, name))
 
     def synthesize(self, references: Sequence[ResourceReference]) -> Any:
         return synthesize_no_default(self.kind, references)

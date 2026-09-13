@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from agentworks.artifacts.model import ArtifactType
-from agentworks.artifacts.native.probe import _PROBE
+from agentworks.artifacts.native.probe import _PROBE, _inventory_problems
 from agentworks.plugins.claude.artifacts import session_artifacts
 from tests.artifacts.test_native_delivery import artifact, context
 from tests.conftest import requires_posix_shell
@@ -26,6 +26,7 @@ def probe(
     settings: dict | None = None,
     identities: tuple[str, ...] = ("skill:review",),
     paths: tuple[str, ...] = (),
+    entries: dict[str, str] | None = None,
     workspace_only: bool = False,
     flags: tuple[str, ...] = (),
     session_plugin: bool = False,
@@ -58,6 +59,7 @@ def probe(
         "home": str(home),
         "workspace": str(workspace),
         "paths": paths,
+        "entries": entries or {},
         "flags": flags,
         "session_plugin": session_plugin,
         "workspace_only": workspace_only,
@@ -78,6 +80,7 @@ def probe(
     )
     observed = json.loads(result.stdout.removeprefix("AGW_ARTIFACT_PROBE="))
     assert isinstance(observed, dict)
+    observed["problems"].extend(_inventory_problems(observed["inventory"], identities, entries or {}))
     return observed
 
 

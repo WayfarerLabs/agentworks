@@ -16,6 +16,7 @@ from agentworks.agents.template import AgentTemplate
 from agentworks.agents.templates import ResolvedAgentTemplate
 from agentworks.artifacts.bundle import ArtifactBundle
 from agentworks.artifacts.declarations import ArtifactsConfig, HintArtifactSpec
+from agentworks.artifacts.model import ArtifactGroup, ArtifactOwner
 from agentworks.artifacts.routing import inspect_owner_artifacts, session_artifacts
 from agentworks.artifacts.state import read_captures
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, VMSetupInvocation
@@ -40,7 +41,7 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local Linux gue
 def owner(db, tmp_path):
     source = tmp_path / "hint.md"
     source.write_text("first capture\n")
-    bundle = ArtifactBundle(name="team", artifacts={"setup": HintArtifactSpec(source=str(source))})
+    bundle = ArtifactBundle(name="team", hints={"setup": HintArtifactSpec(source=str(source))})
     config = SimpleNamespace(artifact_bundles={"team": bundle}, agent_templates={})
     registry = cast(Registry, _StubRegistry(config))
     vm = db.insert_vm("vm", "lima", "vm")
@@ -86,8 +87,8 @@ def test_common_capture_without_activation_and_vm_admin_separation(owner):
         run_setup(owner.db, owner.registry, inputs, invocation, operation="vm-init")
     captured = read_captures(owner.db, "vm", "vm")
     assert set(captured) == {"vm", "admin"}
-    vm_item = captured["vm"].inputs[0]
-    admin_item = captured["admin"].inputs[0]
+    vm_item = tuple(captured["vm"].inputs.items())[0]
+    admin_item = tuple(captured["admin"].inputs.items())[0]
     assert vm_item.content.digest == admin_item.content.digest
     assert vm_item.identity != admin_item.identity
     assert not read_native_setup(owner.db, "vm", "vm").records
@@ -122,7 +123,7 @@ def test_vm_admin_capture_shares_revision_and_refreshes_next_operation(owner, mo
 
     monkeypatch.setattr(subprocess, "Popen", local_transport)
     owner.config.artifact_bundles["team"] = ArtifactBundle(
-        name="team", artifacts={"setup": HintArtifactSpec(source="git::https://fixture.invalid/repo.git//hint.md")}
+        name="team", hints={"setup": HintArtifactSpec(source="git::https://fixture.invalid/repo.git//hint.md")}
     )
     original_capture = PackageCapture.capture
     advanced = False
@@ -150,13 +151,13 @@ def test_vm_admin_capture_shares_revision_and_refreshes_next_operation(owner, mo
 
     captured = [item.artifact_snapshot for item in prepare()]
     assert all(snapshot is not None for snapshot in captured)
-    inputs = [snapshot.inputs[0] for snapshot in captured if snapshot is not None]
+    inputs = [tuple(snapshot.inputs.items())[0] for snapshot in captured if snapshot is not None]
     assert [item.provenance.commit for item in inputs] == [first, first]
     assert [item.content.text for item in inputs] == ["first capture\n", "first capture\n"]
     assert [item.origin.component for item in inputs] == ["vm", "admin"]
     assert inputs[0].identity != inputs[1].identity
     refreshed = [item.artifact_snapshot for item in prepare()]
-    assert [snapshot.inputs[0].provenance.commit for snapshot in refreshed if snapshot is not None] == [
+    assert [tuple(snapshot.inputs.items())[0].provenance.commit for snapshot in refreshed if snapshot is not None] == [
         git("rev-parse", "HEAD"),
         git("rev-parse", "HEAD"),
     ]
@@ -253,8 +254,8 @@ def test_reinit_refreshes_source_and_failed_capture_cannot_publish_old_success(o
     assert read_captures(owner.db, "agent", "agent")["agent"] == old
     run_setup(owner.db, owner.registry, second, user_call(owner), operation="agent-reinit")
     current = read_captures(owner.db, "agent", "agent")["agent"]
-    assert current.inputs[0].content.text == "changed source\n"
-    assert current.inputs[0].identity != old.inputs[0].identity
+    assert tuple(current.inputs.items())[0].content.text == "changed source\n"
+    assert tuple(current.inputs.items())[0].identity != tuple(old.inputs.items())[0].identity
     owner.source.unlink()
     with pytest.raises(StateError):
         prepare_agent_setup(owner.db, owner.registry, vm=owner.vm, name="agent", template=template)
@@ -305,7 +306,15 @@ def test_owned_effect_removal_uses_native_state_and_blocks_pending_cleanup(owner
         assert not managed.exists()
         assert not state.records if remove_activation else state.records[0].complete
         assert view.status == ("inactive" if remove_activation else "current")
-        assert session_artifacts(owner.db, owner.registry, owner.vm, workspace, "agent", "shell", ()).inputs == ()
+        assert not session_artifacts(
+            owner.db,
+            owner.registry,
+            owner.vm,
+            workspace,
+            "agent",
+            "shell",
+            ArtifactGroup(ArtifactOwner("session", "session", "s1")),
+        ).inputs
 
 
 def test_repeated_owner_setup_does_not_rewrite_unchanged_native_files(owner, monkeypatch):
@@ -353,14 +362,14 @@ def test_user_setup_publishes_vm_inputs_without_vm_activation(db, tmp_path):
     )
     run_setup(db, fixture.registry, fixture.owners["agent"], invocation, operation="agent-init")
     record = read_native_setup(db, "agent", "agent").records[0]
-    expected = (*fixture.captures["vm"].inputs, *fixture.captures["agent"].inputs)
+    expected = (*fixture.captures["vm"].inputs.items(), *fixture.captures["agent"].inputs.items())
     assert record.complete
     assert record.artifact_inputs == tuple(item.identity for item in expected)
     for item in expected:
         assert any(
-            item.origin.identity in file.origins and Path(file.path).read_bytes() == item.content.text.encode()
+            item.origin_identity in file.origins and Path(file.path).read_bytes() == item.content.text.encode()
             for file in record.artifact_files
         )
     assert all(Path(file.path).is_relative_to(target.home) for file in record.artifact_files)
     assert not read_native_setup(db, "vm", "vm").records
-    assert [item.origin.component for item in fixture.route().inputs] == ["workspace"]
+    assert [item.origin.component for item in fixture.route().inputs.items()] == ["workspace"]

@@ -3,6 +3,7 @@
 from agentworks.artifacts.model import ArtifactContent, ArtifactInput, ArtifactOrigin, ArtifactProvenance, ArtifactType
 from agentworks.artifacts.state import CapturedArtifacts, decode_captures, write_capture
 from agentworks.db import AppliedStateKey, SessionMode
+from tests.artifacts._fixtures import group
 
 
 def test_vm_snapshot_includes_session_capture_and_ignores_unrelated_damaged_session(db):
@@ -21,7 +22,7 @@ def test_vm_snapshot_includes_session_capture_and_ignores_unrelated_damaged_sess
         ArtifactProvenance(),
         ArtifactOrigin("session", "session", "run", bundle="tools", entry="setup"),
     )
-    capture = CapturedArtifacts("a" * 64, (item,))
+    capture = CapturedArtifacts("a" * 64, group(item))
     write_capture(db, "session", "run", "session", capture, operation="session-start")
     snapshot = db.snapshot_vm_backup_data("box")
     assert snapshot[3] == [session]

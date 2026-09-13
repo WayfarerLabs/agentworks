@@ -11,6 +11,7 @@ from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferr
 from agentworks.artifacts.model import ArtifactContent, ArtifactInput, ArtifactOrigin, ArtifactProvenance, ArtifactType
 from agentworks.artifacts.publication import publish_artifacts, validate_application
 from agentworks.errors import StateError
+from tests.artifacts._fixtures import received
 from tests.native_setup_fixtures import LocalFixtureTransport
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux guest filesystem operations")
@@ -107,17 +108,17 @@ def test_deferred_input_must_be_known_unique_and_routed_inward():
     item = ArtifactInput(
         ArtifactContent(ArtifactType.HINT, "setup", text="hint"),
         ArtifactProvenance(),
-        ArtifactOrigin("vm", "vm", "box"),
+        ArtifactOrigin("vm", "vm", "box", entry="setup"),
     )
     deferred = ArtifactDeferral(input_id=item.identity, destination="user", reason="native user placement")
     assert validate_application(
-        ArtifactApplication(deferred=(deferred,)), (item,), "vm", integration="fixture"
+        ArtifactApplication(deferred=(deferred,)), received(item), "vm", integration="fixture"
     ).deferred == (deferred,)
     for facet, inputs, result in (
-        ("vm", (), ArtifactApplication(deferred=(deferred,))),
-        ("vm", (item,), ArtifactApplication(deferred=(deferred, deferred))),
-        ("workspace", (item,), ArtifactApplication(deferred=(deferred,))),
-        ("session", (item,), ArtifactApplication(deferred=(deferred,))),
+        ("vm", received(), ArtifactApplication(deferred=(deferred,))),
+        ("vm", received(item), ArtifactApplication(deferred=(deferred, deferred))),
+        ("workspace", received(item), ArtifactApplication(deferred=(deferred,))),
+        ("session", received(item), ArtifactApplication(deferred=(deferred,))),
     ):
         with pytest.raises(StateError):
             validate_application(result, inputs, facet, integration="fixture")
