@@ -129,18 +129,27 @@ bounded inventory of relevant skill/persona entrypoints; no model is launched. I
 actual metadata names and paths against planned files and already handled ancestor files. YAML
 headers are parsed on the workstation with the same alias, size and depth guards used during
 capture, so the guest needs no YAML dependency; Codex TOML and configuration-registered role names
-use the standard library. Retirement prunes empty parents of each removed owned skill member only
-within the exact package root supplied by the integration and retained on that file's existing
-ownership record. Core validates that this root contains the file and lies within its owning
-publication scope. Supporting members retire before the package entrypoint; `SKILL.md` stays present
-and owned while any owned supporting member remains, so the next setup can pass native inventory and
-retry cleanup. Modified or unowned files remain untouched; interrupted cleanup retains the member's
-ownership evidence for retry. Older records without a package root still permit owned-file
-retirement but do not authorize directory pruning. Legacy owned skill entrypoints still retire after
-their supporting owned files; their exact parent is used only for ordering, never to infer pruning
-authority. In directories without a root `SKILL.md`, bounded inventory ignores ordinary files and
-empty directories while refusing nested skill entrypoints, symlinks and special files. Unowned notes
-therefore survive cleanup without keeping an operator-removed skill discoverable.
+use the standard library. Publication writes skill entrypoints before supporting members, so an
+interrupted large-package write remains inspectable and retryable. Retirement reverses that order:
+`SKILL.md` stays present and owned while any owned supporting member or required parent cleanup
+remains. Modified or unowned files remain untouched.
+
+Retirement prunes empty parents of each removed owned skill member only within the exact package
+root supplied by the integration and retained on that file's existing record. Core validates that
+the root contains the file and lies within its owning publication scope. Failed inner-parent cleanup
+retains the member record for retry, even if its leaf file is already absent; diagnostics identify
+the package and permission repair. Dropping that evidence could leave a large directory tree without
+an entrypoint and make the next bounded inventory refuse it. Permission denial when removing only
+the final empty package root is different: retain that single empty directory, warn and checkpoint
+the completed retirement. Unsafe paths and ambiguous transport failures remain errors.
+
+An integration may omit the optional package root. Such records still permit owned-file retirement
+but never directory pruning. A recorded native skill identity and `SKILL.md` basename identify the
+entrypoint for ordering only; deeper entrypoints retire before shallower ones. This supports the
+current plugin contract, not only historical records. In directories without a root `SKILL.md`,
+bounded inventory ignores ordinary files and empty directories while refusing nested skill
+entrypoints, symlinks and special files. Unowned notes therefore survive cleanup without keeping an
+operator-removed skill discoverable.
 
 Inventory covers the selected types at known user/workspace discovery roots, with at most 512
 inventory entries, 32 KiB per YAML header and 1 MiB of headers in total.
@@ -149,9 +158,10 @@ so its check also counts package members and refuses `SKILL.md` outside the supp
 `<root>/<package>/SKILL.md` placement, even when an enclosing package has its own entrypoint.
 Proposed supporting files and implied directories count toward the same bound before publication.
 This is a Codex adapter limit, not a restriction on captured packages for other integrations. Codex
-persona TOML is bounded at 32 MiB per file and 64 MiB in total, including the instruction body;
-generated personas obey the same per-file limit. Preflight budgets existing and planned native
-entries together, counting each replacement path once, so publication cannot itself exceed the next
+persona TOML is bounded by Agentworks at 32 MiB per file and 64 MiB in total, including the
+instruction body; these are our rendered-content budgets, not Codex product limits; generated
+personas obey the same per-file limit. Preflight budgets existing and planned native entries
+together, counting each replacement path once, so publication cannot itself exceed the next
 inventory's limits. Symlinked paths and nested candidate layouts are conservatively refused.
 Additional repository ancestor roots, third-party plugin discovery and changes after preflight need
 separate verification. These are Agentworks support limits, not assertions that other layouts are

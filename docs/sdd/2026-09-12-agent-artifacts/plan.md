@@ -522,7 +522,7 @@ record of earlier implementation. The PR is draft while the amendment is being i
 - [x] Run the independent private review lanes and required gates on the completed state; record
       actual review/tool limits and native evidence. Publish a complete handoff and mark ready
       without `review-requested`; do not hold implementation-ready work in draft for live testing.
-- [ ] Assess the ready handoff's complete feedback batch. One further authorized iteration remains
+- [x] Assess the ready handoff's complete feedback batch. One further authorized iteration remains
       after this round if findings require changes; do not merge or enable automatic merging.
 
 The core increment at `cdf87c0e` passes 379 artifact tests with four platform skips, source/test
@@ -605,12 +605,59 @@ independently ran 13 targeted tests, including the production-wrapper large-pack
 Project and independent correctness reviews reproduced the prior argument-limit failure and verified
 the corrected stdin request/response path, consistent implied-directory refusal and existing
 transport compatibility. Their independent shell checks used controlled dependencies, not live VM
-acceptance. Full CLI validation passed 9,478 tests with seven skips; source/test Ruff, format and
-mypy (844 files), package build and file lint returned zero. All CI jobs passed on `14a4b133`.
-Website, Rulesync, locked-SDD and Typer-isolation evidence above remains applicable; these final
-probe changes do not alter those inputs.
+acceptance. Unfiltered local CLI validation passed 9,478 tests with seven skips; source/test Ruff,
+format and mypy (844 files), package build and file lint returned zero. All CI jobs passed on
+`14a4b133`. Website, Rulesync, locked-SDD and Typer-isolation evidence above remains applicable;
+these final probe changes do not alter those inputs.
 
 Iteration 1 of the newest two authorized iterations is complete. Publish the coherent ready handoff
 without `review-requested` and monitor its full feedback batch; one further published feedback/fix
 iteration remains if needed. Native VM, two-user and lifecycle acceptance remains open, so this
 records implementation readiness and does not lock the artifact SDD or merge the PR.
+
+## Typed-map feedback: iteration 2 of 2
+
+The batch includes saga report 5656413083, Muntz 5656473031 and tester 5656529247 on `adda961a`. All
+lanes reported; the operator explicitly allowed an early start once saga and Muntz feedback arrived.
+Lead readings 5656498900 and 5656569823 record dispositions. The PR is draft without
+`review-requested` while this final currently authorized iteration is implemented.
+
+The tester advanced real-VM inheritance, nested supporting-file publication, recorded placement and
+Codex deferral evidence. It also identified interrupted large-package publication, invalid shell
+names crossing persisted input, prune-failure progress and pre-capture declaration visibility. The
+complete two-user and native lifecycle/resume matrix remains open. A separate current-renderer
+Claude diagnostic confirmed that `agents --json` lists active sessions rather than available persona
+definitions; its empty result cannot establish registration. The isolated fixture roots and
+processes were independently verified absent, with no model or network calls.
+
+The test-count discrepancy is selection, not three missing passing tests. The earlier command
+`cli/.venv/bin/pytest cli/tests -n4 -q` selected all 9,485 tests at `14a4b133`, including three
+integration-marked doctor tests, and recorded 9,478 passes with seven skips. Independent collection
+confirmed that CI's `pytest tests/ -m 'not integration'` selects 9,482 tests at that head. Its
+pass/skip split depends on the host; the final local gate below will record the exact CI selection.
+The unfiltered run does not establish artifact live acceptance.
+
+- [ ] Publish skill entrypoints before supporting files and verify interrupted large-package
+      publication can pass preflight and retry for Claude and Grok. Keep retirement ordering
+      reversed.
+- [ ] Enforce canonical names at the common normalized/persisted boundary, preserving shell's
+      separate owner directories; share the declaration/capture name pattern and simplify typed-map
+      access without changing declaration shape or ordering.
+- [ ] Make final empty-package-root permission denial nonfatal, while retaining retry evidence for
+      required inner-parent cleanup and unsafe or ambiguous failures. Verify both cases and preserve
+      the large-tree inventory invariant without a directory ledger.
+- [ ] Expose current declaring bundles in selection order before capture and with stale captures;
+      keep that metadata separate from captured replacements and never acquire sources for
+      inspection.
+- [ ] Remove draft-only capture upgrade exceptions and misleading reinitialization guidance. Retain
+      optional-root retirement as a current plugin contract and clarify our Codex rendered-TOML
+      budget.
+- [ ] Complete private review, exact CI-selected local gates and a coherent ready handoff. Monitor
+      and critically assess its reports; no further fix iteration or merge is currently authorized.
+
+The pruning disposition is narrower than the initial reading's blanket optional-cleanup proposal. A
+readonly inner container can prevent removal of hundreds of emptied child directories while still
+allowing their files to be deleted. Dropping those member records and the entrypoint would recreate
+the next inventory's large-tree refusal. Existing records therefore retain required parent-cleanup
+progress; only failure to remove the final empty package root can be warned about without retaining
+that record. No new directory ownership or cleanup ledger is introduced.

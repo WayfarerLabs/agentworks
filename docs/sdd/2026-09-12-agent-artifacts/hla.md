@@ -447,13 +447,15 @@ The projection includes local and applicable ancestor artifacts, even when alrea
 Show origin, bundle/item, type, captured source revision, current declaration/capture relationship,
 integration activation, recorded handling or deferral reason/route, and native identity/placement.
 Show canonical per-type keys within their owning groups, along with the winning source and compact
-replacement history. Deferred entries stay under their original owner; inspection never presents
-them as session-local overrides. Replacement warnings report changed definitions, while identical
-content remains quiet. Read-only inspection obtains these facts from captured state without
-reacquiring replaced sources. Uncaptured bundles remain visible as references with unknown contents.
-Missing, stale or interrupted evidence is explicit; a recorded successful apply is not a live
-filesystem or model attestation. Default output explains metadata without dumping artifact bodies or
-secret values.
+replacement history. Show current declaring bundles in selection order even before capture, with the
+last contribution selected; this declaration evidence stays separate from captured replacement
+history. Deferred entries stay under their original owner; inspection never presents them as
+session-local overrides. Replacement warnings report changed definitions, while identical content
+remains quiet. Read-only inspection obtains these facts from captured state without reacquiring
+replaced sources. Uncaptured bundles remain visible as references with unknown contents. Missing,
+stale or interrupted evidence is explicit; a recorded successful apply is not a live filesystem or
+model attestation. Default output explains metadata without dumping artifact bodies or secret
+values.
 
 Worked cases the HLA and subsequent tests share:
 
