@@ -136,8 +136,11 @@ publication scope. Supporting members retire before the package entrypoint; `SKI
 and owned while any owned supporting member remains, so the next setup can pass native inventory and
 retry cleanup. Modified or unowned files remain untouched; interrupted cleanup retains the member's
 ownership evidence for retry. Older records without a package root still permit owned-file
-retirement but do not authorize directory pruning. Empty directory trees do not constitute competing
-native entries.
+retirement but do not authorize directory pruning. Legacy owned skill entrypoints still retire after
+their supporting owned files; their exact parent is used only for ordering, never to infer pruning
+authority. In directories without a root `SKILL.md`, bounded inventory ignores ordinary files and
+empty directories while refusing nested skill entrypoints, symlinks and special files. Unowned notes
+therefore survive cleanup without keeping an operator-removed skill discoverable.
 
 Inventory covers the selected types at direct user/workspace discovery roots, with at most 512
 directory entries, 32 KiB per YAML header and 1 MiB of headers in total. Codex persona TOML is

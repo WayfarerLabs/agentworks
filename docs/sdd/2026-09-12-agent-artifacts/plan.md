@@ -569,3 +569,13 @@ retire before that entrypoint, which remains owned while any owned member still 
 lets the existing inventory validate the package before a retry reaches publication. No directory
 ledger or inventory exception for directories without an entrypoint is introduced. Final correction
 validation and handoff remain pending.
+
+The review of `ad5a9733` confirmed exact-root containment and current-record retry, but identified
+legacy entrypoint ordering and unowned ordinary leftovers as two remaining retry failures. The
+legacy correction uses the owned entrypoint's immediate parent for ordering only, preserving its
+file-only cleanup authority. For unowned leftovers, the lead and complexity reviewer rejected
+retaining an otherwise removable `SKILL.md`: that would keep an operator-removed skill discoverable
+and introduce another filesystem operation solely to satisfy an overly strict inventory check.
+Instead, the existing bounded walk ignores ordinary files in directories without a root entrypoint
+and still refuses nested skill entrypoints, symlinks, special files and limit overages. The
+corrected implementation and final review remain pending.
