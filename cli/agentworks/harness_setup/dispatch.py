@@ -27,6 +27,7 @@ from agentworks.harness_setup.state import read_native_setup, replace_setup_reco
 
 if TYPE_CHECKING:
     from agentworks.artifacts.application import OwnedArtifactFile
+    from agentworks.artifacts.model import ArtifactFacet
     from agentworks.db import Database, VMRow
     from agentworks.harness_setup.inputs import SetupInputs
     from agentworks.harness_setup.locking import NativeMutationGuard
@@ -77,7 +78,11 @@ def run_setup(
             write_capture(db, inputs.kind, inputs.name, inputs.component, inputs.artifact_snapshot, operation=operation)
         state = read_native_setup(db, inputs.kind, inputs.name)
         prior = {record.integration: record for record in state.records if record.component == inputs.component}
+        fallback: tuple[ArtifactFacet, ...] = ()
+        if not inputs.activations and inputs.artifact_snapshot is not None and inputs.artifact_snapshot.inputs:
+            fallback = ("user" if inputs.facet == "vm" else "session",)
         if not inputs.activations and not prior:
+            _warn_artifact_deferrals(inputs, fallback)
             return state
         location = (
             invocation.home
@@ -218,4 +223,29 @@ def run_setup(
                 current = current.model_copy(update={"complete": not pending_files, "pending_cleanup": pending_files})
                 state = replace_setup_record(state, current)
             persist(state)
+            if block is not None and current.complete:
+                _warn_artifact_deferrals(inputs, tuple(item.destination for item in current.deferred), name)
+        if fallback and not any(
+            record.pending_cleanup for record in state.records if record.component == inputs.component
+        ):
+            _warn_artifact_deferrals(inputs, fallback)
         return state
+
+
+def _warn_artifact_deferrals(
+    inputs: SetupInputs, destinations: tuple[ArtifactFacet, ...], integration: str | None = None
+) -> None:
+    """Explain when deferred artifacts can reach their next owning setup."""
+    if not destinations:
+        return
+    refresh = {
+        "user": "user: next setup of each actual user",
+        "workspace": "workspace: creation only; existing workspaces cannot refresh in place",
+        "session": "session: next managed start or restart; running sessions are not refreshed",
+    }
+    routes = "; ".join(refresh[destination] for destination in dict.fromkeys(destinations))
+    handler = integration or "core fallback (no activated harness integrations)"
+    output.warn(
+        f"Artifact setup for {inputs.component} '{inputs.name}' via {handler} leaves artifacts deferred ({routes}). "
+        "Already-applied native files follow the harness's own reload behavior."
+    )

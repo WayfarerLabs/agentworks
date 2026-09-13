@@ -247,3 +247,92 @@ def test_applied_state_omits_env_values_but_detects_declaration_changes(setup_ca
         ),
     )
     assert changed.declaration(inputs.activations[0]) != record.declaration
+
+
+@pytest.mark.parametrize("component", ["vm", "admin", "agent", "workspace"])
+@pytest.mark.parametrize("capture", ["absent", "empty", "nonempty"])
+def test_inactive_capture_notice_requires_local_artifacts(db, facet_case, monkeypatch, capture):
+    from agentworks.artifacts.model import (
+        ArtifactContent,
+        ArtifactInput,
+        ArtifactOrigin,
+        ArtifactProvenance,
+        ArtifactType,
+    )
+    from agentworks.artifacts.state import CapturedArtifacts
+
+    inputs, invocation = facet_case
+    item = ArtifactInput(
+        ArtifactContent(ArtifactType.HINT, "fixture", text="fixture"),
+        ArtifactProvenance(),
+        ArtifactOrigin(inputs.component, inputs.kind, inputs.name),
+    )
+    snapshot = None if capture == "absent" else CapturedArtifacts("a" * 64, (item,) if capture == "nonempty" else ())
+    inputs = replace(inputs, artifact_snapshot=snapshot)
+    warning = Mock()
+    monkeypatch.setattr("agentworks.harness_setup.dispatch.output.warn", warning)
+    state = run_setup(db, Mock(), inputs, invocation, operation="fixture-setup", buffered=True)
+    assert warning.call_count == (1 if capture == "nonempty" else 0)
+    assert state.records == ()
+    assert invocation.runner.method_calls == []
+
+
+@pytest.mark.parametrize("component", ["vm"])
+@pytest.mark.parametrize("outcome", ["deferred", "handled", "hook-failure", "publication-failure", "pending-cleanup"])
+def test_deferral_notice_follows_successful_application(db, facet_case, monkeypatch, outcome):
+    from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral, OwnedArtifactFile
+    from agentworks.artifacts.model import (
+        ArtifactContent,
+        ArtifactInput,
+        ArtifactOrigin,
+        ArtifactProvenance,
+        ArtifactType,
+    )
+
+    inputs, invocation = facet_case
+    artifacts = tuple(
+        ArtifactInput(
+            ArtifactContent(ArtifactType.HINT, name, text=name),
+            ArtifactProvenance(),
+            ArtifactOrigin("vm", "vm", "owner", entry=name),
+        )
+        for name in ("one", "two", "three", "four")
+    )
+    application = ArtifactApplication(
+        deferred=()
+        if outcome == "handled"
+        else tuple(
+            ArtifactDeferral(input_id=item.identity, destination=destination, reason="fixture")
+            for item, destination in zip(artifacts, ("user", "workspace", "session", "user"), strict=True)
+        )
+    )
+
+    class Deferring(ConformingHarnessIntegration):
+        name = "deferring"
+        description = "Artifact deferral fixture"
+
+        def vm_init(self, invocation):
+            if outcome == "hook-failure":
+                raise RuntimeError("fixture hook failure")
+            return application
+
+    monkeypatch.setattr("agentworks.harness_setup.dispatch.harness_integration_for", lambda name: Deferring)
+    monkeypatch.setattr("agentworks.artifacts.routing.setup_artifacts", lambda *args: artifacts)
+    monkeypatch.setattr(SetupInputs, "declaration", lambda *args: {})
+    inputs = replace(inputs, activations=(CapabilityBlock.of("deferring"),))
+    warning = Mock()
+    monkeypatch.setattr("agentworks.harness_setup.dispatch.output.warn", warning)
+    if outcome == "publication-failure":
+        monkeypatch.setattr(
+            "agentworks.harness_setup.dispatch.publish_artifacts", Mock(side_effect=RuntimeError("fixture publication"))
+        )
+    elif outcome == "pending-cleanup":
+        leftover = OwnedArtifactFile(path="/home/fixture/old", sha256="a" * 64, origins=(artifacts[0].origin.identity,))
+        monkeypatch.setattr("agentworks.harness_setup.dispatch.publish_artifacts", lambda *a, **k: (leftover,))
+    if outcome in ("hook-failure", "publication-failure"):
+        with pytest.raises(RuntimeError):
+            run_setup(db, Mock(), inputs, invocation, operation="fixture-setup", buffered=True)
+    else:
+        state = run_setup(db, Mock(), inputs, invocation, operation="fixture-setup", buffered=True)
+        assert state.records[0].complete == (outcome != "pending-cleanup")
+    assert warning.call_count == (1 if outcome == "deferred" else 0)
