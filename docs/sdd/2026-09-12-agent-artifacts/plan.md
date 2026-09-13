@@ -449,9 +449,9 @@ carriers, and an acknowledgment ledger would not establish consumption. Native s
 artifact freshness remain separate checks in the required session preparation path; no new bypass
 was identified. The duplicate inactive status and empty trailing field are a small presentation fix.
 
-- [ ] Clarify handling versus proof of consumption without changing the result contract; remove
+- [x] Clarify handling versus proof of consumption without changing the result contract; remove
       duplicate/empty inspection fields while preserving JSON.
-- [ ] Gather remaining reachable local native persona/carrier evidence without model calls; retain
+- [x] Gather remaining reachable local native persona/carrier evidence without model calls; retain
       the scoped VM/two-user acceptance gap where no environment is supplied.
 - [ ] Complete private review and relevant gates, publish a coherent ready handoff, and assess the
       next feedback batch within this newest two-round allowance.
@@ -463,5 +463,20 @@ and therefore missed the actual CLI key parsing. Correct the native key encoding
 rendered identity through actual Codex diagnostics before handoff. This is a private acceptance
 finding within the current round, not a new published feedback batch.
 
-- [ ] Correct Codex session role-key encoding, reject unrepresentable persona names at the native
+- [x] Correct Codex session role-key encoding, reject unrepresentable persona names at the native
       boundary, and verify fresh/resume override behavior against the native parser.
+
+Independent native retesting at `1d6455d1` confirms the Codex fix: two actual app-server responses
+report the intended persona name, correct configuration-file path and exact composed developer
+instructions. The malformed role-file control still produces a path-specific native warning.
+Production fresh/resume commands use the corrected keys and are accepted by the native parser;
+actual conversation resume was not performed. All native processes and isolated fixtures were
+removed and their absence independently verified; only redacted reproduction evidence is retained.
+
+Round 5 local validation at `adb86461` passed: 9,366 tests with seven skips, full source/test Ruff,
+format and mypy, package build, file lint, locked-SDD and Rulesync checks, Typer isolation, website
+Python/Node tests and deterministic builds for both site bases. Every gate returned zero. Project
+and complexity reviews are clean; both covered the Codex correction. The additional independent
+correctness lane remains pending because the collaboration service rejected new/resumed review
+agents at its thread limit. This is an unfinished private review, so the PR stays draft without a
+review-request signal. The round is not complete.
