@@ -59,16 +59,18 @@ The same metadata, complete-package, mutation, and content limits apply on both 
 
 Git acquisition creates an empty bare repository and fetches the selected reference with depth one.
 The same repository/reference pair is resolved once per operation; all its selected entries use that
-immutable commit. Default references select remote HEAD. Reinitialization deliberately reacquires a
-movable reference; a commit reference remains pinned. Provenance records a credential-free
-repository, requested reference, selected path and resolved commit.
+immutable commit. VM and admin preparation share one context and its combined limits, while
+retaining separate origins and saved captures. Agent, workspace and session-local setup each own
+their capture operation. Default references select remote HEAD. Reinitialization deliberately
+reacquires a movable reference; a commit reference remains pinned. Provenance records a
+credential-free repository, requested reference, selected path and resolved commit.
 
 Git members come from `ls-tree` and `cat-file` object reads. There is no checkout, archive
 extraction, filter execution, attribute substitution or bundled script execution. Export-ignored
 members remain present. Source hooks and recursive submodule acquisition are disabled. Workstation
-credential helpers remain available; guest authentication is unrelated. Selected symlinks,
-submodules and Git LFS pointers are errors, including when a link is selected directly as the
-source.
+credential helpers remain available with interactive stdin disabled; guest authentication is
+unrelated. Selected symlinks, submodules and Git LFS pointers are errors, including when a link is
+selected directly as the source. Local capture also rejects unresolved Git LFS pointers.
 
 All members must have contained UTF-8, NFC paths. Absolute paths, traversal, backslashes, control
 characters, punctuation that is not portable, reserved device names, trailing dots/spaces and `.git`
@@ -102,22 +104,28 @@ for all source readers; future core producers can construct that model directly.
 ## Bounds and persisted representation
 
 Default operation limits are 120 seconds, 4,096 members, 16 MiB per member, 64 MiB total content,
-128 MiB acquisition storage and 32 path components. Local directory enumeration has a separate
-bounded entry budget. Git process output is spooled privately, monitored with acquisition storage,
-and read into memory only within its limit. A limit or process failure terminates acquisition,
-removes staging and raises an error. No prior snapshot is returned as a fresh capture.
+128 MiB acquisition storage, 32 path components and 4,096 characters per relative member path. Local
+directory enumeration has a separate bounded entry budget. Git process output is spooled privately,
+monitored with acquisition storage, and read into memory only within its limit. A limit or process
+failure terminates acquisition, removes staging and raises an error. No prior snapshot is returned
+as a fresh capture.
 
 `encode_inputs` returns a version-1 JSON object containing inputs, origins, provenance and content.
-Member bytes use strict base64, including designated text; the text flag records normalization.
-`decode_inputs` accepts only the supported version, rejects extra fields and wrong primitive types,
-bounds the input structure before decoding, validates relative paths and metadata, and checks total
-member/byte limits and recomputed content/input identities. Capture and decoding use the same
-entrypoint parser: stored metadata, body, native options and identity fields must match the retained
-members, and forbidden execution metadata is rejected even when all hashes are consistent.
-Provenance is checked as a credential-free Git repository with its selection, ref and resolved
-commit, an absolute workstation path, or inline content. These checks do not contact the source.
-Unknown versions and corrupt state produce a credential-free error for the caller to frame with
-owning-state context. There is no DB access, native invocation or source reacquisition in the codec.
+It validates that object through the same decoder before returning, so a writer cannot save a
+capture that a subsequent reader rejects. Owning acquisition also performs this validation before
+returning buffered inputs that can cause native effects. Direct persisted writers retain their own
+validation boundary and leave the previous record unchanged on refusal. Member bytes use strict
+base64, including designated text; the text flag records normalization. `decode_inputs` accepts only
+the supported version, rejects extra fields and wrong primitive types, bounds the input structure
+before decoding, validates relative paths and metadata, and checks total member/byte limits and
+recomputed content/input identities. Capture and decoding use the same entrypoint parser: stored
+metadata, body, native options and identity fields must match the retained members, and forbidden
+execution metadata is rejected even when all hashes are consistent. Provenance is checked as a
+credential-free Git repository with its selection, ref and resolved commit, an absolute workstation
+path, or inline content. These checks do not contact the source. The owning state layer
+distinguishes an unsupported domain version from corrupt content. Doctor reports an unsupported
+domain version as uninterpreted evidence, not corruption, and backup retains its uninterpreted
+payload. There is no DB access, native invocation or source reacquisition in the codec.
 
 ## Verification
 

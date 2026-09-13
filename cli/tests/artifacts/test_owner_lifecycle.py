@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -90,6 +91,74 @@ def test_common_capture_without_activation_and_vm_admin_separation(owner):
     assert vm_item.identity != admin_item.identity
     assert not read_native_setup(owner.db, "vm", "vm").records
     assert owner.target.commands == []
+
+
+def test_vm_admin_capture_shares_revision_and_refreshes_next_operation(owner, monkeypatch, tmp_path):
+    from agentworks.package_sources import PackageCapture
+
+    repository = tmp_path / "repository"
+    repository.mkdir()
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(repository), *args], check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    git("init", "-q")
+    git("config", "user.email", "fixture@example.test")
+    git("config", "user.name", "Fixture")
+    source = repository / "hint.md"
+    source.write_text("first capture\n")
+    git("add", ".")
+    git("commit", "-qm", "first")
+    first = git("rev-parse", "HEAD")
+    original_popen = subprocess.Popen
+
+    def local_transport(command, *args, **kwargs):
+        command = [str(repository) if value == "https://fixture.invalid/repo.git" else value for value in command]
+        command = ["protocol.file.allow=always" if value == "protocol.file.allow=never" else value for value in command]
+        return original_popen(command, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", local_transport)
+    owner.config.artifact_bundles["team"] = ArtifactBundle(
+        name="team", artifacts={"setup": HintArtifactSpec(source="git::https://fixture.invalid/repo.git//hint.md")}
+    )
+    original_capture = PackageCapture.capture
+    advanced = False
+
+    def capture_then_advance(self, reference):
+        nonlocal advanced
+        captured = original_capture(self, reference)
+        if not advanced:
+            source.write_text("second capture\n")
+            git("add", ".")
+            git("commit", "-qm", "second")
+            advanced = True
+        return captured
+
+    monkeypatch.setattr(PackageCapture, "capture", capture_then_advance)
+
+    def prepare():
+        return prepare_vm_setup(
+            owner.db,
+            owner.registry,
+            name="vm",
+            template=ResolvedVMTemplate("default", artifacts=owner.artifacts),
+            admin=AdminConfig(artifacts=owner.artifacts),
+        )
+
+    captured = [item.artifact_snapshot for item in prepare()]
+    assert all(snapshot is not None for snapshot in captured)
+    inputs = [snapshot.inputs[0] for snapshot in captured if snapshot is not None]
+    assert [item.provenance.commit for item in inputs] == [first, first]
+    assert [item.content.text for item in inputs] == ["first capture\n", "first capture\n"]
+    assert [item.origin.component for item in inputs] == ["vm", "admin"]
+    assert inputs[0].identity != inputs[1].identity
+    refreshed = [item.artifact_snapshot for item in prepare()]
+    assert [snapshot.inputs[0].provenance.commit for snapshot in refreshed if snapshot is not None] == [
+        git("rev-parse", "HEAD"),
+        git("rev-parse", "HEAD"),
+    ]
 
 
 @pytest.mark.parametrize("component", ["agent", "workspace"])

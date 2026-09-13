@@ -311,3 +311,29 @@ double builds and diffs returned 0. The final bookkeeping commit records this ev
 implementation follows those private reviews. Round 1 is complete and the PR returns to ready
 without `review-requested` for CI and the remaining acceptance pipeline. Two authorized fix rounds
 remain.
+
+## Published feedback round 2
+
+Both saga and Muntz lanes found round 1 clean. The integration tester independently exercised
+capture and inspection on a Lima VM: inline hints, workstation rules, complete skills, current/stale
+refresh, source-symlink refusal, and the documented guide/resource commands. This is scoped live
+acquisition evidence; it did not exercise native harness launches, two-user isolation or model
+calls.
+
+The tester found that capture could accept paths longer than the persisted codec permits, producing
+an unreadable record. Round 2 accepts acquisition/write-boundary consistency, distinct
+future-version diagnostics, local LFS-pointer refusal, noninteractive Git stdin, and an ADR
+clarification of the shared syntax versus separate acquisition contracts. Remaining recommendations
+are being assessed against the approved omitted-input handling contract and actual lifecycle
+callers.
+
+Windows CI failed on a Git capture that had passed the previous run. An independent local experiment
+reproduced a real race: Git removed `shallow.lock` between the storage scanner's `is_file` and
+`stat`. The resulting public error matches CI, but the CI log does not identify the underlying
+exception. The correction must tolerate vanished temporary entries while preserving other I/O errors
+and bounds; Windows CI remains required evidence.
+
+The PR returned to draft before changes. The round began after both named lanes reported, under the
+operator's early-start permission, with feedback batched through the round-start comment. This is
+round 2 of the three authorized rounds. Implementation, private re-review and combined gates for
+this round are pending.

@@ -25,17 +25,25 @@ We use a Terraform-inspired source reference syntax as a single string field:
 - Git with subpath: `git::https://github.com/user/repo.git//path/to/file`
 - Git with ref: `git::https://github.com/user/repo.git?ref=v1.0`
 
-The parsing and fetching logic lives in a reusable `sources.py` module with `fetch_file` (single
-file) and `fetch_dir` (directory/repo clone) operations.
+The parsing and ordinary fetching logic lives in a reusable `sources.py` module with `fetch_file`
+(single file) and `fetch_dir` (directory/repo clone) operations.
+
+Artifact packages share this source-reference parser but use `package_sources.py` for bounded
+workstation capture. Git packages are read from immutable objects without checkout, filters, hooks
+or archive extraction; local packages are read with containment and mutation checks. These
+guarantees differ from the guest checkout/install behavior required by dotfiles. Keep the syntax
+shared and use the acquisition operation that matches the consumer's execution and safety contract.
 
 ## Consequences
 
 - One config field instead of two for every feature that needs external content.
 - Users learn one syntax and apply it to dotfiles, lockfiles, and future features.
 - Git refs (`?ref=tag`) allow pinning to specific versions, which is important for lockfiles.
-- Private repos work because git source references are fetched after git credentials are configured
-  on the VM.
-- The `sources.py` module is reusable infrastructure. Adding a new feature that needs to fetch
-  external content requires no new fetching code.
+- Guest fetches use credentials configured on the VM. Artifact capture uses the invoking
+  workstation's Git credential helpers before provisioning, without reading the invoking process's
+  stdin.
+- Source parsing and acquisition are reusable infrastructure. Consumers use the existing fetch or
+  package-capture operation when its contract fits; sharing syntax does not require executing a
+  checkout for content that must be ingested without repository-controlled execution.
 - Tradeoff: the `git::` prefix is less intuitive than a plain URL. This is the cost of
   disambiguating local paths from git URLs in a single field.

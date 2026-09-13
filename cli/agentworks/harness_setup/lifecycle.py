@@ -22,6 +22,7 @@ from agentworks.harness_setup.dispatch import run_setup
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.runner import SetupRunner
 from agentworks.harness_setup.state import read_native_setup
+from agentworks.package_sources import PackageCapture
 from agentworks.secrets.orchestration import SecretTarget
 from agentworks.vms.sites import site_platform_name
 
@@ -88,32 +89,33 @@ def require_prepared_setup(
 def prepare_vm_setup(
     db: Database, registry: Registry, *, name: str, template: ResolvedVMTemplate, admin: AdminConfig
 ) -> tuple[SetupInputs, ...]:
-    """Prepare VM and actual-admin inputs independently, including retirement."""
+    """Capture VM and actual-admin inputs at one revision, retaining separate owners."""
     result = []
-    if _needed(db, "vm", name, "vm", template.harness_integrations, template.artifacts):
-        result.append(
-            SetupInputs(
-                "vm",
-                name,
-                "vm",
-                tuple(template.harness_integrations),
-                SecretTarget(vm=template.env),
-                template.artifacts,
-                capture_owner(registry, "vm", name, "vm", template.artifacts),
+    with PackageCapture() as operation:
+        if _needed(db, "vm", name, "vm", template.harness_integrations, template.artifacts):
+            result.append(
+                SetupInputs(
+                    "vm",
+                    name,
+                    "vm",
+                    tuple(template.harness_integrations),
+                    SecretTarget(vm=template.env),
+                    template.artifacts,
+                    capture_owner(registry, "vm", name, "vm", template.artifacts, operation=operation),
+                )
             )
-        )
-    if _needed(db, "vm", name, "admin", admin.harness_integrations, admin.artifacts):
-        result.append(
-            SetupInputs(
-                "vm",
-                name,
-                "admin",
-                tuple(admin.harness_integrations),
-                SecretTarget(vm=template.env, admin=admin.env),
-                admin.artifacts,
-                capture_owner(registry, "vm", name, "admin", admin.artifacts),
+        if _needed(db, "vm", name, "admin", admin.harness_integrations, admin.artifacts):
+            result.append(
+                SetupInputs(
+                    "vm",
+                    name,
+                    "admin",
+                    tuple(admin.harness_integrations),
+                    SecretTarget(vm=template.env, admin=admin.env),
+                    admin.artifacts,
+                    capture_owner(registry, "vm", name, "admin", admin.artifacts, operation=operation),
+                )
             )
-        )
     return tuple(result)
 
 

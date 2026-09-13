@@ -42,13 +42,15 @@ exactly one inline `text` or a file `source`. Skills select an explicit director
 Sources use workstation files or Git references, such as `file::~/agent-content/rules.md` and
 `git::https://github.com/example/agent-content.git//skills/review?ref=v1.0.0`. Workstation `~`
 refers to the operator's home. Git refs resolve once per capture; descendants consume that capture
-without fetching again. Pin a commit for reproducible updates. Do not put credentials in source
-URLs.
+without fetching again. VM and admin capture share the same reference resolution during their setup
+operation. Pin a commit for reproducible updates. Do not put credentials in source URLs.
 
 Text uses Unix line endings. Skill supporting files retain executable intent and binary bytes;
 `preserve_bytes` names relative paths or globs for text fixtures that require exact bytes.
 `SKILL.md` cannot be exempted from normalization. Review imported content before authorizing its
-use: acquisition copies content and does not run package installers or skill scripts.
+use: acquisition copies content and does not run package installers or skill scripts. Local and Git
+sources reject unresolved Git LFS pointers. Relative member paths are limited to 4,096 characters
+and 32 components; a capture must satisfy the persisted format before setup can accept it.
 
 VM/admin and agent changes take effect through the owning reinitialization operation. Workspaces
 have no reinit operation; recreate the workspace when its artifact setup must change. Session
