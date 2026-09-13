@@ -399,7 +399,7 @@ private project/complexity/correctness review, relevant native diagnostics, gate
       and the ordinary discoverable guide topic mechanism.
 - [x] Update current FRD/HLA, permanent contracts and examples; add the revised routing decision as
       a coordination message for the saga owner without rewriting predecessor history.
-- [ ] Complete private reviews, local gates and a coherent ready handoff; assess the next published
+- [x] Complete private reviews, local gates and a coherent ready handoff; assess the next published
       batch within the two additional rounds.
 
 Scoped VM/native/two-user acceptance still requires operator inventory and a budget. The additional
@@ -652,8 +652,9 @@ The unfiltered run does not establish artifact live acceptance.
 - [x] Remove draft-only capture upgrade exceptions and misleading reinitialization guidance. Retain
       optional-root retirement as a current plugin contract and clarify our Codex rendered-TOML
       budget.
-- [ ] Complete private review, exact CI-selected local gates and a coherent ready handoff. Monitor
-      and critically assess its reports; no further fix iteration or merge is currently authorized.
+- [x] Complete private review and exact CI-selected local gates.
+- [ ] Publish a coherent ready handoff, then monitor and critically assess its reports; no further
+      fix iteration or merge is currently authorized.
 
 The pruning disposition is narrower than the initial reading's blanket optional-cleanup proposal. A
 readonly inner container can prevent removal of hundreds of emptied child directories while still
@@ -676,3 +677,17 @@ processes exited zero; an independent check found no remaining owned processes o
 directories. Network access was denied and no user prompt was sent. This proves bounded local
 registration and collision handling, not model behavior, managed-VM lifecycle, two-user isolation or
 conversation resume. Those acceptance items remain open.
+
+Final project, Muntz and independent correctness reviews are clean at `2ced1db7`. Muntz ran 192
+focused tests, including actual owning-setup preflight and permission-repair retry. Project and
+correctness independently exercised extracted production branches with memory-only probes; their
+pinned read-only trees lacked the full project test environment. These reviews close the private
+code review requirement for this round, not live acceptance.
+
+All CI jobs passed at `2ced1db7`, including Linux Python 3.12/3.13/3.14, Windows, website, file
+lint, Rulesync, locked-SDD and static checks. The lead's package build, file lint and exact CI
+Typer-isolation check returned zero. The first package invocation could not write the host uv cache;
+rerunning with an owned workspace cache built both distributions successfully. The final plan-only
+commit records this evidence without changing implementation. Publish the complete ready handoff
+without `review-requested`, then assess the full window. The two authorized fix iterations are now
+spent; further material corrections need operator disposition. Remaining live acceptance stays open.
