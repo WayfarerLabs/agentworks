@@ -130,3 +130,71 @@ def test_body_is_not_exposed_through_transport_log(target):
         target, (artifact(target.home / "rule.md", content),), (), lambda files: None, roots=(str(target.home),)
     )
     assert content.decode() not in "".join(target.commands + target.logged_output)
+
+
+def test_skill_retirement_prunes_only_owned_file_parents_and_retries_interruption(target, monkeypatch):
+    from dataclasses import replace
+
+    from agentworks.native_files import NativeFiles
+
+    root = target.home / ".claude/skills/review"
+    files = (
+        replace(artifact(root / "SKILL.md"), native_identity="skill:review"),
+        replace(artifact(root / "scripts/nested/check.sh"), native_identity="skill:review"),
+    )
+    previous = publish_artifacts(target, files, (), lambda files: None, roots=(str(target.home),))
+    checkpoints = [previous]
+    prune = NativeFiles.prune_empty_parents
+    calls = 0
+
+    def interrupted(self, destination, *, root):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise StateError("fixture interrupted cleanup")
+        prune(self, destination, root=root)
+
+    monkeypatch.setattr(NativeFiles, "prune_empty_parents", interrupted)
+    with pytest.raises(StateError):
+        publish_artifacts(target, (), previous, checkpoints.append, roots=(str(target.home),))
+    # The entrypoint's record is already retired; the remaining member still supplies its package root.
+    assert [Path(file.path).name for file in checkpoints[-1]] == ["check.sh"]
+    assert not Path(checkpoints[-1][0].path).exists()
+    monkeypatch.setattr(NativeFiles, "prune_empty_parents", prune)
+    assert publish_artifacts(target, (), checkpoints[-1], checkpoints.append, roots=(str(target.home),)) == ()
+    assert not root.exists()
+    assert root.parent.is_dir()
+
+
+def test_skill_retirement_preserves_modified_and_unowned_files(target):
+    from dataclasses import replace
+
+    root = target.home / ".claude/skills/review"
+    files = tuple(
+        replace(artifact(root / path), native_identity="skill:review")
+        for path in ("SKILL.md", "scripts/modified.sh", "data/retired.txt")
+    )
+    previous = publish_artifacts(target, files, (), lambda files: None, roots=(str(target.home),))
+    (root / "scripts/modified.sh").write_text("operator change")
+    (root / "data/unowned.txt").write_text("unowned content")
+    remaining = publish_artifacts(target, (), previous, lambda files: None, roots=(str(target.home),))
+    assert [Path(file.path).name for file in remaining] == ["modified.sh"]
+    assert (root / "scripts/modified.sh").read_text() == "operator change"
+    assert (root / "data/unowned.txt").read_text() == "unowned content"
+    assert not (root / "data/retired.txt").exists()
+
+
+def test_skill_parent_pruning_refuses_symlinks_and_scope_escape(target):
+    from agentworks.native_files import NativeFiles
+
+    root = target.home / ".claude/skills/review"
+    root.mkdir(parents=True)
+    outside = target.root / "outside"
+    outside.mkdir()
+    (root / "linked").symlink_to(outside, target_is_directory=True)
+    files = NativeFiles(target)
+    with pytest.raises(StateError):
+        files.prune_empty_parents(str(root / "linked/retired"), root=str(root))
+    with pytest.raises(StateError):
+        files.prune_empty_parents(str(outside / "retired"), root=str(root))
+    assert outside.is_dir() and (root / "linked").is_symlink()

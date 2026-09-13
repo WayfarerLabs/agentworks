@@ -4,19 +4,22 @@ from __future__ import annotations
 
 import json
 import shlex
+import tomllib
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
-import yaml
-
+from agentworks.artifacts.application import ArtifactFile
+from agentworks.artifacts.frontmatter import parse_metadata
 from agentworks.artifacts.native.common import MAX_CODEX_PERSONA_BYTES
 from agentworks.errors import StateError
 from agentworks.package_sources import CaptureLimits
+from agentworks.sources import SourceRefError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from agentworks.artifacts.application import ArtifactFile, OwnedArtifactFile
+    from agentworks.artifacts.application import OwnedArtifactFile
     from agentworks.transports import Transport
 
 # Executed in the same login-shell environment as the native workload. Only selected
@@ -154,14 +157,19 @@ for path in paths:
 try:
     candidates = []
     scanned = 0
+    existing_entries = set()
+    discovery_roots = []
     for root in roots:
         skill_root = (root.parent / '.agents' / 'skills') if tool == 'codex' else root / 'skills'
         if tool == 'codex' and root == pathlib.Path(native_home):
             skill_root = pathlib.Path(home) / '.agents' / 'skills'
+        if any(':' not in name for name in skill_names):
+            discovery_roots.append(('skill', skill_root))
         if any(':' not in name for name in skill_names) and skill_root.exists():
             if skill_root.is_symlink():
                 raise ValueError()
             for directory in skill_root.iterdir():
+                existing_entries.add(str(directory))
                 scanned += 1
                 if scanned > 512 or directory.is_symlink():
                     raise ValueError()
@@ -176,6 +184,7 @@ try:
                     pending = [directory]
                     while pending:
                         for leftover in pending.pop().iterdir():
+                            existing_entries.add(str(leftover))
                             scanned += 1
                             if scanned > 512 or leftover.is_symlink() or not leftover.is_dir():
                                 raise ValueError()
@@ -185,10 +194,13 @@ try:
                 if len(candidates) > 512:
                     raise ValueError()
         agent_root = root / 'agents'
+        if agent_names:
+            discovery_roots.append(('agent', agent_root))
         if agent_names and agent_root.exists():
             if agent_root.is_symlink():
                 raise ValueError()
             for path in agent_root.iterdir():
+                existing_entries.add(str(path))
                 scanned += 1
                 if scanned > 512 or path.is_symlink() or path.is_dir():
                     raise ValueError()
@@ -196,8 +208,24 @@ try:
                     candidates.append(('agent', path, path.stem))
                 if len(candidates) > 512:
                     raise ValueError()
+    proposed = {}
+    proposed_entries = set()
+    for spelling, size in request['proposed'].items():
+        path = pathlib.Path(spelling)
+        for kind, root in discovery_roots:
+            selected = (path.name == 'SKILL.md' and path.parent.parent == root) if kind == 'skill' else (
+                path.parent == root and path.suffix == ('.toml' if tool == 'codex' else '.md'))
+            if selected:
+                limit = request['codex_persona_bytes'] if tool == 'codex' and kind == 'agent' else 32768
+                if size < 0 or size > limit:
+                    raise ValueError()
+                proposed[spelling] = (kind, size)
+                proposed_entries.add(str(path.parent) if kind == 'skill' else spelling)
+    if scanned + len(proposed_entries - existing_entries) > 512:
+        raise ValueError()
     total = 0
     codex_total = 0
+    observed_sizes = {}
     for kind, path, fallback in candidates:
         limit = request['codex_persona_bytes'] if tool == 'codex' and kind == 'agent' else 32768
         if tool == 'codex' and kind == 'agent':
@@ -208,6 +236,7 @@ try:
             if len(raw) > limit:
                 raise ValueError()
             codex_total += len(raw)
+            observed_sizes[str(path)] = (kind, len(raw))
             name = tomllib.loads(raw.decode()).get('name')
             if name is None:
                 aliases = registered_agents.get(str(path), [])
@@ -224,9 +253,15 @@ try:
                     raise ValueError()
                 frontmatter = b''.join(lines[1:end]).decode('utf-8')
             total += len(frontmatter.encode())
+            observed_sizes[str(path)] = (kind, len(frontmatter.encode()))
             if total > 1048576:
                 raise ValueError()
             inventory.append({'kind': kind, 'path': str(path), 'fallback_name': fallback, 'frontmatter': frontmatter})
+    future = {**observed_sizes, **proposed}
+    if sum(size for kind, size in future.values() if tool == 'codex' and kind == 'agent') > request['inventory_bytes']:
+        raise ValueError()
+    if sum(size for kind, size in future.values() if tool != 'codex' or kind != 'agent') > 1048576:
+        raise ValueError()
 except Exception:
     problems.append('unreadable-native-inventory')
 if tool == 'grok' and workspace and request['paths']:
@@ -265,6 +300,48 @@ _PROBLEM_MESSAGES = {
 }
 
 
+def _proposed_sizes(files: Sequence[ArtifactFile | OwnedArtifactFile], tool: str) -> dict[str, int]:
+    """Budget entrypoints using the same metadata constraints as the next native inventory.
+
+    Only sizes travel to the target. Unsupported proposed metadata is marked for refusal
+    if its path belongs to an inspected native root; private session carriers are separate.
+    """
+    result = {}
+    for file in files:
+        if not isinstance(file, ArtifactFile) or file.native_identity is None:
+            continue
+        path = PurePosixPath(file.path)
+        kind, _, name = file.native_identity.partition(":")
+        if not (
+            (kind == "skill" and path.name == "SKILL.md")
+            or (kind == "agent" and path.suffix == (".toml" if tool == "codex" else ".md"))
+        ):
+            continue
+        try:
+            if tool == "codex" and kind == "agent":
+                size = len(file.data)
+                if size > MAX_CODEX_PERSONA_BYTES:
+                    raise ValueError
+                metadata = tomllib.loads(file.data.decode())
+            else:
+                lines = file.data[:32769].splitlines(keepends=True)
+                header = ""
+                if lines and lines[0].strip() == b"---":
+                    end = next((index for index, line in enumerate(lines[1:], 1) if line.strip() == b"---"), None)
+                    if end is None:
+                        raise ValueError
+                    header = b"".join(lines[1:end]).decode()
+                size = len(header.encode())
+                metadata = parse_metadata(header) if header else {}
+            actual = metadata.get("name", path.parent.name if kind == "skill" else None)
+            if actual != name.rsplit(":", 1)[-1]:
+                raise ValueError
+        except (ValueError, UnicodeError, SourceRefError, RecursionError):
+            size = -1
+        result[file.path] = size
+    return result
+
+
 def probe_native(
     runner: Transport,
     *,
@@ -289,6 +366,7 @@ def probe_native(
         "workspace": workspace,
         "paths": tuple(file.path for file in files),
         "entries": entries,
+        "proposed": _proposed_sizes(files, tool),
         "flags": flags,
         "session_plugin": session_plugin,
         "workspace_only": workspace_only,
@@ -366,7 +444,7 @@ def _inventory_problems(
                 total += len(header.encode())
                 if total > 1048576:
                     raise ValueError
-                metadata = yaml.safe_load(header) if header else {}
+                metadata = parse_metadata(header) if header else {}
                 if not isinstance(metadata, dict):
                     raise ValueError
                 name = metadata.get("name", row.get("fallback_name") if row["kind"] == "skill" else None)
@@ -381,5 +459,5 @@ def _inventory_problems(
             if native_identity in selected:
                 return [_InventoryProblem("native-artifact-collision", native_identity, row["path"])]
         return []
-    except (ValueError, TypeError, yaml.YAMLError, RecursionError):
+    except (ValueError, TypeError, SourceRefError, RecursionError):
         return [_InventoryProblem("unreadable-native-inventory")]

@@ -119,9 +119,11 @@ containing agents-map key. Its optional `native_options` maps integration names 
 objects. Native integrations validate their own supported option schemas. Hooks and MCP
 configuration are not accepted in this delivery.
 
-Frontmatter rejects YAML anchors/aliases and bounds size and nesting before loading. Metadata must
-be finite JSON, with bounded canonical encoding. Capture produces the same source-independent model
-for all source readers; future core producers can construct that model directly.
+`frontmatter.py` shares the bounded metadata loader between capture and native inventory. It rejects
+YAML anchors/aliases and bounds size and nesting before constructing values. Capture adds its body,
+standard metadata and source-specific validation separately. Metadata must be finite JSON, with
+bounded canonical encoding. Capture produces the same source-independent model for all source
+readers; future core producers can construct that model directly.
 
 ## Bounds and persisted representation
 

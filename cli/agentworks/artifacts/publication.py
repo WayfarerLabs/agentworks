@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -103,6 +104,9 @@ def publish_artifacts(
                 continue
             if data is not None:
                 files.remove(path, expected=prior.sha256)
+            package_root = _skill_package_root(prior)
+            if package_root is not None:
+                files.prune_empty_parents(path, root=package_root)
             del current[path]
             checkpoint(tuple(current.values()))
         for path, item in planned.items():
@@ -132,3 +136,12 @@ def publish_artifacts(
 
 def _mode(executable: bool, group: str) -> int:
     return (0o770 if executable else 0o660) if group else (0o700 if executable else 0o600)
+
+
+def _skill_package_root(file: OwnedArtifactFile) -> str | None:
+    """Recognize the standard skill package containing this owned member, including retries."""
+    if file.native_identity is None or not file.native_identity.startswith("skill:"):
+        return None
+    name = file.native_identity.rsplit(":", 1)[-1]
+    parents = reversed(PurePosixPath(file.path).parents)
+    return next((str(parent) for parent in parents if parent.name == name and parent.parent.name == "skills"), None)

@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 # Open each directory relative to its already-open parent. A concurrent symlink
 # replacement cannot redirect reads or publication into another directory tree.
 _FILE_PROGRAM = r"""
-import grp, hashlib, json, os, secrets, stat, sys
+import errno, grp, hashlib, json, os, secrets, stat, sys
 op, destination, staging, expected, group, executable = sys.argv[1:]
 parts = destination.split('/')[1:]
 if not destination.startswith('/') or any(p in ('', '.', '..') for p in parts):
@@ -28,6 +28,35 @@ if not destination.startswith('/') or any(p in ('', '.', '..') for p in parts):
 if op in ('directory', 'mkdir'):
     parts.append('unused')
 traverse = getattr(os, 'O_PATH', os.O_RDONLY) | os.O_DIRECTORY | os.O_NOFOLLOW
+if op == 'prune':
+    root_parts = staging.split('/')[1:]
+    if parts[:len(root_parts)] != root_parts or len(parts) <= len(root_parts):
+        sys.exit(1)
+    parents = []
+    fd = os.open('/', traverse)
+    try:
+        for component in parts[:-1]:
+            try:
+                child = os.open(component, traverse, dir_fd=fd)
+            except FileNotFoundError:
+                break
+            parents.append((fd, component))
+            fd = child
+        for index in range(len(parents) - 1, len(root_parts) - 2, -1):
+            parent, component = parents[index]
+            try:
+                os.rmdir(component, dir_fd=parent)
+            except FileNotFoundError:
+                pass
+            except OSError as error:
+                if error.errno in (errno.ENOTEMPTY, errno.EEXIST):
+                    break
+                raise
+    finally:
+        os.close(fd)
+        for parent, _ in parents:
+            os.close(parent)
+    sys.exit(0)
 fd = os.open('/', traverse)
 try:
     for component in parts[:-1]:
@@ -258,6 +287,16 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
             raise StateError("owned native file changed; retaining it for operator inspection")
         if not result.ok:
             raise StateError("owned native file could not be removed safely")
+
+    def prune_empty_parents(self, destination: str, *, root: str) -> None:
+        """Prune only empty parents of a retired file, through its package root."""
+        destination, root = native_path(destination), native_path(root)
+        if not destination.startswith(root + "/"):
+            raise StateError("retired native file is outside its package root")
+        command = shlex.join(["python3", "-c", _FILE_PROGRAM, "prune", destination, root, "-", "", "0"])
+        result = self.runner.run(command, check=False, discard_output=True)
+        if not result.ok:
+            raise StateError("retired native file parents could not be pruned safely")
 
     def fingerprint(self, destination: str) -> tuple[str, int] | None:
         """Stream a guarded file's hash and mode without copying or logging its body."""

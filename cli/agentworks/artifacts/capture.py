@@ -8,12 +8,11 @@ import re
 from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import PurePosixPath, PureWindowsPath
-from typing import TYPE_CHECKING, cast
-
-import yaml
+from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.artifacts.declarations import HintArtifactSpec, RuleArtifactSpec
+from agentworks.artifacts.frontmatter import parse_metadata
 from agentworks.artifacts.model import (
     ArtifactContent,
     ArtifactGroup,
@@ -251,25 +250,7 @@ def _frontmatter(text: str) -> tuple[dict[str, object], str]:
     if end is None:
         raise SourceRefError("artifact frontmatter is not terminated")
     header = "".join(lines[1:end])
-    if len(header.encode()) > 64 * 1024:
-        raise SourceRefError("artifact frontmatter exceeds its size limit")
-    try:
-        if any(isinstance(token, (yaml.tokens.AliasToken, yaml.tokens.AnchorToken)) for token in yaml.scan(header)):
-            raise SourceRefError("artifact metadata cannot contain YAML aliases or anchors")
-        depth = 0
-        for event in yaml.parse(header):
-            if isinstance(event, (yaml.events.MappingStartEvent, yaml.events.SequenceStartEvent)):
-                depth += 1
-                if depth > 32:
-                    raise SourceRefError("artifact metadata exceeds its depth limit")
-            elif isinstance(event, (yaml.events.MappingEndEvent, yaml.events.SequenceEndEvent)):
-                depth -= 1
-        value = yaml.safe_load(header)
-    except yaml.YAMLError:
-        raise SourceRefError("invalid artifact YAML frontmatter") from None
-    if not isinstance(value, dict) or any(not isinstance(key, str) for key in value):
-        raise SourceRefError("artifact frontmatter must be a metadata object")
-    metadata = cast("dict[str, object]", value)
+    metadata = parse_metadata(header)
     _json(metadata)
     body = "".join(lines[end + 1 :])
     if not body.strip():

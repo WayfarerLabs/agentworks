@@ -28,6 +28,7 @@ def probe(
     settings: dict | None = None,
     identities: tuple[str, ...] = ("skill:review",),
     paths: tuple[str, ...] = (),
+    proposed: dict[str, int] | None = None,
     entries: dict[str, str] | None = None,
     inventory_bytes: int = CaptureLimits().total_bytes,
     workspace_only: bool = False,
@@ -65,6 +66,7 @@ def probe(
         "workspace": str(workspace),
         "paths": paths,
         "entries": entries or {},
+        "proposed": proposed or {},
         "flags": flags,
         "session_plugin": session_plugin,
         "workspace_only": workspace_only,
@@ -483,3 +485,183 @@ def test_session_probe_accepts_explicit_external_native_home(tmp_path, tool, var
     )
     assert result["native_home"] == str(external)
     assert result["problems"] == []
+
+
+def test_large_skill_retirement_does_not_leave_an_inventory_lockout(tmp_path):
+    import hashlib
+
+    from agentworks.artifacts.application import ArtifactFile, OwnedArtifactFile
+    from agentworks.artifacts.publication import publish_artifacts
+    from tests.native_setup_fixtures import LocalFixtureTransport
+
+    target = LocalFixtureTransport(tmp_path)
+    removed = target.home / ".claude/skills/removed"
+    keep = target.home / ".claude/skills/review/SKILL.md"
+    contents = {removed / "SKILL.md": b"---\nname: removed\n---\nbody\n"}
+    contents.update({removed / f"support-{index}/data.txt": b"data" for index in range(513)})
+    contents[keep] = b"---\nname: review\n---\nbody\n"
+    previous = []
+    for path, data in contents.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        path.chmod(0o600)
+        previous.append(
+            OwnedArtifactFile(
+                path=str(path),
+                sha256=hashlib.sha256(data).hexdigest(),
+                origins=("a" * 64,),
+                native_identity="skill:review" if path == keep else "skill:removed",
+            )
+        )
+    assert probe(tmp_path, tool="claude", entries={str(keep): "skill:review"})["problems"] == []
+    retained = publish_artifacts(
+        target,
+        (ArtifactFile(str(keep), contents[keep], ("a" * 64,), native_identity="skill:review"),),
+        tuple(previous),
+        lambda files: None,
+        roots=(str(target.home),),
+    )
+    assert len(retained) == 1 and not removed.exists()
+    assert probe(tmp_path, tool="claude", entries={str(keep): "skill:review"})["problems"] == []
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        "name: review\na: &a {k: value}\nb: &b {<<: [*a, *a, *a, *a, *a, *a, *a, *a, *a, *a]}\n",
+        "name: review\nvalue: " + "[" * 33 + "0" + "]" * 33,
+    ],
+)
+def test_native_metadata_rejects_expansion_and_depth_before_constructing_yaml(header, monkeypatch):
+    import yaml
+
+    monkeypatch.setattr(yaml, "safe_load", lambda text: pytest.fail("unsafe metadata reached YAML construction"))
+    problems = _inventory_problems(
+        [{"kind": "agent", "path": "/workspace/.claude/agents/other.md", "frontmatter": header}],
+        ("agent:review",),
+        {},
+    )
+    assert [problem.code for problem in problems] == ["unreadable-native-inventory"]
+
+
+def test_proposed_entry_count_cannot_publish_a_later_inventory_lockout(tmp_path):
+    from agentworks.artifacts.application import ArtifactFile
+    from agentworks.artifacts.native.probe import _proposed_sizes
+
+    root = tmp_path / "home/.claude/skills"
+    files = tuple(
+        ArtifactFile(
+            str(root / f"skill-{index}/SKILL.md"),
+            f"---\nname: skill-{index}\n---\nbody\n".encode(),
+            ("a" * 64,),
+            native_identity=f"skill:skill-{index}",
+        )
+        for index in range(513)
+    )
+    assert (
+        "unreadable-native-inventory"
+        in probe(tmp_path, tool="claude", proposed=_proposed_sizes(files, "claude"))["problems"]
+    )
+    accepted = files[:-1]
+    assert probe(tmp_path, tool="claude", proposed=_proposed_sizes(accepted, "claude"))["problems"] == []
+    for file in accepted:
+        path = Path(file.path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(file.data)
+    assert probe(tmp_path, tool="claude")["problems"] == []
+    # Replacement paths count once; an additional distinct path crosses the same bound.
+    assert probe(tmp_path, tool="claude", proposed=_proposed_sizes(accepted, "claude"))["problems"] == []
+    assert (
+        "unreadable-native-inventory"
+        in probe(tmp_path, tool="claude", proposed=_proposed_sizes(files[-1:], "claude"))["problems"]
+    )
+
+
+@pytest.mark.parametrize("license_length", [32000, 33000])
+def test_captured_skill_header_is_checked_before_native_publication(tmp_path, license_length):
+    from agentworks.artifacts.bundle import ArtifactBundle
+    from agentworks.artifacts.capture import capture_artifacts
+    from agentworks.artifacts.declarations import SkillArtifactSpec
+    from agentworks.artifacts.model import ArtifactOrigin
+    from agentworks.artifacts.native.probe import _proposed_sizes
+    from agentworks.plugins.claude.artifacts import outer_artifacts
+    from tests.artifacts._fixtures import received
+
+    source = tmp_path / "source/review"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text(
+        "---\nname: review\ndescription: Review changes\nlicense: " + "x" * license_length + "\n---\nbody\n"
+    )
+    captured = capture_artifacts(
+        [("team", ArtifactBundle(name="team", skills={"review": SkillArtifactSpec(source=str(source))}))],
+        ArtifactOrigin("agent", "agent", "worker"),
+    )
+    plan = outer_artifacts(received(*captured.items()), str(tmp_path / "home/.claude"))
+    result = probe(tmp_path, tool="claude", proposed=_proposed_sizes(plan.files, "claude"))
+    if license_length == 33000:
+        assert "unreadable-native-inventory" in result["problems"]
+        assert not Path(plan.files[0].path).exists()
+    else:
+        assert result["problems"] == []
+        for file in plan.files:
+            path = Path(file.path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(file.data)
+        assert (
+            probe(tmp_path, tool="claude", entries={file.path: "skill:review" for file in plan.files})["problems"] == []
+        )
+
+
+def test_proposed_yaml_budget_includes_existing_entries_and_replaces_paths_once(tmp_path):
+    from agentworks.artifacts.application import ArtifactFile
+    from agentworks.artifacts.native.probe import _proposed_sizes
+
+    root = tmp_path / "home/.claude/agents"
+    root.mkdir(parents=True)
+    files = tuple(
+        ArtifactFile(
+            str(root / f"role-{index}.md"),
+            f"---\nname: role-{index}\ncontext: {'x' * 30000}\n---\nbody\n".encode(),
+            ("a" * 64,),
+            native_identity=f"agent:role-{index}",
+        )
+        for index in range(35)
+    )
+    Path(files[0].path).write_bytes(files[0].data)
+    assert (
+        probe(tmp_path, tool="claude", identities=("agent:review",), proposed=_proposed_sizes(files[:34], "claude"))[
+            "problems"
+        ]
+        == []
+    )
+    assert (
+        "unreadable-native-inventory"
+        in probe(tmp_path, tool="claude", identities=("agent:review",), proposed=_proposed_sizes(files[1:], "claude"))[
+            "problems"
+        ]
+    )
+
+
+def test_proposed_codex_budget_includes_existing_entries_and_replaces_paths_once(tmp_path):
+    from agentworks.artifacts.application import ArtifactFile
+    from agentworks.artifacts.native.probe import _proposed_sizes
+
+    root = tmp_path / "home/.codex/agents"
+    root.mkdir(parents=True)
+    files = tuple(
+        ArtifactFile(
+            str(root / f"role-{index}.toml"),
+            f'name = "role-{index}"\ndeveloper_instructions = "context"\n'.encode(),
+            ("a" * 64,),
+            native_identity=f"agent:role-{index}",
+        )
+        for index in range(2)
+    )
+    Path(files[0].path).write_bytes(files[0].data)
+    budget = sum(len(file.data) for file in files)
+    proposed = _proposed_sizes(files, "codex")
+    assert probe(tmp_path, identities=("agent:review",), proposed=proposed, inventory_bytes=budget)["problems"] == []
+    assert (
+        "unreadable-native-inventory"
+        in probe(tmp_path, identities=("agent:review",), proposed=proposed, inventory_bytes=budget - 1)["problems"]
+    )

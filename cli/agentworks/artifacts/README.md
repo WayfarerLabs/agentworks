@@ -146,10 +146,12 @@ inputs without inspecting or modifying downstream owners. This timing also matte
 removed: updating an ancestor alone does not retire effects previously applied by a descendant.
 
 Applied config records identify files and registrations owned by the integration. Refresh removes
-obsolete owned effects where supported. Existing unowned content and files changed since publication
-require resolution rather than silent replacement. Removing an activation with retained effects
-still needs the owning cleanup operation before passthrough can be considered current. Deleting a VM
-retains the ordinary VM deletion behavior: its filesystem disappears with it.
+obsolete owned effects where supported. Retired skill files also prune empty parents up to their
+known package root. Nonempty directories and modified or unowned files remain; interrupted cleanup
+retains the file record until pruning can be retried. Existing unowned content and files changed
+since publication require resolution rather than silent replacement. Removing an activation with
+retained effects still needs the owning cleanup operation before passthrough can be considered
+current. Deleting a VM retains the ordinary VM deletion behavior: its filesystem disappears with it.
 
 ## Native delivery
 
@@ -175,12 +177,14 @@ name and competing paths. This check still runs when all applicable inputs were 
 
 Inventory covers selected skill/persona types, with at most 512 directory entries, YAML headers up
 to 32 KiB each and 1 MiB combined, and Codex persona TOML files up to 32 MiB each and 64 MiB
-combined. Generated Codex persona files obey that same bound. Symlinked or nested candidate layouts
-are explicitly unsupported. These are conservative Agentworks support limits, not claims that those
-layouts are invalid native configurations. The inventory does not claim to cover additional ancestor
-repository roots, third-party plugin locations, or changes after preflight. Unknown native discovery
-extensions require separate verification; a successful preflight is not an exhaustive native
-inventory.
+combined. Before publication, preflight checks existing and proposed entrypoints together, counting
+a replaced path once, so an accepted plan fits the next inventory. Generated Codex persona files
+obey the same per-file bound. YAML metadata rejects aliases, anchors and nesting deeper than 32
+levels before constructing values. Symlinked or nested candidate layouts are explicitly unsupported.
+These are conservative Agentworks support limits, not claims that those layouts are invalid native
+configurations. The inventory does not claim to cover additional ancestor repository roots,
+third-party plugin locations, or changes after preflight. Unknown native discovery extensions
+require separate verification; a successful preflight is not an exhaustive native inventory.
 
 There is no separate session filesystem. Session publication uses the actual user's private
 `~/.agentworks-artifacts/session/<session_uuid>/<run_id>/` directory. It avoids exposing session
