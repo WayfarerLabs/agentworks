@@ -542,3 +542,18 @@ The operator also identified large skill packages as a likely need for compresse
 loading, and explicitly deferred that implementation. Follow-up storage work should consider
 deduplication, resident and peak memory, and content-integrity verification while preserving the
 normalized integration contract. It does not expand this round's acceptance criteria.
+
+The final private project pass was clean at `2713b409`, but the independent complexity and
+correctness passes found two further material issues. A valid large skill could leave enough empty
+directories after retirement to exhaust the next inventory's bound, and YAML merge aliases in an
+unmanaged native entrypoint could exhaust workstation memory during parsing. Both are being
+corrected in this same private fix batch. Cleanup must prune only empty parents of retired owned
+skill files within the known package root, retaining file evidence until cleanup succeeds. Native
+metadata must use the bounded parser already required for captured metadata. Planned native output
+must also fit the limits that the next inventory will enforce. Final correction review and CLI gates
+remain pending.
+
+At `2713b409`, website Python tests passed all 160 cases, Node tests passed all 103 cases, and both
+site bases passed deterministic double builds. The locked-SDD and Rulesync drift checks returned
+zero. The first website build invocation used an output beneath the repository and was correctly
+refused; rerunning with an isolated temporary output directory passed.

@@ -127,18 +127,22 @@ native CLI carriers.
 The native checks use `--version`, applicable `--help` flags, selected configuration facts and a
 bounded inventory of relevant skill/persona entrypoints; no model is launched. Inventory compares
 actual metadata names and paths against planned files and already handled ancestor files. YAML
-headers are parsed on the workstation, so the guest needs no YAML dependency; Codex TOML and
-configuration-registered role names use the standard library. Empty directory trees left by owned
-skill cleanup do not constitute competing native entries.
+headers are parsed on the workstation with the same alias, size and depth guards used during
+capture, so the guest needs no YAML dependency; Codex TOML and configuration-registered role names
+use the standard library. Retirement prunes empty parents of each removed owned skill member only
+within its known package root. Modified or unowned files remain untouched; interrupted cleanup
+retains the member's ownership evidence for retry. Empty directory trees do not constitute competing
+native entries.
 
 Inventory covers the selected types at direct user/workspace discovery roots, with at most 512
 directory entries, 32 KiB per YAML header and 1 MiB of headers in total. Codex persona TOML is
 bounded at 32 MiB per file and 64 MiB in total, including the instruction body; generated personas
-obey the same per-file limit. Symlinked paths and nested candidate layouts are conservatively
-refused. Additional repository ancestor roots, third-party plugin discovery and changes after
-preflight need separate verification. These are Agentworks support limits, not assertions that other
-layouts are invalid in the native harness, and the check is not a continuous watcher or
-concurrent-mutation guarantee.
+obey the same per-file limit. Preflight budgets existing and planned native entries together,
+counting each replacement path once, so publication cannot itself exceed the next inventory's
+limits. Symlinked paths and nested candidate layouts are conservatively refused. Additional
+repository ancestor roots, third-party plugin discovery and changes after preflight need separate
+verification. These are Agentworks support limits, not assertions that other layouts are invalid in
+the native harness, and the check is not a continuous watcher or concurrent-mutation guarantee.
 
 The initial compatibility baselines are Claude Code 2.1.265, Codex 0.153.4 and Grok Build 1.0.10.
 Older versions or absent carrier flags fail before publication or session teardown. Claude documents
