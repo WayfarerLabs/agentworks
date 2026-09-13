@@ -85,7 +85,7 @@ def test_run_identity_write_participates_in_callers_transaction(db: Database) ->
     assert db.get_session("run") == original
 
 
-def test_v37_migration_assigns_ids_once_and_preserves_existing_session_data(tmp_path: Path) -> None:
+def test_migration_to_v38_assigns_ids_once_and_preserves_v37_session_data(tmp_path: Path) -> None:
     path = tmp_path / "legacy.db"
     build_schema(path, 37)
     with sqlite3.connect(path) as connection:

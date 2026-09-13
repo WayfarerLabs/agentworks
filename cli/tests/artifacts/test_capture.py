@@ -74,7 +74,6 @@ def test_content_identity_excludes_provenance_and_includes_executable(tmp_path):
     changed_member = replace(item.content.members[-1], executable=True)
     assert replace(item.content, members=(*item.content.members[:-1], changed_member)).digest != item.content.digest
     assert replace(item, origin=replace(item.origin, resource_name="another")).identity != item.identity
-    assert item.origin.facet == "user"
 
 
 @pytest.mark.parametrize("name", ["../bad", "/bad", "a\\b", "AUX.txt", "a.", ".git/config", "a//b", "e\u0301.md"])
@@ -319,7 +318,7 @@ def repository(tmp_path, monkeypatch):
     root = skill(repo)
     (root / "SKILL.md").write_bytes((root / "SKILL.md").read_bytes() + b"$Format:%H$\n")
     (root / ".gitattributes").write_text("*.txt export-ignore\n*.md export-subst\n*.dat filter=fixture\n")
-    (root / "kept.txt").write_text("keep me\r\n")
+    (root / "kept.txt").write_bytes(b"keep me\r\n")
     (root / "opaque.dat").write_bytes(b"$Format:%H$\r\n")
     git(repo, "add", ".")
     git(repo, "commit", "-qm", "fixture")

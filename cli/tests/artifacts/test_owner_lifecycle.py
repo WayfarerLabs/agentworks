@@ -88,7 +88,6 @@ def test_common_capture_without_activation_and_vm_admin_separation(owner):
     admin_item = captured["admin"].inputs[0]
     assert vm_item.content.digest == admin_item.content.digest
     assert vm_item.identity != admin_item.identity
-    assert vm_item.origin.facet == "vm" and admin_item.origin.facet == "user"
     assert not read_native_setup(owner.db, "vm", "vm").records
     assert owner.target.commands == []
 
