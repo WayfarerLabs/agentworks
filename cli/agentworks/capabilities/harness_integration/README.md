@@ -33,6 +33,26 @@ owned effects to retire is skipped and not marked applied. A config model, inclu
 schema, does not establish facet support. See
 [harness facets](../../../../docs/guides/harness-facets.md) for complete configuration examples.
 
+Contract version 5 adds artifact delivery. Core captures each owner's `artifacts.bundles` and
+supplies immutable normalized inputs in `SetupInvocation.artifacts`. Setup methods return an
+`ArtifactApplication`: concrete native files plus deferrals for inputs requiring a later facet.
+Core performs guarded whole-file publication and checkpoints confirmed ownership. The integration
+owns native formats, placement, compatibility checks and routing decisions. Omitted inputs are
+handled; returning the old `None` result is a contract error even for an empty invocation.
+
+A VM deferral chooses exactly one of user, workspace or session. User/workspace deferrals can only
+target session. Core sends an inactive VM's inputs directly to session and passes an inactive
+user/workspace's applicable inputs onward. It does not rerun ancestor setup during session start.
+Missing or stale active artifact results require the owning setup operation.
+
+Before `start`, core calls `prepare_artifacts` with the immutable `SessionArtifactContext` available
+on the session binding. This includes completed environment, actual home, prospective session/run
+IDs, remaining inputs and ancestor file ownership metadata. Return the session application in
+`HarnessStart.artifacts`. Core refuses final deferrals before replacing a running workload and
+restricts session file publication to that run's private directory under the actual user's home.
+Generated literal argv values must use `quote_literal_argv` so artifact text is not interpreted as
+Agentworks template substitutions. Native conversation IDs remain integration-owned.
+
 And note that regardless of integration, all sessions run inside the standard tmux session. This
 provides both access to stdin/stdout/stderr for interactivity as well as the persistent execution
 capability. This is all handled automatically by the core Agentworks session logic. The integration
