@@ -26,10 +26,10 @@ from agentworks.secrets.orchestration import SecretTarget
 from agentworks.vms.sites import site_platform_name
 
 if TYPE_CHECKING:
-    from agentworks.artifacts.declarations import ArtifactsConfig
     from collections.abc import Mapping, Sequence
 
     from agentworks.agents.templates import ResolvedAgentTemplate
+    from agentworks.artifacts.declarations import ArtifactsConfig
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.db.instance_state import InstanceKind

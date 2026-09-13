@@ -181,7 +181,9 @@ def realize_agent(
                         if setup_inputs is not None and setup_inputs.artifact_snapshot is not None:
                             from agentworks.artifacts.state import write_capture
 
-                            write_capture(db, "agent", name, "agent", setup_inputs.artifact_snapshot, operation="agent-create")
+                            write_capture(
+                                db, "agent", name, "agent", setup_inputs.artifact_snapshot, operation="agent-create"
+                            )
             except KeyboardInterrupt:
                 output.warn(f"Cancelling agent create '{name}'... rolling back.")
                 _safe_rollback()
