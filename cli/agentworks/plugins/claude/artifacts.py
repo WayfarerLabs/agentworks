@@ -20,6 +20,7 @@ from agentworks.artifacts.native.common import (
     skill_files,
     validate_ancestor_names,
     validate_names,
+    validate_native_argv,
 )
 
 if TYPE_CHECKING:
@@ -45,7 +46,9 @@ def outer_artifacts(inputs: tuple[ArtifactInput, ...], root: str) -> ArtifactApp
     files = []
     hints = tuple(item for item in inputs if item.content.type is ArtifactType.HINT)
     if hints:
-        files.append(artifact_file(f"{root}/rules/agentworks-hints.md", context_text(hints), hints))
+        files.append(
+            artifact_file(f"{root}/rules/agentworks-hints.md", "# Agentworks setup\n\n" + context_text(hints), hints)
+        )
     for item in inputs:
         content = item.content
         if content.type is ArtifactType.RULE:
@@ -53,9 +56,8 @@ def outer_artifacts(inputs: tuple[ArtifactInput, ...], root: str) -> ArtifactApp
             files.append(
                 artifact_file(
                     f"{root}/rules/agentworks-rule-{content.name}.md",
-                    content.text,
+                    f"# {content.name}\n\n{content.text}",
                     (item,),
-                    identity=f"rule:{content.name}",
                 )
             )
         elif content.type is ArtifactType.SKILL:
@@ -139,4 +141,13 @@ def session_artifacts(
         argv += ["--agents", json.dumps(value, ensure_ascii=False)]
     application = ArtifactApplication(tuple(files))
     validate_ancestor_names(context, application)
-    return NativeSessionArtifacts(application, tuple(argv))
+    validate_native_argv(tuple(argv))
+    return NativeSessionArtifacts(
+        application,
+        tuple(argv),
+        tuple(
+            flag
+            for flag in ("--append-system-prompt-file", "--system-prompt-snapshot", "--plugin-dir", "--agents")
+            if flag in argv
+        ),
+    )

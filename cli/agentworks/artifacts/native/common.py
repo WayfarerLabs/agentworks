@@ -24,6 +24,7 @@ class NativeSessionArtifacts:
 
     application: ArtifactApplication = ArtifactApplication()
     argv: tuple[str, ...] = ()
+    required_flags: tuple[str, ...] = ()
 
 
 def defer(inputs: tuple[ArtifactInput, ...], destination: ArtifactFacet, reason: str) -> ArtifactApplication:
@@ -73,7 +74,7 @@ def validate_names(inputs: tuple[ArtifactInput, ...]) -> None:
         if not name or PurePosixPath(name).name != name or name in (".", "..") or "\x00" in name:
             raise ConfigError("artifact native names must be single path components")
         key = item.content.type, name
-        if key in seen:
+        if item.content.type in (ArtifactType.SKILL, ArtifactType.AGENT) and key in seen:
             raise ConfigError(f"multiple artifacts claim native {item.content.type.value} name '{name}'")
         seen.add(key)
 
@@ -87,6 +88,8 @@ def persona_options(item: ArtifactInput, integration: str, allowed: Mapping[str,
         expected = allowed.get(key)
         if expected is None or type(value) is not expected:
             raise ConfigError(f"agent '{item.content.name}': unsupported {integration} native option '{key}'")
+        if isinstance(value, int) and value < 1:
+            raise ConfigError(f"agent '{item.content.name}': native option '{key}' must be positive")
         if isinstance(value, list) and any(not isinstance(element, str) for element in value):
             raise ConfigError(f"agent '{item.content.name}': native option '{key}' must contain strings")
     return dict(options)
@@ -124,3 +127,45 @@ def validate_ancestor_names(context: SessionArtifactContext, application: Artifa
 
 def has_artifacts(context: SessionArtifactContext | None) -> bool:
     return context is not None and bool(context.inputs or context.ancestor_files)
+
+
+def validate_discovery_paths(context: SessionArtifactContext, roots: tuple[str, ...]) -> None:
+    """Previously applied files must remain inside directories this launch discovers."""
+    for file in context.ancestor_files:
+        if not any(file.path.startswith(root + "/") for root in roots):
+            raise ConfigError(
+                "native artifact discovery no longer includes an applied ancestor destination",
+                hint="Restore the native home override or reinitialize the owning facet with the intended home.",
+            )
+
+
+def delivery_files(
+    context: SessionArtifactContext, application: ArtifactApplication
+) -> tuple[OwnedArtifactFile | ArtifactFile, ...]:
+    """Native preflight uses ancestor ownership metadata and this run's proposed files."""
+    return (*context.ancestor_files, *application.files)
+
+
+# Leave room for the launcher's shell/tmux wrapping below Linux's per-argument limit.
+_NATIVE_COMMAND_BYTES = 32 * 1024
+
+
+def validate_native_argv(argv: tuple[str, ...]) -> None:
+    """Reject oversized or NUL-containing native carriers before session publication."""
+    if (
+        any("\x00" in token for token in argv)
+        or sum(len(token.encode("utf-8")) + 1 for token in argv) > _NATIVE_COMMAND_BYTES
+    ):
+        raise ConfigError(
+            "artifact content exceeds the native command carrier limit",
+            hint="Reduce session artifact text or activate a user/workspace facet with native file delivery.",
+        )
+
+
+def validate_native_command(command: str) -> None:
+    """Check the quoted command too: shell escaping can expand literal artifact text."""
+    if len(command.encode("utf-8")) > _NATIVE_COMMAND_BYTES:
+        raise ConfigError(
+            "quoted artifact command exceeds the native launch limit",
+            hint="Reduce session artifact text or use an outer facet's native file delivery.",
+        )

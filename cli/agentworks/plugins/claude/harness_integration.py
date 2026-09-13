@@ -30,12 +30,21 @@ from __future__ import annotations
 import json
 import shlex
 import uuid
+from dataclasses import replace
 from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 
 from pydantic import Field
 
 from agentworks.artifacts.application import ArtifactApplication
-from agentworks.artifacts.native.common import NativeSessionArtifacts, defer, has_artifacts, native_home
+from agentworks.artifacts.native.common import (
+    NativeSessionArtifacts,
+    defer,
+    delivery_files,
+    has_artifacts,
+    native_home,
+    validate_discovery_paths,
+    validate_native_command,
+)
 from agentworks.artifacts.native.probe import probe_native
 from agentworks.capabilities.harness_integration.base import (
     HarnessIntegration,
@@ -177,6 +186,12 @@ class ClaudeCodeIntegration(HarnessIntegration):
 
         Ships as the opt-in `claude` system plugin, and needs the `claude` CLI on the
         session's target.
+
+        Artifact bundles activated at a user or workspace facet publish native rules,
+        skills and agent personas. Session guidance uses an additive prompt file;
+        session skills use a private plugin with the `agentworks-artifacts:` namespace.
+        Artifact guidance is refreshed on resume. Raw arguments that disable or
+        replace its native carriers are rejected while artifacts are in use.
         """,
     )
 
@@ -206,7 +221,13 @@ class ClaudeCodeIntegration(HarnessIntegration):
     def user_init(self, invocation: UserSetupInvocation) -> ArtifactApplication:
         """Apply native setup and return the user's artifact publication plan."""
         root = (
-            probe_native(invocation.runner, tool="claude", environment=invocation.environment, home=invocation.home)
+            probe_native(
+                invocation.runner,
+                tool="claude",
+                environment=invocation.environment,
+                home=invocation.home,
+                check_policy=False,
+            )
             if invocation.artifacts and not self.retiring
             else ""
         )
@@ -219,7 +240,21 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 root or native_home(invocation.home, invocation.environment, "CLAUDE_CONFIG_DIR", ".claude"),
             )
         )
-        setup_user("claude", config, invocation)
+        setup_invocation = (
+            replace(invocation, environment={**invocation.environment, "CLAUDE_CONFIG_DIR": root})
+            if root
+            else invocation
+        )
+        setup_user("claude", config, setup_invocation)
+        if plan.files:
+            probe_native(
+                invocation.runner,
+                tool="claude",
+                environment=invocation.environment,
+                home=invocation.home,
+                paths=tuple(file.path for file in plan.files),
+                identities=tuple(file.native_identity for file in plan.files if file.native_identity),
+            )
         return plan
 
     def workspace_init(self, invocation: WorkspaceSetupInvocation) -> ArtifactApplication:
@@ -230,6 +265,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
             if self.retiring
             else outer_artifacts(invocation.artifacts, f"{invocation.root}/.claude")
         )
+        setup_workspace("claude", config, invocation)
         if plan.files:
             probe_native(
                 invocation.runner,
@@ -238,8 +274,8 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 workspace=invocation.root,
                 paths=tuple(file.path for file in plan.files),
                 workspace_only=True,
+                identities=tuple(file.native_identity for file in plan.files if file.native_identity),
             )
-        setup_workspace("claude", config, invocation)
         return plan
 
     @property
@@ -301,16 +337,19 @@ class ClaudeCodeIntegration(HarnessIntegration):
             runner = ctx.admin_target() if self._admin else ctx.agent_target()
             if runner is None:
                 raise StateError("artifact delivery requires the actual native launch target")
-            probe_native(
+            files = delivery_files(artifact_context, self._artifact_plan.application)
+            native_root = probe_native(
                 runner,
                 tool="claude",
                 environment=artifact_context.environment,
                 home=artifact_context.home,
                 workspace=self._workspace_path,
-                paths=tuple(file.path for file in artifact_context.ancestor_files),
-                flags=tuple(token for token in self._artifact_plan.argv if token.startswith("--")),
+                paths=tuple(file.path for file in files),
+                identities=tuple(file.native_identity for file in files if file.native_identity),
+                flags=self._artifact_plan.required_flags,
                 session_plugin="--plugin-dir" in self._artifact_plan.argv,
             )
+            validate_discovery_paths(artifact_context, (native_root, f"{self._workspace_path}/.claude"))
 
         command = self._resume_or_launch(ctx, intent=intent)
         if intent is HarnessLaunchIntent.FORCE_NEW:
@@ -321,6 +360,8 @@ class ClaudeCodeIntegration(HarnessIntegration):
             note = "Existing Claude Code session found. Resuming..."
         else:
             note = "No existing Claude Code session. Starting a new one..."
+        if has_artifacts(self._session_binding.artifact_context):
+            validate_native_command(command)
         return HarnessStart(command, note, self._artifact_plan.application)
 
     def _resume_or_launch(self, ctx: RunContext, *, intent: HarnessLaunchIntent) -> str:

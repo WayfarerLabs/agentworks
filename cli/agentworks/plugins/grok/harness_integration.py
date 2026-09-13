@@ -25,7 +25,15 @@ from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 from pydantic import Field
 
 from agentworks.artifacts.application import ArtifactApplication
-from agentworks.artifacts.native.common import NativeSessionArtifacts, defer, has_artifacts, native_home
+from agentworks.artifacts.native.common import (
+    NativeSessionArtifacts,
+    defer,
+    delivery_files,
+    has_artifacts,
+    native_home,
+    validate_discovery_paths,
+    validate_native_command,
+)
 from agentworks.artifacts.native.probe import probe_native
 from agentworks.capabilities.harness_integration.base import (
     HarnessIntegration,
@@ -136,6 +144,11 @@ class GrokBuildIntegration(HarnessIntegration):
 
         Ships as the opt-in `grok` system plugin and requires the `grok` CLI on
         the session's launch target.
+
+        User and workspace facets publish native rules, skills and agent personas.
+        Session guidance is added through `--rules`, and session personas through
+        `--agents`. Private interactive session skills are unsupported; activate the
+        user or workspace facet to publish those skills at their native scope.
         """,
     )
 
@@ -155,17 +168,34 @@ class GrokBuildIntegration(HarnessIntegration):
 
     def user_init(self, invocation: UserSetupInvocation) -> ArtifactApplication:
         root = (
-            probe_native(invocation.runner, tool="grok", environment=invocation.environment, home=invocation.home)
+            probe_native(
+                invocation.runner,
+                tool="grok",
+                environment=invocation.environment,
+                home=invocation.home,
+                check_policy=False,
+            )
             if invocation.artifacts and not self.retiring
             else ""
         )
-        return (
+        plan = (
             ArtifactApplication()
             if self.retiring
             else outer_artifacts(
                 invocation.artifacts, root or native_home(invocation.home, invocation.environment, "GROK_HOME", ".grok")
             )
         )
+
+        if plan.files:
+            probe_native(
+                invocation.runner,
+                tool="grok",
+                environment=invocation.environment,
+                home=invocation.home,
+                paths=tuple(file.path for file in plan.files),
+                identities=tuple(file.native_identity for file in plan.files if file.native_identity),
+            )
+        return plan
 
     def workspace_init(self, invocation: WorkspaceSetupInvocation) -> ArtifactApplication:
         plan = (
@@ -181,6 +211,7 @@ class GrokBuildIntegration(HarnessIntegration):
                 workspace=invocation.root,
                 paths=tuple(file.path for file in plan.files),
                 workspace_only=True,
+                identities=tuple(file.native_identity for file in plan.files if file.native_identity),
             )
         return plan
 
@@ -206,16 +237,19 @@ class GrokBuildIntegration(HarnessIntegration):
             runner = ctx.admin_target() if self._admin else ctx.agent_target()
             if runner is None:
                 raise StateError("artifact delivery requires the actual native launch target")
-            probe_native(
+            files = delivery_files(artifact_context, self._artifact_plan.application)
+            native_root = probe_native(
                 runner,
                 tool="grok",
                 environment=artifact_context.environment,
                 home=artifact_context.home,
                 workspace=self._workspace_path,
-                paths=tuple(file.path for file in artifact_context.ancestor_files),
-                flags=tuple(token for token in self._artifact_plan.argv if token.startswith("--")),
+                paths=tuple(file.path for file in files),
+                identities=tuple(file.native_identity for file in files if file.native_identity),
+                flags=self._artifact_plan.required_flags,
                 session_plugin="--plugin-dir" in self._artifact_plan.argv,
             )
+            validate_discovery_paths(artifact_context, (native_root, f"{self._workspace_path}/.grok"))
 
         command = self._resume_or_launch(ctx, intent=intent)
         if intent is HarnessLaunchIntent.FORCE_NEW:
@@ -226,6 +260,8 @@ class GrokBuildIntegration(HarnessIntegration):
             note = "Existing Grok Build session found. Resuming..."
         else:
             note = "No existing Grok Build session. Starting a new one..."
+        if has_artifacts(self._session_binding.artifact_context):
+            validate_native_command(command)
         return HarnessStart(command, note, self._artifact_plan.application)
 
     def _resume_or_launch(self, ctx: RunContext, *, intent: HarnessLaunchIntent) -> str:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shlex
 import tomllib
 from dataclasses import replace
 from types import SimpleNamespace
@@ -93,7 +94,7 @@ def test_rules_are_unconditional_and_hints_do_not_collide_with_named_rule(render
     rule = artifact(ArtifactType.RULE, name="hints")
     result = render((hint, rule), "/native")
     assert len({file.path for file in result.files}) == 2
-    assert all(file.data == hint.content.text.encode() for file in result.files)
+    assert all(file.data.endswith(hint.content.text.encode()) for file in result.files)
     assert all(file.path.count("/") == 3 for file in result.files)
 
 
@@ -251,3 +252,115 @@ def test_vm_deferral_preserves_input_identity_without_descendant_knowledge(imple
     assert result.files == ()
     assert result.deferred[0].input_id == item.identity
     assert result.deferred[0].destination == ("session" if implementation is ShellIntegration else "user")
+
+
+@pytest.mark.parametrize(
+    "implementation,configured",
+    [
+        (ClaudeCodeIntegration, {"append_system_prompt": "configured guidance"}),
+        (GrokBuildIntegration, {"rules": "configured guidance"}),
+    ],
+)
+@pytest.mark.parametrize("resume", [False, True])
+def test_native_launch_carries_literal_artifact_guidance_on_new_and_resumed_threads(
+    monkeypatch, implementation, configured, resume
+):
+    from agentworks.capabilities.base import RunContext
+    from agentworks.capabilities.harness_integration import HarnessLaunchIntent
+    from tests.conftest import _FakeTarget
+
+    module = __import__(implementation.__module__, fromlist=["probe_native"])
+    monkeypatch.setattr(module, "probe_native", lambda *args, **kwargs: "/home/alice/.native")
+    item = artifact(ArtifactType.RULE)
+    integration = implementation(
+        "native",
+        configured,
+        session_name="s1",
+        vm_name="box",
+        workspace_name="ws",
+        workspace_path="/ws",
+        target=None,
+        admin=True,
+        state={"session_id": "939b1597-7c61-5ace-80f4-14617b7b4257"},
+        artifact_context=context(item),
+    )
+    method = "_transcript_exists" if implementation is ClaudeCodeIntegration else "_session_exists"
+    monkeypatch.setattr(integration, method, lambda *_args: resume)
+    result = integration.start(
+        RunContext(admin_target=_FakeTarget()),
+        intent=HarnessLaunchIntent.RESUME_OR_NEW if resume else HarnessLaunchIntent.CREATE,
+    )
+    assert "{{" not in result.command
+    argv = shlex.split(shlex.split(result.command)[2])
+    assert ("--resume" in argv) is resume
+    if implementation is GrokBuildIntegration:
+        assert argv[argv.index("--rules") + 1] == "configured guidance\n\n" + item.content.text
+    else:
+        assert "--append-system-prompt" not in argv
+        assert argv[argv.index("--append-system-prompt-file") + 1] == result.artifacts.files[0].path
+        assert result.artifacts.files[0].data.decode() == "configured guidance\n\n" + item.content.text
+
+
+@pytest.mark.parametrize("fresh", [False, True])
+def test_codex_literal_role_and_guidance_overrides_apply_on_resume_and_new(fresh):
+    item = artifact(ArtifactType.RULE)
+    persona = artifact(ArtifactType.AGENT, name="reviewer")
+    integration = CodexIntegration(
+        "codex",
+        {"developer_instructions": "configured guidance"},
+        session_name="s1",
+        vm_name="box",
+        workspace_name="ws",
+        workspace_path="/ws",
+        target=None,
+        admin=True,
+        state={},
+        artifact_context=context(item, persona),
+    )
+    integration._artifact_plan = codex.session_artifacts(
+        context(item, persona), configured="configured guidance", extra_args=[]
+    )
+    argv_text = integration._codex_argv(() if fresh else ("resume", "thread-id"), fresh=fresh)
+    assert "{{" not in argv_text
+    argv = shlex.split(argv_text)
+    values = [argv[index + 1] for index, token in enumerate(argv) if token == "-c"]
+    combined = tomllib.loads("\n".join(values))
+    assert combined["developer_instructions"] == "configured guidance\n\n" + item.content.text
+    path = combined["agents"]["reviewer"]["config_file"]
+    role = tomllib.loads(
+        next(file.data.decode() for file in integration._artifact_plan.application.files if file.path == path)
+    )
+    assert role["developer_instructions"] == persona.content.text
+    assert "name" not in role and "description" not in role
+
+
+@pytest.mark.parametrize(
+    "render,type",
+    [
+        (codex.session_artifacts, ArtifactType.RULE),
+        (grok.session_artifacts, ArtifactType.RULE),
+        (claude.session_artifacts, ArtifactType.AGENT),
+    ],
+)
+def test_large_native_argument_artifacts_fail_before_publication(render, type):
+    item = artifact(type)
+    item = replace(item, content=replace(item.content, text="x" * (128 * 1024)))
+    with pytest.raises(ConfigError):
+        render(context(item), configured=None, extra_args=[])
+
+
+def test_large_claude_context_uses_private_file_without_an_argument_size_penalty():
+    item = artifact(ArtifactType.RULE)
+    item = replace(item, content=replace(item.content, text="x" * (128 * 1024)))
+    result = claude.session_artifacts(context(item), configured=None, extra_args=[])
+    assert len(result.application.files[0].data) == 128 * 1024
+    assert sum(len(token) for token in result.argv) < 1024
+
+
+def test_quoted_native_command_limit_accounts_for_shell_expansion():
+    from agentworks.artifacts.native.common import validate_native_command
+    from agentworks.capabilities.harness_integration import quote_literal_argv
+
+    text = "'" * (16 * 1024)
+    with pytest.raises(ConfigError):
+        validate_native_command(quote_literal_argv(text))

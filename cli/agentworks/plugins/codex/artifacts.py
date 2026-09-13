@@ -19,6 +19,7 @@ from agentworks.artifacts.native.common import (
     skill_files,
     validate_ancestor_names,
     validate_names,
+    validate_native_argv,
 )
 from agentworks.errors import ConfigError
 
@@ -32,15 +33,14 @@ if TYPE_CHECKING:
 _OPTIONS = {"model": str, "model_reasoning_effort": str}
 
 
-def _persona(item: ArtifactInput) -> str:
-    return tomli_w.dumps(
-        {
-            "name": item.content.name,
-            "description": item.content.description,
-            "developer_instructions": item.content.text,
-            **persona_options(item, "codex", _OPTIONS),
-        }
-    )
+def _persona(item: ArtifactInput, *, role_layer: bool = False) -> str:
+    values: dict[str, object] = {
+        "developer_instructions": item.content.text,
+        **persona_options(item, "codex", _OPTIONS),
+    }
+    if not role_layer:
+        values.update(name=item.content.name, description=item.content.description)
+    return tomli_w.dumps(values)
 
 
 def outer_artifacts(inputs: tuple[ArtifactInput, ...], *, skills_root: str, agents_root: str) -> ArtifactApplication:
@@ -69,8 +69,12 @@ def outer_artifacts(inputs: tuple[ArtifactInput, ...], *, skills_root: str, agen
 
 
 def _reject_overrides(extra_args: Sequence[str]) -> None:
-    reject_flags(extra_args, {"--disable", "--profile", "-p"}, "codex")
+    reject_flags(extra_args, {"--profile", "-p"}, "codex")
     for index, token in enumerate(extra_args):
+        if token == "--disable" and index + 1 < len(extra_args) and extra_args[index + 1] in ("multi_agent", "skills"):
+            raise ConfigError("codex extra_args disables native artifact discovery")
+        if token.startswith("--disable=") and token.split("=", 1)[1] in ("multi_agent", "skills"):
+            raise ConfigError("codex extra_args disables native artifact discovery")
         value = ""
         if token in ("-c", "--config") and index + 1 < len(extra_args):
             value = extra_args[index + 1]
@@ -118,7 +122,9 @@ def session_artifacts(
             )
         elif item.content.type is ArtifactType.AGENT:
             path = f"{context.directory}/agents/{item.content.name}.toml"
-            files.append(artifact_file(path, _persona(item), (item,), identity=f"agent:{item.content.name}"))
+            files.append(
+                artifact_file(path, _persona(item, role_layer=True), (item,), identity=f"agent:{item.content.name}")
+            )
             key = f"agents.{json.dumps(item.content.name)}"
             argv += [
                 "-c",
@@ -128,4 +134,5 @@ def session_artifacts(
             ]
     application = ArtifactApplication(tuple(files), tuple(deferred))
     validate_ancestor_names(context, application)
-    return NativeSessionArtifacts(application, tuple(argv))
+    validate_native_argv(tuple(argv))
+    return NativeSessionArtifacts(application, tuple(argv), ("--config",) if argv else ())

@@ -104,6 +104,11 @@ class ShellIntegration(HarnessIntegration):
         `required_commands` are checked on the target before the session starts, which
         turns a missing binary into a clear message instead of a pane that dies
         immediately.
+
+        Artifact bundles publish as files, with no model-context claim. User files
+        live in `~/.agentworks-artifacts/user/`; workspace files live in
+        `<workspace>/.agentworks-artifacts/`. A session with remaining artifacts
+        receives its private run directory through `AGENTWORKS_ARTIFACTS_DIR`.
         """,
     )
 
