@@ -141,11 +141,16 @@ def run_setup(
                 integration = bound[name]
                 declaration = inputs.declaration(block)
 
+            from agentworks.artifacts.routing import setup_artifacts
+
+            artifacts = () if block is None else setup_artifacts(db, registry, inputs, invocation.vm, name)
+
             current = SetupRecord(
                 component=inputs.component,
                 integration=name,
                 destination_id=destination,
                 declaration=declaration,
+                artifact_inputs=tuple(item.identity for item in artifacts),
                 claims=() if previous is None else previous.claims,
                 artifact_files=()
                 if previous is None or previous.destination_id != destination
@@ -163,13 +168,6 @@ def run_setup(
                     raise StateError("integration returned malformed native claim metadata") from None
                 state = replace_setup_record(state, current)
                 persist(state)
-
-            from agentworks.artifacts.routing import setup_artifacts
-
-            artifacts = () if block is None else setup_artifacts(db, registry, inputs, invocation.vm, name)
-            current = current.model_copy(update={"artifact_inputs": tuple(item.identity for item in artifacts)})
-            state = replace_setup_record(state, current)
-            persist(state)
 
             def checkpoint_files(files: tuple[OwnedArtifactFile, ...]) -> None:
                 nonlocal current, state

@@ -8,6 +8,7 @@ import pytest
 from agentworks.agents.initializer import create_new_agent_user
 from agentworks.agents.realize import realize_agent
 from agentworks.agents.templates import ResolvedAgentTemplate
+from agentworks.artifacts.application import ArtifactApplication
 from agentworks.capabilities.harness_integration.kinds import HarnessIntegrationEntry
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
 from agentworks.env.entry import EnvEntry
@@ -165,6 +166,7 @@ def test_fresh_owner_buffers_setup_until_atomic_row_commit(db, registry, vm, nat
         invocation.checkpoint((claim,))
         assert read_native_setup(db, kind, name).records == ()
         calls.append(claim)
+        return ArtifactApplication()
 
     monkeypatch.setattr(ShellIntegration, "user_init" if kind == "agent" else "workspace_init", initialize)
     if fail_insert:
@@ -387,6 +389,7 @@ def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(db, registry,
         assert "ADMIN_ONLY" not in invocation.environment
         assert "AGENTWORKS_AGENT" not in invocation.environment
         events.append("vm")
+        return ArtifactApplication()
 
     def user_setup(self, invocation):
         assert events == ["core", "vm"]
@@ -397,6 +400,7 @@ def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(db, registry,
         events.append("admin")
         if fail_user:
             raise RuntimeError("admin setup failed: vm-private")
+        return ArtifactApplication()
 
     def final_keys(*args, **kwargs):
         assert events == ["core", "vm", "admin"]
