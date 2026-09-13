@@ -466,3 +466,20 @@ def test_codex_skills_parent_symlink_is_refused_before_reading_metadata(tmp_path
     result = probe(tmp_path)
     assert "unreadable-native-inventory" in result["problems"]
     assert result["inventory"] == []
+
+
+@pytest.mark.parametrize(
+    "tool,variable", [("claude", "CLAUDE_CONFIG_DIR"), ("codex", "CODEX_HOME"), ("grok", "GROK_HOME")]
+)
+def test_session_probe_accepts_explicit_external_native_home(tmp_path, tool, variable):
+    external = tmp_path / "external-native"
+    external.mkdir()
+    result = probe(
+        tmp_path,
+        tool=tool,
+        identities=(),
+        paths=(str(tmp_path / "home/private-run/context.md"),),
+        environment={variable: str(external)},
+    )
+    assert result["native_home"] == str(external)
+    assert result["problems"] == []

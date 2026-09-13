@@ -80,11 +80,14 @@ def check_discovery_path(path, anchor):
 safe_roots = []
 for root in roots:
     try:
-        anchor = pathlib.Path(home) if root == pathlib.Path(native_home) else pathlib.Path(workspace)
-        check_discovery_path(root, anchor)
+        user_root = root == pathlib.Path(native_home)
+        anchor = pathlib.Path(home) if user_root else pathlib.Path(workspace)
+        # Session configuration may select an explicit native home outside HOME;
+        # outer user publication applies its own stricter containment rule.
+        root_anchor = pathlib.Path(root.anchor) if user_root and not root.is_relative_to(anchor) else anchor
+        check_discovery_path(root, root_anchor)
         if tool == 'codex' and any(':' not in name for name in skill_names):
-            skill_root = anchor / '.agents' / 'skills'
-            check_discovery_path(skill_root, anchor)
+            check_discovery_path(anchor / '.agents' / 'skills', anchor)
         safe_roots.append(root)
     except Exception:
         problems.append('unreadable-native-inventory')
