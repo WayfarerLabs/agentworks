@@ -95,9 +95,13 @@ removes staging and raises an error. No prior snapshot is returned as a fresh ca
 Member bytes use strict base64, including designated text; the text flag records normalization.
 `decode_inputs` accepts only the supported version, rejects extra fields and wrong primitive types,
 bounds the input structure before decoding, validates relative paths and metadata, and checks total
-member/byte limits and recomputed content/input identities. Unknown versions and corrupt state
-produce a credential-free error for the caller to frame with owning-state context. There is no DB
-access, native invocation or source reacquisition in the codec.
+member/byte limits and recomputed content/input identities. Capture and decoding use the same
+entrypoint parser: stored metadata, body, native options and identity fields must match the retained
+members, and forbidden execution metadata is rejected even when all hashes are consistent.
+Provenance is checked as a credential-free Git repository with its selection, ref and resolved
+commit, an absolute workstation path, or inline content. These checks do not contact the source.
+Unknown versions and corrupt state produce a credential-free error for the caller to frame with
+owning-state context. There is no DB access, native invocation or source reacquisition in the codec.
 
 ## Verification
 

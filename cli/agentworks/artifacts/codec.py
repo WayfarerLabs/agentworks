@@ -9,7 +9,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, ValidationError
 
-from agentworks.artifacts.capture import normalize_text
+from agentworks.artifacts.capture import content_from_members, normalize_text, validate_provenance
 from agentworks.artifacts.model import (
     ArtifactComponent,
     ArtifactContent,
@@ -162,6 +162,19 @@ def decode_inputs(payload: object) -> tuple[ArtifactInput, ...]:
             )
             origin = ArtifactOrigin(**record.origin.model_dump())
             provenance = ArtifactProvenance(**record.provenance.model_dump())
+            validate_provenance(provenance)
+            if content.members:
+                expected = content_from_members(
+                    content.type, origin.entry, content.members, provenance.selected_path or provenance.source
+                )
+            elif content.type in (ArtifactType.HINT, ArtifactType.RULE) and content.text.strip():
+                expected = ArtifactContent(content.type, origin.entry, text=content.text)
+            else:
+                raise SourceRefError("persisted artifact is missing its entrypoint")
+            if expected != content:
+                raise SourceRefError("persisted artifact metadata does not match its entrypoint")
+            if bool(content.members) != (provenance.source != "inline"):
+                raise SourceRefError("persisted artifact source does not match its content")
             item = ArtifactInput(content, provenance, origin)
             if item.identity != record.identity or content.digest != content_row.digest:
                 raise SourceRefError("persisted artifact identity does not match its content")

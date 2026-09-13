@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 
 from agentworks.agents.template import AgentTemplate
 from agentworks.agents.templates import resolve_from_dict_with_provenance as resolve_agent
@@ -127,7 +127,7 @@ def test_instance_overlays_replace_bundle_selection_and_publish_instance_provena
     kind: str,
     model: type[Any],
     resolve: Callable[..., Any],
-    selection: dict[str, object],
+    selection: dict[str, JsonValue],
 ) -> None:
     from agentworks.instance_overlay_codec import decode_overlay_model, encode_overlay_model
     from agentworks.schema import CapabilityBlock

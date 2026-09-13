@@ -6,7 +6,7 @@ import fnmatch
 import json
 import re
 from dataclasses import replace
-from pathlib import PurePosixPath
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, cast
 
 import yaml
@@ -19,7 +19,12 @@ from agentworks.artifacts.model import (
     ArtifactProvenance,
     ArtifactType,
 )
-from agentworks.package_sources import DEFAULT_CAPTURE_LIMITS, CaptureLimits, PackageCapture
+from agentworks.package_sources import (
+    DEFAULT_CAPTURE_LIMITS,
+    CaptureLimits,
+    PackageCapture,
+    validate_artifact_source,
+)
 from agentworks.sources import SourceRefError
 
 if TYPE_CHECKING:
@@ -122,6 +127,17 @@ def _content(
         )
         for member in package.members
     )
+    return content_from_members(artifact_type, entry, members, package.selected_path or package.source)
+
+
+def content_from_members(
+    artifact_type: ArtifactType, entry: str, members: tuple[ArtifactMember, ...], selected_path: str
+) -> ArtifactContent:
+    """Parse normalized source or persisted members at their respective input boundary."""
+    for member in members:
+        required_text = artifact_type != ArtifactType.SKILL or member.path == "SKILL.md"
+        if required_text and (not member.text or normalize_text(member.data).encode() != member.data):
+            raise SourceRefError("artifact entrypoint must contain normalized text")
     if artifact_type in (ArtifactType.HINT, ArtifactType.RULE):
         if len(members) != 1:
             raise SourceRefError("hints and rules require exactly one text file")
@@ -135,7 +151,7 @@ def _content(
             raise SourceRefError("a skill source must select the package containing SKILL.md")
         metadata, body = _frontmatter(normalize_text(entrypoints[0].data))
         name, description = _identity(metadata)
-        selected_name = PurePosixPath(package.selected_path or package.source).name
+        selected_name = PurePosixPath(selected_path.replace("\\", "/")).name
         if selected_name != name:
             raise SourceRefError("skill name must match its selected package directory")
         _skill_metadata(metadata)
@@ -147,10 +163,43 @@ def _content(
     options = metadata.pop("native_options", {})
     if not isinstance(options, dict) or any(not isinstance(value, dict) for value in options.values()):
         raise SourceRefError("agent native_options must map integrations to option objects")
-    if any(key in metadata for key in ("hooks", "mcpServers", "mcp_servers")):
-        raise SourceRefError("hooks and MCP configuration are not supported artifact inputs")
+    _reject_execution_options(metadata)
     _reject_execution_options(options)
     return ArtifactContent(artifact_type, name, description, body, members, _json(metadata), _json(options))
+
+
+def validate_provenance(provenance: ArtifactProvenance) -> None:
+    """Validate source provenance crossing the persisted-state boundary.
+
+    Reuse source-reference parsing without resolving paths or contacting a source.
+    Local capture records absolute workstation paths; Git capture separates its
+    credential-free repository, selection, requested ref and resolved commit.
+    """
+    source = provenance.source
+    if any(
+        not value.isprintable()
+        for value in (source, provenance.selected_path, provenance.requested_ref, provenance.commit)
+        if value
+    ):
+        raise SourceRefError("artifact provenance must contain printable values")
+    if source.startswith(("https://", "git@")):
+        reference = "git::" + source
+        if provenance.selected_path:
+            reference += "//" + provenance.selected_path
+        if provenance.requested_ref:
+            reference += "?ref=" + provenance.requested_ref
+        parsed = validate_artifact_source(reference)
+        if (
+            parsed.path != source
+            or parsed.subpath != provenance.selected_path
+            or parsed.ref != provenance.requested_ref
+            or not re.fullmatch(r"(?:[a-f0-9]{40}|[a-f0-9]{64})", provenance.commit)
+        ):
+            raise SourceRefError("artifact Git provenance is inconsistent")
+    elif provenance.selected_path or provenance.requested_ref or provenance.commit:
+        raise SourceRefError("local and inline artifact provenance cannot contain Git fields")
+    elif source != "inline" and not (PurePosixPath(source).is_absolute() or PureWindowsPath(source).is_absolute()):
+        raise SourceRefError("local artifact provenance requires an absolute workstation path")
 
 
 def _is_text(path: str, preserve_bytes: Sequence[str]) -> bool:
