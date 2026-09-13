@@ -185,7 +185,7 @@ records this implementation assignment for the saga and dependent efforts.
       exercise the public CLI and native placement boundaries, and independently verify cleanup.
 - [ ] Audit R1-R10 and the complete approved matrix against evidence, complete owned cleanup and
       record remaining limitations honestly. Lock this SDD only when its work is actually complete.
-- [ ] Push the complete implementation once, update the PR around shipped behavior and evidence, and
+- [x] Push the complete implementation once, update the PR around shipped behavior and evidence, and
       mark ready without `review-requested`. Do not merge or enable automatic merging.
 - [ ] Monitor the ready handoff under the standard feedback window. Up to three PR feedback/fix
       rounds are authorized by the 2026-09-13 implementation direction; each changed head repeats
@@ -285,3 +285,23 @@ for the pending Windows CI run.
 | R7-R8       | Session/run identity, private placement, staged restart and owned cleanup                  | Migration/backup, publication and real-manager lifecycle tests; two-user VM acceptance pending         |
 | R9          | Qualified errors and read-only actual-lineage inspection                                   | Lifecycle errors and isolated public CLI acceptance                                                    |
 | R10         | Local artifacts, local Git and dedicated test integrations                                 | Local gates complete; ready handoff requests remaining scoped VM/native acceptance without model calls |
+
+## Published feedback round 1
+
+The complete implementation was pushed once at `60c20002` and marked ready on 2026-09-13 at 06:25
+UTC, without `review-requested`. CI passed on Python 3.12, 3.13 and 3.14 and passed all non-Windows
+repository gates. The Windows run reported 185 passes, 15 skips and one fixture failure: text-mode
+writing transformed explicit CRLF into CR-CR-LF. The fix writes fixture bytes explicitly. Copilot
+reported a quota limit, not a code finding.
+
+The saga lead found no ruling-conformance blockers and requested an optional migration-test naming
+clarification. The published Muntz lane requested removal of unused `ArtifactOrigin.facet`, one
+shared allowed-deferral definition, and a dedicated `ArtifactApplication.artifacts_dir` result in
+place of a generic environment list. All were accepted. Core still validates the plugin boundary and
+maps only the session's own private directory to the fixed discovery variable. The optional
+unknown-suffix warning was declined: unlisted asset types deliberately retain their bytes, and a
+warning would also flag expected opaque assets. Native/live acceptance remains open.
+
+Both lanes had reported by 06:35 UTC. Under the operator's explicit early-start permission, round 1
+of up to 3 began at 06:38 UTC after returning the PR to draft. Later feedback belongs to the next
+batch. The round's private reviews, final gates and re-handoff are in progress.
