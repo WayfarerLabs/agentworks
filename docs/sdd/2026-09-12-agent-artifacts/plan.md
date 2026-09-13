@@ -347,3 +347,15 @@ test-helper return annotation and a plan spelling; their targeted reruns passed.
 records this validation and contains no implementation changes after the reviewed head. Round 2 is
 complete; the handoff returns the PR to ready without `review-requested`. Windows CI and the
 remaining scoped native/two-user acceptance are still required. One authorized fix round remains.
+
+## Published feedback round 3
+
+The saga and Muntz lanes found round 2 clean; the Windows job's sole failure was in the new
+storage-race fixture. It expected a deleted lock file to disappear from an already-started scan, but
+Windows can retain its metadata in a directory entry. Counting those bytes conservatively is a valid
+snapshot. The fixture must permit that observation and require a subsequent scan to see only the
+retained file. The formerly failing pinned-Git capture passed.
+
+The PR returned to draft before this final authorized round. Both named lanes had reported, so the
+operator's early-start permission applies. The batch includes feedback through the round-start
+comment. Production behavior is unchanged; private review and final validation are pending.

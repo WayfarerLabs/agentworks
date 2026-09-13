@@ -489,8 +489,8 @@ def test_git_member_path_persistence_bound(repository, length):
         assert decode_inputs(encode_inputs(inputs)) == inputs
 
 
-@pytest.mark.parametrize("vanished", ["file", "directory"])
-def test_git_storage_accounting_tolerates_removed_temporary_entries(monkeypatch, vanished):
+@pytest.mark.parametrize(("vanished", "cache_metadata"), [("file", False), ("file", True), ("directory", False)])
+def test_git_storage_accounting_tolerates_removed_temporary_entries(monkeypatch, vanished, cache_metadata):
     original = os.scandir
     with PackageCapture() as operation:
         (operation.root / "kept").write_bytes(b"abc")
@@ -509,6 +509,8 @@ def test_git_storage_accounting_tolerates_removed_temporary_entries(monkeypatch,
                 def changing_entries() -> Iterator[os.DirEntry[str]]:
                     for entry in entries:
                         if vanished == "file" and entry.name == removed.name:
+                            if cache_metadata:
+                                entry.stat(follow_symlinks=False)
                             removed.unlink()
                         yield entry
 
@@ -516,8 +518,12 @@ def test_git_storage_accounting_tolerates_removed_temporary_entries(monkeypatch,
 
         with monkeypatch.context() as patch:
             patch.setattr(os, "scandir", changing_scan)
-            assert operation._storage_size() == 3
+            # An enumerated file can retain cached metadata after unlink (notably
+            # on Windows); counting it conservatively is a valid in-flight scan.
+            size = operation._storage_size()
+            assert size in ({3, 12} if vanished == "file" else {3})
         assert not removed.exists()
+        assert operation._storage_size() == 3
 
 
 def test_git_storage_accounting_preserves_io_errors(monkeypatch):
