@@ -322,10 +322,9 @@ calls.
 
 The tester found that capture could accept paths longer than the persisted codec permits, producing
 an unreadable record. Round 2 accepts acquisition/write-boundary consistency, distinct
-future-version diagnostics, local LFS-pointer refusal, noninteractive Git stdin, and an ADR
-clarification of the shared syntax versus separate acquisition contracts. Remaining recommendations
-are being assessed against the approved omitted-input handling contract and actual lifecycle
-callers.
+future-version diagnostics, local LFS-pointer refusal, Git stdin isolation, and an ADR clarification
+of the shared syntax versus separate acquisition contracts. Remaining recommendations are being
+assessed against the approved omitted-input handling contract and actual lifecycle callers.
 
 Windows CI failed on a Git capture that had passed the previous run. An independent local experiment
 reproduced a real race: Git removed `shallow.lock` between the storage scanner's `is_file` and
@@ -335,5 +334,16 @@ and bounds; Windows CI remains required evidence.
 
 The PR returned to draft before changes. The round began after both named lanes reported, under the
 operator's early-start permission, with feedback batched through the round-start comment. This is
-round 2 of the three authorized rounds. Implementation, private re-review and combined gates for
-this round are pending.
+round 2 of the three authorized rounds. All three private review lanes returned clean at `fe3796cf`:
+project review ran 114 tests, complexity ran 321, and correctness ran 343, each with four Windows
+skips. Independent real-Git experiments observed a disappearing `shallow.lock` without capture
+failure after the correction; injected I/O errors still propagated. Removing early validation,
+encoder validation or the shared context made the corresponding boundary regressions fail.
+
+The combined suite passed 9,310 tests with seven skips. Ruff, format, full source/test mypy (841
+files), package build, file lint, locked-SDD check, Rulesync drift, Typer isolation and website
+Python/Node tests plus both deterministic site builds passed. Initial gate failures were a missing
+test-helper return annotation and a plan spelling; their targeted reruns passed. The final commit
+records this validation and contains no implementation changes after the reviewed head. Round 2 is
+complete; the handoff returns the PR to ready without `review-requested`. Windows CI and the
+remaining scoped native/two-user acceptance are still required. One authorized fix round remains.
