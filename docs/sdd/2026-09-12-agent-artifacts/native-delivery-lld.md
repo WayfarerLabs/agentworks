@@ -130,8 +130,13 @@ actual metadata names and paths against planned files and already handled ancest
 headers are parsed on the workstation with the same alias, size and depth guards used during
 capture, so the guest needs no YAML dependency; Codex TOML and configuration-registered role names
 use the standard library. Retirement prunes empty parents of each removed owned skill member only
-within its known package root. Modified or unowned files remain untouched; interrupted cleanup
-retains the member's ownership evidence for retry. Empty directory trees do not constitute competing
+within the exact package root supplied by the integration and retained on that file's existing
+ownership record. Core validates that this root contains the file and lies within its owning
+publication scope. Supporting members retire before the package entrypoint; `SKILL.md` stays present
+and owned while any owned supporting member remains, so the next setup can pass native inventory and
+retry cleanup. Modified or unowned files remain untouched; interrupted cleanup retains the member's
+ownership evidence for retry. Older records without a package root still permit owned-file
+retirement but do not authorize directory pruning. Empty directory trees do not constitute competing
 native entries.
 
 Inventory covers the selected types at direct user/workspace discovery roots, with at most 512

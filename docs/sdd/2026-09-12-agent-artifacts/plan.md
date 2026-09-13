@@ -557,3 +557,15 @@ At `2713b409`, website Python tests passed all 160 cases, Node tests passed all 
 site bases passed deterministic double builds. The locked-SDD and Rulesync drift checks returned
 zero. The first website build invocation used an output beneath the repository and was correctly
 refused; rerunning with an isolated temporary output directory passed.
+
+The correction at `55ff7aee` passes 9,439 CLI tests with seven skips and mypy over 844 files. Its
+focused complexity review passed 165 tests with four skips and confirmed the original cleanup, YAML
+and prospective-bound fixes, but reproduced one additional boundary issue: deriving a package root
+from path components could select a coincidentally named ancestor above the owning scope. The final
+correction replaces inference with an optional exact package root on the existing per-file ownership
+record. Missing legacy roots authorize file retirement only. Project and correctness review also
+reproduced a normal-setup retry failure after early removal of `SKILL.md`. Supporting members must
+retire before that entrypoint, which remains owned while any owned member still needs cleanup. This
+lets the existing inventory validate the package before a retry reaches publication. No directory
+ledger or inventory exception for directories without an entrypoint is introduced. Final correction
+validation and handoff remain pending.
