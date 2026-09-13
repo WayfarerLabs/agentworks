@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import PID_STOPPED, Database
+from agentworks.db import PID_STOPPED, Database, SessionMode
 from agentworks.errors import ConnectivityError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.multi_console import (
@@ -1069,12 +1069,13 @@ def test_delete_agent_kills_console_windows(
 
     _seed_vm(db, with_tailscale=True)
     db._conn.execute("INSERT INTO agents (name, vm_name, linux_user) VALUES ('bot', 'vm1', 'bot-user')")
-    db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode, agent_name, socket_path, pid) "
-        "VALUES ('s1', 'ws-vm1', 'default', 'agent', 'bot', '/tmp/s1.sock', ?), "
-        "('s2', 'ws-vm1', 'default', 'agent', 'bot', '/tmp/s2.sock', ?)",
-        (PID_STOPPED, PID_STOPPED),
-    )
+    for name in ("s1", "s2"):
+        db.insert_session(
+            name, "ws-vm1", "default", SessionMode.AGENT, agent_name="bot", socket_path=f"/tmp/{name}.sock"
+        )
+        db.update_session_runtime(
+            name, socket_path=f"/tmp/{name}.sock", pid=PID_STOPPED, boot_id=None, tmux_server_start_ticks=None
+        )
     db._conn.commit()
     create_console(db, name="con", vm_name="vm1", session_specs=["s1", "s2"])
 
