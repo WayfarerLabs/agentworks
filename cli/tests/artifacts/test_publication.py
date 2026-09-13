@@ -166,8 +166,8 @@ def test_skill_retirement_prunes_only_owned_file_parents_and_retries_interruptio
     assert root.parent.is_dir()
 
 
-@pytest.mark.parametrize("legacy", ["none", "support", "all"])
-def test_skill_retirement_preserves_modified_and_unowned_files(target, legacy):
+@pytest.mark.parametrize("rootless", ["none", "support", "all"])
+def test_skill_retirement_preserves_modified_and_unowned_files(target, rootless):
     from dataclasses import replace
 
     root = target.home / ".claude/skills/review"
@@ -176,10 +176,10 @@ def test_skill_retirement_preserves_modified_and_unowned_files(target, legacy):
         for path in ("SKILL.md", "scripts/modified.sh", "data/retired.txt")
     )
     previous = publish_artifacts(target, files, (), lambda files: None, roots=(str(target.home),))
-    if legacy != "none":
+    if rootless != "none":
         previous = tuple(
             record.model_copy(update={"package_root": None})
-            if legacy == "all" or record.path.endswith("/modified.sh")
+            if rootless == "all" or record.path.endswith("/modified.sh")
             else record
             for record in previous
         )
@@ -224,15 +224,15 @@ def test_recorded_package_root_never_prunes_same_named_ancestor_components(tmp_p
     assert native_home.is_dir() and package.parent.is_dir() and target.home.is_dir()
 
 
-def test_legacy_records_without_package_root_retire_files_without_guessing(target):
+def test_rootless_records_without_package_root_retire_files_without_guessing(target):
     import hashlib
 
     root = target.home / ".claude/skills/review"
     root.mkdir(parents=True)
     path = root / "SKILL.md"
-    path.write_bytes(b"legacy bytes")
+    path.write_bytes(b"rootless bytes")
     path.chmod(0o600)
-    legacy = OwnedArtifactFile.model_validate(
+    rootless = OwnedArtifactFile.model_validate(
         {
             "path": str(path),
             "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
@@ -240,8 +240,8 @@ def test_legacy_records_without_package_root_retire_files_without_guessing(targe
             "native_identity": "skill:review",
         }
     )
-    assert legacy.package_root is None
-    assert publish_artifacts(target, (), (legacy,), lambda files: None, roots=(str(target.home),)) == ()
+    assert rootless.package_root is None
+    assert publish_artifacts(target, (), (rootless,), lambda files: None, roots=(str(target.home),)) == ()
     assert not path.exists() and root.is_dir()
 
 
@@ -278,7 +278,7 @@ def test_persisted_package_root_cannot_escape_current_publication_scope(target):
     assert path.read_bytes() == b"owned" and target.commands == []
 
 
-def test_legacy_skill_entrypoints_retire_deepest_first_after_supporting_members(target):
+def test_rootless_skill_entrypoints_retire_deepest_first_after_supporting_members(target):
     from dataclasses import replace
 
     root = target.home / ".claude/skills/review"
@@ -295,3 +295,48 @@ def test_legacy_skill_entrypoints_retire_deepest_first_after_supporting_members(
         [],
     ]
     assert root.is_dir() and (root / "nested").is_dir()
+
+
+@pytest.mark.parametrize("unowned", [False, True])
+def test_final_root_permission_denial_only_completes_when_directory_is_verified_empty(target, monkeypatch, unowned):
+    from dataclasses import replace
+
+    from agentworks.native_files import NativeFiles
+
+    root = target.home / ".claude/skills/review"
+    previous = publish_artifacts(
+        target,
+        (replace(artifact(root / "SKILL.md"), native_identity="skill:review", package_root=str(root)),),
+        (),
+        lambda files: None,
+        roots=(str(target.home),),
+    )
+    if unowned:
+        (root / "operator-note.txt").write_text("retain this")
+    warnings: list[str] = []
+    monkeypatch.setattr("agentworks.native_files.output.warn", warnings.append)
+    checkpoints = [previous]
+    remove = NativeFiles.remove
+    removals = []
+
+    def record_remove(self, destination, *, expected):
+        removals.append(destination)
+        remove(self, destination, expected=expected)
+
+    monkeypatch.setattr(NativeFiles, "remove", record_remove)
+    root.parent.chmod(0o500)
+    try:
+        if unowned:
+            with pytest.raises(StateError):
+                publish_artifacts(target, (), previous, checkpoints.append, roots=(str(target.home),))
+            assert checkpoints[-1] == previous and not warnings
+        else:
+            assert publish_artifacts(target, (), previous, checkpoints.append, roots=(str(target.home),)) == ()
+            assert checkpoints[-1] == () and len(warnings) == 1
+        assert not (root / "SKILL.md").exists() and root.is_dir()
+    finally:
+        root.parent.chmod(0o700)
+    assert publish_artifacts(target, (), checkpoints[-1], checkpoints.append, roots=(str(target.home),)) == ()
+    assert removals == [str(root / "SKILL.md")]
+    if unowned:
+        assert (root / "operator-note.txt").read_text() == "retain this"

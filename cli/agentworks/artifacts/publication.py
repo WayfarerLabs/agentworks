@@ -124,7 +124,14 @@ def publish_artifacts(
                 files.prune_empty_parents(path, root=prior.package_root)
             del current[path]
             checkpoint(tuple(current.values()))
-        for path, item in planned.items():
+        publication = sorted(
+            planned.items(),
+            key=lambda item: (
+                _skill_entrypoint_directory(item[1]) is None,
+                item[0].count("/") if _skill_entrypoint_directory(item[1]) is not None else 0,
+            ),
+        )
+        for path, item in publication:
             digest = hashlib.sha256(item.data).hexdigest()
             record = OwnedArtifactFile(
                 path=path,
@@ -166,8 +173,8 @@ def _validate_package_root(file: ArtifactFile | OwnedArtifactFile) -> str | None
     return root
 
 
-def _skill_entrypoint_directory(file: OwnedArtifactFile) -> str | None:
-    """Find the owned entrypoint's directory for retirement ordering, never pruning."""
+def _skill_entrypoint_directory(file: ArtifactFile | OwnedArtifactFile) -> str | None:
+    """Find an entrypoint directory for publication and retirement ordering, never pruning."""
     if file.package_root is not None:
         return file.package_root if file.path == file.package_root + "/SKILL.md" else None
     if file.native_identity and file.native_identity.startswith("skill:") and file.path.endswith("/SKILL.md"):

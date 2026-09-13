@@ -9,6 +9,8 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal, cast
 
+from agentworks.artifacts.names import is_artifact_name
+
 if TYPE_CHECKING:
     from _hashlib import HASH
     from collections.abc import Iterator, Mapping
@@ -28,6 +30,18 @@ class ArtifactType(StrEnum):
     RULE = "rule"
     SKILL = "skill"
     AGENT = "agent"
+
+    @property
+    def map_name(self) -> Literal["hints", "rules", "skills", "agents"]:
+        match self:
+            case ArtifactType.HINT:
+                return "hints"
+            case ArtifactType.RULE:
+                return "rules"
+            case ArtifactType.SKILL:
+                return "skills"
+            case ArtifactType.AGENT:
+                return "agents"
 
 
 @dataclass(frozen=True)
@@ -64,6 +78,10 @@ class ArtifactContent:
     members: tuple[ArtifactMember, ...] = ()
     metadata_json: str = "{}"
     native_options_json: str = "{}"
+
+    def __post_init__(self) -> None:
+        if not is_artifact_name(self.name):
+            raise ValueError("artifact name must use at most 64 lowercase letters, digits and single hyphens")
 
     @property
     def metadata(self) -> dict[str, object]:
@@ -155,31 +173,37 @@ class ArtifactGroup:
     agents: Mapping[str, ArtifactInput] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        for artifact_type in ArtifactType:
-            attribute = artifact_type.value + "s"
-            values = dict(getattr(self, attribute))
+        for artifact_type, mapping in self.type_maps():
+            values = dict(mapping)
             for name, item in values.items():
                 if (
-                    item.origin.owner != self.owner
+                    not is_artifact_name(name)
+                    or item.origin.owner != self.owner
                     or item.content.type != artifact_type
                     or item.content.name != name
                     or item.origin.entry != name
                 ):
                     raise ValueError("artifact map entry does not match its owner, type or name")
-            object.__setattr__(self, attribute, MappingProxyType(values))
+            object.__setattr__(self, artifact_type.map_name, MappingProxyType(values))
+
+    def type_maps(self) -> tuple[tuple[ArtifactType, Mapping[str, ArtifactInput]], ...]:
+        return (
+            (ArtifactType.HINT, self.hints),
+            (ArtifactType.RULE, self.rules),
+            (ArtifactType.SKILL, self.skills),
+            (ArtifactType.AGENT, self.agents),
+        )
 
     def items(self) -> Iterator[ArtifactInput]:
-        for values in (self.hints, self.rules, self.skills, self.agents):
+        for _, values in self.type_maps():
             yield from values.values()
 
     def select(self, identities: set[str]) -> ArtifactGroup:
         return ArtifactGroup(
             self.owner,
             **{
-                kind.value + "s": {
-                    name: item for name, item in getattr(self, kind.value + "s").items() if item.identity in identities
-                }
-                for kind in ArtifactType
+                kind.map_name: {name: item for name, item in values.items() if item.identity in identities}
+                for kind, values in self.type_maps()
             },
         )
 

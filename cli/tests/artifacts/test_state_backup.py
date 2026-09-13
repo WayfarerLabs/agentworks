@@ -72,3 +72,29 @@ def test_persisted_package_root_requires_a_normalized_containing_path():
     for root in ("relative", "/home/../other", "/other", "/home/user/file"):
         with pytest.raises(ValidationError):
             OwnedArtifactFile(path="/home/user/file", sha256="a" * 64, origins=("b" * 64,), package_root=root)
+
+
+def test_unsupported_capture_versions_refuse_overwrite_and_remain_uninterpreted_in_backup(db):
+    import pytest
+
+    from agentworks.artifacts.state import UnsupportedArtifactCaptureVersionError, canonicalize_captures, read_captures
+    from agentworks.db import VersionedPayload
+
+    db.insert_vm("box", site="local", hostname="box")
+    item = ArtifactInput(
+        ArtifactContent(ArtifactType.HINT, "setup", text="new capture"),
+        ArtifactProvenance(),
+        ArtifactOrigin("vm", "vm", "box", bundle="team", entry="setup"),
+    )
+    replacement = CapturedArtifacts("a" * 64, group(item))
+    for version in (1, 99):
+        payload = VersionedPayload(version, {"unknown": "preserve without interpretation"})
+        db.instance_state.replace_applied_slices("vm", "box", "fixture", {AppliedStateKey.ARTIFACT_INPUTS: payload})
+        with pytest.raises(UnsupportedArtifactCaptureVersionError):
+            read_captures(db, "vm", "box")
+        with pytest.raises(UnsupportedArtifactCaptureVersionError):
+            write_capture(db, "vm", "box", "vm", replacement, operation="fixture")
+        record = db.instance_state.get_applied_slices("vm", "box")[0]
+        assert record.payload == payload and canonicalize_captures(record) == payload
+        saved = db.snapshot_vm_backup_data("box")[-1]
+        assert saved[0].payload == payload

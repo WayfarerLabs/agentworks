@@ -51,18 +51,24 @@ Acquisition provenance remains separate from these identities.
 Native package cleanup boundaries are outside this capture codec. The integration's shared skill
 renderer supplies an exact optional `ArtifactFile.package_root`, retained on each
 `OwnedArtifactFile` through publication and retirement checkpoints. The root contains that file and
-must remain strictly within an owning publication root. Missing legacy roots authorize only file
-retirement; neither the capture codec nor cleanup infers a package root from path spelling. For
-retirement ordering only, a legacy owned file with native skill identity and basename `SKILL.md`
-identifies an entrypoint whose owned supporting members retire first. Deeper entrypoints precede
-shallower ones, preserving retryable discovery without granting directory-pruning authority.
+must remain strictly within an owning publication root. Omitting this optional field authorizes file
+retirement only; neither the capture codec nor cleanup infers a package root from path spelling. For
+ordering, a file with native skill identity and basename `SKILL.md` identifies an entrypoint:
+publication places it before supporting members, and retirement keeps it until those members retire.
+Deeper entrypoints retire before shallower ones. Required inner-parent cleanup precedes dropping its
+file record, which can remain after the file itself was removed. Permission denial on the final
+package-root removal is the sole optional failure: the guarded operation checks directory identity
+and peeks for emptiness, then warns and permits the file checkpoint to complete. Failed inner-parent
+cleanup, unsafe paths, failed checks and transport failures remain retryable.
 
 Codex's native adapter refuses skill entrypoints outside `<skill-root>/<package>/SKILL.md` in its
 known discovery roots, including nested entrypoints within otherwise valid packages. Its bounded
 inventory counts package members and directories against the existing 512-entry limit, including
 proposed files and implied directories before publication. This is a Codex delivery support limit;
 capture still permits ordinary supporting members within its independent package limits. Proposed
-members and implied directories receive the same entrypoint-layout checks as existing files.
+members and implied directories receive the same entrypoint-layout checks as existing files. The
+shared `MAX_CODEX_PERSONA_BYTES` constant bounds Agentworks-rendered persona TOML at 32 MiB; it is
+an Agentworks rendering/inventory budget, not a native Codex product limit.
 
 Native discovery requests travel as JSON through the transport's existing `input_data` stdin channel
 with TTY allocation disabled. The login-shell command remains fixed-size as packages grow; bounded
@@ -172,11 +178,17 @@ metadata is rejected even when all hashes are consistent. Provenance is checked 
 Git repository with its selection, ref and resolved commit, an absolute workstation path, or inline
 content. These checks do not contact the source. The owning state layer distinguishes an unsupported
 domain version from corrupt content. Doctor reports an unsupported domain version as uninterpreted
-evidence, not corruption, and backup retains its uninterpreted payload. Owning reinitialization may
-replace the unsupported version-1 draft capture, while independent native owned-file records remain
-available for guarded update and cleanup. Unsupported future versions cannot be overwritten by this
-path. Declaration syntax makes a clean break with the former flat map. There is no DB access, native
-invocation or source reacquisition in the codec.
+evidence, not corruption, and backup retains its uninterpreted payload. The state writer refuses to
+overwrite every unsupported capture version, including version 1; owning reinitialization is not an
+upgrade path. Independent native file ownership records remain preserved. There is no DB access,
+native invocation or source reacquisition in the codec.
+
+Names share one canonical pattern across declarations, normalized content and persisted type-map
+keys. Explicit typed map access retains the fixed hints/rules/skills/agents traversal and key order.
+Inspection exposes current contributing bundle IDs as `declared_bundles`, in selection order with
+the last selected. It retains one row per owner/type/key and keeps current declaration selection
+separate from captured origin and replacement digests. It does not acquire sources or invent
+replacement history before capture.
 
 ## Verification
 
@@ -185,7 +197,8 @@ byte-preserved text fixtures, executable identity, immutable metadata, source-in
 versioned grouped round trips and corrupt state. Composition tests cover whole-entry inheritance
 without acquiring discarded sources, same-owner replacement, canonical names, compact provenance,
 quiet identical replacements, original-owner deferral and cross-scope equal-name preservation.
-Lifecycle tests cover provenance-only refresh and cleanup with unsupported draft captures.
+Lifecycle tests cover provenance-only refresh, entrypoint-first publication and cleanup retry after
+permission failures. Unsupported captures remain uninterpreted in backup and refuse replacement.
 Filesystem fixtures exercise path collisions, links, special files, metadata directories, mutation
 and operation bounds. Local Git fixtures exercise shared revision capture, pinned commits, refresh,
 selected links/submodules/LFS, export attributes, filters/hooks, credential redaction, failure and

@@ -22,6 +22,7 @@ from agentworks.artifacts.model import (
     ArtifactReplacement,
     ArtifactType,
 )
+from agentworks.artifacts.names import ARTIFACT_NAME_PATTERN, MAX_ARTIFACT_NAME_LENGTH
 from agentworks.package_sources import MAX_MEMBER_PATH_LENGTH, CaptureLimits, validate_member_set
 from agentworks.sources import SourceRefError
 
@@ -29,6 +30,7 @@ _LIMITS = CaptureLimits()
 _MAX_ENCODED_MEMBER = ((_LIMITS.member_bytes + 2) // 3) * 4
 SmallString = Annotated[StrictStr, Field(max_length=4096)]
 MetadataString = Annotated[StrictStr, Field(max_length=65536)]
+ArtifactName = Annotated[StrictStr, Field(pattern=ARTIFACT_NAME_PATTERN, max_length=MAX_ARTIFACT_NAME_LENGTH)]
 
 
 class _Record(BaseModel):
@@ -44,7 +46,7 @@ class _Member(_Record):
 
 class _Content(_Record):
     type: Literal["hint", "rule", "skill", "agent"]
-    name: SmallString
+    name: ArtifactName
     description: SmallString
     text: Annotated[StrictStr, Field(max_length=_LIMITS.member_bytes)]
     members: Annotated[list[_Member], Field(max_length=_LIMITS.members)]
@@ -93,10 +95,18 @@ class _Owner(_Record):
 class _Envelope(_Record):
     version: Annotated[StrictInt, Field(ge=2, le=2)]
     owner: _Owner
-    hints: dict[SmallString, _Input]
-    rules: dict[SmallString, _Input]
-    skills: dict[SmallString, _Input]
-    agents: dict[SmallString, _Input]
+    hints: dict[ArtifactName, _Input]
+    rules: dict[ArtifactName, _Input]
+    skills: dict[ArtifactName, _Input]
+    agents: dict[ArtifactName, _Input]
+
+    def type_maps(self) -> tuple[tuple[ArtifactType, dict[str, _Input]], ...]:
+        return (
+            (ArtifactType.HINT, self.hints),
+            (ArtifactType.RULE, self.rules),
+            (ArtifactType.SKILL, self.skills),
+            (ArtifactType.AGENT, self.agents),
+        )
 
 
 def encode_inputs(inputs: ArtifactGroup) -> dict[str, object]:
@@ -107,10 +117,10 @@ def encode_inputs(inputs: ArtifactGroup) -> dict[str, object]:
     """
     from dataclasses import asdict
 
-    result: dict[str, dict[str, object]] = {kind.value + "s": {} for kind in ArtifactType}
+    result: dict[str, dict[str, object]] = {kind.map_name: {} for kind in ArtifactType}
     for item in inputs.items():
         content = item.content
-        entries = result[content.type.value + "s"]
+        entries = result[content.type.map_name]
         entries[content.name] = {
             "ordinal": len(entries),
             "content": {
@@ -151,11 +161,10 @@ def decode_inputs(payload: object) -> ArtifactGroup:
         _bound_payload(payload)
         envelope = _Envelope.model_validate(payload)
         owner = ArtifactOwner(**envelope.owner.model_dump())
-        result: dict[str, dict[str, ArtifactInput]] = {kind.value + "s": {} for kind in ArtifactType}
+        result: dict[str, dict[str, ArtifactInput]] = {kind.map_name: {} for kind in ArtifactType}
         total_bytes = 0
         total_members = 0
-        for artifact_type in ArtifactType:
-            entries = getattr(envelope, artifact_type.value + "s")
+        for artifact_type, entries in envelope.type_maps():
             ordered = sorted(entries.items(), key=lambda entry: entry[1].ordinal)
             if [record.ordinal for _, record in ordered] != list(range(len(ordered))):
                 raise SourceRefError("persisted artifact map order is invalid")
@@ -226,7 +235,7 @@ def decode_inputs(payload: object) -> ArtifactGroup:
                 item = ArtifactInput(content, provenance, origin, replacements)
                 if item.identity != record.identity or content.digest != content_row.digest:
                     raise SourceRefError("persisted artifact identity does not match its content")
-                result[artifact_type.value + "s"][name] = item
+                result[artifact_type.map_name][name] = item
         return ArtifactGroup(owner, **result)
     except (ValidationError, ValueError, TypeError, binascii.Error, UnicodeError, RecursionError):
         raise SourceRefError("invalid or unsupported persisted artifact capture") from None

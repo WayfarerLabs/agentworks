@@ -20,11 +20,11 @@ def shell_artifacts(inputs: ArtifactInputs, root: str, *, session: bool = False)
     for group in inputs.groups():
         if not group:
             continue
-        maps: dict[str, dict[str, object]] = {kind.value + "s": {} for kind in ArtifactType}
+        maps: dict[str, dict[str, object]] = {kind.map_name: {} for kind in ArtifactType}
         group_root = f"{root}/scopes/{group.owner.component}/{group.owner.resource_name}"
         for item in group.items():
             content = item.content
-            directory = f"{group_root}/{content.type.value}s"
+            directory = f"{group_root}/{content.type.map_name}"
             if content.type is ArtifactType.SKILL:
                 publication = skill_files(directory, item)
             else:
@@ -41,7 +41,7 @@ def shell_artifacts(inputs: ArtifactInputs, root: str, *, session: bool = False)
                 suffix = "json" if content.type is ArtifactType.AGENT else "md"
                 publication = (artifact_file(f"{directory}/{content.name}.{suffix}", body, (item,)),)
             files.extend(publication)
-            maps[content.type.value + "s"][content.name] = {
+            maps[content.type.map_name][content.name] = {
                 "files": [file.path.removeprefix(root + "/") for file in publication],
                 "origin": asdict(item.origin),
                 "source": item.provenance.source,

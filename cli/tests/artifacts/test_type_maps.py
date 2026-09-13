@@ -243,3 +243,54 @@ def test_generated_bundle_schema_accepts_maps_and_rejects_old_flat_entries():
     assert list(schema.iter_errors(document))
     with pytest.raises(ValidationError):
         ArtifactBundle.model_validate({"name": "team", "hints": {"note": {"type": "hint", "text": "context"}}})
+
+
+@pytest.mark.parametrize("name", ["/", "Upper", "", "trailing/", "a_b", "a--b", "x" * 65])
+def test_persisted_type_map_names_are_canonical_even_when_key_and_content_agree(name):
+    captured = capture_artifacts(
+        [("team", ArtifactBundle(name="team", hints={"note": HintArtifactSpec(text="note")}))],
+        ArtifactOrigin("session", "session", "run"),
+    )
+    payload = cast(dict[str, Any], encode_inputs(captured))
+    record = payload["hints"].pop("note")
+    record["content"]["name"] = record["origin"]["entry"] = name
+    payload["hints"][name] = record
+    with pytest.raises(SourceRefError):
+        decode_inputs(payload)
+
+
+@pytest.mark.parametrize("stage", ["before-capture", "stale-capture", "current-capture"])
+def test_inspection_separates_current_bundle_selection_from_captured_replacements(db, monkeypatch, capsys, stage):
+    from agentworks.artifacts.inspection import render_artifacts
+    from agentworks.db import AppliedStateKey
+
+    fixture = graph(db)
+    second = ArtifactBundle(name="selected-bundle", hints={"agent-0": HintArtifactSpec(text="uncaptured private body")})
+    fixture.registry.add("artifact-bundle", second.name, second, Origin.built_in(source="test"))
+    template = fixture.registry.lookup("agent-template", "agent")
+    template.artifacts.bundles.append(second.name)
+    if stage == "before-capture":
+        db.instance_state.clear_applied_slice("agent", "agent", AppliedStateKey.ARTIFACT_INPUTS)
+    elif stage == "current-capture":
+        snapshot = capture_owner(fixture.registry, "agent", "agent", "agent", template.artifacts)
+        write_capture(db, "agent", "agent", "agent", snapshot, operation="fixture")
+
+    def forbid(*args, **kwargs):
+        raise AssertionError("inspection must not acquire sources")
+
+    monkeypatch.setattr("agentworks.artifacts.capture.capture_artifacts", forbid)
+    monkeypatch.setattr("agentworks.package_sources.PackageCapture.capture", forbid)
+    result = inspect_artifacts(db, fixture.registry, agent_name="agent")
+    rows = result.owners[-1].artifacts
+    assert len(rows) == 1
+    assert rows[0].declared_bundles == ("agent-bundle", "selected-bundle")
+    assert rows[0].bundle == ("agent-bundle" if stage == "stale-capture" else "selected-bundle")
+    assert bool(rows[0].replacements) == (stage == "current-capture")
+    assert (rows[0].input_id is None) == (stage == "before-capture")
+    data = inspection_data(result)
+    encoded = json.dumps(data)
+    assert json.loads(encoded)["owners"][-1]["artifacts"][0]["declared_bundles"] == ["agent-bundle", "selected-bundle"]
+    render_artifacts(result)
+    human = capsys.readouterr().out
+    assert "agent-bundle" in human and "selected-bundle" in human
+    assert "uncaptured private body" not in human + encoded

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import TYPE_CHECKING
 
 import tomli_w
@@ -44,7 +43,7 @@ def _persona(item: ArtifactInput, *, role_layer: bool = False) -> str:
         values.update(name=item.content.name, description=item.content.description)
     rendered = tomli_w.dumps(values)
     if len(rendered.encode()) > MAX_CODEX_PERSONA_BYTES:
-        raise ConfigError("Codex persona exceeds the supported native configuration file size")
+        raise ConfigError("Codex persona exceeds the Agentworks rendered TOML size budget")
     return rendered
 
 
@@ -129,10 +128,6 @@ def session_artifacts(
             )
         elif item.content.type is ArtifactType.AGENT:
             name = item.content.name
-            if len(name) > 64 or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name):
-                raise ConfigError(
-                    "Codex session persona names must use at most 64 lowercase letters, digits and single hyphens"
-                )
             path = f"{context.directory}/agents/{item.content.name}.toml"
             files.append(
                 artifact_file(path, _persona(item, role_layer=True), (item,), identity=f"agent:{item.content.name}")

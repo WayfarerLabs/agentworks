@@ -148,14 +148,18 @@ removed: updating an ancestor alone does not retire effects previously applied b
 Applied config records identify files and registrations owned by the integration. Refresh removes
 obsolete owned effects where supported. Retired skill files also prune empty parents up to their
 recorded package root. The renderer supplies that exact boundary for every skill member; cleanup
-never infers it from directory names. Supporting files retire before `SKILL.md`, which stays owned
-and present while any owned supporting member remains. Nonempty directories and modified or unowned
-files remain; interrupted cleanup retains the file record and package boundary for retry. Older
-records without a package root retain this entrypoint ordering using the owned skill entrypoint
-path, but retire files without directory pruning. Existing unowned content and files changed since
-publication require resolution rather than silent replacement. Removing an activation with retained
-effects still needs the owning cleanup operation before passthrough can be considered current.
-Deleting a VM retains the ordinary VM deletion behavior: its filesystem disappears with it.
+never infers it from directory names. `SKILL.md` publishes before supporting files, so an
+interrupted publication remains discoverable for retry. Supporting files retire before `SKILL.md`,
+which stays owned and present while any owned supporting member remains. Nonempty directories and
+modified or unowned files remain. Failed inner-directory cleanup retains the file record and package
+boundary for retry, even when the file has already been removed. If only removing the final package
+root is denied by permissions, cleanup verifies that directory's identity and emptiness, warns and
+completes file retirement. Records that omit the optional package root retain entrypoint ordering
+using the owned skill entrypoint path, but retire files without directory pruning. Existing unowned
+content and files changed since publication require resolution rather than silent replacement.
+Removing an activation with retained effects still needs the owning cleanup operation before
+passthrough can be considered current. Deleting a VM retains the ordinary VM deletion behavior: its
+filesystem disappears with it.
 
 ## Native delivery
 
@@ -180,9 +184,10 @@ configuration registrations, rather than assuming filenames are names. Conflicts
 name and competing paths. This check still runs when all applicable inputs were handled upstream.
 
 Inventory covers selected skill/persona types, with at most 512 directory entries, YAML headers up
-to 32 KiB each and 1 MiB combined, and Codex persona TOML files up to 32 MiB each and 64 MiB
-combined. For Codex, Agentworks recursively checks package contents and accepts skill entrypoints
-only at `<skill-root>/<package>/SKILL.md`. Its 512-entry budget includes supporting files and
+to 32 KiB each and 1 MiB combined, and an Agentworks rendered-TOML budget for Codex personas of 32
+MiB each and 64 MiB combined. The TOML budget is an Agentworks limit, not a native Codex product
+limit. For Codex, Agentworks recursively checks package contents and accepts skill entrypoints only
+at `<skill-root>/<package>/SKILL.md`. Its 512-entry budget includes supporting files and
 directories, including proposed members and their implied directories. The Claude and Grok adapters
 do not scan beneath a present package entrypoint. These native support limits do not restrict the
 generic capture format. Before publication, preflight checks existing and proposed entries together,
@@ -218,9 +223,11 @@ agw artifacts show --session review --integration codex
 
 Inspection includes applicable ancestor content, even artifacts already handled upstream. It shows
 current declarations, captured revisions, activation, recorded handling and deferral, and native
-placement, current winning provenance and compact replacement evidence. Missing captures remain
-unknown. Stale, interrupted, or malformed evidence cannot become an empty successful result.
-Selectors must describe one actual lineage.
+placement, current winning provenance and compact replacement evidence. Each type/key row includes
+all current contributing bundle IDs in selection order, with the last selected. This declaration
+selection is separate from captured provenance and replacement digests, including when capture is
+missing or stale. Missing captures remain unknown. Stale, interrupted, or malformed evidence cannot
+become an empty successful result. Selectors must describe one actual lineage.
 
 The command reads existing state and declarations. It does not fetch sources, apply integrations,
 resolve secrets, or attest to the current filesystem or model context. Artifact bodies are omitted.

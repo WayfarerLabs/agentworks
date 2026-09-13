@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral, ArtifactFile
@@ -18,6 +17,7 @@ if TYPE_CHECKING:
     from agentworks.artifacts.model import ArtifactFacet, ArtifactInput, ArtifactInputs
 
 
+# Agentworks budget for a rendered persona TOML file, including its instruction body.
 MAX_CODEX_PERSONA_BYTES = 32 * 1024 * 1024
 
 
@@ -84,8 +84,6 @@ def validate_names(inputs: ArtifactInputs) -> None:
     seen: dict[tuple[ArtifactType, str], ArtifactInput] = {}
     for item in inputs.items():
         name = item.content.name
-        if not name or PurePosixPath(name).name != name or name in (".", "..") or "\x00" in name:
-            raise ConfigError("artifact native names must be single path components")
         key = item.content.type, name
         if item.content.type in (ArtifactType.SKILL, ArtifactType.AGENT) and key in seen:
             previous = seen[key].origin.owner

@@ -390,6 +390,8 @@ def test_codex_literal_role_and_guidance_overrides_apply_on_resume_and_new(fresh
     "name",
     [
         "review.part",
+        "/",
+        "",
         'review"er',
         "review=er",
         "review er",
@@ -401,9 +403,10 @@ def test_codex_literal_role_and_guidance_overrides_apply_on_resume_and_new(fresh
         "r" * 65,
     ],
 )
-def test_codex_session_rejects_persona_names_that_cannot_use_portable_override_keys(name):
-    with pytest.raises(ConfigError):
-        codex.session_artifacts(context(artifact(ArtifactType.AGENT, name=name)), configured=None, extra_args=[])
+@pytest.mark.parametrize("kind", list(ArtifactType))
+def test_normalized_artifact_names_reject_noncanonical_names_before_native_delivery(name, kind):
+    with pytest.raises(ValueError):
+        artifact(kind, name=name)
 
 
 @pytest.mark.parametrize(

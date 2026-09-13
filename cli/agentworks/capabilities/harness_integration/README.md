@@ -38,25 +38,28 @@ Contract version 6 supplies grouped artifact delivery. Core captures each owner'
 `SetupInvocation.artifacts` is an `ArtifactInputs` value: one local group and deferred groups keyed
 by their original owner. `SessionArtifactContext.inputs` uses the same boundary. Later selected
 bundles replace whole same-type/key definitions within an owner; different owners never overwrite
-each other. An integration must consume those groups without flattening away equal names. Setup
-methods return an `ArtifactApplication`: concrete native files plus deferrals for inputs requiring a
-later facet. Core performs guarded whole-file publication and checkpoints confirmed ownership. The
-integration owns native formats, placement, compatibility checks and routing decisions. A successful
-application reports inputs omitted from its deferral list as handled. The integration must fulfill
-that delivery obligation, through native files, launch arguments or another supported native
-mechanism; omission is its handling report, not independent proof of consumption. Core validates the
-result and refuses final-session deferrals. Returning the old `None` result is a contract error even
-for an empty invocation.
+each other. Normalized content and map keys enforce the same portable lowercase artifact-name
+contract used by declarations and persisted captures. An integration must consume those groups
+without flattening away equal names. Setup methods return an `ArtifactApplication`: concrete native
+files plus deferrals for inputs requiring a later facet. Core performs guarded whole-file
+publication and checkpoints confirmed ownership. The integration owns native formats, placement,
+compatibility checks and routing decisions. A successful application reports inputs omitted from its
+deferral list as handled. The integration must fulfill that delivery obligation, through native
+files, launch arguments or another supported native mechanism; omission is its handling report, not
+independent proof of consumption. Core validates the result and refuses final-session deferrals.
+Returning the old `None` result is a contract error even for an empty invocation.
 
 An `ArtifactFile` may supply an exact `package_root` for guarded empty-parent cleanup. The shared
 skill renderer sets it on every package member, and publication persists it in that member's
 `OwnedArtifactFile`. The normalized root must contain the file and lie strictly within an owning
-publication root. It is a cleanup boundary, not a separate directory ownership record. Retirement
-keeps `SKILL.md` until owned supporting members have retired, then prunes only empty parents up to
-the recorded root before dropping the file's checkpoint evidence. Older records without this field
-retain guarded file retirement and do not authorize directory pruning. Their owned `SKILL.md`
-entrypoints, identified by native skill identity, still retire after supporting owned files; deeper
-entrypoints retire before shallower ones. Unowned files do not keep an obsolete entrypoint active.
+publication root. It is a cleanup boundary, not a separate directory ownership record. Publication
+places `SKILL.md` before supporting members; retirement keeps it until owned supporting members
+retire. Required inner-parent cleanup precedes dropping each record, including when its file is
+already absent. Only permission denial removing the final, verified-empty package root permits a
+warning and completed file retirement; other cleanup failures remain retryable. Files that omit this
+optional field retain guarded retirement without directory pruning. Their `SKILL.md` entrypoints,
+identified by native skill identity, still publish first and retire last; deeper entrypoints retire
+before shallower ones. Unowned files do not keep an obsolete entrypoint active.
 
 A VM deferral chooses exactly one of user, workspace or session. User/workspace deferrals can only
 target session. Core sends an inactive VM's inputs to user, then passes an inactive user or

@@ -51,6 +51,18 @@ if op == 'prune':
             except OSError as error:
                 if error.errno in (errno.ENOTEMPTY, errno.EEXIST):
                     break
+                if index == len(root_parts) - 1 and error.errno in (errno.EACCES, errno.EPERM, errno.EROFS):
+                    check = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+                    try:
+                        original = parents[index + 1][0] if index + 1 < len(parents) else fd
+                        observed, held = os.fstat(check), os.fstat(original)
+                        if (observed.st_dev, observed.st_ino) != (held.st_dev, held.st_ino):
+                            raise OSError(errno.ESTALE, 'package root changed')
+                        with os.scandir(check) as entries:
+                            if next(entries, None) is None:
+                                sys.exit(3)  # Only the final, verified-empty package root may remain.
+                    finally:
+                        os.close(check)
                 raise
     finally:
         os.close(fd)
@@ -295,8 +307,15 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
             raise StateError("retired native file is outside its package root")
         command = shlex.join(["python3", "-c", _FILE_PROGRAM, "prune", destination, root, "-", "", "0"])
         result = self.runner.run(command, check=False, discard_output=True)
-        if not result.ok:
-            raise StateError("retired native file parents could not be pruned safely")
+        if result.returncode == 3:
+            output.warn(
+                f"Empty retired package root '{root}' was retained because its parent denies directory removal."
+            )
+        elif not result.ok:
+            raise StateError(
+                f"Retired members beneath package root '{root}' could not be pruned safely",
+                hint="Check permissions and retry setup. Cleanup evidence remains; files may already be absent.",
+            )
 
     def fingerprint(self, destination: str) -> tuple[str, int] | None:
         """Stream a guarded file's hash and mode without copying or logging its body."""

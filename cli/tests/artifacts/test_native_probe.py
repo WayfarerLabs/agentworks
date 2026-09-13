@@ -674,10 +674,10 @@ def test_proposed_codex_budget_includes_existing_entries_and_replaces_paths_once
     )
 
 
-@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize("rootless", [False, True])
 @pytest.mark.parametrize("unowned_leftovers", [False, True])
 def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(
-    tmp_path, db, monkeypatch, legacy, unowned_leftovers
+    tmp_path, db, monkeypatch, rootless, unowned_leftovers
 ):
     from dataclasses import replace
 
@@ -724,7 +724,7 @@ def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(
     )
     first = integration.user_init(invocation)
     current = publish_artifacts(target, first.files, (), lambda files: None, roots=(str(target.home),))
-    if legacy:
+    if rootless:
         current = tuple(record.model_copy(update={"package_root": None}) for record in current)
     entrypoint = target.home / ".claude/skills/review/SKILL.md"
     if unowned_leftovers:
@@ -763,7 +763,7 @@ def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(
     retried = integration.user_init(invocation)
     finished = publish_artifacts(target, retried.files, checkpoints[-1], checkpoints.append, roots=(str(target.home),))
     assert not entrypoint.exists()
-    assert entrypoint.parent.exists() == (legacy or unowned_leftovers)
+    assert entrypoint.parent.exists() == (rootless or unowned_leftovers)
     if unowned_leftovers:
         assert (entrypoint.parent / "notes.txt").read_text() == "operator notes"
         assert (entrypoint.parent / "unowned/more.txt").read_text() == "more operator notes"

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, cast
 from agentworks.artifacts.bundle import resolve_bundle
 from agentworks.artifacts.capture import capture_artifacts
 from agentworks.artifacts.codec import decode_inputs, encode_inputs
-from agentworks.artifacts.model import ArtifactComponent, ArtifactGroup, ArtifactOrigin, ArtifactType
+from agentworks.artifacts.model import ArtifactComponent, ArtifactGroup, ArtifactOrigin
 from agentworks.db import AppliedStateKey, AppliedStateSlice, Database, VersionedPayload
 from agentworks.errors import StateError
 from agentworks.sources import SourceRefError
@@ -65,10 +65,8 @@ def declaration_digest(registry: Registry, config: ArtifactsConfig) -> str:
     for name in config.bundles:
         bundle = resolve_bundle(registry, name).value
         maps = {
-            kind.value + "s": {
-                key: spec.model_dump(mode="json") for key, spec in getattr(bundle, kind.value + "s").items()
-            }
-            for kind in ArtifactType
+            kind.map_name: {key: spec.model_dump(mode="json") for key, spec in entries.items()}
+            for kind, entries in bundle.type_maps()
         }
         payload.append((name, maps))
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
@@ -118,7 +116,7 @@ def decode_captures(record: AppliedStateSlice) -> dict[ArtifactComponent, Captur
     if record.payload.payload_version != 2:
         raise UnsupportedArtifactCaptureVersionError(
             "artifact captures require a different Agentworks version",
-            hint="Reinitialize the owning scope to capture current declarations. Stored file ownership was retained.",
+            hint="Use an Agentworks version that supports this capture. Stored data and file ownership were retained.",
         )
     try:
         payload = record.payload.value
@@ -166,15 +164,7 @@ def write_capture(
         raise StateError(
             "artifact capture does not match its owner declaration", entity_kind=kind, entity_name=name
         ) from None
-    try:
-        captures = read_captures(db, kind, name)
-    except UnsupportedArtifactCaptureVersionError:
-        records = db.instance_state.get_applied_slices(kind, name)
-        if any(
-            record.key is AppliedStateKey.ARTIFACT_INPUTS and record.payload.payload_version != 1 for record in records
-        ):
-            raise
-        captures = {}
+    captures = read_captures(db, kind, name)
     captures[component] = capture
     try:
         payload = encode_captures(captures)

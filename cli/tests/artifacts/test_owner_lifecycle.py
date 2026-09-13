@@ -263,12 +263,9 @@ def test_reinit_refreshes_source_and_failed_capture_cannot_publish_old_success(o
     assert not read_native_setup(owner.db, "agent", "agent").records
 
 
-@pytest.mark.parametrize("legacy_capture", [False, True])
 @pytest.mark.parametrize("modified", [False, True])
 @pytest.mark.parametrize("remove_activation", [False, True])
-def test_owned_effect_removal_uses_native_state_and_blocks_pending_cleanup(
-    owner, modified, remove_activation, legacy_capture
-):
+def test_owned_effect_removal_uses_native_state_and_blocks_pending_cleanup(owner, modified, remove_activation):
     owner.db.insert_agent("agent", "vm", "worker", template="configured")
     workspace = owner.db.insert_workspace("project", str(owner.target.root / "project"), "vm", "project")
     template = ResolvedAgentTemplate(
@@ -282,19 +279,6 @@ def test_owned_effect_removal_uses_native_state_and_blocks_pending_cleanup(
     run_setup(owner.db, owner.registry, inputs, user_call(owner), operation="agent-init")
     previous = read_native_setup(owner.db, "agent", "agent").records[0]
     assert previous.complete and len(previous.artifact_files) == 2
-    if legacy_capture:
-        from agentworks.artifacts.state import UnsupportedArtifactCaptureVersionError
-        from agentworks.db import AppliedStateKey, VersionedPayload
-
-        owner.db.instance_state.replace_applied_slices(
-            "agent",
-            "agent",
-            "legacy-fixture",
-            {AppliedStateKey.ARTIFACT_INPUTS: VersionedPayload(1, {"components": {}})},
-        )
-        with pytest.raises(UnsupportedArtifactCaptureVersionError):
-            read_captures(owner.db, "agent", "agent")
-        assert read_native_setup(owner.db, "agent", "agent").records[0] == previous
     managed = Path(previous.artifact_files[0].path)
     if modified:
         managed.write_text("operator change")
@@ -397,3 +381,19 @@ def test_user_setup_publishes_vm_inputs_without_vm_activation(db, tmp_path):
     assert all(Path(file.path).is_relative_to(target.home) for file in record.artifact_files)
     assert not read_native_setup(db, "vm", "vm").records
     assert [item.origin.component for item in fixture.route().inputs.items()] == ["workspace"]
+
+
+def test_unsupported_capture_does_not_force_an_inactive_setup(owner):
+    from agentworks.artifacts.state import UnsupportedArtifactCaptureVersionError
+    from agentworks.db import AppliedStateKey, VersionedPayload
+
+    owner.db.insert_agent("agent", "vm", "worker", template="configured")
+    payload = VersionedPayload(1, {"unknown": "uninterpreted"})
+    owner.db.instance_state.replace_applied_slices(
+        "agent", "agent", "fixture", {AppliedStateKey.ARTIFACT_INPUTS: payload}
+    )
+    with pytest.raises(UnsupportedArtifactCaptureVersionError):
+        prepare_agent_setup(
+            owner.db, owner.registry, vm=owner.vm, name="agent", template=ResolvedAgentTemplate("configured")
+        )
+    assert owner.db.instance_state.get_applied_slices("agent", "agent")[0].payload == payload

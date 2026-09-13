@@ -7,18 +7,23 @@ from typing import TYPE_CHECKING, Annotated
 from pydantic import Field
 
 from agentworks.artifacts.declarations import AgentArtifactSpec, HintArtifactSpec, RuleArtifactSpec, SkillArtifactSpec
+from agentworks.artifacts.model import ArtifactType
+from agentworks.artifacts.names import ARTIFACT_NAME_PATTERN, MAX_ARTIFACT_NAME_LENGTH
 from agentworks.declared_resource import DeclaredResource
 from agentworks.schema import ResourceRef
 from agentworks.schema.reference import RefRelationship
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from agentworks.artifacts.declarations import ArtifactSpec
     from agentworks.resources.graph import FinalizeContext
     from agentworks.resources.inheritance import LayeredResolution
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
     from agentworks.value_provenance import LayerContribution
 
-ArtifactName = Annotated[str, Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$", max_length=64)]
+ArtifactName = Annotated[str, Field(pattern=ARTIFACT_NAME_PATTERN, max_length=MAX_ARTIFACT_NAME_LENGTH)]
 
 
 class ArtifactBundle(DeclaredResource):
@@ -42,6 +47,14 @@ class ArtifactBundle(DeclaredResource):
 
     agents: dict[ArtifactName, AgentArtifactSpec] = Field(default_factory=dict)
     """Agent personas; each key must match the definition's frontmatter name."""
+
+    def type_maps(self) -> tuple[tuple[ArtifactType, Mapping[str, ArtifactSpec]], ...]:
+        return (
+            (ArtifactType.HINT, self.hints),
+            (ArtifactType.RULE, self.rules),
+            (ArtifactType.SKILL, self.skills),
+            (ArtifactType.AGENT, self.agents),
+        )
 
     def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         from agentworks.resources.reference import inherits_reference

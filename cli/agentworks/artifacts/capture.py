@@ -23,6 +23,7 @@ from agentworks.artifacts.model import (
     ArtifactReplacement,
     ArtifactType,
 )
+from agentworks.artifacts.names import is_artifact_name
 from agentworks.package_sources import (
     CaptureLimits,
     PackageCapture,
@@ -56,7 +57,6 @@ _TEXT_SUFFIXES = frozenset(
         ".toml",
     }
 )
-_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
 def capture_artifacts(
@@ -76,13 +76,12 @@ def capture_artifacts(
     """
     if operation is not None and limits is not None:
         raise ValueError("a borrowed capture operation already defines its limits")
-    result: dict[str, dict[str, ArtifactInput]] = {kind.value + "s": {} for kind in ArtifactType}
+    result: dict[str, dict[str, ArtifactInput]] = {kind.map_name: {} for kind in ArtifactType}
     changed: list[tuple[str, str, str]] = []
     with nullcontext(operation) if operation is not None else PackageCapture(limits or CaptureLimits()) as active:
         for bundle_name, bundle in bundles:
-            for artifact_type in ArtifactType:
-                entries = getattr(bundle, artifact_type.value + "s")
-                selected = result[artifact_type.value + "s"]
+            for artifact_type, entries in bundle.type_maps():
+                selected = result[artifact_type.map_name]
                 for entry, spec in entries.items():
                     try:
                         active.check()
@@ -261,7 +260,7 @@ def _frontmatter(text: str) -> tuple[dict[str, object], str]:
 def _identity(metadata: dict[str, object]) -> tuple[str, str]:
     name = metadata.get("name")
     description = metadata.get("description")
-    if not isinstance(name, str) or not _NAME.fullmatch(name) or len(name) > 64:
+    if not is_artifact_name(name):
         raise SourceRefError("artifact name must use at most 64 lowercase letters, digits and single hyphens")
     if not isinstance(description, str) or not description.strip() or len(description) > 1024:
         raise SourceRefError("artifact description must contain between 1 and 1024 characters")

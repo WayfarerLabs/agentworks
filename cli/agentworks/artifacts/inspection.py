@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.artifacts.bundle import resolve_bundle
-from agentworks.artifacts.model import ArtifactType
 from agentworks.errors import NotFoundError, StateError, ValidationError
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.state import read_native_setup
@@ -15,7 +14,7 @@ from agentworks.schema import CapabilityBlock
 from agentworks.secrets.orchestration import SecretTarget
 
 if TYPE_CHECKING:
-    from agentworks.artifacts.declarations import ArtifactsConfig, ArtifactSpec
+    from agentworks.artifacts.declarations import ArtifactsConfig
     from agentworks.artifacts.model import (
         ArtifactComponent,
         ArtifactFacet,
@@ -98,6 +97,7 @@ class ArtifactMetadata:
     revision: str | None = None
     selected_path: str | None = None
     replacements: tuple[ArtifactReplacement, ...] = ()
+    declared_bundles: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -292,25 +292,23 @@ def inspect_artifacts(
 def _artifact_metadata(
     registry: Registry, config: ArtifactsConfig, view: ArtifactOwnerView
 ) -> tuple[ArtifactMetadata, ...]:
-    entries: dict[tuple[str, str], tuple[str, ArtifactSpec]] = {}
+    entries: dict[tuple[str, str], list[str]] = {}
     for bundle in config.bundles:
         try:
             declaration = resolve_bundle(registry, bundle).value
         except KeyError:
             continue  # Missing bundle references remain visible in the owner declaration.
-        for kind in ArtifactType:
-            entries.update(
-                ((kind.value, name), (bundle, spec)) for name, spec in getattr(declaration, kind.value + "s").items()
-            )
+        for kind, definitions in declaration.type_maps():
+            for name in definitions:
+                entries.setdefault((kind.value, name), []).append(bundle)
     rows = []
     captured = () if view.captured is None else view.captured.inputs.items()
     seen = set()
     for item in captured:
         key = (item.content.type.value, item.content.name)
-        selected = entries.get(key)
-        declared = selected is not None and selected[0] == item.origin.bundle
-        if declared:
-            seen.add(key)
+        selected = tuple(entries.get(key, ()))
+        declared = bool(selected)
+        seen.add(key)
         rows.append(
             ArtifactMetadata(
                 item.origin.bundle,
@@ -325,11 +323,12 @@ def _artifact_metadata(
                 item.provenance.commit or None,
                 item.provenance.selected_path or None,
                 item.replacements,
+                selected,
             )
         )
     rows.extend(
-        ArtifactMetadata(bundle, name, kind, True)
-        for (kind, name), (bundle, _) in entries.items()
+        ArtifactMetadata(bundles[-1], name, kind, True, declared_bundles=tuple(bundles))
+        for (kind, name), bundles in entries.items()
         if (kind, name) not in seen
     )
     return tuple(rows)
@@ -386,6 +385,11 @@ def render_artifacts(inspection: ArtifactInspection) -> None:
             output.info(
                 f"  {artifact.type} {artifact.bundle}/{artifact.entry}: {content}; {current}; revision {revision}"
             )
+            if artifact.declared_bundles:
+                output.info(
+                    f"    Declaration bundles: {', '.join(artifact.declared_bundles)}; "
+                    f"selected {artifact.declared_bundles[-1]}"
+                )
             for previous in artifact.replacements:
                 output.info(
                     f"    Replaced bundle {previous.origin.bundle}: {previous.digest[:12]}; "
@@ -435,6 +439,7 @@ def inspection_data(inspection: ArtifactInspection) -> JsonObject:
                         "entry": item.entry,
                         "type": item.type,
                         "declared": item.declared,
+                        "declared_bundles": list(item.declared_bundles),
                         "input_id": item.input_id,
                         "origin_id": item.origin_id,
                         "native_name": item.native_name,
