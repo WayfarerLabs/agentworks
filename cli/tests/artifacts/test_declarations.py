@@ -119,3 +119,64 @@ def test_admin_instance_layer_preserves_or_replaces_template_selection(selection
     refs = artifact_references(layered.value.artifacts, ("vm", "machine"), layered.provenance)
     expected_owner = ("admin-template", "admin") if not selection else ("vm", "machine")
     assert all(ref.declared_by == expected_owner for ref in refs)
+
+
+@pytest.mark.parametrize(("kind", "model", "resolve"), KINDS, ids=[row[0] for row in KINDS])
+@pytest.mark.parametrize("selection", [{}, {"bundles": []}, {"bundles": ["instance"]}])
+def test_instance_overlays_replace_bundle_selection_and_publish_instance_provenance(
+    kind: str,
+    model: type[Any],
+    resolve: Callable[..., Any],
+    selection: dict[str, object],
+) -> None:
+    from agentworks.instance_overlay_codec import decode_overlay_model, encode_overlay_model
+    from agentworks.schema import CapabilityBlock
+
+    instance_kind = kind.removesuffix("-template")
+    template = model(name="base", artifacts=ArtifactsConfig(bundles=["team"]))
+    if kind == "session-template":
+        template = template.model_copy(update={"harness_integration": CapabilityBlock.of("shell")})
+    overlay = decode_overlay_model(model, instance_kind, {"artifacts": selection})
+    assert encode_overlay_model(overlay, instance_kind) == {"artifacts": selection}
+    layered = resolve({"base": template}, "base", overlay=overlay, instance_name="running")
+    expected = ["team"] if not selection else selection["bundles"]
+    assert layered.value.artifacts.bundles == expected
+    refs = artifact_references(layered.value.artifacts, (instance_kind, "running"), layered.provenance)
+    assert [ref.name for ref in refs] == expected
+    owner = (kind, "base") if not selection else (instance_kind, "running")
+    assert all(ref.source == (instance_kind, "running") and ref.declared_by == owner for ref in refs)
+
+
+@pytest.mark.parametrize("declared", [False, True])
+def test_bundle_reference_uses_ordinary_registry_miss_policy(declared: bool) -> None:
+    from agentworks.errors import ConfigError
+    from agentworks.origin import Origin
+    from tests.conftest import registry_with_shell
+
+    registry = registry_with_shell()
+    origin = Origin.built_in(source="fixture")
+    registry.add(
+        "agent-template", "dev", AgentTemplate(name="dev", artifacts=ArtifactsConfig(bundles=["team"])), origin
+    )
+    if declared:
+        # Loading declarations never tries to acquire this nonexistent source.
+        registry.add(
+            "artifact-bundle",
+            "team",
+            ArtifactBundle.model_validate(
+                {
+                    "name": "team",
+                    "artifacts": {"review": {"type": "skill", "source": "missing/directory"}},
+                }
+            ),
+            origin,
+        )
+        registry.finalize()
+        assert [(ref.kind, ref.name) for ref in registry.graph.edges_of("agent-template", "dev")] == [
+            ("artifact-bundle", "team")
+        ]
+    else:
+        with pytest.raises(ConfigError) as caught:
+            registry.finalize()
+        assert "artifact-bundle" in str(caught.value)
+        assert "team" in str(caught.value)
