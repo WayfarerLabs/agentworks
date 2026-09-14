@@ -1,0 +1,24 @@
+# Surfaces where an accidental change is expensive and a review is cheap.
+#
+# These are review requirements, not authorship restrictions: anyone may
+# propose a change to any of them. Paired with the "require review from Code
+# Owners" branch protection setting on main, an owner has to look before it
+# lands.
+#
+# Each entry covers itself. This file is under /.github/, and the rulesync
+# sources own the generated agent trees, so relaxing a rule needs the same
+# review as the change the rule was there to catch. A control that a single
+# commit can remove alongside the thing it guards is not a control.
+
+# Workflows, actions, and this file. A workflow change can widen the
+# deployment job's privileges or stop the merge gate from gating, and both
+# read as ordinary diffs.
+/.github/ @wfscot
+
+# The gates themselves: lint, locked-SDD, and rulesync generation. A change
+# here changes what every other change is checked against.
+/scripts/ @wfscot
+
+# Policy that agents load as instructions. The generated trees are projections
+# of these sources, so owning the sources owns what every session is told.
+/.rulesync/ @wfscot
