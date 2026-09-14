@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from agentworks.artifacts.application import ArtifactApplication
 from agentworks.capabilities.base import RunContext
 from agentworks.errors import ExternalError, StateError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
@@ -407,6 +408,7 @@ def test_workspace_setup_joins_eager_env_and_follows_directory_creation(
         assert "AGENTWORKS_AGENT" not in invocation.environment
         assert invocation.root == "/srv/project"
         calls.append(invocation)
+        return ArtifactApplication()
 
     monkeypatch.setattr(ShellIntegration, "workspace_init", setup)
     workspace_manager.create_workspace(

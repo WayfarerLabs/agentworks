@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.errors import unknown_template_error
 
 if TYPE_CHECKING:
@@ -42,6 +43,7 @@ class ResolvedAgentTemplate:
     mise_install_before: str = "7d"
     mise_prune_on_reinit: bool = True
     harness_integrations: list[CapabilityBlock] = field(default_factory=list)
+    artifacts: ArtifactsConfig = field(default_factory=ArtifactsConfig)
     env: dict[str, EnvEntry] = field(default_factory=dict)
 
 

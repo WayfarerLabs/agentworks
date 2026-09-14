@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.config import load_config
-from agentworks.db import Database, VersionedPayload
+from agentworks.db import Database, SessionMode, VersionedPayload
 from agentworks.env.show import ResolvedEnvRow, show_env
 from agentworks.errors import StateError, ValidationError
 from agentworks.instance_specs import parse_instance_spec
@@ -97,10 +97,13 @@ def _seed_db(
     if with_agent:
         db.insert_agent("claude", "vm-1", "aw-claude")
     if with_session:
-        db._conn.execute(
-            "INSERT INTO sessions (name, workspace_name, template, mode, agent_name, socket_path) "
-            "VALUES ('s1', 'ws-a', 'default', 'agent', 'claude', "
-            "'/run/agentworks/agent-tmux-sockets/aw-claude/s1.sock')"
+        db.insert_session(
+            "s1",
+            "ws-a",
+            "default",
+            SessionMode.AGENT,
+            agent_name="claude",
+            socket_path="/run/agentworks/agent-tmux-sockets/aw-claude/s1.sock",
         )
     db._conn.commit()
 
@@ -222,10 +225,12 @@ def test_copied_workspace_template_shows_no_workspace_env_and_does_not_crash(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group, template) "
         "VALUES ('ws-proj', 'vm-1', '/home/agentworks/ws-proj', 'ws-ws-proj', 'proj')"
     )
-    db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode, socket_path) "
-        "VALUES ('s-copied', 'ws-copied', 'default', 'admin', "
-        "'/run/agentworks/admin-tmux-sockets/agentworks/s-copied.sock')"
+    db.insert_session(
+        "s-copied",
+        "ws-copied",
+        "default",
+        SessionMode.ADMIN,
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/s-copied.sock",
     )
     db._conn.commit()
 

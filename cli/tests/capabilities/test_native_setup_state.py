@@ -70,7 +70,7 @@ def test_nested_declaration_survives_persistence(tmp_path):
 
 
 def test_unknown_version_is_retained_but_cannot_bless_setup():
-    record = _slice(VersionedPayload(2, {"future": True}))
+    record = _slice(VersionedPayload(3, {"future": True}))
     with pytest.raises(UnsupportedNativeSetupVersionError):
         decode_native_setup(record)
     assert canonicalize_native_setup(record) == record.payload

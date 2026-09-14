@@ -22,10 +22,11 @@ from __future__ import annotations
 
 import shlex
 from abc import abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal, Protocol, Self
 
+from agentworks.artifacts.application import ArtifactApplication
 from agentworks.capabilities.base import Capability, ScopeLevel
 from agentworks.command_checks import check_required_commands
 from agentworks.errors import StateError
@@ -35,6 +36,7 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
+    from agentworks.artifacts.application import SessionArtifactContext
     from agentworks.capabilities.base import OperationScope, RunContext
     from agentworks.capabilities.descriptor import Facet
     from agentworks.capabilities.harness_integration.setup import (
@@ -68,6 +70,7 @@ class HarnessStart:
 
     command: str
     note: str | None = None
+    artifacts: ArtifactApplication = ArtifactApplication()
 
 
 @dataclass(frozen=True)
@@ -120,7 +123,7 @@ def require_implemented_start(
         f"invalid result type '{type(result).__name__}' for launch intent '{intent.value}'",
         entity_kind="session",
         entity_name=session_name,
-        hint="Update the harness integration to implement contract version 3.",
+        hint="Update the harness integration to implement contract version 6.",
     )
 
 
@@ -220,6 +223,7 @@ class SessionBinding:
     target: _Target | None
     admin: bool
     state: dict[str, object]
+    artifact_context: SessionArtifactContext | None = None
 
 
 class HarnessIntegration(Capability):
@@ -257,6 +261,7 @@ class HarnessIntegration(Capability):
         target: _Target | None,  # the agent node it runs as; None in admin mode
         admin: bool,  # admin mode (uses ctx.admin_target())
         state: dict[str, object],  # this harness integration's OWN namespace of the persisted blob (mutated in place)
+        artifact_context: SessionArtifactContext | None = None,
     ) -> None:
         super().__init__(owner_name, config, facet="session")
         self._session: SessionBinding | None = SessionBinding(
@@ -267,6 +272,7 @@ class HarnessIntegration(Capability):
             target=target,
             admin=admin,
             state=state,
+            artifact_context=artifact_context,
         )
         self._probed = False
 
@@ -298,7 +304,7 @@ class HarnessIntegration(Capability):
         """Whether the owner removed this previously applied integration activation."""
         return self._config is None
 
-    def vm_init(self, invocation: VMSetupInvocation) -> None:
+    def vm_init(self, invocation: VMSetupInvocation) -> ArtifactApplication:
         """Reject activation unless the integration implements VM setup."""
         raise StateError(
             f"harness integration '{self.name}' does not implement setup facet 'vm'",
@@ -306,7 +312,7 @@ class HarnessIntegration(Capability):
             entity_name=self.owner_name,
         )
 
-    def user_init(self, invocation: UserSetupInvocation) -> None:
+    def user_init(self, invocation: UserSetupInvocation) -> ArtifactApplication:
         """Reject activation unless the integration implements user setup."""
         raise StateError(
             f"harness integration '{self.name}' does not implement setup facet 'user'",
@@ -314,7 +320,7 @@ class HarnessIntegration(Capability):
             entity_name=self.owner_name,
         )
 
-    def workspace_init(self, invocation: WorkspaceSetupInvocation) -> None:
+    def workspace_init(self, invocation: WorkspaceSetupInvocation) -> ArtifactApplication:
         """Reject activation unless the integration implements workspace setup."""
         raise StateError(
             f"harness integration '{self.name}' does not implement setup facet 'workspace'",
@@ -331,6 +337,10 @@ class HarnessIntegration(Capability):
         """
         _ = self._session_binding
         return ()
+
+    def prepare_artifacts(self, context: SessionArtifactContext) -> None:
+        """Bind core-prepared inputs before the integration chooses its launch."""
+        self._session = replace(self._session_binding, artifact_context=context)
 
     @property
     def _session_binding(self) -> SessionBinding:

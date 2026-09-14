@@ -33,6 +33,47 @@ owned effects to retire is skipped and not marked applied. A config model, inclu
 schema, does not establish facet support. See
 [harness facets](../../../../docs/guides/harness-facets.md) for complete configuration examples.
 
+Contract version 6 supplies grouped artifact delivery. Core captures each owner's
+`artifacts.bundles` into an immutable `ArtifactGroup` with hints, rules, skills and agents maps.
+`SetupInvocation.artifacts` is an `ArtifactInputs` value: one local group and deferred groups keyed
+by their original owner. `SessionArtifactContext.inputs` uses the same boundary. Later selected
+bundles replace whole same-type/key definitions within an owner; different owners never overwrite
+each other. Normalized content and map keys enforce the same portable lowercase artifact-name
+contract used by declarations and persisted captures. An integration must consume those groups
+without flattening away equal names. Setup methods return an `ArtifactApplication`: concrete native
+files plus deferrals for inputs requiring a later facet. Core performs guarded whole-file
+publication and checkpoints confirmed ownership. The integration owns native formats, placement,
+compatibility checks and routing decisions. A successful application reports inputs omitted from its
+deferral list as handled. The integration must fulfill that delivery obligation, through native
+files, launch arguments or another supported native mechanism; omission is its handling report, not
+independent proof of consumption. Core validates the result and refuses final-session deferrals.
+Returning the old `None` result is a contract error even for an empty invocation.
+
+An `ArtifactFile` may supply an exact `package_root` for guarded empty-parent cleanup. The shared
+skill renderer sets it on every package member, and publication persists it in that member's
+`OwnedArtifactFile`. The normalized root must contain the file and lie strictly within an owning
+publication root. It is a cleanup boundary, not a separate directory ownership record. Publication
+places `SKILL.md` before supporting members; retirement keeps it until owned supporting members
+retire. Required inner-parent cleanup precedes dropping each record, including when its file is
+already absent. Only permission denial removing the final, verified-empty package root permits a
+warning and completed file retirement; other cleanup failures remain retryable. Files that omit this
+optional field retain guarded retirement without directory pruning. Their `SKILL.md` entrypoints,
+identified by native skill identity, still publish first and retire last; deeper entrypoints retire
+before shallower ones. Unowned files do not keep an obsolete entrypoint active.
+
+A VM deferral chooses exactly one of user, workspace or session. User/workspace deferrals can only
+target session. Core sends an inactive VM's inputs to user, then passes an inactive user or
+workspace's applicable inputs to session. It does not rerun ancestor setup during session start.
+Missing or stale active artifact results require the owning setup operation.
+
+Before `start`, core calls `prepare_artifacts` with the immutable `SessionArtifactContext` available
+on the session binding. This includes completed environment, actual home, prospective session/run
+IDs, grouped remaining inputs and ancestor file ownership metadata. Return the session application
+in `HarnessStart.artifacts`. Core refuses final deferrals before replacing a running workload and
+restricts session file publication to that run's private directory under the actual user's home.
+Generated literal argv values must use `quote_literal_argv` so artifact text is not interpreted as
+Agentworks template substitutions. Native conversation IDs remain integration-owned.
+
 And note that regardless of integration, all sessions run inside the standard tmux session. This
 provides both access to stdin/stdout/stderr for interactivity as well as the persistent execution
 capability. This is all handled automatically by the core Agentworks session logic. The integration
@@ -690,9 +731,10 @@ The checklist beyond code, per the repo rules:
 
 Known holes the current contract leaves open on purpose, so the boundaries read as deliberate:
 
-- **Artifacts and features.** The current setup pipeline is core provisioning and scoped env,
-  followed by harness integrations. It has no artifact ingestion, bundles, propagation, deferral, or
-  feature-emission stage. Those are future contracts, not accepted configuration today.
+- **Features and further artifact types.** Core provisioning prepares scoped env and declared
+  artifact bundles before harness integrations handle or defer them. A future feature-emission stage
+  can fit between core and integrations. Core hint emission, hooks and MCP artifacts remain later
+  work; see [agent artifacts](../../artifacts/README.md) for the supported artifact types.
 - **Secrets and integration-owned environment.** The declare-and-receive secret plumbing is in place
   but no shipped integration declares a config secret. The session template's `env` chain, including
   secret-backed entries, is the supported way to put an env var (an API key, a tool config-dir

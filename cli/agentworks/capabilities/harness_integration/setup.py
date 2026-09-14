@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
+from agentworks.artifacts.model import ArtifactInputs
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
@@ -26,6 +28,7 @@ class SetupInvocation:
     runner: Transport
     prior: SetupRecord | None
     checkpoint: Callable[[tuple[NativeClaim, ...]], None]
+    artifacts: ArtifactInputs = field(default_factory=ArtifactInputs)
     environment: Mapping[str, str] = field(default_factory=dict, repr=False)
     secrets: Mapping[str, str] = field(default_factory=dict, repr=False)
 

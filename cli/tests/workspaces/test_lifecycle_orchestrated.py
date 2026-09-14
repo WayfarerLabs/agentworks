@@ -29,7 +29,7 @@ import pytest
 
 from agentworks.agents import grants as agent_grants
 from agentworks.capabilities.base import RunContext
-from agentworks.db import InitStatus, VMStatus
+from agentworks.db import InitStatus, SessionMode, VMStatus
 from agentworks.errors import (
     ExternalError,
     NotFoundError,
@@ -98,13 +98,14 @@ def _seed_workspace(db: Database, *, vm_name: str, name: str) -> None:
 def _seed_live_session(db: Database, *, name: str, ws: str) -> None:
     """A session row that reads as alive (complete fingerprint + socket), so
     delete's status-aware kill loop probes and kills it."""
-    db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode, "
-        "socket_path, pid, boot_id, tmux_server_start_ticks) VALUES (?, ?, 'default', 'admin', "
-        "?, 4242, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', 77)",
-        (name, ws, f"/tmp/{name}.sock"),
+    db.insert_session(name, ws, "default", SessionMode.ADMIN)
+    db.update_session_runtime(
+        name,
+        socket_path=f"/tmp/{name}.sock",
+        pid=4242,
+        boot_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        tmux_server_start_ticks=77,
     )
-    db._conn.commit()
 
 
 def _reachable(monkeypatch: pytest.MonkeyPatch, value: bool) -> None:

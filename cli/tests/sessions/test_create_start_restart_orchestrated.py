@@ -25,6 +25,7 @@ import pytest
 # Captured at import time (before any test's autouse registry stub is
 # installed): the gate-parity tests below need the REAL registry and
 # the REAL env-chain resolve.
+from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.bootstrap import build_registry as _real_build_registry
 from agentworks.bootstrap import load_request_registry as _real_load_request_registry
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, HarnessStart, ShellIntegration
@@ -117,6 +118,7 @@ def _requiring_template(monkeypatch: pytest.MonkeyPatch, *commands: str) -> None
             harness_integration="shell",
             harness_integration_config={"command": "claude", "required_commands": list(commands)},
             env={},
+            artifacts=ArtifactsConfig(),
         ),
     )
 
@@ -1301,7 +1303,13 @@ def _template(
         config["resume_command"] = resume_command
     if required_commands is not None:
         config["required_commands"] = required_commands
-    resolved = SimpleNamespace(name="claude", harness_integration="shell", harness_integration_config=config, env={})
+    resolved = SimpleNamespace(
+        name="claude",
+        harness_integration="shell",
+        harness_integration_config=config,
+        env={},
+        artifacts=ArtifactsConfig(),
+    )
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: resolved)
 
 

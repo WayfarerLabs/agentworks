@@ -8,6 +8,7 @@ import pytest
 from agentworks.agents.initializer import create_new_agent_user
 from agentworks.agents.realize import realize_agent
 from agentworks.agents.templates import ResolvedAgentTemplate
+from agentworks.artifacts.application import ArtifactApplication
 from agentworks.capabilities.harness_integration.kinds import HarnessIntegrationEntry
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
 from agentworks.env.entry import EnvEntry
@@ -51,7 +52,7 @@ def test_empty_setup_does_not_resolve_ancestor_env(db, registry, vm, monkeypatch
     monkeypatch.setattr("agentworks.vms.templates.resolve_live_template", lambda *a: pytest.fail("unused ancestor env"))
     assert prepare_agent_setup(db, registry, vm=vm, name="agent", template=ResolvedAgentTemplate("default")) is None
     assert prepare_workspace_setup(db, registry, vm=vm, name="project", template=ResolvedTemplate("default")) is None
-    assert prepare_vm_setup(db, name=vm.name, template=resolve_vm({}), admin=AdminConfig()) == ()
+    assert prepare_vm_setup(db, registry, name=vm.name, template=resolve_vm({}), admin=AdminConfig()) == ()
 
 
 def test_component_inputs_keep_only_ancestors_and_retirement(db, registry, vm, monkeypatch):
@@ -80,7 +81,7 @@ def test_component_inputs_keep_only_ancestors_and_retirement(db, registry, vm, m
     assert project.target.admin is None and project.target.agent is None
     parent.harness_integrations = selected
     admin = AdminConfig(env=_env(USER="admin"), harness_integrations=selected)
-    system, user = prepare_vm_setup(db, name=vm.name, template=parent, admin=admin)
+    system, user = prepare_vm_setup(db, registry, name=vm.name, template=parent, admin=admin)
     assert system.target.admin is None and user.target.admin == admin.env
     assert system.kind == user.kind == "vm" and system.name == user.name == vm.name
     assert user.component == "admin"
@@ -165,6 +166,7 @@ def test_fresh_owner_buffers_setup_until_atomic_row_commit(db, registry, vm, nat
         invocation.checkpoint((claim,))
         assert read_native_setup(db, kind, name).records == ()
         calls.append(claim)
+        return ArtifactApplication()
 
     monkeypatch.setattr(ShellIntegration, "user_init" if kind == "agent" else "workspace_init", initialize)
     if fail_insert:
@@ -291,6 +293,9 @@ def test_config_secret_registration_and_delivery_share_actual_owner(db, vm, nati
             assert invocation.secrets == {"config-secret": "config-private"}
             assert invocation.environment["ENV_TOKEN"] == "env-private"
             observed.append(invocation)
+            from agentworks.artifacts.application import ArtifactApplication
+
+            return ArtifactApplication()
 
     with seated_plugin(Plugin(name="lifecycle-token", capabilities={"harness-integration": (Harness,)})):
         from tests.conftest import registry_with_shell
@@ -369,7 +374,7 @@ def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(db, registry,
     template.harness_integrations = [CapabilityBlock.of("shell")]
     template.env = _env(VM_ONLY="system", TOKEN={"secret": "vm-token"})
     admin = AdminConfig(env=_env(ADMIN_ONLY="admin"), harness_integrations=[CapabilityBlock.of("shell")])
-    inputs = prepare_vm_setup(db, name=vm.name, template=template, admin=admin)
+    inputs = prepare_vm_setup(db, registry, name=vm.name, template=template, admin=admin)
     events = []
 
     def core(*args, **kwargs):
@@ -384,6 +389,7 @@ def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(db, registry,
         assert "ADMIN_ONLY" not in invocation.environment
         assert "AGENTWORKS_AGENT" not in invocation.environment
         events.append("vm")
+        return ArtifactApplication()
 
     def user_setup(self, invocation):
         assert events == ["core", "vm"]
@@ -394,6 +400,7 @@ def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(db, registry,
         events.append("admin")
         if fail_user:
             raise RuntimeError("admin setup failed: vm-private")
+        return ArtifactApplication()
 
     def final_keys(*args, **kwargs):
         assert events == ["core", "vm", "admin"]

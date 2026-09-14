@@ -1,4 +1,4 @@
-"""Private snapshots and atomic publication for plugin-native settings roles."""
+"""Private snapshots and atomic publication for owned native files."""
 
 from __future__ import annotations
 
@@ -20,21 +20,62 @@ if TYPE_CHECKING:
 # Open each directory relative to its already-open parent. A concurrent symlink
 # replacement cannot redirect reads or publication into another directory tree.
 _FILE_PROGRAM = r"""
-import grp, hashlib, json, os, secrets, stat, sys
-op, destination, staging, expected, group = sys.argv[1:]
+import errno, grp, hashlib, json, os, secrets, stat, sys
+op, destination, staging, expected, group, executable = sys.argv[1:]
 parts = destination.split('/')[1:]
 if not destination.startswith('/') or any(p in ('', '.', '..') for p in parts):
     sys.exit(1)
 if op in ('directory', 'mkdir'):
     parts.append('unused')
 traverse = getattr(os, 'O_PATH', os.O_RDONLY) | os.O_DIRECTORY | os.O_NOFOLLOW
+if op == 'prune':
+    root_parts = staging.split('/')[1:]
+    if parts[:len(root_parts)] != root_parts or len(parts) <= len(root_parts):
+        sys.exit(1)
+    parents = []
+    fd = os.open('/', traverse)
+    try:
+        for component in parts[:-1]:
+            try:
+                child = os.open(component, traverse, dir_fd=fd)
+            except FileNotFoundError:
+                break
+            parents.append((fd, component))
+            fd = child
+        for index in range(len(parents) - 1, len(root_parts) - 2, -1):
+            parent, component = parents[index]
+            try:
+                os.rmdir(component, dir_fd=parent)
+            except FileNotFoundError:
+                pass
+            except OSError as error:
+                if error.errno in (errno.ENOTEMPTY, errno.EEXIST):
+                    break
+                if index == len(root_parts) - 1 and error.errno in (errno.EACCES, errno.EPERM, errno.EROFS):
+                    check = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+                    try:
+                        original = parents[index + 1][0] if index + 1 < len(parents) else fd
+                        observed, held = os.fstat(check), os.fstat(original)
+                        if (observed.st_dev, observed.st_ino) != (held.st_dev, held.st_ino):
+                            raise OSError(errno.ESTALE, 'package root changed')
+                        with os.scandir(check) as entries:
+                            if next(entries, None) is None:
+                                sys.exit(3)  # Only the final, verified-empty package root may remain.
+                    finally:
+                        os.close(check)
+                raise
+    finally:
+        os.close(fd)
+        for parent, _ in parents:
+            os.close(parent)
+    sys.exit(0)
 fd = os.open('/', traverse)
 try:
     for component in parts[:-1]:
         try:
             next_fd = os.open(component, traverse, dir_fd=fd)
         except FileNotFoundError:
-            if op in ('read', 'directory'):
+            if op in ('read', 'fingerprint', 'delete', 'directory'):
                 print(json.dumps({'exists': False}))
                 sys.exit(0)
             os.mkdir(component, 0o700 if not group else 0o2770, dir_fd=fd)
@@ -48,6 +89,8 @@ try:
         print(json.dumps({'exists': True}))
         sys.exit(0)
     content = None
+    actual = '-'
+    mode = 0
     try:
         source_fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
     except FileNotFoundError:
@@ -56,7 +99,17 @@ try:
         with os.fdopen(source_fd, 'rb') as source:
             if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
                 sys.exit(1)
-            content = source.read()
+            mode = stat.S_IMODE(os.fstat(source.fileno()).st_mode)
+            if op == 'read':
+                content = source.read()
+            else:
+                digest = hashlib.sha256()
+                while chunk := source.read(256 * 1024):
+                    digest.update(chunk)
+                actual = digest.hexdigest()
+    if op == 'fingerprint':
+        print(json.dumps({'exists': actual != '-', 'sha256': actual, 'mode': mode}))
+        sys.exit(0)
     if op == 'read':
         if content is not None:
             output_fd = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -64,9 +117,12 @@ try:
                 output.write(content)
         print(json.dumps({'exists': content is not None}))
     else:
-        actual = '-' if content is None else hashlib.sha256(content).hexdigest()
         if actual != expected:
             sys.exit(2)
+        if op == 'delete':
+            if actual != '-':
+                os.unlink(parts[-1], dir_fd=fd)
+            sys.exit(0)
         gid = -1 if not group else grp.getgrnam(group).gr_gid
         with open(staging, 'rb') as source:
             replacement = source.read()
@@ -75,7 +131,8 @@ try:
             output_fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=fd)
             with os.fdopen(output_fd, 'wb') as output:
                 os.fchown(output.fileno(), -1, gid)
-                os.fchmod(output.fileno(), 0o600 if not group else 0o660)
+                mode = (0o700 if executable == '1' else 0o600) if not group else (0o770 if executable == '1' else 0o660)
+                os.fchmod(output.fileno(), mode)
                 output.write(replacement)
                 output.flush()
                 os.fsync(output.fileno())
@@ -97,7 +154,11 @@ finally:
 
 def native_path(path: str) -> str:
     """Validate an external guest path before interpreting its components."""
-    if not path.startswith("/") or "\x00" in path or any(part in ("", ".", "..") for part in path.split("/")[1:]):
+    if (
+        not path.startswith("/")
+        or not path.isprintable()
+        or any(part in ("", ".", "..") for part in path.split("/")[1:])
+    ):
         raise StateError("native settings require an absolute, normalized guest path")
     return str(PurePosixPath(path))
 
@@ -162,6 +223,7 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
                 "-",
                 "-",
                 "",
+                "0",
             ]
         )
         result = self.runner.run(command, check=False)
@@ -179,7 +241,7 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
         """Read a regular native file without emitting its contents into logs."""
         destination = native_path(destination)
         remote, local = self.slot()
-        command = shlex.join(["python3", "-c", _FILE_PROGRAM, "read", destination, remote, "-", ""])
+        command = shlex.join(["python3", "-c", _FILE_PROGRAM, "read", destination, remote, "-", "", "0"])
         result = self.runner.run(command, check=False, discard_output=False)
         if not result.ok:
             raise StateError("native settings path is unreadable or contains an unsuitable file or link")
@@ -197,14 +259,28 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
         except Exception:
             raise ExternalError("could not capture native settings file") from None
 
-    def publish(self, destination: str, content: bytes, *, expected: str | None, group: str = "") -> None:
+    def publish(
+        self, destination: str, content: bytes, *, expected: str | None, group: str = "", executable: bool = False
+    ) -> None:
         """Atomically replace a guarded file only while its observed bytes match."""
         destination = native_path(destination)
         remote, local = self.slot()
         local.write_bytes(content)
         try:
             self.runner.copy_to(local, remote)
-            command = shlex.join(["python3", "-c", _FILE_PROGRAM, "write", destination, remote, expected or "-", group])
+            command = shlex.join(
+                [
+                    "python3",
+                    "-c",
+                    _FILE_PROGRAM,
+                    "write",
+                    destination,
+                    remote,
+                    expected or "-",
+                    group,
+                    "1" if executable else "0",
+                ]
+            )
             result = self.runner.run(command, check=False, discard_output=True)
         except Exception:
             raise ExternalError("could not publish native settings file") from None
@@ -212,3 +288,55 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
             raise StateError("native settings changed during setup; retry against the current file")
         if not result.ok:
             raise StateError("native settings publication could not establish the destination ownership or mode")
+
+    def remove(self, destination: str, *, expected: str) -> None:
+        """Remove only a regular file that still matches its recorded ownership."""
+        command = shlex.join(
+            ["python3", "-c", _FILE_PROGRAM, "delete", native_path(destination), "-", expected, "", "0"]
+        )
+        result = self.runner.run(command, check=False, discard_output=True)
+        if result.returncode == 2:
+            raise StateError("owned native file changed; retaining it for operator inspection")
+        if not result.ok:
+            raise StateError("owned native file could not be removed safely")
+
+    def prune_empty_parents(self, destination: str, *, root: str) -> None:
+        """Prune only empty parents of a retired file, through its package root."""
+        destination, root = native_path(destination), native_path(root)
+        if not destination.startswith(root + "/"):
+            raise StateError("retired native file is outside its package root")
+        command = shlex.join(["python3", "-c", _FILE_PROGRAM, "prune", destination, root, "-", "", "0"])
+        result = self.runner.run(command, check=False, discard_output=True)
+        if result.returncode == 3:
+            output.warn(
+                f"Empty retired package root '{root}' was retained because its parent denies directory removal."
+            )
+        elif not result.ok:
+            raise StateError(
+                f"Retired members beneath package root '{root}' could not be pruned safely",
+                hint="Check permissions and retry setup. Cleanup evidence remains; files may already be absent.",
+            )
+
+    def fingerprint(self, destination: str) -> tuple[str, int] | None:
+        """Stream a guarded file's hash and mode without copying or logging its body."""
+        command = shlex.join(
+            ["python3", "-c", _FILE_PROGRAM, "fingerprint", native_path(destination), "-", "-", "", "0"]
+        )
+        result = self.runner.run(command, check=False)
+        if not result.ok:
+            raise StateError("artifact destination is inaccessible or contains an unsuitable file or link")
+        try:
+            observed = json.loads(result.stdout)
+            if observed["exists"] is False:
+                return None
+            digest, mode = observed["sha256"], observed["mode"]
+            if (
+                observed["exists"] is not True
+                or not isinstance(digest, str)
+                or len(digest) != 64
+                or type(mode) is not int
+            ):
+                raise ValueError
+            return digest, mode
+        except (ValueError, KeyError, TypeError):
+            raise ExternalError("invalid artifact destination observation") from None

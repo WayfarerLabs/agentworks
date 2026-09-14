@@ -19,7 +19,7 @@ select exactly the VM, its workspaces and agents, and those workspaces' sessions
 payload is decoded. A malformed selected row therefore fails the backup, while a malformed row for
 an unrelated owner cannot block it. These named predicates are part of the repository contract;
 callers do not recreate the polymorphic owner-tree query or filter a decoded global record list. The
-same backup snapshot reads applied slices for the VM, its agents, and its workspaces through
+same backup snapshot reads applied slices for the VM, its agents, workspaces and sessions through
 `get_applied_slices`. Backup decodes and re-encodes each known slice through its owning domain codec
 before exporting it, including native setup evidence for the complete owner tree.
 
@@ -40,13 +40,12 @@ Desired overlays express current intent. Applied-state slices store domain-speci
 evidence. VM facts record successful checkpoints; native setup also records confirmed partial
 mutations and pending cleanup. They use a repository-owned closed key type whose valid
 instance-kind/key pairs are checked on writes and persisted reads. The keys `hardware-provenance`
-and `ssh-identity` are VM-only. `harness-native-setup` is valid for VM, agent, and workspace owners;
-session owners accept no applied keys. The VM native slice contains distinct `vm` and `admin`
-components, while an agent slice contains `agent` and a workspace slice contains `workspace`.
-`replace_applied_slices` replaces only the supplied slice keys, with one operation and one
-timestamp, and preserves all unrelated evidence. Empty replacement is a no-op. Existing instances
-have no synthesized records: absence means not recorded until a lifecycle operation establishes
-evidence.
+and `ssh-identity` are VM-only. `harness-native-setup` and `artifact-inputs` are valid for VM,
+agent, workspace and session owners. VM slices contain distinct `vm` and `admin` components; other
+owners contain their matching component. `replace_applied_slices` replaces only the supplied slice
+keys, with one operation and one timestamp, and preserves all unrelated evidence. Empty replacement
+is a no-op. Existing instances have no synthesized records: absence means not recorded until a
+lifecycle operation establishes evidence.
 
 Operator-facing inspection groups these records under `lifecycle_evidence`. The `applied-state`
 record type and `hardware-provenance` key are private storage vocabulary and do not become public
@@ -103,6 +102,29 @@ setup buffer these records until the owner row and desired overlay can commit in
 transaction. Subsequent owning setup uses the prior claims to retire removed activations and
 associations where the integration can prove ownership. Removing a desired declaration does not
 itself erase its evidence.
+
+Version 2 of native setup adds prepared artifact identities, single-destination deferrals and owned
+artifact files. File ownership records retain the native path/identity, originating declarations,
+content hash, executable intent and optional exact `package_root`. A package root is normalized and
+must contain its file; publication also checks it against the owning scope. It remains with each
+file's checkpoint evidence through interrupted required cleanup, even if the file is already absent.
+Only permission denial removing the final, verified-empty package root permits completed retirement
+with a warning. File records that omit this optional field can retire owned files with entrypoint
+ordering, but do not authorize directory pruning. Version-1 plugin/settings evidence remains
+readable but cannot claim that it handled artifact inputs. Core captures use a separate version-2
+`artifact-inputs` slice with effective declaration fingerprints and one group per actual owner. Each
+group has four type maps, lossless normalized content and compact replacement provenance. Inactive
+integrations reuse that common capture without acquiring their own applied record. Unsupported
+capture versions remain uninterpreted and cannot be overwritten by owning reinitialization. Backup
+preserves their payloads for an Agentworks version that can interpret them; independent native file
+ownership evidence is retained.
+
+Session rows have a durable unique `session_uuid` and a nullable `run_id`. Migration 38 assigns each
+existing session its UUID once; legacy run IDs remain absent until the next managed launch. Core
+allocates prospective IDs before private artifact publication and preserves the session UUID on
+restart. A running start that does nothing changes neither identity. These fields are independent of
+native conversation state and the observed tmux runtime fingerprint. Database backup preserves them
+through the ordinary schema and row backup contract.
 
 `describe` exposes sanitized integration/component names, completion, pending cleanup, and claim
 counts under `lifecycle_evidence`; it performs no native I/O and does not reveal stored config.

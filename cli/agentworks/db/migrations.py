@@ -13,6 +13,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 from agentworks.errors import MigrationBlockedError
 from agentworks.path_rendering import format_host_path
@@ -73,6 +74,47 @@ def _retire_vm_checkpoints(conn: sqlite3.Connection, _context: MigrationContext)
             ),
         )
     conn.execute("DROP TABLE vm_checkpoints")
+
+
+def _add_session_identity(conn: sqlite3.Connection, _context: MigrationContext) -> None:
+    """Assign each legacy session one durable UUID without inventing a managed run."""
+    # Rebuild to enforce NOT NULL and uniqueness without a fabricated SQL default.
+    # The migration runner disables foreign keys and commits this whole step.
+    conn.execute("BEGIN IMMEDIATE")
+    conn.execute("""
+        CREATE TABLE sessions_new (
+            name                    TEXT PRIMARY KEY,
+            workspace_name          TEXT NOT NULL REFERENCES workspaces(name),
+            template                TEXT NOT NULL,
+            mode                    TEXT NOT NULL DEFAULT 'admin',
+            created_at              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            updated_at              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            agent_name              TEXT REFERENCES agents(name),
+            created_workspace       INTEGER NOT NULL DEFAULT 0,
+            socket_path             TEXT,
+            pid                     INTEGER,
+            boot_id                 TEXT,
+            created_agent           INTEGER NOT NULL DEFAULT 0,
+            harness_integration_state TEXT NOT NULL DEFAULT '{}',
+            tmux_server_start_ticks INTEGER,
+            last_started_at         TEXT,
+            session_uuid            TEXT NOT NULL UNIQUE,
+            run_id                  TEXT,
+            CHECK (mode != 'agent' OR socket_path IS NOT NULL)
+        )
+    """)
+    columns = (
+        "name, workspace_name, template, mode, created_at, updated_at, agent_name, "
+        "created_workspace, socket_path, pid, boot_id, created_agent, "
+        "harness_integration_state, tmux_server_start_ticks, last_started_at"
+    )
+    for row in conn.execute(f"SELECT {columns} FROM sessions"):
+        conn.execute(
+            f"INSERT INTO sessions_new ({columns}, session_uuid) VALUES ({','.join('?' for _ in range(16))})",
+            (*row, str(uuid4())),
+        )
+    conn.execute("DROP TABLE sessions")
+    conn.execute("ALTER TABLE sessions_new RENAME TO sessions")
 
 
 def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> None:
@@ -726,6 +768,7 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
         ALTER TABLE sessions ADD COLUMN last_started_at TEXT;
         ALTER TABLE consoles ADD COLUMN last_started_at TEXT;
     """,
+    38: _add_session_identity,
 }
 
 LATEST_VERSION = max(MIGRATIONS)
@@ -855,6 +898,7 @@ _SCHEMA_SENTINEL_ADDITIONS: dict[int, dict[str, tuple[str, ...]]] = {
         "sessions": ("last_started_at",),
         "consoles": ("last_started_at",),
     },
+    38: {"sessions": ("session_uuid", "run_id")},
 }
 
 _SCHEMA_SENTINEL_REMOVED_TABLES: dict[int, tuple[str, ...]] = {

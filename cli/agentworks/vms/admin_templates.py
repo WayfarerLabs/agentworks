@@ -168,6 +168,7 @@ def _merge_template(
     _source: object,
 ) -> tuple[AdminConfig, tuple[LayerContribution, ...]]:
     """Merge only fields explicitly authored by this admin declaration."""
+    from agentworks.artifacts.declarations import ArtifactsConfig
     from agentworks.env.entry import EnvEntry
     from agentworks.instance_overlay_codec import OVERLAY_EXCLUDED_FIELDS
     from agentworks.schema import CapabilityBlock, merge_model
@@ -188,6 +189,7 @@ def _merge_template(
         exclude=set(OVERLAY_EXCLUDED_FIELDS),
     )
     raw = {**defaults, **raw}
+    raw["artifacts"] = ArtifactsConfig.model_validate(raw["artifacts"])
     raw["env"] = {key: EnvEntry.model_validate(value) for key, value in cast("dict[str, object]", raw["env"]).items()}
     raw["harness_integrations"] = [
         CapabilityBlock.model_validate(value) for value in cast("list[object]", raw["harness_integrations"])

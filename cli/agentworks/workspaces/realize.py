@@ -166,6 +166,17 @@ def realize_workspace(
                         from agentworks.harness_setup.state import write_native_setup
 
                         write_native_setup(db, "workspace", name, native_setup, operation="workspace-create")
+                        if setup_inputs is not None and setup_inputs.artifact_snapshot is not None:
+                            from agentworks.artifacts.state import write_capture
+
+                            write_capture(
+                                db,
+                                "workspace",
+                                name,
+                                "workspace",
+                                setup_inputs.artifact_snapshot,
+                                operation="workspace-create",
+                            )
             except KeyboardInterrupt:
                 output.warn(f"Cancelling workspace create '{name}'... rolling back.")
                 _safe_cleanup()

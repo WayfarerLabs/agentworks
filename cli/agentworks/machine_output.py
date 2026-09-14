@@ -62,6 +62,7 @@ class MachineOutputCommand(StrEnum):
     RESOURCE_SHOW = "resource.show"
     RESOURCE_KINDS = "resource.kinds"
     GRAPH_SHOW = "graph.show"
+    ARTIFACTS_SHOW = "artifacts.show"
     VM_LIST = "vm.list"
     VM_DESCRIBE = "vm.describe"
     WORKSPACE_LIST = "workspace.list"

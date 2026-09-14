@@ -32,6 +32,7 @@ import pytest
 
 from agentworks.agents.template import AgentTemplate
 from agentworks.agents.templates import resolve_from_dict as resolve_agent
+from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.env.entry import EnvEntry
 from agentworks.schema import CapabilityBlock
 from agentworks.sessions.template import SessionTemplate
@@ -82,6 +83,7 @@ KINDS = {
             "system_install_commands": ["docker"],
             "harness_integrations": [CapabilityBlock.of("shell")],
             "env": _ENV,
+            "artifacts": ArtifactsConfig(bundles=["team"]),
             "tailscale_auth_key": "prod-ts-key",
         },
     ),
@@ -103,6 +105,7 @@ KINDS = {
             "mise_prune_on_reinit": False,
             "harness_integrations": [CapabilityBlock.of("shell")],
             "env": _ENV,
+            "artifacts": ArtifactsConfig(bundles=["team"]),
         },
     ),
     "workspace-template": _Kind(
@@ -115,6 +118,7 @@ KINDS = {
             "git_user_email": "ada@example.com",
             "harness_integrations": [CapabilityBlock.of("shell")],
             "env": _ENV,
+            "artifacts": ArtifactsConfig(bundles=["team"]),
         },
     ),
     "session-template": _Kind(
@@ -123,6 +127,7 @@ KINDS = {
         declared={
             "description": "Prod debugging",
             "env": _ENV,
+            "artifacts": ArtifactsConfig(bundles=["team"]),
             "harness_integration": CapabilityBlock.of("shell", **{"command": "htop"}),
         },
         # ``shell`` is the only registered harness integration, so no fixture

@@ -7,6 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, TypedDict
+from uuid import UUID, uuid4
 
 if TYPE_CHECKING:
     from agentworks.debian import DebianRelease
@@ -173,6 +174,10 @@ class SessionRow:
     harness_integration_state: dict[str, object] = field(default_factory=dict)
     # The most recent successful managed tmux creation observed by Agentworks.
     last_started_at: str | None = None
+    # Stable logical identity, independent of reusable display names.
+    session_uuid: str = field(default_factory=lambda: str(uuid4()))
+    # Prospective managed launch identity; legacy rows have no recorded run.
+    run_id: str | None = None
 
 
 class ShellEntry(TypedDict):
@@ -199,3 +204,11 @@ class ConsoleSessionRow:
     session_name: str
     position: int
     shells: list[ShellEntry]
+
+
+def _canonical_session_identity(value: str) -> str:
+    """Validate an identity crossing a DB input or persisted-row boundary."""
+    try:
+        return str(UUID(value))
+    except (ValueError, TypeError, AttributeError):
+        raise ValueError("session identities must be UUID strings") from None

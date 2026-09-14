@@ -6,11 +6,14 @@ import hashlib
 import json
 import shlex
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, cast
 
 from pydantic import ValidationError
 
 from agentworks import output
+from agentworks.artifacts.model import ArtifactInputs
+from agentworks.artifacts.publication import publish_artifacts, validate_application
+from agentworks.artifacts.state import write_capture
 from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled, harness_integration_for
 from agentworks.capabilities.harness_integration.setup import (
     SetupInvocation,
@@ -24,6 +27,8 @@ from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupR
 from agentworks.harness_setup.state import read_native_setup, replace_setup_record, write_native_setup
 
 if TYPE_CHECKING:
+    from agentworks.artifacts.application import OwnedArtifactFile
+    from agentworks.artifacts.model import ArtifactFacet
     from agentworks.db import Database, VMRow
     from agentworks.harness_setup.inputs import SetupInputs
     from agentworks.harness_setup.locking import NativeMutationGuard
@@ -65,13 +70,22 @@ def run_setup(
     It must already have refused native residue and own failed-create rollback.
     Existing owners checkpoint confirmed ownership changes before another can run.
     """
+    from agentworks.artifacts.routing import inactive_destination, setup_artifacts
+
     expected = {"vm": VMSetupInvocation, "user": UserSetupInvocation, "workspace": WorkspaceSetupInvocation}
     if not isinstance(invocation, expected[inputs.facet]):
         raise StateError("native setup invocation does not match its facet")
+    facet = cast('Literal["vm", "user", "workspace"]', inputs.facet)
     with native_mutation_guard(db.path, invocation.vm.name, held=held):
+        if inputs.artifact_snapshot is not None and not buffered:
+            write_capture(db, inputs.kind, inputs.name, inputs.component, inputs.artifact_snapshot, operation=operation)
         state = read_native_setup(db, inputs.kind, inputs.name)
         prior = {record.integration: record for record in state.records if record.component == inputs.component}
+        fallback: tuple[ArtifactFacet, ...] = ()
+        if not inputs.activations and inputs.artifact_snapshot is not None and inputs.artifact_snapshot.inputs:
+            fallback = (inactive_destination(inputs.facet),)
         if not inputs.activations and not prior:
+            _warn_artifact_deferrals(inputs, fallback)
             return state
         location = (
             invocation.home
@@ -93,7 +107,7 @@ def run_setup(
             ensure_harness_integration_enabled(registry, selected.name)
             implementation = harness_integration_for(selected.name)
             bound[selected.name] = implementation.for_setup(
-                owner_kind=inputs.kind, owner_name=inputs.name, facet=inputs.facet, config=selected.config
+                owner_kind=inputs.kind, owner_name=inputs.name, facet=facet, config=selected.config
             )
 
         for integration in bound.values():
@@ -107,7 +121,7 @@ def run_setup(
         for name in (*desired, *(name for name in prior if name not in desired)):
             previous = prior.get(name)
             block = desired.get(name)
-            if block is None and previous is not None and not previous.claims:
+            if block is None and previous is not None and not previous.claims and not previous.artifact_files:
                 state = NativeSetupState(
                     records=tuple(
                         record
@@ -122,7 +136,7 @@ def run_setup(
                 try:
                     ensure_harness_integration_enabled(registry, name)
                     integration = harness_integration_for(name).for_setup(
-                        owner_kind=inputs.kind, owner_name=inputs.name, facet=inputs.facet, config=None
+                        owner_kind=inputs.kind, owner_name=inputs.name, facet=facet, config=None
                     )
                 except (ConfigError, StateError):
                     pending = previous.model_copy(update={"complete": False, "pending_cleanup": True})
@@ -135,12 +149,20 @@ def run_setup(
                 integration = bound[name]
                 declaration = inputs.declaration(block)
 
+            artifacts = (
+                ArtifactInputs() if block is None else setup_artifacts(db, registry, inputs, invocation.vm, name)
+            )
+
             current = SetupRecord(
                 component=inputs.component,
                 integration=name,
                 destination_id=destination,
                 declaration=declaration,
+                artifact_inputs=tuple(item.identity for item in artifacts.items()),
                 claims=() if previous is None else previous.claims,
+                artifact_files=()
+                if previous is None or previous.destination_id != destination
+                else previous.artifact_files,
             )
             state = replace_setup_record(state, current)
             persist(state)
@@ -155,16 +177,39 @@ def run_setup(
                 state = replace_setup_record(state, current)
                 persist(state)
 
+            def checkpoint_files(files: tuple[OwnedArtifactFile, ...]) -> None:
+                nonlocal current, state
+                current = current.model_copy(update={"artifact_files": files})
+                state = replace_setup_record(state, current)
+                persist(state)
+
             scoped_secrets = {ref.name: invocation.secrets[ref.name] for ref in integration.config_secret_refs()}
-            call = replace(invocation, prior=previous, checkpoint=checkpoint, secrets=scoped_secrets)
+            call = replace(
+                invocation, prior=previous, checkpoint=checkpoint, secrets=scoped_secrets, artifacts=artifacts
+            )
             if isinstance(call, VMSetupInvocation):
-                integration.vm_init(call)
+                application = integration.vm_init(call)
             elif isinstance(call, UserSetupInvocation):
-                integration.user_init(call)
+                application = integration.user_init(call)
             elif isinstance(call, WorkspaceSetupInvocation):
-                integration.workspace_init(call)
+                application = integration.workspace_init(call)
+            else:
+                raise StateError("unknown native setup invocation")
+            application = validate_application(application, artifacts, inputs.facet, integration=name)
+            if isinstance(call, VMSetupInvocation) and application.files:
+                raise StateError("VM artifacts must be routed to an inner facet")
+            roots = () if location is None else (location,)
+            owned = publish_artifacts(
+                call.runner,
+                application.files,
+                current.artifact_files,
+                checkpoint_files,
+                roots=roots,
+                group=call.linux_group if isinstance(call, WorkspaceSetupInvocation) else "",
+            )
+            current = current.model_copy(update={"artifact_files": owned, "deferred": application.deferred})
             if block is None:
-                if current.claims:
+                if current.claims or current.artifact_files:
                     current = current.model_copy(update={"pending_cleanup": True})
                     state = replace_setup_record(state, current)
                     output.warn(f"Native cleanup for {name} retains outstanding ownership; retry its owning setup.")
@@ -177,7 +222,33 @@ def run_setup(
                         )
                     )
             else:
-                current = current.model_copy(update={"complete": True})
+                pending_files = any(item.path not in {file.path for file in application.files} for item in owned)
+                current = current.model_copy(update={"complete": not pending_files, "pending_cleanup": pending_files})
                 state = replace_setup_record(state, current)
             persist(state)
+            if block is not None and current.complete:
+                _warn_artifact_deferrals(inputs, tuple(item.destination for item in current.deferred), name)
+        if fallback and not any(
+            record.pending_cleanup for record in state.records if record.component == inputs.component
+        ):
+            _warn_artifact_deferrals(inputs, fallback)
         return state
+
+
+def _warn_artifact_deferrals(
+    inputs: SetupInputs, destinations: tuple[ArtifactFacet, ...], integration: str | None = None
+) -> None:
+    """Explain when deferred artifacts can reach their next owning setup."""
+    if not destinations:
+        return
+    refresh = {
+        "user": "user: next setup of each actual user",
+        "workspace": "workspace: creation only; existing workspaces cannot refresh in place",
+        "session": "session: next managed start or restart; running sessions are not refreshed",
+    }
+    routes = "; ".join(refresh[destination] for destination in dict.fromkeys(destinations))
+    handler = integration or "core fallback (no activated harness integrations)"
+    output.warn(
+        f"Artifact setup for {inputs.component} '{inputs.name}' via {handler} leaves artifacts deferred ({routes}). "
+        "Already-applied native files follow the harness's own reload behavior."
+    )

@@ -1,0 +1,48 @@
+# Copy into the operator resources directory after selecting real source paths.
+# The repository URL below is a placeholder. Review source content before setup.
+# Enable the codex system plugin through plugins.system in operator configuration.
+apiVersion: agentworks/v1
+kind: artifact-bundle
+metadata:
+  name: team-artifacts
+spec:
+  hints:
+    setup-note:
+      text: Project tools are available through mise.
+  rules:
+    conventions:
+      source: file::~/agent-content/conventions.md
+  skills:
+    review:
+      source: git::https://github.com/example/agent-content.git//skills/review?ref=v1.0.0
+      preserve_bytes:
+        - fixtures/**
+  agents:
+    reviewer:
+      source: file::~/agent-content/reviewer.md
+---
+apiVersion: agentworks/v1
+kind: vm-template
+metadata:
+  name: artifact-vm
+spec:
+  artifacts:
+    bundles: [team-artifacts]
+  # With no VM integration activation, core routes these inputs to the user facet.
+---
+apiVersion: agentworks/v1
+kind: agent-template
+metadata:
+  name: artifact-user
+spec:
+  # User activation alone handles VM-origin skills through the default route.
+  harness_integrations:
+    - name: codex
+---
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: artifact-session
+spec:
+  harness_integration:
+    name: codex

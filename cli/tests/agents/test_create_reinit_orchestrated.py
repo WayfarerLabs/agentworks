@@ -19,6 +19,7 @@ from agentworks import db as db_module
 from agentworks.agents import grants as agent_grants
 from agentworks.agents import initializer as agent_initializer
 from agentworks.agents import manager as agent_manager
+from agentworks.artifacts.application import ArtifactApplication
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.git_credential.base import StoredCredential
 from agentworks.db import VersionedPayload
@@ -1254,6 +1255,7 @@ def test_active_user_setup_joins_eager_env_and_runs_after_core(
         with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "box"):
             pass
         calls.append(invocation)
+        return ArtifactApplication()
 
     monkeypatch.setattr(ShellIntegration, "user_init", setup)
     spec = '{"harness_integrations":[{"name":"shell"}],"env":{"SETUP_TOKEN":{"secret":"setup-token"}}}'
@@ -1307,6 +1309,7 @@ def test_legacy_overlay_conversion_waits_for_successful_native_reinit(
         assert self._config_as(type(self).config_for("user")).plugins == ["legacy@fixture"]
         if fail_setup:
             raise StateError("fixture native failure")
+        return ArtifactApplication()
 
     monkeypatch.setattr(ClaudeCodeIntegration, "user_init", setup)
     if fail_setup:

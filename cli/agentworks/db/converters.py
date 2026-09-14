@@ -19,6 +19,7 @@ from agentworks.db.models import (
     VMEventRow,
     VMRow,
     WorkspaceRow,
+    _canonical_session_identity,
 )
 from agentworks.debian import DebianRelease, profile_for_release
 from agentworks.errors import StateError
@@ -166,6 +167,16 @@ def _to_agent_grant(row: sqlite3.Row) -> AgentGrantRow:
 
 
 def _to_session(row: sqlite3.Row) -> SessionRow:
+    try:
+        session_uuid = _canonical_session_identity(row["session_uuid"])
+        run_id = None if row["run_id"] is None else _canonical_session_identity(row["run_id"])
+    except ValueError:
+        raise StateError(
+            "stored session identity is malformed",
+            entity_kind="session",
+            entity_name=row["name"],
+            hint="Restore a valid Agentworks database backup.",
+        ) from None
     return SessionRow(
         name=row["name"],
         workspace_name=row["workspace_name"],
@@ -182,6 +193,8 @@ def _to_session(row: sqlite3.Row) -> SessionRow:
         tmux_server_start_ticks=row["tmux_server_start_ticks"],
         harness_integration_state=_parse_harness_integration_state(row["harness_integration_state"], row["name"]),
         last_started_at=row["last_started_at"],
+        session_uuid=session_uuid,
+        run_id=run_id,
     )
 
 

@@ -105,10 +105,23 @@ from __future__ import annotations
 import json
 import re
 import shlex
+from dataclasses import replace
 from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, NamedTuple
 
 from pydantic import Field
 
+from agentworks.artifacts.application import ArtifactApplication
+from agentworks.artifacts.native.common import (
+    NativeSessionArtifacts,
+    defer,
+    delivery_files,
+    has_artifacts,
+    native_home,
+    validate_discovery_paths,
+    validate_native_command,
+    validate_user_placement,
+)
+from agentworks.artifacts.native.probe import probe_native
 from agentworks.capabilities.harness_integration.base import (
     HarnessIntegration,
     HarnessLaunchIntent,
@@ -119,6 +132,7 @@ from agentworks.capabilities.harness_integration.base import (
 from agentworks.errors import StateError
 from agentworks.plugins._harness_native.native import setup_user, setup_workspace
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
+from agentworks.plugins.codex.artifacts import outer_artifacts, session_artifacts
 from agentworks.plugins.codex.recorder import home_word, notify_value_word, provision_fragment, thread_tail
 from agentworks.schema import AgwModel, MergeStrategy
 from agentworks.topics import TopicProse
@@ -128,7 +142,11 @@ if TYPE_CHECKING:
 
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.descriptor import Facet
-    from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, WorkspaceSetupInvocation
+    from agentworks.capabilities.harness_integration.setup import (
+        UserSetupInvocation,
+        VMSetupInvocation,
+        WorkspaceSetupInvocation,
+    )
     from agentworks.transports import Transport
 
 
@@ -144,6 +162,12 @@ class CodexWorkspaceConfig(NativeWorkspaceConfig):
 
     name: Literal["codex"]
     """The harness integration selected for this workspace's facet."""
+
+
+class CodexSetupConfig(AgwModel):
+    """Activate an artifact-only native facet."""
+
+    name: Literal["codex"]
 
 
 class CodexConfig(AgwModel):
@@ -389,7 +413,7 @@ class _Layer2(NamedTuple):
 class CodexIntegration(HarnessIntegration):
     """Runs Codex, resuming or launching fresh per on-disk state."""
 
-    contract_version: ClassVar[int] = 4
+    contract_version: ClassVar[int] = 6
     name: ClassVar[str] = "codex"
     description: ClassVar[str] = "Run Codex, resuming its session when one exists"
     config_model: ClassVar[type[CodexConfig]] = CodexConfig
@@ -406,6 +430,12 @@ class CodexIntegration(HarnessIntegration):
 
         Ships as the opt-in `codex` system plugin, and needs the `codex` CLI on the
         session's target.
+
+        User and workspace facets publish standard skills and native agent personas.
+        Hints and rules flow to the session, where they add to `developer_instructions`.
+        Private session skills are unsupported; activate an outer facet for native
+        skill placement. Session persona definitions configure delegated roles;
+        primary `agent` selection remains prompt-mediated.
         """,
     )
 
@@ -423,25 +453,89 @@ class CodexIntegration(HarnessIntegration):
     # taking effect, and it is why the pane may come up in a different
     # conversation than last time.
     _dropped_stale: bool = False
+    _artifact_plan: NativeSessionArtifacts = NativeSessionArtifacts()
 
     @classmethod
     def config_for(cls, facet: Facet | None = None) -> type[BaseModel] | None:
         """Select independent config for user, workspace, or session setup."""
+        if facet == "vm":
+            return CodexSetupConfig
         if facet == "user":
             return CodexUserConfig
         if facet == "workspace":
             return CodexWorkspaceConfig
         return super().config_for(facet)
 
-    def user_init(self, invocation: UserSetupInvocation) -> None:
-        """Reconcile this actual user's native setup and ownership claims."""
-        config = None if self.retiring else self._config_as(CodexUserConfig)
-        setup_user("codex", config, invocation)
+    def vm_init(self, invocation: VMSetupInvocation) -> ArtifactApplication:
+        return (
+            ArtifactApplication()
+            if self.retiring
+            else defer(invocation.artifacts, "user", "Native artifact discovery belongs to an actual user")
+        )
 
-    def workspace_init(self, invocation: WorkspaceSetupInvocation) -> None:
-        """Map project settings without installing user-scoped plugins."""
+    def user_init(self, invocation: UserSetupInvocation) -> ArtifactApplication:
+        """Apply native setup and return the user's artifact publication plan."""
+        root = (
+            probe_native(
+                invocation.runner,
+                tool="codex",
+                environment=invocation.environment,
+                home=invocation.home,
+                check_policy=False,
+            )
+            if invocation.artifacts and not self.retiring
+            else ""
+        )
+        config = None if self.retiring else self._config_as(CodexUserConfig)
+        if not self.retiring:
+            root = root or native_home(invocation.home, invocation.environment, "CODEX_HOME", ".codex")
+        plan = (
+            ArtifactApplication()
+            if self.retiring
+            else outer_artifacts(
+                invocation.artifacts,
+                skills_root=f"{invocation.home}/.agents/skills",
+                agents_root=f"{root}/agents",
+            )
+        )
+        validate_user_placement(plan, invocation.home)
+        setup_invocation = (
+            replace(invocation, environment={**invocation.environment, "CODEX_HOME": root}) if root else invocation
+        )
+        setup_user("codex", config, setup_invocation)
+        if plan.files:
+            probe_native(
+                invocation.runner,
+                tool="codex",
+                environment=invocation.environment,
+                home=invocation.home,
+                files=plan.files,
+            )
+        return plan
+
+    def workspace_init(self, invocation: WorkspaceSetupInvocation) -> ArtifactApplication:
+        """Apply project settings and return workspace-owned artifact files."""
         config = None if self.retiring else self._config_as(CodexWorkspaceConfig)
+        plan = (
+            ArtifactApplication()
+            if self.retiring
+            else outer_artifacts(
+                invocation.artifacts,
+                skills_root=f"{invocation.root}/.agents/skills",
+                agents_root=f"{invocation.root}/.codex/agents",
+            )
+        )
         setup_workspace("codex", config, invocation)
+        if plan.files:
+            probe_native(
+                invocation.runner,
+                tool="codex",
+                environment=invocation.environment,
+                workspace=invocation.root,
+                files=plan.files,
+                workspace_only=True,
+            )
+        return plan
 
     @property
     def config(self) -> CodexConfig:
@@ -489,6 +583,37 @@ class CodexIntegration(HarnessIntegration):
         asymmetry to apologize for: a fresh launch resumes nothing, while its
         effective workload config may provide initial input.
         """
+        self._artifact_plan = session_artifacts(
+            self._session_binding.artifact_context,
+            configured=self.config.developer_instructions,
+            extra_args=self.config.extra_args,
+        )
+        artifact_context = self._session_binding.artifact_context
+        if artifact_context is not None and has_artifacts(artifact_context):
+            runner = ctx.admin_target() if self._admin else ctx.agent_target()
+            if runner is None:
+                raise StateError("artifact delivery requires the actual native launch target")
+            files = delivery_files(artifact_context, self._artifact_plan.application)
+            native_root = probe_native(
+                runner,
+                tool="codex",
+                environment=artifact_context.environment,
+                home=artifact_context.home,
+                workspace=self._workspace_path,
+                files=files,
+                flags=self._artifact_plan.required_flags,
+                session_plugin="--plugin-dir" in self._artifact_plan.argv,
+            )
+            validate_discovery_paths(
+                artifact_context,
+                (
+                    f"{artifact_context.home}/.agents/skills",
+                    f"{native_root}/agents",
+                    f"{self._workspace_path}/.agents/skills",
+                    f"{self._workspace_path}/.codex/agents",
+                ),
+            )
+
         self._decision = None
         self._adopted_id = None
         self._dropped_stale = False
@@ -504,7 +629,9 @@ class CodexIntegration(HarnessIntegration):
                 self._state.clear()
                 self._state.update(prior_state)
             raise
-        return HarnessStart(command, self._decision_note(intent=intent))
+        if has_artifacts(self._session_binding.artifact_context):
+            validate_native_command(command)
+        return HarnessStart(command, self._decision_note(intent=intent), self._artifact_plan.application)
 
     def _decision_note(self, *, intent: HarnessLaunchIntent) -> str | None:
         """The console line for the op that just ran, with a create or
@@ -869,9 +996,12 @@ class CodexIntegration(HarnessIntegration):
         """
         parts = [shlex.quote(token) for token in (*head, *self._managed_flags())]
         parts += ["-c", notify_value_word(self._session_name)]
-        if self.config.developer_instructions is not None:
+        if self.config.developer_instructions is not None and "developer_instructions=" not in " ".join(
+            self._artifact_plan.argv
+        ):
             value = _toml_basic_string(self.config.developer_instructions)
             parts += ["-c", quote_literal_argv(f"developer_instructions={value}")]
+        parts += [quote_literal_argv(token) for token in self._artifact_plan.argv]
         parts += [shlex.quote(token) for token in self._extra_arg_tokens()]
         if fresh and (prompt := self._fresh_prompt()) is not None:
             parts += ["--", quote_literal_argv(prompt)]

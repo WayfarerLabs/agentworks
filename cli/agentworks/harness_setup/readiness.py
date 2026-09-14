@@ -40,7 +40,11 @@ def evaluate_setup(
     location: str | None = None,
     username: str | None = None,
 ) -> SetupEvidence:
-    """Compare declarations and actual placement without acquiring source files."""
+    """Compare native setup configuration and destination evidence.
+
+    Artifact freshness is a separate condition enforced by session preparation's
+    routing check. This result alone does not authorize an artifact-bearing launch.
+    """
 
     def result(status: SetupStatus, record: SetupRecord | None = None) -> SetupEvidence:
         return SetupEvidence(status, inputs.kind, inputs.name, remediation, record)
