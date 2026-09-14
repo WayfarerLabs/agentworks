@@ -41,7 +41,8 @@ this follow-up.
 
 - [x] Rename the command and keep completion, machine output, tests and current documentation
       aligned.
-- [ ] Complete private project and complexity review, validate the CLI and publish a ready PR.
+- [x] Complete private project and complexity review and validate the renamed CLI.
+- [ ] Publish a ready PR and monitor its authorized feedback/fix rounds.
 
 ## Authoring amendment, 2026-09-14
 
@@ -775,3 +776,17 @@ suite (9,577 passed, seven skipped), Ruff/format, mypy (847 files), file lint, l
 the isolated-HOME real CLI drive; all passed. No fixture HOME remains. The two implementation
 simplifications and native-inventory clarification complete this round's feedback batch; publication
 and the next window follow on the same PR.
+
+## Singular command validation, 2026-09-14
+
+Private project and Muntz reviews of `bdc2c350` found no findings. Both read the complete diff and
+searched current command, completion, JSON and documentation references; neither claimed runtime
+testing. The lead drove real CLI root/group/show help and the artifact guide in an isolated HOME:
+the singular command succeeds, the former plural command exits with usage error, and the guide
+teaches the singular spelling. Focused inspection, machine-output and completion tests passed (144
+passed, one skipped). No operator state or remote backend was touched. The two remaining saga-owned
+command references belong to the saga lead and are called out in the handoff.
+
+Full non-integration suite: 9,593 passed, seven skipped. Ruff lint/format, mypy over 848 files,
+Typer isolation, locked-SDD and Rulesync checks passed. Website validation passed 160 Python tests,
+103 Node tests and deterministic double builds for both site bases.
