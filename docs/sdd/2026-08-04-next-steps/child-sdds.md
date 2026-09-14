@@ -687,6 +687,23 @@ Merged work the ledger owes a line, recorded from the merges themselves.
     artifacts. Reconciling the contract is the saga lead's, pending the operator's direction.
   - **Open after merge:** live VM acceptance of the harness integrations, which no lane has
     performed, and the effort's final SDD lock.
+- **Agent artifacts merged** (PR #794, merged 2026-09-14 as `908258a9`; SDD **not yet locked**). The
+  wave 4 successor, seeded and delivered by the same lead, carrying the artifact half that
+  facets-first deferred: `artifact-bundle` resources and `artifacts` blocks, workstation and Git
+  acquisition into one normalized representation, integration-owned routing, native delivery for
+  Claude, Codex, grok and shell, `agw artifacts show`, and instance-state-backed ownership with
+  idempotent retirement.
+  - **It also delivered the shared session-identity slice** the saga had settled in August and no
+    effort owned. `SessionRow` now carries `session_uuid` (`NOT NULL UNIQUE`, so never-reused is a
+    schema constraint) and a nullable `run_id`. Existing sessions received a durable UUID; none
+    received an invented run. This is the dependency #770 was blocked on, and that lane has been
+    told.
+  - **Two relayed rulings on this effort contradict each other and need reconciling here**, not by
+    date-sorting: `message-2026-09-11-harness-unsupported-facets.md` routes inactive-VM inputs
+    directly to session; `message-2026-09-13-agent-artifacts-user-default.md` supersedes it with
+    user. The newer states the supersession; the older does not yet say it was superseded.
+  - **Open after merge:** live acceptance, the effort's SDD lock, and the saga-side reconciliation
+    of the superseded no-op-defaults rule at `scope-participation-contract.md:72-74`.
 
 ### Efforts that ran without ledger entries (reconstructed 2026-09-06)
 
