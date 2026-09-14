@@ -405,6 +405,15 @@ of that contract's statements are stale against the code and the FRD corrects th
 and resume are one method taking a `HarnessLaunchIntent`, and the harness-integration contract is at
 version 3.
 
+**Session cgroups adopted as an adjacent standalone child (operator, 2026-09-14).** The
+session-cgroups effort (`docs/sdd/2026-09-06-session-cgroups/`, PR #770) is a saga child, seeded and
+reviewed by the saga lead, but it is not a numbered wave and does not gate the saga lock. It sits
+with the other adjacent standalone efforts recorded in `child-sdds.md`. It was considered for wave 8
+and deliberately not folded in: wave 8 is the external plugin API (registration conformance,
+discovery, namespacing, versioning), while this effort is OS-level containment of what an agent can
+do on the VM. Trust is a shared theme, not a shared deliverable, and folding them would make wave 8
+mean two things. Nothing downstream waits on this effort, and it depends on no wave before it.
+
 ### Observability (destinations 5 and 6)
 
 The universal event vocabulary is Agentworks-owned and independently versioned; ACP is a projection,

@@ -704,6 +704,15 @@ Merged work the ledger owes a line, recorded from the merges themselves.
     user. The newer states the supersession; the older does not yet say it was superseded.
   - **Open after merge:** live acceptance, the effort's SDD lock, and the saga-side reconciliation
     of the superseded no-op-defaults rule at `scope-participation-contract.md:72-74`.
+- **Session cgroups adopted** (PR #770, adopted 2026-09-14 by operator ruling recorded in
+  `target-state.md`). An adjacent standalone child: saga-lead-seeded and reviewed, not a numbered
+  wave, and not gating the saga lock. It contains what an agent can do on its VM through cgroups and
+  a protected service registration. Status at adoption: round 1 handed off 2026-09-07 at `c306c139`,
+  both private reviewers clean on that head, still draft with `review-requested`, two published
+  rounds remaining. Its declared design gates stay open by intent, not by neglect: precise pane
+  lifetime, Bookworm versus a required Trixie upgrade, and side-by-side pricing of restricted
+  same-UID execution against per-run users. Its session-identity dependency is discharged, since
+  `session_uuid` and `run_id` landed on `main` with PR #794; that lane has been told.
 
 ### Efforts that ran without ledger entries (reconstructed 2026-09-06)
 
