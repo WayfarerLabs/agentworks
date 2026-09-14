@@ -50,8 +50,11 @@ technique, not a smell; what decides is what the assertion protects.
 
 - **Keep** a guard enforcing a boundary the type system cannot express, that an ordinary edit can
   regress: import and layering boundaries, consent confinement
-  (`guide/test_power_import_boundary.py` is the standing example, forbidding the guide package from
-  reaching `subprocess`, sockets, or secrets), and drift against a canonical source.
+  (`cli/tests/guide/test_shell_service.py::test_static_index_list_and_selected_render_do_not_load_operator_state_modules`
+  is the standing example: it renders the index, lists topics and renders a topic in a clean
+  subprocess, then asserts that none of seven operator-state roots reached `sys.modules`,
+  `agentworks.config`, `db`, `declared_resource`, `resource_loading`, `resource_names`, `resources`
+  and `secrets`), and drift against a canonical source.
 - **Delete** a guard pinning how our code is written rather than what it may reach: identifier
   spellings, call-graph shape, statement order. The `phase7` corpus was this family, and so are
   three of the four banned patterns in `resources/test_graph_guard.py`: the `dependencies()`
@@ -70,7 +73,7 @@ three go. An example that contradicts its own doctrine teaches the error to ever
 which is why this is corrected in place rather than left to the inventory.
 
 "Statement order" there means order pinned **lexically**, by reading the source. Order often matters
-behaviorally, and asserting its consequence is not the same shape: PR #523 hoisted a policy check
+behaviorally, and asserting its consequence is not the same shape: PR `#523` hoisted a policy check
 above the work it guards and pinned that with tests asserting no row was deleted and no SSH config
 rewritten. Those never read the source, they fail only when the order actually breaks something, and
 they are exactly the observational twins the paragraph below prefers. Delete the pin that says a
@@ -78,16 +81,21 @@ statement comes first; keep the test that says what goes wrong when it does not.
 
 Some guards read as both bullets at once, protecting a genuine behavioral property through
 structural inspection. There a structural guard yields to an observational twin wherever one exists
-or is cheap to write, and stays until then. PR #523 set the precedent when it deleted a lexical
+or is cheap to write, and stays until then. PR `#523` set the precedent when it deleted a lexical
 Tailscale-ordering pin whose property observational tests already covered.
 
 ### `match=` splits three ways
 
-It appears at 663 sites, and the criteria above do not decide it on their own (operator ruling 10).
+It appears widely, and the criteria above do not decide it on their own (operator ruling 10).
 Deleting it wholesale drops real branch coverage; preserving it by adding a production discriminator
 is exactly what R2.2 forbids. So:
 
-1. The raised type already discriminates: **delete** the `match=`, keep the `raises`.
+1. The raised type already discriminates: **delete** the `match=`, keep the `raises`. That claim is
+   about the callee, not the call site. Before deleting under case 1, confirm the operation under
+   test raises the asserted type from exactly one path; where the type is raisable from more than
+   one, case 1 does not apply and the site takes case 2 or a keep. The group-1 screen (see the sweep
+   inventory's method section) found the single-path premise false for roughly four in five
+   resolvable sites, so treat case 1 as the exception to verify, never the default.
 2. The match is the only thing distinguishing same-type branches of one function: **discriminate
    structurally** where the code already offers a handle, meaning the exception type, an exception
    attribute, or the cause chain, and assert on that instead. Where our own authored wording is
@@ -101,21 +109,29 @@ where the prose arrives from outside the repository, so a `match=` against a pro
 upstream tool's error text is the one surviving form; every message this repository writes is
 authored prose, error messages included.
 
-**Corrected 2026-08-16** (sweep inventory, verified at HEAD). Two numbers here were wrong. The count
-was 696 and is 663, the wave 1 landings having taken the rest; a textual grep answers 664, one of
-which is a docstring mentioning `match=` rather than a site. And this taxonomy is keyed on a pytest
-spelling the website suite does not use: `website/tests` is `unittest` and carries **51
-`assertRaisesRegex` sites**, which are the same three cases and which a `match=`-keyed scan misses
-entirely. Read every rule above as governing both spellings.
+This taxonomy is keyed on a pytest spelling the website suite does not use: `website/tests` is
+`unittest` and carries `assertRaisesRegex` sites, which are the same three cases and which a
+`match=`-keyed scan misses entirely. Read every rule above as governing both spellings.
+
+**Corrected 2026-09-06.** This document twice recorded a site count that a later tree made wrong,
+and both times the correction was itself a number someone would have to re-check. The counts are
+gone. `sweep-screen.py estate`, committed beside the sweep inventory, derives the estate from the
+AST of whatever tree it runs against and prints one line per site, so the size of each population is
+a question with a current answer rather than a figure this document carries. What matters here and
+does not move is the shape: the estate is `match=` under `cli/tests` plus the regex family under
+`website/tests`, and the regex family means all five members `estate.py` names: `assertRaisesRegex`,
+`assertRaisesRegexp` and `assertWarnsRegex`, which assert a type as well as a message, plus
+`assertRegex` and `assertNotRegex`, which assert a message alone. A `match=`-keyed scan misses every
+one of them.
 
 Case 2's "where the code already offers a handle" turned out to be the common case rather than the
 rare one, which is worth stating because it sized a whole batch. Two handles already exist in
-production and neither needs a change: `AgentworksError` carries `entity_kind` and `entity_name`
-(populated at 286 raise sites, already asserted on at 75 test sites), and `schema.errors._problems`
-exposes `path`, `unknown_field` and `alternatives` and is already imported by
+production and neither needs a change: `AgentworksError` carries `entity_kind` and `entity_name`,
+populated at raise sites throughout and already asserted on in tests, and `schema.errors._problems`
+exposes `path`, `union_path`, `unknown_field` and `alternatives` and is already imported by
 `cli/tests/schema/test_errors.py`. Check for a handle before falling through to the delete arm, and
-check that it DISCRIMINATES: the platform-config family carries `entity_kind` identically on all
-sixteen sites, so the handle is present and useless there.
+check that it DISCRIMINATES: the platform-config family carries `entity_kind` identically across its
+sites, so the handle is present and useless there.
 
 ### The rubric for a borderline assertion
 
@@ -126,31 +142,52 @@ is cost rather than coverage, does not reach an assertion that also fails when a
 breaks. (Operator ruling, 2026-08-16; this is what R2.4's "case by case, mostly by deletion" means,
 not a loosening of it.)
 
+### A platform-conditional path is covered, not speculative
+
+At HEAD the suite runs on `windows-latest` in CI, in the `test-windows` job that `ci-success`
+requires, per [.github/workflows/ci.yml](../../../.github/workflows/ci.yml). PR `#760` added that
+job and PR `#747` is what made the suite pass on it. That job runs `cli/tests` on Python 3.13
+excluding the `integration` marker, so the criterion reaches the non-integration CLI suite on
+Windows and nothing beyond it: a platform-conditional path exercised only by an integration test, or
+only outside `cli/tests`, is not covered by this job and this criterion does not speak for it.
+Within that scope a test guarding a platform-conditional path is CI coverage rather than inert
+generality, and the delete criteria treat it as live coverage: the branch it guards runs on every
+pull request, and deleting the test drops real branch coverage rather than retiring an abstraction
+nothing exercises. (Effort lead, 2026-09-06.)
+
 ## Guidance delivery
 
-Wave 0 first resolves rule delivery (issue #511), then amends the two existing rules
+Wave 0 first resolves rule delivery (issue `#511`), then amends the two existing rules
 (`development-principles`, `no-prose-policing-tests`); no new files, personas, or delivery
 mechanisms. The expected delivery resolution is subtraction-shaped: the `globs`/`paths:` frontmatter
 is what forces lazy loading, so after the probes confirm the emission shape, the twelve broad
-always-on rules drop the filter and load eagerly, as the frontmatter-free `always-consider-*` rules
-already do. Wave 0 completes on one of two measurable branches (FRD R1.3): verified unconditional
-delivery, or an operator-approved fallback that places the full criteria text into every affected
-lane; a citation alone cannot supply the contents of a rule a target never loads. Wave 1 delegation
-charters cite the two amended rules regardless, which costs a sentence per charter.
+always-on rules drop the filter and load eagerly. This once cited frontmatter-free
+`always-consider-*` rules as the precedent; **no such file exists in the tree**, and whether the
+count is wrong, the file list is short, or "rules" means something other than files is the
+operator's to say, which the inventory records as a finding rather than correcting here. Wave 0
+completes on one of two measurable branches (FRD R1.3): verified unconditional delivery, or an
+operator-approved fallback that places the full criteria text into every affected lane; a citation
+alone cannot supply the contents of a rule a target never loads. Wave 1 delegation charters cite the
+two amended rules regardless (FRD R1.3), which costs a sentence per charter. R1.3 also says citation
+is a supplement and never delivery, which is why the charters wave 0 actually wrote carry both
+criteria in full as well as citing them: a dev that loses the rule channel still has them.
 
 ## Waves and vehicle
 
 - **Wave 0**: the delivery resolution plus one small amendment PR, merged first (FRD R1).
 - **Wave 1**: independent, contained deletion work off main, each item judged locally against the
-  two doctrines, each PR green on the full suite. No ordering between items; PR batching per the
-  plan. Precedes the CLI grammar rewrite (saga `phasing.md`).
+  two doctrines, each PR green on the full suite. Unordered by design, though the plan's sequencing
+  section records four facts that constrain that freedom in practice, and the inventory adds four
+  more binding the sweep's own PRs; PR batching per the plan. The saga's `phasing.md` put this wave
+  before the CLI grammar rewrite; that rewrite has since merged and locked with PR `#491`, so the
+  ordering is discharged rather than pending.
 - **Wave 2**: process and rule subtraction PRs under the net-deletion constraint, in parallel with
   wave 1 on its own session (file-disjoint: `.rulesync/` and the skills tree versus `cli/` and
   `website/`).
-- **Reassess**: waits for both waves and for the CLI grammar rewrite landing (the saga's
-  `phasing.md` puts the rewrite between wave 1 and this reassessment, so the effort cannot close or
-  lock early); the lead writes the reassessment and the candidate proposals; the operator decides
-  what, if anything, is promoted.
+- **Reassess**: waits for both waves; the CLI grammar rewrite it also waited for has landed (the
+  saga's `phasing.md` puts the rewrite between wave 1 and this reassessment, so the effort cannot
+  close or lock early); the lead writes the reassessment and the candidate proposals; the operator
+  decides what, if anything, is promoted.
 
 ## Clean-slate process architecture
 
@@ -166,7 +203,9 @@ The Wave 2 process rewrite has four layers, each with one kind of information:
    skill was selected.
 4. **Role and specialty artifacts** own their perspectives: `sdd` owns artifact lifecycle,
    `agentworks-reviewer` owns its rubric and consistency mode, `integration-testing` owns live
-   validation, and the developer, tester, and saga-lead definitions own only role-specific duties.
+   validation, `saga-lead` owns the saga lead's operating manual as a SKILL rather than a role
+   definition, and the four role definitions (`agentworks-dev`, `agentworks-reviewer`,
+   `agentworks-tester`, `muntz`) own only role-specific duties.
 
 `message-2026-08-18-process-semantic-inventory.md` is the rewrite checklist. Every operative
 contract has one future owner and named consumers; duplicated prose either collapses to that owner

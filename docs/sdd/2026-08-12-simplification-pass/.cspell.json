@@ -2,14 +2,21 @@
   "version": "0.2",
   "import": ["../../../.cspell.json"],
   "words": [
+    "backticked",
+    "callees",
     "colocatable",
+    "metacharacter",
+    "metacharacters",
     "monkeypatch",
     "monkeypatches",
     "multiprocess",
     "NFKC",
+    "qualname",
     "regressable",
+    "retargeted",
     "satisfiability",
     "uninventoried",
+    "unrowed",
     "untooled",
     "worktrees"
   ]
