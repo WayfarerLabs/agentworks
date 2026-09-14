@@ -7,7 +7,8 @@ value for the default (``shell``) and a declared ``claude-code``
 template, the guard that a template which fails to resolve shows ``-``
 without aborting the render, the 20-char truncation the shared
 ``output.render_table`` helper applies, that plain local inventory still shows
-the harness integration, and that ``--names-only`` stays pure (no registry cost).
+the harness integration, and that unfiltered ``--names-only`` stays pure (no
+registry cost).
 """
 
 from __future__ import annotations
@@ -326,14 +327,15 @@ def test_list_bad_registry_degrades_harness_integration_to_dash_and_still_render
     assert rows[0].split()[4] == "-"
 
 
-def test_names_only_stays_pure_and_pays_no_registry_cost(
+def test_unfiltered_names_only_stays_pure_and_pays_no_registry_cost(
     db: Database,
     make_config,  # noqa: ANN001
     captured_output,  # noqa: ANN001
     monkeypatch,  # noqa: ANN001
 ) -> None:
-    # --names-only short-circuits before any harness-integration/registry work: even
-    # a build_registry that would blow up leaves the name list intact.
+    # Without a harness-integration filter, --names-only short-circuits before
+    # registry work: even a build_registry that would blow up leaves the name list
+    # intact.
     import agentworks.bootstrap as bootstrap
 
     config = make_config()

@@ -852,10 +852,10 @@ def test_vm_and_workspace_descriptions_snapshot_only_frozen_safe_scalars() -> No
         workspace_facts.name = "forbidden"  # type: ignore[misc]
 
 
-def test_session_human_listing_uses_one_fact_path_and_names_only_stays_lightweight(
+def test_session_human_listing_uses_one_fact_path_and_unfiltered_names_only_stays_lightweight(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ordinary status/repair is single-sourced; completion avoids it entirely."""
+    """Status/repair is single-sourced; unfiltered names-only completion avoids it."""
     from agentworks import output
     from agentworks.db import SessionRow
     from agentworks.sessions import manager as session_manager

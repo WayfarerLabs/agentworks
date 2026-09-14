@@ -190,11 +190,11 @@ def filter_sessions(
     ``Database.list_sessions``.
 
     An unknown name in any filter raises ``NotFoundError`` rather than
-    matching nothing; every element of a list filter is
-    checked. Because every batch session op (``list_sessions``,
-    ``stop_all_sessions``, ``start_all_sessions``) funnels its filters
-    through here, this is the single validation point for the session
-    surface.
+    matching nothing; every element of a list filter is checked.
+    ``_filter_sessions_with_registry`` is the shared validation point for the
+    batch session surface. This public function is its row-only facade; listing
+    calls the shared helper directly when it must reuse the filter registry for
+    display.
 
     A harness-integration filter builds one offline finalized registry, then
     validates every requested resource before considering enablement and
@@ -225,7 +225,7 @@ def _filter_sessions_with_registry(
     console_name: str | list[str] | None = None,
     admin_only: bool = False,
 ) -> tuple[list[SessionRow], Registry | None]:
-    """Return filtered sessions and the registry built for integration filtering."""
+    """Validate batch filters and return rows plus any integration registry."""
     registry: Registry | None = None
     selected_integrations: frozenset[str] | None = None
     if harness_integration_name is not None:
