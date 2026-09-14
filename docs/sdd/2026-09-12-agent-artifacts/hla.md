@@ -211,11 +211,16 @@ provenance, logical origin and normalized content identity are distinct fields.
 | Content identity  | Digest of normalized content, relative member paths and executable intent, excluding timestamps and provenance. |
 | Deferred artifact | An existing input with its origin unchanged, one destination facet and an integration-supplied reason.          |
 
-Hints and rules carry UTF-8/LF text. Skills retain standard metadata, `SKILL.md` and their complete
-member tree. Agents carry name, description, instructions and supported integration-specific
-options. Supporting members distinguish normalized text from opaque bytes and retain executable
-intent; the codec represents opaque bytes losslessly, for example with base64 within JSON. Exact
-codec fields and bounded sizes belong in the LLD, not a new public distribution format.
+Hints carry plain UTF-8/LF text. Rules carry an always-loaded Markdown body and an optional
+inspection description parsed from YAML frontmatter. Rule metadata accepts only `description`;
+persona metadata accepts only `name`, `description` and `native_options`. Unexpected or duplicate
+fields and invalid structure fail capture. Inline and file rules normalize to the same content
+shape, and adapters render their instruction bodies without source frontmatter. Skills retain
+standard metadata, `SKILL.md` and their complete member tree. Agents carry name, description,
+instructions and supported integration-specific options. Supporting members distinguish normalized
+text from opaque bytes and retain executable intent; the codec represents opaque bytes losslessly,
+for example with base64 within JSON. Exact codec fields and bounded sizes belong in the LLD, not a
+new public distribution format.
 
 The normalized representation is independent of source transport. Source readers converge here;
 future automatic emissions construct the same typed inputs without pretending to be Git sources. Two

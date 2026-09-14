@@ -98,6 +98,7 @@ class ArtifactMetadata:
     selected_path: str | None = None
     replacements: tuple[ArtifactReplacement, ...] = ()
     declared_bundles: tuple[str, ...] = ()
+    description: str | None = None
 
 
 @dataclass(frozen=True)
@@ -324,6 +325,7 @@ def _artifact_metadata(
                 item.provenance.selected_path or None,
                 item.replacements,
                 selected,
+                item.content.description or None,
             )
         )
     rows.extend(
@@ -396,6 +398,8 @@ def render_artifacts(inspection: ArtifactInspection) -> None:
                     f"source {previous.provenance.source}"
                 )
             if artifact.source is not None:
+                if artifact.description is not None:
+                    output.info(f"    Description: {artifact.description}")
                 output.info(f"    Source: {artifact.source}; native name: {artifact.native_name}")
                 if artifact.selected_path:
                     output.info(
@@ -443,6 +447,7 @@ def inspection_data(inspection: ArtifactInspection) -> JsonObject:
                         "input_id": item.input_id,
                         "origin_id": item.origin_id,
                         "native_name": item.native_name,
+                        "description": item.description,
                         "source": item.source,
                         "requested_ref": item.requested_ref,
                         "revision": item.revision,

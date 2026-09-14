@@ -106,12 +106,79 @@ session routing; it never becomes part of the receiver's local group. The same t
 different scopes remain separate contributions. Integrations must preserve them through supported
 native placement or aggregation, or refuse ambiguous delivery explicitly.
 
+## Artifact formats
+
+Hints are plain UTF-8 text. Skills use the standard
+[Agent Skills format](https://agentskills.io/specification): `SKILL.md` and its complete supporting
+file tree. Rules and agents use Markdown with the metadata contracts below. Text line endings are
+normalized to LF.
+
+### Rules
+
+Rules are always loaded into context. Supply plain Markdown or a YAML frontmatter block at the start
+of the inline `text` or selected file:
+
+```markdown
+---
+description: Requirements for repository changes
+---
+
+Run the relevant checks before submitting changes. Keep documentation consistent with behavior.
+```
+
+`description` is the only supported rule field. It is optional; when supplied, it must be a nonblank
+string of at most 1,024 characters. The containing `rules` map key names the rule. The instruction
+body must be nonblank. Frontmatter must be a mapping, use unique string keys, and end with a second
+`---` line. A leading `---` reserves that block for metadata; use `***` for a horizontal rule at the
+start of plain Markdown.
+
+`agw artifacts show` exposes captured descriptions in text and machine output without fetching
+sources or displaying instruction bodies. Descriptions describe artifacts for inspection; they do
+not control when instructions load. Integrations render the body without its source frontmatter.
+
+Unexpected fields are errors, including `name`, `globs`, `targets`, `root`, `localRoot` and native
+option blocks. Conditional rules and per-artifact harness selection are unsupported. The consuming
+scope and its activated integration facets determine placement and delivery.
+
+### Agents
+
+An agent persona requires `name`, `description` and a nonblank Markdown instruction body:
+
+```markdown
+---
+name: reviewer
+description: Review changes for correctness and unnecessary complexity
+native_options:
+  claude-code:
+    tools: [Read, Grep, Glob]
+  codex:
+    model_reasoning_effort: high
+---
+
+Review the changes and report actionable findings.
+```
+
+The name must match its `agents` map key. The description must be a nonblank string of at most 1,024
+characters. `native_options` is optional and maps integration names to option objects. Each
+consuming integration validates its own supported options and renders the shared persona body into
+its native format. An option for one integration does not configure another.
+
+All other top-level fields are errors. For example, a top-level `model`, `tools`, `targets` or
+Rulesync `claudecode` block is refused; supported native settings belong under
+`native_options.<integration-name>`. Duplicate keys, non-string keys, YAML aliases and anchors are
+also refused in rule and agent metadata. Hooks and MCP configuration remain unsupported.
+
+These authoring formats borrow Rulesync's common-body and native-options approach without claiming
+full Rulesync format compatibility. They do not change bundle selection, scope ownership or native
+collision handling.
+
 ## Sources and refresh
 
 Hints provide small setup facts. Rules are instructions always loaded into context. Each accepts
 exactly one inline `text` or a file `source`. Skills select an explicit directory containing
 `SKILL.md`, with the complete supporting file tree. Agents select Markdown with `name` and
-`description` frontmatter and an instruction body.
+`description` frontmatter and an instruction body. The [artifact formats](#artifact-formats) above
+define accepted metadata for each type.
 
 Sources use workstation files or Git references, such as `file::~/agent-content/rules.md` and
 `git::https://github.com/example/agent-content.git//skills/review?ref=v1.0.0`. Workstation `~`
@@ -125,6 +192,11 @@ Text uses Unix line endings. Skill supporting files retain executable intent and
 use: acquisition copies content and does not run package installers or skill scripts. Local and Git
 sources reject unresolved Git LFS pointers. Relative member paths are limited to 4,096 characters
 and 32 components; a capture must satisfy the persisted format before setup can accept it.
+
+Existing captures keep the authoring interpretation recorded when they were acquired. Updating
+Agentworks alone does not reinterpret YAML-looking rule text or remove previously retained persona
+metadata. An explicit owning refresh captures sources under the current strict format; fix any
+unsupported metadata before refreshing. Source changes alone do not update an existing capture.
 
 VM/admin and agent changes take effect through the owning reinitialization operation. Workspaces
 have no reinit operation; recreate the workspace when its artifact setup must change. Session

@@ -137,13 +137,21 @@ members retain their exact bytes even with a recognized suffix. A skill pattern 
 is rejected; its entrypoint always normalizes. Hints, rules and persona instruction bodies always
 use normalized text regardless of their source filename.
 
+Rules accept plain Markdown or a leading YAML metadata mapping containing only `description`.
+Descriptions are optional nonblank strings of at most 1,024 characters; the map key supplies the
+name. Inline and file sources parse identically. Normalized rule content stores description,
+canonical metadata and body separately; native renderers consume the body. Persisted inline rules
+validate their separated metadata and body, while file rules additionally compare against retained
+source members. Hints remain literal text, including YAML-looking content.
+
 Skills require root `SKILL.md` frontmatter with standard name/description and a nonempty instruction
 body. The name matches the map key and the explicitly selected directory. Standard optional
 metadata, including license, compatibility, allowed tools and string-valued metadata maps, is
 retained. Persona Markdown requires name, description and instructions; the name matches the
 containing agents-map key. Its optional `native_options` maps integration names to native option
-objects. Native integrations validate their own supported option schemas. Hooks and MCP
-configuration are not accepted in this delivery.
+objects. Other top-level persona fields are rejected. Rule and persona mappings reject duplicate and
+non-string keys at every depth. Native integrations validate their own supported option schemas.
+Hooks and MCP configuration are not accepted in this delivery.
 
 `frontmatter.py` shares the bounded metadata loader between capture and native inventory. It rejects
 YAML anchors/aliases and bounds size and nesting before constructing values. Capture adds its body,
@@ -160,7 +168,7 @@ monitored with acquisition storage, and read into memory only within its limit. 
 failure terminates acquisition, removes staging and raises an error. No prior snapshot is returned
 as a fresh capture.
 
-`encode_inputs` returns a version-2 JSON object containing the owner and four type maps. Entries
+`encode_inputs` returns a version-3 JSON object containing the owner and four type maps. Entries
 contain content, origins, provenance, input identity, compact replacement evidence and an ordinal
 within their type map. Ordinals preserve declared order through the DB serializer, which sorts JSON
 object keys. Decode requires contiguous unique ordinals and restores map insertion order. Internal
@@ -169,19 +177,24 @@ validates that object through the same decoder before returning, so a writer can
 that a subsequent reader rejects. Owning acquisition also performs this validation before returning
 buffered inputs that can cause native effects. Direct persisted writers retain their own validation
 boundary and leave the previous record unchanged on refusal. Member bytes use strict base64,
-including designated text; the text flag records normalization. `decode_inputs` accepts only the
-supported version, rejects extra fields and wrong primitive types, bounds the input structure before
-decoding, validates relative paths and metadata, and checks total member/byte limits and recomputed
-content/input identities. Capture and decoding use the same entrypoint parser: stored metadata,
-body, native options and identity fields must match the retained members, and forbidden execution
-metadata is rejected even when all hashes are consistent. Provenance is checked as a credential-free
-Git repository with its selection, ref and resolved commit, an absolute workstation path, or inline
-content. These checks do not contact the source. The owning state layer distinguishes an unsupported
-domain version from corrupt content. Doctor reports an unsupported domain version as uninterpreted
-evidence, not corruption, and backup retains its uninterpreted payload. The state writer refuses to
-overwrite every unsupported capture version, including version 1; owning reinitialization is not an
-upgrade path. Independent native file ownership records remain preserved. There is no DB access,
-native invocation or source reacquisition in the codec.
+including designated text; the text flag records normalization. Version 2 remains readable with its
+original literal-rule and persona-metadata interpretation; `CapturedArtifacts.codec_version` retains
+that interpretation when another component is updated or a backup is canonicalized. Fresh captures
+use version 3 and strict authoring validation. Content identities remain stable until explicit
+refresh. The enclosing applied-state payload uses the highest component codec version, so older
+readers recognize a newer payload rather than treating it as corruption. `decode_inputs` accepts
+only supported versions, rejects extra fields and wrong primitive types, bounds the input structure
+before decoding, validates relative paths and metadata, and checks total member/byte limits and
+recomputed content/input identities. Capture and decoding use the same entrypoint parser: stored
+metadata, body, native options and identity fields must match the retained members, and forbidden
+execution metadata is rejected even when all hashes are consistent. Provenance is checked as a
+credential-free Git repository with its selection, ref and resolved commit, an absolute workstation
+path, or inline content. These checks do not contact the source. The owning state layer
+distinguishes an unsupported domain version from corrupt content. Doctor reports an unsupported
+domain version as uninterpreted evidence, not corruption, and backup retains its uninterpreted
+payload. The state writer refuses to overwrite every unsupported capture version, including version
+1; owning reinitialization is not an upgrade path. Independent native file ownership records remain
+preserved. There is no DB access, native invocation or source reacquisition in the codec.
 
 Names share one canonical pattern across declarations, normalized content and persisted type-map
 keys. Explicit typed map access retains the fixed hints/rules/skills/agents traversal and key order.

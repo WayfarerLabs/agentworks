@@ -9,7 +9,7 @@ import yaml
 from agentworks.sources import SourceRefError
 
 
-def parse_metadata(header: str) -> dict[str, object]:
+def parse_metadata(header: str, *, unique_keys: bool = False) -> dict[str, object]:
     """Reject expansion and excessive nesting before constructing YAML values."""
     if len(header.encode()) > 64 * 1024:
         raise SourceRefError("artifact frontmatter exceeds its size limit")
@@ -24,6 +24,21 @@ def parse_metadata(header: str) -> dict[str, object]:
                     raise SourceRefError("artifact metadata exceeds its depth limit")
             elif isinstance(event, (yaml.events.MappingEndEvent, yaml.events.SequenceEndEvent)):
                 depth -= 1
+        if unique_keys:
+            pending = [yaml.compose(header, Loader=yaml.SafeLoader)]
+            while pending:
+                node = pending.pop()
+                if isinstance(node, yaml.MappingNode):
+                    keys: set[str] = set()
+                    for key, child in node.value:
+                        if not isinstance(key, yaml.ScalarNode) or key.tag != "tag:yaml.org,2002:str":
+                            raise SourceRefError("artifact metadata keys must be strings")
+                        if key.value in keys:
+                            raise SourceRefError("artifact metadata cannot contain duplicate keys")
+                        keys.add(key.value)
+                        pending.append(child)
+                elif isinstance(node, yaml.SequenceNode):
+                    pending.extend(node.value)
         value = yaml.safe_load(header)
     except yaml.YAMLError:
         raise SourceRefError("invalid artifact YAML frontmatter") from None

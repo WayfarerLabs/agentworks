@@ -91,7 +91,7 @@ def capture_artifacts(
                             assert spec.text is not None
                             encoded = spec.text.encode("utf-8")
                             active.account(len(encoded))
-                            content = ArtifactContent(artifact_type, entry, text=normalize_text(encoded))
+                            content = text_content(artifact_type, entry, normalize_text(encoded))
                             provenance = ArtifactProvenance()
                         else:
                             package = active.capture(source)
@@ -158,9 +158,14 @@ def _content(
 
 
 def content_from_members(
-    artifact_type: ArtifactType, entry: str, members: tuple[ArtifactMember, ...], selected_path: str
+    artifact_type: ArtifactType,
+    entry: str,
+    members: tuple[ArtifactMember, ...],
+    selected_path: str,
+    *,
+    legacy: bool = False,
 ) -> ArtifactContent:
-    """Parse normalized source or persisted members at their respective input boundary."""
+    """Parse source or persisted members; legacy preserves version-2 capture semantics."""
     for member in members:
         required_text = artifact_type != ArtifactType.SKILL or member.path == "SKILL.md"
         if required_text and (not member.text or normalize_text(member.data).encode() != member.data):
@@ -168,10 +173,7 @@ def content_from_members(
     if artifact_type in (ArtifactType.HINT, ArtifactType.RULE):
         if len(members) != 1:
             raise SourceRefError("hints and rules require exactly one text file")
-        text = normalize_text(members[0].data)
-        if not text.strip():
-            raise SourceRefError("artifact instructions cannot be empty")
-        return ArtifactContent(artifact_type, entry, text=text, members=members)
+        return text_content(artifact_type, entry, normalize_text(members[0].data), members, legacy=legacy)
     if artifact_type == ArtifactType.SKILL:
         entrypoints = [member for member in members if member.path == "SKILL.md"]
         if len(entrypoints) != 1:
@@ -187,7 +189,12 @@ def content_from_members(
         return ArtifactContent(artifact_type, name, description, body, members, _json(metadata))
     if len(members) != 1:
         raise SourceRefError("an agent source must select one persona Markdown file")
-    metadata, body = _frontmatter(normalize_text(members[0].data))
+    metadata, body = _frontmatter(normalize_text(members[0].data), unique_keys=not legacy)
+    if not legacy and metadata.keys() - {"name", "description", "native_options"}:
+        raise SourceRefError(
+            "agent frontmatter accepts only name, description and native_options; "
+            "put supported integration-specific options under native_options"
+        )
     name, description = _identity(metadata)
     if name != entry:
         raise SourceRefError("agent name must match its artifact map key")
@@ -197,6 +204,41 @@ def content_from_members(
     _reject_execution_options(metadata)
     _reject_execution_options(options)
     return ArtifactContent(artifact_type, name, description, body, members, _json(metadata), _json(options))
+
+
+def text_content(
+    artifact_type: ArtifactType,
+    name: str,
+    text: str,
+    members: tuple[ArtifactMember, ...] = (),
+    *,
+    legacy: bool = False,
+) -> ArtifactContent:
+    """Parse inline or file guidance identically without interpreting hints as metadata."""
+    if not text.strip():
+        raise SourceRefError("artifact instructions cannot be empty")
+    if artifact_type == ArtifactType.RULE and not legacy:
+        metadata, body = _frontmatter(text, unique_keys=True) if text.splitlines()[0].strip() == "---" else ({}, text)
+        return rule_content(name, body, metadata, members)
+    return ArtifactContent(artifact_type, name, text=text, members=members)
+
+
+def rule_content(
+    name: str, body: str, metadata: dict[str, object], members: tuple[ArtifactMember, ...] = ()
+) -> ArtifactContent:
+    """Validate rule metadata from authored frontmatter or a persisted inline record."""
+    if metadata.keys() - {"description"}:
+        raise SourceRefError("rule frontmatter accepts only description; rules are always loaded")
+    description = metadata.get("description", "")
+    if (
+        not isinstance(description, str)
+        or ("description" in metadata and not description.strip())
+        or len(description) > 1024
+    ):
+        raise SourceRefError("rule description must contain between 1 and 1024 characters")
+    if not body.strip():
+        raise SourceRefError("artifact instructions cannot be empty")
+    return ArtifactContent(ArtifactType.RULE, name, description, body, members, _json(metadata))
 
 
 def validate_provenance(provenance: ArtifactProvenance) -> None:
@@ -241,15 +283,15 @@ def _is_text(path: str, preserve_bytes: Sequence[str]) -> bool:
     )
 
 
-def _frontmatter(text: str) -> tuple[dict[str, object], str]:
+def _frontmatter(text: str, *, unique_keys: bool = False) -> tuple[dict[str, object], str]:
     lines = text.splitlines(keepends=True)
     if not lines or lines[0].strip() != "---":
-        raise SourceRefError("skill and agent entrypoints require YAML frontmatter")
+        raise SourceRefError("artifact entrypoint requires YAML frontmatter")
     end = next((index for index, line in enumerate(lines[1:], 1) if line.strip() == "---"), None)
     if end is None:
         raise SourceRefError("artifact frontmatter is not terminated")
     header = "".join(lines[1:end])
-    metadata = parse_metadata(header)
+    metadata = parse_metadata(header, unique_keys=unique_keys)
     _json(metadata)
     body = "".join(lines[end + 1 :])
     if not body.strip():

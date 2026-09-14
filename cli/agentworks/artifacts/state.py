@@ -41,6 +41,7 @@ class CapturedArtifacts:
 
     declaration: str
     inputs: ArtifactGroup
+    codec_version: int = 3
 
 
 def _validate_owner(capture: CapturedArtifacts, kind: InstanceKind, name: str, component: ArtifactComponent) -> None:
@@ -96,12 +97,15 @@ def capture_owner(
 
 def encode_captures(captures: dict[ArtifactComponent, CapturedArtifacts]) -> VersionedPayload:
     return VersionedPayload(
-        2,
+        max((snapshot.codec_version for snapshot in captures.values()), default=3),
         cast(
             "JsonObject",
             {
                 "components": {
-                    component: {"declaration": snapshot.declaration, "content": encode_inputs(snapshot.inputs)}
+                    component: {
+                        "declaration": snapshot.declaration,
+                        "content": encode_inputs(snapshot.inputs, version=snapshot.codec_version),
+                    }
                     for component, snapshot in captures.items()
                 }
             },
@@ -113,7 +117,7 @@ def decode_captures(record: AppliedStateSlice) -> dict[ArtifactComponent, Captur
     """Validate persisted input content and its actual owner without echoing values."""
     if record.key is not AppliedStateKey.ARTIFACT_INPUTS:
         raise TypeError("artifact capture requires its matching applied slice")
-    if record.payload.payload_version != 2:
+    if record.payload.payload_version not in (2, 3):
         raise UnsupportedArtifactCaptureVersionError(
             "artifact captures require a different Agentworks version",
             hint="Use an Agentworks version that supports this capture. Stored data and file ownership were retained.",
@@ -133,7 +137,9 @@ def decode_captures(record: AppliedStateSlice) -> dict[ArtifactComponent, Captur
             if not isinstance(declaration, str):
                 raise ValueError
             inputs = decode_inputs(value["content"])
-            snapshot = CapturedArtifacts(declaration, inputs)
+            content = value["content"]
+            assert isinstance(content, dict)  # decode_inputs validated the envelope.
+            snapshot = CapturedArtifacts(declaration, inputs, cast("int", content["version"]))
             _validate_owner(snapshot, record.instance_kind, record.instance_name, component)
             result[component] = snapshot
         return result
@@ -174,6 +180,6 @@ def write_capture(
 
 
 def canonicalize_captures(record: AppliedStateSlice) -> VersionedPayload:
-    if record.payload.payload_version != 2:
+    if record.payload.payload_version not in (2, 3):
         return record.payload
     return encode_captures(decode_captures(record))
