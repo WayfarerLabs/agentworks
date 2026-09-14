@@ -920,12 +920,13 @@ def stop_all_sessions(
     vm_name: str | list[str] | None = None,
     workspace_name: str | list[str] | None = None,
     agent_name: str | list[str] | None = None,
+    harness_integration_name: str | list[str] | None = None,
     console_name: str | list[str] | None = None,
     admin_only: bool = False,
     force: bool = False,
     interaction: TtyInteractionPolicy,
 ) -> None:
-    """Stop all running sessions, optionally filtered by VM, workspace, agent, console, or mode.
+    """Stop running sessions selected by relationship, integration, or mode.
 
     Each name filter accepts a single name or a list of names; lists
     OR within a filter, filters AND across the call. ``agent_name``
@@ -934,12 +935,17 @@ def stop_all_sessions(
     """
     sessions = _mgr.filter_sessions(
         db,
+        config=config,
         workspace_name=workspace_name,
         vm_name=vm_name,
         agent_name=agent_name,
+        harness_integration_name=harness_integration_name,
         console_name=console_name,
         admin_only=admin_only,
     )
+    if not sessions:
+        output.info("No running sessions to stop.")
+        return
 
     # Resolve distinct VMs from the filtered session set and open the
     # batch boundary + per-VM gates BEFORE the SSH probes. The probes
@@ -1026,6 +1032,7 @@ def _launch_all_sessions(
     vm_name: str | list[str] | None = None,
     workspace_name: str | list[str] | None = None,
     agent_name: str | list[str] | None = None,
+    harness_integration_name: str | list[str] | None = None,
     console_name: str | list[str] | None = None,
     admin_only: bool = False,
     replace_running: bool,
@@ -1034,7 +1041,7 @@ def _launch_all_sessions(
     resume_only: bool = False,
     interaction: TtyInteractionPolicy,
 ) -> None:
-    """Start sessions, optionally replacing running runtimes.
+    """Start sessions selected by relationship, integration, or mode.
 
     Batch start selects stopped sessions plus states required by explicit
     modifiers; restart considers every match and replaces running runtimes.
@@ -1047,12 +1054,17 @@ def _launch_all_sessions(
     intent = _requested_launch_intent(force_new=force_new, resume_only=resume_only)
     sessions = _mgr.filter_sessions(
         db,
+        config=config,
         workspace_name=workspace_name,
         vm_name=vm_name,
         agent_name=agent_name,
+        harness_integration_name=harness_integration_name,
         console_name=console_name,
         admin_only=admin_only,
     )
+    if not sessions:
+        output.info("No matching sessions to start.")
+        return
 
     # Resolve distinct VMs from the filtered set and anchor them BEFORE the
     # SSH probes. Each singular launch also opens its own gate span;

@@ -151,6 +151,9 @@ from ._scope import (
     _distinct_vms_for_sessions as _distinct_vms_for_sessions,
 )
 from ._scope import (
+    _filter_sessions_with_registry as _filter_sessions_with_registry,
+)
+from ._scope import (
     _prepare_vm as _prepare_vm,
 )
 from ._scope import (

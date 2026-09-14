@@ -7,9 +7,12 @@ from functools import partial
 from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
+from agentworks import output
 from agentworks.errors import (
+    AgentworksError,
     NotFoundError,
     StateError,
+    ValidationError,
 )
 from agentworks.name_filters import validate_name_filters
 from agentworks.vms.manager import gated_vm_boundary
@@ -20,6 +23,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow, VMRow, WorkspaceRow
+    from agentworks.resources import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.sessions.tmux import RunCommand
     from agentworks.ssh import SSHLogger
@@ -169,13 +173,15 @@ def _regenerate_tmuxinator(
 def filter_sessions(
     db: Database,
     *,
+    config: Config | None = None,
     workspace_name: str | list[str] | None = None,
     vm_name: str | list[str] | None = None,
     agent_name: str | list[str] | None = None,
+    harness_integration_name: str | list[str] | None = None,
     console_name: str | list[str] | None = None,
     admin_only: bool = False,
 ) -> list[SessionRow]:
-    """Load sessions with optional workspace, VM, agent, console, and/or admin filters.
+    """Load sessions with optional relationship, integration, and mode filters.
 
     Each name filter accepts a single name or a list of names; lists
     OR within a filter, filters AND across the call. ``admin_only``
@@ -189,7 +195,50 @@ def filter_sessions(
     ``stop_all_sessions``, ``start_all_sessions``) funnels its filters
     through here, this is the single validation point for the session
     surface.
+
+    A harness-integration filter builds one offline finalized registry, then
+    validates every requested resource before considering enablement and
+    readiness. Disabled or not-ready values warn and are excluded. With no
+    harness-integration filter, the existing database-only path is preserved.
     """
+    sessions, _registry = _filter_sessions_with_registry(
+        db,
+        config=config,
+        workspace_name=workspace_name,
+        vm_name=vm_name,
+        agent_name=agent_name,
+        harness_integration_name=harness_integration_name,
+        console_name=console_name,
+        admin_only=admin_only,
+    )
+    return sessions
+
+
+def _filter_sessions_with_registry(
+    db: Database,
+    *,
+    config: Config | None = None,
+    workspace_name: str | list[str] | None = None,
+    vm_name: str | list[str] | None = None,
+    agent_name: str | list[str] | None = None,
+    harness_integration_name: str | list[str] | None = None,
+    console_name: str | list[str] | None = None,
+    admin_only: bool = False,
+) -> tuple[list[SessionRow], Registry | None]:
+    """Return filtered sessions and the registry built for integration filtering."""
+    registry: Registry | None = None
+    selected_integrations: frozenset[str] | None = None
+    if harness_integration_name is not None:
+        if config is None:
+            raise ValidationError(
+                "config is required with a harness-integration filter",
+                entity_kind="harness-integration",
+            )
+        from agentworks.bootstrap import load_request_registry
+
+        registry = load_request_registry(config, include_live_resources=False)
+        selected_integrations = _available_harness_integrations(registry, harness_integration_name)
+
     validate_name_filters(
         db,
         vm_name=vm_name,
@@ -197,13 +246,69 @@ def filter_sessions(
         agent_name=agent_name,
         console_name=console_name,
     )
-    return db.list_sessions(
+    sessions = db.list_sessions(
         workspace_name=workspace_name,
         vm_name=vm_name,
         agent_name=agent_name,
         console_name=console_name,
         admin_only=admin_only,
     )
+    if selected_integrations is None:
+        return sessions, None
+    assert registry is not None
+    if not selected_integrations:
+        return [], registry
+
+    from agentworks.sessions.templates import resolve_live_template
+
+    selected: list[SessionRow] = []
+    for session in sessions:
+        try:
+            template = resolve_live_template(db, registry, session.name, session.template)
+        except AgentworksError as exc:
+            output.warn(
+                f"Skipping session '{session.name}' for harness-integration filtering: "
+                f"its effective template could not be resolved ({exc})."
+            )
+            continue
+        if template.harness_integration in selected_integrations:
+            selected.append(session)
+    return selected, registry
+
+
+def _available_harness_integrations(
+    registry: Registry,
+    requested: str | list[str],
+) -> frozenset[str]:
+    """Validate and reduce requested integration names in contract order."""
+    values = [requested] if isinstance(requested, str) else list(requested)
+    unique_values = list(dict.fromkeys(values))
+    from agentworks.resources.access import ResourceIdentity, resolve_resource
+
+    # Resolve the complete input before emitting availability warnings. A
+    # mixed known/unknown filter is therefore one hard error, never a partial
+    # selection whose earlier values happened to produce presentation.
+    for name in unique_values:
+        resolve_resource(registry, ResourceIdentity("harness-integration", name))
+
+    from agentworks.resources.graph import Enablement
+
+    enabled: list[str] = []
+    for name in unique_values:
+        if registry.graph.enablement_of("harness-integration", name) is Enablement.disabled:
+            output.warn(f"Harness integration '{name}' is disabled; ignoring this filter value.")
+        else:
+            enabled.append(name)
+
+    ready: list[str] = []
+    for name in enabled:
+        readiness = registry.graph.readiness_of("harness-integration", name)
+        if not readiness.is_ready:
+            detail = f": {readiness.reason}" if readiness.reason else ""
+            output.warn(f"Harness integration '{name}' is not ready{detail}; ignoring this filter value.")
+        else:
+            ready.append(name)
+    return frozenset(ready)
 
 
 def _distinct_vms_for_sessions(db: Database, sessions: list[SessionRow]) -> list[VMRow]:
