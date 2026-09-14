@@ -191,16 +191,17 @@ class TestDynamicCompletionsMapping:
         show = guide.subcommands["show"]
         (topic,) = [param for param in show.params if param.is_argument]
         group_options = [opt for param in guide.params for opt in param.opts]
+        list_options = [opt for param in listed.params if not param.is_argument for opt in param.opts]
         show_options = [opt for param in show.params if not param.is_argument for opt in param.opts]
 
         assert set(guide.subcommands) == {"list", "show"}
-        assert not listed.params
         assert topic.name == "topic"
         assert topic.required
         assert not topic.multiple
         assert topic.dynamic_completer == "guide_topics"
         assert group_options == ["--agent", "--human"]
-        assert not show_options
+        assert list_options == group_options
+        assert show_options == group_options
 
         generated = {shell: generate(shell) for shell in ("bash", "zsh", "powershell")}
         bash = _generated_block(generated["bash"], "        guide)", "        resource)")
@@ -216,7 +217,7 @@ class TestDynamicCompletionsMapping:
         assert "list" in zsh_group and "show" in zsh_group
         assert all(option in zsh_group for option in group_options)
         assert "1:topic:_agentworks_guide_topics" in zsh_show
-        assert all(option not in zsh_show for option in group_options)
+        assert all(option in zsh_show for option in group_options)
         assert "CompletionResult]::new('list'" in powershell
         assert "CompletionResult]::new('show'" in powershell
         assert all(f"CompletionResult]::new('{option}'" in powershell for option in group_options)
@@ -261,13 +262,19 @@ printf '%s\\n' "${{COMPREPLY[@]}}"
         assert complete(["agw", "guide", ""]) == ["list", "show", "--agent", "--human", "--help"]
         assert complete(["agw", "guide", "--"]) == ["--agent", "--human", "--help"]
         assert complete(["agw", "guide", "list", ""]) == []
+        assert complete(["agw", "guide", "list", "--"]) == ["--agent", "--human", "--help"]
         assert complete(["agw", "guide", "show", ""]) == expected_topics
         for option in ("--agent", "--human"):
             assert complete(["agw", "guide", option, ""]) == ["list", "show", "--agent", "--human", "--help"]
             assert complete(["agw", "guide", option, "list", ""]) == []
             assert complete(["agw", "guide", option, "show", ""]) == expected_topics
+            assert complete(["agw", "guide", "show", option, ""]) == expected_topics
             assert complete(["agw", "guide", option, "show", expected_topics[0], ""]) == []
-            assert complete(["agw", "guide", option, "show", expected_topics[0], "--"]) == ["--help"]
+            assert complete(["agw", "guide", option, "show", expected_topics[0], "--"]) == [
+                "--agent",
+                "--human",
+                "--help",
+            ]
         assert complete(["agw", "guide", "show", expected_topics[0], ""]) == []
 
     @pytest.mark.skipif(
@@ -341,6 +348,7 @@ print -r -- __READY__
         assert not topic_invoked
         assert complete("agw guide show ")[1]
         assert complete("agw guide --human show ")[1]
+        assert complete("agw guide show --agent ")[1]
         assert not complete("agw guide --agent show concept-fixture ")[1]
 
     @pytest.mark.windows
@@ -364,6 +372,7 @@ function Complete([string]$line) {{
     afterAgent = @(Complete 'agw guide --agent ')
     agent = @(Complete 'agw guide --agent show ')
     human = @(Complete 'agw guide --human show ')
+    localAgent = @(Complete 'agw guide show --agent ')
     helpAfterTopic = @(Complete 'agw guide --agent show {expected_topics[0]} --')
 }} | ConvertTo-Json -Depth 3 -Compress
 """
@@ -379,7 +388,8 @@ function Complete([string]$line) {{
         assert result["afterAgent"] == ["list", "show", "--agent", "--human", "--help"]
         assert result["agent"] == expected_topics
         assert result["human"] == expected_topics
-        assert result["helpAfterTopic"] == ["--help"]
+        assert result["localAgent"] == expected_topics
+        assert result["helpAfterTopic"] == ["--agent", "--human", "--help"]
 
     def test_database_backed_snippets_share_hidden_probe_contract(self) -> None:
         from agentworks.completions.bash import DYNAMIC_SNIPPETS as BASH_SNIPPETS

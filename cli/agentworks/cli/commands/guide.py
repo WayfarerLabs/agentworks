@@ -20,6 +20,14 @@ guide_app = typer.Typer(
 )
 app.add_typer(guide_app)
 
+GuideModeOption = Annotated[
+    bool | None,
+    typer.Option(
+        "--agent/--human",
+        help="Render for an agent or human, overriding automatic mode selection.",
+    ),
+]
+
 
 def _guide_mode(agent: bool | None) -> GuideMode:
     explicit: Literal["agent", "human"] | None = None if agent is None else ("agent" if agent else "human")
@@ -29,11 +37,7 @@ def _guide_mode(agent: bool | None) -> GuideMode:
 @guide_app.callback()
 def guide(
     context: typer.Context,
-    agent: bool | None = typer.Option(
-        None,
-        "--agent/--human",
-        help="Render for an agent or human, overriding automatic mode selection.",
-    ),
+    agent: GuideModeOption = None,
 ) -> None:
     """Render the guide index when no subcommand is selected."""
     context.obj = _guide_mode(agent)
@@ -43,7 +47,7 @@ def guide(
 
 
 @guide_app.command("list")
-def guide_list() -> None:
+def guide_list(agent: GuideModeOption = None) -> None:
     """Emit every available topic name, one per line."""
     typer.echo(list_guide_topics().markdown, nl=False)
 
@@ -52,6 +56,8 @@ def guide_list() -> None:
 def guide_show(
     context: typer.Context,
     topic: Annotated[str, typer.Argument(help="One exact guide topic name.")],
+    agent: GuideModeOption = None,
 ) -> None:
     """Render one exact guide topic."""
-    typer.echo(render_guide(topic, cast("GuideMode", context.obj)).markdown, nl=False)
+    mode = _guide_mode(agent) if agent is not None else cast("GuideMode", context.obj)
+    typer.echo(render_guide(topic, mode).markdown, nl=False)

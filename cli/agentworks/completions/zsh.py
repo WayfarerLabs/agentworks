@@ -188,7 +188,9 @@ def _emit_group(lines: list[str], spec: CommandSpec, func_name: str) -> None:
     group_args = _build_arguments(spec.params)
     lines.append(f"{func_name}() {{")
     lines.append("    local -a subcommands")
-    lines.append("    _arguments -C \\")
+    # Click stops parsing group options at the subcommand. Keep same-named leaf
+    # options in the leaf argument stream instead of consuming them here.
+    lines.append("    _arguments -C -A '-*' \\")
     for arg in group_args:
         lines.append(f"        {arg} \\")
     lines.append("        '--help[Show help]' \\")
