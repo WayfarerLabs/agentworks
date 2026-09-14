@@ -616,6 +616,7 @@ def list_sessions(
     workspace_name: str | list[str] | None = None,
     vm_name: str | list[str] | None = None,
     agent_name: str | list[str] | None = None,
+    harness_integration_name: str | list[str] | None = None,
     admin_only: bool = False,
     include_status: bool = False,
     names_only: bool = False,
@@ -629,11 +630,13 @@ def list_sessions(
     selected service ordering so completion stays stable.
     """
     if names_only:
-        sessions = _sorted_session_rows(
+        sessions, _registry = _sorted_session_rows(
             db,
+            config=config,
             workspace_name=workspace_name,
             vm_name=vm_name,
             agent_name=agent_name,
+            harness_integration_name=harness_integration_name,
             admin_only=admin_only,
             sort_keys=sort_keys,
         )
@@ -649,6 +652,7 @@ def list_sessions(
         workspace_name=workspace_name,
         vm_name=vm_name,
         agent_name=agent_name,
+        harness_integration_name=harness_integration_name,
         admin_only=admin_only,
         include_status=include_status,
         sort_keys=sort_keys,
@@ -663,6 +667,7 @@ def session_listing(
     workspace_name: str | list[str] | None = None,
     vm_name: str | list[str] | None = None,
     agent_name: str | list[str] | None = None,
+    harness_integration_name: str | list[str] | None = None,
     admin_only: bool = False,
     include_status: bool = False,
     require_vm_names: bool = False,
@@ -673,11 +678,13 @@ def session_listing(
     ``require_vm_names`` keeps closed projections from receiving the nullable
     VM fact used only by human recovery inventory.
     """
-    sessions = _sorted_session_rows(
+    sessions, filter_registry = _sorted_session_rows(
         db,
+        config=config,
         workspace_name=workspace_name,
         vm_name=vm_name,
         agent_name=agent_name,
+        harness_integration_name=harness_integration_name,
         admin_only=admin_only,
         sort_keys=sort_keys,
     )
@@ -719,7 +726,7 @@ def session_listing(
                 )
             )
     observed_at = datetime.now(UTC) if include_status else None
-    registry = _mgr._display_registry(config)
+    registry = filter_registry or _mgr._display_registry(config)
     harness_by_template: dict[str, str] = {}
 
     def harness_for(template_name: str) -> str | None:
@@ -770,19 +777,33 @@ def session_listing(
 def _sorted_session_rows(
     db: Database,
     *,
+    config: Config,
     workspace_name: str | list[str] | None,
     vm_name: str | list[str] | None,
     agent_name: str | list[str] | None,
+    harness_integration_name: str | list[str] | None,
     admin_only: bool,
     sort_keys: tuple[str, ...] | None,
-) -> tuple[SessionRow, ...]:
-    sessions = _mgr.filter_sessions(
-        db,
-        workspace_name=workspace_name,
-        vm_name=vm_name,
-        agent_name=agent_name,
-        admin_only=admin_only,
-    )
+) -> tuple[tuple[SessionRow, ...], Registry | None]:
+    if harness_integration_name is None:
+        sessions = _mgr.filter_sessions(
+            db,
+            workspace_name=workspace_name,
+            vm_name=vm_name,
+            agent_name=agent_name,
+            admin_only=admin_only,
+        )
+        registry = None
+    else:
+        sessions, registry = _mgr._filter_sessions_with_registry(
+            db,
+            config=config,
+            workspace_name=workspace_name,
+            vm_name=vm_name,
+            agent_name=agent_name,
+            harness_integration_name=harness_integration_name,
+            admin_only=admin_only,
+        )
     vm_names: dict[str, str | None] = {}
 
     def session_vm_name(session: SessionRow) -> str | None:
@@ -791,17 +812,20 @@ def _sorted_session_rows(
             vm_names[session.name] = None if workspace is None else workspace.vm_name
         return vm_names[session.name]
 
-    return sort_rows(
-        sessions,
-        sort_keys=sort_keys,
-        key_functions={
-            "alpha": lambda session: (session.name,),
-            "creation": lambda session: nullable_sort_value(session.created_at),
-            "vm": lambda session: nullable_sort_value(session_vm_name(session)),
-            "agent": lambda session: nullable_sort_value(session.agent_name),
-            "workspace": lambda session: nullable_sort_value(session.workspace_name),
-        },
-        entity_kind="session",
+    return (
+        sort_rows(
+            sessions,
+            sort_keys=sort_keys,
+            key_functions={
+                "alpha": lambda session: (session.name,),
+                "creation": lambda session: nullable_sort_value(session.created_at),
+                "vm": lambda session: nullable_sort_value(session_vm_name(session)),
+                "agent": lambda session: nullable_sort_value(session.agent_name),
+                "workspace": lambda session: nullable_sort_value(session.workspace_name),
+            },
+            entity_kind="session",
+        ),
+        registry,
     )
 
 

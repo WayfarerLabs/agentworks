@@ -56,7 +56,7 @@ def _resolve_template(
 
 
 def _display_registry(config: Config) -> Registry | None:
-    """Build the registry for a read-only display column, degrading to
+    """Build the registry for an unfiltered read-only display, degrading to
     ``None`` when config validation fails.
 
     ``load_request_registry`` builds and validates the registry and renders
@@ -64,11 +64,13 @@ def _display_registry(config: Config) -> Registry | None:
     raise ``AgentworksError`` for reasons
     unrelated to session templates (a misconfigured secret source
     chain, a bad ``defaults.site``, an unrelated resource collision).
-    ``session list`` / ``session describe`` are read-only and never
-    built the registry before the HARNESS INTEGRATION column existed, so a bad
-    registry must degrade the HARNESS INTEGRATION cell to ``"-"`` for every row
-    rather than abort the whole command. Catching ``AgentworksError``
-    keeps the same breadth as the per-template guard below.
+    Unfiltered ``session list`` is read-only and never built the registry before
+    the HARNESS INTEGRATION column existed, so a bad registry must degrade the
+    HARNESS INTEGRATION cell to ``"-"`` for every row rather than abort the whole
+    command. Catching ``AgentworksError`` keeps the same breadth as the
+    per-template guard below. An explicit harness-integration filter instead
+    requires the registry for validation and fails closed when it cannot be
+    loaded.
     """
     from agentworks.bootstrap import load_request_registry
 

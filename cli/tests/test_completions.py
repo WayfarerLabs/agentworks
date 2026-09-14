@@ -667,6 +667,16 @@ class TestOptionFlagsInSpec:
             assert ("session.start", parameter) in DYNAMIC_COMPLETIONS
             assert ("session.restart", parameter) in DYNAMIC_COMPLETIONS
 
+    def test_session_harness_integration_filters_use_resource_completion(self) -> None:
+        commands = _walk_commands(build_spec(app))
+        for operation in ("list", "stop", "start", "restart"):
+            parameter = next(
+                param
+                for param in commands[f"agentworks.session.{operation}"].params
+                if "--harness-integration" in param.opts
+            )
+            assert parameter.dynamic_completer == "harness_integrations"
+
 
 class TestGeneration:
     """Smoke tests for completion script generation."""
