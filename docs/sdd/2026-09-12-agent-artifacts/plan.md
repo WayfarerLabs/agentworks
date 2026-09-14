@@ -41,8 +41,9 @@ allowance has been granted for the follow-up.
       refresh uses the strict authoring format.
 - [x] Update the artifacts guide, permanent reference and owned SDD response; correct stale handoff
       bookkeeping without closing incomplete acceptance.
-- [ ] Complete private reviews, required gates and a coherent ready handoff; assess published
-      feedback and escalate material findings requiring further direction.
+- [x] Complete private reviews and required local gates for the authoring amendment.
+- [ ] Publish a coherent ready handoff and assess published feedback; escalate material findings
+      requiring further direction.
 
 ## Requirements and research
 
@@ -715,3 +716,24 @@ does not establish the complete managed lifecycle, conversation-resume or two-us
 matrix. Those unchecked acceptance items remain open, and no lockfile is added. The report's
 interactive-onboarding observation belongs to separate harness setup work; this amendment changes
 artifact authoring and inspection only.
+
+
+## Authoring amendment validation, 2026-09-14
+
+At `45a5ab45`, independent project, Muntz and generic correctness reviews found no material issues.
+Project review traced source, persistence, guide and SDD contracts; Muntz ran seven actual-parser
+probes; correctness ran twelve plus a legacy duplicate-key control. The isolated review trees had
+no project environment, so these reviews do not claim independent full-suite execution.
+
+Lead validation passed: 9,577 tests and seven skips using CI's non-integration selection; Ruff lint
+and format; mypy over 847 files; package source/wheel builds; Typer isolation; file lint; locked-SDD
+and Rulesync checks; 160 Python and 103 Node website tests; deterministic double builds at both site
+bases. The Rulesync check required an owned writable temporary/cache directory after the default
+Bun temporary location was read-only. Spelling cleanup after review changes no behavior.
+
+The real CLI ran with an isolated HOME: config initialization, artifacts guide rendering, bundle
+sample, and artifact inspection in text and JSON. A real core capture and SQLite record supplied the
+inspection fixture; captured descriptions appeared without instruction bodies. Unsupported rule
+frontmatter was refused by core capture. Every command returned zero and the fixture HOME was
+removed. No VM, remote harness, model call or operator state was used; remaining full-SDD live
+acceptance stays open. The follow-up handoff requests its normal PR validation pipeline.

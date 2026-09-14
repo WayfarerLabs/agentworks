@@ -80,7 +80,7 @@ Hints are small contextual facts, such as the availability of an environment var
 GitHub authentication. They remain distinct from rules, skills and a session's initial prompt. A
 producer needing stronger behavior can emit a rule or skill. A rule is guidance always loaded into
 context wherever that rule applies. A rule accepts plain Markdown or optional YAML frontmatter
-containing only a nonblank `description`; the artifact map key is its name. The description is
+containing only a nonempty `description`; the artifact map key is its name. The description is
 inspection metadata, separate from the always-loaded body. A skill is standard
 [Agent Skills](https://agentskills.io/specification) content: a directory with a `SKILL.md` entry
 document and any supporting files, preserving the standard's metadata and progressive disclosure

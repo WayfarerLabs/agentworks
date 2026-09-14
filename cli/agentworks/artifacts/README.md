@@ -126,9 +126,9 @@ description: Requirements for repository changes
 Run the relevant checks before submitting changes. Keep documentation consistent with behavior.
 ```
 
-`description` is the only supported rule field. It is optional; when supplied, it must be a nonblank
+`description` is the only supported rule field. It is optional; when supplied, it must be a nonempty
 string of at most 1,024 characters. The containing `rules` map key names the rule. The instruction
-body must be nonblank. Frontmatter must be a mapping, use unique string keys, and end with a second
+body must be nonempty. Frontmatter must be a mapping, use unique string keys, and end with a second
 `---` line. A leading `---` reserves that block for metadata; use `***` for a horizontal rule at the
 start of plain Markdown.
 
@@ -142,7 +142,7 @@ scope and its activated integration facets determine placement and delivery.
 
 ### Agents
 
-An agent persona requires `name`, `description` and a nonblank Markdown instruction body:
+An agent persona requires `name`, `description` and a nonempty Markdown instruction body:
 
 ```markdown
 ---
@@ -158,7 +158,7 @@ native_options:
 Review the changes and report actionable findings.
 ```
 
-The name must match its `agents` map key. The description must be a nonblank string of at most 1,024
+The name must match its `agents` map key. The description must be a nonempty string of at most 1,024
 characters. `native_options` is optional and maps integration names to option objects. Each
 consuming integration validates its own supported options and renders the shared persona body into
 its native format. An option for one integration does not configure another.

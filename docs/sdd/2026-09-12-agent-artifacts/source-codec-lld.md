@@ -138,7 +138,7 @@ is rejected; its entrypoint always normalizes. Hints, rules and persona instruct
 use normalized text regardless of their source filename.
 
 Rules accept plain Markdown or a leading YAML metadata mapping containing only `description`.
-Descriptions are optional nonblank strings of at most 1,024 characters; the map key supplies the
+Descriptions are optional nonempty strings of at most 1,024 characters; the map key supplies the
 name. Inline and file sources parse identically. Normalized rule content stores description,
 canonical metadata and body separately; native renderers consume the body. Persisted inline rules
 validate their separated metadata and body, while file rules additionally compare against retained
