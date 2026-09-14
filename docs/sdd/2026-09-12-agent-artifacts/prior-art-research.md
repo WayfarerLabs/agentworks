@@ -144,6 +144,16 @@ differ from this FRD's complete-package refusal and owner routing. Reuse the con
 skill content, not those ingestion or lifecycle semantics. Full Rulesync format compatibility is not
 implied.
 
+The 2026-09-14 operator-approved authoring amendment adopts optional rule `description` frontmatter
+and strict rule/persona field validation. Rulesync's rule schema also supports `globs`, `targets`,
+`root`, `localRoot` and tool-specific blocks. Those do not fit this delivery's always-loaded rules
+and facet-owned placement. Its persona model retains a shared body and tool-specific options;
+Agentworks keeps that model with explicit `native_options` keyed by integration, rather than
+introducing portable model or tool names. Agent Skills content remains standard. See the
+[rule schema](https://github.com/dyoshikawa/rulesync/blob/main/src/features/rules/rulesync-rule.ts)
+and
+[persona schema](https://github.com/dyoshikawa/rulesync/blob/main/src/features/subagents/rulesync-subagent.ts).
+
 The [programmatic API](https://rulesync.dyoshikawa.com/api/programmatic-api) is a Node/TypeScript
 generation API. Calling it would introduce a runtime boundary and still require Agentworks-owned
 acquisition, scope routing and applied-state handling. The HLA therefore proposes small native

@@ -9,7 +9,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, ValidationError
 
-from agentworks.artifacts.capture import content_from_members, normalize_text, validate_provenance
+from agentworks.artifacts.capture import content_from_members, normalize_text, rule_content, validate_provenance
 from agentworks.artifacts.model import (
     ArtifactComponent,
     ArtifactContent,
@@ -93,7 +93,7 @@ class _Owner(_Record):
 
 
 class _Envelope(_Record):
-    version: Annotated[StrictInt, Field(ge=2, le=2)]
+    version: Annotated[StrictInt, Field(ge=2, le=3)]
     owner: _Owner
     hints: dict[ArtifactName, _Input]
     rules: dict[ArtifactName, _Input]
@@ -109,7 +109,7 @@ class _Envelope(_Record):
         )
 
 
-def encode_inputs(inputs: ArtifactGroup) -> dict[str, object]:
+def encode_inputs(inputs: ArtifactGroup, *, version: int = 3) -> dict[str, object]:
     """Validate the persisted write boundary against the same schema used on read.
 
     No native state or source access is involved. Acquisition also calls this before
@@ -146,13 +146,13 @@ def encode_inputs(inputs: ArtifactGroup) -> dict[str, object]:
             "identity": item.identity,
             "replacements": [asdict(value) for value in item.replacements],
         }
-    payload: dict[str, object] = {"version": 2, "owner": asdict(inputs.owner), **result}
+    payload: dict[str, object] = {"version": version, "owner": asdict(inputs.owner), **result}
     decode_inputs(payload)
     return payload
 
 
-def decode_inputs(payload: object) -> ArtifactGroup:
-    """Validate persisted JSON across executions, including corrupt or old records.
+def decode_inputs(payload: object) -> tuple[int, ArtifactGroup]:
+    """Return the validated capture version and inputs from persisted JSON.
 
     Errors intentionally omit Pydantic details because rejected inputs may contain
     source credentials or artifact bodies. The caller supplies owning-state context.
@@ -208,10 +208,18 @@ def decode_inputs(payload: object) -> ArtifactGroup:
                 validate_provenance(provenance)
                 if content.members:
                     expected = content_from_members(
-                        content.type, origin.entry, content.members, provenance.selected_path or provenance.source
+                        content.type,
+                        origin.entry,
+                        content.members,
+                        provenance.selected_path or provenance.source,
+                        version=envelope.version,
                     )
                 elif content.type in (ArtifactType.HINT, ArtifactType.RULE) and content.text.strip():
-                    expected = ArtifactContent(content.type, origin.entry, text=content.text)
+                    expected = (
+                        rule_content(origin.entry, content.text, content.metadata)
+                        if content.type == ArtifactType.RULE and envelope.version == 3
+                        else ArtifactContent(content.type, origin.entry, text=content.text)
+                    )
                 else:
                     raise SourceRefError("persisted artifact is missing its entrypoint")
                 if expected != content:
@@ -236,7 +244,7 @@ def decode_inputs(payload: object) -> ArtifactGroup:
                 if item.identity != record.identity or content.digest != content_row.digest:
                     raise SourceRefError("persisted artifact identity does not match its content")
                 result[artifact_type.map_name][name] = item
-        return ArtifactGroup(owner, **result)
+        return envelope.version, ArtifactGroup(owner, **result)
     except (ValidationError, ValueError, TypeError, binascii.Error, UnicodeError, RecursionError):
         raise SourceRefError("invalid or unsupported persisted artifact capture") from None
 

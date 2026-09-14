@@ -90,7 +90,7 @@ def test_capture_rejects_persistence_limits_before_returning_buffered_inputs(mon
     assert "private fixture content" not in str(error.value)
 
 
-@pytest.mark.parametrize("version", [2, 3])
+@pytest.mark.parametrize("version", [2, 3, 4])
 def test_doctor_distinguishes_corrupt_capture_from_newer_version(
     db: Database, monkeypatch: pytest.MonkeyPatch, version: int
 ) -> None:
@@ -107,14 +107,14 @@ def test_doctor_distinguishes_corrupt_capture_from_newer_version(
     ]
 
     assert len(checks) == 1
-    assert checks[0].status is (Status.INFO if version == 3 else Status.FAIL)
+    assert checks[0].status is (Status.INFO if version == 4 else Status.FAIL)
     assert checks[0].instance_state is not None
     assert checks[0].instance_state.fact_type is (
-        InstanceStateHealthFactType.UNCONSUMED_RECORD if version == 3 else InstanceStateHealthFactType.MALFORMED_RECORD
+        InstanceStateHealthFactType.UNCONSUMED_RECORD if version == 4 else InstanceStateHealthFactType.MALFORMED_RECORD
     )
     assert "private-fixture-payload" not in str(checks)
     assert db.instance_state.get_applied_slices("vm", "box") == before
-    if version == 3:
+    if version == 4:
         with pytest.raises(UnsupportedArtifactCaptureVersionError):
             decode_captures(before[0])
         with pytest.raises(UnsupportedArtifactCaptureVersionError):

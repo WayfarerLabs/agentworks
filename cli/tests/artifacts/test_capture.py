@@ -74,7 +74,7 @@ def test_complete_skill_text_and_opaque_roundtrip(tmp_path):
     assert members["script"].data.endswith(b"\r")
     if os.name != "nt":
         assert members["script"].executable
-    assert decode_inputs(json.loads(json.dumps(encode_inputs(inputs)))) == inputs
+    assert decode_inputs(json.loads(json.dumps(encode_inputs(inputs)))) == (3, inputs)
     metadata = content.metadata
     metadata["name"] = "changed"
     assert content.metadata["name"] == "review"
@@ -308,7 +308,7 @@ def test_persona_metadata_and_options_are_immutable(tmp_path):
     assert item.content.name == "reviewer"
     assert item.content.native_options == {"codex": {"model": "example"}}
     assert item.content.text == "Check changes.\n"
-    assert decode_inputs(encode_inputs(group(item))) == group(item)
+    assert decode_inputs(encode_inputs(group(item))) == (3, group(item))
 
 
 @pytest.mark.parametrize("metadata", ["hooks: {}", "mcpServers: {}", "x: &x [*x]", "compatibility: [wrong]"])
@@ -508,7 +508,7 @@ def test_git_member_path_persistence_bound(repository, length):
     else:
         inputs = capture(spec)
         assert path in {member.path for member in tuple(inputs.items())[0].content.members}
-        assert decode_inputs(encode_inputs(inputs)) == inputs
+        assert decode_inputs(encode_inputs(inputs)) == (3, inputs)
 
 
 @pytest.mark.parametrize(("vanished", "cache_metadata"), [("file", False), ("file", True), ("directory", False)])

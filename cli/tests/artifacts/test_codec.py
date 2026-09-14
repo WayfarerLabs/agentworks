@@ -112,7 +112,7 @@ def test_decode_accepts_git_provenance_without_source_access(tmp_path: Path) -> 
             commit="a" * 40,
         ),
     )
-    assert decode_inputs(encode_inputs(group(altered))) == group(altered)
+    assert decode_inputs(encode_inputs(group(altered))) == (3, group(altered))
 
 
 @pytest.mark.parametrize("field", ["hooks", "mcpServers", "mcp_servers"])

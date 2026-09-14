@@ -2,17 +2,17 @@
 
 ## Current stage and ownership
 
-The operator approved the FRD and HLA on 2026-09-13 and authorized the complete implementation on
-PR 794. This includes workstation/Git acquisition, the native support matrix and a launch error for
+PR [794](https://github.com/WayfarerLabs/agentworks/pull/794) merged on 2026-09-14 at
+`908258a932c7715ff92dc75a7a64163a99920872`. The implementation includes workstation/Git acquisition,
+per-type maps with scope-owned namespaces, the native support matrix and a launch error for
 artifacts still unhandled at the session. The effort lead owns architecture, sequencing and this
-plan. Implementation proceeds as one complete delivery on the existing branch; local work units and
-commits provide internal checkpoints, with one completed implementation push before handoff.
+plan. Remaining live acceptance and closeout are listed below; merge did not complete them.
 
-The current operator amendment replaces the bundle entry map with top-level per-type maps and
-preserves separate owner groups throughout propagation. Same-type keys share the owning scope's
-namespace across producers and bundles; whole-entry replacement is intentional within that scope.
-The operator authorized two further iterations, including this implementation round. The current
-checklist below governs that amendment; previously completed checkboxes remain historical records.
+The operator approved an authoring amendment on 2026-09-14: optional description-only rule
+frontmatter, strict rule/persona metadata validation, inspection descriptions and artifacts-guide
+coverage. The follow-up ships on `fix/artifact-frontmatter` in
+[PR 803](https://github.com/WayfarerLabs/agentworks/pull/803). Previously completed checkboxes
+remain historical records.
 
 Keep predecessor closeout separate. Its implementation is merged, but seven acceptance/cleanup
 checkboxes remain open in the
@@ -23,18 +23,28 @@ Do not change the saga's existing ledger or contracts; route coordination to the
 
 ## Delivery
 
-Operator decision, 2026-09-12: keep requirements, research, HLA and the entire implementation on
-branch `sdd/agent-artifacts` and [PR 794](https://github.com/WayfarerLabs/agentworks/pull/794). This
-supersedes the earlier plan and handoffs that treated the seed as a separate merge increment. No
-separate design merge is planned; the operator does not see a coordination need for one here.
+The initial design and implementation shipped together on PR 794, as the operator requested. Its
+final ready handoff and authorized feedback rounds are complete. This authoring amendment is one
+complete follow-up PR governed by this SDD, carrying `sdd:agent-artifacts` and `saga:next-steps`.
+Complete private project, complexity and correctness reviews and relevant gates before marking it
+ready without `review-requested`. Do not merge automatically. On 2026-09-14 the operator authorized
+up to two published feedback/fix iterations for this follow-up.
 
-Keep the PR draft while work remains. Use `review-requested` for a coherent HLA checkpoint on this
-same PR, and remove it before incorporating changes or continuing implementation. Requirements and
-HLA approval remain explicit checkpoints; sharing a PR does not approve either. Carry
-`sdd:agent-artifacts` and `saga:next-steps` throughout. Mark ready without `review-requested` only
-when implementation and local gates are complete, with merge intent. The ready transition requests
-the standard integration-testing pipeline; its remaining live acceptance must finish before merge,
-and pending CI and acceptance are disclosed at handoff.
+## Authoring amendment, 2026-09-14
+
+- [x] Parse optional rule `description` frontmatter identically for inline and file sources, and
+      keep hints literal and skills standard.
+- [x] Reject unexpected rule/persona fields, malformed structures and duplicate/non-string keys;
+      retain integration-owned validation of supported native options.
+- [x] Expose captured descriptions through artifact inspection without content acquisition or body
+      disclosure, and preserve native delivery of only the rule body.
+- [x] Preserve already-captured interpretation through reads, sibling updates and backup; explicit
+      refresh uses the strict authoring format.
+- [x] Update the artifacts guide, permanent reference and owned SDD response; correct stale handoff
+      bookkeeping without closing incomplete acceptance.
+- [x] Complete private reviews and required local gates for the authoring amendment.
+- [x] Publish a coherent ready handoff and assess published feedback; escalate material findings
+      requiring further direction.
 
 ## Requirements and research
 
@@ -77,17 +87,14 @@ and pending CI and acceptance are disclosed at handoff.
 
 ## Implementation sequence
 
-All units ship together on PR 794. The lead integrates bounded developer branches locally, updates
-this plan as evidence completes each unit, and keeps `review-requested` off during implementation.
-Do not push delegate branches or partial implementation checkpoints. The next published head must
-contain the full implementation and collateral, followed by standard ready handoff.
+The following units shipped together on PR 794. Their completed checkboxes record that delivery;
+open acceptance items remain obligations of this SDD.
 
 ### 1. Shared contracts and migration
 
-This effort owns the early identity prerequisite under the existing saga contract, which explicitly
-permits that slice to land early. Main has no identity implementation, and PR 770 remains a design
-checkpoint. The lead owns identity and session publication together; no containment or event-stream
-contract is adopted here. The
+This effort delivered the early identity prerequisite under the existing saga contract, which
+permitted that slice to land early. The implementation is now on main. The lead owns identity and
+session publication together; no containment or event-stream contract is adopted here. The
 [coordination message](../2026-08-04-next-steps/message-2026-09-13-agent-artifacts-identity-implementation.md)
 records this implementation assignment for the saga and dependent efforts.
 
@@ -193,7 +200,7 @@ records this implementation assignment for the saga and dependent efforts.
       record remaining limitations honestly. Lock this SDD only when its work is actually complete.
 - [x] Push the complete implementation once, update the PR around shipped behavior and evidence, and
       mark ready without `review-requested`. Do not merge or enable automatic merging.
-- [ ] Monitor the ready handoff under the standard feedback window and the latest
+- [x] Monitor the ready handoff under the standard feedback window and the latest
       operator-authorized iteration allowance recorded below. Each changed head repeats private
       review, validation and proper handoff. Escalate scope changes or unavailable evidence.
 
@@ -653,7 +660,7 @@ The unfiltered run does not establish artifact live acceptance.
       optional-root retirement as a current plugin contract and clarify our Codex rendered-TOML
       budget.
 - [x] Complete private review and exact CI-selected local gates.
-- [ ] Publish a coherent ready handoff, then monitor and critically assess its reports; no further
+- [x] Publish a coherent ready handoff, then monitor and critically assess its reports; no further
       fix iteration or merge is currently authorized.
 
 The pruning disposition is narrower than the initial reading's blanket optional-cleanup proposal. A
@@ -691,3 +698,67 @@ rerunning with an owned workspace cache built both distributions successfully. T
 commit records this evidence without changing implementation. Publish the complete ready handoff
 without `review-requested`, then assess the full window. The two authorized fix iterations are now
 spent; further material corrections need operator disposition. Remaining live acceptance stays open.
+
+## Merged handoff and acceptance record, 2026-09-14
+
+The final ready head `39752081` completed its feedback window before PR 794 merged. Saga, Muntz and
+integration-test lanes answered without remaining material findings; all inline threads were
+disposed. The
+[final critical reading](https://github.com/WayfarerLabs/agentworks/pull/794#issuecomment-5656791826)
+records those dispositions and the completed window. This closes the two stale handoff checkboxes
+above. Earlier dated progress notes describe their historical checkpoints, not current pending work.
+
+The tester subsequently reported an authenticated Claude guest probe returning exact marker strings
+from a delivered user rule and skill. This is additional external evidence of native context
+loading, beyond the lead's local SDK registration checks; the lead did not independently rerun the
+model calls. See the
+[tester report](https://github.com/WayfarerLabs/agentworks/pull/794#issuecomment-5658715367). It
+does not establish the complete managed lifecycle, conversation-resume or two-user shared-workspace
+matrix. Those unchecked acceptance items remain open, and no lockfile is added. The report's
+interactive-onboarding observation belongs to separate harness setup work; this amendment changes
+artifact authoring and inspection only.
+
+## Authoring amendment validation, 2026-09-14
+
+At `45a5ab45`, independent project, Muntz and generic correctness reviews found no material issues.
+Project review traced source, persistence, guide and SDD contracts; Muntz ran seven actual-parser
+probes; correctness ran twelve plus a legacy duplicate-key control. The isolated review trees had no
+project environment, so these reviews do not claim independent full-suite execution.
+
+Lead validation passed: 9,577 tests and seven skips using CI's non-integration selection; Ruff lint
+and format; mypy over 847 files; package source/wheel builds; Typer isolation; file lint; locked-SDD
+and Rulesync checks; 160 Python and 103 Node website tests; deterministic double builds at both site
+bases. The Rulesync check required an owned writable temporary/cache directory after the default Bun
+temporary location was read-only. Spelling cleanup after review changes no behavior.
+
+The real CLI ran with an isolated HOME: config initialization, artifacts guide rendering, bundle
+sample, and artifact inspection in text and JSON. A real core capture and SQLite record supplied the
+inspection fixture; captured descriptions appeared without instruction bodies. Unsupported rule
+frontmatter was refused by core capture. Every command returned zero and the fixture HOME was
+removed. No VM, remote harness, model call or operator state was used; remaining full-SDD live
+acceptance stays open. The follow-up handoff requests its normal PR validation pipeline.
+
+## Authoring feedback round 1 of 2, 2026-09-14
+
+The first handoff's full feedback window elapsed. Saga and integration-test reports were clean; the
+tester reproduced the suite and exercised real capture refusals, valid controls and both inspection
+renderings. Muntz proposed two simplifications and asked about native inventory policy. The
+[critical reading](https://github.com/WayfarerLabs/agentworks/pull/803#issuecomment-5669057766) is
+answered by this bounded round, authorized by the operator on 2026-09-14.
+
+- [x] Pass the capture version through artifact parsing; keep generic YAML key policy independent of
+      capture versions for native inventory and standard skills.
+- [x] Return the validated version with decoded inputs, removing the raw-JSON recovery from state.
+- [x] Clarify why native inventory keeps its existing key policy.
+- [ ] Repeat private project, complexity and correctness reviews and required checks; publish the
+      completed head, return ready and monitor the next feedback window. One further fix round
+      remains.
+
+Round 1 validation at `fdf50882`: all three private lanes are clean. Project and correctness traced
+all decoder callers, both supported capture versions and state preservation. Muntz additionally ran
+28 before/after parser comparisons and two key-policy probes with matching behavior. These bounded
+probes do not claim independent full-suite execution. The lead repeated the complete non-integration
+suite (9,577 passed, seven skipped), Ruff/format, mypy (847 files), file lint, locked-SDD check and
+the isolated-HOME real CLI drive; all passed. No fixture HOME remains. The two implementation
+simplifications and native-inventory clarification complete this round's feedback batch; publication
+and the next window follow on the same PR.

@@ -71,7 +71,7 @@ class HintArtifactSpec(_TextArtifactSpec):
 
 
 class RuleArtifactSpec(_TextArtifactSpec):
-    """Instructions always loaded into the agent's context."""
+    """Always-loaded Markdown instructions with optional description-only YAML frontmatter."""
 
 
 class SkillArtifactSpec(_ArtifactSpec):
@@ -85,7 +85,7 @@ class AgentArtifactSpec(_ArtifactSpec):
     """An agent persona with a name, description, and instruction body."""
 
     source: NonBlankStr = Field(examples=["file::~/agent-content/reviewer.md"])
-    """Workstation or Git Markdown definition with name and description frontmatter."""
+    """Workstation or Git Markdown with name, description and optional native_options frontmatter."""
 
 
 type ArtifactSpec = HintArtifactSpec | RuleArtifactSpec | SkillArtifactSpec | AgentArtifactSpec

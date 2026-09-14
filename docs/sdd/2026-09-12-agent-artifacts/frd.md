@@ -79,7 +79,9 @@ capabilities. The same types serve explicitly supplied content and future automa
 Hints are small contextual facts, such as the availability of an environment variable or configured
 GitHub authentication. They remain distinct from rules, skills and a session's initial prompt. A
 producer needing stronger behavior can emit a rule or skill. A rule is guidance always loaded into
-context wherever that rule applies. A skill is standard
+context wherever that rule applies. A rule accepts plain Markdown or optional YAML frontmatter
+containing only a nonempty `description`; the artifact map key is its name. The description is
+inspection metadata, separate from the always-loaded body. A skill is standard
 [Agent Skills](https://agentskills.io/specification) content: a directory with a `SKILL.md` entry
 document and any supporting files, preserving the standard's metadata and progressive disclosure
 model. Loading a rule does not guarantee obedience; publishing files for shell retains the delivery
@@ -92,6 +94,14 @@ an agent means this definition. Where resource ownership could be ambiguous, say
 for the artifact and **agent resource** for the Agentworks resource. Native support for primary and
 delegated use must be stated per integration; the name does not promise both in every harness. The
 model also leaves room for limited hooks and MCP configuration later.
+
+Rule and agent frontmatter must reject unexpected fields, invalid field types, duplicate keys and
+non-string keys rather than silently ignoring them. Agent frontmatter accepts only `name`,
+`description` and optional `native_options` keyed by integration; each integration validates its own
+supported options. Rules do not accept conditional activation, target selection or placement fields.
+Captured descriptions appear in artifact inspection without fetching sources or disclosing bodies.
+Existing captures retain their recorded meaning until an explicit owning refresh; fresh capture uses
+the current authoring contract.
 
 An **artifact bundle** is a reusable collection with separate `hints`, `rules`, `skills` and
 `agents` maps. These are top-level fields of the bundle's `spec`; the containing map supplies the
