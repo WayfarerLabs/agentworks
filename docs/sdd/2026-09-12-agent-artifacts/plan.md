@@ -717,19 +717,18 @@ matrix. Those unchecked acceptance items remain open, and no lockfile is added. 
 interactive-onboarding observation belongs to separate harness setup work; this amendment changes
 artifact authoring and inspection only.
 
-
 ## Authoring amendment validation, 2026-09-14
 
 At `45a5ab45`, independent project, Muntz and generic correctness reviews found no material issues.
 Project review traced source, persistence, guide and SDD contracts; Muntz ran seven actual-parser
-probes; correctness ran twelve plus a legacy duplicate-key control. The isolated review trees had
-no project environment, so these reviews do not claim independent full-suite execution.
+probes; correctness ran twelve plus a legacy duplicate-key control. The isolated review trees had no
+project environment, so these reviews do not claim independent full-suite execution.
 
 Lead validation passed: 9,577 tests and seven skips using CI's non-integration selection; Ruff lint
 and format; mypy over 847 files; package source/wheel builds; Typer isolation; file lint; locked-SDD
 and Rulesync checks; 160 Python and 103 Node website tests; deterministic double builds at both site
-bases. The Rulesync check required an owned writable temporary/cache directory after the default
-Bun temporary location was read-only. Spelling cleanup after review changes no behavior.
+bases. The Rulesync check required an owned writable temporary/cache directory after the default Bun
+temporary location was read-only. Spelling cleanup after review changes no behavior.
 
 The real CLI ran with an isolated HOME: config initialization, artifacts guide rendering, bundle
 sample, and artifact inspection in text and JSON. A real core capture and SQLite record supplied the
