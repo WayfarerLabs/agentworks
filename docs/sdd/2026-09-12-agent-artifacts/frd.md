@@ -392,7 +392,7 @@ ownership ledger.
 artifact and the reason it remains unhandled. Core enforces the final-session disposition chosen in
 the HLA; omission, warning or success must not disguise dropped inputs.
 
-Provide **`agw artifacts show`**, following the scope-selection conventions of `agw env show`, to
+Provide **`agw artifact show`**, following the scope-selection conventions of `agw env show`, to
 explain artifacts for a VM, an admin or agent user, a workspace, or a session. Include local inputs
 and all applicable parent scopes by default. Resolve the selected owner's actual ancestors: a
 session includes its VM, actual user and workspace; a workspace does not acquire a user ancestor,
@@ -449,6 +449,6 @@ keys replace whole definitions within one scope, with inspectable provenance; na
 scopes remain distinct through deferral and native handling. Supported native representations and
 shell files have the promised placement and lifecycle; unsupported cases receive the agreed explicit
 disposition. Repetition, update, removal, failure and session reuse are demonstrated with observed
-evidence. Operators can use `agw artifacts show` to explain local and ancestor declarations,
+evidence. Operators can use `agw artifact show` to explain local and ancestor declarations,
 provenance and recorded delivery without changing the system. Permanent documentation stands alone,
 and the predecessor's remaining acceptance is not misrepresented as artifact completion.

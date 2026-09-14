@@ -46,7 +46,7 @@ class _ArtifactBundleKind:
 
         The owning scope captures bundle contents before its activated harness integrations
         handle or defer them. A bundle is a declaration, not a live instance. Use
-        `agw artifacts show` to inspect the selected scope and its actual ancestors.
+        `agw artifact show` to inspect the selected scope and its actual ancestors.
         """,
     )
     model: type[DeclaredResource] = ArtifactBundle

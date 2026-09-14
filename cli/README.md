@@ -249,7 +249,7 @@ This is a breaking change from 0.16. [The 0.17 upgrade guide](../docs/guides/upg
 covers the paired CLI/resource-directory cutover, per-user reinitialization, and rollback boundary.
 
 Agent artifact declarations and their native placement have a dedicated read-only view:
-`agw artifacts show --session my-session` includes the session and its actual ancestors;
+`agw artifact show --session my-session` includes the session and its actual ancestors;
 `--integration codex` narrows the explanation. It shows capture and application evidence without
 fetching content or exposing bodies. Start with `agw guide show concept-agent-artifacts` or the
 [artifact documentation](agentworks/artifacts/README.md) for bundle sources, explicit facet

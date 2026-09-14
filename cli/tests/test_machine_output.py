@@ -75,7 +75,7 @@ def test_machine_output_commands_are_the_complete_v1_contract() -> None:
         "resource.show",
         "resource.kinds",
         "graph.show",
-        "artifacts.show",
+        "artifact.show",
         "vm.list",
         "vm.describe",
         "workspace.list",

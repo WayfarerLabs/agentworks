@@ -199,7 +199,7 @@ or changing descendants. Removal has the same timing boundary: ancestor refresh 
 files previously applied by a descendant.
 
 See `agw guide show concept-agent-artifacts` for bundle examples, source capture, native support,
-and inspection. `agw artifacts show` includes upstream handling even when handled payloads no longer
+and inspection. `agw artifact show` includes upstream handling even when handled payloads no longer
 flow to a descendant.
 
 ## Session prerequisites
@@ -233,7 +233,7 @@ records commit with their owner rows.
 Use the existing owning inspection commands, such as `agw agent describe worker`,
 `agw workspace describe project`, or `agw vm describe dev`, to inspect the `harness-native-setup`
 lifecycle evidence. The summary includes completion, pending cleanup, and claim counts, without
-native I/O or settings values. Use `agw artifacts show` to inspect artifact capture, handling, and
+native I/O or settings values. Use `agw artifact show` to inspect artifact capture, handling, and
 deferral along the actual lineage. Doctor also checks stored evidence; it does not complete setup or
 repair native drift.
 
