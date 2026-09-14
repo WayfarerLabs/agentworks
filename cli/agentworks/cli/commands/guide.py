@@ -27,6 +27,13 @@ GuideModeOption = Annotated[
         help="Render for an agent or human, overriding automatic mode selection.",
     ),
 ]
+GuideListModeOption = Annotated[
+    bool | None,
+    typer.Option(
+        "--agent/--human",
+        help="Accepted for command symmetry; does not affect topic-list output.",
+    ),
+]
 
 
 def _guide_mode(agent: bool | None) -> GuideMode:
@@ -47,7 +54,7 @@ def guide(
 
 
 @guide_app.command("list")
-def guide_list(agent: GuideModeOption = None) -> None:
+def guide_list(agent: GuideListModeOption = None) -> None:
     """Emit every available topic name, one per line."""
     typer.echo(list_guide_topics().markdown, nl=False)
 
