@@ -414,6 +414,51 @@ discovery, namespacing, versioning), while this effort is OS-level containment o
 do on the VM. Trust is a shared theme, not a shared deliverable, and folding them would make wave 8
 mean two things. Nothing downstream waits on this effort, and it depends on no wave before it.
 
+**Transport and SSH rebuilt in parallel, then cut over and deleted (operator, 2026-09-14).** The
+execution layer is replaced rather than cleaned up in place, by two coordinated adjacent standalone
+children: transport-improv (`docs/sdd/2026-09-12-transport-improv/`, PR #795) owning one shared
+execution contract through permission-scoped views, and ssh-connection-contracts
+(`docs/sdd/2026-09-05-ssh-connection-contracts/`, PR #796) owning an independent installed-OpenSSH
+carrier. The new stack must not import, wrap, subclass, or call legacy execution code, directly or
+indirectly; that constraint is what keeps the rebuild from inheriting the assumptions it exists to
+replace. Cutover across resources and physical deletion of the old stack are transport-owned
+deliverables, not cleanup deferred past the interesting work.
+
+The rationale is that this layer's defect is a missing contract rather than accumulated mess.
+Behavior was discovered rather than specified, repeatedly: the Windows-only forced-TTY workaround
+nobody could remove until it was investigated (PR #737), `fetch_file`/`fetch_dir` fusing acquisition
+and delivery so that artifacts had to route around them rather than reuse them, and native execution
+transport having to be required after the fact (PR #746). In-place cleanup preserves the assumptions
+being discovered.
+
+**These are adjacent standalone children, but unlike the others they bear prerequisites.** Nothing
+waits on session-cgroups; waves 5 and 7 wait on this. Wave 5's session-level PTY observation and
+input interception, and wave 7's structured control, both build on the execution contract this work
+defines. Neither wave should be chartered against today's transport.
+
+**Saga-lead condition recorded at adoption (2026-09-14):** the old stack's tests carry
+incident-derived knowledge that exists nowhere else, including the forced-TTY versus closed-stdin
+finding, Windows stdin `TextIOWrapper` newline rewriting, and the Git-for-Windows POSIX toolchain
+dependency. Permission to copy useful tests does not protect that. Inventory those behaviors before
+deletion and re-prove each against the new stack, rather than discovering after the fact that a
+lesson was deleted with the code that encoded it.
+
+**Simplification becomes a standing loop (operator, 2026-09-14).** One-shot sweeps of a moving
+codebase race themselves: a survey starts going stale the moment it is written, which is why the
+simplification pass recut its map at least once as `main` moved. The replacement is an
+operator-directed standing loop, in the shape of the smol-dev loop, pointed at idle parts of the
+codebase to analyze and clean up code, docs, and tests. Pointing it at idle code is the structural
+fix, since findings about code that is not moving do not go stale underneath the work.
+
+**Establishing the loop is saga work; running it is not.** The saga's closeout may wait on the loop
+existing and being proven, and must not wait on the loop finishing, because it does not finish. The
+loop outlives the saga by design. Recorded explicitly because a standing mechanism recorded as a
+saga deliverable would otherwise look like an item the lock waits on forever.
+
+The loop needs the smol-dev gate to be safe: the operator names the area, the loop proposes, and the
+operator blesses before anything is deleted. Without that gate it wanders, and it re-litigates
+choices that were already settled deliberately.
+
 ### Observability (destinations 5 and 6)
 
 The universal event vocabulary is Agentworks-owned and independently versioned; ACP is a projection,
