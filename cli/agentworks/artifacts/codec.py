@@ -151,8 +151,8 @@ def encode_inputs(inputs: ArtifactGroup, *, version: int = 3) -> dict[str, objec
     return payload
 
 
-def decode_inputs(payload: object) -> ArtifactGroup:
-    """Validate persisted JSON across executions, including corrupt or old records.
+def decode_inputs(payload: object) -> tuple[int, ArtifactGroup]:
+    """Return the validated capture version and inputs from persisted JSON.
 
     Errors intentionally omit Pydantic details because rejected inputs may contain
     source credentials or artifact bodies. The caller supplies owning-state context.
@@ -212,7 +212,7 @@ def decode_inputs(payload: object) -> ArtifactGroup:
                         origin.entry,
                         content.members,
                         provenance.selected_path or provenance.source,
-                        legacy=envelope.version == 2,
+                        version=envelope.version,
                     )
                 elif content.type in (ArtifactType.HINT, ArtifactType.RULE) and content.text.strip():
                     expected = (
@@ -244,7 +244,7 @@ def decode_inputs(payload: object) -> ArtifactGroup:
                 if item.identity != record.identity or content.digest != content_row.digest:
                     raise SourceRefError("persisted artifact identity does not match its content")
                 result[artifact_type.map_name][name] = item
-        return ArtifactGroup(owner, **result)
+        return envelope.version, ArtifactGroup(owner, **result)
     except (ValidationError, ValueError, TypeError, binascii.Error, UnicodeError, RecursionError):
         raise SourceRefError("invalid or unsupported persisted artifact capture") from None
 

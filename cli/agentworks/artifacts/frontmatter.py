@@ -10,7 +10,12 @@ from agentworks.sources import SourceRefError
 
 
 def parse_metadata(header: str, *, unique_keys: bool = False) -> dict[str, object]:
-    """Reject expansion and excessive nesting before constructing YAML values."""
+    """Reject expansion and excessive nesting before constructing YAML values.
+
+    Rule/persona authoring opts into unique string keys. Native inventory observes
+    existing files without imposing that authoring schema; standard skills retain
+    their existing key policy too. Both use the default key handling.
+    """
     if len(header.encode()) > 64 * 1024:
         raise SourceRefError("artifact frontmatter exceeds its size limit")
     try:

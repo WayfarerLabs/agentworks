@@ -163,9 +163,9 @@ def content_from_members(
     members: tuple[ArtifactMember, ...],
     selected_path: str,
     *,
-    legacy: bool = False,
+    version: int = 3,
 ) -> ArtifactContent:
-    """Parse source or persisted members; legacy preserves version-2 capture semantics."""
+    """Parse source or persisted members; the version selects the capture interpretation."""
     for member in members:
         required_text = artifact_type != ArtifactType.SKILL or member.path == "SKILL.md"
         if required_text and (not member.text or normalize_text(member.data).encode() != member.data):
@@ -173,7 +173,7 @@ def content_from_members(
     if artifact_type in (ArtifactType.HINT, ArtifactType.RULE):
         if len(members) != 1:
             raise SourceRefError("hints and rules require exactly one text file")
-        return text_content(artifact_type, entry, normalize_text(members[0].data), members, legacy=legacy)
+        return text_content(artifact_type, entry, normalize_text(members[0].data), members, version=version)
     if artifact_type == ArtifactType.SKILL:
         entrypoints = [member for member in members if member.path == "SKILL.md"]
         if len(entrypoints) != 1:
@@ -189,8 +189,8 @@ def content_from_members(
         return ArtifactContent(artifact_type, name, description, body, members, _json(metadata))
     if len(members) != 1:
         raise SourceRefError("an agent source must select one persona Markdown file")
-    metadata, body = _frontmatter(normalize_text(members[0].data), unique_keys=not legacy)
-    if not legacy and metadata.keys() - {"name", "description", "native_options"}:
+    metadata, body = _frontmatter(normalize_text(members[0].data), unique_keys=version >= 3)
+    if version >= 3 and metadata.keys() - {"name", "description", "native_options"}:
         raise SourceRefError(
             "agent frontmatter accepts only name, description and native_options; "
             "put supported integration-specific options under native_options"
@@ -212,12 +212,12 @@ def text_content(
     text: str,
     members: tuple[ArtifactMember, ...] = (),
     *,
-    legacy: bool = False,
+    version: int = 3,
 ) -> ArtifactContent:
     """Parse inline or file guidance identically without interpreting hints as metadata."""
     if not text.strip():
         raise SourceRefError("artifact instructions cannot be empty")
-    if artifact_type == ArtifactType.RULE and not legacy:
+    if artifact_type == ArtifactType.RULE and version >= 3:
         metadata, body = _frontmatter(text, unique_keys=True) if text.splitlines()[0].strip() == "---" else ({}, text)
         return rule_content(name, body, metadata, members)
     return ArtifactContent(artifact_type, name, text=text, members=members)

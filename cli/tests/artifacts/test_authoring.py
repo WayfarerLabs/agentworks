@@ -33,7 +33,7 @@ def test_rule_capture_roundtrip_and_native_body(tmp_path, file_source, header):
     assert item.content.text == "Run relevant checks.\n"
     assert item.content.description == ("Repository conventions" if header else "")
     assert item.content.metadata == ({"description": "Repository conventions"} if header else {})
-    assert decode_inputs(encode_inputs(inputs)) == inputs
+    assert decode_inputs(encode_inputs(inputs)) == (3, inputs)
     for render in (claude.outer_artifacts, grok.outer_artifacts):
         files = render(received(item), "/home/user/.native").files
         assert len(files) == 1
@@ -85,7 +85,7 @@ def test_hints_remain_plaintext_even_when_they_look_like_frontmatter():
     source = "---\nglobs: ['*.py']\n---\nA setup fact.\n"
     item = capture(HintArtifactSpec(text=source)).hints["review"]
     assert item.content.text == source and item.content.metadata == {}
-    assert decode_inputs(encode_inputs(group(item))) == group(item)
+    assert decode_inputs(encode_inputs(group(item))) == (3, group(item))
 
 
 @pytest.mark.parametrize(
@@ -121,7 +121,7 @@ def test_existing_capture_keeps_its_interpretation_until_owner_refresh(db, tmp_p
     )
     source.write_text(text)
     member = ArtifactMember(source.name, text.encode(), text=True)
-    old_content = content_from_members(artifact_type, "review", (member,), str(source), legacy=True)
+    old_content = content_from_members(artifact_type, "review", (member,), str(source), version=2)
     item = ArtifactInput(
         old_content,
         ArtifactProvenance(source=str(source)),
@@ -136,7 +136,7 @@ def test_existing_capture_keeps_its_interpretation_until_owner_refresh(db, tmp_p
     record = db.instance_state.get_applied_slices("vm", "box")[0]
     assert canonicalize_captures(record) == record.payload
     assert read_captures(db, "vm", "box") == {"vm": snapshot, "admin": admin}
-    assert decode_inputs(encode_inputs(snapshot.inputs, version=2)) == snapshot.inputs
+    assert decode_inputs(encode_inputs(snapshot.inputs, version=2)) == (2, snapshot.inputs)
     with pytest.raises(SourceRefError):
         encode_inputs(snapshot.inputs)  # Old bytes cannot masquerade as a new capture.
     if artifact_type == ArtifactType.RULE:

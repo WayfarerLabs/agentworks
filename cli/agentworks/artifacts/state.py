@@ -136,10 +136,8 @@ def decode_captures(record: AppliedStateSlice) -> dict[ArtifactComponent, Captur
             declaration = value["declaration"]
             if not isinstance(declaration, str):
                 raise ValueError
-            inputs = decode_inputs(value["content"])
-            content = value["content"]
-            assert isinstance(content, dict)  # decode_inputs validated the envelope.
-            snapshot = CapturedArtifacts(declaration, inputs, cast("int", content["version"]))
+            version, inputs = decode_inputs(value["content"])
+            snapshot = CapturedArtifacts(declaration, inputs, version)
             _validate_owner(snapshot, record.instance_kind, record.instance_name, component)
             result[component] = snapshot
         return result

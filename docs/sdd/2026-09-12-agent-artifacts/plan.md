@@ -10,8 +10,9 @@ plan. Remaining live acceptance and closeout are listed below; merge did not com
 
 The operator approved an authoring amendment on 2026-09-14: optional description-only rule
 frontmatter, strict rule/persona metadata validation, inspection descriptions and artifacts-guide
-coverage. The follow-up ships on `fix/artifact-frontmatter` in a new PR. Previously completed
-checkboxes remain historical records.
+coverage. The follow-up ships on `fix/artifact-frontmatter` in
+[PR 803](https://github.com/WayfarerLabs/agentworks/pull/803). Previously completed checkboxes
+remain historical records.
 
 Keep predecessor closeout separate. Its implementation is merged, but seven acceptance/cleanup
 checkboxes remain open in the
@@ -26,8 +27,8 @@ The initial design and implementation shipped together on PR 794, as the operato
 final ready handoff and authorized feedback rounds are complete. This authoring amendment is one
 complete follow-up PR governed by this SDD, carrying `sdd:agent-artifacts` and `saga:next-steps`.
 Complete private project, complexity and correctness reviews and relevant gates before marking it
-ready without `review-requested`. Do not merge automatically. No additional published feedback/fix
-allowance has been granted for the follow-up.
+ready without `review-requested`. Do not merge automatically. On 2026-09-14 the operator authorized
+up to two published feedback/fix iterations for this follow-up.
 
 ## Authoring amendment, 2026-09-14
 
@@ -42,7 +43,7 @@ allowance has been granted for the follow-up.
 - [x] Update the artifacts guide, permanent reference and owned SDD response; correct stale handoff
       bookkeeping without closing incomplete acceptance.
 - [x] Complete private reviews and required local gates for the authoring amendment.
-- [ ] Publish a coherent ready handoff and assess published feedback; escalate material findings
+- [x] Publish a coherent ready handoff and assess published feedback; escalate material findings
       requiring further direction.
 
 ## Requirements and research
@@ -736,3 +737,19 @@ inspection fixture; captured descriptions appeared without instruction bodies. U
 frontmatter was refused by core capture. Every command returned zero and the fixture HOME was
 removed. No VM, remote harness, model call or operator state was used; remaining full-SDD live
 acceptance stays open. The follow-up handoff requests its normal PR validation pipeline.
+
+## Authoring feedback round 1 of 2, 2026-09-14
+
+The first handoff's full feedback window elapsed. Saga and integration-test reports were clean; the
+tester reproduced the suite and exercised real capture refusals, valid controls and both inspection
+renderings. Muntz proposed two simplifications and asked about native inventory policy. The
+[critical reading](https://github.com/WayfarerLabs/agentworks/pull/803#issuecomment-5669057766) is
+answered by this bounded round, authorized by the operator on 2026-09-14.
+
+- [x] Pass the capture version through artifact parsing; keep generic YAML key policy independent of
+      capture versions for native inventory and standard skills.
+- [x] Return the validated version with decoded inputs, removing the raw-JSON recovery from state.
+- [x] Clarify why native inventory keeps its existing key policy.
+- [ ] Repeat private project, complexity and correctness reviews and required checks; publish the
+      completed head, return ready and monitor the next feedback window. One further fix round
+      remains.
