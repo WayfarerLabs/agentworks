@@ -1305,11 +1305,11 @@ For locally missing history, the shell suggests an explicitly scoped lookup on t
 Agentworks GitHub releases page. Refusal performs no network request or claimed summary. Use current
 command facts to assess an installation.
 
-`agw guide show TOPIC` accepts exactly one topic. The guide-global `--agent` and `--human` options
-override automatic presentation selection for either the no-subcommand index or a following `show`;
-explicit selection wins over the Claude Code execution signature and stdout TTY fallback. They do
-not modify a following `list`. Ordinary shell content and release evidence are identical in both
-modes. Content inside an agent-only fence renders only in agent mode.
+`agw guide show TOPIC` accepts exactly one topic. The `--agent` and `--human` options may be placed
+on the guide group or on either subcommand. For `show`, a subcommand option overrides a group
+option, and either explicit selection wins over the Claude Code execution signature and stdout TTY
+fallback. For `list`, both placements are accepted and ignored. Ordinary shell content and release
+evidence are identical in both modes. Content inside an agent-only fence renders only in agent mode.
 
 `concept-assistant-agent` is the shared, directly addressable home for general external-assistant
 posture. The assistant acts under the operator's current instruction, uses the CLI and its help for
@@ -1354,6 +1354,7 @@ surfaces.
 | `agw guide list`                                          | Emit every topic name for shell completion    |
 | `agw guide show TOPIC`                                    | Render one exact topic                        |
 | `agw guide --agent/--human show TOPIC`                    | Override the selected topic's presentation    |
+| `agw guide show TOPIC --agent/--human`                    | Override at the subcommand                    |
 | `agw guide show concept-assistant-agent`                  | Render the external-assistant posture         |
 | `agw guide show concept-prerequisites`                    | Render workstation and access prerequisites   |
 | `agw guide show concept-virtual-machines`                 | Explain VM platforms, sites, and inspection   |
