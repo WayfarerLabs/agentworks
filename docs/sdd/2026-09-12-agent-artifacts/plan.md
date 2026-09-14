@@ -753,3 +753,12 @@ answered by this bounded round, authorized by the operator on 2026-09-14.
 - [ ] Repeat private project, complexity and correctness reviews and required checks; publish the
       completed head, return ready and monitor the next feedback window. One further fix round
       remains.
+
+Round 1 validation at `fdf50882`: all three private lanes are clean. Project and correctness traced
+all decoder callers, both supported capture versions and state preservation. Muntz additionally ran
+28 before/after parser comparisons and two key-policy probes with matching behavior. These bounded
+probes do not claim independent full-suite execution. The lead repeated the complete non-integration
+suite (9,577 passed, seven skipped), Ruff/format, mypy (847 files), file lint, locked-SDD check and
+the isolated-HOME real CLI drive; all passed. No fixture HOME remains. The two implementation
+simplifications and native-inventory clarification complete this round's feedback batch; publication
+and the next window follow on the same PR.
