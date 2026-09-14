@@ -255,14 +255,16 @@ its branch is deleted. Remaining unmerged drafts on remote branches, both out of
   rewrites LF to `os.linesep`) was invisible on Linux by construction. Recorded as a known gap, not
   a scheduled item.
 
-- **Green CI does not cover the harness-integration subsystem's native paths.** The wave 4 fixtures
-  skip when the native CLI is absent and CI installs neither `codex` nor `claude`, so roughly 41
-  tests in the subsystem wave 4 just shipped do not run on the runner. Integration testing measured
-  it directly: CI reported 8,878 passed with 44 skipped where a host with both CLIs installed
-  reported 8,930 passed with three skipped, reconciling to the same total. The effort disclosed this
-  rather than claiming the coverage, and retained a prepared patch. It is the same shape as the
-  Linux-only gap above that let a Windows `vm create` break reach a published release: a class of
-  regressions "all checks pass" does not speak to. This is a statement about automated regression
-  coverage, not about whether the subsystem works: live integration testing does exercise these
-  paths against real VMs and native CLIs. The gap is that a future change can break them without CI
-  noticing. Open.
+- **Green CI does not cover the harness-integration subsystem's native paths.** The artifact and
+  harness fixtures skip when the native CLI is absent, and CI installs neither `codex` nor `claude`,
+  so the tests that exercise real native behavior do not run on the runner. At this snapshot the
+  Linux job reports 9,478 passed and 55 skipped, and the Windows job runs a marker-selected subset
+  (197 passed, 15 skipped). The efforts disclosed this rather than claiming the coverage, and
+  retained a prepared patch to install the CLIs in CI. It is the same shape as the Linux-only gap
+  above that let a Windows `vm create` break reach a published release: a class of regressions "all
+  checks pass" does not speak to. This is a statement about automated regression coverage, not about
+  whether the subsystem works, since live integration testing does exercise these paths against real
+  VMs and native CLIs. The gap is that a future change can break them without CI noticing. How many
+  of the 55 skips are native-CLI skips has not been re-measured at this snapshot; an earlier
+  measurement during wave 4 is not carried forward here because its figures came from two different
+  runs. Open.
