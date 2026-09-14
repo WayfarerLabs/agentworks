@@ -1,6 +1,7 @@
 # Current State
 
-- Snapshot date: 2026-09-06, post-0.18.0 and post-wave-4-charter (update at wave boundaries)
+- Snapshot date: 2026-09-14, post-agent-artifacts-merge (PR #794, `908258a9`), which followed wave 4
+  (PR #761, `7c744828`) (update at wave boundaries)
 - Baseline: released Agentworks 0.14.0 (2026-08-18, live on PyPI; see `phasing.md`'s release map for
   the cut's trail) plus post-release `main`. The release itself carries everything the previous
   baseline enumerated (the phase 1 TOML sunset, the 0.14 expired-compat removals, declarative-schema
@@ -150,47 +151,72 @@ and the manifest surface has no warn-window channel (the standing consequence re
   it, and the 0.14 hard break for direct backend references. The readiness-shape choice for the
   `secret-source` kind is settled and recorded in that SDD's lock.
 
-## Harness integration surface (wave 4 groundwork)
+## Harness integration surface (wave 4 and agent artifacts, both merged)
 
-- The capability exists at the session scope only. `HarnessIntegration`
-  (`cli/agentworks/capabilities/harness_integration/base.py:202`) declares one abstract operation,
-  `start` (`:308`), and the kind descriptor's `required_operations` is `frozenset({"start"})`
-  (`cli/agentworks/capabilities/harness_integration/kinds.py:119`). There are no vm, user, or
-  workspace methods.
-- **The facet vocabulary is not missing; it is declared and unused.** `Capability.config_for`
-  (`cli/agentworks/capabilities/base.py:339`) is a shipped classmethod whose docstring defines a
-  facet as the level a capability is driven at, states that facets are not scopes, records that core
-  owns the mapping, and says the signature takes no facet argument only because no capability offers
-  more than one config yet. `cli/agentworks/capabilities/README.md` carries the same contract. The
-  per-kind config contract lives on the descriptor (`kinds.py:127`,
-  `cli/agentworks/capabilities/descriptor.py:165`); a capability declares its own model through
-  `config_model` and offers it through `config_for`.
-- Resume is not a second method. `HarnessLaunchIntent` (`base.py:71`) carries `CREATE`,
-  `RESUME_ONLY`, `RESUME_OR_NEW`, and `FORCE_NEW` with a `starts_fresh` property, so one `start`
-  serves both paths. The kind's `contract_version` is 3 (`kinds.py:117`), matching all four in-tree
-  integrations.
-- The harness leak into core is still present and is wave 4's acceptance test: `claude_marketplaces`
-  and `claude_plugins` sit on the agent template (`cli/agentworks/agents/templates.py:42`) and on
-  admin config (`cli/agentworks/vms/admin.py:142`), with an `install_claude_plugins` VM-init step
-  (`cli/agentworks/vms/initializer/driver.py:741`, defined at `:764`). The Claude plugin's own
-  module docstring (`cli/agentworks/plugins/claude/__init__.py:28`) already names them as core
-  surfaces that should not be Claude-specific.
-- The instance-state store is in place for applied state: `cli/agentworks/db/instance_state.py`
-  exposes `replace_applied_slices` (`:529`), `clear_applied_slice` (`:575`), and
-  `inspect_owner_state` (`:593`), with `AppliedStateKey` (`:37`) closed at two vm-only keys and
-  `_APPLIED_KEYS_BY_KIND` (`:62`) already carrying `agent`, `workspace`, and `session` as kinds that
-  own no keys yet. Wave 4 registers keys without touching the table, which is what the R2 store
-  review promised.
+Wave 4 merged 2026-09-12 as `7c744828`. Its agent-artifacts successor merged 2026-09-14 as
+`908258a9`. Neither SDD is locked: both retain open live-acceptance items. Everything below was
+re-derived from `main` after the successor landed, because several wave-4-era facts recorded here
+were changed by it.
+
+- **The capability spans four facets.** `required_operations` is
+  `frozenset({"start", "vm_init", "user_init", "workspace_init"})`
+  (`cli/agentworks/capabilities/harness_integration/kinds.py:121`), and `contract_version` is **6**
+  (`:118`): wave 4 took it from 3 to 4, and #794 bumped it twice more. The base declares the setup
+  methods at `capabilities/harness_integration/base.py:307`, `:315`, and `:323`, with `check_setup`
+  at `:331` and `start` at `:447`.
+- **The base still refuses an unimplemented facet, but no first-party integration relies on that.**
+  Those three base methods raise `StateError` naming the integration and facet, which is wave 4's
+  reversal of the earlier no-op-defaults rule. Since #794, all four shipped integrations override
+  all three: claude, codex, grok, and shell each implement `vm_init`, and each one `defer`s its VM
+  artifacts to a later facet rather than placing files at the VM. So the refusal now guards future
+  and third-party integrations rather than describing current behavior.
+- **`config_for` carries its facet argument** at `capabilities/base.py:340` and
+  `capabilities/harness_integration/base.py:246`. The default keeps single-config capabilities
+  unchanged.
+- **The harness leak into core is closed, which was wave 4's stated acceptance test.**
+  `claude_marketplaces` and `claude_plugins` no longer sit on the agent template or admin config,
+  and the `install_claude_plugins` VM-init step is gone. They survive only as `LEGACY_CLAUDE_FIELDS`
+  (`cli/agentworks/legacy_claude.py:22`) with migration-facing error handling
+  (`cli/agentworks/instance_overlay_codec.py:83`, `cli/agentworks/schema/errors.py:579`), so an
+  operator's old declaration is diagnosed rather than silently ignored.
+- **Artifacts shipped in the successor.** `cli/agentworks/artifacts/` carries declarations, capture,
+  codec, routing, publication, session handling, inspection, and applied state. `artifact-bundle` is
+  a registered resource kind (`artifacts/kinds.py:69`) declaring four types: hint, rule, skill, and
+  agent personas (`artifacts/model.py:29-32`). Hints and rules may be inline text or a source
+  reference (`artifacts/declarations.py:54-58`); skills and agent personas require a source
+  (`:77-88`) and have no inline form. `agw artifacts show` explains declarations and recorded
+  delivery without applying anything. Claude, Codex, and grok have native artifact modules; shell's
+  delivery lives at `artifacts/native/shell.py` and does not claim to load files into model context.
+- **Applied state gained two keys without touching the table.** `AppliedStateKey` carries
+  `HARNESS_NATIVE_SETUP` (`cli/agentworks/db/instance_state.py:42`) and `ARTIFACT_INPUTS` (`:43`),
+  with `ARTIFACT_INPUTS` valid for vm, workspace, agent, **and** session owners (`:63-76`).
+- **Captured artifact content is persisted in that typed payload, bytes included.**
+  `artifacts/codec.py` encodes `content.text` and base64-encoded member `data` into the
+  `VersionedPayload` that `artifacts/state.py` writes under `ARTIFACT_INPUTS`. Capture limits bound
+  what can be persisted (`codec.py:29-30`, `package_sources.CaptureLimits`). This is worth flagging
+  rather than burying: `cli/agentworks/db/README.md` describes instance-state payloads as
+  "deliberately compact" and tells a new consumer not to add a generic blob API, so bounded artifact
+  bodies in the payload sit in tension with that contract. The saga lead raised content-in-payload
+  as a finding during wave 4, read the successor's design as having moved bytes out, and was wrong
+  about the implementation. Whether the bound makes this acceptable is an open operator question,
+  not a settled one.
+- **Feature capability kinds remain future work**, with their pipeline position between core and
+  integrations preserved as guidance only.
 
 ## Session runtime (observability groundwork)
 
-- Sessions have no run/incarnation identity. `sessions.name` is the sole key and is reusable after
-  delete-and-recreate. `boot_id` is no longer only a reboot detector: `SessionRow` now carries
-  `pid`, `boot_id`, and `tmux_server_start_ticks` together as the tmux server's process fingerprint,
-  used for teardown identity by the session and console lifecycle work. That is process identity,
-  not workload identity, and it does not close the gap below. Any transcript keyed by session name
-  alone will splice unrelated histories. This is the single sharpest schema gap for the
-  observability effort.
+- **Session and run identity now exist** (migration 38, delivered by PR #794 under the
+  scope-participation contract's early-landing allowance). `SessionRow` carries `session_uuid`
+  (`NOT NULL UNIQUE`, so never-reused is a schema constraint rather than a convention) and a
+  nullable `run_id` (`cli/agentworks/db/models.py:178-180`). Existing sessions received a durable
+  UUID at migration; none received an invented run, and a legacy incarnation takes its first
+  `run_id` at its next managed launch. The operator-facing name stays the reusable human key, so a
+  delete-and-recreate under one name can no longer splice histories. This was previously recorded
+  here as the single sharpest schema gap for the observability effort; it is closed.
+- `boot_id` remains what it was: `SessionRow` carries `pid`, `boot_id`, and
+  `tmux_server_start_ticks` together as the tmux server's process fingerprint, used for teardown
+  identity. That is process identity, not workload identity, and the new fields are what carry
+  workload identity.
 - There is no PTY observation, no input interception, no event or fanout infrastructure, and no
   supervisor or heartbeat. tmux owns the PTY (one tmux server per session on a private socket);
   Agentworks only ever pulls scrollback via `capture-pane`.
@@ -228,3 +254,17 @@ its branch is deleted. Remaining unmerged drafts on remote branches, both out of
   mechanism there (`subprocess.run(..., text=True)` wrapping stdin in a `TextIOWrapper` that
   rewrites LF to `os.linesep`) was invisible on Linux by construction. Recorded as a known gap, not
   a scheduled item.
+
+- **Green CI does not cover the harness-integration subsystem's native paths.** The artifact and
+  harness fixtures skip when the native CLI is absent, and CI installs neither `codex` nor `claude`,
+  so the tests that exercise real native behavior do not run on the runner. At this snapshot the
+  Linux job reports 9,478 passed and 55 skipped, and the Windows job runs a marker-selected subset
+  (197 passed, 15 skipped). The efforts disclosed this rather than claiming the coverage, and
+  retained a prepared patch to install the CLIs in CI. It is the same shape as the Linux-only gap
+  above that let a Windows `vm create` break reach a published release: a class of regressions "all
+  checks pass" does not speak to. This is a statement about automated regression coverage, not about
+  whether the subsystem works, since live integration testing does exercise these paths against real
+  VMs and native CLIs. The gap is that a future change can break them without CI noticing. How many
+  of the 55 skips are native-CLI skips has not been re-measured at this snapshot; an earlier
+  measurement during wave 4 is not carried forward here because its figures came from two different
+  runs. Open.
