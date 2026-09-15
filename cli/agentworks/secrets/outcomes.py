@@ -146,7 +146,7 @@ def format_hint(outcome: ResolutionOutcome) -> str:
         return "resolved"
     if isinstance(result, ResolutionFailed):
         if result.reason is FailureReason.DEADLINE_EXCEEDED and outcome.backend == "onepassword":
-            return "approve the 1Password request and retry"
+            return "retry and approve the 1Password request"
         return _FAILURE_HINTS[result.reason]
     if isinstance(result, ResolutionMissing):
         return "configure the secret in this source or a later source"
