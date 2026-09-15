@@ -14,6 +14,7 @@ from agentworks.cli._app import app
 from agentworks.completions.spec import CommandSpec, build_spec
 from agentworks.guide.agent_mode import GuideMode
 from agentworks.guide.catalog import discover_concept_shells
+from agentworks.guide.markdown import _closing_fence, _opening_fence, scan_markdown
 from agentworks.guide.render import render_shell
 from agentworks.guide.service import render_guide
 from agentworks.plugins.registration import seat_installed_plugins
@@ -34,42 +35,69 @@ def _starts_agw_command(segment: str) -> bool:
     return bool(segment) and segment.split(maxsplit=1)[0] == "agw"
 
 
-def _shell_segments(expression: str) -> Iterator[str]:
+def _fence_details(content: str) -> tuple[str, int, str]:
+    opening = _opening_fence(content)
+    assert opening is not None
+    marker, length = opening
+    value = content.lstrip(" ")
+    info = value[length:].strip().split(maxsplit=1)
+    return marker, length, info[0] if info else ""
+
+
+def _scan_shell(expression: str) -> tuple[tuple[str, ...], str | None, bool]:
+    segments: list[str] = []
     start = 0
     quote: str | None = None
     escaped = False
+    at_word_start = True
     for index, character in enumerate(expression):
         if escaped:
             escaped = False
-            continue
-        if character == "\\" and quote != "'":
+            at_word_start = False
+        elif character == "\\" and quote != "'":
             escaped = True
-            continue
-        if quote is not None:
+            at_word_start = False
+        elif quote is not None:
             if character == quote:
                 quote = None
-            continue
-        if character in {'"', "'"}:
+        elif character in {'"', "'"}:
             quote = character
-        elif character == "#" and (index == start or expression[index - 1].isspace()):
+            at_word_start = False
+        elif character == "#" and at_word_start:
             if segment := expression[start:index].strip():
-                yield segment
-            return
+                segments.append(segment)
+            return tuple(segments), quote, escaped
         elif character in _SHELL_OPERATOR_CHARS:
             if segment := expression[start:index].strip():
-                yield segment
+                segments.append(segment)
             start = index + 1
-    segment = expression[start:].strip()
+            at_word_start = True
+        elif character.isspace():
+            at_word_start = True
+        else:
+            at_word_start = False
+    if segment := expression[start:].strip():
+        segments.append(segment)
+    return tuple(segments), quote, escaped
+
+
+def _continues_shell_line(line: str) -> bool:
+    _, _, escaped = _scan_shell(line)
+    return escaped
+
+
+def _shell_segments(expression: str) -> Iterator[str]:
+    segments, quote, escaped = _scan_shell(expression)
     if quote is not None or escaped:
-        if _starts_agw_command(segment):
+        yield from segments[:-1]
+        if segments and _starts_agw_command(segments[-1]):
             raise ValueError("malformed shell quoting in authored command")
         return
-    if segment:
-        yield segment
+    yield from segments
 
 
 def _shell_commands(expression: str) -> Iterator[str]:
-    for segment in _shell_segments(expression.replace("\\\n", " ")):
+    for segment in _shell_segments(expression):
         if not _starts_agw_command(segment):
             continue
         tokens = shlex.split(segment)
@@ -79,23 +107,36 @@ def _shell_commands(expression: str) -> Iterator[str]:
 def _authored_commands(text: str) -> set[str]:
     commands: set[str] = set()
     inline_lines: list[str] = []
-    fence: str | None = None
+    fence: tuple[str, int, str] | None = None
     continuation = ""
-    for line in text.splitlines():
-        if line.startswith("```"):
+    lines = scan_markdown(text, "authored command guidance")
+    for index, line in enumerate(lines):
+        next_outside = index + 1 == len(lines) or lines[index + 1].outside_code
+        if line.outside_code:
+            if not next_outside:
+                fence = _fence_details(line.content)
+            else:
+                inline_lines.append(line.content)
+            continue
+
+        assert fence is not None
+        marker, opening_length, language = fence
+        if _closing_fence(line.content, (marker, opening_length)):
             if continuation:
                 raise ValueError("unfinished continuation in authored shell command")
-            fence = None if fence is not None else line[3:].strip()
-        elif fence in {"bash", "sh", "shell"}:
-            if line.endswith("\\"):
-                continuation += line[:-1] + " "
+            fence = None
+            continue
+        if language in {"bash", "sh", "shell"}:
+            logical_line = continuation + line.content
+            if _continues_shell_line(logical_line):
+                continuation = logical_line[:-1]
             else:
-                commands.update(_shell_commands(continuation + line))
+                commands.update(_shell_commands(logical_line))
                 continuation = ""
-        elif fence is None:
-            inline_lines.append(line)
-    if continuation:
-        raise ValueError("unfinished continuation in authored shell command")
+        if next_outside:
+            if continuation:
+                raise ValueError("unfinished continuation in authored shell command")
+            fence = None
     inline_text = "\n".join(inline_lines)
     commands.update(
         command
@@ -337,7 +378,6 @@ agw doctor
 ```
 Then `echo ok && agw retired`.
 """
-
     assert _authored_commands(text) == {"agw doctor", "agw retired"}
 
 
@@ -348,25 +388,48 @@ printf '%s' 'agw retired'
 echo '`agw retired`'
 ```
 """
-
     assert _authored_commands(text) == set()
+
+
+def test_command_extraction_uses_the_supported_fence_grammar() -> None:
+    text = """````bash
+agw doctor
+````
+
+> ~~~bash
+> agw resource kinds
+> ~~~
+
+~~~text
+'agw retired'
+~~~
+Then `agw version`.
+"""
+    assert _authored_commands(text) == {"agw doctor", "agw resource kinds", "agw version"}
 
 
 def test_shell_comments_start_at_word_boundaries() -> None:
     assert _authored_commands("Use `agw vm start NAME#literal --retired`.") == {"agw vm start 'NAME#literal' --retired"}
+    assert _authored_commands(r"Use `agw vm start NAME\ #literal --retired`.") == {
+        "agw vm start 'NAME #literal' --retired"
+    }
     assert _authored_commands("Use `agw doctor # agw retired`.") == {"agw doctor"}
+    continued = """```bash
+agw vm start NAME\\
+#literal --retired
+```
+"""
+    assert _authored_commands(continued) == {"agw vm start 'NAME#literal' --retired"}
+
+    assert "agw retired" in _authored_commands("```bash\n# explanation \\\nagw retired\n```")
+    assert "agw retired" in _authored_commands("```bash\nagw doctor \\\\\nagw retired\n```")
+    quoted_lines = ("```bash", 'agw doctor "foo\\', 'bar" # explanation \\', "agw retired", "```")
+    assert "agw retired" in _authored_commands("\n".join(quoted_lines))
 
 
-@pytest.mark.parametrize(
-    "text",
-    (
-        "```bash\nagw retired \\\n```",
-        "```bash\nagw retired \\",
-    ),
-)
-def test_authored_command_extraction_rejects_unfinished_continuations(text: str) -> None:
+def test_authored_command_extraction_rejects_unfinished_continuations() -> None:
     with pytest.raises(ValueError, match="unfinished continuation"):
-        _authored_commands(text)
+        _authored_commands("```bash\nagw retired \\\n```")
 
 
 def test_command_resolution_checks_paths_and_options_without_executing() -> None:
