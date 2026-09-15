@@ -7,6 +7,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor as PythonThreadPoolExecutor
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
+from uuid import uuid4
 
 import pytest
 
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
 
 
 BOOT_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+SESSION_UUID = "11111111-1111-4111-8111-111111111111"
 
 
 class _Target:
@@ -62,6 +64,8 @@ def _plan(
     ordinal = int(name.rsplit("-", 1)[-1]) if name.rsplit("-", 1)[-1].isdigit() else 1
     return DedicatedTeardownPlan(
         session_name=name,
+        session_uuid=SESSION_UUID,
+        run_id=None,
         vm_name=vm_name,
         socket_path=socket_path or f"/run/agentworks/admin-tmux-sockets/agentworks/{name}.sock",
         stored_pid=pid or 1000 + ordinal,
@@ -168,9 +172,14 @@ def test_collision_refuses_before_executor_or_remote_mutation(
 def test_database_compare_and_set_is_atomic_conflict_safe_and_retry_safe(db: Database) -> None:
     socket_path = "/run/agentworks/admin-tmux-sockets/agentworks/session.sock"
     _seed_session(db, "session", socket_path=socket_path, pid=101, start_ticks=201)
+    db.set_session_run_id("session", str(uuid4()))
+    session = db.get_session("session")
+    assert session is not None
 
     db.compare_and_set_session_stopped(
         "session",
+        expected_session_uuid=session.session_uuid,
+        expected_run_id=session.run_id,
         expected_socket_path=socket_path,
         expected_pid=101,
         expected_boot_id=BOOT_ID,
@@ -181,6 +190,8 @@ def test_database_compare_and_set_is_atomic_conflict_safe_and_retry_safe(db: Dat
 
     db.compare_and_set_session_stopped(
         "session",
+        expected_session_uuid=session.session_uuid,
+        expected_run_id=session.run_id,
         expected_socket_path=socket_path,
         expected_pid=101,
         expected_boot_id=BOOT_ID,
@@ -197,6 +208,8 @@ def test_database_compare_and_set_is_atomic_conflict_safe_and_retry_safe(db: Dat
     with pytest.raises(StateError):
         db.compare_and_set_session_stopped(
             "session",
+            expected_session_uuid=session.session_uuid,
+            expected_run_id=session.run_id,
             expected_socket_path=socket_path,
             expected_pid=101,
             expected_boot_id=BOOT_ID,
@@ -206,20 +219,53 @@ def test_database_compare_and_set_is_atomic_conflict_safe_and_retry_safe(db: Dat
     assert current is not None and current.pid == 102
 
 
-def test_incomplete_fingerprint_selects_serial_compatibility(db: Database) -> None:
+def test_database_compare_and_set_rejects_advanced_run(db: Database) -> None:
     socket_path = "/run/agentworks/admin-tmux-sockets/agentworks/session.sock"
-    session = _seed_session(db, "session", socket_path=socket_path, pid=101, start_ticks=None)
+    original = _seed_session(db, "session", socket_path=socket_path, pid=101, start_ticks=201)
 
-    plan = teardown_mod.prepare_concurrent_dedicated_teardown(
-        db,
-        session,
-        vm_name="box",
-        target=cast("Transport", _Target("bounded")),
-        target_owns_session=True,
-        force=False,
+    db.set_session_run_id("session", str(uuid4()))
+    with pytest.raises(StateError):
+        db.compare_and_set_session_stopped(
+            "session",
+            expected_session_uuid=original.session_uuid,
+            expected_run_id=original.run_id,
+            expected_socket_path=socket_path,
+            expected_pid=101,
+            expected_boot_id=BOOT_ID,
+            expected_tmux_server_start_ticks=201,
+        )
+
+
+def test_database_compare_and_set_rejects_reused_name(db: Database) -> None:
+    socket_path = "/run/agentworks/admin-tmux-sockets/agentworks/session.sock"
+    original = _seed_session(db, "session", socket_path=socket_path, pid=101, start_ticks=201)
+
+    db.delete_session("session")
+    replacement = db.insert_session(
+        "session",
+        "work",
+        "default",
+        SessionMode.ADMIN,
+        socket_path=socket_path,
     )
-
-    assert plan is None
+    db.update_session_runtime(
+        "session",
+        socket_path=socket_path,
+        pid=PID_STOPPED,
+        boot_id=None,
+        tmux_server_start_ticks=None,
+    )
+    assert replacement.session_uuid != original.session_uuid
+    with pytest.raises(StateError):
+        db.compare_and_set_session_stopped(
+            "session",
+            expected_session_uuid=original.session_uuid,
+            expected_run_id=original.run_id,
+            expected_socket_path=socket_path,
+            expected_pid=101,
+            expected_boot_id=BOOT_ID,
+            expected_tmux_server_start_ticks=201,
+        )
 
 
 def test_invalid_complete_fingerprint_fails_preparation_closed(db: Database) -> None:
@@ -440,7 +486,7 @@ def test_quiet_wait_invokes_heartbeat_before_completion(monkeypatch: pytest.Monk
 
     heartbeats: list[int] = []
     monkeypatch.setattr(teardown_mod, "_wait_for_futures", controlled_wait)
-    monkeypatch.setattr(teardown_mod, "_heartbeat", lambda futures, *, total: heartbeats.append(total))
+    monkeypatch.setattr(teardown_mod, "_heartbeat", lambda futures: heartbeats.append(len(futures)))
 
     failures = teardown_mod.execute_concurrent_dedicated_teardowns(
         [_plan("session-1")],

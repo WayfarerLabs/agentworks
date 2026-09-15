@@ -886,13 +886,6 @@ def stop_all_sessions(
                         target_owns_session=target_owns_session,
                         force=force,
                     )
-                    if plan is None:
-                        raise StateError(
-                            f"session '{session.name}' could not produce a complete teardown plan",
-                            entity_kind="session",
-                            entity_name=session.name,
-                            hint="Inspect and repair the persisted session runtime before retrying.",
-                        )
                     concurrent_plans.append(plan)
                     continue
 

@@ -38,11 +38,12 @@ adds no second lock.
 
 ### 1. Add state fencing and eligibility
 
-Add atomic stopped-state compare-and-set for a complete prepared runtime identity. Partition
-selected rows after the current gates: only validated dedicated rows with complete fingerprints are
-eligible for concurrency. Missing-fingerprint dedicated rows and legacy rows remain serial. Refuse
-duplicate socket or VM/boot/PID process keys among concurrent plans before submission, regardless of
-whether duplicate process keys carry different stored start ticks.
+Add atomic stopped-state compare-and-set for the durable session UUID, nullable managed-run
+identity, and complete prepared runtime fingerprint. Partition selected rows after the current
+gates: only validated dedicated rows with complete fingerprints are eligible for concurrency.
+Missing-fingerprint dedicated rows and legacy rows remain serial. Refuse duplicate socket or
+VM/boot/PID process keys among concurrent plans before submission, regardless of whether duplicate
+process keys carry different stored start ticks.
 
 ### 2. Extract value-based dedicated teardown
 

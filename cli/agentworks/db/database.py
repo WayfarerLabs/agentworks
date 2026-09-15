@@ -958,6 +958,8 @@ class Database:
         self,
         name: str,
         *,
+        expected_session_uuid: str,
+        expected_run_id: str | None,
         expected_socket_path: str,
         expected_pid: int,
         expected_boot_id: str,
@@ -965,10 +967,11 @@ class Database:
     ) -> None:
         """Clear one runtime only when its complete prepared identity matches.
 
-        Persisted runtime identity is a cross-process boundary. A zero-row
-        update is accepted only when an interrupted prior attempt already
-        committed the exact desired stopped state; every other mismatch stays
-        untouched and fails closed.
+        Durable session, managed-run, and runtime identities are a
+        cross-process boundary. A zero-row update is accepted only when an
+        interrupted prior attempt already committed the exact desired stopped
+        state for all three; every other mismatch stays untouched and fails
+        closed.
         """
         if (
             isinstance(expected_pid, bool)
@@ -980,12 +983,14 @@ class Database:
         result = self._conn.execute(
             "UPDATE sessions SET socket_path = ?, pid = ?, boot_id = NULL, tmux_server_start_ticks = NULL, "
             "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
-            "WHERE name = ? AND socket_path IS ? AND pid IS ? AND boot_id IS ? "
-            "AND tmux_server_start_ticks IS ?",
+            "WHERE name = ? AND session_uuid = ? AND run_id IS ? AND socket_path IS ? "
+            "AND pid IS ? AND boot_id IS ? AND tmux_server_start_ticks IS ?",
             (
                 expected_socket_path,
                 _db.PID_STOPPED,
                 name,
+                expected_session_uuid,
+                expected_run_id,
                 expected_socket_path,
                 expected_pid,
                 expected_boot_id,
@@ -999,6 +1004,8 @@ class Database:
         session = self.get_session(name)
         if (
             session is not None
+            and session.session_uuid == expected_session_uuid
+            and session.run_id == expected_run_id
             and session.socket_path == expected_socket_path
             and session.pid == _db.PID_STOPPED
             and session.boot_id is None

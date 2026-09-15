@@ -110,6 +110,8 @@ not authored prose.
       their existing regression suites.
 - [x] Prove socket validation, exact tmux targeting, force recovery, absence verification, and
       stopped persistence remain unchanged.
+- [x] Reconcile main's durable session UUID and managed-run identity into the prepared plan and
+      stopped-state compare-and-set, with replacement-row and run-advance conflict coverage.
 
 ### Phase 1 Definition of Done
 

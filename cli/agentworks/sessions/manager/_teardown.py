@@ -35,6 +35,8 @@ class DedicatedTeardownPlan:
     """Complete immutable authority for one dedicated remote teardown."""
 
     session_name: str
+    session_uuid: str
+    run_id: str | None
     vm_name: str
     socket_path: str
     stored_pid: int
@@ -97,14 +99,12 @@ def _validated_socket_path(db: Database, session: SessionRow) -> str:
     return socket_path
 
 
-def _validated_pid(session: SessionRow) -> int | None:
-    """Return a positive stored PID, or None when the fingerprint is incomplete."""
+def _validated_pid(session: SessionRow) -> int:
+    """Return a positive stored PID for a concurrency-eligible row."""
     pid = session.pid
-    if pid is None:
-        return None
-    if isinstance(pid, bool) or pid <= 0:
+    if pid is None or isinstance(pid, bool) or pid <= 0:
         raise StateError(
-            f"session '{session.name}' has an invalid stored tmux server PID",
+            f"session '{session.name}' does not have a positive stored tmux server PID",
             entity_kind="session",
             entity_name=session.name,
             hint="Repair the persisted runtime identity before retrying.",
@@ -120,26 +120,29 @@ def prepare_concurrent_dedicated_teardown(
     target: Transport,
     target_owns_session: bool,
     force: bool,
-) -> DedicatedTeardownPlan | None:
+) -> DedicatedTeardownPlan:
     """Prepare complete dedicated work on the invoking thread.
 
     Persisted rows are a process boundary. Invalid values fail closed; an
-    incomplete fingerprint deliberately selects the synchronous compatibility
-    path instead.
+    The coordinator selects only complete-fingerprint rows for this function;
+    any contract violation fails closed instead of inventing work.
     """
-    if session.pid == PID_STOPPED:
-        return None
-    if session.socket_path is None:
-        return None
     socket_path = _validated_socket_path(db, session)
     pid = _validated_pid(session)
-    if pid is None or session.boot_id is None or session.tmux_server_start_ticks is None:
-        return None
+    if session.boot_id is None or session.tmux_server_start_ticks is None:
+        raise StateError(
+            f"session '{session.name}' does not have a complete stored tmux server fingerprint",
+            entity_kind="session",
+            entity_name=session.name,
+            hint="Inspect and repair the persisted session runtime before retrying.",
+        )
     boot_id = _mgr._validated_stored_boot_id(session)
     start_ticks = _mgr._validated_stored_start_ticks(session)
     assert start_ticks is not None
     return DedicatedTeardownPlan(
         session_name=session.name,
+        session_uuid=session.session_uuid,
+        run_id=session.run_id,
         vm_name=vm_name,
         socket_path=socket_path,
         stored_pid=pid,
@@ -390,6 +393,8 @@ def teardown_dedicated_session(
 
     plan = DedicatedTeardownPlan(
         session_name=session.name,
+        session_uuid=session.session_uuid,
+        run_id=session.run_id,
         vm_name=_mgr._require_workspace(db, session.workspace_name).vm_name,
         socket_path=socket_path,
         stored_pid=observed.pid,
@@ -422,6 +427,8 @@ def reconcile_dedicated_teardown(db: Database, plan: DedicatedTeardownPlan) -> N
     """Persist verified stopped evidence on the invoking thread."""
     db.compare_and_set_session_stopped(
         plan.session_name,
+        expected_session_uuid=plan.session_uuid,
+        expected_run_id=plan.run_id,
         expected_socket_path=plan.socket_path,
         expected_pid=plan.stored_pid,
         expected_boot_id=plan.stored_boot_id,
@@ -440,12 +447,9 @@ def _execute_gated(
 
 def _shutdown_after_submission_abort(executor: ThreadPoolExecutor, gate: _SubmissionGate) -> None:
     """Abort every wrapper and keep later interrupts from masking the first."""
-    aborted = False
     while True:
         try:
-            if not aborted:
-                gate.abort()
-                aborted = True
+            gate.abort()
             executor.shutdown(wait=True, cancel_futures=True)
             return
         except KeyboardInterrupt:
@@ -500,12 +504,10 @@ def _cancel_queued(futures: Sequence[Future[DedicatedTeardownEvidence | None]]) 
 
 def _heartbeat(
     futures: Sequence[Future[DedicatedTeardownEvidence | None]],
-    *,
-    total: int,
 ) -> None:
     completed = sum(future.done() for future in futures)
     active = sum(future.running() for future in futures)
-    queued = total - completed - active
+    queued = len(futures) - completed - active
     output.info(f"Session teardown progress: {completed} completed, {active} active, {queued} queued.")
 
 
@@ -551,7 +553,7 @@ def execute_concurrent_dedicated_teardowns(
                 return_when=FIRST_COMPLETED,
             )
             if not done:
-                _heartbeat(tuple(future_plans), total=len(future_plans))
+                _heartbeat(tuple(future_plans))
                 continue
 
             for future in done:

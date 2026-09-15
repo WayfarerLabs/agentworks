@@ -49,8 +49,9 @@ interrupted or fails partway, a batch-local start gate makes every submitted cal
 remote mutation, including work enqueued before `submit()` raised without returning its future. Only
 after the complete future map exists does the coordinator release the gate for execution. It then
 consumes futures in completion order, applies verified stopped evidence to SQLite through
-compare-and-set, and emits a labeled line. Ordinary failures accumulate without cancelling siblings.
-A five-second quiet wait emits a compact progress heartbeat.
+compare-and-set over the logical session, managed run, and tmux fingerprint, and emits a labeled
+line. Ordinary failures accumulate without cancelling siblings. A five-second quiet wait emits a
+compact progress heartbeat.
 
 The initial eight-worker, ten-second, one-attempt policy matches the shipped read-only guest
 observation policy as precedent. Teardown owns separately named constants and a different executor
@@ -67,6 +68,7 @@ Preparation is the only worker-adjacent phase allowed to consult the database fo
 socket-path validation. It produces a dedicated-only frozen value containing:
 
 - session name;
+- durable session UUID and nullable managed-run identity;
 - canonical database VM name;
 - exact validated socket path;
 - complete stored boot ID, PID, and start ticks;

@@ -61,6 +61,8 @@ A frozen dataclass with value fields:
 @dataclass(frozen=True)
 class DedicatedTeardownPlan:
     session_name: str
+    session_uuid: str
+    run_id: str | None
     vm_name: str
     socket_path: str
     stored_pid: int
@@ -71,28 +73,28 @@ class DedicatedTeardownPlan:
     force: bool
 ```
 
-Every identity field is complete and validated before construction. `vm_name` is the canonical
-database VM key resolved from the already-validated session graph on the invoking thread; it is not
-derived from transport addressing. The values form the expected identity for later compare-and-set
-persistence. Each plan owns a distinct transport instance. No two concurrently running plans share
-it.
+Every required identity field is complete and validated before construction. `session_uuid` is the
+durable logical identity and nullable `run_id` identifies the prospective managed launch current at
+preparation. `vm_name` is the canonical database VM key resolved from the already-validated session
+graph on the invoking thread; it is not derived from transport addressing. The values form the
+expected identity for later compare-and-set persistence. Each plan owns a distinct transport
+instance. No two concurrently running plans share it.
 
 ## Preparation
 
 `prepare_concurrent_dedicated_teardown(db, session, *, vm_name, target, target_owns_session, force)`
 runs only on the invoking thread.
 
-1. Reject the stopped sentinel as no work.
+1. Accept only a row the coordinator already classified as complete and concurrency-eligible.
 2. Require a dedicated socket and validate it as an exact managed path through the current database
    graph.
 3. Require a positive persisted PID, canonical boot ID, and positive start ticks.
-4. If any fingerprint field is missing, classify the row for synchronous teardown instead of
-   constructing a concurrent plan.
+4. Copy the durable session UUID and nullable managed-run identity from the prepared row.
 5. Copy the canonical `vm_name` from the already-validated batch relationship graph and construct
    the plan with `sudo=not target_owns_session`.
 
-Preparation performs no remote mutation. An invalid stored value retains the current per-session
-failure behavior; a merely incomplete fingerprint is not an error and stays serial.
+Preparation performs no remote mutation. The coordinator routes incomplete fingerprints to the
+serial lane; if an ineligible row nevertheless reaches preparation, validation fails closed.
 
 ## Dedicated Remote State Machine
 
