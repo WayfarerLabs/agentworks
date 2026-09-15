@@ -25,16 +25,63 @@ _INLINE_COMMAND_PATTERNS = (
 )
 _AUTHORED_COMMAND_SEGMENTS = frozenset({"COMMAND", "GROUP"})
 _GUIDANCE_CATEGORIES = frozenset({"guide", "kind", "capability", "hint"})
+_SHELL_OPERATOR_CHARS = frozenset("();<>|&")
+
+
+def _shell_segments(expression: str) -> Iterator[str]:
+    start = 0
+    quote: str | None = None
+    escaped = False
+    for index, character in enumerate(expression):
+        if escaped:
+            escaped = False
+            continue
+        if character == "\\" and quote != "'":
+            escaped = True
+            continue
+        if quote is not None:
+            if character == quote:
+                quote = None
+            continue
+        if character in {'"', "'"}:
+            quote = character
+        elif character in _SHELL_OPERATOR_CHARS:
+            if segment := expression[start:index].strip():
+                yield segment
+            start = index + 1
+    if segment := expression[start:].strip():
+        yield segment
+
+
+def _shell_commands(expression: str) -> Iterator[str]:
+    for segment in _shell_segments(expression.replace("\\\n", " ")):
+        try:
+            tokens = shlex.split(segment, comments=True)
+        except ValueError:
+            continue
+        if tokens and tokens[0] == "agw":
+            yield shlex.join(tokens)
 
 
 def _authored_commands(text: str) -> set[str]:
-    commands = {" ".join(command.split()) for pattern in _INLINE_COMMAND_PATTERNS for command in pattern.findall(text)}
+    commands = {
+        command
+        for pattern in _INLINE_COMMAND_PATTERNS
+        for expression in pattern.findall(text)
+        for command in _shell_commands(expression)
+    }
     fence: str | None = None
+    continuation = ""
     for line in text.splitlines():
         if line.startswith("```"):
             fence = None if fence is not None else line[3:].strip()
-        elif fence in {"bash", "sh", "shell"} and line.startswith("agw "):
-            commands.add(line)
+            continuation = ""
+        elif fence in {"bash", "sh", "shell"}:
+            if line.endswith("\\"):
+                continuation += line[:-1] + " "
+            else:
+                commands.update(_shell_commands(continuation + line))
+                continuation = ""
     return commands
 
 
@@ -234,18 +281,22 @@ def _validate_command_prefix_and_options(command: str, root: CommandSpec) -> str
     return validate_from(root, 1)
 
 
-def test_authored_command_extraction_covers_inline_quotes_and_shell_fences() -> None:
-    text = """Use `agw vm start NAME` or 'agw doctor'.
+def test_authored_command_extraction_covers_quotes_fences_and_shell_boundaries() -> None:
+    text = """Use `agw vm start NAME && agw doctor` or 'agw resource kinds'.
 
 ```bash
-agw resource list --kind vm-site
+agw resource list --kind vm-site | jq --raw-output .
+agw vm start \\
+  OTHER
 ```
 """
 
     assert _authored_commands(text) == {
         "agw doctor",
+        "agw resource kinds",
         "agw resource list --kind vm-site",
         "agw vm start NAME",
+        "agw vm start OTHER",
     }
 
 
