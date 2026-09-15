@@ -170,9 +170,9 @@ def _scope_nodes(scope: ast.Module | ast.FunctionDef | ast.AsyncFunctionDef) -> 
         stack.extend(reversed(list(ast.iter_child_nodes(node))))
 
 
-def _scope_bindings(scope: ast.Module | ast.FunctionDef | ast.AsyncFunctionDef) -> dict[str, tuple[ast.expr, ...]]:
+def _scope_bindings(nodes: tuple[ast.AST, ...]) -> dict[str, tuple[ast.expr, ...]]:
     values: dict[str, list[ast.expr]] = {}
-    for node in _scope_nodes(scope):
+    for node in nodes:
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name):
@@ -188,7 +188,7 @@ def _hint_templates(path: Path) -> Iterator[tuple[int, str]]:
     scopes.extend(node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)))
     for scope in scopes:
         nodes = tuple(_scope_nodes(scope))
-        bindings = _scope_bindings(scope)
+        bindings = _scope_bindings(nodes)
         indirect_names = {
             keyword.value.id
             for node in nodes
