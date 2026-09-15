@@ -6,6 +6,8 @@ import shlex
 from collections.abc import Iterator
 from pathlib import Path
 
+import pytest
+
 from agentworks import __file__ as agentworks_file
 from agentworks.capabilities.descriptor import capability_descriptors
 from agentworks.cli._app import app
@@ -25,7 +27,7 @@ _INLINE_COMMAND_PATTERNS = (
 )
 _AUTHORED_COMMAND_SEGMENTS = frozenset({"COMMAND", "GROUP"})
 _GUIDANCE_CATEGORIES = frozenset({"guide", "kind", "capability", "hint"})
-_SHELL_OPERATOR_CHARS = frozenset("();<>|&")
+_SHELL_OPERATOR_CHARS = frozenset("();|&")
 
 
 def _shell_segments(expression: str) -> Iterator[str]:
@@ -45,20 +47,23 @@ def _shell_segments(expression: str) -> Iterator[str]:
             continue
         if character in {'"', "'"}:
             quote = character
+        elif character == "#" and (index == start or expression[index - 1].isspace()):
+            if segment := expression[start:index].strip():
+                yield segment
+            return
         elif character in _SHELL_OPERATOR_CHARS:
             if segment := expression[start:index].strip():
                 yield segment
             start = index + 1
+    if quote is not None or escaped:
+        raise ValueError("malformed shell quoting in authored command")
     if segment := expression[start:].strip():
         yield segment
 
 
 def _shell_commands(expression: str) -> Iterator[str]:
     for segment in _shell_segments(expression.replace("\\\n", " ")):
-        try:
-            tokens = shlex.split(segment, comments=True)
-        except ValueError:
-            continue
+        tokens = shlex.split(segment, comments=True)
         if tokens and tokens[0] == "agw":
             yield shlex.join(tokens)
 
@@ -283,11 +288,13 @@ def _validate_command_prefix_and_options(command: str, root: CommandSpec) -> str
 
 def test_authored_command_extraction_covers_quotes_fences_and_shell_boundaries() -> None:
     text = """Use `agw vm start NAME && agw doctor` or 'agw resource kinds'.
+Keep the quoted operator in `agw vm start 'A|B'` as an operand.
 
 ```bash
 agw resource list --kind vm-site | jq --raw-output .
 agw vm start \\
   OTHER
+# agw retired && agw vm retired
 ```
 """
 
@@ -295,9 +302,13 @@ agw vm start \\
         "agw doctor",
         "agw resource kinds",
         "agw resource list --kind vm-site",
+        "agw vm start 'A|B'",
         "agw vm start NAME",
         "agw vm start OTHER",
     }
+
+    with pytest.raises(ValueError, match="malformed shell quoting"):
+        _authored_commands('Use `agw retired "unterminated`.')
 
 
 def test_command_resolution_checks_paths_and_options_without_executing() -> None:
