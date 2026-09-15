@@ -972,7 +972,8 @@ def test_failed_native_probe_retains_external_diagnostic(returncode, stdout):
 
 
 @pytest.mark.parametrize("returncode", [0, 1])
-def test_native_probe_errors_redact_runtime_environment(returncode):
+@pytest.mark.parametrize("padding", ["", " "])
+def test_native_probe_errors_redact_runtime_environment(returncode, padding):
     import shlex
     import traceback
     from unittest.mock import Mock
@@ -983,15 +984,15 @@ def test_native_probe_errors_redact_runtime_environment(returncode):
     from agentworks.transports import Transport
 
     short = "fixture-token"
-    long = short + "-'long value'"
+    long = padding + ("padded-secret" if padding else short) + "-'long value'" + padding
     environment = {"API_TOKEN": short, "OTHER_TOKEN": long}
-    stderr = f"startup failed: {long}; {shlex.quote(long)}; {short}"
+    stderr = f"{long}\nstartup failed: {shlex.quote(long)}; {short}\n{long}"
     target = Mock(spec=Transport)
     target.run.side_effect = [SSHResult(0, "", ""), SSHResult(returncode, "invalid", stderr)]
     with pytest.raises(ExternalError) as caught:
         probe_native(target, tool="claude", environment=environment)
     exposed = str(caught.value) + (caught.value.hint or "") + "".join(traceback.format_exception(caught.value))
     assert short not in exposed
-    assert long not in exposed
+    assert long.strip() not in exposed
     assert shlex.quote(long) not in exposed
     assert "startup failed" in exposed

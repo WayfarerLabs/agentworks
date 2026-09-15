@@ -404,10 +404,11 @@ def probe_native(
     )
     # Login startup scripts can echo the supplied runtime environment on failure.
     # Redact known values and their shell-quoted forms before publishing diagnostics.
-    diagnostic = result.stderr.strip()
+    diagnostic = result.stderr
     redactions = {form for value in environment.values() if value for form in (value, shlex.quote(value))}
     for value in sorted(redactions, key=len, reverse=True):
         diagnostic = diagnostic.replace(value, "[REDACTED]")
+    diagnostic = diagnostic.strip()
     if result.returncode:
         raise ExternalError(f"{tool} artifact discovery probe failed (exit {result.returncode}): {diagnostic}")
     try:
