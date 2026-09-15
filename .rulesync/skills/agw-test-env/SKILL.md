@@ -197,9 +197,20 @@ as needed). Core capabilities need nothing: lima/wsl2, shell, env-var/prompt, gi
 
 Agentworks supports SIX vm platforms. Two ship built in and self-disable on a host that lacks what
 they need (`lima`, `wsl2`); four are plugin-gated and stay not-ready until their plugin is listed
-under `[plugins] system` (`aws-ec2`, `azure-vm`, `gcp-gce`, `proxmox`). That list is the coverage
-checklist: confirm it against the platform implementations in the tree rather than against this
-paragraph, because a new platform lands here later than it lands in code.
+under `[plugins] system` (`aws-ec2`, `azure-vm`, `gcp-gce`, `proxmox`).
+
+That list is the coverage checklist, so get it from the app rather than from this paragraph:
+
+```console
+agw resource list --kind vm-platform --include-disabled
+```
+
+It names every platform the installed build registers, says whether each is built in or comes from a
+system plugin, and marks the ones disabled or not ready on this host. `--include-disabled` is what
+makes it the full set: a plugin-gated platform is invisible without it, so a reader checking
+coverage on a host that enables only some plugins would otherwise miss the rest. Nothing needs
+enabling to run it. A new platform appears in that output before it appears in any skill, so treat
+the command as authoritative and this section as the commentary.
 
 Report the PLATFORM name, not the site name. A site is one configured place; the platform is the
 code path under test, and two sites can share one.
