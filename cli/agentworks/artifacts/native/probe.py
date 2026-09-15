@@ -12,7 +12,8 @@ from typing import TYPE_CHECKING
 from agentworks.artifacts.application import ArtifactFile
 from agentworks.artifacts.frontmatter import parse_metadata
 from agentworks.artifacts.native.common import MAX_CODEX_PERSONA_BYTES
-from agentworks.errors import StateError
+from agentworks.errors import ExternalError, StateError
+from agentworks.native_files import require_python3
 from agentworks.package_sources import CaptureLimits
 from agentworks.sources import SourceRefError
 
@@ -374,6 +375,7 @@ def probe_native(
     check_policy: bool = True,
 ) -> str:
     """Check the actual native home and relevant native policy without starting a model."""
+    require_python3(runner)
     entries = {file.path: file.native_identity for file in files if file.native_identity}
     identities = tuple(entries.values())
     request = {
@@ -400,6 +402,10 @@ def probe_native(
         check=False,
         timeout=30,
     )
+    if result.returncode:
+        raise ExternalError(
+            f"{tool} artifact discovery probe failed (exit {result.returncode}): {result.stderr.strip()}"
+        )
     try:
         lines = [
             line.removeprefix("AGW_ARTIFACT_PROBE=")
@@ -409,12 +415,15 @@ def probe_native(
         observed = json.loads(lines[-1])
         root = observed["native_home"]
         problems = observed["problems"]
-        if result.returncode or not isinstance(root, str) or not root.startswith("/") or not isinstance(problems, list):
+        if not isinstance(root, str) or not root.startswith("/") or not isinstance(problems, list):
             raise ValueError()
         if any(not isinstance(problem, str) or problem not in _PROBLEM_MESSAGES for problem in problems):
             raise ValueError()
     except (ValueError, KeyError, IndexError, TypeError):
-        raise StateError(f"could not verify {tool} artifact discovery on the launch target") from None
+        raise ExternalError(
+            f"{tool} artifact discovery probe returned an invalid response",
+            hint=result.stderr.strip() or None,
+        ) from None
     inventory_problems = _inventory_problems(observed.get("inventory"), identities, entries)
     problems.extend(problem.code for problem in inventory_problems)
     details = []

@@ -5,10 +5,12 @@ settings. The same integration activation model serves administrators and agents
 workspace facets map project settings. They do not install workspace plugins. Integration activation
 must be explicit, including when all configuration fields use defaults.
 
-Native setup requires `python3` on the VM for guarded file access and atomic publication. Add
-`python3` to the VM template's `apt_packages` and run `vm reinit` before user or workspace setup. A
-missing interpreter is reported before staging or native mutation. The harness CLI itself must also
-be installed through the existing package or install-command configuration.
+Agentworks installs `python3` as a required system package on every VM during create and reinit.
+Native setup uses its standard library for guarded file access, atomic publication and artifact
+discovery; `python3-venv` and `python3-pip` are not required. Run `agw vm reinit <vm-name>` to
+repair an older VM missing the interpreter. A missing interpreter is reported before staging or
+native mutation. The harness CLI itself must also be installed through the existing package or
+install-command configuration.
 
 ## Settings mappings
 

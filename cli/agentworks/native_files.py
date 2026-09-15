@@ -163,6 +163,15 @@ def native_path(path: str) -> str:
     return str(PurePosixPath(path))
 
 
+def require_python3(runner: Transport) -> None:
+    """Check the guest prerequisite before native setup, including older VMs."""
+    if not runner.run("command -v python3 >/dev/null", check=False, discard_output=True).ok:
+        raise StateError(
+            "native harness setup requires python3 on the VM",
+            hint="Run agw vm reinit <vm-name> to install required system packages before retrying setup.",
+        )
+
+
 class NativeFiles(AbstractContextManager["NativeFiles"]):
     """One operation's private remote/local staging, removed on every handled exit."""
 
@@ -173,11 +182,7 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
         self._counter = 0
 
     def __enter__(self) -> NativeFiles:
-        if not self.runner.run("command -v python3 >/dev/null", check=False, discard_output=True).ok:
-            raise StateError(
-                "native harness setup requires python3 on the VM",
-                hint="Add python3 to the VM template's apt_packages and run vm reinit before retrying setup.",
-            )
+        require_python3(self.runner)
         result = self.runner.run("mktemp -d -t agentworks-native-XXXXXXXXXX", check=False)
         if not result.ok or not PurePosixPath(result.stdout.strip()).name.startswith("agentworks-native-"):
             raise ExternalError("could not create native setup staging directory")
