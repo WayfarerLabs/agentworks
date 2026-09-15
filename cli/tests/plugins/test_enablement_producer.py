@@ -50,7 +50,7 @@ from agentworks.resources.graph import (
     compose_enablement,
 )
 from agentworks.resources.registry import Registry
-from agentworks.schema import AgwModel, AgwRootModel, CapabilityBlock, NonEmptyStr, SecretRef
+from agentworks.schema import AgwModel, AgwRootModel, CapabilityBlock, CapabilityConfig, NonEmptyStr, SecretRef
 from agentworks.secrets.base import SecretDecl
 from agentworks.secrets.resolve import active_sources
 from agentworks.secrets.sources import SecretSourceDecl
@@ -475,7 +475,7 @@ def _harness_integration_registry() -> Registry:
     registry.add(
         "session-template",
         "tmpl",
-        SessionTemplate(name="tmpl", harness_integration=CapabilityBlock(name="fixture-harness")),
+        SessionTemplate(name="tmpl", harness_integration={"fixture-harness": CapabilityConfig()}),
         _operator(),
     )
     return registry

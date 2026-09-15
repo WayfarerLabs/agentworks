@@ -29,8 +29,8 @@ from agentworks.errors import ConfigError
 from agentworks.plugins import Plugin, capability_adapters, seated_plugin
 from agentworks.resources import Origin, Registry
 from agentworks.resources.inheritance import LayerSource, LayerSourceKind
-from agentworks.schema import AgwModel, CapabilityBlock, CapabilityConfig, RefOwner
-from agentworks.sessions.template import SessionTemplate, _capability_provenance
+from agentworks.schema import AgwModel, CapabilityConfig, RefOwner
+from agentworks.sessions.template import SessionTemplate, effective_references
 from agentworks.source_location import SourceLocation
 from agentworks.value_provenance import longest_prefix_value
 from tests.conftest import registry_with_shell
@@ -110,9 +110,13 @@ def _registry(*templates: SessionTemplate) -> Registry:
 def test_selector_provenance_uses_the_root_owner_as_a_fallback() -> None:
     root = LayerSource(LayerSourceKind.TEMPLATE, "session-template", "base")
 
-    projected = _capability_provenance({(): (root,)})
+    from agentworks.sessions.templates import ResolvedSessionTemplate
 
-    assert projected[("name",)] == RefOwner(kind="session-template", name="base")
+    references = effective_references(
+        ResolvedSessionTemplate(name="child", harness_integration="shell"), ("session-template", "child"), {(): (root,)}
+    )
+
+    assert references[0].declared_by == ("session-template", "base")
 
 
 def test_a_child_completed_by_its_parent_validates(seated: None) -> None:
@@ -145,10 +149,12 @@ def test_a_parent_that_cannot_stand_alone_is_itself_a_load_error(seated: None) -
     child = SessionTemplate(
         name="kid",
         inherits=["base"],
-        harness_integration=CapabilityBlock.model_validate({"name": "needy", "command": "top"}),
+        harness_integration={"needy": CapabilityConfig.model_validate({"command": "top"})},
     )
-    with pytest.raises(ConfigError, match="session-template/base.command: is required"):
+    with pytest.raises(ConfigError) as caught:
         _registry(parent, child)
+    assert caught.value.entity_kind == "session-template"
+    assert caught.value.entity_name == "base"
 
 
 def test_an_error_on_an_inherited_key_names_the_template_that_declared_it(seated: None) -> None:
@@ -170,8 +176,8 @@ def test_an_error_on_an_inherited_key_names_the_template_that_declared_it(seated
     with pytest.raises(ConfigError) as exc:
         _registry(child, parent)
     message = str(exc.value)
-    assert "session-template/kid.timeout: must be an integer" in message
-    assert "(inherited from session-template/base)" in message
+    assert "session-template/kid.harness_integration.needy.timeout" in message
+    assert "session-template/base.harness_integration.needy" in message
 
 
 def test_a_key_the_child_overrode_is_not_attributed_to_the_parent(seated: None) -> None:
@@ -195,8 +201,8 @@ def test_a_key_the_child_overrode_is_not_attributed_to_the_parent(seated: None) 
     with pytest.raises(ConfigError) as exc:
         _registry(child, parent)
     message = str(exc.value)
-    assert "session-template/kid.timeout: must be an integer" in message
-    assert "inherited from" not in message
+    assert "session-template/kid.harness_integration.needy.timeout" in message
+    assert "session-template/base" not in message
 
 
 def test_a_nested_inherited_error_uses_the_parent_owner_and_child_location(
@@ -247,5 +253,5 @@ def test_a_nested_inherited_error_uses_the_parent_owner_and_child_location(
     assert captured["location"] == SourceLocation(file=Path("t.yaml"), line=1)
     provenance = cast("Mapping[ProvenancePath, RefOwner]", captured["provenance"])
     assert longest_prefix_value(provenance, ("options", "retry_count")) == RefOwner(
-        kind="session-template", name="base"
+        kind="session-template", name="base", label="session-template/base.harness_integration.nested"
     )

@@ -84,6 +84,10 @@ class UnsupportedStoredOverlayError(StateError):
     """Stored desired state was written for a declaration schema this release cannot read."""
 
 
+class ActivationMapMigrationRequired(UnsupportedStoredOverlayError):
+    """A saved activation list needs an explicit replacement with map semantics."""
+
+
 def parse_instance_spec(instance_kind: InstanceKind, value: str) -> InstanceOverlay[BaseModel]:
     """Parse strict inline JSON and validate it through the kind's spec model."""
     raw = _parse_json_object(value)
@@ -279,7 +283,7 @@ def _refuse_stored_activation_list(record: DesiredOverlayRecord, raw: JsonObject
         else "Back up the state database and explicitly migrate the saved instance spec to activation maps "
         "before using this resource, or recreate the resource with the new config."
     )
-    raise UnsupportedStoredOverlayError(
+    raise ActivationMapMigrationRequired(
         f"stored {record.instance_kind} {record.instance_name!r} uses the retired harness activation list format",
         entity_kind=record.instance_kind,
         entity_name=record.instance_name,
@@ -381,9 +385,13 @@ def replace_agent_overlay(
         return OverlayOutcome(OverlayDisposition.CLEARED, prior_fields)
 
     prior = db.instance_state.get_desired_overlay("agent", instance_name)
-    if prior is not None and not supplied:
-        with suppress(LegacyClaudeContextRequired):
-            decode_stored_overlay(prior)
+    if prior is not None:
+        try:
+            with suppress(LegacyClaudeContextRequired):
+                decode_stored_overlay(prior)
+        except ActivationMapMigrationRequired:
+            if not supplied:
+                raise
     if not supplied:
         if prior is None:
             return None

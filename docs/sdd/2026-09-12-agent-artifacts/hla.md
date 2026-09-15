@@ -124,11 +124,11 @@ spec:
 
 Owning VM, admin, agent, workspace and session declarations reference bundles through
 `artifacts: {bundles: [team-artifacts]}`. The bundle list uses replacement across template
-inheritance: omission inherits, a supplied list replaces, and
-`[]` removes inherited references for that owner. Repeated bundle references are rejected. This does
-not suppress another scope's artifacts. A skill's `SKILL.md` name and selected directory, or an
-agent persona's declared name, must agree with the map key. Native namespaces such as a harness
-plugin's skill prefix remain an integration concern.
+inheritance: omission inherits, a supplied list replaces, and `[]` removes inherited references for
+that owner. Repeated bundle references are rejected. This does not suppress another scope's
+artifacts. A skill's `SKILL.md` name and selected directory, or an agent persona's declared name,
+must agree with the map key. Native namespaces such as a harness plugin's skill prefix remain an
+integration concern.
 
 ### Composition within an owner
 

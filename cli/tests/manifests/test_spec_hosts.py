@@ -29,7 +29,6 @@ from ._specs import WHERE, decode, decode_issues, rejection
 _HOSTS = [
     ("vm-site", "lab", "platform", "lima"),
     ("git-credential", "gh", "provider", "github"),
-    ("session-template", "htop", "harness_integration", "shell"),
     ("secret-source", "ci-env", "backend", "env-var"),
 ]
 

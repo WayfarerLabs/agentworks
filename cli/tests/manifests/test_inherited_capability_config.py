@@ -14,7 +14,7 @@ contract in ``agentworks/manifests/emit.py``), and it is bounded rather
 than fixed:
 
 - **Exposure today is nil**, because no registered harness arm requires a
-  field beyond its own tag. ``test_no_harness_arm_requires_a_field_beyond_its_tag``
+  field. ``test_no_shipped_harness_config_requires_a_field``
   is the tripwire, and it names what to do when it fires.
 - **The divergence is real, not theorized**: the first test here forces it
   with a fixture arm, so the decision below rests on observed behavior.
@@ -29,7 +29,7 @@ zero evidence. Recorded in ``emission-lld.md`` section 5.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import pytest
 from jsonschema import Draft202012Validator
@@ -50,7 +50,6 @@ class DemandingConfig(AgwModel):
     """A harness config with a required field beyond its tag, which no
     shipped arm has."""
 
-    name: Literal["demanding"]
     workspace: str
     """A field a parent template could legitimately supply."""
 
@@ -108,10 +107,10 @@ def test_an_inherited_required_field_loads_and_does_not_validate() -> None:
     )
 
 
-def test_no_harness_arm_requires_a_field_beyond_its_tag() -> None:
+def test_no_shipped_harness_config_requires_a_field() -> None:
     """The tripwire, and the reason the divergence above stays theoretical.
 
-    While every arm's only required field is its own tag, no child fragment
+    While every config field has a default, no child fragment
     can be incomplete, so the emitted schema cannot reject anything the
     chain would complete.
 
@@ -125,7 +124,7 @@ def test_no_harness_arm_requires_a_field_beyond_its_tag() -> None:
     for name, seated in descriptor_for("harness-integration").registry().items():
         model = offered_model(seated if isinstance(seated, type) else type(seated), facet="session")
         assert model is not None
-        assert model.model_json_schema().get("required", []) == ["name"], name
+        assert model.model_json_schema().get("required", []) == [], name
 
 
 def test_a_standalone_template_still_gets_the_missing_field_diagnostic() -> None:

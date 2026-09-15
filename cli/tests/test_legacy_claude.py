@@ -54,7 +54,7 @@ def test_conversion_retains_full_context_and_other_components(vm, legacy):
     decoded = decode_stored_overlay(original, legacy_user_base=activations)
     component = cast("dict[str, Any]", decoded.payload.value["admin"] if vm else decoded.payload.value)
     entries = component["harness_integrations"]
-    assert list(entries) == ["codex", "claude-code", "shell"]
+    assert set(entries) == {"codex", "claude-code", "shell"}
     assert entries["claude-code"]["settings"] == activations["claude-code"].config["settings"]
     assert entries["claude-code"]["marketplaces"] == (
         ["inherited", "new"] if legacy.get("claude_marketplaces") else ["inherited"]

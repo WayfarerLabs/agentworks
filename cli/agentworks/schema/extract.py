@@ -264,13 +264,14 @@ def _collection_nodes(shape: FieldShape, value: object) -> Iterator[_Node]:
     """
     if shape.collection is Collection.MAPPING and isinstance(value, Mapping):
         for key, element in value.items():
-            if not isinstance(key, str):
-                continue
+            # JSON provenance paths carry strings and integers. Other admitted
+            # Python mapping keys still contribute references at the map's path.
+            path = (key,) if type(key) in (str, int) else ()
             if shape.mapping_key_marker is not None:
                 for edge in _scalar_edge(shape.mapping_key_marker, key):
-                    yield replace(edge, path=(key,))
+                    yield replace(edge, path=path)
             for child in _element_nodes(shape, element):
-                yield replace(child, path=(key,))
+                yield replace(child, path=path)
         return
     for index, element in enumerate(_elements_of(shape.collection, value)):
         for child in _element_nodes(shape, element):

@@ -10,7 +10,7 @@ Both rows are present-but-disabled until an operator opts in with
 ``[plugins] system = ["codex"]``:
 
 - The harness integration row publishes with a ``system-plugin`` origin; a
-  ``session-template`` whose tagged ``spec.harness_integration.name`` is ``codex``
+  ``session-template`` whose ``spec.harness_integration`` map selects ``codex``
   STAYS ready (it does not propagate), and ``ensure_harness_integration_enabled``
   refuses it at session create/start/restart with the "enable plugin `codex`" hint until
   enabled.
@@ -21,7 +21,7 @@ Both rows are present-but-disabled until an operator opts in with
 
 ``shell`` remains the default harness integration, so the common session path is
 unaffected; enabling this plugin changes nothing until a template selects
-``spec.harness_integration.name: codex``.
+``spec.harness_integration map key: codex``.
 """
 
 from __future__ import annotations

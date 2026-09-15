@@ -116,7 +116,7 @@ def graph(db: Database, *, active: tuple[str, ...] = (), counts: dict[str, int] 
             agent={} if component == "agent" else None,
             workspace={} if component == "workspace" else None,
         )
-        inputs = SetupInputs(kind, name, component, tuple(activations), target, artifacts=config)
+        inputs = SetupInputs(kind, name, component, activations, target, artifacts=config)
         snapshot = capture_owner(registry, kind, name, component, config)
         write_capture(db, kind, name, component, snapshot, operation="fixture")
         owners[component] = inputs

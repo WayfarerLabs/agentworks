@@ -1333,11 +1333,11 @@ def test_legacy_overlay_conversion_waits_for_successful_native_reinit(
         assert db.instance_state.get_desired_overlay("agent", "dev").payload.value == {
             "shell": "zsh",
             "harness_integrations": (
-                [
-                    {"name": "codex"},
-                    {"name": "claude-code", "marketplaces": ["new-base"], "plugins": ["legacy@fixture"]},
-                ]
+                {
+                    "codex": {},
+                    "claude-code": {"marketplaces": ["new-base"], "plugins": ["legacy@fixture"]},
+                }
                 if repoint
-                else [{"name": "claude-code", "plugins": ["legacy@fixture"]}]
+                else {"claude-code": {"plugins": ["legacy@fixture"]}}
             ),
         }

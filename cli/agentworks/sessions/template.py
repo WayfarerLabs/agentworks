@@ -80,9 +80,12 @@ def _activation_provenance(
 ) -> dict[ProvenancePath, tuple[LayerSource, ...]]:
     """Translate the resolved session pair into its authored map paths."""
     return {
-        ("harness_integration", name, *path[1:]): sources
-        for path, sources in provenance.items()
-        if path and path[0] in ("harness_integration", "harness_integration_config")
+        **({(): provenance[()]} if () in provenance else {}),
+        **{
+            ("harness_integration", name, *path[1:]): sources
+            for path, sources in provenance.items()
+            if path and path[0] in ("harness_integration", "harness_integration_config")
+        },
     }
 
 

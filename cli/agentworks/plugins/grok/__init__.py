@@ -3,7 +3,7 @@ official CLI installer, shipped as one opt-in bundle.
 
 The harness integration and installer publish present-but-disabled until an
 operator enables ``[plugins] system = ["grok"]``. Enabling the plugin changes
-nothing until a template selects ``spec.harness_integration.name: grok-build``
+nothing until a template selects ``spec.harness_integration: {grok-build: {}}``
 or an agent-template references the ``grok`` user install command.
 """
 

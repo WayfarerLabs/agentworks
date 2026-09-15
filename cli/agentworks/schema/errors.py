@@ -578,7 +578,7 @@ def _contextual_message(detail: ErrorDetails, address: _Address) -> str | None:
                 and container.__module__ in {"agentworks.agents.template", "agentworks.vms.admin"}
                 and detail["loc"][-1:] in (("claude_marketplaces",), ("claude_plugins",))
             ):
-                message += "; move Claude setup into a complete harness_integrations list with name: claude-code"
+                message += "; move Claude setup into harness_integrations under the claude-code map key"
             return message
         case "string_too_short":
             # Only the min-length-1 case means "must not be empty".

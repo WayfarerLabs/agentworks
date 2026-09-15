@@ -123,7 +123,7 @@ def require_implemented_start(
         f"invalid result type '{type(result).__name__}' for launch intent '{intent.value}'",
         entity_kind="session",
         entity_name=session_name,
-        hint="Update the harness integration to implement contract version 6.",
+        hint="Update the harness integration to implement contract version 7.",
     )
 
 

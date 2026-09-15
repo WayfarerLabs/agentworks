@@ -6,7 +6,7 @@ graph, and the relocated ephemeral teardown bodies.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Annotated, Literal, cast
+from typing import TYPE_CHECKING, Annotated, cast
 
 import pytest
 
@@ -310,7 +310,6 @@ def test_session_create_graph_shares_one_vm_node(db: Database) -> None:
 class _ScannerConfig(AgwModel):
     """A harness config that NAMES a secret, with a constant default."""
 
-    name: Literal["scanner"]
     api_key: Annotated[
         NonEmptyStr,
         SecretRef(usage="the scanner API key", default_template="scanner-api-key"),
@@ -882,9 +881,7 @@ def _toy_harness_integration(harness_integration_name: str) -> type:
     from agentworks.capabilities.harness_integration import HarnessIntegration
 
     class _ToyConfig(AgwModel):
-        """The toy integration takes no config beyond its own tag."""
-
-        name: str
+        """The toy integration takes no config."""
 
     class _ToyIntegration(HarnessIntegration):
         name: ClassVar[str] = harness_integration_name

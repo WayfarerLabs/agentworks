@@ -208,7 +208,7 @@ def test_multiple_hosts_project_each_map_facet(seated: None, monkeypatch: pytest
             "user_integrations": {"facet-test": {"user_token": "u"}},
         }
     )
-    assert value.model_dump()["user_integrations"]["facet-test"]["user_token"] == "u"
+    assert value.model_dump(by_alias=True)["user_integrations"]["facet-test"]["user_token"] == "u"
     with pytest.raises(ValidationError):
         model.model_validate({"name": "host", "user_integrations": {"facet-test": {"session_token": "wrong"}}})
 
@@ -270,3 +270,22 @@ def test_map_config_contract_rejects_redundant_name_fields() -> None:
         seated_plugin(Plugin(name="tagged-fixture", capabilities={"harness-integration": (Tagged,)})),
     ):
         pass
+
+
+@pytest.mark.parametrize("name", ["__base__", "_private", "model_validate", "model_dump", "model_config"])
+def test_integration_map_keys_are_not_python_model_fields(name: str) -> None:
+    from jsonschema import Draft202012Validator
+
+    from agentworks.manifests.reference import kind_reference
+    from tests.plugins._fixtures import ConformingHarnessIntegration
+
+    NamedIntegration = type(
+        "NamedIntegration", (ConformingHarnessIntegration,), {"name": name, "description": "Schema key fixture"}
+    )
+    with seated_plugin(Plugin(name="map-keys", capabilities={"harness-integration": (NamedIntegration,)})):
+        projected = spec_model("session-template")
+        value: dict[str, object] = {"harness_integration": {name: {}}}
+        assert Draft202012Validator(projected.model_json_schema()).is_valid(value)
+        projected.model_validate({"name": "test", **value})
+        fields = {entry.name: entry for entry in kind_reference("session-template").spec}
+        assert any(arm.name == name for arm in fields["harness_integration"].alternatives)

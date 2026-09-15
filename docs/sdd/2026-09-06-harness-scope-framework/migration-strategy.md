@@ -39,8 +39,8 @@ harness_integrations:
 
 The map belongs to the resource. Omission or `{}` inherits where that template kind supports
 inheritance. Parent integration keys remain, while config under the same key composes through its
-facet schema. Moving old Claude fields under `claude-code` retains their append-and-deduplicate
-list behavior without replacing unrelated activations.
+facet schema. Moving old Claude fields under `claude-code` retains their append-and-deduplicate list
+behavior without replacing unrelated activations.
 
 Update shipped manifests and examples with the implementation. Old authored fields receive normal
 unknown-field diagnostics plus specific migration guidance. Do not keep two live runtime dispatch
@@ -51,21 +51,21 @@ agent-template; no new admin selection on VM templates is introduced.
 
 Retain decoding for unrelated fields in supported old payload versions at the persisted-data
 boundary. Legacy Claude fields still use their finite contextual adapter: validate the old values,
-compose the current selected user template's config, and capture the resulting activation map.
-Empty old lists append nothing; absent Claude config stays inactive. Conflicting old fields and a
-new activation map refuse with value-safe diagnostics. Inspection remains read-only and automatic
+compose the current selected user template's config, and capture the resulting activation map. Empty
+old lists append nothing; absent Claude config stays inactive. Conflicting old fields and a new
+activation map refuse with value-safe diagnostics. Inspection remains read-only and automatic
 conversion checkpoints only after successful owning setup.
 
-Saved `harness_integrations` lists need explicit migration. They represented replacement of both
-the full selection and each config, which additive maps cannot preserve automatically. Classify
-these supported historical shapes as unsupported rather than corrupt, retain the original data,
-and explain recovery. Agent reinit accepts a complete replacement `--spec` or `{}` clearing even
-when the old payload cannot be decoded. Other owners require explicit saved-data migration or
-recreation; do not promise VM/workspace instance-spec replacement commands that do not exist.
+Saved `harness_integrations` lists need explicit migration. They represented replacement of both the
+full selection and each config, which additive maps cannot preserve automatically. Classify these
+supported historical shapes as unsupported rather than corrupt, retain the original data, and
+explain recovery. Agent reinit accepts a complete replacement `--spec` or `{}` clearing even when
+the old payload cannot be decoded. Other owners require explicit saved-data migration or recreation;
+do not promise VM/workspace instance-spec replacement commands that do not exist.
 
 A saved tagged session selector can be read as a singleton map without changing its same-name merge
-or different-name replacement behavior. Applied native setup records retain their comparison
-carrier and ownership, so unchanged effective config does not become stale through this migration.
+or different-name replacement behavior. Applied native setup records retain their comparison carrier
+and ownership, so unchanged effective config does not become stale through this migration.
 
 ## Native ownership
 
