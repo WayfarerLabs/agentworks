@@ -439,3 +439,21 @@ references, kept unrelated unreadable saved state protected during explicit list
 session guidance, and removed the obsolete tagged-facet cache. All material findings are resolved;
 the final accepted cleanup is recorded at `4405e9e7`. PR feedback and independent live acceptance
 remain separate from this completed implementation and private validation.
+
+
+### PR 816 feedback correction
+
+The operator authorized a focused correction after the later Muntz review identified incorrect
+native-list merge guidance. The existing native `plugins` and `marketplaces` replacement policies
+remain unchanged. The guides now describe them explicitly and show a disabling template followed
+by a reactivating child to reset a whole integration config while preserving its siblings.
+
+- [x] Correct the native-list guidance and whole-config reset example.
+- [x] Remove the unused non-null map projection branch, align its fixture with the supported host
+      shape, and address the ordering text, shadowed variable, and JSON null boundary comment.
+- [ ] Validate and review the focused correction, then restore the ready handoff.
+
+The operator agreed to a separate follow-up for a consistent omitted-versus-null policy across
+inheritance: omission inherits; explicit null clears the inherited value, with defaults or required
+value validation applied afterward. Unknown opt-out key validation belongs in that follow-up's
+clearing contract; this correction preserves the current treatment of unavailable integrations.

@@ -39,10 +39,16 @@ harness_integrations:
 
 The map belongs to the resource. Omission or `{}` inherits where that template kind supports
 inheritance. Parent integration keys remain, while config under the same key composes through its
-facet schema. Moving old Claude fields under `claude-code` retains their append-and-deduplicate list
-behavior without replacing unrelated activations. A `null` value disables an inherited integration;
-a later empty or explicit config reactivates it without restoring the disabled config. These map
-rules apply to setup scopes only; session selection retains its tagged shape.
+facet schema. The native `marketplaces` and `plugins` fields use replacement: an authored list must
+include every desired entry, `[]` clears it, and omission inherits. Moving old Claude fields into
+these fields therefore requires reviewing inherited entries; unrelated activations remain intact. A
+`null` value disables an inherited integration; a later empty or explicit config reactivates it
+without restoring the disabled config. These map rules apply to setup scopes only; session selection
+retains its tagged shape.
+
+A single map entry cannot request replacement of the integration's whole inherited config. Use an
+intermediate template to disable the integration, followed by a child that reactivates it with fresh
+config. This explicit two-layer reset preserves other integration keys.
 
 Update shipped manifests and examples with the implementation. Old authored fields receive normal
 unknown-field diagnostics plus specific migration guidance. Do not keep two live runtime dispatch

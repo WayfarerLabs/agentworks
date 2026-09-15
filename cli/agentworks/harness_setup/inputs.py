@@ -93,7 +93,7 @@ class SetupInputs:
         # map migration; existing workspace setup cannot be rerun in place.
         captured = {"name": name, **(config.config if model is None else model.model_dump(mode="json"))}
         env = {}
-        for name, scope in (
+        for scope_name, scope in (
             ("vm", self.target.vm),
             ("admin", self.target.admin),
             ("agent", self.target.agent),
@@ -101,7 +101,7 @@ class SetupInputs:
             ("session", self.target.session),
         ):
             if scope is not None:
-                env[name] = {
+                env[scope_name] = {
                     key: {"secret": entry.secret}
                     if entry.secret is not None
                     else {"sha256": hashlib.sha256((entry.value or "").encode()).hexdigest()}

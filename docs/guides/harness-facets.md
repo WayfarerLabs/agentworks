@@ -77,16 +77,17 @@ Integration activation maps merge by key:
 
 - Omit `harness_integrations` or supply `{}` to inherit the effective map.
 - Adding a key activates that integration and preserves the parent's other integrations.
-- Restating a key merges its configuration according to the owning facet's schema. Lists append and
-  deduplicate by default; fields can declare another merge policy.
+- Restating a key merges its configuration according to the owning facet's schema. Claude and Codex
+  user facets replace an inherited `plugins` or `marketplaces` list when that field is supplied;
+  include every desired entry, or use `[]` to clear the list. Omitted fields inherit.
 - An empty entry activates defaults when new and preserves inherited configuration when already
   selected.
 - A `null` entry disables that integration, including an inherited activation. For example,
   `harness_integrations: {codex: null}` leaves other integrations active. A later layer can
   reactivate Codex with `{}` or explicit config; the disabled config is not restored.
 
-For example, this child adds a Claude plugin while retaining the parent's Codex activation and any
-inherited Claude configuration:
+For example, this child sets Claude's plugin list to `reviewer@team`, replacing any inherited plugin
+list. It retains the parent's Codex activation and Claude settings and marketplaces:
 
 ```yaml
 apiVersion: agentworks/v1
@@ -95,6 +96,31 @@ metadata:
   name: review-user
 spec:
   inherits: [dual-harness-user]
+  harness_integrations:
+    claude-code:
+      plugins: [reviewer@team]
+```
+
+To replace Claude's whole inherited configuration while retaining other integrations, use two
+layers: disable Claude in an intermediate template, then reactivate it in the child. A single map
+entry has no whole-config replacement switch.
+
+```yaml
+apiVersion: agentworks/v1
+kind: agent-template
+metadata:
+  name: without-claude
+spec:
+  inherits: [dual-harness-user]
+  harness_integrations:
+    claude-code: null
+---
+apiVersion: agentworks/v1
+kind: agent-template
+metadata:
+  name: fresh-claude
+spec:
+  inherits: [without-claude]
   harness_integrations:
     claude-code:
       plugins: [reviewer@team]

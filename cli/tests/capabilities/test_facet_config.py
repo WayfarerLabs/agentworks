@@ -190,7 +190,7 @@ def test_multiple_hosts_project_each_map_facet(seated: None, monkeypatch: pytest
     from agentworks.source_location import synthesized
 
     class Host(SessionTemplate):
-        user_integrations: dict[str, CapabilityConfig] = Field(default_factory=dict)
+        user_integrations: dict[str, CapabilityConfig | None] = Field(default_factory=dict)
 
     harness = descriptor_for("harness-integration")
     hosts = (*harness.manifest_sections, HostSurface("session-template", "user_integrations", "user", "mapping"))

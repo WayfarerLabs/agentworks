@@ -142,7 +142,7 @@ class AgentTemplate(DeclaredResource):
     Write booleans unquoted; quoted strings such as ``"no"`` are invalid."""
 
     harness_integrations: dict[NonEmptyStr, CapabilityConfig | None] | None = None
-    """Ordered integrations explicitly activated for native user setup.
+    """Integrations explicitly activated for native user setup.
     Entries merge by integration name and facet config; an empty map inherits.
     A null entry disables that integration."""
 

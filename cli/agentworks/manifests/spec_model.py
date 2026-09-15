@@ -21,7 +21,7 @@ descriptor, the capability config union).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, Any, get_args
+from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter, create_model
 from pydantic.fields import FieldInfo
@@ -97,16 +97,13 @@ def spec_model(kind: str) -> type[BaseModel]:
         field_name = host.naming_field
         field = projected.model_fields[field_name]
         if host.cardinality == "mapping":
-            null_opt_out = unwrap_optional(get_args(unwrap_optional(field.annotation)[0])[1])[1]
             union: Any = built_model(
                 f"{class_name(kind)}{class_name(field_name)}Map",
-                base=_ActivationMapProjection if null_opt_out else AgwModel,
+                base=_ActivationMapProjection,
                 doc="Integration names select their own facet config.",
                 fields={
                     f"integration_{index}": (
-                        config_model_for(implementation, facet=host.facet) | None
-                        if null_opt_out
-                        else config_model_for(implementation, facet=host.facet),
+                        config_model_for(implementation, facet=host.facet) | None,
                         Field(default=None, validate_default=False, alias=name),
                     )
                     for index, (name, implementation) in enumerate(registered_implementations(descriptor.kind).items())

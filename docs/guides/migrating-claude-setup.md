@@ -13,11 +13,17 @@ harness_integrations:
 ```
 
 The `harness_integrations` map preserves inherited integrations. Configuration under `claude-code`
-merges with the inherited user-facet config; marketplace and plugin lists append and deduplicate by
-default. Omit the map or write `{}` to inherit it. An empty `claude-code: {}` entry activates
-defaults when Claude is not already selected and preserves its configuration when inherited. Use
-`claude-code: null` to disable an inherited Claude activation. The owning reinit reconciles any
-previously recorded native effects using the normal cleanup rules.
+merges with the inherited user-facet config. Each authored `marketplaces` or `plugins` list replaces
+that field's inherited list; include every entry you intend to retain, or use `[]` to clear it.
+Omitting either field inherits its value. Omit the map or write `{}` to inherit it. An empty
+`claude-code: {}` entry activates defaults when Claude is not already selected and preserves its
+configuration when inherited. Use `claude-code: null` to disable an inherited Claude activation. The
+owning reinit reconciles any previously recorded native effects using the normal cleanup rules.
+
+There is no single-entry switch to replace an integration's entire inherited configuration. To start
+fresh while retaining other integrations, disable it in an intermediate template and reactivate it
+in a child with the desired config. The
+[harness integration guide](harness-facets.md#explicit-integration-activations) shows both layers.
 
 ## Stored instance overlays
 

@@ -81,7 +81,7 @@ class WorkspaceTemplate(DeclaredResource):
     """``user.email`` for commits made in this workspace's checkout."""
 
     harness_integrations: dict[NonEmptyStr, CapabilityConfig | None] | None = None
-    """Ordered integrations explicitly activated for native workspace setup.
+    """Integrations explicitly activated for native workspace setup.
     Entries merge by integration name and facet config; an empty map inherits.
     A null entry disables that integration."""
 
