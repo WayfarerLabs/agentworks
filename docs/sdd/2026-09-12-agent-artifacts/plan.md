@@ -807,8 +807,18 @@ unconditional.
 - [x] Share the missing-interpreter check between native staging and artifact discovery; preserve
       probe process failure diagnostics separately from malformed response errors.
 - [x] Update permanent prerequisite and reinit guidance, including repair of older VMs.
-- [ ] Complete regression checks, private reviews and a ready follow-up PR for issue 812.
+- [x] Complete private project, complexity and correctness reviews.
+- [x] Finish regression checks: 9,604 tests passed with seven skips; lint, types, Rulesync and
+      website checks passed.
+- [ ] Publish the ready follow-up PR for issue 812 and assess its feedback.
 
 This correction ships on `fix/vm-python-prerequisite`, under the artifact SDD. The initial issue's
 WSL observations are external evidence, not a live WSL rerun by this lead. Full SDD acceptance and
 locking remain separate.
+
+Private review is clean at `5b51afca`. The correctness lane caught runtime-value disclosure through
+probe stderr; the project lane then caught trimming before redaction of whitespace-bearing values.
+Both are corrected and covered on the nonzero-exit and invalid-response paths, including formatted
+tracebacks. Diagnostics retain process exit status and useful stderr after redacting known runtime
+values and their shell-quoted forms. Muntz verified the mandatory package call with bounded fake
+transport probes; the other reviews were source review, not independent full-suite or WSL runs.
