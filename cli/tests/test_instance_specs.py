@@ -656,6 +656,29 @@ def test_agent_can_replace_saved_list_without_decoding_its_retired_semantics(db:
     assert saved is not None and saved.payload == replacement.payload
 
 
+@pytest.mark.parametrize("supplied", [False, True])
+@pytest.mark.parametrize(
+    ("unreadable", "error_type"),
+    [
+        ({"future_field": True}, UnsupportedStoredOverlayError),
+        ({"env": {"TOKEN": {"unexpected": "value"}}}, StateError),
+    ],
+)
+def test_saved_activation_list_does_not_mask_other_unreadable_state(
+    db: Database, supplied, unreadable, error_type
+) -> None:
+    old = VersionedPayload(1, {"harness_integrations": [], **unreadable})
+    db.instance_state.put_desired_overlay("agent", "a1", old)
+    replacement = parse_instance_spec("agent", '{"shell":"zsh"}') if supplied else None
+
+    with pytest.raises(error_type) as caught:
+        replace_agent_overlay(db, "a1", replacement, supplied=supplied)
+
+    assert type(caught.value) is error_type
+    saved = db.instance_state.get_desired_overlay("agent", "a1")
+    assert saved is not None and saved.payload == old
+
+
 def test_saved_tagged_session_selection_preserves_effective_config() -> None:
     from agentworks.db import DesiredOverlayRecord
     from agentworks.schema import CapabilityConfig

@@ -157,16 +157,21 @@ def decode_stored_overlay(
             hint="Upgrade Agentworks to a compatible or newer release before applying this instance spec.",
         )
     raw = _map_session_selector(record)
-    _refuse_stored_activation_list(record, raw)
+    # A retired list permits explicit replacement only if the rest is readable.
+    readable = (
+        {key: value for key, value in raw.items() if key != "harness_integrations"}
+        if isinstance(raw.get("harness_integrations"), list)
+        else raw
+    )
     try:
         encoded = json.dumps(
-            raw,
+            readable,
             ensure_ascii=False,
             allow_nan=False,
             sort_keys=True,
             separators=(",", ":"),
         )
-        return parse_instance_spec(record.instance_kind, encoded)
+        parsed = parse_instance_spec(record.instance_kind, encoded)
     except UnsupportedOverlayFieldsError as error:
         raise UnsupportedStoredOverlayError(
             f"stored {record.instance_kind} {record.instance_name!r} instance spec uses unsupported fields: {error}",
@@ -181,6 +186,8 @@ def decode_stored_overlay(
             entity_name=record.instance_name,
             hint="Back up the state database before repairing it, or restore a known-good backup.",
         ) from error
+    _refuse_stored_activation_list(record, raw)
+    return parsed
 
 
 def decode_stored_vm_overlays(
