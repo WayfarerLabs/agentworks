@@ -34,7 +34,7 @@ from agentworks.agents.template import AgentTemplate
 from agentworks.agents.templates import resolve_from_dict as resolve_agent
 from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.env.entry import EnvEntry
-from agentworks.schema import CapabilityConfig
+from agentworks.schema import CapabilityBlock, CapabilityConfig
 from agentworks.sessions.template import SessionTemplate
 from agentworks.sessions.templates import resolve_from_dict as resolve_session
 from agentworks.vms.template import VMTemplate
@@ -128,7 +128,7 @@ KINDS = {
             "description": "Prod debugging",
             "env": _ENV,
             "artifacts": ArtifactsConfig(bundles=["team"]),
-            "harness_integration": {"shell": CapabilityConfig.model_validate({**{"command": "htop"}})},
+            "harness_integration": CapabilityBlock.of("shell", command="htop"),
         },
         # ``shell`` is the only registered harness integration, so no fixture
         # can name a different one; the pair's coverage rides on

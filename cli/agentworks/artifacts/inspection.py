@@ -165,7 +165,7 @@ def _owner_inputs(db: Database, registry: Registry, context: ArtifactContext) ->
                 "vm",
                 context.vm.name,
                 "admin",
-                user.harness_integrations,
+                user.active_harness_integrations,
                 SecretTarget(vm=vm.env, admin=user.env),
                 user.artifacts,
             )

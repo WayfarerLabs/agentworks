@@ -123,7 +123,7 @@ def test_disabled_rows_are_present_but_hidden_from_default_list(tmp_path: Path) 
 _CODEX_TEMPLATE = ManifestDoc(
     "session-template",
     "cx",
-    {"harness_integration": {"codex": {}}},
+    {"harness_integration": {"name": "codex"}},
     description="Codex session",
 )
 

@@ -70,7 +70,7 @@ def _write_config(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Pat
             {"provider": {"name": "github", "source": {"mode": "secret"}}},
         ),
         ("secret", "anthropic-api-key", {}),
-        ("session-template", "dev", {"harness_integration": {"shell": {"command": "claude"}}}),
+        ("session-template", "dev", {"harness_integration": {"name": "shell", "command": "claude"}}),
         ("workspace-template", "gruntweave", {"repo": "https://example.com/org/repo.git"}),
         ("agent-template", "claude", {"shell": "zsh"}),
     ],

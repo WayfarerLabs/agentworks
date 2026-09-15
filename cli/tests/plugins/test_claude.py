@@ -130,7 +130,7 @@ def test_disabled_rows_are_present_but_hidden_from_default_list(tmp_path: Path) 
 _CC_TEMPLATE = ManifestDoc(
     "session-template",
     "cc",
-    {"harness_integration": {"claude-code": {}}},
+    {"harness_integration": {"name": "claude-code"}},
     description="Claude Code session",
 )
 

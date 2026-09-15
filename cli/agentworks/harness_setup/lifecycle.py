@@ -104,13 +104,13 @@ def prepare_vm_setup(
                     capture_owner(registry, "vm", name, "vm", template.artifacts, operation=operation),
                 )
             )
-        if _needed(db, "vm", name, "admin", admin.harness_integrations, admin.artifacts):
+        if _needed(db, "vm", name, "admin", admin.active_harness_integrations, admin.artifacts):
             result.append(
                 SetupInputs(
                     "vm",
                     name,
                     "admin",
-                    admin.harness_integrations,
+                    admin.active_harness_integrations,
                     SecretTarget(vm=template.env, admin=admin.env),
                     admin.artifacts,
                     capture_owner(registry, "vm", name, "admin", admin.artifacts, operation=operation),

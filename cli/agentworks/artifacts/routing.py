@@ -335,7 +335,7 @@ def _user_inputs(
             "vm",
             vm.name,
             "admin",
-            admin.harness_integrations,
+            admin.active_harness_integrations,
             SecretTarget(vm=ancestor.target.vm, admin=admin.env),
             artifacts=admin.artifacts,
         )

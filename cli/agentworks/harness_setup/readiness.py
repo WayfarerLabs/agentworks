@@ -137,7 +137,7 @@ def _applicable_evidence(
                 kind="vm",
                 name=vm.name,
                 component="admin",
-                activations=admin.harness_integrations,
+                activations=admin.active_harness_integrations,
                 target=SecretTarget(vm=vm_template.env, admin=admin.env),
             )
             username = vm.admin_username

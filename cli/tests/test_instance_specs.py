@@ -61,6 +61,8 @@ def test_spec_requires_a_nonempty_json_object(value: str) -> None:
         '{"cpus":1e400}',
         '{"cpus":1} trailing',
         '{"env":{"A":null}}',
+        '{"harness_integrations":null}',
+        '{"harness_integrations":{"codex":{"settings":null}}}',
     ],
 )
 def test_spec_rejects_json_extensions_and_null_recursively(value: str) -> None:
@@ -73,6 +75,22 @@ def test_deep_recursive_null_is_a_typed_validation_error() -> None:
 
     with pytest.raises(ValidationError):
         parse_instance_spec("vm", value)
+
+
+@pytest.mark.parametrize("kind", ["vm", "agent", "workspace"])
+def test_instance_activation_opt_out_round_trips(kind) -> None:
+    overlay = parse_instance_spec(kind, '{"harness_integrations":{"codex":null}}')
+    assert overlay.payload.value == {"harness_integrations": {"codex": None}}
+
+
+def test_admin_activation_opt_out_round_trips_in_saved_vm() -> None:
+    from agentworks.db import DesiredOverlayRecord
+
+    overlays = parse_vm_instance_specs(None, '{"harness_integrations":{"codex":null}}')
+    assert overlays is not None
+    assert overlays.payload.value["admin"] == {"harness_integrations": {"codex": None}}
+    record = DesiredOverlayRecord("vm", "owner", overlays.payload, "2026-09-15")
+    assert decode_stored_vm_overlays(record).payload == overlays.payload
 
 
 def test_huge_json_integer_is_a_typed_validation_error() -> None:
@@ -679,9 +697,9 @@ def test_saved_activation_list_does_not_mask_other_unreadable_state(
     assert saved is not None and saved.payload == old
 
 
-def test_saved_tagged_session_selection_preserves_effective_config() -> None:
+def test_saved_session_selection_preserves_effective_config() -> None:
     from agentworks.db import DesiredOverlayRecord
-    from agentworks.schema import CapabilityConfig
+    from agentworks.schema import CapabilityBlock
 
     record = DesiredOverlayRecord(
         "session",
@@ -690,9 +708,7 @@ def test_saved_tagged_session_selection_preserves_effective_config() -> None:
         "2026-09-15",
     )
     decoded = decode_stored_overlay(record)
-    parent = SessionTemplate(
-        name="parent", harness_integration={"shell": CapabilityConfig.model_validate({"required_commands": ["git"]})}
-    )
+    parent = SessionTemplate(name="parent", harness_integration=CapabilityBlock.of("shell", required_commands=["git"]))
     from agentworks.instance_specs import InstanceOverlay
 
     assert isinstance(decoded, InstanceOverlay) and isinstance(decoded.declaration, SessionTemplate)

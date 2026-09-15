@@ -156,7 +156,7 @@ def decode_stored_overlay(
             entity_name=record.instance_name,
             hint="Upgrade Agentworks to a compatible or newer release before applying this instance spec.",
         )
-    raw = _map_session_selector(record)
+    raw = record.payload.value
     # A retired list permits explicit replacement only if the rest is readable.
     readable = (
         {key: value for key, value in raw.items() if key != "harness_integrations"}
@@ -265,18 +265,6 @@ def decode_stored_vm_overlays(
     if malformed:
         raise _malformed_stored_overlay(record, str(malformed[0])) from malformed[0]
     return _vm_instance_overlays(vm_overlay, admin)
-
-
-def _map_session_selector(record: DesiredOverlayRecord) -> JsonObject:
-    """Read the historical tagged session selector without changing its merge semantics."""
-    raw = record.payload.value
-    selector = raw.get("harness_integration")
-    if record.instance_kind != "session" or not isinstance(selector, dict):
-        return raw
-    name = selector.get("name")
-    if not isinstance(name, str):
-        return raw
-    return {**raw, "harness_integration": {name: {key: value for key, value in selector.items() if key != "name"}}}
 
 
 def _refuse_stored_activation_list(record: DesiredOverlayRecord, raw: JsonObject) -> None:
@@ -602,6 +590,8 @@ def _validate_json_tree(value: object) -> None:
     while pending:
         item, path = pending.pop()
         if item is None:
+            if len(path) == 2 and path[0] == "harness_integrations":
+                continue
             location = ".".join(path) or "<root>"
             raise ValidationError(f"instance spec cannot contain null at {location}")
         if isinstance(item, float) and not math.isfinite(item):

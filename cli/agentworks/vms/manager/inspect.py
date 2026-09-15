@@ -779,7 +779,7 @@ def _vm_instance_state(
             base = None
             if legacy_component(record) is not None:
                 with suppress(NotFoundError):
-                    base = resolve_admin(registry, vm.admin_template).value.harness_integrations
+                    base = resolve_admin(registry, vm.admin_template).value.active_harness_integrations
             overlays = decode_stored_vm_overlays(record, legacy_user_base=base)
             if legacy_component(record) is not None:
                 issues.append(InstanceStateIssue(InstanceStateIssueCode.INSTANCE_SPEC_MIGRATION_PENDING, slot="admin"))
