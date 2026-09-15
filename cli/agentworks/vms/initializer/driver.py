@@ -697,26 +697,39 @@ def _phase_b_setup(
             target_role="admin",
         )
 
-        # Non-fatal: dotfiles (can override mise config, can provide lockfile)
+        # Non-fatal: dotfiles (can override mise config, can provide lockfile).
+        # Sync and install are reported separately because a failed sync skips
+        # the install entirely. Saying so is the difference between a warning an
+        # operator can act on and a later failure that looks unrelated to it.
         if admin.dotfiles_source:
             logger.step("Dotfiles")
             dest = admin.dotfiles_destination.replace("~", home)
+            synced = False
             try:
-                from agentworks.sources import SourceRefError, fetch_dir, parse_source_ref
+                from agentworks.sources import fetch_dir, parse_source_ref
 
                 ref = parse_source_ref(admin.dotfiles_source)
                 output.info(f"Syncing dotfiles from {admin.dotfiles_source}...")
                 fetch_dir(ref, ts_target, dest, logger=logger)
-
-                output.info(f"Running dotfiles install: {admin.dotfiles_install_cmd}")
-                ts_target.run(
-                    f"cd {dest} && {admin.dotfiles_install_cmd}",
-                    timeout=120,
+                synced = True
+            except Exception as e:
+                msg = (
+                    f"dotfiles sync failed, so '{admin.dotfiles_install_cmd}' did not run and {dest} "
+                    f"still holds its previous contents: {e}"
                 )
-            except (SourceRefError, Exception) as e:
-                msg = f"dotfiles install failed: {e}"
                 logger.warning(msg)
                 output.warn(msg)
+            if synced:
+                try:
+                    output.info(f"Running dotfiles install: {admin.dotfiles_install_cmd}")
+                    ts_target.run(
+                        f"cd {dest} && {admin.dotfiles_install_cmd}",
+                        timeout=120,
+                    )
+                except Exception as e:
+                    msg = f"dotfiles install '{admin.dotfiles_install_cmd}' failed in {dest}: {e}"
+                    logger.warning(msg)
+                    output.warn(msg)
 
         # Non-fatal: mise lockfile (after git creds and dotfiles; overrides dotfiles lockfile)
         if admin.mise_lockfile:

@@ -14,10 +14,26 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+# A wrapping layer sets a hint for its own concern, so the hint that names the
+# underlying misconfiguration stays attached to the cause it wrapped. Rendering
+# only the outermost hint discards the actionable half of such a failure. Both
+# bounds keep a deep or self-referential cause chain from flooding the output.
+_MAX_HINT_DEPTH = 8
+_MAX_HINTS = 3
+
+
 def echo_hint(exc: BaseException) -> None:
-    """Render an AgentworksError's hint attribute on a second line if set."""
-    hint = getattr(exc, "hint", None)
-    if hint:
+    """Render the error's hint and those of the causes it wraps, outermost first."""
+    hints: list[str] = []
+    current: BaseException | None = exc
+    for _ in range(_MAX_HINT_DEPTH):
+        if current is None or len(hints) >= _MAX_HINTS:
+            break
+        hint = getattr(current, "hint", None)
+        if hint and hint not in hints:
+            hints.append(hint)
+        current = current.__cause__
+    for hint in hints:
         typer.echo(f"  Hint: {hint}", err=True)
 
 

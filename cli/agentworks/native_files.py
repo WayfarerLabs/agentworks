@@ -28,6 +28,14 @@ if not destination.startswith('/') or any(p in ('', '.', '..') for p in parts):
 if op in ('directory', 'mkdir'):
     parts.append('unused')
 traverse = getattr(os, 'O_PATH', os.O_RDONLY) | os.O_DIRECTORY | os.O_NOFOLLOW
+def classify(error):
+    # Report a link, a non-directory component, and a denial as distinct
+    # statuses so the caller can name the cause instead of failing generically.
+    if error.errno in (errno.ELOOP, errno.ENOTDIR):
+        sys.exit(4)
+    if error.errno in (errno.EACCES, errno.EPERM, errno.EROFS):
+        sys.exit(5)
+    raise error
 if op == 'prune':
     root_parts = staging.split('/')[1:]
     if parts[:len(root_parts)] != root_parts or len(parts) <= len(root_parts):
@@ -98,7 +106,7 @@ try:
     else:
         with os.fdopen(source_fd, 'rb') as source:
             if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
-                sys.exit(1)
+                sys.exit(4)
             mode = stat.S_IMODE(os.fstat(source.fileno()).st_mode)
             if op == 'read':
                 content = source.read()
@@ -147,9 +155,34 @@ try:
                 os.unlink(name, dir_fd=fd)
             except FileNotFoundError:
                 pass
+except OSError as error:
+    classify(error)
 finally:
     os.close(fd)
 """
+
+
+_UNSUITABLE_PATH = 4
+_DENIED_PATH = 5
+
+
+def _path_failure(subject: str, destination: str, returncode: int) -> StateError:
+    """Name why a guarded path could not be used, from the guest program's status."""
+    if returncode == _UNSUITABLE_PATH:
+        return StateError(
+            f"{subject} '{destination}' is a symlink or is not a regular file",
+            hint=(
+                "Agentworks owns this file and never reads or writes through a link. Remove the link on the VM, "
+                "stop whatever installs it (commonly a dotfiles install script) from claiming this path, and "
+                "express those values through the integration's settings mapping instead."
+            ),
+        )
+    if returncode == _DENIED_PATH:
+        return StateError(
+            f"{subject} '{destination}' cannot be accessed",
+            hint="Check the ownership and mode of the file and each of its parent directories, then retry setup.",
+        )
+    return StateError(f"{subject} '{destination}' could not be inspected safely")
 
 
 def native_path(path: str) -> str:
@@ -233,7 +266,7 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
         )
         result = self.runner.run(command, check=False)
         if not result.ok:
-            raise StateError("native config directory is inaccessible or contains a link")
+            raise _path_failure("native config directory", native_path(destination), result.returncode)
         try:
             exists = json.loads(result.stdout)["exists"]
             if not isinstance(exists, bool):
@@ -249,7 +282,7 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
         command = shlex.join(["python3", "-c", _FILE_PROGRAM, "read", destination, remote, "-", "", "0"])
         result = self.runner.run(command, check=False, discard_output=False)
         if not result.ok:
-            raise StateError("native settings path is unreadable or contains an unsuitable file or link")
+            raise _path_failure("native settings file", destination, result.returncode)
         try:
             exists = json.loads(result.stdout)["exists"]
             if not isinstance(exists, bool):
@@ -291,17 +324,20 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
             raise ExternalError("could not publish native settings file") from None
         if result.returncode == 2:
             raise StateError("native settings changed during setup; retry against the current file")
+        if result.returncode in (_UNSUITABLE_PATH, _DENIED_PATH):
+            raise _path_failure("native settings file", destination, result.returncode)
         if not result.ok:
             raise StateError("native settings publication could not establish the destination ownership or mode")
 
     def remove(self, destination: str, *, expected: str) -> None:
         """Remove only a regular file that still matches its recorded ownership."""
-        command = shlex.join(
-            ["python3", "-c", _FILE_PROGRAM, "delete", native_path(destination), "-", expected, "", "0"]
-        )
+        destination = native_path(destination)
+        command = shlex.join(["python3", "-c", _FILE_PROGRAM, "delete", destination, "-", expected, "", "0"])
         result = self.runner.run(command, check=False, discard_output=True)
         if result.returncode == 2:
             raise StateError("owned native file changed; retaining it for operator inspection")
+        if result.returncode in (_UNSUITABLE_PATH, _DENIED_PATH):
+            raise _path_failure("owned native file", destination, result.returncode)
         if not result.ok:
             raise StateError("owned native file could not be removed safely")
 
@@ -324,12 +360,11 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
 
     def fingerprint(self, destination: str) -> tuple[str, int] | None:
         """Stream a guarded file's hash and mode without copying or logging its body."""
-        command = shlex.join(
-            ["python3", "-c", _FILE_PROGRAM, "fingerprint", native_path(destination), "-", "-", "", "0"]
-        )
+        destination = native_path(destination)
+        command = shlex.join(["python3", "-c", _FILE_PROGRAM, "fingerprint", destination, "-", "-", "", "0"])
         result = self.runner.run(command, check=False)
         if not result.ok:
-            raise StateError("artifact destination is inaccessible or contains an unsuitable file or link")
+            raise _path_failure("artifact destination", destination, result.returncode)
         try:
             observed = json.loads(result.stdout)
             if observed["exists"] is False:

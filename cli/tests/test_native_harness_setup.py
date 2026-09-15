@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from collections.abc import Iterator
@@ -19,7 +20,7 @@ from agentworks.capabilities.harness_integration.setup import WorkspaceSetupInvo
 from agentworks.db import VMRow
 from agentworks.errors import ConfigError, ExternalError, StateError
 from agentworks.harness_setup.model import NativeClaim
-from agentworks.native_files import NativeFiles
+from agentworks.native_files import _DENIED_PATH, _FILE_PROGRAM, _UNSUITABLE_PATH, NativeFiles
 from agentworks.plugins._harness_native.native import setup_user, setup_workspace
 from agentworks.plugins._harness_native.native_cli import NativeCLI, NativeTool
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
@@ -81,6 +82,67 @@ def test_links_cannot_redirect_native_files(transport: LocalFixtureTransport, li
                 str(directory / "settings.json"), b'{"changed": true}', expected=hashlib.sha256(b"{}").hexdigest()
             )
     assert protected.read_bytes() == b"{}"
+
+
+def _run_guest(op: str, destination: Path, staging: Path) -> subprocess.CompletedProcess[str]:
+    """Drive the embedded guest program directly, the way the probe tests do."""
+    return subprocess.run(
+        [sys.executable, "-c", _FILE_PROGRAM, op, str(destination), str(staging), "-", "", "0"],
+        capture_output=True,
+        text=True,
+    )
+
+
+@pytest.mark.parametrize("op", ["read", "fingerprint", "write", "delete"])
+def test_guest_program_classifies_a_linked_destination(tmp_path: Path, op: str) -> None:
+    """A leaf symlink must reach the classification branch instead of escaping.
+
+    O_NOFOLLOW raises ELOOP before the regular-file check, which is how this
+    failure previously left the program as an uncaught OSError: the operator got
+    a traceback in the log and an error naming neither the path nor the cause.
+    """
+    root = tmp_path / "home" / ".claude"
+    root.mkdir(parents=True)
+    protected = tmp_path / "outside.json"
+    protected.write_bytes(b"{}")
+    (root / "settings.json").symlink_to(protected)
+    staging = tmp_path / "staging"
+    staging.write_bytes(b'{"replacement": true}')
+
+    result = _run_guest(op, root / "settings.json", staging)
+
+    assert result.returncode == _UNSUITABLE_PATH
+    assert "Traceback" not in result.stderr
+    assert protected.read_bytes() == b"{}"
+
+
+def test_guest_program_separates_a_denial_from_an_unsuitable_path(tmp_path: Path) -> None:
+    """A denied parent is a different operator problem than a link."""
+    if os.geteuid() == 0:
+        pytest.skip("root bypasses directory permissions")
+    root = tmp_path / "home" / ".claude"
+    root.mkdir(parents=True)
+    (root / "settings.json").write_bytes(b"{}")
+    root.chmod(0o000)
+    try:
+        result = _run_guest("read", root / "settings.json", tmp_path / "staging")
+    finally:
+        root.chmod(0o700)
+
+    assert result.returncode == _DENIED_PATH
+    assert "Traceback" not in result.stderr
+
+
+def test_guest_program_still_reports_a_regular_file(tmp_path: Path) -> None:
+    """Classification must not swallow the ordinary case it sits in front of."""
+    root = tmp_path / "home" / ".claude"
+    root.mkdir(parents=True)
+    (root / "settings.json").write_bytes(b"{}")
+
+    result = _run_guest("fingerprint", root / "settings.json", tmp_path / "staging")
+
+    assert result.returncode == 0
+    assert json.loads(result.stdout)["sha256"] == hashlib.sha256(b"{}").hexdigest()
 
 
 @pytest.mark.parametrize("tool", ["codex", "claude"])
