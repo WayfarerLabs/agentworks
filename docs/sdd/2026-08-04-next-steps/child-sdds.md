@@ -767,6 +767,26 @@ Merged work the ledger owes a line, recorded from the merges themselves.
   machine-facing JSON `command` identifier, tests, and current docs. Recorded because it falsified a
   line in `current-state.md` that the saga lead had merged hours earlier. That line is corrected now
   rather than ahead of the merge, because until this landed the plural was what `main` actually had.
+- **The 0.19.0 pre-release smoke test found a real wsl2 defect, and the miss that nearly hid it**
+  (PRs #811 and #813, merged 2026-09-15 as `4b7fc378` and `1b345445`; issue #812 closed). Recorded
+  as one item because the two halves only make sense together.
+  - **The miss.** The WSL2 lane ran against published `agentworks-cli` v0.18.0 rather than the
+    commit under test, and reported green with a caveat. The stated reason, that getting code onto
+    the Windows bed needed a credential through a cloud control plane, was wrong twice: this
+    repository is public, and a built wheel carries the code regardless.
+  - **The defect the substitution hid.** Re-running the lane against `main` failed immediately:
+    minimal WSL Debian guests have no `python3`, which the native artifact probe requires, so agent
+    creation with a harness integration could not proceed. This was on a shipped platform, in the
+    harness path wave 4 and agent artifacts own, in the exact code 0.19.0 would carry. PR #813
+    installs `python3` through the mandatory system-package list and makes mandatory-package failure
+    fail initialization rather than warn and continue; existing VMs repair with `agw vm reinit`.
+  - **Why the general lesson is the durable part.** `main` reports the last released version until
+    the release PR merges, so a version string cannot discriminate "am I testing the right build";
+    identity must be checked by a feature only the commit under test has. The integration-testing
+    skill now carries both principles: test the build under test rather than a stand-in, and verify
+    a constraint before designing around it.
+  - **Saga-lead note:** a lane can report green and still be blind, and what caught this was
+    re-running against the real artifact rather than any additional depth of review.
 
 ### Efforts that ran without ledger entries (reconstructed 2026-09-06)
 
