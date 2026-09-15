@@ -46,7 +46,7 @@ def _client(
     *,
     intent: PreviewIntent | ResolutionIntent,
     account: str | None = None,
-    timeout: float = 30.0,
+    timeout: float = 300.0,
     app_impact: AppAuthenticationImpact = AppAuthenticationImpact.OPERATOR_ACTION,
     tty_access: TtyInteractionAccess = TtyInteractionAccess.DISABLED,
 ) -> tuple[AbstractContextManager[SecretSourceClient], SecretSourceClient]:
@@ -65,6 +65,7 @@ def _client(
 
 
 def test_config_and_mapping_validation() -> None:
+    assert OnePasswordSourceConfig(name="onepassword").timeout == 300.0
     config = OnePasswordSourceConfig(name="onepassword", account="work.example.com", timeout=7)
     assert config.timeout == 7.0
     assert config.app_authentication_impact is AppAuthenticationImpact.OPERATOR_ACTION

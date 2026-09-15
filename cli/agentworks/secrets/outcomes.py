@@ -131,7 +131,7 @@ _FAILURE_HINTS: dict[FailureReason, str] = {
     FailureReason.LOOKUP_REJECTED: "check that the provider reference identifies a valid target",
     FailureReason.AUTHENTICATION: "authenticate the configured secret provider and retry",
     FailureReason.CONNECTIVITY: "check connectivity to the configured secret provider",
-    FailureReason.DEADLINE_EXCEEDED: "increase the source timeout or complete pending provider approval",
+    FailureReason.DEADLINE_EXCEEDED: "retry the provider request",
     FailureReason.EXTERNAL: "retry after checking the configured secret provider",
     FailureReason.MALFORMED_VALUE: "remove NUL characters from the provider value",
     FailureReason.BACKEND_PROTOCOL: "report the secret backend protocol violation",
@@ -145,13 +145,9 @@ def format_hint(outcome: ResolutionOutcome) -> str:
     if isinstance(result, ResolutionResolved):
         return "resolved"
     if isinstance(result, ResolutionFailed):
-        hint = _FAILURE_HINTS[result.reason]
         if result.reason is FailureReason.DEADLINE_EXCEEDED and outcome.backend == "onepassword":
-            return (
-                f"{hint}; a pending approval in the 1Password desktop app is a common cause. "
-                "`op whoami` is not a reliable exclusion test for app integration"
-            )
-        return hint
+            return "approve the 1Password request and retry"
+        return _FAILURE_HINTS[result.reason]
     if isinstance(result, ResolutionMissing):
         return "configure the secret in this source or a later source"
     assert isinstance(result, ResolutionBlocked)
@@ -188,6 +184,8 @@ def complete_resolution_error(outcomes: Sequence[ResolutionOutcome]) -> Agentwor
             error_type: type[AgentworksError] = SecretMappingError
         elif first.result.reason is FailureReason.CONNECTIVITY:
             error_type = ConnectivityError
+        elif first.result.reason is FailureReason.DEADLINE_EXCEEDED:
+            error_type = SecretUnavailableError
         else:
             error_type = ExternalError
     else:
