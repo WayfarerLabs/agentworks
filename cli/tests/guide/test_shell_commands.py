@@ -38,28 +38,51 @@ def _authored_commands(text: str) -> set[str]:
     return commands
 
 
-def _string_templates(expression: ast.expr) -> tuple[str, ...]:
+def _string_templates(
+    expression: ast.expr,
+    bindings: dict[str, tuple[ast.expr, ...]] | None = None,
+    resolving: frozenset[str] = frozenset(),
+) -> tuple[str, ...]:
+    bindings = bindings or {}
     if isinstance(expression, ast.Constant) and isinstance(expression.value, str):
         return (expression.value,)
-    if isinstance(expression, ast.JoinedStr):
-        return (
-            "".join(
-                value.value if isinstance(value, ast.Constant) and isinstance(value.value, str) else "VALUE"
-                for value in expression.values
-            ),
+    if isinstance(expression, ast.Name) and expression.id in bindings and expression.id not in resolving:
+        return tuple(
+            template
+            for value in bindings[expression.id]
+            for template in _string_templates(value, bindings, resolving | {expression.id})
         )
+    if isinstance(expression, ast.JoinedStr):
+        templates: tuple[str, ...] = ("",)
+        for value in expression.values:
+            parts: tuple[str, ...]
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                parts = (value.value,)
+            elif isinstance(value, ast.FormattedValue):
+                parts = _string_templates(value.value, bindings, resolving)
+                if not parts:
+                    parts = (str(value.value.value),) if isinstance(value.value, ast.Constant) else ("VALUE",)
+            else:
+                parts = ("VALUE",)
+            templates = tuple(prefix + part for prefix in templates for part in parts)
+        return templates
     if isinstance(expression, ast.BinOp) and isinstance(expression.op, ast.Add):
         return tuple(
-            left + right for left in _string_templates(expression.left) for right in _string_templates(expression.right)
+            left + right
+            for left in _string_templates(expression.left, bindings, resolving)
+            for right in _string_templates(expression.right, bindings, resolving)
         )
     if isinstance(expression, ast.IfExp):
-        return (*_string_templates(expression.body), *_string_templates(expression.orelse))
+        return (
+            *_string_templates(expression.body, bindings, resolving),
+            *_string_templates(expression.orelse, bindings, resolving),
+        )
     return ()
 
 
 def _is_hint_name(name: str) -> bool:
     lowered = name.casefold()
-    return lowered == "hint" or lowered.endswith("_hint")
+    return lowered in {"hint", "remediation", "remedy"} or lowered.endswith("_hint")
 
 
 def _is_hint_target(target: ast.expr) -> bool:
@@ -85,36 +108,75 @@ def _assigned_hint_expression(node: ast.AST, indirect_names: set[str]) -> ast.ex
     return None
 
 
+def _scope_nodes(scope: ast.Module | ast.FunctionDef | ast.AsyncFunctionDef) -> Iterator[ast.AST]:
+    stack = list(reversed(scope.body))
+    while stack:
+        node = stack.pop()
+        yield node
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        stack.extend(reversed(list(ast.iter_child_nodes(node))))
+
+
+def _scope_bindings(
+    scope: ast.Module | ast.FunctionDef | ast.AsyncFunctionDef,
+    tree: ast.Module,
+) -> dict[str, tuple[ast.expr, ...]]:
+    values: dict[str, list[ast.expr]] = {}
+    for node in _scope_nodes(scope):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    values.setdefault(target.id, []).append(node.value)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
+            values.setdefault(node.target.id, []).append(node.value)
+
+    if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        positional_names = [parameter.arg for parameter in (*scope.args.posonlyargs, *scope.args.args)]
+        parameter_names = [*positional_names, *(parameter.arg for parameter in scope.args.kwonlyargs)]
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name) or node.func.id != scope.name:
+                continue
+            for name, argument in zip(positional_names, node.args, strict=False):
+                values.setdefault(name, []).append(argument)
+            for keyword in node.keywords:
+                if keyword.arg in parameter_names:
+                    values.setdefault(keyword.arg, []).append(keyword.value)
+
+    return {name: tuple(expressions) for name, expressions in values.items()}
+
+
 def _hint_templates(path: Path) -> Iterator[tuple[int, str]]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    indirect_names = {
-        keyword.value.id
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        for keyword in node.keywords
-        if keyword.arg is not None and _is_hint_name(keyword.arg) and isinstance(keyword.value, ast.Name)
-    }
-    seen: set[tuple[int, str]] = set()
-    for node in ast.walk(tree):
+    scopes: list[ast.Module | ast.FunctionDef | ast.AsyncFunctionDef] = [tree]
+    scopes.extend(node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)))
+    for scope in scopes:
+        nodes = tuple(_scope_nodes(scope))
+        bindings = _scope_bindings(scope, tree)
+        indirect_names = {
+            keyword.value.id
+            for node in nodes
+            if isinstance(node, ast.Call)
+            for keyword in node.keywords
+            if keyword.arg is not None and _is_hint_name(keyword.arg) and isinstance(keyword.value, ast.Name)
+        }
         expressions: list[ast.expr] = []
-        if isinstance(node, ast.Call):
-            expressions.extend(
-                keyword.value for keyword in node.keywords if keyword.arg is not None and _is_hint_name(keyword.arg)
-            )
-        elif assigned := _assigned_hint_expression(node, indirect_names):
-            expressions.append(assigned)
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and _is_hint_name(node.name):
-            expressions.extend(
-                returned.value
-                for returned in ast.walk(node)
-                if isinstance(returned, ast.Return) and returned.value is not None
-            )
+        for node in nodes:
+            if isinstance(node, ast.Call):
+                expressions.extend(
+                    keyword.value
+                    for keyword in node.keywords
+                    if keyword.arg is not None
+                    and _is_hint_name(keyword.arg)
+                    and not (isinstance(keyword.value, ast.Name) and keyword.value.id in indirect_names)
+                )
+            elif assigned := _assigned_hint_expression(node, indirect_names):
+                expressions.append(assigned)
+        if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)) and _is_hint_name(scope.name):
+            expressions.extend(node.value for node in nodes if isinstance(node, ast.Return) and node.value is not None)
         for expression in expressions:
-            for template in _string_templates(expression):
-                candidate = (expression.lineno, template)
-                if candidate not in seen:
-                    seen.add(candidate)
-                    yield candidate
+            for template in _string_templates(expression, bindings):
+                yield expression.lineno, template
 
 
 def _shipped_guidance(package_root: Path) -> Iterator[tuple[str, str, str]]:
@@ -148,38 +210,42 @@ def _shipped_guidance(package_root: Path) -> Iterator[tuple[str, str, str]]:
 
 def _validate_command_prefix_and_options(command: str, root: CommandSpec) -> str | None:
     tokens = shlex.split(command)
-    current = root
-    path = [root]
-    index = 1
-    options_enabled = True
-    while index < len(tokens):
-        token = tokens[index]
-        if token == "--":
-            options_enabled = False
-            index += 1
-            continue
-        if options_enabled and token.startswith("-"):
-            option = token.partition("=")[0]
-            parameter = next(
-                (parameter for spec in path for parameter in spec.params if option in parameter.opts),
-                None,
-            )
-            if parameter is None and option != "--help":
-                return f"unknown option {option!r}"
-            if parameter is not None and not parameter.is_flag and "=" not in token:
-                index += 2 if index + 1 < len(tokens) else 1
+    if not tokens or tokens[0] != "agw":
+        return "command does not start with 'agw'"
+
+    def validate_from(current: CommandSpec, index: int, options_enabled: bool = True) -> str | None:
+        while index < len(tokens):
+            token = tokens[index]
+            if token == "--":
+                options_enabled = False
+                index += 1
                 continue
+            if options_enabled and token.startswith("-"):
+                option = token.partition("=")[0]
+                parameter = next((parameter for parameter in current.params if option in parameter.opts), None)
+                if parameter is None and option != "--help":
+                    return f"unknown option {option!r}"
+                if parameter is not None and not parameter.is_flag and "=" not in token:
+                    index += 2 if index + 1 < len(tokens) else 1
+                    continue
+                index += 1
+                continue
+            if current.subcommands:
+                if token in _GENERIC_SEGMENTS:
+                    matches = (
+                        validate_from(child, index + 1, options_enabled) is None
+                        for child in current.subcommands.values()
+                    )
+                    if any(matches):
+                        return None
+                    return f"no command matches generic segment {token!r}"
+                if token not in current.subcommands:
+                    return f"unknown command segment {token!r}"
+                current = current.subcommands[token]
             index += 1
-            continue
-        if current.subcommands:
-            if token in _GENERIC_SEGMENTS:
-                return None
-            if token not in current.subcommands:
-                return f"unknown command segment {token!r}"
-            current = current.subcommands[token]
-            path.append(current)
-        index += 1
-    return None
+        return None
+
+    return validate_from(root, 1)
 
 
 def test_authored_command_extraction_covers_inline_quotes_and_shell_fences() -> None:
@@ -206,6 +272,9 @@ def test_command_resolution_checks_paths_and_options_without_executing() -> None
     assert _validate_command_prefix_and_options("agw vm retired NAME", spec) is not None
     assert _validate_command_prefix_and_options("agw vm start NAME --retired", spec) is not None
     assert _validate_command_prefix_and_options("agw guide --agent retired TOPIC", spec) is not None
+    assert _validate_command_prefix_and_options("agw doctor --debug", spec) is not None
+    assert _validate_command_prefix_and_options("agw VALUE --retired", spec) is not None
+    assert _validate_command_prefix_and_options("agw session VALUE VALUE --retired", spec) is not None
 
 
 def test_hint_inventory_is_limited_to_hint_values_and_preserves_placeholders(tmp_path: Path) -> None:
@@ -223,6 +292,16 @@ def fail(operation: str, name: str) -> None:
 def fail_direct(name: str) -> None:
     remedy = f"Run `agw vm start {name}`."
     raise RuntimeError("failed", hint=remedy)
+
+def carry_remediation(name: str) -> str:
+    remediation = f"Run `agw agent reinit {name}`."
+    return build(remediation=remediation)
+
+def command_hint(command_path: str) -> str:
+    return f"Run `agw {command_path}`."
+
+def use_command_hint() -> None:
+    raise RuntimeError("failed", hint=command_hint("vm list"))
 ''',
         encoding="utf-8",
     )
@@ -230,6 +309,8 @@ def fail_direct(name: str) -> None:
     assert list(_hint_templates(source)) == [
         (4, "Run `agw session VALUE VALUE --force`."),
         (11, "Run `agw vm start VALUE`."),
+        (15, "Run `agw agent reinit VALUE`."),
+        (19, "Run `agw vm list`."),
     ]
 
 
