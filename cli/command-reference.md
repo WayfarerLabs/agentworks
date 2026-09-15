@@ -1141,11 +1141,11 @@ via `--workspace <ws>`). Use these when you just need a terminal without the con
 A session template selects the **harness integration** that runs the session's workload. The
 integration is a [capability](../docs/guides/resources.md#harness-integrations) that owns
 starting/resuming the harness or shell and checking its required executables; the template's
-`spec.harness_integration` is one tagged table whose `name` key selects the integration and whose
-remaining keys are the config block that integration validates. A template that names no integration
-runs the built-in `shell` integration (a login shell, `$SHELL --login`, or an operator-supplied
-command), which is the built-in `default` template's behavior. Define custom templates as
-`session-template` resources:
+`spec.harness_integration` is a map with exactly one integration key whose value is the config block
+that integration validates, with no inner `name` field. Every effective template must select an
+integration or inherit a selection. The built-in `default` template explicitly selects `shell`,
+which runs a login shell (`$SHELL --login`) or an operator-supplied command. Define custom templates
+as `session-template` resources:
 
 ```yaml
 apiVersion: agentworks/v1
@@ -1155,9 +1155,9 @@ metadata:
   description: Live process monitor
 spec:
   harness_integration:
-    name: shell
-    command: htop
-    required_commands: [htop]
+    shell:
+      command: htop
+      required_commands: [htop]
 ```
 
 `agw resource explain harness-integration/shell` documents its config field by field. Two things
@@ -1167,8 +1167,8 @@ session's launch target (the agent, or the VM admin for admin sessions) before a
 so launching a session whose tool is not installed fails fast with a clear error instead of a
 cryptic downstream tmux failure.
 
-Those keys live only inside the `harness_integration` table; spelling any of them at the `spec` top
-level is a load error that points you at the nested shape.
+Those config keys live only inside the selected integration entry under `harness_integration`;
+spelling any of them at the `spec` top level is a load error that points you at the nested shape.
 
 The `claude-code` integration runs Claude Code as the session. Session creation and `--force-new`
 start a new Claude conversation; ordinary `session start` and `session restart` continue the same
@@ -1191,9 +1191,9 @@ metadata:
   description: Claude Code session
 spec:
   harness_integration:
-    name: claude-code
-    permission_mode: acceptEdits
-    model: opus
+    claude-code:
+      permission_mode: acceptEdits
+      model: opus
 ```
 
 The `codex` integration runs Codex the same way: `session create` and `--force-new` start a new
@@ -1226,11 +1226,11 @@ metadata:
   description: Codex session
 spec:
   harness_integration:
-    name: codex
-    sandbox: workspace-write
-    approval_policy: on-request
-    approvals_reviewer: auto_review
-    network: true
+    codex:
+      sandbox: workspace-write
+      approval_policy: on-request
+      approvals_reviewer: auto_review
+      network: true
 ```
 
 The integration-plus-config pair inherits as a unit. A child that restates the same integration uses

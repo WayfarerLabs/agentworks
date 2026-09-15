@@ -239,16 +239,16 @@ What the base and the markers buy you:
   reference semantics live: extraction reads it to build the dependency graph, validation fills the
   default from it, emitted JSON Schema carries it as `x-agw-ref`, and it is what later authorizes an
   op to read that secret through `ctx.secret(name)`.
-- **A capability that accepts no configuration still declares a model**, one with no fields beyond
-  its tag. "Accepts nothing" has to be something an author SAYS, not something they get by
-  forgetting.
+- **A capability that accepts no configuration still declares a model**, one with no config fields
+  (only its tag, on tagged surfaces). "Accepts nothing" has to be something an author SAYS, not
+  something they get by forgetting.
 
-Whether the model carries a `name` tag depends on the surface. `vm-platform`, `harness-integration`,
-and `git-credential-provider` config models are selected by a `name` key inside their tagged table.
-A secret backend's source config is tagged the same way, while its per-secret mapping is selected by
-its outer map key, carries no tag, and extends `AgwRootModel` rather than `AgwModel` because a
-mapping may be a bare string. Conformance checks both backend models against their separate
-contracts.
+Whether the model carries a `name` tag depends on the surface. `vm-platform` and
+`git-credential-provider` config models are selected by a `name` key inside their tagged table.
+Harness integration config is untagged: the outer activation map key selects the integration at each
+facet. A secret backend's source config is tagged, while its per-secret mapping is selected by its
+outer map key, carries no tag, and extends `AgwRootModel` rather than `AgwModel` because a mapping
+may be a bare string. Conformance checks both backend models against their separate contracts.
 
 Git credential providers use contract version 3. Each provider owns its entire config model,
 including any acquisition discriminator and every `SecretRef`, and implements `credential_scopes()`

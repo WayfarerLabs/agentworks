@@ -63,7 +63,7 @@ metadata:
   name: artifact-user
 spec:
   harness_integrations:
-    - name: shell
+    shell: {}
 ---
 apiVersion: agentworks/v1
 kind: session-template
@@ -71,7 +71,7 @@ metadata:
   name: artifact-session
 spec:
   harness_integration:
-    name: shell
+    shell: {}
 ```
 
 Select these templates through your normal VM, agent and session declarations or creation workflow.

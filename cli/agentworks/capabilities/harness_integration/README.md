@@ -29,11 +29,11 @@ configure native tooling before a session launches; the session facet chooses th
 The base setup methods reject activation of an unimplemented facet with an error naming the
 integration and facet. Implement only supported setup methods; an implemented method can succeed
 without changes for default-only or already-satisfied config. An inactive integration with no prior
-owned effects to retire is skipped and not marked applied. A config model, including a name-only
+owned effects to retire is skipped and not marked applied. A config model, including an empty
 schema, does not establish facet support. See
 [harness facets](../../../../docs/guides/harness-facets.md) for complete configuration examples.
 
-Contract version 6 supplies grouped artifact delivery. Core captures each owner's
+The harness contract supplies grouped artifact delivery. Core captures each owner's
 `artifacts.bundles` into an immutable `ArtifactGroup` with hints, rules, skills and agents maps.
 `SetupInvocation.artifacts` is an `ArtifactInputs` value: one local group and deferred groups keyed
 by their original owner. `SessionArtifactContext.inputs` uses the same boundary. Later selected
@@ -242,12 +242,11 @@ The capability ladder, harness-integration edition:
   target) and its per-session state blob. Constructed fresh per operation by the session node
   factories.
 - The **session consuming resource** is the `session-template` (it owns the config: in manifests,
-  `spec.harness_integration` is one tagged table whose `name` key selects the integration and whose
-  remaining keys are that integration's config, which is the only accepted shape; the
-  operator-facing view is in `docs/guides/resources.md`) and, at runtime, the session node that
-  holds the instance. VM, admin, agent, and workspace templates host ordered integration
-  activations; their owning lifecycles construct separate instances bound to the corresponding
-  facet.
+  `spec.harness_integration` is a map with exactly one integration key whose value holds that
+  integration's config, with no inner `name` field; the operator-facing view is in
+  `docs/guides/resources.md`) and, at runtime, the session node that holds the instance. VM, admin,
+  agent, and workspace templates host maps of integration activations; their owning lifecycles
+  construct separate instances bound to the corresponding facet.
 
 Layering is a hard rule: this package imports neither `sessions/` nor `orchestration/` (the `target`
 type is a local `Protocol` for exactly this reason), and `test_shell_integration.py` asserts it. An
@@ -268,20 +267,22 @@ missing any of them, naming the plugin:
 
 - `contract_version`: the capability contract version this implementation is written against.
   Registration requires an exact match with the version its kind's descriptor declares supported, so
-  a contract change is a hard cutover rather than a silent re-certification. The current contract is
-  version 4, and every shipped integration declares 4. This contract requires explicit facet
-  selection for config; it does not imply compatibility with earlier shapes.
+  a contract change is a hard cutover rather than a silent re-certification. The kind descriptor in
+  `kinds.py` defines the current version. This contract requires explicit facet selection and
+  untagged config models selected by activation map keys; it does not imply compatibility with
+  earlier shapes.
 - `config_model`: the session config when using the base selector (see below). An override of
-  `config_for` supplies its own facet answers; `None` accepts the tag alone.
+  `config_for` supplies its own facet answers; `None` accepts only empty config.
 - `name` / `description`: the registry row's identity.
 
 #### Setup Binding
 
 VM, admin, agent, and workspace templates explicitly select native setup integrations through
-`harness_integrations`, an ordered list of tagged capability blocks. Admin and agent select the same
-user facet. An omitted list inherits; an authored list replaces the whole inherited list, and `[]`
-selects none. Duplicate integration names are invalid. Each block is validated against its hosting
-facet, and its capability and secret references participate in the usual graph gates.
+`harness_integrations`, a map keyed by integration name with untagged facet config values. Admin and
+agent select the same user facet. An omitted or empty map inherits; an authored map preserves other
+inherited keys and merges config for the same key according to the owning facet's schema. Each entry
+is validated against its hosting facet, and its capability and secret references participate in the
+usual graph gates.
 
 Each block is an **integration activation**, with defaults or explicit configuration. It activates
 the integration's facet on the owning resource; it does not prove that setup completed. A facet is a
@@ -292,7 +293,7 @@ enablement and the VM power-state activation gate remain separate concepts.
 integration activation without session identity or conversation state. The instance's owner
 identifies its config and secret references. A removed activation binds with `config=None`, exposes
 `retiring=True`, and refuses config access instead of synthesizing new defaults. Active setup with
-`{}` still selects the integration's defaults or its name-only config.
+`{}` still selects the integration's defaults or its empty config.
 
 `vm_init`, `user_init`, and `workspace_init` receive their corresponding typed setup invocations.
 The base methods have no native effects or claims. Session construction retains its existing
@@ -347,12 +348,13 @@ rules and the [instance-state contract](../../db/README.md) for persistence and 
 
 #### Config: Facet Selection
 
-The integration declares its session `config_model`, an `AgwModel` carrying its own `name` as a
-`Literal` tag plus one field per accepted key, each with its type and an attribute docstring that IS
-its operator-facing description. `config_for(facet="session")` selects that model. The base returns
-`None` for vm, user, and workspace; overrides may offer models at those facets. No config means a
-closed name-only selection, not a support or enablement declaration. A missing facet selector is
-refused. Resource hosts choose the facet, and capability references show all four answers.
+The integration declares its session `config_model`, a untagged `AgwModel` with one field per
+accepted key, each with its type and an attribute docstring that IS its operator-facing description.
+The host map's key selects the integration. `config_for(facet="session")` selects that model. The
+base returns `None` for vm, user, and workspace; overrides may offer models at those facets. No
+config means a closed empty config, not a support or enablement declaration. A missing facet
+selector is refused. Resource hosts choose the facet, and capability references show all four
+answers.
 
 The core validates against the selected model (closed-world, so an unknown key is a hard error
 naming the valid fields) and extracts whatever references it marks. No integration code runs for

@@ -32,9 +32,9 @@ metadata:
   description: "Codex, strict posture: read-only sandbox, prompts for requests beyond it"
 spec:
   harness_integration:
-    name: codex
-    sandbox: read-only
-    approval_policy: on-request
+    codex:
+      sandbox: read-only
+      approval_policy: on-request
 ---
 apiVersion: agentworks/v1
 kind: session-template
@@ -43,11 +43,11 @@ metadata:
   description: "Codex, auto posture: writes the workspace with network access, prompts for requests beyond the sandbox"
 spec:
   harness_integration:
-    name: codex
-    sandbox: workspace-write
-    approval_policy: on-request
-    approvals_reviewer: auto_review # yes, this is snake case per the docs
-    network: true
+    codex:
+      sandbox: workspace-write
+      approval_policy: on-request
+      approvals_reviewer: auto_review # yes, this is snake case per the docs
+      network: true
 ---
 apiVersion: agentworks/v1
 kind: session-template
@@ -56,7 +56,7 @@ metadata:
   description: "Codex, yolo posture: full access, no approvals, web search on"
 spec:
   harness_integration:
-    name: codex
-    sandbox: danger-full-access
-    approval_policy: never
-    web_search: live
+    codex:
+      sandbox: danger-full-access
+      approval_policy: never
+      web_search: live

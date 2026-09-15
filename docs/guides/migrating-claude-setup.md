@@ -7,15 +7,15 @@ the native CLI is installed for the actual user.
 
 ```yaml
 harness_integrations:
-  - name: claude-code
+  claude-code:
     marketplaces: [example-org/team]
     plugins: [reviewer@team]
 ```
 
-An authored `harness_integrations` list replaces the complete inherited list. Include other
-integrations you intend to keep, along with the complete effective Claude marketplace/plugin values.
-Omit the list to inherit it, or write `[]` to enable none. Do not convert one old field into a
-partial replacement that drops the other field or another integration.
+The `harness_integrations` map preserves inherited integrations. Configuration under `claude-code`
+merges with the inherited user-facet config; marketplace and plugin lists append and deduplicate by
+default. Omit the map or write `{}` to inherit it. An empty `claude-code: {}` entry activates
+defaults when Claude is not already selected and preserves its configuration when inherited.
 
 ## Stored instance overlays
 
