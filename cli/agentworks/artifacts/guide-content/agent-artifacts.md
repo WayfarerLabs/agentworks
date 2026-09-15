@@ -12,7 +12,7 @@ activation, environment, and prerequisites, see `agw guide show concept-harness-
 
 Start with `agw resource explain artifact-bundle` and `agw resource sample artifact-bundle`. Use the
 owning template's `resource explain` output for `artifacts.bundles` and integration activation.
-`agw artifacts show --help` lists read-only inspection selectors. Inspection includes the chosen
+`agw artifact show --help` lists read-only inspection selectors. Inspection includes the chosen
 owner and its actual ancestors, including artifacts already handled upstream, without showing bodies
 or fetching content. Recorded application is evidence of a past operation, not current model
 context.

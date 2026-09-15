@@ -6,7 +6,7 @@ resource selects bundles with `artifacts.bundles`; its core setup captures their
 explicitly activated harness integrations handle or defer them.
 
 Use `agw resource explain artifact-bundle` for the declaration schema and
-`agw resource sample artifact-bundle` for an editable sample. Use `agw artifacts show --help` for
+`agw resource sample artifact-bundle` for an editable sample. Use `agw artifact show --help` for
 inspection selectors. [The worked example](examples/scoped-artifacts.yaml) demonstrates declaring
 sources separately from selecting and handling them.
 
@@ -81,7 +81,7 @@ receive the handled hint again. If the user facet were inactive, the hint would 
 session and be published beneath that user's private session artifact directory. Inactive workspace
 facets likewise pass their applicable inputs to session.
 
-Use `agw artifacts show --agent <agent-name> --integration shell` to inspect the captured input and
+Use `agw artifact show --agent <agent-name> --integration shell` to inspect the captured input and
 recorded handling. The templates themselves do not create instances. See `agw vm create --help`,
 `agw agent create --help` and `agw session create --help` for your normal instance workflow.
 
@@ -132,7 +132,7 @@ body must be nonempty. Frontmatter must be a mapping, use unique string keys, an
 `---` line. A leading `---` reserves that block for metadata; use `***` for a horizontal rule at the
 start of plain Markdown.
 
-`agw artifacts show` exposes captured descriptions in text and machine output without fetching
+`agw artifact show` exposes captured descriptions in text and machine output without fetching
 sources or displaying instruction bodies. Descriptions describe artifacts for inspection; they do
 not control when instructions load. Integrations render the body without its source frontmatter.
 
@@ -286,11 +286,11 @@ and MCP artifacts are later work.
 ## Inspect before changing state
 
 ```sh
-agw artifacts show --vm dev
-agw artifacts show --vm dev --admin
-agw artifacts show --agent developer
-agw artifacts show --workspace service
-agw artifacts show --session review --integration codex
+agw artifact show --vm dev
+agw artifact show --vm dev --admin
+agw artifact show --agent developer
+agw artifact show --workspace service
+agw artifact show --session review --integration codex
 ```
 
 Inspection includes applicable ancestor content, even artifacts already handled upstream. It shows
@@ -325,5 +325,5 @@ match. Changed managed files are retained and diagnosed, with evidence for retry
 
 `session.py` prepares the launch context, stages a new private run before old-runtime teardown, then
 retires obsolete owned files after teardown. No artifact bookkeeping changes VM deletion.
-`agw artifacts show` projects declarations, captures and recorded delivery without claiming to
+`agw artifact show` projects declarations, captures and recorded delivery without claiming to
 observe the target filesystem or prove that a model obeyed the supplied content.

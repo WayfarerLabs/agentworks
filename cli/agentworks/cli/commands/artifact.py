@@ -9,11 +9,11 @@ import typer
 from agentworks.cli._app import app
 from agentworks.machine_output import OutputFormat
 
-artifacts_app = typer.Typer(name="artifacts", help="Inspect scoped agent artifact delivery.", no_args_is_help=True)
-app.add_typer(artifacts_app)
+artifact_app = typer.Typer(name="artifact", help="Inspect scoped agent artifact delivery.", no_args_is_help=True)
+app.add_typer(artifact_app)
 
 
-@artifacts_app.command("show")
+@artifact_app.command("show")
 def show(
     vm: Annotated[str | None, typer.Option("--vm", help="Inspect this VM or confirm the selected owner's VM.")] = None,
     admin: Annotated[
@@ -62,6 +62,6 @@ def show(
         from agentworks.cli._machine_output import write_json_stdout
         from agentworks.machine_output import MachineOutputCommand
 
-        write_json_stdout(MachineOutputCommand.ARTIFACTS_SHOW, inspection_data(result))
+        write_json_stdout(MachineOutputCommand.ARTIFACT_SHOW, inspection_data(result))
     else:
         render_artifacts(result)

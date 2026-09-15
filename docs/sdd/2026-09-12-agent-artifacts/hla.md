@@ -10,7 +10,7 @@ documented native mechanisms from the behavior still requiring native validation
 The design adds ordinary `artifact-bundle` resources and an `artifacts` block to owning resources.
 Core captures and normalizes inputs once for an owning operation. Harness integrations receive those
 inputs after env preparation and apply or defer them through the existing facet graph. Integration
-results and file ownership use the existing instance-state facility. `agw artifacts show` explains
+results and file ownership use the existing instance-state facility. `agw artifact show` explains
 declarations and recorded delivery through the same graph without applying anything.
 
 The approved first delivery includes workstation and Git sources, hints, rules, standard Agent
@@ -429,18 +429,17 @@ conflict checks for its generated native options.
 
 ## Inspection and worked behavior
 
-Add `agw artifacts show` beside `agw env show`, with thin CLI parsing and a typed projection
-service. Support VM, actual admin/agent user, workspace and session selection. Reuse familiar
-selectors; an explicit admin selector avoids treating a workspace as though it had an admin
-ancestor.
+Add `agw artifact show` beside `agw env show`, with thin CLI parsing and a typed projection service.
+Support VM, actual admin/agent user, workspace and session selection. Reuse familiar selectors; an
+explicit admin selector avoids treating a workspace as though it had an admin ancestor.
 
 ```sh
-agw artifacts show --vm dev
-agw artifacts show --vm dev --admin
-agw artifacts show --agent developer
-agw artifacts show --workspace service
-agw artifacts show --session review
-agw artifacts show --session review --integration codex
+agw artifact show --vm dev
+agw artifact show --vm dev --admin
+agw artifact show --agent developer
+agw artifact show --workspace service
+agw artifact show --session review
+agw artifact show --session review --integration codex
 ```
 
 Multiple selectors must identify the same actual lineage. Without an integration filter, show the

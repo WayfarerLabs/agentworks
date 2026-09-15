@@ -192,10 +192,10 @@ def test_cli_json_reads_existing_state_without_publication_or_disclosing_bodies(
 
     monkeypatch.setattr("agentworks.bootstrap.load_request_registry", registry)
     before = tuple(db.instance_state.get_applied_slices("agent", "agent"))
-    result = CliRunner().invoke(app, ["artifacts", "show", "--agent", "agent", "--output", "json"])
+    result = CliRunner().invoke(app, ["artifact", "show", "--agent", "agent", "--output", "json"])
     assert result.exit_code == 0, result.output
     data = json.loads(result.stdout)
-    assert data["command"] == "artifacts.show"
+    assert data["command"] == "artifact.show"
     assert [owner["scope"] for owner in data["data"]["owners"]] == ["vm", "agent"]
     assert tuple(fixture.captures["agent"].inputs.items())[0].content.text not in result.stdout
     assert tuple(db.instance_state.get_applied_slices("agent", "agent")) == before
@@ -216,7 +216,7 @@ def test_cli_refuses_stale_state_without_migration(tmp_path, monkeypatch) -> Non
     monkeypatch.setattr("agentworks.db.DB_PATH", path)
     monkeypatch.setattr("agentworks.config.load_config", lambda **kwargs: object())
     monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda config, **kwargs: Registry.empty())
-    result = CliRunner().invoke(app, ["artifacts", "show", "--vm", "old"])
+    result = CliRunner().invoke(app, ["artifact", "show", "--vm", "old"])
     assert result.exit_code != 0
     assert path.read_bytes() == before
     with sqlite3.connect(path) as connection:

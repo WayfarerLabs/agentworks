@@ -10,9 +10,9 @@ plan. Remaining live acceptance and closeout are listed below; merge did not com
 
 The operator approved an authoring amendment on 2026-09-14: optional description-only rule
 frontmatter, strict rule/persona metadata validation, inspection descriptions and artifacts-guide
-coverage. The follow-up ships on `fix/artifact-frontmatter` in
-[PR 803](https://github.com/WayfarerLabs/agentworks/pull/803). Previously completed checkboxes
-remain historical records.
+coverage. [PR 803](https://github.com/WayfarerLabs/agentworks/pull/803) merged on 2026-09-14 at
+`adc2d3e06cb54efd4271a03d70d9dfc9e61f8097` after one authorized feedback/fix round; all review lanes
+and CI were clean. Previously completed checkboxes remain historical records.
 
 Keep predecessor closeout separate. Its implementation is merged, but seven acceptance/cleanup
 checkboxes remain open in the
@@ -29,6 +29,20 @@ complete follow-up PR governed by this SDD, carrying `sdd:agent-artifacts` and `
 Complete private project, complexity and correctness reviews and relevant gates before marking it
 ready without `review-requested`. Do not merge automatically. On 2026-09-14 the operator authorized
 up to two published feedback/fix iterations for this follow-up.
+
+## Singular command amendment, 2026-09-14
+
+The operator requested `agw artifact show` in place of `agw artifacts show` to match the CLI's
+singular command groups. This small follow-up ships on `fix/artifact-command`, including command
+registration, completion selectors, the JSON command identifier and current guidance. Historical
+completed milestones below retain the spelling they shipped with. Artifact config maps, package
+names and data semantics remain unchanged. The operator authorized up to two feedback/fix rounds for
+this follow-up.
+
+- [x] Rename the command and keep completion, machine output, tests and current documentation
+      aligned.
+- [x] Complete private project and complexity review and validate the renamed CLI.
+- [ ] Publish a ready PR and monitor its authorized feedback/fix rounds.
 
 ## Authoring amendment, 2026-09-14
 
@@ -750,9 +764,9 @@ answered by this bounded round, authorized by the operator on 2026-09-14.
       capture versions for native inventory and standard skills.
 - [x] Return the validated version with decoded inputs, removing the raw-JSON recovery from state.
 - [x] Clarify why native inventory keeps its existing key policy.
-- [ ] Repeat private project, complexity and correctness reviews and required checks; publish the
-      completed head, return ready and monitor the next feedback window. One further fix round
-      remains.
+- [x] Repeat private project, complexity and correctness reviews and required checks; publish the
+      completed head, return ready and monitor feedback through merge. The second authorized round
+      was unnecessary.
 
 Round 1 validation at `fdf50882`: all three private lanes are clean. Project and correctness traced
 all decoder callers, both supported capture versions and state preservation. Muntz additionally ran
@@ -762,3 +776,17 @@ suite (9,577 passed, seven skipped), Ruff/format, mypy (847 files), file lint, l
 the isolated-HOME real CLI drive; all passed. No fixture HOME remains. The two implementation
 simplifications and native-inventory clarification complete this round's feedback batch; publication
 and the next window follow on the same PR.
+
+## Singular command validation, 2026-09-14
+
+Private project and Muntz reviews of `bdc2c350` found no findings. Both read the complete diff and
+searched current command, completion, JSON and documentation references; neither claimed runtime
+testing. The lead drove real CLI root/group/show help and the artifact guide in an isolated HOME:
+the singular command succeeds, the former plural command exits with usage error, and the guide
+teaches the singular spelling. Focused inspection, machine-output and completion tests passed (144
+passed, one skipped). No operator state or remote backend was touched. The two remaining saga-owned
+command references belong to the saga lead and are called out in the handoff.
+
+Full non-integration suite: 9,593 passed, seven skipped. Ruff lint/format, mypy over 848 files,
+Typer isolation, locked-SDD and Rulesync checks passed. Website validation passed 160 Python tests,
+103 Node tests and deterministic double builds for both site bases.
