@@ -86,8 +86,8 @@ Integration activation maps merge by key:
   `harness_integrations: {codex: null}` leaves other integrations active. A later layer can
   reactivate Codex with `{}` or explicit config; the disabled config is not restored.
 
-For example, this child sets Claude's plugin list to `reviewer@team`, replacing any inherited plugin
-list. It retains the parent's Codex activation and Claude settings and marketplaces:
+For example, this child sets Claude's marketplace and plugin lists, replacing any inherited values
+for those fields. It retains the parent's Codex activation and Claude settings:
 
 ```yaml
 apiVersion: agentworks/v1
@@ -98,6 +98,7 @@ spec:
   inherits: [dual-harness-user]
   harness_integrations:
     claude-code:
+      marketplaces: [example-org/team]
       plugins: [reviewer@team]
 ```
 
@@ -123,6 +124,7 @@ spec:
   inherits: [without-claude]
   harness_integrations:
     claude-code:
+      marketplaces: [example-org/team]
       plugins: [reviewer@team]
 ```
 

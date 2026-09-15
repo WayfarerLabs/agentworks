@@ -440,18 +440,26 @@ session guidance, and removed the obsolete tagged-facet cache. All material find
 the final accepted cleanup is recorded at `4405e9e7`. PR feedback and independent live acceptance
 remain separate from this completed implementation and private validation.
 
-
 ### PR 816 feedback correction
 
 The operator authorized a focused correction after the later Muntz review identified incorrect
 native-list merge guidance. The existing native `plugins` and `marketplaces` replacement policies
-remain unchanged. The guides now describe them explicitly and show a disabling template followed
-by a reactivating child to reset a whole integration config while preserving its siblings.
+remain unchanged. The guides now describe them explicitly and show a disabling template followed by
+a reactivating child to reset a whole integration config while preserving its siblings.
 
 - [x] Correct the native-list guidance and whole-config reset example.
 - [x] Remove the unused non-null map projection branch, align its fixture with the supported host
       shape, and address the ordering text, shadowed variable, and JSON null boundary comment.
-- [ ] Validate and review the focused correction, then restore the ready handoff.
+- [x] Validate and privately review the focused correction.
+
+The correction passed 9,657 unit tests (7 skipped), Ruff, strict mypy, file lint, Rulesync parity,
+locked-SDD and Typer-isolation checks, 160 Python and 103 Node website tests, and deterministic
+double builds for both site bases. An isolated home running the real CLI verified native plugin list
+replacement, empty-list clearing, inherited marketplaces and sibling activations, and fresh
+configuration after disable/reactivate for both Claude and Codex. No live VM provisioning was
+performed. Project, correctness, and complexity reviews found no material issues; their final
+example correction explicitly supplies the marketplace discarded by a whole-config reset. The ready
+handoff and independent PR feedback remain delivery work recorded on PR 816.
 
 The operator agreed to a separate follow-up for a consistent omitted-versus-null policy across
 inheritance: omission inherits; explicit null clears the inherited value, with defaults or required
