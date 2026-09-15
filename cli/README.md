@@ -518,7 +518,7 @@ metadata:
   name: default
 spec:
   harness_integrations:
-    - name: claude-code
+    claude-code:
       marketplaces: ["https://github.com/WayfarerLabs/nerftools#4.1.0"]
       plugins: [nerftools-default@nerftools]
 ```

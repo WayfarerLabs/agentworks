@@ -21,7 +21,7 @@ meaningful over a blob more than one template wrote.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, Literal, cast
+from typing import TYPE_CHECKING, ClassVar, cast
 
 import pytest
 
@@ -30,7 +30,7 @@ from agentworks.plugins import Plugin, capability_adapters, seated_plugin
 from agentworks.resources import Origin, Registry
 from agentworks.resources.inheritance import LayerSource, LayerSourceKind
 from agentworks.schema import AgwModel, CapabilityBlock, RefOwner
-from agentworks.sessions.template import SessionTemplate, _capability_provenance
+from agentworks.sessions.template import SessionTemplate, effective_references
 from agentworks.source_location import SourceLocation
 from agentworks.value_provenance import longest_prefix_value
 from tests.conftest import registry_with_shell
@@ -51,7 +51,6 @@ class _NeedyConfig(AgwModel):
     """A config whose ``command`` is required and whose ``timeout`` is
     typed, so a lineage can complete the first and get the second wrong."""
 
-    name: Literal["needy"]
     command: str
     timeout: int = 30
 
@@ -68,7 +67,6 @@ class _NestedOptions(AgwModel):
 
 
 class _NestedConfig(AgwModel):
-    name: Literal["nested"]
     options: _NestedOptions
 
 
@@ -112,16 +110,20 @@ def _registry(*templates: SessionTemplate) -> Registry:
 def test_selector_provenance_uses_the_root_owner_as_a_fallback() -> None:
     root = LayerSource(LayerSourceKind.TEMPLATE, "session-template", "base")
 
-    projected = _capability_provenance({(): (root,)})
+    from agentworks.sessions.templates import ResolvedSessionTemplate
 
-    assert projected[("name",)] == RefOwner(kind="session-template", name="base")
+    references = effective_references(
+        ResolvedSessionTemplate(name="child", harness_integration="shell"), ("session-template", "child"), {(): (root,)}
+    )
+
+    assert references[0].declared_by == ("session-template", "base")
 
 
 def test_a_child_completed_by_its_parent_validates(seated: None) -> None:
     """The case the interim guard existed to keep impossible: the child's
     own blob is missing a required field and is still valid, because the
     chain is what has to be complete."""
-    parent = SessionTemplate(name="base", harness_integration=CapabilityBlock.of("needy", **{"command": "top"}))
+    parent = SessionTemplate(name="base", harness_integration=CapabilityBlock.of("needy", **{**{"command": "top"}}))
     child = SessionTemplate(name="kid", inherits=["base"])
     _registry(parent, child)  # no raise
 
@@ -139,14 +141,16 @@ def test_a_parent_that_cannot_stand_alone_is_itself_a_load_error(seated: None) -
     an abstract base that only children complete. That is the honest rule,
     because any template can be named directly at ``session create``, and
     it is what moving the check from first use to load means."""
-    parent = SessionTemplate(name="base", harness_integration=CapabilityBlock.of("needy", **{"timeout": 5}))
+    parent = SessionTemplate(name="base", harness_integration=CapabilityBlock.of("needy", **{**{"timeout": 5}}))
     child = SessionTemplate(
         name="kid",
         inherits=["base"],
-        harness_integration=CapabilityBlock.model_validate({"name": "needy", "command": "top"}),
+        harness_integration=CapabilityBlock.of("needy", **{"command": "top"}),
     )
-    with pytest.raises(ConfigError, match="session-template/base.command: is required"):
+    with pytest.raises(ConfigError) as caught:
         _registry(parent, child)
+    assert caught.value.entity_kind == "session-template"
+    assert caught.value.entity_name == "base"
 
 
 def test_an_error_on_an_inherited_key_names_the_template_that_declared_it(seated: None) -> None:
@@ -163,13 +167,13 @@ def test_an_error_on_an_inherited_key_names_the_template_that_declared_it(seated
     child = SessionTemplate(name="kid", inherits=["base"])
     parent = SessionTemplate(
         name="base",
-        harness_integration=CapabilityBlock.of("needy", **{"command": "top", "timeout": "soon"}),
+        harness_integration=CapabilityBlock.of("needy", **{**{"command": "top", "timeout": "soon"}}),
     )
     with pytest.raises(ConfigError) as exc:
         _registry(child, parent)
     message = str(exc.value)
-    assert "session-template/kid.timeout: must be an integer" in message
-    assert "(inherited from session-template/base)" in message
+    assert "session-template/kid.harness_integration.timeout" in message
+    assert "session-template/base.harness_integration" in message
 
 
 def test_a_key_the_child_overrode_is_not_attributed_to_the_parent(seated: None) -> None:
@@ -184,17 +188,17 @@ def test_a_key_the_child_overrode_is_not_attributed_to_the_parent(seated: None) 
     child = SessionTemplate(
         name="kid",
         inherits=["base"],
-        harness_integration=CapabilityBlock.of("needy", **{"timeout": "soon"}),
+        harness_integration=CapabilityBlock.of("needy", **{**{"timeout": "soon"}}),
     )
     parent = SessionTemplate(
         name="base",
-        harness_integration=CapabilityBlock.of("needy", **{"command": "top", "timeout": 5}),
+        harness_integration=CapabilityBlock.of("needy", **{**{"command": "top", "timeout": 5}}),
     )
     with pytest.raises(ConfigError) as exc:
         _registry(child, parent)
     message = str(exc.value)
-    assert "session-template/kid.timeout: must be an integer" in message
-    assert "inherited from" not in message
+    assert "session-template/kid.harness_integration.timeout" in message
+    assert "session-template/base" not in message
 
 
 def test_a_nested_inherited_error_uses_the_parent_owner_and_child_location(
@@ -227,16 +231,12 @@ def test_a_nested_inherited_error_uses_the_parent_owner_and_child_location(
     child = SessionTemplate(
         name="kid",
         inherits=["base"],
-        harness_integration=CapabilityBlock.of(
-            "nested",
-            **{"options": {"labels": ["child"]}},
-        ),
+        harness_integration=CapabilityBlock.of("nested", **{**{"options": {"labels": ["child"]}}}),
     )
     parent = SessionTemplate(
         name="base",
         harness_integration=CapabilityBlock.of(
-            "nested",
-            **{"options": {"retry_count": "soon", "labels": ["base"]}},
+            "nested", **{**{"options": {"retry_count": "soon", "labels": ["base"]}}}
         ),
     )
     with pytest.raises(ConfigError) as exc:
@@ -249,5 +249,5 @@ def test_a_nested_inherited_error_uses_the_parent_owner_and_child_location(
     assert captured["location"] == SourceLocation(file=Path("t.yaml"), line=1)
     provenance = cast("Mapping[ProvenancePath, RefOwner]", captured["provenance"])
     assert longest_prefix_value(provenance, ("options", "retry_count")) == RefOwner(
-        kind="session-template", name="base"
+        kind="session-template", name="base", label="session-template/base.harness_integration"
     )

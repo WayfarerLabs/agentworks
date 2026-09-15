@@ -353,11 +353,11 @@ spec:
     required_commands: [htop]
 ```
 
-- `spec.harness_integration` is one table: its `name` key names a `harness-integration` capability
-  row, and the remaining keys are the config block that integration owns and validates (unknown keys
-  are errors). Every effective session template must select an integration explicitly or inherit a
-  selection. The built-in `default` template explicitly selects `shell`; omission alone is not a
-  shell fallback.
+- `spec.harness_integration` is one tagged table: its `name` key names a `harness-integration`
+  capability row, and the remaining keys are the config block that integration owns and validates
+  (unknown keys are errors). Every effective session template must select an integration explicitly
+  or inherit a selection. The built-in `default` template explicitly selects `shell`; omission alone
+  is not a shell fallback.
 - `agw resource explain harness-integration` lists the integrations this build has, and
   `agw resource explain harness-integration/<name>` documents one integration's config field by
   field. That is the reference; what follows is what an operator wants to know beyond the fields

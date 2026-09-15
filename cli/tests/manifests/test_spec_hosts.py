@@ -29,8 +29,8 @@ from ._specs import WHERE, decode, decode_issues, rejection
 _HOSTS = [
     ("vm-site", "lab", "platform", "lima"),
     ("git-credential", "gh", "provider", "github"),
-    ("session-template", "htop", "harness_integration", "shell"),
     ("secret-source", "ci-env", "backend", "env-var"),
+    ("session-template", "work", "harness_integration", "shell"),
 ]
 
 
@@ -73,7 +73,7 @@ def test_a_session_template_round_trips() -> None:
         name="htop",
         declared_at=WHERE,
         inherits=["base"],
-        harness_integration=CapabilityBlock.of("shell", command="htop"),
+        harness_integration=CapabilityBlock.of("shell", **{"command": "htop"}),
     )
 
 

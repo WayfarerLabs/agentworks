@@ -26,7 +26,7 @@ from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.lifecycle import prepare_agent_setup, prepare_vm_setup, prepare_workspace_setup
 from agentworks.harness_setup.state import read_native_setup
 from agentworks.resources.registry import Registry
-from agentworks.schema import CapabilityBlock
+from agentworks.schema import CapabilityConfig
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.templates import ResolvedVMTemplate
 from agentworks.workspaces.realize import realize_workspace
@@ -269,10 +269,12 @@ def test_owned_effect_removal_uses_native_state_and_blocks_pending_cleanup(owner
     owner.db.insert_agent("agent", "vm", "worker", template="configured")
     workspace = owner.db.insert_workspace("project", str(owner.target.root / "project"), "vm", "project")
     template = ResolvedAgentTemplate(
-        "configured", artifacts=owner.artifacts, harness_integrations=[CapabilityBlock.of("shell")]
+        "configured", artifacts=owner.artifacts, harness_integrations={"shell": CapabilityConfig.model_validate({})}
     )
     owner.config.agent_templates["configured"] = AgentTemplate(
-        name="configured", artifacts=owner.artifacts, harness_integrations=[CapabilityBlock.of("shell")]
+        name="configured",
+        artifacts=owner.artifacts,
+        harness_integrations={"shell": CapabilityConfig.model_validate({})},
     )
     inputs = prepare_agent_setup(owner.db, owner.registry, vm=owner.vm, name="agent", template=template)
     assert inputs is not None
@@ -285,7 +287,7 @@ def test_owned_effect_removal_uses_native_state_and_blocks_pending_cleanup(owner
     updated = replace(
         template,
         artifacts=ArtifactsConfig(),
-        harness_integrations=[] if remove_activation else template.harness_integrations,
+        harness_integrations={} if remove_activation else template.harness_integrations,
     )
     owner.config.agent_templates["configured"] = AgentTemplate(
         name="configured", artifacts=updated.artifacts, harness_integrations=updated.harness_integrations
@@ -330,7 +332,7 @@ def test_repeated_owner_setup_does_not_rewrite_unchanged_native_files(owner, mon
 
     owner.db.insert_agent("agent", "vm", "worker")
     template = ResolvedAgentTemplate(
-        "default", artifacts=owner.artifacts, harness_integrations=[CapabilityBlock.of("shell")]
+        "default", artifacts=owner.artifacts, harness_integrations={"shell": CapabilityConfig.model_validate({})}
     )
     first = prepare_agent_setup(owner.db, owner.registry, vm=owner.vm, name="agent", template=template)
     assert first is not None

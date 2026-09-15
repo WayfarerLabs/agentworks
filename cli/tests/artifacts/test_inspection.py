@@ -228,7 +228,7 @@ def test_session_inspection_uses_runtime_diamond_order(db: Database) -> None:
     from agentworks.harness_setup.inputs import SetupInputs
     from agentworks.harness_setup.model import NativeSetupState, SetupRecord
     from agentworks.harness_setup.state import write_native_setup
-    from agentworks.schema import CapabilityBlock
+    from agentworks.schema import CapabilityConfig
     from agentworks.secrets.orchestration import SecretTarget
     from tests.artifacts.test_routing import graph
 
@@ -238,16 +238,16 @@ def test_session_inspection_uses_runtime_diamond_order(db: Database) -> None:
     fixture.save("agent", inherited=group(vm.hints["vm-0"]), routes={"vm-0": "session", "agent-0": "session"})
     fixture.save("workspace", inherited=group(vm.hints["vm-1"]), routes={"vm-1": "session", "workspace-0": "session"})
     db.insert_session("review", "workspace", "default", SessionMode.AGENT, agent_name="agent", socket_path="/socket")
-    block = CapabilityBlock.of("shell")
+    block = CapabilityConfig()
     owner = SetupInputs(
-        "session", "review", "session", (block,), SecretTarget(vm={}, agent={}, workspace={}, session={})
+        "session", "review", "session", {"shell": block}, SecretTarget(vm={}, agent={}, workspace={}, session={})
     )
     prepared = fixture.route().inputs
     record = SetupRecord(
         component="session",
         integration="shell",
         destination_id="d" * 64,
-        declaration=owner.declaration(block),
+        declaration=owner.declaration("shell", block),
         complete=True,
         artifact_inputs=tuple(item.identity for item in prepared.items()),
     )

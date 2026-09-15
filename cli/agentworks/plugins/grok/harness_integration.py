@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import shlex
 import uuid
-from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
+from typing import TYPE_CHECKING, Annotated, ClassVar
 
 from pydantic import Field
 
@@ -64,8 +64,6 @@ if TYPE_CHECKING:
 class GrokBuildSetupConfig(AgwModel):
     """Activate an artifact-only native facet."""
 
-    name: Literal["grok-build"]
-
 
 class GrokBuildConfig(AgwModel):
     """What a session template tells the ``grok-build`` integration.
@@ -78,9 +76,6 @@ class GrokBuildConfig(AgwModel):
     documentation. No 1.0.10 binary was installed for this recheck, so runtime
     observations below remain explicitly pinned to 1.0.4.
     """
-
-    name: Literal["grok-build"]
-    """The harness integration this config is for."""
 
     permission_mode: str | None = None
     """Forwarded as ``--permission-mode``. A child template's declared
@@ -132,7 +127,7 @@ _SESSIONS_DIR = "${GROK_HOME:-$HOME/.grok}/sessions"
 class GrokBuildIntegration(HarnessIntegration):
     """Run Grok Build, resuming its persisted session when one exists."""
 
-    contract_version: ClassVar[int] = 6
+    contract_version: ClassVar[int] = 7
     name: ClassVar[str] = "grok-build"
     description: ClassVar[str] = "Run Grok Build, resuming its session when one exists"
     config_model: ClassVar[type[GrokBuildConfig]] = GrokBuildConfig

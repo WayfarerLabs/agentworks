@@ -17,7 +17,7 @@ from agentworks.errors import StateError
 if TYPE_CHECKING:
     from agentworks.db import Database, DesiredOverlayRecord
     from agentworks.db.instance_state import JsonObject, JsonValue
-    from agentworks.schema import CapabilityBlock
+    from agentworks.schema import CapabilityConfig
 
 LEGACY_CLAUDE_FIELDS = frozenset({"claude_marketplaces", "claude_plugins"})
 
@@ -40,7 +40,7 @@ def legacy_component(record: DesiredOverlayRecord) -> JsonObject | None:
     return raw if LEGACY_CLAUDE_FIELDS.intersection(raw) else None
 
 
-def translate_component(raw: JsonObject, base: list[CapabilityBlock] | None, *, agent: bool) -> JsonObject:
+def translate_component(raw: JsonObject, base: dict[str, CapabilityConfig] | None, *, agent: bool) -> JsonObject:
     """Validate legacy values, then combine them with the complete resolved base.
 
     With no context, return only the stripped component so the normal codec can
@@ -59,20 +59,20 @@ def translate_component(raw: JsonObject, base: list[CapabilityBlock] | None, *, 
     result = deepcopy({key: value for key, value in raw.items() if key not in LEGACY_CLAUDE_FIELDS})
     if base is None:
         return result
-    activations = [block.model_dump(mode="json") for block in base]
-    claude = next((item for item in activations if item["name"] == "claude-code"), None)
+    activations = {name: config.model_dump(mode="json") for name, config in base.items()}
+    claude = activations.get("claude-code")
     if claude is None and any(legacy.values()):
-        claude = {"name": "claude-code"}
-        activations.append(claude)
+        claude = {}
+        activations["claude-code"] = claude
     if claude is not None:
         for field, entries in legacy.items():
             claude[field] = list(dict.fromkeys([*claude.get(field, []), *entries]))
     if activations:
-        result["harness_integrations"] = cast("list[JsonValue]", activations)
+        result["harness_integrations"] = cast("dict[str, JsonValue]", activations)
     return result
 
 
-def translated_record(record: DesiredOverlayRecord, base: list[CapabilityBlock] | None) -> DesiredOverlayRecord:
+def translated_record(record: DesiredOverlayRecord, base: dict[str, CapabilityConfig] | None) -> DesiredOverlayRecord:
     """Copy a recognized envelope while retaining its unrelated component data."""
     raw = legacy_component(record)
     if raw is None:

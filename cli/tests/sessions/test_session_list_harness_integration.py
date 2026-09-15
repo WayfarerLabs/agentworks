@@ -94,7 +94,7 @@ def test_listing_uses_the_live_session_overlay_harness_integration(
     config = make_config(manifests=[CLAUDE_TEMPLATE])
     _seed_vm(db, "box", "ws-box")
     _seed_session(db, "s1", "ws-box", "claude")
-    overlay = parse_instance_spec("session", '{"harness_integration":{"name":"shell"}}')
+    overlay = parse_instance_spec("session", '{"harness_integration": {"name": "shell"}}')
     db.instance_state.put_desired_overlay("session", "s1", overlay.payload)
 
     listing = session_manager.session_listing(

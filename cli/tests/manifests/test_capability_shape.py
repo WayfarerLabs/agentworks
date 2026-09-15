@@ -1,10 +1,4 @@
-"""The tagged capability-config shape: the ONE way to name a capability.
-
-Every hosting surface (vm-site's platform, git-credential's provider,
-session-template's harness_integration, and secret-source's backend) takes
-the capability as one tagged table whose ``name`` key selects it and whose
-remaining keys are its config.
-"""
+"""Capability host shapes reject retired selectors and retain their ownership boundaries."""
 
 from __future__ import annotations
 

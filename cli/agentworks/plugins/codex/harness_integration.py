@@ -153,21 +153,13 @@ if TYPE_CHECKING:
 class CodexUserConfig(NativeUserConfig):
     """Native Codex setup for one actual user."""
 
-    name: Literal["codex"]
-    """The harness integration selected for this user's facet."""
-
 
 class CodexWorkspaceConfig(NativeWorkspaceConfig):
     """Native Codex project settings."""
 
-    name: Literal["codex"]
-    """The harness integration selected for this workspace's facet."""
-
 
 class CodexSetupConfig(AgwModel):
     """Activate an artifact-only native facet."""
-
-    name: Literal["codex"]
 
 
 class CodexConfig(AgwModel):
@@ -181,9 +173,6 @@ class CodexConfig(AgwModel):
     ``developer_instructions`` config and the positional ``--`` boundary were
     rechecked with Codex CLI 0.149.1.
     """
-
-    name: Literal["codex"]
-    """The harness integration this config is for."""
 
     model: str | None = None
     """Forwarded as ``-m``."""
@@ -413,7 +402,7 @@ class _Layer2(NamedTuple):
 class CodexIntegration(HarnessIntegration):
     """Runs Codex, resuming or launching fresh per on-disk state."""
 
-    contract_version: ClassVar[int] = 6
+    contract_version: ClassVar[int] = 7
     name: ClassVar[str] = "codex"
     description: ClassVar[str] = "Run Codex, resuming its session when one exists"
     config_model: ClassVar[type[CodexConfig]] = CodexConfig

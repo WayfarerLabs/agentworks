@@ -63,7 +63,7 @@ metadata:
   name: artifact-user
 spec:
   harness_integrations:
-    - name: shell
+    shell: {}
 ---
 apiVersion: agentworks/v1
 kind: session-template

@@ -135,7 +135,7 @@ def test_filter_matches_the_desired_instance_overlay(
     )
     _seed_workspace(db, vm="vm1", workspace="ws1")
     _seed_session(db, name="overlaid", workspace="ws1", template="claude")
-    overlay = parse_instance_spec("session", '{"harness_integration":{"name":"shell"}}')
+    overlay = parse_instance_spec("session", '{"harness_integration": {"name": "shell"}}')
     db.instance_state.put_desired_overlay("session", "overlaid", overlay.payload)
 
     shell = session_manager.filter_sessions(db, config=config, harness_integration_name="shell")

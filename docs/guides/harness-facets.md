@@ -32,14 +32,14 @@ Codex capabilities with this config fragment:
 system = ["claude", "codex"]
 ```
 
-VM, admin, agent, and workspace templates accept an ordered `harness_integrations` list. Every entry
-is an **integration activation**: a `name` tag followed by any explicit facet configuration.
-Name-only entries activate a supported facet with defaults. Multiple supported integrations can
-coexist, each with its own config. Merely enabling the system plugin does not run setup anywhere.
-Activating an unimplemented facet fails during owning setup with an error identifying the
-integration and facet. With no prior owned effects to retire, leaving it inactive skips invocation
-and creates no successful setup record. An implemented facet can succeed without changes when its
-defaults request no work or its desired state already exists.
+VM, admin, agent, and workspace templates accept a `harness_integrations` map keyed by integration
+name. Every entry is an **integration activation**: its value is the facet configuration, with no
+inner `name` field. An empty entry such as `codex: {}` activates a supported facet with defaults.
+Multiple supported integrations can coexist, each with its own config. Merely enabling the system
+plugin does not run setup anywhere. Activating an unimplemented facet fails during owning setup with
+an error identifying the integration and facet. With no prior owned effects to retire, leaving it
+inactive skips invocation and creates no successful setup record. An implemented facet can succeed
+without changes when its defaults request no work or its desired state already exists.
 
 Activation describes the resource's effective declaration. It does not prove that setup has run or
 succeeded; readiness uses setup evidence separately. This is distinct from VM activation, which
@@ -57,8 +57,8 @@ metadata:
   name: dual-harness-user
 spec:
   harness_integrations:
-    - name: claude-code
-    - name: codex
+    claude-code: {}
+    codex: {}
 ---
 apiVersion: agentworks/v1
 kind: session-template
@@ -73,35 +73,72 @@ A session template selects exactly one integration through singular `harness_int
 effective template must select one or inherit a selection. The built-in `default` session template
 explicitly selects `shell`; an unrelated template with no selection is invalid.
 
-Integration activation lists use complete replacement:
+Integration activation maps merge by key:
 
-- Omit `harness_integrations` to inherit the effective list.
-- Supply a list to replace the complete inherited list, including each entry's config.
-- Supply `harness_integrations: []` to select none.
-- Duplicate integration names are invalid.
+- Omit `harness_integrations` or supply `{}` to inherit the effective map.
+- Adding a key activates that integration and preserves the parent's other integrations.
+- Restating a key merges its configuration according to the owning facet's schema. Claude and Codex
+  user facets replace an inherited `plugins` or `marketplaces` list when that field is supplied;
+  include every desired entry, or use `[]` to clear the list. Omitted fields inherit.
+- An empty entry activates defaults when new and preserves inherited configuration when already
+  selected.
+- A `null` entry disables that integration, including an inherited activation. For example,
+  `harness_integrations: {codex: null}` leaves other integrations active. A later layer can
+  reactivate Codex with `{}` or explicit config; the disabled config is not restored.
 
-For example, this child keeps only Claude with its default user config. It does not retain the
-parent's Codex activation or merge a previous Claude settings mapping:
+For example, this child sets Claude's marketplace and plugin lists, replacing any inherited values
+for those fields. It retains the parent's Codex activation and Claude settings:
 
 ```yaml
 apiVersion: agentworks/v1
 kind: agent-template
 metadata:
-  name: claude-user
+  name: review-user
 spec:
   inherits: [dual-harness-user]
   harness_integrations:
-    - name: claude-code
+    claude-code:
+      marketplaces: [example-org/team]
+      plugins: [reviewer@team]
 ```
 
-Session selection has its existing tagged-object merge semantics: restating the same name merges
-session config according to its model; selecting a different name starts that integration's config
-anew. Config for integration activations at setup scopes never rolls into a session's config, even
-when both name the same integration. Each host validates its own facet. Claude and Codex user facets
-accept settings, marketplaces, plugins, and artifacts; their workspace facets accept settings and
-artifacts. All shipped integrations implement VM, user, workspace, and session facets. VM facets
-route artifact inputs to a later facet; shell and Grok outer facets provide artifact handling. A
-name-only config schema does not itself imply facet support for another integration.
+To replace Claude's whole inherited configuration while retaining other integrations, use two
+layers: disable Claude in an intermediate template, then reactivate it in the child. A single map
+entry has no whole-config replacement switch.
+
+```yaml
+apiVersion: agentworks/v1
+kind: agent-template
+metadata:
+  name: without-claude
+spec:
+  inherits: [dual-harness-user]
+  harness_integrations:
+    claude-code: null
+---
+apiVersion: agentworks/v1
+kind: agent-template
+metadata:
+  name: fresh-claude
+spec:
+  inherits: [without-claude]
+  harness_integrations:
+    claude-code:
+      marketplaces: [example-org/team]
+      plugins: [reviewer@team]
+```
+
+Session selection uses a tagged table: `harness_integration: {name: codex}`. Restating the same
+`name` merges session config according to its model; selecting a different name replaces the
+previous selection and starts that integration's config anew. Omission inherits the selection, but
+an effective session without a selection is invalid. The setup map's `null` opt-out does not apply
+to the session selector. Config for integration activations at setup scopes never rolls into a
+session's config, even when both name the same integration. Each host validates its own facet.
+Claude and Codex user facets accept settings, marketplaces, plugins, and artifacts; their workspace
+facets accept settings and artifacts. All shipped integrations implement VM, user, workspace, and
+session facets. VM facets route artifact inputs to a later facet; shell and Grok outer facets
+provide artifact handling. An empty config schema does not itself imply facet support for another
+integration.
 
 For separate project settings, select both workspace facets and give each its own workstation
 source. Create these source documents before workspace creation; this declaration does not change
@@ -114,11 +151,11 @@ metadata:
   name: dual-harness-project
 spec:
   harness_integrations:
-    - name: claude-code
+    claude-code:
       settings:
         source: ~/.config/agentworks/harness/claude-project.json
         strategy: merge-preserve
-    - name: codex
+    codex:
       settings:
         source: ~/.config/agentworks/harness/codex-project.toml
         strategy: merge-overwrite
@@ -238,10 +275,10 @@ deferral along the actual lineage. Doctor also checks stored evidence; it does n
 repair native drift.
 
 After editing VM/admin or agent activations, run `agw vm reinit <name>` or
-`agw agent reinit <name>`. Removing a declaration becomes native cleanup during the owning
-operation, using its previous applied-state records. Workspace mappings require explicit recreation
-to apply changes; `workspace repair` only repairs its existing access and Git identity
-responsibilities.
+`agw agent reinit <name>`. Removing a declaration, or disabling an inherited activation with `null`,
+becomes native cleanup during the owning operation, using its previous applied-state records.
+Workspace mappings require explicit recreation to apply changes; `workspace repair` only repairs its
+existing access and Git identity responsibilities.
 
 Cleanup only removes effects whose ownership can be established. Removed settings mappings retain
 the document; removed owned plugin associations are reconciled where safe. Obsolete artifact files

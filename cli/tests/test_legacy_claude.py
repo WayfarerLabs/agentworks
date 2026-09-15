@@ -12,7 +12,7 @@ from agentworks.db.instance_state import JsonObject
 from agentworks.errors import StateError
 from agentworks.instance_specs import InstanceOverlay, UnsupportedStoredOverlayError, decode_stored_overlay
 from agentworks.legacy_claude import LegacyClaudeContextRequired, checkpoint_conversion
-from agentworks.schema import CapabilityBlock
+from agentworks.schema import CapabilityConfig
 
 
 def stored(raw: JsonObject, *, vm: bool = False, version: int | None = None) -> DesiredOverlayRecord:
@@ -24,17 +24,18 @@ def stored(raw: JsonObject, *, vm: bool = False, version: int | None = None) -> 
     )
 
 
-def base() -> list[CapabilityBlock]:
-    return [
-        CapabilityBlock.of("codex"),
-        CapabilityBlock.of(
-            "claude-code",
-            marketplaces=["inherited"],
-            plugins=["base@inherited"],
-            settings={"source": "settings.json", "strategy": "merge-preserve"},
+def base() -> dict[str, CapabilityConfig]:
+    return {
+        "codex": CapabilityConfig(),
+        "claude-code": CapabilityConfig.model_validate(
+            {
+                "marketplaces": ["inherited"],
+                "plugins": ["base@inherited"],
+                "settings": {"source": "settings.json", "strategy": "merge-preserve"},
+            }
         ),
-        CapabilityBlock.of("shell"),
-    ]
+        "shell": CapabilityConfig(),
+    }
 
 
 @pytest.mark.parametrize("vm", [False, True])
@@ -53,22 +54,24 @@ def test_conversion_retains_full_context_and_other_components(vm, legacy):
     decoded = decode_stored_overlay(original, legacy_user_base=activations)
     component = cast("dict[str, Any]", decoded.payload.value["admin"] if vm else decoded.payload.value)
     entries = component["harness_integrations"]
-    assert [item["name"] for item in entries] == ["codex", "claude-code", "shell"]
-    assert entries[1]["settings"] == activations[1].config["settings"]
-    assert entries[1]["marketplaces"] == (["inherited", "new"] if legacy.get("claude_marketplaces") else ["inherited"])
-    assert entries[1]["plugins"] == (
+    assert set(entries) == {"codex", "claude-code", "shell"}
+    assert entries["claude-code"]["settings"] == activations["claude-code"].config["settings"]
+    assert entries["claude-code"]["marketplaces"] == (
+        ["inherited", "new"] if legacy.get("claude_marketplaces") else ["inherited"]
+    )
+    assert entries["claude-code"]["plugins"] == (
         ["base@inherited", "new@inherited"] if legacy.get("claude_plugins") else ["base@inherited"]
     )
     assert component["shell"] == "zsh"
     if vm:
         assert decoded.payload.value["vm"] == {"cpus": 4}
     assert original.payload.value == initial
-    assert activations[1].config["marketplaces"] == ["inherited"]
+    assert activations["claude-code"].config["marketplaces"] == ["inherited"]
 
 
 @pytest.mark.parametrize("raw", [{"claude_plugins": []}, {"claude_plugins": None}])
 def test_absent_legacy_agent_values_do_not_enable_an_empty_claude_activation(raw):
-    decoded = decode_stored_overlay(stored(raw), legacy_user_base=[])
+    decoded = decode_stored_overlay(stored(raw), legacy_user_base={})
     assert decoded.payload.value == {}
 
 
@@ -90,7 +93,7 @@ def test_invalid_and_ambiguous_legacy_fields_refuse_without_values(raw):
 
 def test_admin_null_is_invalid_but_agent_null_is_an_absent_old_field():
     with pytest.raises(StateError):
-        decode_stored_overlay(stored({"claude_plugins": None}, vm=True), legacy_user_base=[])
+        decode_stored_overlay(stored({"claude_plugins": None}, vm=True), legacy_user_base={})
 
 
 @pytest.mark.parametrize("vm", [False, True])
@@ -116,7 +119,7 @@ def test_conversion_checkpoint_refuses_a_changed_stored_overlay(db):
     db.instance_state.put_desired_overlay("agent", "fixture", VersionedPayload(1, {"claude_plugins": []}))
     original = db.instance_state.get_desired_overlay("agent", "fixture")
     assert original is not None
-    decoded = decode_stored_overlay(original, legacy_user_base=[])
+    decoded = decode_stored_overlay(original, legacy_user_base={})
     assert isinstance(decoded, InstanceOverlay)
     replacement = VersionedPayload(1, {"shell": "zsh"})
     db.instance_state.put_desired_overlay("agent", "fixture", replacement)

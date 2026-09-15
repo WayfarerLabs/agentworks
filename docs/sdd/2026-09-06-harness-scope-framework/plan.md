@@ -405,3 +405,63 @@ scratch tree and observed all 20 unsupported-activation cases fail, then restore
 This closes B4 under the operator's decision without new runtime routing machinery. The directed
 correction is complete; the handoff records final-head CI separately. Independent live backend
 acceptance, saga-owner pickup, and final SDD locking remain open.
+
+## 2026-09-15 activation-map correction
+
+The operator requested a separate implementation PR with name-keyed maps for every harness config
+facet. This supersedes the completed list-shape work above without changing its historical record.
+The new PR branches independently from main. The operator subsequently clarified that the session
+selector keeps its existing tagged shape and setup activation maps support explicit null opt-outs.
+
+- [x] Implement the initial keyed config, schema-directed inheritance, per-setting provenance, and
+      strict facet validation; apply the subsequent operator clarifications below.
+- [x] Carry maps through setup and artifact consumers, retaining applied-state comparison semantics.
+- [x] Give historical saved setup lists an explicit migration disposition; preserve compatible saved
+      session selections and unrelated instance config.
+- [x] Update permanent guides, samples, reference projection, and the governing design together.
+- [x] Keep the single session selector unchanged and add per-key null opt-outs to setup maps,
+      including persisted instance specs and removal of inherited config references.
+- [x] Verify inheritance, defaults, selection replacement, source attribution, saved-state recovery,
+      readiness, and lifecycle behavior; run required gates and independent private review lanes.
+- [ ] Publish the complete PR ready for review and monitor its feedback under the delivery process.
+
+The clarified implementation passed 9,657 non-integration tests with seven skips, Ruff lint/format,
+and strict mypy across 849 files. File lint, locked-SDD and Rulesync checks passed, alongside 160
+Python and 103 Node website tests and deterministic double builds for both site bases. An isolated
+home running the real CLI verified inherited siblings, same-key configuration and source
+attribution, null removal, fresh reactivation, the unchanged session selector, and resource
+sample/explain output. No live VM provisioning was performed in this author run; the ready handoff
+triggers the normal independent PR validation pipeline.
+
+Project, generic correctness, and complexity reviews covered the implementation and the operator's
+session/null clarifications. Corrections preserved reserved integration names and non-string mapping
+references, kept unrelated unreadable saved state protected during explicit list migration, fixed
+session guidance, and removed the obsolete tagged-facet cache. All material findings are resolved;
+the final accepted cleanup is recorded at `4405e9e7`. PR feedback and independent live acceptance
+remain separate from this completed implementation and private validation.
+
+### PR 816 feedback correction
+
+The operator authorized a focused correction after the later Muntz review identified incorrect
+native-list merge guidance. The existing native `plugins` and `marketplaces` replacement policies
+remain unchanged. The guides now describe them explicitly and show a disabling template followed by
+a reactivating child to reset a whole integration config while preserving its siblings.
+
+- [x] Correct the native-list guidance and whole-config reset example.
+- [x] Remove the unused non-null map projection branch, align its fixture with the supported host
+      shape, and address the ordering text, shadowed variable, and JSON null boundary comment.
+- [x] Validate and privately review the focused correction.
+
+The correction passed 9,657 unit tests (7 skipped), Ruff, strict mypy, file lint, Rulesync parity,
+locked-SDD and Typer-isolation checks, 160 Python and 103 Node website tests, and deterministic
+double builds for both site bases. An isolated home running the real CLI verified native plugin list
+replacement, empty-list clearing, inherited marketplaces and sibling activations, and fresh
+configuration after disable/reactivate for both Claude and Codex. No live VM provisioning was
+performed. Project, correctness, and complexity reviews found no material issues; their final
+example correction explicitly supplies the marketplace discarded by a whole-config reset. The ready
+handoff and independent PR feedback remain delivery work recorded on PR 816.
+
+The operator agreed to a separate follow-up for a consistent omitted-versus-null policy across
+inheritance: omission inherits; explicit null clears the inherited value, with defaults or required
+value validation applied afterward. Unknown opt-out key validation belongs in that follow-up's
+clearing contract; this correction preserves the current treatment of unavailable integrations.

@@ -17,7 +17,7 @@ from pydantic import Field
 from agentworks.artifacts.declarations import ArtifactsConfig, artifact_references
 from agentworks.declared_resource import DeclaredResource
 from agentworks.env.entry import EnvTable, env_references
-from agentworks.schema import CapabilityBlock, MergeStrategy, NonEmptyStr, ResourceRef, SecretRef
+from agentworks.schema import CapabilityConfig, NonEmptyStr, ResourceRef, SecretRef
 from agentworks.schema.reference import RefRelationship
 
 if TYPE_CHECKING:
@@ -162,9 +162,10 @@ class VMTemplate(DeclaredResource):
     ) = None
     """Names of ``system-install-command`` resources run during VM init."""
 
-    harness_integrations: Annotated[list[CapabilityBlock], MergeStrategy.REPLACE] | None = None
-    """Ordered integrations explicitly activated for native vm setup.
-    An authored list replaces the inherited list; an empty list activates none."""
+    harness_integrations: dict[NonEmptyStr, CapabilityConfig | None] | None = None
+    """Integrations explicitly activated for native vm setup.
+    Entries merge by integration name and facet config; an empty map inherits.
+    A null entry disables that integration."""
 
     artifacts: ArtifactsConfig | None = None
     """Artifact bundles selected at this scope; an omitted selection inherits."""

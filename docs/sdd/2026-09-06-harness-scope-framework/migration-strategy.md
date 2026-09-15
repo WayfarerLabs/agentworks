@@ -32,16 +32,23 @@ claude_plugins: [reviewer@team]
 ```yaml
 # New fields on the same declaring resource
 harness_integrations:
-  - name: claude-code
+  claude-code:
     marketplaces: [example-org/team]
     plugins: [reviewer@team]
 ```
 
-The list belongs to the resource. Omission inherits where that template kind already supports
-inheritance; an authored list replaces the whole inherited list, and `[]` clears it. Converting a
-layered old setup therefore requires constructing the intended complete activation list, including
-other integrations and the effective Claude values. Do not translate a single old field into a
-partial replacement list that silently loses the other values.
+The map belongs to the resource. Omission or `{}` inherits where that template kind supports
+inheritance. Parent integration keys remain, while config under the same key composes through its
+facet schema. The native `marketplaces` and `plugins` fields use replacement: an authored list must
+include every desired entry, `[]` clears it, and omission inherits. Moving old Claude fields into
+these fields therefore requires reviewing inherited entries; unrelated activations remain intact. A
+`null` value disables an inherited integration; a later empty or explicit config reactivates it
+without restoring the disabled config. These map rules apply to setup scopes only; session selection
+retains its tagged shape.
+
+A single map entry cannot request replacement of the integration's whole inherited config. Use an
+intermediate template to disable the integration, followed by a child that reactivates it with fresh
+config. This explicit two-layer reset preserves other integration keys.
 
 Update shipped manifests and examples with the implementation. Old authored fields receive normal
 unknown-field diagnostics plus specific migration guidance. Do not keep two live runtime dispatch
@@ -50,26 +57,26 @@ agent-template; no new admin selection on VM templates is introduced.
 
 ## Persisted desired overlays
 
-Retain decoding for supported old payload versions at the persisted-data boundary, separate from new
-operator-authored input validation. A legacy adapter extracts the old Claude fields before the new
-declaration model rejects them, validates their original value types, and resolves them with the
-owning template context before building the new full activation list. Invalid or ambiguous old/new
-declarations refuse with field-only diagnostics and preserve the stored payload.
+Retain decoding for unrelated fields in supported old payload versions at the persisted-data
+boundary. Legacy Claude fields still use their finite contextual adapter: validate the old values,
+compose the current selected user template's config, and capture the resulting activation map. Empty
+old lists append nothing; absent Claude config stays inactive. Conflicting old fields and a new
+activation map refuse with value-safe diagnostics. Inspection remains read-only and automatic
+conversion checkpoints only after successful owning setup.
 
-A migrated effective list captures the intended current configuration under the new whole-list
-semantics; it cannot pretend to preserve old per-field list inheritance indefinitely. Document this
-change and the resulting complete list. The owning reinit operation persists the new canonical
-overlay only through its normal desired-state checkpoint; inspection can explain a legacy overlay
-without mutating it. Unrelated fields and VM/admin components are retained. A migration failure must
-not overwrite the original record, and unknown future payload versions remain unsupported rather
-than being guessed into this migration.
+Saved `harness_integrations` lists need explicit migration. They represented replacement of both the
+full selection and each config, which additive maps cannot preserve automatically. Classify these
+supported historical shapes as unsupported rather than corrupt, retain the original data, and
+explain recovery. Agent reinit accepts a complete replacement `--spec` or `{}` clearing even when
+the old payload cannot be decoded. Other owners require explicit saved-data migration or recreation;
+do not promise VM/workspace instance-spec replacement commands that do not exist. A replacement map
+can disable inherited integrations with explicit `null` entries, but same-key config still merges
+through its facet schema, so opt-outs do not make mechanical list conversion safe.
 
-The finite adapter covers marketplace-only and plugin-only overlays, empty legacy lists, templates
-with other integrations, and old/new collisions. Empty legacy lists append nothing; they do not
-clear inherited entries. Conversion captures the complete effective list, including unrelated
-integrations, under the new replacement semantics. Reinit serializes desired-state changes before
-reading the context and commits automatic conversion only after successful setup. Record-only
-inspection reports migration pending when template context is unavailable.
+Saved session selectors retain their tagged shape and need no migration or adapter. Their same-name
+merge and different-name replacement behavior remains unchanged. Applied native setup records retain
+their comparison carrier and ownership, so unchanged effective config does not become stale through
+this migration.
 
 ## Native ownership
 

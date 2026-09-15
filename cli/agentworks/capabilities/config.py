@@ -38,8 +38,8 @@ validates**, and its shape follows the kind's dispatch:
   wrote it and exactly as the host row carries it
   (:class:`~agentworks.schema.CapabilityBlock`);
 - a MAP-KEYED config kind would be selected by the key its value sits under.
-  No current capability config uses that dispatch; a secret backend's
-  separately declared per-secret mapping is not its source config.
+  Setup activation maps pass their key; a singular session host unwraps
+  its tagged block and passes the selected name beside the untagged config.
 
 So a TAGGED kind needs no ``name`` argument at all: the tag inside the
 table is what selects the implementation, and reading it here rather than
@@ -92,7 +92,7 @@ _MAPPING_UNION_CACHE: dict[tuple[str, tuple[type[BaseModel], ...], bool], type[B
 #: every historical declaration.
 _OFFERED_MODEL_CACHE: dict[tuple[type, Facet | None], tuple[object, object]] = {}
 
-_TAG_MODEL_CACHE: dict[tuple[type, str], type[BaseModel]] = {}
+_HOST_MODEL_CACHE: dict[tuple[type[BaseModel], str], type[BaseModel]] = {}
 
 
 def selected_name(kind: str, config: object, name: str | None) -> str | None:
@@ -183,6 +183,15 @@ def validate_capability_config(
     if impl is None:
         return None
     hint = reference_hint(kind, selected)
+    if descriptor.config_schema.discriminator is None:
+        return _validated(
+            config_model_for(impl, facet=facet),
+            config,
+            owner=owner,
+            location=location,
+            hint=hint,
+            provenance=provenance,
+        )
     union = capability_config_union(kind, facet=facet)
     validated = _validated(union, config, owner=owner, location=location, hint=hint, provenance=provenance)
     # The union is a root model, so the thing the capability was written
@@ -387,13 +396,10 @@ def capability_config_union(kind: str, *, facet: Facet | None = None) -> type[Ba
     fixture capability; a deliberate choice, not an oversight.
     """
     descriptor = descriptor_for(kind)
-    discriminator = descriptor.config_schema.discriminator
-    if discriminator is None:
-        raise StateError(
-            f"the {kind} capability kind declares an untagged config_schema, so there is no union to "
-            f"assemble; only a mapping contract may be untagged"
-        )
+    discriminator = descriptor.config_schema.discriminator or "name"
     arms = _arms(descriptor, facet=facet)
+    if descriptor.config_schema.discriminator is None:
+        arms = {name: tagged_host_model(model, name) for name, model in arms.items()}
     key = (kind, facet, frozenset(arms.items()))
     cached = _UNION_CACHE.get(key)
     if cached is not None:
@@ -401,6 +407,21 @@ def capability_config_union(kind: str, *, facet: Facet | None = None) -> type[Ba
     union = _build_union(descriptor, tuple(arms.values()), discriminator)
     _UNION_CACHE[key] = union
     return union
+
+
+def tagged_host_model(model: type[BaseModel], name: str) -> type[BaseModel]:
+    """Add the singular host's selector around an untagged capability config model.
+
+    Capability models continue to own config fields only. The host owns the
+    required name tag used by its emitted discriminated union.
+    """
+    key = (model, name)
+    if key not in _HOST_MODEL_CACHE:
+        tag: Any = Literal[name]
+        _HOST_MODEL_CACHE[key] = create_model(
+            f"{model.__name__}{_class_name(name)}Host", __base__=model, name=(tag, ...)
+        )
+    return _HOST_MODEL_CACHE[key]
 
 
 def capability_mapping_union(kind: str) -> type[BaseModel]:
@@ -550,11 +571,11 @@ def offered_model(impl: type, *, facet: Facet | None = None) -> type[BaseModel] 
 
 
 def config_model_for(impl: type, *, facet: Facet | None = None) -> type[BaseModel]:
-    """The selected validation model, including a closed name-only facet.
+    """The selected validation model, including a closed empty facet.
 
     A registered implementation offering no config is still selectable. Its
-    integration activation accepts its literal tag and rejects every other
-    key. Unknown implementations are handled separately by the registry lookup.
+    integration activation accepts an empty config and rejects every key.
+    Unknown implementations are handled separately by the registry lookup.
     """
     model = offered_model(impl, facet=facet)
     if model is not None:
@@ -562,12 +583,7 @@ def config_model_for(impl: type, *, facet: Facet | None = None) -> type[BaseMode
     descriptor = descriptor_for_impl(impl)
     if descriptor is None or not descriptor.config_facets:
         raise StateError(f"{impl.__name__} offers no config model")
-    name = str(cast("type[Capability]", impl).name)
-    key = (impl, name)
-    if key not in _TAG_MODEL_CACHE:
-        tag: Any = Literal[name]
-        _TAG_MODEL_CACHE[key] = create_model(f"{impl.__name__}NoConfig", __base__=AgwModel, name=(tag, ...))
-    return _TAG_MODEL_CACHE[key]
+    return AgwModel
 
 
 def _seated_impl(descriptor: CapabilityKindDescriptor, name: str) -> type | None:

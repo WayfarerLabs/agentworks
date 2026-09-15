@@ -21,9 +21,13 @@ command that can change the bound template. No other reinit, repair, start, rest
 accepts an instance spec.
 
 The JSON must be one object written directly on the command line. It cannot be a file path, `null`,
-an array, or multiple JSON values. Duplicate keys, non-finite numbers, nested nulls, unknown fields,
-and the template-only fields `name`, `inherits`, `metadata`, and `framework` are rejected before
-state or remote resources change. Quote the object for the current shell:
+an array, or multiple JSON values. Duplicate keys, non-finite numbers, unknown fields, and the
+template-only fields `name`, `inherits`, `metadata`, and `framework` are rejected before state or
+remote resources change. Nested nulls are rejected except directly at
+`harness_integrations.<integration-name>` in VM, admin, agent, and workspace specs, where they
+disable that integration. For example, `--spec '{"harness_integrations":{"codex":null}}'` disables
+inherited Codex setup. Nulls inside its config remain invalid. Quote the object for the current
+shell:
 
 ```bash
 agw vm create build-01 --template dev --spec '{"cpus":8,"memory":16}' \
@@ -1142,10 +1146,10 @@ A session template selects the **harness integration** that runs the session's w
 integration is a [capability](../docs/guides/resources.md#harness-integrations) that owns
 starting/resuming the harness or shell and checking its required executables; the template's
 `spec.harness_integration` is one tagged table whose `name` key selects the integration and whose
-remaining keys are the config block that integration validates. A template that names no integration
-runs the built-in `shell` integration (a login shell, `$SHELL --login`, or an operator-supplied
-command), which is the built-in `default` template's behavior. Define custom templates as
-`session-template` resources:
+remaining keys are the config block that integration validates. Every effective template must select
+an integration or inherit a selection. The built-in `default` template explicitly selects `shell`,
+which runs a login shell (`$SHELL --login`) or an operator-supplied command. Define custom templates
+as `session-template` resources:
 
 ```yaml
 apiVersion: agentworks/v1
@@ -1167,8 +1171,8 @@ session's launch target (the agent, or the VM admin for admin sessions) before a
 so launching a session whose tool is not installed fails fast with a clear error instead of a
 cryptic downstream tmux failure.
 
-Those keys live only inside the `harness_integration` table; spelling any of them at the `spec` top
-level is a load error that points you at the nested shape.
+Those config keys live only inside the `harness_integration` table; spelling any of them at the
+`spec` top level is a load error that points you at the nested shape.
 
 The `claude-code` integration runs Claude Code as the session. Session creation and `--force-new`
 start a new Claude conversation; ordinary `session start` and `session restart` continue the same

@@ -894,9 +894,7 @@ def test_legacy_agent_inspection_explains_pending_conversion_without_writing(db,
     state = agent_description(db, make_config(), name="dev").instance_state
     assert any(issue.code is InstanceStateIssueCode.INSTANCE_SPEC_MIGRATION_PENDING for issue in state.issues)
     assert state.declarations[0].current.status == "resolved"
-    assert state.declarations[0].current.spec["harness_integrations"] == [
-        {"name": "claude-code", "plugins": ["one@fixture"]}
-    ]
+    assert state.declarations[0].current.spec["harness_integrations"] == {"claude-code": {"plugins": ["one@fixture"]}}
     assert db.instance_state.get_desired_overlay("agent", "dev") == original
 
 
@@ -912,7 +910,5 @@ def test_legacy_vm_inspection_preserves_vm_component_and_record(db, make_config)
     assert state.declarations[0].current.status == "resolved"
     assert state.declarations[1].current.status == "resolved"
     assert state.declarations[0].current.spec["cpus"] == 8
-    assert state.declarations[1].current.spec["harness_integrations"] == [
-        {"name": "claude-code", "plugins": ["one@fixture"]}
-    ]
+    assert state.declarations[1].current.spec["harness_integrations"] == {"claude-code": {"plugins": ["one@fixture"]}}
     assert db.instance_state.get_desired_overlay("vm", "box") == original

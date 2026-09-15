@@ -155,7 +155,7 @@ def get_live_overlays(
     if record is None:
         return None
     base = (
-        resolve_template_with_provenance(registry, template_name).value.harness_integrations
+        resolve_template_with_provenance(registry, template_name).value.active_harness_integrations
         if legacy_component(record) is not None
         else None
     )
@@ -169,9 +169,9 @@ def _merge_template(
 ) -> tuple[AdminConfig, tuple[LayerContribution, ...]]:
     """Merge only fields explicitly authored by this admin declaration."""
     from agentworks.artifacts.declarations import ArtifactsConfig
+    from agentworks.capabilities.harness_integration.activations import merge_activation_layer
     from agentworks.env.entry import EnvEntry
     from agentworks.instance_overlay_codec import OVERLAY_EXCLUDED_FIELDS
-    from agentworks.schema import CapabilityBlock, merge_model
 
     previous = target.model_dump(
         mode="python",
@@ -182,8 +182,8 @@ def _merge_template(
         exclude=set(OVERLAY_EXCLUDED_FIELDS),
         exclude_unset=True,
     )
-    merged, operations = merge_model(type(layer), previous, authored)
-    raw = cast("dict[str, object]", merged)
+    merged, operations = merge_activation_layer(type(layer), previous, authored, facet="user")
+    raw = merged
     defaults = type(target)(name=target.name).model_dump(
         mode="python",
         exclude=set(OVERLAY_EXCLUDED_FIELDS),
@@ -191,7 +191,4 @@ def _merge_template(
     raw = {**defaults, **raw}
     raw["artifacts"] = ArtifactsConfig.model_validate(raw["artifacts"])
     raw["env"] = {key: EnvEntry.model_validate(value) for key, value in cast("dict[str, object]", raw["env"]).items()}
-    raw["harness_integrations"] = [
-        CapabilityBlock.model_validate(value) for value in cast("list[object]", raw["harness_integrations"])
-    ]
     return target.model_copy(update=raw), operations

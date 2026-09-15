@@ -434,7 +434,7 @@ def test_user_setup_binding_uses_native_model_and_config_home(
         owner_kind="agent-template",
         owner_name="fixture",
         facet="user",
-        config={"name": integration.name, "settings": {"source": str(source), "strategy": "replace"}},
+        config={"settings": {"source": str(source), "strategy": "replace"}},
     )
     claims: list[tuple[NativeClaim, ...]] = []
     root = transport.root / "overridden-config"

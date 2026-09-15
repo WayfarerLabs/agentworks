@@ -100,13 +100,13 @@ def run_setup(
             location=location,
             username=invocation.username if isinstance(invocation, UserSetupInvocation) else None,
         )
-        desired = {block.name: block for block in inputs.activations}
-        # Validate and bind the complete active list before its first mutation.
+        desired = inputs.activations
+        # Validate and bind the complete activation map before its first mutation.
         bound = {}
-        for selected in inputs.activations:
-            ensure_harness_integration_enabled(registry, selected.name)
-            implementation = harness_integration_for(selected.name)
-            bound[selected.name] = implementation.for_setup(
+        for name, selected in inputs.activations.items():
+            ensure_harness_integration_enabled(registry, name)
+            implementation = harness_integration_for(name)
+            bound[name] = implementation.for_setup(
                 owner_kind=inputs.kind, owner_name=inputs.name, facet=facet, config=selected.config
             )
 
@@ -147,7 +147,7 @@ def run_setup(
                 declaration = previous.declaration
             else:
                 integration = bound[name]
-                declaration = inputs.declaration(block)
+                declaration = inputs.declaration(name, block)
 
             artifacts = (
                 ArtifactInputs() if block is None else setup_artifacts(db, registry, inputs, invocation.vm, name)

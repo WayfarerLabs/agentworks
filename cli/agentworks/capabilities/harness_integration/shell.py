@@ -11,7 +11,7 @@ PATH). All optional.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar, Literal
+from typing import TYPE_CHECKING, ClassVar
 
 from pydantic import Field
 
@@ -61,9 +61,6 @@ class ShellConfig(AgwModel):
     empty" at every read.
     """
 
-    name: Literal["shell"]
-    """The harness integration this config is for."""
-
     command: str = Field(default="", examples=["htop"])
     """The command the session's pane runs. Empty (the default) is a bare
     login shell."""
@@ -80,13 +77,11 @@ class ShellConfig(AgwModel):
 class ShellSetupConfig(AgwModel):
     """Activate shell artifact publication at an outer facet."""
 
-    name: Literal["shell"]
-
 
 class ShellIntegration(HarnessIntegration):
     """Runs an operator command (or a login shell) as the session."""
 
-    contract_version: ClassVar[int] = 6
+    contract_version: ClassVar[int] = 7
     name: ClassVar[str] = "shell"
     description: ClassVar[str] = "Run an operator command or a login shell"
     prose: ClassVar[TopicProse | None] = TopicProse(

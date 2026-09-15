@@ -7,38 +7,46 @@ the native CLI is installed for the actual user.
 
 ```yaml
 harness_integrations:
-  - name: claude-code
+  claude-code:
     marketplaces: [example-org/team]
     plugins: [reviewer@team]
 ```
 
-An authored `harness_integrations` list replaces the complete inherited list. Include other
-integrations you intend to keep, along with the complete effective Claude marketplace/plugin values.
-Omit the list to inherit it, or write `[]` to enable none. Do not convert one old field into a
-partial replacement that drops the other field or another integration.
+The `harness_integrations` map preserves inherited integrations. Configuration under `claude-code`
+merges with the inherited user-facet config. Each authored `marketplaces` or `plugins` list replaces
+that field's inherited list; include every entry you intend to retain, or use `[]` to clear it.
+Omitting either field inherits its value. Omit the map or write `{}` to inherit it. An empty
+`claude-code: {}` entry activates defaults when Claude is not already selected and preserves its
+configuration when inherited. Use `claude-code: null` to disable an inherited Claude activation. The
+owning reinit reconciles any previously recorded native effects using the normal cleanup rules.
+
+There is no single-entry switch to replace an integration's entire inherited configuration. To start
+fresh while retaining other integrations, disable it in an intermediate template and reactivate it
+in a child with the desired config. The
+[harness integration guide](harness-facets.md#explicit-integration-activations) shows both layers.
 
 ## Stored instance overlays
 
 Agentworks recognizes old Claude fields only in stored agent payload version 1 and the admin
 component of stored VM payload version 2. It resolves the currently selected template without the
-stored layer, retains its full activation list and Claude settings, then appends and deduplicates
-the old marketplace/plugin values in order. An old empty list adds nothing; it does not clear
-inherited values. Agent null values mean absent fields; admin null values are invalid. Empty old
-values do not enable an otherwise absent Claude activation.
+stored layer, retains its activation map and Claude settings, then appends and deduplicates the old
+marketplace/plugin values in order. An old empty list adds nothing; it does not clear inherited
+values. Agent null values mean absent fields; admin null values are invalid. Empty old values do not
+enable an otherwise absent Claude activation.
 
-The converted layer captures the resulting complete activation list under the new replacement
-semantics. Later template changes do not flow through a converted explicit list. Review that list
-with instance inspection and adjust the owning declaration or agent instance spec when needed.
-Template repointing during agent reinit resolves the conversion against the proposed new template.
+The converted layer captures the resulting activation map. Later template changes follow ordinary
+map and facet-config merging. Review that map with instance inspection and adjust the owning
+declaration or agent instance spec when needed. Template repointing during agent reinit resolves the
+conversion against the proposed new template.
 
-Old fields and a new activation list in the same stored component are ambiguous and refuse
-conversion. Invalid old value types, unrelated malformed fields, and unsupported future payload
-versions also refuse. Diagnostics identify fields without printing their values. Back up the state
-database before repairing a malformed record; backups preserve the original stored payload.
+Old fields and an activation map in the same stored component are ambiguous and refuse conversion.
+Invalid old value types, unrelated malformed fields, and unsupported future payload versions also
+refuse. Diagnostics identify fields without printing their values. Back up the state database before
+repairing a malformed record; backups preserve the original stored payload.
 
 Inspection computes a contextual view and reports migration pending without changing stored data.
-Record-only doctor can recognize valid legacy data but cannot construct an effective list without
-the selected template; it reports pending conversion rather than assuming an empty base.
+Record-only doctor can recognize valid legacy data but cannot construct an effective map without the
+selected template; it reports pending conversion rather than assuming an empty base.
 
 Run the owning agent or VM reinit after migrating the authored templates. Automatic conversion is
 saved only after successful setup, and only if the stored record still matches the captured input.
@@ -47,6 +55,28 @@ warnings leave conversion pending. Unrelated fields and the VM component remain 
 setup or failed conversion checkpoint retains the old overlay for retry. Explicit agent template
 repointing and instance-spec replacement keep their existing desired-state checkpoint before remote
 work; automatic conversion does not move that boundary.
+
+## Saved activation lists
+
+Saved instance specs containing the former `harness_integrations` list require an explicit
+migration. Lists replaced all inherited activations and config; maps preserve inherited integrations
+and merge same-named config. Converting a list mechanically would silently change those decisions.
+Inspection reports the saved shape as unsupported and retains the original payload.
+
+For an agent, use `agw agent reinit NAME --spec` with the complete replacement instance spec, or
+`--spec '{}'` to clear the instance layer. Review the selected template first: inherited
+integrations remain active in the map model unless the replacement spec disables them with `null`.
+For example, `harness_integrations: {codex: null}` disables inherited Codex while retaining other
+integrations. These opt-outs do not preserve the old list's whole-config replacement semantics;
+review same-named integration config as well. VM and workspace instance specs have no equivalent
+replacement command. Back up the database before explicitly migrating their saved desired config, or
+recreate the resource with the new declarations. Do not delete a VM or workspace merely to change
+this spelling unless losing its contents is intended.
+
+Session selectors keep their tagged shape, such as `harness_integration: {name: codex}`, and need no
+shape migration. Their same-name merge and changed-name replacement behavior is preserved. Saved
+applied setup records also retain their comparison format, so the authoring change alone does not
+invalidate existing workspace setup or discard ownership records.
 
 ## Existing native installations
 

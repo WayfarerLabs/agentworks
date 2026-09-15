@@ -27,7 +27,7 @@ from agentworks.secrets.orchestration import SecretTarget
 from agentworks.vms.sites import site_platform_name
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Mapping
 
     from agentworks.agents.templates import ResolvedAgentTemplate
     from agentworks.artifacts.declarations import ArtifactsConfig
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.harness_setup.model import NativeSetupState, SetupComponent
     from agentworks.resources.registry import Registry
-    from agentworks.schema import CapabilityBlock
+    from agentworks.schema import CapabilityConfig
     from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
     from agentworks.vms.admin import AdminConfig
@@ -50,7 +50,7 @@ def _needed(
     kind: InstanceKind,
     name: str,
     component: SetupComponent,
-    activations: Sequence[CapabilityBlock],
+    activations: Mapping[str, CapabilityConfig],
     artifacts: ArtifactsConfig,
 ) -> bool:
     return (
@@ -98,19 +98,19 @@ def prepare_vm_setup(
                     "vm",
                     name,
                     "vm",
-                    tuple(template.harness_integrations),
+                    template.harness_integrations,
                     SecretTarget(vm=template.env),
                     template.artifacts,
                     capture_owner(registry, "vm", name, "vm", template.artifacts, operation=operation),
                 )
             )
-        if _needed(db, "vm", name, "admin", admin.harness_integrations, admin.artifacts):
+        if _needed(db, "vm", name, "admin", admin.active_harness_integrations, admin.artifacts):
             result.append(
                 SetupInputs(
                     "vm",
                     name,
                     "admin",
-                    tuple(admin.harness_integrations),
+                    admin.active_harness_integrations,
                     SecretTarget(vm=template.env, admin=admin.env),
                     admin.artifacts,
                     capture_owner(registry, "vm", name, "admin", admin.artifacts, operation=operation),
@@ -132,7 +132,7 @@ def prepare_agent_setup(
         "agent",
         name,
         "agent",
-        tuple(template.harness_integrations),
+        template.harness_integrations,
         SecretTarget(vm=ancestor.env, agent=template.env),
         template.artifacts,
         capture_owner(registry, "agent", name, "agent", template.artifacts),
@@ -152,7 +152,7 @@ def prepare_workspace_setup(
         "workspace",
         name,
         "workspace",
-        tuple(template.harness_integrations),
+        template.harness_integrations,
         SecretTarget(vm=ancestor.env, workspace=template.env),
         template.artifacts,
         capture_owner(registry, "workspace", name, "workspace", template.artifacts),

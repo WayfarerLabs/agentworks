@@ -54,7 +54,7 @@ same contract a raised exception would.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Final
 from weakref import WeakKeyDictionary
 
@@ -89,6 +89,7 @@ class _Block:
 
     model: type[BaseModel]
     blob: object
+    path: tuple[str | int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -103,6 +104,7 @@ class _Edge:
     """
 
     reference: ConfigReference
+    path: tuple[str | int, ...] = ()
 
 
 _Node = _Block | _Edge
@@ -137,9 +139,17 @@ def extract_references(
     its own declaration, its runtime needs off the merged one, FR17), and
     that is therefore two CALLS by the caller, never a parameter here.
     """
+    return tuple(reference for _path, reference in extract_reference_paths(model_cls, blob))
+
+
+def extract_reference_paths(
+    model_cls: type[BaseModel],
+    blob: object,
+) -> tuple[tuple[tuple[str | int, ...], ConfigReference], ...]:
+    """Extract references with config-local field, map-key, and list-index paths."""
     root: _Node = _Block(model=model_cls, blob=blob)
     walk = iter_descendants(root, _below, key=_identity_of)
-    return tuple(node.reference for node in walk if isinstance(node, _Edge))
+    return tuple((node.path, node.reference) for node in walk if isinstance(node, _Edge))
 
 
 def _identity_of(node: _Node) -> Hashable:
@@ -178,22 +188,27 @@ def _below(node: _Node) -> Iterator[_Node]:
     """
     if isinstance(node, _Edge):
         return
-    for shape, value in _field_values(node):
-        if shape.marker is not None:
-            yield from _scalar_edge(shape.marker, value)
-        elif shape.collection is not None:
-            yield from _collection_nodes(shape, value)
-        elif shape.nested_model is not None:
-            yield _Block(model=shape.nested_model, blob=value)
-        elif shape.arms and shape.discriminator is not None:
-            yield from _arm_block(shape.arms, shape.discriminator, shape.union_scalar_shorthand, value)
-        elif shape.structural_arms:
-            yield from _structural_block(shape.structural_arms, value)
-        elif shape.union_model is not None:
-            yield from _union_block(shape.union_model, shape.union_members, value)
+    for shape, value, path in _field_values(node):
+        for child in _value_nodes(shape, value):
+            yield replace(child, path=(*path, *child.path))
 
 
-def _field_values(block: _Block) -> Iterator[tuple[FieldShape, object]]:
+def _value_nodes(shape: FieldShape, value: object) -> Iterator[_Node]:
+    if shape.marker is not None:
+        yield from _scalar_edge(shape.marker, value)
+    elif shape.collection is not None:
+        yield from _collection_nodes(shape, value)
+    elif shape.nested_model is not None:
+        yield _Block(model=shape.nested_model, blob=value)
+    elif shape.arms and shape.discriminator is not None:
+        yield from _arm_block(shape.arms, shape.discriminator, shape.union_scalar_shorthand, value)
+    elif shape.structural_arms:
+        yield from _structural_block(shape.structural_arms, value)
+    elif shape.union_model is not None:
+        yield from _union_block(shape.union_model, shape.union_members, value)
+
+
+def _field_values(block: _Block) -> Iterator[tuple[FieldShape, object, tuple[str | int, ...]]]:
     """Each declared field of ``block``'s model, with the raw value the
     blob holds for it.
 
@@ -211,13 +226,13 @@ def _field_values(block: _Block) -> Iterator[tuple[FieldShape, object]]:
         # model-rooted one carries whatever its root model carries.
         root = fields.get("root")
         if root is not None:
-            yield shape_of(root), block.blob
+            yield shape_of(root), block.blob, block.path
         return
     if not isinstance(block.blob, Mapping):
         return
     defaults = _absent_defaults(block.model)
     for name, field in fields.items():
-        yield shape_of(field), block.blob[name] if name in block.blob else defaults.get(name)
+        yield shape_of(field), block.blob[name] if name in block.blob else defaults.get(name), (*block.path, name)
 
 
 def _scalar_edge(marker: RefMarker, value: object) -> Iterator[_Edge]:
@@ -249,12 +264,18 @@ def _collection_nodes(shape: FieldShape, value: object) -> Iterator[_Node]:
     """
     if shape.collection is Collection.MAPPING and isinstance(value, Mapping):
         for key, element in value.items():
+            # JSON provenance paths carry strings and integers. Other admitted
+            # Python mapping keys still contribute references at the map's path.
+            path = (key,) if type(key) in (str, int) else ()
             if shape.mapping_key_marker is not None:
-                yield from _scalar_edge(shape.mapping_key_marker, key)
-            yield from _element_nodes(shape, element)
+                for edge in _scalar_edge(shape.mapping_key_marker, key):
+                    yield replace(edge, path=path)
+            for child in _element_nodes(shape, element):
+                yield replace(child, path=path)
         return
-    for element in _elements_of(shape.collection, value):
-        yield from _element_nodes(shape, element)
+    for index, element in enumerate(_elements_of(shape.collection, value)):
+        for child in _element_nodes(shape, element):
+            yield replace(child, path=(index,))
 
 
 def _element_nodes(shape: FieldShape, element: object) -> Iterator[_Node]:

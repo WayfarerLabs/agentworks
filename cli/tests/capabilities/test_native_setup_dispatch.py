@@ -19,7 +19,7 @@ from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
 from agentworks.harness_setup.state import read_native_setup, write_native_setup
 from agentworks.plugins import Plugin, seated_plugin
-from agentworks.schema import CapabilityBlock
+from agentworks.schema import CapabilityConfig
 from agentworks.secrets.orchestration import SecretTarget
 from tests.plugins._fixtures import ConformingHarnessIntegration
 
@@ -31,7 +31,7 @@ def facet_case(db, monkeypatch, component):
         kind="vm" if component in {"vm", "admin"} else component,
         name="owner",
         component=component,
-        activations=(),
+        activations={},
         target=SecretTarget(vm={}),
     )
     common = dict(vm=vm, runner=Mock(), prior=None, checkpoint=Mock())
@@ -62,7 +62,7 @@ def test_unimplemented_activation_fails_without_successful_record(db, facet_case
     integration = "unsupported"
     monkeypatch.setattr("agentworks.harness_setup.dispatch.harness_integration_for", lambda name: Unsupported)
     inputs, invocation = facet_case
-    inputs = replace(inputs, activations=(CapabilityBlock.of(integration),))
+    inputs = replace(inputs, activations={integration: CapabilityConfig.model_validate({})})
     monkeypatch.setattr(SetupInputs, "declaration", lambda *args: {})
     with pytest.raises(StateError) as error:
         run_setup(db, Mock(), inputs, invocation, operation="fixture-setup", buffered=buffered)
@@ -93,7 +93,7 @@ def test_inactive_integrations_remain_absent(db, facet_case, monkeypatch):
 @pytest.mark.parametrize("integration", ["claude-code", "codex"])
 def test_implemented_default_setup_completes_without_native_changes(db, facet_case, integration):
     inputs, invocation = facet_case
-    inputs = replace(inputs, activations=(CapabilityBlock.of(integration),))
+    inputs = replace(inputs, activations={integration: CapabilityConfig.model_validate({})})
     for _ in range(2):
         state = run_setup(db, Mock(), inputs, invocation, operation="fixture-setup")
         (record,) = state.records
@@ -144,7 +144,7 @@ def setup_case(tmp_path, monkeypatch):
         kind="agent",
         name="agent",
         component="agent",
-        activations=(CapabilityBlock.of("first"), CapabilityBlock.of("second")),
+        activations={"first": CapabilityConfig.model_validate({}), "second": CapabilityConfig.model_validate({})},
         target=SecretTarget(vm={}, agent={}),
     )
     invocation = UserSetupInvocation(
@@ -179,7 +179,11 @@ def test_retirement_follows_desired_order_and_preserves_other_records(setup_case
     run_setup(db, Mock(), inputs, invocation, operation="agent-reinit")
     events.clear()
     run_setup(
-        db, Mock(), replace(inputs, activations=(CapabilityBlock.of("second"),)), invocation, operation="agent-reinit"
+        db,
+        Mock(),
+        replace(inputs, activations={"second": CapabilityConfig.model_validate({})}),
+        invocation,
+        operation="agent-reinit",
     )
     assert events == [("second", False), ("first", True)]
     assert [record.integration for record in read_native_setup(db, "agent", "agent").records] == ["second"]
@@ -247,7 +251,7 @@ def test_applied_state_omits_env_values_but_detects_declaration_changes(setup_ca
             vm={}, agent={"LITERAL": EnvEntry("changed-literal"), "TOKEN": EnvEntry({"secret": "token-name"})}
         ),
     )
-    assert changed.declaration(inputs.activations[0]) != record.declaration
+    assert changed.declaration("first", inputs.activations["first"]) != record.declaration
 
 
 @pytest.mark.parametrize("component", ["vm", "admin", "agent", "workspace"])
@@ -326,7 +330,7 @@ def test_deferral_notice_follows_successful_application(db, facet_case, monkeypa
     monkeypatch.setattr("agentworks.harness_setup.dispatch.harness_integration_for", lambda name: Deferring)
     monkeypatch.setattr("agentworks.artifacts.routing.setup_artifacts", lambda *args: received(*artifacts))
     monkeypatch.setattr(SetupInputs, "declaration", lambda *args: {})
-    inputs = replace(inputs, activations=(CapabilityBlock.of("deferring"),))
+    inputs = replace(inputs, activations={"deferring": CapabilityConfig.model_validate({})})
     warning = Mock()
     monkeypatch.setattr("agentworks.harness_setup.dispatch.output.warn", warning)
     if outcome == "publication-failure":

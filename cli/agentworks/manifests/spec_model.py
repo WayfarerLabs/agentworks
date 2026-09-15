@@ -1,13 +1,10 @@
 """The per-kind model assembly, shared by emission and the renderer.
 
-A kind's row IS its spec model (see ``agentworks.declared_resource``), with
-one exception that both derived surfaces have to handle identically: a kind
-whose spec SELECTS a capability carries a
-:class:`~agentworks.schema.CapabilityBlock` on the naming field (``name``
-plus ``extra="allow"``), because the extra keys belong to another owner.
-That is right for the row and useless to anyone describing the document: the
-keys an operator may write inside ``platform:`` are the selected platform's,
-and they are knowable, from the union over the registered implementations.
+Capability host fields carry either a tagged ``CapabilityBlock`` or a map of
+``CapabilityConfig`` values selected by their integration keys. Those carriers
+accept capability-owned fields until finalization, while document schema and
+reference output need the selected implementations' concrete models. This
+module projects tagged unions and key-specific config maps from that ownership.
 
 So :func:`spec_model` is the one answer to "what does a ``kind`` document's
 ``spec`` look like", and both the JSON Schema emitter (``manifests/emit.py``)
@@ -26,7 +23,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Annotated, Any
 
-from pydantic import StringConstraints, create_model
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter, create_model
 from pydantic.fields import FieldInfo
 from pydantic.json_schema import SkipJsonSchema
 
@@ -37,9 +34,17 @@ from agentworks.schema import AgwModel, NonEmptyStr
 from agentworks.schema._shape import unwrap_optional
 
 if TYPE_CHECKING:
-    from pydantic import BaseModel
-
     from agentworks.capabilities.descriptor import CapabilityKindDescriptor, HostSurface
+
+
+class _ActivationMapProjection(AgwModel):
+    """Unknown integration names may be disabled without loading their implementation."""
+
+    model_config = ConfigDict(
+        extra="allow",
+        json_schema_extra={"propertyNames": TypeAdapter(NonEmptyStr).json_schema()},
+    )
+    __pydantic_extra__: dict[NonEmptyStr, None] = Field(init=False)
 
 
 def declarable_kinds() -> tuple[str, ...]:
@@ -75,23 +80,37 @@ def spec_model(kind: str) -> type[BaseModel]:
     naming, collisions, and reference integrity, and the field-reference
     walk sees one ordinary model.
 
-    The splice replaces the field's MODEL and nothing else about it. A row
-    whose capability block is optional (``session-template``'s
-    ``harness_integration: CapabilityBlock | None = None``) keeps its null
-    arm, because ``harness_integration: null`` loads: dropping it would
-    describe a document the loader accepts as invalid.
+    Optional host fields retain their null arm and defaults. Tagged selectors
+    project a union; map selectors project each registered integration's own
+    facet model.
     """
     _seat_plugin_capabilities()
     row = row_model(kind)
     projected: type[BaseModel] = row
     for descriptor, host in hosted_capabilities(kind):
-        from agentworks.capabilities.config import capability_config_union
+        from agentworks.capabilities.config import (
+            capability_config_union,
+            config_model_for,
+            registered_implementations,
+        )
 
         field_name = host.naming_field
         field = projected.model_fields[field_name]
-        union: Any = capability_config_union(descriptor.kind, facet=host.facet)
-        if host.cardinality == "list":
-            union = list[union]
+        if host.cardinality == "mapping":
+            union: Any = built_model(
+                f"{class_name(kind)}{class_name(field_name)}Map",
+                base=_ActivationMapProjection,
+                doc="Integration names select their own facet config.",
+                fields={
+                    f"integration_{index}": (
+                        config_model_for(implementation, facet=host.facet) | None,
+                        Field(default=None, validate_default=False, alias=name),
+                    )
+                    for index, (name, implementation) in enumerate(registered_implementations(descriptor.kind).items())
+                },
+            )
+        else:
+            union = capability_config_union(descriptor.kind, facet=host.facet)
         _declared, optional = unwrap_optional(field.annotation)
         if optional:
             union = union | None

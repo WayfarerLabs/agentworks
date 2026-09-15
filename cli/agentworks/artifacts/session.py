@@ -15,7 +15,7 @@ from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.model import NativeSetupState, SetupRecord
 from agentworks.harness_setup.state import read_native_setup, replace_setup_record, write_native_setup
 from agentworks.native_files import native_path
-from agentworks.schema import CapabilityBlock
+from agentworks.schema import CapabilityConfig
 
 if TYPE_CHECKING:
     from agentworks.db import Database, SessionRow, VMRow, WorkspaceRow
@@ -91,7 +91,7 @@ def prepare_session_artifacts(
         "session",
         name,
         "session",
-        (CapabilityBlock.of(template.harness_integration, **template.harness_integration_config),),
+        {template.harness_integration: CapabilityConfig.model_validate(template.harness_integration_config)},
         secret_target,
         template.artifacts,
         capture,
@@ -132,7 +132,7 @@ def stage_session_artifacts(
         component="session",
         integration=integration,
         destination_id=hashlib.sha256(context.directory.encode()).hexdigest(),
-        declaration=prepared.setup_inputs.declaration(prepared.setup_inputs.activations[0]),
+        declaration=prepared.setup_inputs.declaration(integration, prepared.setup_inputs.activations[integration]),
         artifact_inputs=tuple(item.identity for item in context.inputs.items()),
         artifact_files=retained,
     )
