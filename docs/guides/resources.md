@@ -764,7 +764,7 @@ spec:
   backend:
     name: onepassword
     account: work.example.com
-    timeout: 30
+    timeout: 300
     app_authentication_impact: operator-action
 ```
 
@@ -773,7 +773,7 @@ Enable the `onepassword` plugin, add `work-op` to the chain, and map a secret wi
 `prompt` source names remain valid unchanged. A direct configured-backend reference such as
 `onepassword` breaks in 0.14; the error gives the exact source declaration and reference rewrite,
 with no compatibility row or legacy parser. When rewriting the old OnePassword mapping table, move
-its account to the source. The timeout bounds the complete source turn and defaults to 30 seconds.
+its account to the source. The timeout bounds the complete source turn and defaults to 300 seconds.
 
 `app_authentication_impact` is conservative by default: zero-impact preview returns
 `indeterminate/operator-impact-limited` without checking availability when app authentication may

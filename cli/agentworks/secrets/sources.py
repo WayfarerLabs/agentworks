@@ -319,7 +319,7 @@ def direct_backend_source_error(
                     "spec:\n"
                     "  backend_mappings:\n"
                     f"    <source-name>: {json.dumps(reference)}\n\n"
-                    "The source timeout defaults to 30 seconds and may be set with "
+                    "The source timeout defaults to 300 seconds and may be set with "
                     "spec.backend.timeout."
                 )
     return ConfigError(message, hint=hint)

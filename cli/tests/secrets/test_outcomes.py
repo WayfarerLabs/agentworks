@@ -5,12 +5,14 @@ from __future__ import annotations
 import pytest
 
 from agentworks.capabilities.secret_backend import BlockReason, FailureReason
+from agentworks.errors import ConnectivityError, ExternalError, SecretMappingError, SecretUnavailableError
 from agentworks.secrets.outcomes import (
     ResolutionBlocked,
     ResolutionFailed,
     ResolutionMissing,
     ResolutionOutcome,
     ResolutionResolved,
+    complete_resolution_error,
     format_outcome,
 )
 
@@ -50,3 +52,34 @@ def test_batch_doomed_is_an_unattributed_final_outcome_only() -> None:
     assert outcome.source is None
     with pytest.raises(ValueError):
         ResolutionOutcome("secret", ResolutionBlocked(BlockReason.BATCH_DOOMED), source="fixture")
+
+
+@pytest.mark.parametrize(
+    ("reason", "error_type"),
+    [
+        (FailureReason.INVALID_MAPPING, SecretMappingError),
+        (FailureReason.LOOKUP_REJECTED, SecretMappingError),
+        (FailureReason.CONNECTIVITY, ConnectivityError),
+        (FailureReason.DEADLINE_EXCEEDED, SecretUnavailableError),
+        (FailureReason.AUTHENTICATION, ExternalError),
+        (FailureReason.EXTERNAL, ExternalError),
+        (FailureReason.MALFORMED_VALUE, ExternalError),
+        (FailureReason.BACKEND_PROTOCOL, ExternalError),
+        (FailureReason.UNEXPECTED, ExternalError),
+    ],
+)
+def test_failed_resolution_maps_to_error_taxonomy(
+    reason: FailureReason,
+    error_type: type[Exception],
+) -> None:
+    outcome = ResolutionOutcome(
+        "secret",
+        ResolutionFailed(reason),
+        source="fixture",
+        identifier="safe-identifier",
+        backend="onepassword",
+    )
+
+    error = complete_resolution_error((outcome,))
+
+    assert type(error) is error_type

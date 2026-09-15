@@ -14,7 +14,7 @@ import typer
 
 from agentworks.cli import _record_unhandled_error
 from agentworks.cli._errors import echo_hint
-from agentworks.errors import ExternalError, StateError
+from agentworks.errors import ExternalError, SecretUnavailableError, StateError
 from agentworks.output import AgentworksError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.ssh import SSHError
@@ -73,6 +73,34 @@ def test_record_unhandled_error_handles_unusable_log_dir(tmp_path: Path, monkeyp
         result = _record_unhandled_error(exc)
 
     assert result is None
+
+
+def test_main_wrapper_renders_secret_unavailability_without_a_traceback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Expected secret unavailability is a clean domain failure."""
+    from agentworks import cli as cli_mod
+    from agentworks.cli import _entry
+
+    def fake_app() -> None:
+        raise SecretUnavailableError("secret unavailable", hint="retry")
+
+    record_calls: list[BaseException] = []
+    monkeypatch.setattr(cli_mod, "app", fake_app)
+    monkeypatch.setattr(_entry, "record_unhandled_error", lambda exc: record_calls.append(exc))
+    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("sys.argv", ["agentworks", "fixture"])
+    monkeypatch.setenv("AGW_DEBUG", "")
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_mod.main()
+
+    assert exc_info.value.code == 1
+    assert "Traceback" not in capsys.readouterr().err
+    assert record_calls == []
+    assert not (tmp_path / "logs" / "error.log").exists()
 
 
 def test_main_wrapper_catches_unhandled_exception(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
