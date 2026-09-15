@@ -23,7 +23,7 @@ _INLINE_COMMAND_PATTERNS = (
     re.compile(r"'(agw(?:\s+[^']+)?)'"),
     re.compile(r'"(agw(?:\s+[^\"]+)?)"'),
 )
-_GENERIC_SEGMENTS = frozenset({"COMMAND", "GROUP", "VALUE"})
+_AUTHORED_COMMAND_SEGMENTS = frozenset({"COMMAND", "GROUP"})
 _GUIDANCE_CATEGORIES = frozenset({"guide", "kind", "capability", "hint"})
 
 
@@ -118,10 +118,7 @@ def _scope_nodes(scope: ast.Module | ast.FunctionDef | ast.AsyncFunctionDef) -> 
         stack.extend(reversed(list(ast.iter_child_nodes(node))))
 
 
-def _scope_bindings(
-    scope: ast.Module | ast.FunctionDef | ast.AsyncFunctionDef,
-    tree: ast.Module,
-) -> dict[str, tuple[ast.expr, ...]]:
+def _scope_bindings(scope: ast.Module | ast.FunctionDef | ast.AsyncFunctionDef) -> dict[str, tuple[ast.expr, ...]]:
     values: dict[str, list[ast.expr]] = {}
     for node in _scope_nodes(scope):
         if isinstance(node, ast.Assign):
@@ -130,19 +127,6 @@ def _scope_bindings(
                     values.setdefault(target.id, []).append(node.value)
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
             values.setdefault(node.target.id, []).append(node.value)
-
-    if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
-        positional_names = [parameter.arg for parameter in (*scope.args.posonlyargs, *scope.args.args)]
-        parameter_names = [*positional_names, *(parameter.arg for parameter in scope.args.kwonlyargs)]
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name) or node.func.id != scope.name:
-                continue
-            for name, argument in zip(positional_names, node.args, strict=False):
-                values.setdefault(name, []).append(argument)
-            for keyword in node.keywords:
-                if keyword.arg in parameter_names:
-                    values.setdefault(keyword.arg, []).append(keyword.value)
-
     return {name: tuple(expressions) for name, expressions in values.items()}
 
 
@@ -152,7 +136,7 @@ def _hint_templates(path: Path) -> Iterator[tuple[int, str]]:
     scopes.extend(node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)))
     for scope in scopes:
         nodes = tuple(_scope_nodes(scope))
-        bindings = _scope_bindings(scope, tree)
+        bindings = _scope_bindings(scope)
         indirect_names = {
             keyword.value.id
             for node in nodes
@@ -231,7 +215,9 @@ def _validate_command_prefix_and_options(command: str, root: CommandSpec) -> str
                 index += 1
                 continue
             if current.subcommands:
-                if token in _GENERIC_SEGMENTS:
+                if token == "VALUE":
+                    return f"unresolved command segment {token!r}"
+                if token in _AUTHORED_COMMAND_SEGMENTS:
                     matches = (
                         validate_from(child, index + 1, options_enabled) is None
                         for child in current.subcommands.values()
@@ -267,8 +253,10 @@ def test_command_resolution_checks_paths_and_options_without_executing() -> None
     spec = build_spec(app)
 
     assert _validate_command_prefix_and_options("agw vm start NAME", spec) is None
-    assert _validate_command_prefix_and_options("agw VALUE", spec) is None
     assert _validate_command_prefix_and_options("agw guide --agent show TOPIC", spec) is None
+    assert _validate_command_prefix_and_options("agw GROUP --help", spec) is None
+    assert _validate_command_prefix_and_options("agw VALUE", spec) is not None
+    assert _validate_command_prefix_and_options("agw GROUP --retired", spec) is not None
     assert _validate_command_prefix_and_options("agw vm retired NAME", spec) is not None
     assert _validate_command_prefix_and_options("agw vm start NAME --retired", spec) is not None
     assert _validate_command_prefix_and_options("agw guide --agent retired TOPIC", spec) is not None
@@ -297,11 +285,9 @@ def carry_remediation(name: str) -> str:
     remediation = f"Run `agw agent reinit {name}`."
     return build(remediation=remediation)
 
-def command_hint(command_path: str) -> str:
+def command_hint(use_list: bool) -> str:
+    command_path = "vm list" if use_list else "doctor"
     return f"Run `agw {command_path}`."
-
-def use_command_hint() -> None:
-    raise RuntimeError("failed", hint=command_hint("vm list"))
 ''',
         encoding="utf-8",
     )
@@ -310,7 +296,8 @@ def use_command_hint() -> None:
         (4, "Run `agw session VALUE VALUE --force`."),
         (11, "Run `agw vm start VALUE`."),
         (15, "Run `agw agent reinit VALUE`."),
-        (19, "Run `agw vm list`."),
+        (20, "Run `agw vm list`."),
+        (20, "Run `agw doctor`."),
     ]
 
 

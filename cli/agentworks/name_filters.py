@@ -28,7 +28,6 @@ def _check_filter(
     kind: str,
     label: str,
     defined: set[str],
-    list_command: str,
 ) -> None:
     """Raise ``NotFoundError`` naming every unknown element of one filter.
 
@@ -43,6 +42,16 @@ def _check_filter(
         message = f"unknown {label} '{unknown[0]}'"
     else:
         message = f"unknown {label}s: " + ", ".join(f"'{n}'" for n in unknown)
+    if kind == "vm":
+        list_command = "vm list"
+    elif kind == "workspace":
+        list_command = "workspace list"
+    elif kind == "agent":
+        list_command = "agent list"
+    elif kind == "console":
+        list_command = "console list"
+    else:
+        raise AssertionError(f"unsupported name filter kind: {kind}")
     raise NotFoundError(
         message,
         entity_kind=kind,
@@ -74,7 +83,6 @@ def validate_name_filters(
             kind="vm",
             label="VM",
             defined={vm.name for vm in db.list_vms()},
-            list_command="vm list",
         )
     if workspace_name is not None:
         _check_filter(
@@ -82,7 +90,6 @@ def validate_name_filters(
             kind="workspace",
             label="workspace",
             defined={ws.name for ws in db.list_workspaces()},
-            list_command="workspace list",
         )
     if agent_name is not None:
         _check_filter(
@@ -90,7 +97,6 @@ def validate_name_filters(
             kind="agent",
             label="agent",
             defined={agent.name for agent in db.list_agents()},
-            list_command="agent list",
         )
     if console_name is not None:
         _check_filter(
@@ -98,5 +104,4 @@ def validate_name_filters(
             kind="console",
             label="console",
             defined={console.name for console in db.list_consoles()},
-            list_command="console list",
         )
