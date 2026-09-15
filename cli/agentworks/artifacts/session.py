@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication, OwnedArtifactFile, SessionArtifactContext
 from agentworks.artifacts.publication import publish_artifacts, validate_application
 from agentworks.artifacts.state import CapturedArtifacts, capture_owner, write_capture
@@ -110,6 +111,16 @@ def validate_session_application(
         raise StateError("session artifacts conflict with an ancestor artifact destination")
     if any(not item.path.startswith(context.directory + "/") for item in result.files):
         raise StateError("session artifact publication must use its private run directory")
+    artifacts = {item.identity: item for item in context.inputs.items()}
+    for deferred in result.deferred:
+        artifact = artifacts[deferred.input_id]
+        origin = artifact.origin
+        output.warn(
+            f"Integration '{integration}' left {artifact.content.type.value} '{artifact.content.name}' "
+            f"from {origin.component} {origin.resource_kind}/{origin.resource_name} "
+            f"(producer {origin.producer}, bundle {origin.bundle}) unhandled at the session facet: "
+            f"{deferred.reason}"
+        )
     return result
 
 
@@ -135,6 +146,7 @@ def stage_session_artifacts(
         declaration=prepared.setup_inputs.declaration(integration, prepared.setup_inputs.activations[integration]),
         artifact_inputs=tuple(item.identity for item in context.inputs.items()),
         artifact_files=retained,
+        deferred=application.deferred,
     )
 
     def checkpoint(files: tuple[OwnedArtifactFile, ...]) -> None:

@@ -340,3 +340,48 @@ def test_final_root_permission_denial_only_completes_when_directory_is_verified_
     assert removals == [str(root / "SKILL.md")]
     if unowned:
         assert (root / "operator-note.txt").read_text() == "retain this"
+
+
+@pytest.mark.parametrize("invalid", [None, "unknown", "duplicate", "route", "file", "directory", "escape"])
+def test_terminal_warning_follows_complete_session_validation(captured_output, invalid):
+    from agentworks.artifacts.application import SessionArtifactContext
+    from agentworks.artifacts.session import validate_session_application
+
+    item = ArtifactInput(
+        ArtifactContent(ArtifactType.HINT, "setup", text="private hint"),
+        ArtifactProvenance(),
+        ArtifactOrigin("vm", "vm", "box", producer="core", bundle="team", entry="setup"),
+    )
+    context = SessionArtifactContext(
+        inputs=received(item), home="/home/user", directory="/home/user/run", session_uuid="session", run_id="run"
+    )
+    deferred = ArtifactDeferral(input_id=item.identity, destination="session", reason="fixture-workaround")
+    application = ArtifactApplication(deferred=(deferred,))
+    if invalid in ("unknown", "duplicate", "route"):
+        second = ArtifactDeferral(
+            input_id="a" * 64 if invalid == "unknown" else item.identity,
+            destination="user" if invalid == "route" else "session",
+            reason="unsupported",
+        )
+        application = ArtifactApplication(deferred=(second,) if invalid == "route" else (deferred, second))
+    elif invalid == "file":
+        application = ArtifactApplication(
+            deferred=(deferred,), files=(ArtifactFile("/home/user/run/file", b"body", ("a" * 64,)),)
+        )
+    elif invalid == "directory":
+        application = ArtifactApplication(deferred=(deferred,), artifacts_dir="/home/user/other-run")
+    elif invalid == "escape":
+        application = ArtifactApplication(
+            deferred=(deferred,), files=(ArtifactFile("/home/user/shared", b"body", (item.origin_identity,)),)
+        )
+    if invalid is not None:
+        with pytest.raises(StateError):
+            validate_session_application(application, context, integration="fixture")
+        assert not captured_output.warnings
+    else:
+        assert validate_session_application(application, context, integration="fixture") == application
+        assert len(captured_output.warnings) == 1
+        warning = captured_output.warnings[0]
+        for value in ("fixture", item.content.name, item.origin.resource_name, item.origin.bundle, deferred.reason):
+            assert value in warning
+        assert item.content.text not in warning

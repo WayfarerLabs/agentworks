@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 
 class ArtifactDeferral(AgwModel):
-    """An unchanged input routed by an integration, validated at its boundary."""
+    """An unchanged input routed inward, or left unhandled at the session facet."""
 
     input_id: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
     destination: ArtifactFacet
@@ -70,7 +70,7 @@ class OwnedArtifactFile(AgwModel):
 
 @dataclass(frozen=True)
 class ArtifactApplication:
-    """A native delivery plan; only deferred inputs need a later facet."""
+    """A native delivery plan with deferred inputs, terminally unhandled at session."""
 
     files: tuple[ArtifactFile, ...] = ()
     deferred: tuple[ArtifactDeferral, ...] = ()
