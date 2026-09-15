@@ -235,11 +235,12 @@ attempt already committed.
 ## Atomic Reconciliation
 
 Add a database operation that updates session runtime only when the row still matches all prepared
-runtime identity fields. It uses one `UPDATE ... WHERE name = ? AND socket_path IS ? AND pid IS ?`
-plus the corresponding boot ID and start-ticks predicates, checks `rowcount == 1`, and commits
-through the existing transaction policy. After zero affected rows, it reads the row once: an exact
-match for the desired state means an earlier interrupted reconciliation already committed and is
-idempotent success; any other or missing row is a typed conflict and remains untouched.
+identity fields. Its single conditional `UPDATE` predicates on the reusable name, durable session
+UUID, nullable managed-run ID, socket path, PID, boot ID, and start ticks. It checks `rowcount == 1`
+and commits through the existing transaction policy. After zero affected rows, it reads the row
+once: an exact durable-identity and desired-runtime-state match means an earlier interrupted
+reconciliation already committed and is idempotent success; any other or missing row is a typed
+conflict and remains untouched.
 
 `reconcile_dedicated_teardown(db, plan)` runs on the invoking thread after a normally returned
 future. It compare-and-sets from the plan's complete expected identity to the persisted socket,
