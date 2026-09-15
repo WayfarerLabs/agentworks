@@ -184,7 +184,7 @@ were changed by it.
   a registered resource kind (`artifacts/kinds.py:69`) declaring four types: hint, rule, skill, and
   agent personas (`artifacts/model.py:29-32`). Hints and rules may be inline text or a source
   reference (`artifacts/declarations.py:54-58`); skills and agent personas require a source
-  (`:77-88`) and have no inline form. `agw artifacts show` explains declarations and recorded
+  (`:77-88`) and have no inline form. `agw artifact show` explains declarations and recorded
   delivery without applying anything. Claude, Codex, and grok have native artifact modules; shell's
   delivery lives at `artifacts/native/shell.py` and does not claim to load files into model context.
 - **Applied state gained two keys without touching the table.** `AppliedStateKey` carries

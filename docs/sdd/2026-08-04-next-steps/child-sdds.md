@@ -761,6 +761,13 @@ Merged work the ledger owes a line, recorded from the merges themselves.
   non-string keys rather than silently accepting ineffective configuration. It also refuses YAML
   aliases and anchors and bounds document depth, which matters because artifact sources can be Git
   references, so this parser reads content the operator did not author.
+- **Artifact command group singularized** (PR #806, merged 2026-09-15 as `b2df951d`).
+  `agw artifacts show` became `agw artifact show` to match the singular command groups, with no
+  plural alias retained. Complete across command registration, completion selectors, the
+  machine-facing JSON `command` identifier, tests, and current docs. Recorded because it falsified a
+  line in `current-state.md` that the saga lead had merged hours earlier; that line is corrected in
+  the same round rather than pre-emptively, since before this merged the plural was what `main`
+  actually had.
 
 ### Efforts that ran without ledger entries (reconstructed 2026-09-06)
 
