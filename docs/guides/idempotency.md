@@ -165,11 +165,13 @@ Activated workspace integration facets run after workspace directory and reposit
 explicit workspace recreation. Session create, start, and restart inspect declared prerequisites
 without implicitly running any ancestor setup.
 
-Owning setup receives both the effective activation list and prior applied state. It reconciles
+Owning setup receives both the effective activation map and prior applied state. It reconciles
 matching owned effects, retires removed associations where ownership can be established, and
 preserves incomplete or pending cleanup evidence on failure. Removing an activation from config
-therefore takes effect at the next owning setup operation, not at configuration load. List omission
-inherits, an authored list replaces the complete inherited list, and `[]` requests no activations.
+therefore takes effect at the next owning setup operation, not at configuration load. Omitting the
+map or supplying `{}` inherits existing activations. Entries merge by integration name, with each
+configuration following its facet's merge rules. A null entry, such as `codex: null`, disables that
+integration while preserving the others; a later layer can reactivate it with fresh configuration.
 
 Cleanup is deliberately bounded. Settings mappings retain their native document when removed and
 have no separate ownership claims; they do not restore overwritten values. Native plugins and
