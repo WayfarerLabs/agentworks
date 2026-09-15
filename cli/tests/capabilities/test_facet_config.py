@@ -239,6 +239,7 @@ def test_map_schema_keeps_key_specific_models_and_session_cardinality(seated: No
     Draft202012Validator.check_schema(schema)
     validator = Draft202012Validator(schema)
     config: object
+    document: dict[str, object]
     for config in ({"shell": {}}, {"facet-test": {"session_token": "secret"}}, {}):
         document = {"harness_integration": config}
         assert validator.is_valid(document)
