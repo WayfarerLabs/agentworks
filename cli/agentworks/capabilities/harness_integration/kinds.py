@@ -70,9 +70,9 @@ class _HarnessIntegrationKind:
         ordinary start resumes existing harness state when possible, and which commands
         have to exist on the target before launch.
 
-        Integrations are code, and a session-template selects one by writing its name
-        as a key in `spec.harness_integration`. The value contains that integration's
-        own config, which is why each documents its fields. Every template
+        Integrations are code, and a session-template selects one with a tagged block,
+        such as `spec.harness_integration: {name: codex}`. Other fields in that block
+        contain the integration's own config. Every template
         lineage must select an integration; the synthesized default selects `shell`.
         """,
     )

@@ -584,14 +584,7 @@ def config_model_for(impl: type, *, facet: Facet | None = None) -> type[BaseMode
     descriptor = descriptor_for_impl(impl)
     if descriptor is None or not descriptor.config_facets:
         raise StateError(f"{impl.__name__} offers no config model")
-    if descriptor.config_schema.discriminator is None:
-        return AgwModel
-    name = str(cast("type[Capability]", impl).name)
-    key = (impl, name)
-    if key not in _TAG_MODEL_CACHE:
-        tag: Any = Literal[name]
-        _TAG_MODEL_CACHE[key] = create_model(f"{impl.__name__}NoConfig", __base__=AgwModel, name=(tag, ...))
-    return _TAG_MODEL_CACHE[key]
+    return AgwModel
 
 
 def _seated_impl(descriptor: CapabilityKindDescriptor, name: str) -> type | None:

@@ -82,7 +82,7 @@ def spec_model(kind: str) -> type[BaseModel]:
 
     Optional host fields retain their null arm and defaults. Tagged selectors
     project a union; map selectors project each registered integration's own
-    facet model and retain the host's entry limit.
+    facet model.
     """
     _seat_plugin_capabilities()
     row = row_model(kind)

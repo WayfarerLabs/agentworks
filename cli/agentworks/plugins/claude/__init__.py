@@ -12,7 +12,7 @@ Both rows are present-but-disabled until an operator opts in with
 ``[plugins] system = ["claude"]``:
 
 - The harness integration row publishes with a ``system-plugin`` origin; a
-  ``session-template`` whose ``spec.harness_integration`` map selects
+  ``session-template`` whose ``spec.harness_integration.name`` selects
   ``claude-code`` STAYS ready (it does not propagate), and
   ``ensure_harness_integration_enabled`` refuses it at session create/start/restart with the
   "enable plugin `claude`" hint until enabled.
