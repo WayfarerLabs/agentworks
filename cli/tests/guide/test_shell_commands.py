@@ -79,14 +79,17 @@ def _authored_commands(text: str) -> set[str]:
     continuation = ""
     for line in text.splitlines():
         if line.startswith("```"):
+            if continuation:
+                raise ValueError("unfinished continuation in authored shell command")
             fence = None if fence is not None else line[3:].strip()
-            continuation = ""
         elif fence in {"bash", "sh", "shell"}:
             if line.endswith("\\"):
                 continuation += line[:-1] + " "
             else:
                 commands.update(_shell_commands(continuation + line))
                 continuation = ""
+    if continuation:
+        raise ValueError("unfinished continuation in authored shell command")
     return commands
 
 
@@ -309,6 +312,18 @@ agw vm start \\
 
     with pytest.raises(ValueError, match="malformed shell quoting"):
         _authored_commands('Use `agw retired "unterminated`.')
+
+
+@pytest.mark.parametrize(
+    "text",
+    (
+        "```bash\nagw retired \\\n```",
+        "```bash\nagw retired \\",
+    ),
+)
+def test_authored_command_extraction_rejects_unfinished_continuations(text: str) -> None:
+    with pytest.raises(ValueError, match="unfinished continuation"):
+        _authored_commands(text)
 
 
 def test_command_resolution_checks_paths_and_options_without_executing() -> None:
