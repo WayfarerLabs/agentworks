@@ -6,11 +6,13 @@ import hashlib
 import json
 import shlex
 import tomllib
+from collections.abc import Callable
 from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
 
+from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication, OwnedArtifactFile, SessionArtifactContext
 from agentworks.artifacts.model import (
     ArtifactContent,
@@ -20,7 +22,7 @@ from agentworks.artifacts.model import (
     ArtifactProvenance,
     ArtifactType,
 )
-from agentworks.artifacts.native.common import native_home, validate_ancestor_names
+from agentworks.artifacts.native.common import NativeSessionArtifacts, native_home, validate_ancestor_names
 from agentworks.artifacts.native.probe import probe_native
 from agentworks.artifacts.native.shell import shell_artifacts
 from agentworks.artifacts.publication import validate_application
@@ -36,7 +38,7 @@ from agentworks.plugins.grok.harness_integration import GrokBuildIntegration
 from tests.artifacts._fixtures import received
 
 
-def enabled(render):
+def enabled(render: Callable[..., NativeSessionArtifacts]) -> list[str]:
     return {
         claude.session_artifacts: ["session-prompt", "session-skill-plugin", "session-agent-definitions"],
         codex.session_artifacts: ["session-developer-instructions", "session-agent-config"],
@@ -376,10 +378,15 @@ def test_native_launch_carries_literal_artifact_guidance_on_new_and_resumed_thre
 
 @pytest.mark.parametrize("fresh", [False, True])
 @pytest.mark.parametrize("name", ["reviewer", "review-2", "123", "r" * 64])
-def test_codex_literal_role_and_guidance_overrides_apply_on_resume_and_new(fresh, name):
+@pytest.mark.parametrize("include_rule", [False, True])
+def test_codex_literal_role_and_guidance_overrides_apply_on_resume_and_new(fresh, name, include_rule):
     item = artifact(ArtifactType.RULE)
     persona = artifact(ArtifactType.AGENT, name=name)
-    persona = replace(persona, content=replace(persona.content, description='Review "x=y".\n{{session_name}} café'))
+    persona = replace(
+        persona,
+        content=replace(persona.content, description='Review "developer_instructions=x".\n{{session_name}} café'),
+    )
+    artifacts = context(item, persona) if include_rule else context(persona)
     integration = CodexIntegration(
         "codex",
         {"developer_instructions": "configured guidance"},
@@ -390,11 +397,11 @@ def test_codex_literal_role_and_guidance_overrides_apply_on_resume_and_new(fresh
         target=None,
         admin=True,
         state={},
-        artifact_context=context(item, persona),
+        artifact_context=artifacts,
     )
     integration._artifact_plan = codex.session_artifacts(
-        enabled_workarounds=enabled(codex.session_artifacts),
-        context=context(item, persona),
+        enabled_workarounds=enabled(codex.session_artifacts) if include_rule else ["session-agent-config"],
+        context=artifacts,
         configured="configured guidance",
         extra_args=[],
     )
@@ -408,7 +415,9 @@ def test_codex_literal_role_and_guidance_overrides_apply_on_resume_and_new(fresh
     for value in values:
         key, raw_value = value.split("=", 1)
         combined[key.strip()] = tomllib.loads("value=" + raw_value.strip())["value"]
-    assert combined["developer_instructions"] == "configured guidance\n\n" + item.content.text
+    assert combined["developer_instructions"] == "configured guidance" + (
+        "\n\n" + item.content.text if include_rule else ""
+    )
     assert {key for key in combined if key.startswith("agents.")} == {
         f"agents.{name}.config_file",
         f"agents.{name}.description",
@@ -669,6 +678,9 @@ def test_skipped_inputs_do_not_probe_or_require_launch_target(monkeypatch, imple
         ("2.1.264 (Claude Code)", 0, False, False),
         ("2.1.265 (Claude Code)", 0, True, False),
         ("2.2.0 (Claude Code)", 0, True, False),
+        ("node 22.18.0\n2.1.264 (Claude Code)\n", 0, False, False),
+        ("startup helper 1.0.0\n2.1.265 (Claude Code)\n", 0, True, False),
+        ("2.1.265", 0, False, True),
         ("unrecognized", 0, False, True),
         ("2.1.265", 1, False, True),
     ],
@@ -684,7 +696,7 @@ def test_claude_snapshot_adjustment_is_narrow_and_unknown_versions_warn(
     target = Mock(spec=Transport)
     target.run.return_value = SSHResult(returncode, version, "")
     warning = Mock()
-    monkeypatch.setattr(claude.output, "warn", warning)
+    monkeypatch.setattr(output, "warn", warning)
     result = claude.session_prompt_snapshot(target, {})
     assert result == (("--system-prompt-snapshot", "off") if snapshot else ())
     assert warning.called is warn
@@ -720,7 +732,7 @@ def test_claude_snapshot_observation_timeout_warns_and_continues(monkeypatch):
     target = Mock(spec=Transport)
     target.run.side_effect = SSHError("fixture timed out")
     warning = Mock()
-    monkeypatch.setattr(claude.output, "warn", warning)
+    monkeypatch.setattr(output, "warn", warning)
     assert claude.session_prompt_snapshot(target, {"TOKEN": "fixture-secret"}) == ()
     warning.assert_called_once()
 

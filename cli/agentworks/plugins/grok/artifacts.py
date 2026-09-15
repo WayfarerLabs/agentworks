@@ -104,7 +104,7 @@ def session_artifacts(
     validate_names(inputs)
     selected_types = {item.content.type for item in inputs.items()}
     ancestor_names = {file.native_identity or "" for file in context.ancestor_files}
-    has_skills = ArtifactType.SKILL in selected_types or any(name.startswith("skill:") for name in ancestor_names)
+    has_skills = any(name.startswith("skill:") for name in ancestor_names)
     has_agents = ArtifactType.AGENT in selected_types or any(name.startswith("agent:") for name in ancestor_names)
     forbidden = set()
     if selected_types & {ArtifactType.HINT, ArtifactType.RULE}:

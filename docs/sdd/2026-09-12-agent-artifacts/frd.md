@@ -258,7 +258,7 @@ and from an implemented facet that needs no native changes. Successful setup alo
 artifact was handled. The approved result contract lists what remains deferred; a successful
 application reports other inputs as handled. The integration must fulfill that delivery obligation
 through its supported native mechanism, which can include launch arguments without a published file.
-Core validates the result and rejects every final-session deferral with its source and reason. An
+Core validates the result and warns for every final-session deferral with its source and reason. An
 integration silently dropping an input violates the handling contract; omission from the deferral
 list does not independently prove native consumption. No per-item acknowledgment ledger or
 file-or-deferral coverage requirement is added.

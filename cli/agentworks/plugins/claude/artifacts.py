@@ -181,7 +181,7 @@ def session_prompt_snapshot(runner: Transport, environment: Mapping[str, str]) -
             timeout=20,
         )
         if result.returncode == 0:
-            version = re.search(r"\b(\d+)\.(\d+)\.(\d+)\b", result.stdout)
+            version = re.search(r"^\s*(\d+)\.(\d+)\.(\d+) \(Claude Code\)\s*$", result.stdout, re.MULTILINE)
     except SSHError:
         pass
     if version is None:

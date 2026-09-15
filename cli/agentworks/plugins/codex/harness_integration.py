@@ -992,8 +992,8 @@ class CodexIntegration(HarnessIntegration):
         """
         parts = [shlex.quote(token) for token in (*head, *self._managed_flags())]
         parts += ["-c", notify_value_word(self._session_name)]
-        if self.config.developer_instructions is not None and "developer_instructions=" not in " ".join(
-            self._artifact_plan.argv
+        if self.config.developer_instructions is not None and not any(
+            token.startswith("developer_instructions=") for token in self._artifact_plan.argv
         ):
             value = _toml_basic_string(self.config.developer_instructions)
             parts += ["-c", quote_literal_argv(f"developer_instructions={value}")]
