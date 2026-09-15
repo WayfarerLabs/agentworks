@@ -787,6 +787,23 @@ Merged work the ledger owes a line, recorded from the merges themselves.
     a constraint before designing around it.
   - **Saga-lead note:** a lane can report green and still be blind, and what caught this was
     re-running against the real artifact rather than any additional depth of review.
+- **Integration activations became maps** (PR #816, merged 2026-09-15 as `a22d5cb6`). Child
+  templates replacing the whole `harness_integrations` list silently dropped inherited activations,
+  so adding one integration removed the rest. Keyed by integration name, inheritance is additive:
+  omitting the map or `{}` inherits, same-key config merges under the facet's schema, and
+  `codex: null` disables that integration while a later layer can reactivate it with fresh config.
+  - **The shape change was free, and that window is closing.** `harness_integrations` is absent from
+    v0.18.0 and entered with wave 4, which is still unreleased in PR #748, so no operator manifest
+    uses the list form and no migration was needed. The same reasoning made the
+    `artifact`/`artifacts` rename free. Both windows close when 0.19.0 cuts; a shape regret found
+    afterward costs a migration.
+  - **It also answers the contract's open ordering question.** `scope-participation-contract.md`
+    left "ordering and conflict reporting when multiple integrations attach at one broader scope" to
+    wave 4. Dispatch iterates the activation map for desired work and retires removed activations in
+    recorded prior order, so the order that carries meaning is retirement order, not declaration
+    order. That is the defensible split: retirement has a real sequencing constraint, while
+    application order between independent integrations at one scope has no principled basis to
+    prefer. Recorded here because the answer otherwise lives only in a merged diff.
 
 ### Efforts that ran without ledger entries (reconstructed 2026-09-06)
 
