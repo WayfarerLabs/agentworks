@@ -419,8 +419,23 @@ selector keeps its existing tagged shape and setup activation maps support expli
 - [x] Give historical saved setup lists an explicit migration disposition; preserve compatible saved
       session selections and unrelated instance config.
 - [x] Update permanent guides, samples, reference projection, and the governing design together.
-- [ ] Keep the single session selector unchanged and add per-key null opt-outs to setup maps,
+- [x] Keep the single session selector unchanged and add per-key null opt-outs to setup maps,
       including persisted instance specs and removal of inherited config references.
-- [ ] Verify inheritance, defaults, selection replacement, source attribution, saved-state recovery,
+- [x] Verify inheritance, defaults, selection replacement, source attribution, saved-state recovery,
       readiness, and lifecycle behavior; run required gates and independent private review lanes.
 - [ ] Publish the complete PR ready for review and monitor its feedback under the delivery process.
+
+The clarified implementation passed 9,657 non-integration tests with seven skips, Ruff lint/format,
+and strict mypy across 849 files. File lint, locked-SDD and Rulesync checks passed, alongside 160
+Python and 103 Node website tests and deterministic double builds for both site bases. An isolated
+home running the real CLI verified inherited siblings, same-key configuration and source
+attribution, null removal, fresh reactivation, the unchanged session selector, and resource
+sample/explain output. No live VM provisioning was performed in this author run; the ready handoff
+triggers the normal independent PR validation pipeline.
+
+Project, generic correctness, and complexity reviews covered the implementation and the operator's
+session/null clarifications. Corrections preserved reserved integration names and non-string mapping
+references, kept unrelated unreadable saved state protected during explicit list migration, fixed
+session guidance, and removed the obsolete tagged-facet cache. All material findings are resolved;
+the final accepted cleanup is recorded at `4405e9e7`. PR feedback and independent live acceptance
+remain separate from this completed implementation and private validation.
