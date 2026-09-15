@@ -123,9 +123,9 @@ def prepare_concurrent_dedicated_teardown(
 ) -> DedicatedTeardownPlan:
     """Prepare complete dedicated work on the invoking thread.
 
-    Persisted rows are a process boundary. Invalid values fail closed; an
-    The coordinator selects only complete-fingerprint rows for this function;
-    any contract violation fails closed instead of inventing work.
+    Persisted rows are a process boundary. The coordinator selects only
+    complete-fingerprint rows for this function; any contract violation fails
+    closed instead of inventing work.
     """
     socket_path = _validated_socket_path(db, session)
     pid = _validated_pid(session)
