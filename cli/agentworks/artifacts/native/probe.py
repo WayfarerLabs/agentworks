@@ -402,10 +402,14 @@ def probe_native(
         check=False,
         timeout=30,
     )
+    # Login startup scripts can echo the supplied runtime environment on failure.
+    # Redact known values and their shell-quoted forms before publishing diagnostics.
+    diagnostic = result.stderr.strip()
+    redactions = {form for value in environment.values() if value for form in (value, shlex.quote(value))}
+    for value in sorted(redactions, key=len, reverse=True):
+        diagnostic = diagnostic.replace(value, "[REDACTED]")
     if result.returncode:
-        raise ExternalError(
-            f"{tool} artifact discovery probe failed (exit {result.returncode}): {result.stderr.strip()}"
-        )
+        raise ExternalError(f"{tool} artifact discovery probe failed (exit {result.returncode}): {diagnostic}")
     try:
         lines = [
             line.removeprefix("AGW_ARTIFACT_PROBE=")
@@ -422,7 +426,7 @@ def probe_native(
     except (ValueError, KeyError, IndexError, TypeError):
         raise ExternalError(
             f"{tool} artifact discovery probe returned an invalid response",
-            hint=result.stderr.strip() or None,
+            hint=diagnostic or None,
         ) from None
     inventory_problems = _inventory_problems(observed.get("inventory"), identities, entries)
     problems.extend(problem.code for problem in inventory_problems)

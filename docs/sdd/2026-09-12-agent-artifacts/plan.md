@@ -801,7 +801,7 @@ a declared platform guarantee. The operator directed making required guest depen
 unconditional.
 
 - [x] Install `python3` through the common required system-package list on every create/reinit.
-      Guest programs use the standard library; pip and venv packages are unnecessary.
+      Guest programs use the standard library; pip and virtual-environment packages are unnecessary.
 - [x] Stop initialization if mandatory package installation fails, before dependent setup. Optional
       template-package failures retain their existing warning behavior.
 - [x] Share the missing-interpreter check between native staging and artifact discovery; preserve

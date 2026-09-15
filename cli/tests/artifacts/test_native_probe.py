@@ -969,3 +969,29 @@ def test_failed_native_probe_retains_external_diagnostic(returncode, stdout):
     assert stderr in str(caught.value) + (caught.value.hint or "")
     if returncode:
         assert str(returncode) in str(caught.value)
+
+
+@pytest.mark.parametrize("returncode", [0, 1])
+def test_native_probe_errors_redact_runtime_environment(returncode):
+    import shlex
+    import traceback
+    from unittest.mock import Mock
+
+    from agentworks.artifacts.native.probe import probe_native
+    from agentworks.errors import ExternalError
+    from agentworks.ssh import SSHResult
+    from agentworks.transports import Transport
+
+    short = "fixture-token"
+    long = short + "-'long value'"
+    environment = {"API_TOKEN": short, "OTHER_TOKEN": long}
+    stderr = f"startup failed: {long}; {shlex.quote(long)}; {short}"
+    target = Mock(spec=Transport)
+    target.run.side_effect = [SSHResult(0, "", ""), SSHResult(returncode, "invalid", stderr)]
+    with pytest.raises(ExternalError) as caught:
+        probe_native(target, tool="claude", environment=environment)
+    exposed = str(caught.value) + (caught.value.hint or "") + "".join(traceback.format_exception(caught.value))
+    assert short not in exposed
+    assert long not in exposed
+    assert shlex.quote(long) not in exposed
+    assert "startup failed" in exposed

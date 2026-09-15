@@ -269,6 +269,7 @@ def test_native_probe_passes_environment_separately_and_rejects_policy_failures(
         return SimpleNamespace(
             returncode=0,
             ok=True,
+            stderr="",
             stdout="AGW_ARTIFACT_PROBE="
             + json.dumps(
                 {"native_home": "/home/a/.claude", "problems": ["native-discovery-exclusions"], "inventory": []}
