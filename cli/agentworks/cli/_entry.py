@@ -56,7 +56,6 @@ def main() -> None:
         ConnectivityError,
         ExternalError,
         NotFoundError,
-        SecretUnavailableError,
         StateError,
         UserAbort,
         ValidationError,
@@ -85,14 +84,7 @@ def main() -> None:
     except UserAbort:
         typer.echo("Aborted.", err=True)
         raise SystemExit(1) from None
-    except (
-        NotFoundError,
-        AlreadyExistsError,
-        ValidationError,
-        StateError,
-        AuthorizationError,
-        SecretUnavailableError,
-    ) as e:
+    except (NotFoundError, AlreadyExistsError, ValidationError, StateError, AuthorizationError) as e:
         # Clean domain errors: render as a one-liner with no traceback. These
         # are user-facing and a traceback adds noise without diagnostic value.
         # The handler owns the (red on a TTY) `Error:` prefix, so pass the

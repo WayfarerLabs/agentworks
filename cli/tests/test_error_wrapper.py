@@ -76,7 +76,6 @@ def test_record_unhandled_error_handles_unusable_log_dir(tmp_path: Path, monkeyp
 
 
 def test_main_wrapper_renders_secret_unavailability_without_a_traceback(
-    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -90,7 +89,6 @@ def test_main_wrapper_renders_secret_unavailability_without_a_traceback(
     record_calls: list[BaseException] = []
     monkeypatch.setattr(cli_mod, "app", fake_app)
     monkeypatch.setattr(_entry, "record_unhandled_error", lambda exc: record_calls.append(exc))
-    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
     monkeypatch.setattr("sys.argv", ["agentworks", "fixture"])
     monkeypatch.setenv("AGW_DEBUG", "")
 
@@ -100,7 +98,6 @@ def test_main_wrapper_renders_secret_unavailability_without_a_traceback(
     assert exc_info.value.code == 1
     assert "Traceback" not in capsys.readouterr().err
     assert record_calls == []
-    assert not (tmp_path / "logs" / "error.log").exists()
 
 
 def test_main_wrapper_catches_unhandled_exception(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
