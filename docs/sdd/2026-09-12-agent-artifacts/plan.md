@@ -822,3 +822,25 @@ Both are corrected and covered on the nonzero-exit and invalid-response paths, i
 tracebacks. Diagnostics retain process exit status and useful stderr after redacting known runtime
 values and their shell-quoted forms. Muntz verified the mandatory package call with bounded fake
 transport probes; the other reviews were source review, not independent full-suite or WSL runs.
+
+## Conservative session workarounds correction, 2026-09-15
+
+The operator superseded automatic session delivery and terminal launch errors with explicit
+`enabled_workarounds` and warnings for optional unhandled artifacts across every integration.
+Earlier checked work remains its historical implementation record. This correction uses one new
+implementation PR after PR 816; broader template-null policy remains a separate follow-up.
+
+- [ ] Add typed, default-empty workaround lists with replacement inheritance to every session facet.
+- [ ] Gate each existing native session carrier independently; shell session publication also opts
+      in.
+- [ ] Warn for valid terminal unhandled inputs with origins and applicable workaround names; persist
+      the disposition and retire previously owned effects when an opt-in is removed.
+- [ ] Remove blanket version/help certification; limit Claude snapshot handling to opted-in session
+      rules/hints and preserve focused domain errors through agent reinit.
+- [ ] Update permanent guides, support matrices and design artifacts to the same contract.
+- [ ] Run focused behavior checks, required gates, and independent project, correctness and
+      complexity reviews before publishing a complete ready handoff.
+
+Acceptance covers default behavior, selective opt-ins, inherited opt-out, unavailable native session
+skills, terminal warning inspection, valid safety failures, cleanup on disable/restart, older native
+versions and conditional prompt flags. Existing native outer placement remains ordinary behavior.

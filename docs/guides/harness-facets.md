@@ -211,7 +211,11 @@ avoiding duplicate delivery through the user/workspace diamond.
 An inactive user or workspace facet passes its inputs onward to the session. An activated facet
 applies what it can and defers the remainder. Handled inputs stop at that facet. The session joins
 its actual user and workspace results with anything routed directly from the VM. Remaining inputs
-that the session integration cannot handle refuse launch with their original source and reason.
+that the session integration cannot handle produce warnings with their original source and reason.
+Session delivery requires explicit `enabled_workarounds` in the selected integration's session
+config. The default empty list leaves all remaining inputs unhandled. Each named workaround enables
+only its documented delivery method; `[]` replaces inherited opt-ins. See
+`agw guide show agent-artifacts` for the supported methods and their limitations.
 
 For example, VM-declared skills can reach native user placement by activating only the user facet.
 The same captured VM inputs remain available to every actual user; one user's handling does not
@@ -250,8 +254,9 @@ These are integration policies, not a generic operator-authored list of required
 The shipped integrations currently declare no ancestor requirement, so session-only use is valid
 when the tool is otherwise installed and ready and any supplied artifacts can be delivered there.
 Artifact delivery additionally requires current ancestor capture and handling evidence; unsupported
-final-session delivery refuses launch. Selecting a user activation does not select a session
-integration, and selecting a session integration does not implicitly enable or run user setup.
+final-session delivery warns and continues without claiming those inputs were handled. Selecting a
+user activation does not select a session integration, and selecting a session integration does not
+implicitly enable or run user setup.
 
 Evidence can be absent, incomplete, stale, unavailable, or current. Current means a completed
 applied-state record matches the effective declaration and destination identity. It does not mean

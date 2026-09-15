@@ -177,9 +177,18 @@ pretending it is unchanged. Session personas can use `--agents` JSON, avoiding p
 persona-field omissions. The subagent documentation cited above establishes primary and delegated
 use, but does not make every native option portable.
 
-Resume can reuse a saved system prompt. The documented `--system-prompt-snapshot off` changes that
-behavior; the native compatibility tests must establish the supported version and prove changed
-rules take effect. Merely rewriting an appended prompt file is insufficient evidence.
+Session rules/hints in the current adapter use an appended prompt file, whereas native `CLAUDE.md`
+is delivered as a user message and ordinary skill bodies load into the conversation on invocation.
+Those native mechanisms do not justify changing system-prompt recording. The
+[CLI reference](https://code.claude.com/docs/en/cli-reference#system-prompt-flags-in-resumed-conversations)
+documents that before 2.1.265, supplied prompt flags already disabled recording; the explicit
+snapshot-off adjustment is therefore limited to the opted-in appended-session-prompt method on newer
+versions. Installed versions observed in earlier acceptance are not minimum supported versions. Help
+output is incomplete and cannot certify flag absence.
+
+The [plugin reference](https://code.claude.com/docs/en/plugins-reference#standard-plugin-layout)
+explicitly excludes plugin-root `CLAUDE.md` from automatic project context. Plugin hooks could
+inject context but introduce another execution lifecycle; this correction adds no hook workaround.
 
 ### Codex
 

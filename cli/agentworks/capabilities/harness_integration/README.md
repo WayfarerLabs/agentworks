@@ -46,8 +46,10 @@ publication and checkpoints confirmed ownership. The integration owns native for
 compatibility checks and routing decisions. A successful application reports inputs omitted from its
 deferral list as handled. The integration must fulfill that delivery obligation, through native
 files, launch arguments or another supported native mechanism; omission is its handling report, not
-independent proof of consumption. Core validates the result and refuses final-session deferrals.
-Returning the old `None` result is a contract error even for an empty invocation.
+independent proof of consumption. Core validates the result and warns about final-session deferrals.
+A session deferral targets `session` as a terminal unhandled result; it is persisted for inspection
+and never routed again. Returning the old `None` result is a contract error even for an empty
+invocation.
 
 An `ArtifactFile` may supply an exact `package_root` for guarded empty-parent cleanup. The shared
 skill renderer sets it on every package member, and publication persists it in that member's
@@ -69,8 +71,15 @@ Missing or stale active artifact results require the owning setup operation.
 Before `start`, core calls `prepare_artifacts` with the immutable `SessionArtifactContext` available
 on the session binding. This includes completed environment, actual home, prospective session/run
 IDs, grouped remaining inputs and ancestor file ownership metadata. Return the session application
-in `HarnessStart.artifacts`. Core refuses final deferrals before replacing a running workload and
+in `HarnessStart.artifacts`. Core warns about unhandled inputs after validating the full result and
 restricts session file publication to that run's private directory under the actual user's home.
+First-party session facets default to no artifact delivery. Their typed `enabled_workarounds` config
+lists specific supported delivery methods, with an empty default and replacement inheritance. Return
+an explicit deferral for each disabled or unsupported input, including its relevant workaround in
+the reason when one exists. Filter disabled inputs before applying delivery-specific validation or
+compatibility probes. Keep unsafe paths, conflicting ownership, malformed results and invalid
+configuration as errors. Do not turn an optional artifact into a blanket version requirement.
+
 Generated literal argv values must use `quote_literal_argv` so artifact text is not interpreted as
 Agentworks template substitutions. Native conversation IDs remain integration-owned.
 
