@@ -19,7 +19,7 @@ from agentworks.artifacts.declarations import ArtifactsConfig, artifact_referenc
 from agentworks.declared_resource import DeclaredResource
 from agentworks.env.entry import EnvTable, env_references
 from agentworks.git_credentials.credential import credential_references
-from agentworks.schema import CapabilityBlock, MergeStrategy, ResourceRef
+from agentworks.schema import CapabilityConfig, NonEmptyStr, ResourceRef
 from agentworks.schema.reference import RefRelationship
 
 if TYPE_CHECKING:
@@ -141,9 +141,9 @@ class AgentTemplate(DeclaredResource):
     """Whether re-running init removes mise tools no longer declared.
     Write booleans unquoted; quoted strings such as ``"no"`` are invalid."""
 
-    harness_integrations: Annotated[list[CapabilityBlock], MergeStrategy.REPLACE] | None = None
+    harness_integrations: dict[NonEmptyStr, CapabilityConfig] | None = None
     """Ordered integrations explicitly activated for native user setup.
-    An authored list replaces the inherited list; an empty list activates none."""
+    Entries merge by integration name and facet config; an empty map inherits."""
 
     artifacts: ArtifactsConfig | None = None
     """Artifact bundles selected at this scope; an omitted selection inherits."""

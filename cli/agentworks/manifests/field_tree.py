@@ -449,7 +449,32 @@ def _resolved(
     children = tuple(_resolved(child, by_path, capability_kind, expanding) for child in by_path[entry.doc.path])
     entry = replace(entry, children=children)
     entry = _collapsed(entry)
-    return _expanded(entry, capability_kind, expanding)
+    entry = _expanded(entry, capability_kind, expanding)
+    return _keyed_implementations(entry, capability_kind)
+
+
+def _keyed_implementations(entry: FieldEntry, capability_kind: str | None) -> FieldEntry:
+    """Present generated capability map keys as addressable implementation choices."""
+    if capability_kind is None or not entry.children:
+        return entry
+    from agentworks.capabilities.descriptor import descriptor_for
+
+    if descriptor_for(capability_kind).config_schema.discriminator is not None:
+        return entry
+    implementations = _implementations(capability_kind)
+    if not all((child.name, child.doc.nested_model) in implementations for child in entry.children):
+        return entry
+    alternatives = tuple(
+        Alternative(
+            name=child.name,
+            summary=implementations[child.name, child.doc.nested_model].summary,
+            target=f"{capability_kind}/{child.name}",
+            fields=(child,),
+        )
+        for child in entry.children
+        if child.doc.nested_model is not None
+    )
+    return replace(entry, children=(), alternatives=alternatives)
 
 
 def _collapsed(entry: FieldEntry) -> FieldEntry:

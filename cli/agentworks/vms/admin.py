@@ -19,7 +19,7 @@ from agentworks.artifacts.declarations import ArtifactsConfig, artifact_referenc
 from agentworks.declared_resource import DeclaredResource
 from agentworks.env.entry import EnvTable, env_references
 from agentworks.git_credentials.credential import credential_references
-from agentworks.schema import CapabilityBlock, MergeStrategy, ResourceRef
+from agentworks.schema import CapabilityConfig, NonEmptyStr, ResourceRef
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -145,9 +145,9 @@ class AdminConfig(DeclaredResource):
     """Whether to mark checkouts as git ``safe.directory`` for this user.
     Write booleans unquoted; quoted strings such as ``"no"`` are invalid."""
 
-    harness_integrations: Annotated[list[CapabilityBlock], MergeStrategy.REPLACE] = Field(default_factory=list)
+    harness_integrations: dict[NonEmptyStr, CapabilityConfig] = Field(default_factory=dict)
     """Ordered integrations explicitly activated for native user setup.
-    An instance list replaces this template selection; an empty list activates none."""
+    Entries merge by integration name and facet config; an empty map inherits."""
 
     artifacts: ArtifactsConfig = Field(default_factory=ArtifactsConfig)
     """Artifact bundles selected for the VM admin user."""

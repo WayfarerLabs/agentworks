@@ -287,13 +287,25 @@ def _hosted_capability_references(
     """
     from agentworks.capabilities.config import capability_config_references
     from agentworks.manifests.spec_model import hosted_capabilities
-    from agentworks.schema import CapabilityBlock
+    from agentworks.schema import CapabilityBlock, CapabilityConfig
 
     refs: list[ConfigReference] = []
     for descriptor, host in hosted_capabilities(doc.kind):
         value = getattr(resource, host.naming_field, None)
-        blocks = value if host.cardinality == "list" and isinstance(value, (list, tuple)) else (value,)
-        for block in blocks:
+        if host.cardinality == "mapping" and isinstance(value, dict):
+            for name, config in value.items():
+                if isinstance(config, CapabilityConfig):
+                    refs.extend(
+                        capability_config_references(
+                            kind=descriptor.kind,
+                            name=name,
+                            config=config.config,
+                            owner=owner,
+                            facet=host.facet,
+                        )
+                    )
+            continue
+        for block in (value,):
             if isinstance(block, CapabilityBlock):
                 refs.extend(
                     capability_config_references(

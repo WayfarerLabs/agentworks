@@ -115,7 +115,7 @@ def _readiness(name: str, impl: Any) -> Readiness:
 
 HARNESS_INTEGRATION_DESCRIPTOR = CapabilityKindDescriptor(
     kind="harness-integration",
-    contract_version=6,
+    contract_version=7,
     implementation_contract=HarnessIntegration,
     registry=_registry,
     required_operations=frozenset({"start", "vm_init", "user_init", "workspace_init"}),
@@ -126,18 +126,28 @@ HARNESS_INTEGRATION_DESCRIPTOR = CapabilityKindDescriptor(
     readiness=_readiness,
     publisher_source="agentworks.capabilities.harness_integration",
     config_facets=FACETS,
-    config_schema=ConfigContract(base=AgwModel, discriminator="name", layered_merge=True),
+    config_schema=ConfigContract(
+        base=AgwModel, discriminator=None, forbidden_fields=frozenset({"name"}), layered_merge=True
+    ),
     manifest_sections=(
-        HostSurface(host_kind="vm-template", naming_field="harness_integrations", facet="vm", cardinality="list"),
-        HostSurface(host_kind="admin-template", naming_field="harness_integrations", facet="user", cardinality="list"),
-        HostSurface(host_kind="agent-template", naming_field="harness_integrations", facet="user", cardinality="list"),
+        HostSurface(host_kind="vm-template", naming_field="harness_integrations", facet="vm", cardinality="mapping"),
         HostSurface(
-            host_kind="workspace-template", naming_field="harness_integrations", facet="workspace", cardinality="list"
+            host_kind="admin-template", naming_field="harness_integrations", facet="user", cardinality="mapping"
+        ),
+        HostSurface(
+            host_kind="agent-template", naming_field="harness_integrations", facet="user", cardinality="mapping"
+        ),
+        HostSurface(
+            host_kind="workspace-template",
+            naming_field="harness_integrations",
+            facet="workspace",
+            cardinality="mapping",
         ),
         HostSurface(
             host_kind="session-template",
             naming_field="harness_integration",
             facet="session",
+            cardinality="mapping",
         ),
     ),
 )

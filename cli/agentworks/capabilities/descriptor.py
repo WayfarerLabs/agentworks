@@ -78,6 +78,9 @@ class ConfigContract:
     forbidden_reference_kinds: frozenset[str] = frozenset()
     """Reference-marker kinds this model layer is not allowed to contain."""
 
+    forbidden_fields: frozenset[str] = frozenset()
+    """Top-level config keys reserved by the host contract."""
+
     layered_merge: bool = False
     """Whether this contract's model participates in schema-directed layers."""
 
@@ -86,7 +89,7 @@ class ConfigContract:
 class HostSurface:
     """How a capability kind is selected inside a declarable kind's spec.
 
-    The field selects one facet, with singular or list cardinality.
+    The field selects one facet, with singular or mapping cardinality.
     """
 
     host_kind: str
@@ -99,8 +102,8 @@ class HostSurface:
     facet: Facet | None = None
     """The config answer consumed here; ordinary capabilities omit it."""
 
-    cardinality: Literal["singular", "list"] = "singular"
-    """Whether the field holds one tagged block or an ordered list."""
+    cardinality: Literal["singular", "mapping"] = "singular"
+    """Whether the field holds one tagged block or a map keyed by implementation name."""
 
 
 @dataclass(frozen=True)

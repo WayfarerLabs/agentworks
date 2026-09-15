@@ -15,7 +15,7 @@ from pydantic import Field
 from agentworks.artifacts.declarations import ArtifactsConfig, artifact_references
 from agentworks.declared_resource import DeclaredResource
 from agentworks.env.entry import EnvTable, env_references
-from agentworks.schema import CapabilityBlock, MergeStrategy, ResourceRef
+from agentworks.schema import CapabilityConfig, NonEmptyStr, ResourceRef
 from agentworks.schema.reference import RefRelationship
 
 if TYPE_CHECKING:
@@ -80,9 +80,9 @@ class WorkspaceTemplate(DeclaredResource):
     git_user_email: str | None = None
     """``user.email`` for commits made in this workspace's checkout."""
 
-    harness_integrations: Annotated[list[CapabilityBlock], MergeStrategy.REPLACE] | None = None
+    harness_integrations: dict[NonEmptyStr, CapabilityConfig] | None = None
     """Ordered integrations explicitly activated for native workspace setup.
-    An authored list replaces the inherited list; an empty list activates none."""
+    Entries merge by integration name and facet config; an empty map inherits."""
 
     artifacts: ArtifactsConfig | None = None
     """Artifact bundles selected at this scope; an omitted selection inherits."""

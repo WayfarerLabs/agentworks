@@ -31,7 +31,7 @@ import json
 import shlex
 import uuid
 from dataclasses import replace
-from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
+from typing import TYPE_CHECKING, Annotated, ClassVar
 
 from pydantic import Field
 
@@ -77,21 +77,13 @@ if TYPE_CHECKING:
 class ClaudeCodeUserConfig(NativeUserConfig):
     """Native ClaudeCode setup for one actual user."""
 
-    name: Literal["claude-code"]
-    """The harness integration selected for this user's facet."""
-
 
 class ClaudeCodeWorkspaceConfig(NativeWorkspaceConfig):
     """Native ClaudeCode project settings."""
 
-    name: Literal["claude-code"]
-    """The harness integration selected for this workspace's facet."""
-
 
 class ClaudeCodeSetupConfig(AgwModel):
     """Activate an artifact-only native facet."""
-
-    name: Literal["claude-code"]
 
 
 class ClaudeCodeConfig(AgwModel):
@@ -104,9 +96,6 @@ class ClaudeCodeConfig(AgwModel):
     The native workload flags, positional parser behavior, and ``/goal``
     composition were rechecked with Claude Code 2.1.231.
     """
-
-    name: Literal["claude-code"]
-    """The harness integration this config is for."""
 
     permission_mode: str | None = None
     """Forwarded as ``--permission-mode``."""
@@ -173,7 +162,7 @@ _PROJECTS_DIR = "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"
 class ClaudeCodeIntegration(HarnessIntegration):
     """Runs Claude Code, resuming or launching fresh per on-disk state."""
 
-    contract_version: ClassVar[int] = 6
+    contract_version: ClassVar[int] = 7
     name: ClassVar[str] = "claude-code"
     description: ClassVar[str] = "Run Claude Code, resuming its session when one exists"
     config_model: ClassVar[type[ClaudeCodeConfig]] = ClaudeCodeConfig

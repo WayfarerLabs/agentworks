@@ -196,6 +196,9 @@ def _model_error(
             f"its {attribute_name} {model.__name__} cannot be built (an unresolved annotation?), "
             "so nothing could validate or extract references against it"
         )
+    reserved = sorted(contract.forbidden_fields.intersection(model.model_fields))
+    if reserved:
+        return f"its {attribute_name} {model.__name__} declares host-reserved fields: {', '.join(reserved)}"
     union_shape = structural_union_error(model)
     if union_shape is not None:
         return f"its {attribute_name} declares an invalid structural union: {union_shape}"

@@ -93,12 +93,12 @@ class _SessionTemplateKind:
         the non-empty-``references`` path is preserved.
         """
         source = references[0].source if references else ALWAYS_MATERIALIZE_SOURCE
-        from agentworks.schema import CapabilityBlock
+        from agentworks.schema import CapabilityConfig
 
         return SessionTemplate(
             name="default",
             origin=Origin.auto_declared(source=source),
-            harness_integration=CapabilityBlock.of("shell"),
+            harness_integration={"shell": CapabilityConfig()},
         )
 
 

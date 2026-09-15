@@ -38,8 +38,7 @@ validates**, and its shape follows the kind's dispatch:
   wrote it and exactly as the host row carries it
   (:class:`~agentworks.schema.CapabilityBlock`);
 - a MAP-KEYED config kind would be selected by the key its value sits under.
-  No current capability config uses that dispatch; a secret backend's
-  separately declared per-secret mapping is not its source config.
+  Harness activations use this dispatch at each facet.
 
 So a TAGGED kind needs no ``name`` argument at all: the tag inside the
 table is what selects the implementation, and reading it here rather than
@@ -183,6 +182,15 @@ def validate_capability_config(
     if impl is None:
         return None
     hint = reference_hint(kind, selected)
+    if descriptor.config_schema.discriminator is None:
+        return _validated(
+            config_model_for(impl, facet=facet),
+            config,
+            owner=owner,
+            location=location,
+            hint=hint,
+            provenance=provenance,
+        )
     union = capability_config_union(kind, facet=facet)
     validated = _validated(union, config, owner=owner, location=location, hint=hint, provenance=provenance)
     # The union is a root model, so the thing the capability was written
@@ -550,11 +558,11 @@ def offered_model(impl: type, *, facet: Facet | None = None) -> type[BaseModel] 
 
 
 def config_model_for(impl: type, *, facet: Facet | None = None) -> type[BaseModel]:
-    """The selected validation model, including a closed name-only facet.
+    """The selected validation model, including a closed empty facet.
 
     A registered implementation offering no config is still selectable. Its
-    integration activation accepts its literal tag and rejects every other
-    key. Unknown implementations are handled separately by the registry lookup.
+    integration activation accepts an empty config and rejects every key.
+    Unknown implementations are handled separately by the registry lookup.
     """
     model = offered_model(impl, facet=facet)
     if model is not None:
@@ -562,6 +570,8 @@ def config_model_for(impl: type, *, facet: Facet | None = None) -> type[BaseMode
     descriptor = descriptor_for_impl(impl)
     if descriptor is None or not descriptor.config_facets:
         raise StateError(f"{impl.__name__} offers no config model")
+    if descriptor.config_schema.discriminator is None:
+        return AgwModel
     name = str(cast("type[Capability]", impl).name)
     key = (impl, name)
     if key not in _TAG_MODEL_CACHE:

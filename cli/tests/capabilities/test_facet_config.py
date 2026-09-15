@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import replace
-from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, cast
+from typing import TYPE_CHECKING, Annotated, ClassVar, cast
 
 import pytest
 from pydantic import BaseModel, Field, ValidationError
@@ -12,7 +12,6 @@ from pydantic import BaseModel, Field, ValidationError
 from agentworks.capabilities.config import (
     capability_config_model,
     capability_config_references,
-    capability_config_union,
     offered_model,
     validate_capability_config,
 )
@@ -22,7 +21,7 @@ from agentworks.manifests.reference import implementation_reference, kind_refere
 from agentworks.manifests.spec_model import spec_model
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.plugins.base import PluginError
-from agentworks.schema import AgwModel, CapabilityBlock, RefOwner, SecretRef
+from agentworks.schema import AgwModel, CapabilityConfig, RefOwner, SecretRef
 from agentworks.sessions.template import SessionTemplate
 from tests.plugins._fixtures import ConformingHarnessIntegration
 
@@ -33,13 +32,11 @@ OWNER = RefOwner(kind="session-template", name="facet-test")
 
 
 class SessionConfig(AgwModel):
-    name: Literal["facet-test"]
     session_token: Annotated[str, SecretRef(usage="session token")] = "session-secret"
     args: list[str] = Field(default_factory=list)
 
 
 class UserConfig(AgwModel):
-    name: Literal["facet-test"]
     user_token: Annotated[str, SecretRef(usage="user token")] = "user-secret"
 
 
@@ -63,14 +60,18 @@ def seated() -> Iterator[None]:
 
 def test_each_facet_validates_and_extracts_its_own_fields(seated: None) -> None:
     for facet, token in (("user", "user-secret"), ("session", "session-secret")):
-        config = {"name": "facet-test"}
-        value = validate_capability_config(kind="harness-integration", facet=facet, config=config, owner=OWNER)
+        config: dict[str, object] = {}
+        value = validate_capability_config(
+            kind="harness-integration", name="facet-test", facet=facet, config=config, owner=OWNER
+        )
         assert isinstance(value, UserConfig if facet == "user" else SessionConfig)
-        refs = capability_config_references(kind="harness-integration", facet=facet, config=config, owner=OWNER)
+        refs = capability_config_references(
+            kind="harness-integration", name="facet-test", facet=facet, config=config, owner=OWNER
+        )
         assert [ref.name for ref in refs] == [token]
     with pytest.raises(ConfigError):
         validate_capability_config(
-            kind="harness-integration", facet="session", config={"name": "facet-test", "user_token": "x"}, owner=OWNER
+            kind="harness-integration", name="facet-test", facet="session", config={"user_token": "x"}, owner=OWNER
         )
 
 
@@ -78,12 +79,12 @@ def test_no_config_is_closed_and_distinct_from_unknown_implementation(seated: No
     assert offered_model(FacetHarness, facet="vm") is None
     assert capability_config_model("harness-integration", "missing", facet="vm") is None
     value = validate_capability_config(
-        kind="harness-integration", facet="vm", config={"name": "facet-test"}, owner=OWNER
+        kind="harness-integration", name="facet-test", facet="vm", config={}, owner=OWNER
     )
-    assert value is not None and value.model_dump() == {"name": "facet-test"}
+    assert value is not None and value.model_dump() == {}
     with pytest.raises(ConfigError):
         validate_capability_config(
-            kind="harness-integration", facet="vm", config={"name": "facet-test", "args": []}, owner=OWNER
+            kind="harness-integration", name="facet-test", facet="vm", config={"args": []}, owner=OWNER
         )
     with pytest.raises(StateError):
         capability_config_model("harness-integration", "facet-test")
@@ -115,23 +116,23 @@ def test_registration_selection_is_shared_with_constructor_and_secret_extraction
         )
         assert isinstance(instance.config, SessionConfig)
         assert [ref.name for ref in instance.config_secret_refs()] == ["session-secret"]
-        capability_config_union("harness-integration", facet="session")
+        capability_config_model("harness-integration", "facet-test", facet="session")
         implementation_reference("harness-integration", "facet-test")
         assert Stateful.calls == Counter(dict.fromkeys(FACETS, 1))
 
 
-def test_union_tracks_facet_declaration_replacement_and_registry_restoration(
+def test_model_tracks_facet_declaration_replacement_and_registry_restoration(
     seated: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    original = capability_config_union("harness-integration", facet="session")
-    user = capability_config_union("harness-integration", facet="user")
+    original = capability_config_model("harness-integration", "facet-test", facet="session")
+    user = capability_config_model("harness-integration", "facet-test", facet="user")
     assert original is not user
     with monkeypatch.context() as changes:
         changes.setattr(FacetHarness, "config_model", UserConfig)
-        changed = capability_config_union("harness-integration", facet="session")
+        changed = capability_config_model("harness-integration", "facet-test", facet="session")
         assert changed is not original
         assert capability_config_model("harness-integration", "facet-test", facet="session") is UserConfig
-    assert capability_config_union("harness-integration", facet="session") is original
+    assert capability_config_model("harness-integration", "facet-test", facet="session") is original
 
     class Replacement(FacetHarness):
         config_model = UserConfig
@@ -139,8 +140,8 @@ def test_union_tracks_facet_declaration_replacement_and_registry_restoration(
     registry = descriptor_for("harness-integration").registry()
     with monkeypatch.context() as changes:
         changes.setitem(registry, "facet-test", Replacement)
-        assert capability_config_union("harness-integration", facet="session") is not original
-    assert capability_config_union("harness-integration", facet="session") is original
+        assert capability_config_model("harness-integration", "facet-test", facet="session") is not original
+    assert capability_config_model("harness-integration", "facet-test", facet="session") is original
 
 
 @pytest.mark.parametrize("failure", ["invalid", "raising", "noncallable", "old-contract"])
@@ -158,7 +159,7 @@ def test_public_registration_refuses_bad_facet_contracts(failure: str) -> None:
     if failure == "noncallable":
         Bad.config_for = None  # type: ignore[assignment]
     if failure == "old-contract":
-        Bad.contract_version = 3
+        Bad.contract_version = 6
     with (
         pytest.raises(PluginError),
         seated_plugin(Plugin(name="bad-facets", capabilities={"harness-integration": (Bad,)})),
@@ -169,18 +170,18 @@ def test_public_registration_refuses_bad_facet_contracts(failure: str) -> None:
 def test_reference_root_has_all_answers_and_resource_field_only_session(seated: None) -> None:
     fields = {entry.name: entry for entry in implementation_reference("harness-integration", "facet-test").spec}
     assert set(fields) == set(FACETS)
-    assert {entry.name for entry in fields["vm"].children} == {"name"}
-    assert {entry.name for entry in fields["user"].children} == {"name", "user_token"}
+    assert {entry.name for entry in fields["vm"].children} == set()
+    assert {entry.name for entry in fields["user"].children} == {"user_token"}
     session = next(entry for entry in kind_reference("session-template").spec if entry.name == "harness_integration")
     arm = next(arm for arm in session.alternatives if arm.name == "facet-test")
     assert arm.target == "harness-integration/facet-test"
     model = spec_model("session-template")
-    model.model_validate({"name": "host", "harness_integration": {"name": "facet-test", "session_token": "x"}})
+    model.model_validate({"name": "host", "harness_integration": {"facet-test": {"session_token": "x"}}})
     with pytest.raises(ValidationError):
-        model.model_validate({"name": "host", "harness_integration": {"name": "facet-test", "user_token": "x"}})
+        model.model_validate({"name": "host", "harness_integration": {"facet-test": {"user_token": "x"}}})
 
 
-def test_multiple_hosts_project_list_and_singular_facets(seated: None, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_multiple_hosts_project_each_map_facet(seated: None, monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks.capabilities import descriptor as descriptors
     from agentworks.manifests.decode import _hosted_capability_references
     from agentworks.manifests.envelope import Document
@@ -189,10 +190,10 @@ def test_multiple_hosts_project_list_and_singular_facets(seated: None, monkeypat
     from agentworks.source_location import synthesized
 
     class Host(SessionTemplate):
-        user_integrations: list[CapabilityBlock] = Field(default_factory=list)
+        user_integrations: dict[str, CapabilityConfig] = Field(default_factory=dict)
 
     harness = descriptor_for("harness-integration")
-    hosts = (*harness.manifest_sections, HostSurface("session-template", "user_integrations", "user", "list"))
+    hosts = (*harness.manifest_sections, HostSurface("session-template", "user_integrations", "user", "mapping"))
     updated = replace(harness, manifest_sections=hosts)
     table = tuple(updated if d is harness else d for d in descriptors.capability_descriptors())
     monkeypatch.setattr(descriptors, "capability_descriptors", lambda: table)
@@ -203,21 +204,18 @@ def test_multiple_hosts_project_list_and_singular_facets(seated: None, monkeypat
     value = model.model_validate(
         {
             "name": "host",
-            "harness_integration": {"name": "facet-test", "session_token": "s"},
-            "user_integrations": [{"name": "facet-test", "user_token": "u"}],
+            "harness_integration": {"facet-test": {"session_token": "s"}},
+            "user_integrations": {"facet-test": {"user_token": "u"}},
         }
     )
-    assert value.model_dump()["user_integrations"][0]["user_token"] == "u"
+    assert value.model_dump()["user_integrations"]["facet-test"]["user_token"] == "u"
     with pytest.raises(ValidationError):
-        model.model_validate({"name": "host", "user_integrations": [{"name": "facet-test", "session_token": "wrong"}]})
+        model.model_validate({"name": "host", "user_integrations": {"facet-test": {"session_token": "wrong"}}})
 
     raw = Host(
         name="host",
-        user_integrations=[
-            CapabilityBlock.of("facet-test", user_token="first"),
-            CapabilityBlock.of("facet-test", user_token="second"),
-        ],
-        harness_integration=CapabilityBlock.of("facet-test", session_token="session"),
+        user_integrations={"facet-test": CapabilityConfig.model_validate({"user_token": "first"})},
+        harness_integration={"facet-test": CapabilityConfig.model_validate({"session_token": "session"})},
     )
     doc = Document(
         kind="session-template",
@@ -228,7 +226,46 @@ def test_multiple_hosts_project_list_and_singular_facets(seated: None, monkeypat
         location=synthesized(),
     )
     refs = _hosted_capability_references(raw, doc, OWNER)
-    assert [ref.name for ref in refs] == ["session", "first", "second"]
+    assert [ref.name for ref in refs] == ["session", "first"]
     fields = {entry.name: entry for entry in kind_reference("session-template").spec}
-    [element] = fields["user_integrations"].children
-    assert any(arm.target == "harness-integration/facet-test" for arm in element.alternatives)
+    assert any(arm.target == "harness-integration/facet-test" for arm in fields["user_integrations"].alternatives)
+
+
+def test_map_schema_keeps_key_specific_models_and_session_cardinality(seated: None) -> None:
+    from jsonschema import Draft202012Validator
+
+    model = spec_model("session-template")
+    schema = model.model_json_schema()
+    Draft202012Validator.check_schema(schema)
+    validator = Draft202012Validator(schema)
+    config: object
+    for config in ({"shell": {}}, {"facet-test": {"session_token": "secret"}}, {}):
+        document = {"harness_integration": config}
+        assert validator.is_valid(document)
+        model.model_validate({"name": "test", **document})
+    for config in (
+        {"shell": {"session_token": "secret"}},
+        {"facet-test": {"user_token": "secret"}},
+        {"shell": {"name": "facet-test"}},
+        {"shell": {}, "facet-test": {}},
+        {"unknown": {}},
+        [{"name": "shell"}],
+    ):
+        document = {"harness_integration": config}
+        assert not validator.is_valid(document)
+        with pytest.raises(ValidationError):
+            model.model_validate({"name": "test", **document})
+
+
+def test_map_config_contract_rejects_redundant_name_fields() -> None:
+    class TaggedConfig(AgwModel):
+        name: str
+
+    class Tagged(FacetHarness):
+        config_model = TaggedConfig
+
+    with (
+        pytest.raises(PluginError),
+        seated_plugin(Plugin(name="tagged-fixture", capabilities={"harness-integration": (Tagged,)})),
+    ):
+        pass
