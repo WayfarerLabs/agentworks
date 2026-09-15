@@ -631,7 +631,10 @@ def test_each_declared_shell_workaround_delivers_artifacts(workaround, type):
     assert result.artifacts.files
     assert result.artifacts.deferred == ()
     assert result.artifacts.artifacts_dir == prepared.directory
-    assert any(file.origins == (item.origin_identity,) for file in result.artifacts.files)
+    assert any(
+        file.origins == (item.origin_identity,) and file.path != f"{prepared.directory}/index.json"
+        for file in result.artifacts.files
+    )
 
 
 @pytest.mark.parametrize(

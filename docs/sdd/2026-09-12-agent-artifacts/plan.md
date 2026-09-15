@@ -863,7 +863,6 @@ artifact guide rendered successfully. Fixture HOME removal was independently ver
 native model run was performed here; the ready handoff requests the normal independent validation
 lane. Full SDD acceptance and locking remain separate.
 
-
 ## Workarounds feedback round 1, 2026-09-15
 
 The operator authorized one fix round for PR 822 after the first handoff at `e6e1284d`. All lanes
@@ -875,14 +874,30 @@ Current names match, but adding an unimplemented config name must fail validatio
 - [x] Compare native config literals with the actual delivery maps, without copying workaround names
       into the new check.
 - [x] Drive shell delivery separately for every schema-declared workaround and artifact type.
-- [ ] Verify the new checks fail on a one-sided config-name addition; complete private reviews and
+- [x] Verify the new checks fail on a one-sided config-name addition; complete private reviews and
       required gates.
 - [ ] Publish round 1 of 1 as ready and assess its feedback.
 
 The existing selective-delivery tests remain because they check each method's artifact types.
 Runtime behavior and operator configuration do not change in this round. The accepted check needs no
-new runtime registry. The other suggestions remain optional: input presence and emitted delivery
-are distinct predicates; two short lifecycle error handlers retain local ownership; Codex needs
+new runtime registry. The other suggestions remain optional: input presence and emitted delivery are
+distinct predicates; two short lifecycle error handlers retain local ownership; Codex needs
 assignment-aware override parsing; warning acknowledgement would add a new knob. The tester's empty
 non-package session directories are a pre-existing cleanup opportunity, with no retained content,
 and remain outside this correction. The public critical reading records these dispositions.
+
+Round 1 private reviews are clean. Muntz ran 167 delivery cases, then added an unimplemented name to
+all four config declarations: the three native checks and four shell cases failed, while the four
+existing shell cases passed. Removing those mutations restored all seven focused checks. The
+correctness lane also ran the new cases and suggested excluding the index from the payload
+assertion; that strengthening is included and the seven cases pass. The project lane reviewed source
+and SDD bookkeeping without claiming a live run.
+
+Round 1 validation: 9,757 tests passed, seven skipped; Ruff lint/format, mypy (850 files), file
+lint, locked-SDD, Typer isolation and Rulesync checks passed. Rulesync 7.14.0 ran through npx with
+an isolated package cache after the Bun runner stalled and an older cached installation failed
+before checking repository output. Website Python (160) and Node (103) tests and both deterministic
+build comparisons passed. The 16 real CLI configuration cases and unknown-name refusal passed again;
+temporary HOME and build outputs were independently verified removed. The first handoff's
+independent live Lima evidence covers the unchanged runtime; this tests-and-plan correction did not
+run another VM workload.
