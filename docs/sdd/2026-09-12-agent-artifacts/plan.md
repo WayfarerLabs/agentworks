@@ -830,17 +830,35 @@ The operator superseded automatic session delivery and terminal launch errors wi
 Earlier checked work remains its historical implementation record. This correction uses one new
 implementation PR after PR 816; broader template-null policy remains a separate follow-up.
 
-- [ ] Add typed, default-empty workaround lists with replacement inheritance to every session facet.
-- [ ] Gate each existing native session carrier independently; shell session publication also opts
+- [x] Add typed, default-empty workaround lists with replacement inheritance to every session facet.
+- [x] Gate each existing native session carrier independently; shell session publication also opts
       in.
-- [ ] Warn for valid terminal unhandled inputs with origins and applicable workaround names; persist
+- [x] Warn for valid terminal unhandled inputs with origins and applicable workaround names; persist
       the disposition and retire previously owned effects when an opt-in is removed.
-- [ ] Remove blanket version/help certification; limit Claude snapshot handling to opted-in session
+- [x] Remove blanket version/help certification; limit Claude snapshot handling to opted-in session
       rules/hints and preserve focused domain errors through agent reinit.
-- [ ] Update permanent guides, support matrices and design artifacts to the same contract.
-- [ ] Run focused behavior checks, required gates, and independent project, correctness and
-      complexity reviews before publishing a complete ready handoff.
+- [x] Update permanent guides, support matrices and design artifacts to the same contract.
+- [x] Complete independent project, correctness and complexity reviews.
+- [x] Finish required gates and isolated-HOME CLI validation.
+- [ ] Publish the complete ready handoff and assess published feedback.
 
 Acceptance covers default behavior, selective opt-ins, inherited opt-out, unavailable native session
 skills, terminal warning inspection, valid safety failures, cleanup on disable/restart, older native
 versions and conditional prompt flags. Existing native outer placement remains ordinary behavior.
+
+Private review is clean at `aadffb58`. The project lane corrected two stale design statements; Muntz
+removed an unreachable Grok skill condition. Correctness review found that a Codex persona
+description could suppress configured primary guidance and that login-shell output could mislead the
+narrow Claude version check. Both are corrected with regressions. Muntz independently ran the 25
+affected cases and restored the old expressions to verify that 11 fail without the fixes. The
+project lane reviewed source; correctness additionally reproduced both corrected paths locally. No
+reviewer claimed a live VM or native model run.
+
+Lead validation passed: 9,750 non-integration tests, seven skipped; Ruff lint/format, mypy over 850
+files, file lint, locked-SDD, Rulesync and Typer isolation checks. Website gates passed 160 Python
+tests, 103 Node tests and deterministic double builds for both site bases. The real CLI exercised 16
+isolated-HOME configuration cases covering default-off, explicit enablement, inheritance and
+explicit disablement across all four integrations; unknown workaround names were refused and the
+artifact guide rendered successfully. Fixture HOME removal was independently verified. No live VM or
+native model run was performed here; the ready handoff requests the normal independent validation
+lane. Full SDD acceptance and locking remain separate.

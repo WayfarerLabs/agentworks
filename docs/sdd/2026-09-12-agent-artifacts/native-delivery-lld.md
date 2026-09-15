@@ -203,8 +203,8 @@ no workaround. These names opt into the existing carriers in the table above. Ho
 fallbacks and release-by-release compatibility tables are not part of this correction.
 
 Raw carrier conflicts are checked for enabled session delivery and already applied ancestor
-discovery. Disabled session inputs do not introduce restrictions on native launch arguments.
-Outer native placement and its safety/ownership checks remain in place. Core emits final unhandled
+discovery. Disabled session inputs do not introduce restrictions on native launch arguments. Outer
+native placement and its safety/ownership checks remain in place. Core emits final unhandled
 warnings after full output validation and stores the deferrals so inspection does not claim success.
 Known domain failures retain their error type and focused remediation through the agent lifecycle;
 version/configuration refusals are not recast as unexplained SSH failures.
