@@ -223,7 +223,9 @@ def test_cli_refuses_stale_state_without_migration(tmp_path, monkeypatch) -> Non
         assert connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] == 37
 
 
-def test_session_inspection_uses_runtime_diamond_order(db: Database) -> None:
+@pytest.mark.parametrize("unhandled", [False, True])
+def test_session_inspection_uses_runtime_diamond_order(db: Database, unhandled: bool) -> None:
+    from agentworks.artifacts.application import ArtifactDeferral
     from agentworks.artifacts.inspection import inspect_artifacts
     from agentworks.harness_setup.inputs import SetupInputs
     from agentworks.harness_setup.model import NativeSetupState, SetupRecord
@@ -250,12 +252,24 @@ def test_session_inspection_uses_runtime_diamond_order(db: Database) -> None:
         declaration=owner.declaration("shell", block),
         complete=True,
         artifact_inputs=tuple(item.identity for item in prepared.items()),
+        deferred=tuple(
+            ArtifactDeferral(input_id=item.identity, destination="session", reason="fixture disabled")
+            for item in prepared.items()
+            if unhandled
+        ),
     )
     write_native_setup(db, "session", "review", NativeSetupState(records=(record,)), operation="fixture")
     result = inspect_artifacts(db, fixture.registry, session_name="review")
     assert [owner.scope for owner in result.owners] == ["vm", "agent", "workspace", "session"]
     assert result.owners[-1].integrations[0].status == "current"
-    assert result.owners[-1].integrations[0].recorded_handled == tuple(item.identity for item in prepared.items())
+    integration = result.owners[-1].integrations[0]
+    assert integration.recorded_handled == (() if unhandled else tuple(item.identity for item in prepared.items()))
+    assert tuple(item.input_id for item in integration.recorded_deferred) == tuple(
+        item.input_id for item in record.deferred
+    )
+    assert tuple(item.reason for item in integration.recorded_deferred) == tuple(
+        item.reason for item in record.deferred
+    )
 
 
 def test_worked_manifests_build_without_acquiring_their_sources(tmp_path, monkeypatch) -> None:

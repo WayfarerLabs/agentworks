@@ -34,18 +34,9 @@ def validate_application(
         if not isinstance(item, ArtifactDeferral) or item.input_id not in identities or item.input_id in deferred:
             raise StateError("integration deferred an unknown or duplicate artifact input")
         if item.destination not in ALLOWED_DEFERRALS[facet]:
-            if facet == "session":
-                artifact = next(value for value in inputs.items() if value.identity == item.input_id)
-                origin = artifact.origin
-                raise StateError(
-                    f"integration '{integration}' cannot apply {artifact.content.type.value} "
-                    f"'{origin.bundle}/{origin.entry}' from {origin.component} "
-                    f"{origin.resource_kind}/{origin.resource_name} at the session facet",
-                    entity_kind=origin.resource_kind,
-                    entity_name=origin.resource_name,
-                    hint=item.reason,
-                )
-            raise StateError("integration returned an invalid artifact route")
+            raise StateError(
+                f"integration '{integration}' returned artifact route '{item.destination}' at the '{facet}' facet"
+            )
         deferred.add(item.input_id)
     for file in application.files:
         if not isinstance(file, ArtifactFile) or not isinstance(file.data, bytes) or type(file.executable) is not bool:

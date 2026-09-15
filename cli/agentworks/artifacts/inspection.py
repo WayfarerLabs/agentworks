@@ -417,7 +417,10 @@ def render_artifacts(inspection: ArtifactInspection) -> None:
             for input_id in integration.recorded_handled:
                 output.info(f"    Recorded handled: {input_id[:12]}")
             for item in integration.recorded_deferred:
-                output.info(f"    Recorded deferred: {item.input_id[:12]} to {item.destination}: {item.reason}")
+                if owner.facet == "session":
+                    output.info(f"    Recorded unhandled: {item.input_id[:12]}: {item.reason}")
+                else:
+                    output.info(f"    Recorded deferred: {item.input_id[:12]} to {item.destination}: {item.reason}")
             for placement in integration.placements:
                 output.info(f"    Recorded placement: {placement.path} ({placement.native_identity or 'file'})")
     output.info("Recorded application does not verify current native files or model context.")

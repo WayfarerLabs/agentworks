@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral
+from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.bundle import ArtifactBundle
 from agentworks.artifacts.declarations import ArtifactsConfig, HintArtifactSpec
 from agentworks.artifacts.session import cleanup_session_artifacts
@@ -59,7 +59,11 @@ def lifecycle(tmp_path, monkeypatch):
     target = LocalFixtureTransport(tmp_path / "native")
     _patch_transports(monkeypatch, target, target)
     bundle = ArtifactBundle(name="team", hints={"setup": HintArtifactSpec(text="Use the project tools.\n")})
-    template = ResolvedSessionTemplate(name="shell-artifacts", artifacts=ArtifactsConfig(bundles=["team"]))
+    template = ResolvedSessionTemplate(
+        name="shell-artifacts",
+        artifacts=ArtifactsConfig(bundles=["team"]),
+        harness_integration_config={"enabled_workarounds": ["session-artifact-files"]},
+    )
     monkeypatch.setattr(manager, "_resolve_template", lambda *a, **k: template)
     config = SimpleNamespace(session=SimpleNamespace(history_limit=1), artifact_bundles={"team": bundle})
     yield Lifecycle(db, config, template, target, events)
@@ -191,35 +195,73 @@ def test_source_failure_preserves_old_runtime_run_and_files(lifecycle):
     assert "kill" not in lifecycle.events
 
 
-def test_remaining_deferral_refuses_before_runtime_or_file_changes(lifecycle, monkeypatch):
+def test_disabling_session_files_warns_launches_and_retires_previous_files(lifecycle, monkeypatch, captured_output):
+    from agentworks.sessions import tmux
+
     lifecycle.restart()
     previous = lifecycle.db.get_session("s1")
     files = lifecycle.files()
     lifecycle.events.clear()
+    lifecycle.template.harness_integration_config["enabled_workarounds"] = []
+    launch = tmux.create_session
+    observed = []
 
-    def defer(self, ctx, **kwargs):
-        context = self._session_binding.artifact_context
-        assert context is not None
-        return HarnessStart(
-            "",
-            artifacts=ArtifactApplication(
-                deferred=(
-                    ArtifactDeferral(
-                        input_id=tuple(context.inputs.items())[0].identity,
-                        destination="session",
-                        reason="unsupported fixture",
-                    ),
-                )
-            ),
-        )
+    def inspect(*args, **kwargs):
+        observed.append(dict(kwargs["env"]))
+        return launch(*args, **kwargs)
 
-    monkeypatch.setattr(ShellIntegration, "start", defer)
-    with pytest.raises(StateError):
-        lifecycle.restart()
+    monkeypatch.setattr(tmux, "create_session", inspect)
+    captured_output.warnings.clear()
+    lifecycle.restart()
     current = lifecycle.db.get_session("s1")
-    assert current is not None and previous is not None and current.run_id == previous.run_id
-    assert files == lifecycle.files() and all(file.exists() for file in files)
-    assert "kill" not in lifecycle.events
+    assert current is not None and previous is not None and current.run_id != previous.run_id
+    assert not lifecycle.files() and all(not file.exists() for file in files)
+    assert len(observed) == 1 and "AGENTWORKS_ARTIFACTS_DIR" not in observed[0]
+    assert len(captured_output.warnings) == 1
+    record = read_native_setup(lifecycle.db, "session", "s1").records[0]
+    assert record.complete and not record.artifact_files
+    assert tuple(item.input_id for item in record.deferred) == record.artifact_inputs
+    assert all(item.destination == "session" for item in record.deferred)
+    lifecycle.restart()
+    assert not lifecycle.files()
+
+
+@pytest.mark.parametrize("operation", ["create", "start"])
+def test_default_session_artifacts_warn_without_files_or_discovery_env(
+    lifecycle, monkeypatch, captured_output, operation
+):
+    from agentworks.sessions import tmux
+
+    lifecycle.template.harness_integration_config.clear()
+    launch = tmux.create_session
+    observed = []
+
+    def inspect(*args, **kwargs):
+        observed.append(dict(kwargs["env"]))
+        return launch(*args, **kwargs)
+
+    monkeypatch.setattr(tmux, "create_session", inspect)
+    if operation == "create":
+        lifecycle.db.insert_agent_grant("a1", "ws1", "explicit")
+        monkeypatch.setattr("agentworks.agents.manager._assert_agent_ssh_works", lambda *a, **k: None)
+        manager.create_session(
+            lifecycle.db,
+            lifecycle.config,
+            name="s2",
+            workspace="ws1",
+            agent="a1",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+    else:
+        monkeypatch.setattr(manager, "check_session_status", lambda *a, **k: SessionStatus.STOPPED)
+        manager.start_session(lifecycle.db, lifecycle.config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
+    name = "s2" if operation == "create" else "s1"
+    record = read_native_setup(lifecycle.db, "session", name).records[0]
+    assert record.complete and not record.artifact_files
+    assert tuple(item.input_id for item in record.deferred) == record.artifact_inputs
+    assert len(captured_output.warnings) == 1
+    assert len(observed) == 1 and "AGENTWORKS_ARTIFACTS_DIR" not in observed[0]
+    assert not (lifecycle.target.home / ".agentworks-artifacts").exists()
 
 
 def test_unknown_runtime_preserves_artifact_ownership(lifecycle, monkeypatch):

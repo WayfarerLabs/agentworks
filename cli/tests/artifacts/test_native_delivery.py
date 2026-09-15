@@ -6,11 +6,14 @@ import hashlib
 import json
 import shlex
 import tomllib
+from collections.abc import Callable
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import get_args
 
 import pytest
 
+from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication, OwnedArtifactFile, SessionArtifactContext
 from agentworks.artifacts.model import (
     ArtifactContent,
@@ -20,11 +23,13 @@ from agentworks.artifacts.model import (
     ArtifactProvenance,
     ArtifactType,
 )
-from agentworks.artifacts.native.common import native_home, validate_ancestor_names
+from agentworks.artifacts.native.common import NativeSessionArtifacts, native_home, validate_ancestor_names
 from agentworks.artifacts.native.probe import probe_native
 from agentworks.artifacts.native.shell import shell_artifacts
 from agentworks.artifacts.publication import validate_application
 from agentworks.artifacts.session import validate_session_application
+from agentworks.capabilities.base import RunContext
+from agentworks.capabilities.harness_integration import HarnessStart
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
 from agentworks.errors import ConfigError, StateError
 from agentworks.plugins.claude import artifacts as claude
@@ -34,6 +39,14 @@ from agentworks.plugins.codex.harness_integration import CodexIntegration
 from agentworks.plugins.grok import artifacts as grok
 from agentworks.plugins.grok.harness_integration import GrokBuildIntegration
 from tests.artifacts._fixtures import received
+
+
+def enabled(render: Callable[..., NativeSessionArtifacts]) -> list[str]:
+    return {
+        claude.session_artifacts: ["session-prompt", "session-skill-plugin", "session-agent-definitions"],
+        codex.session_artifacts: ["session-developer-instructions", "session-agent-config"],
+        grok.session_artifacts: ["session-rules", "session-agent-definitions"],
+    }[render]
 
 
 def artifact(
@@ -163,7 +176,9 @@ def test_codex_outer_routes_context_and_installs_standard_skills_and_personas():
 )
 def test_session_guidance_adds_to_configured_text_without_making_it_an_initial_prompt(render, option):
     item = artifact(ArtifactType.RULE)
-    result = render(context(item), configured="existing setup", extra_args=[])
+    result = render(
+        enabled_workarounds=enabled(render), context=context(item), configured="existing setup", extra_args=[]
+    )
     assert option in result.argv
     expected = "existing setup\n\n" + item.content.text
     if render is codex.session_artifacts:
@@ -176,12 +191,14 @@ def test_session_guidance_adds_to_configured_text_without_making_it_an_initial_p
     else:
         assert result.application.files[0].data.decode() == expected
         assert result.argv[result.argv.index("--append-system-prompt-file") + 1] == result.application.files[0].path
-        assert result.argv[-2:] == ("--system-prompt-snapshot", "off")
+        assert "--system-prompt-snapshot" not in result.argv
 
 
 def test_claude_session_plugin_uses_native_namespace_and_private_directory():
     item = artifact(ArtifactType.SKILL)
-    result = claude.session_artifacts(context(item), configured=None, extra_args=[])
+    result = claude.session_artifacts(
+        enabled_workarounds=enabled(claude.session_artifacts), context=context(item), configured=None, extra_args=[]
+    )
     plugin_path = result.argv[result.argv.index("--plugin-dir") + 1]
     manifest = json.loads(next(file.data for file in result.application.files if file.path.endswith("plugin.json")))
     assert manifest["name"] == "agentworks-artifacts"
@@ -194,7 +211,7 @@ def test_claude_session_plugin_uses_native_namespace_and_private_directory():
 @pytest.mark.parametrize("render", [codex.session_artifacts, grok.session_artifacts])
 def test_private_skills_stay_unhandled_when_native_cli_cannot_discover_them(render):
     item = artifact(ArtifactType.SKILL)
-    result = render(context(item), configured=None, extra_args=[])
+    result = render(enabled_workarounds=enabled(render), context=context(item), configured=None, extra_args=[])
     assert result.application.files == ()
     assert result.application.deferred[0].input_id == item.identity
     assert result.application.deferred[0].destination == "session"
@@ -210,23 +227,25 @@ def test_native_persona_options_do_not_enable_hooks_or_unknown_native_fields(ren
     }[render]
     item = artifact(ArtifactType.AGENT, options={name: {"hooks": {}}})
     with pytest.raises(ConfigError):
-        render(context(item), configured=None, extra_args=[])
+        render(enabled_workarounds=enabled(render), context=context(item), configured=None, extra_args=[])
 
 
 @pytest.mark.parametrize(
     "render,args",
     [
         (claude.session_artifacts, ["--append-system-prompt=override"]),
-        (claude.session_artifacts, ["--disable-slash-commands"]),
         (codex.session_artifacts, ['-cdeveloper_instructions="override"']),
-        (codex.session_artifacts, ["--config", 'agents.review.config_file="/other"']),
         (grok.session_artifacts, ["--append-system-prompt", "override"]),
-        (grok.session_artifacts, ["--no-subagents"]),
     ],
 )
 def test_raw_native_overrides_cannot_replace_artifact_carrier(render, args):
     with pytest.raises(ConfigError):
-        render(context(artifact(ArtifactType.RULE)), configured=None, extra_args=args)
+        render(
+            enabled_workarounds=enabled(render),
+            context=context(artifact(ArtifactType.RULE)),
+            configured=None,
+            extra_args=args,
+        )
 
 
 def test_native_name_collision_does_not_silently_shadow_another_scope():
@@ -235,20 +254,26 @@ def test_native_name_collision_does_not_silently_shadow_another_scope():
     earlier = claude.outer_artifacts(received(other), "/home/alice/.claude")
     with pytest.raises(ConfigError):
         claude.session_artifacts(
-            context(item, ancestors=tuple(owned(file) for file in earlier.files)), configured=None, extra_args=[]
+            enabled_workarounds=enabled(claude.session_artifacts),
+            context=context(item, ancestors=tuple(owned(file) for file in earlier.files)),
+            configured=None,
+            extra_args=[],
         )
     # Multiple members of the same skill are a single native claim.
     skill = claude.outer_artifacts(received(artifact(ArtifactType.SKILL)), "/home/alice/.claude")
     validate_ancestor_names(context(ancestors=tuple(owned(file) for file in skill.files)), ArtifactApplication())
 
 
-def test_ancestor_guidance_also_disables_claude_saved_prompt_on_resume():
+def test_ancestor_guidance_does_not_change_claude_saved_prompt_on_resume():
     files = claude.outer_artifacts(received(artifact(ArtifactType.RULE)), "/home/alice/.claude").files
     result = claude.session_artifacts(
-        context(ancestors=tuple(owned(file) for file in files)), configured=None, extra_args=[]
+        enabled_workarounds=enabled(claude.session_artifacts),
+        context=context(ancestors=tuple(owned(file) for file in files)),
+        configured=None,
+        extra_args=[],
     )
     assert result.application.files == ()
-    assert result.argv == ("--system-prompt-snapshot", "off")
+    assert result.argv == ()
 
 
 @pytest.mark.parametrize("root", ["relative", "/home/a/../b", "/home//a", "/home/a/"])
@@ -304,8 +329,9 @@ def test_vm_deferral_preserves_input_identity_without_descendant_knowledge(imple
     ],
 )
 @pytest.mark.parametrize("resume", [False, True])
+@pytest.mark.parametrize("opted_in", [False, True])
 def test_native_launch_carries_literal_artifact_guidance_on_new_and_resumed_threads(
-    monkeypatch, implementation, configured, resume
+    monkeypatch, implementation, configured, resume, opted_in
 ):
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.harness_integration import HarnessLaunchIntent
@@ -316,7 +342,12 @@ def test_native_launch_carries_literal_artifact_guidance_on_new_and_resumed_thre
     item = artifact(ArtifactType.RULE)
     integration = implementation(
         "native",
-        configured,
+        {
+            **configured,
+            "enabled_workarounds": (
+                ["session-prompt" if implementation is ClaudeCodeIntegration else "session-rules"] if opted_in else []
+            ),
+        },
         session_name="s1",
         vm_name="box",
         workspace_name="ws",
@@ -335,7 +366,12 @@ def test_native_launch_carries_literal_artifact_guidance_on_new_and_resumed_thre
     assert "{{" not in result.command
     argv = shlex.split(shlex.split(result.command)[2])
     assert ("--resume" in argv) is resume
-    if implementation is GrokBuildIntegration:
+    if not opted_in:
+        flag = "--rules" if implementation is GrokBuildIntegration else "--append-system-prompt"
+        assert argv[argv.index(flag) + 1] == "configured guidance"
+        assert result.artifacts.files == ()
+        assert len(result.artifacts.deferred) == 1
+    elif implementation is GrokBuildIntegration:
         assert argv[argv.index("--rules") + 1] == "configured guidance\n\n" + item.content.text
     else:
         assert "--append-system-prompt" not in argv
@@ -345,10 +381,15 @@ def test_native_launch_carries_literal_artifact_guidance_on_new_and_resumed_thre
 
 @pytest.mark.parametrize("fresh", [False, True])
 @pytest.mark.parametrize("name", ["reviewer", "review-2", "123", "r" * 64])
-def test_codex_literal_role_and_guidance_overrides_apply_on_resume_and_new(fresh, name):
+@pytest.mark.parametrize("include_rule", [False, True])
+def test_codex_literal_role_and_guidance_overrides_apply_on_resume_and_new(fresh, name, include_rule):
     item = artifact(ArtifactType.RULE)
     persona = artifact(ArtifactType.AGENT, name=name)
-    persona = replace(persona, content=replace(persona.content, description='Review "x=y".\n{{session_name}} café'))
+    persona = replace(
+        persona,
+        content=replace(persona.content, description='Review "developer_instructions=x".\n{{session_name}} café'),
+    )
+    artifacts = context(item, persona) if include_rule else context(persona)
     integration = CodexIntegration(
         "codex",
         {"developer_instructions": "configured guidance"},
@@ -359,10 +400,13 @@ def test_codex_literal_role_and_guidance_overrides_apply_on_resume_and_new(fresh
         target=None,
         admin=True,
         state={},
-        artifact_context=context(item, persona),
+        artifact_context=artifacts,
     )
     integration._artifact_plan = codex.session_artifacts(
-        context(item, persona), configured="configured guidance", extra_args=[]
+        enabled_workarounds=enabled(codex.session_artifacts) if include_rule else ["session-agent-config"],
+        context=artifacts,
+        configured="configured guidance",
+        extra_args=[],
     )
     argv_text = integration._codex_argv(() if fresh else ("resume", "thread-id"), fresh=fresh)
     assert "{{" not in argv_text
@@ -374,7 +418,9 @@ def test_codex_literal_role_and_guidance_overrides_apply_on_resume_and_new(fresh
     for value in values:
         key, raw_value = value.split("=", 1)
         combined[key.strip()] = tomllib.loads("value=" + raw_value.strip())["value"]
-    assert combined["developer_instructions"] == "configured guidance\n\n" + item.content.text
+    assert combined["developer_instructions"] == "configured guidance" + (
+        "\n\n" + item.content.text if include_rule else ""
+    )
     assert {key for key in combined if key.startswith("agents.")} == {
         f"agents.{name}.config_file",
         f"agents.{name}.description",
@@ -423,13 +469,15 @@ def test_large_native_argument_artifacts_fail_before_publication(render, type):
     item = artifact(type)
     item = replace(item, content=replace(item.content, text="x" * (128 * 1024)))
     with pytest.raises(ConfigError):
-        render(context(item), configured=None, extra_args=[])
+        render(enabled_workarounds=enabled(render), context=context(item), configured=None, extra_args=[])
 
 
 def test_large_claude_context_uses_private_file_without_an_argument_size_penalty():
     item = artifact(ArtifactType.RULE)
     item = replace(item, content=replace(item.content, text="x" * (128 * 1024)))
-    result = claude.session_artifacts(context(item), configured=None, extra_args=[])
+    result = claude.session_artifacts(
+        enabled_workarounds=enabled(claude.session_artifacts), context=context(item), configured=None, extra_args=[]
+    )
     assert len(result.application.files[0].data) == 128 * 1024
     assert sum(len(token) for token in result.argv) < 1024
 
@@ -528,3 +576,243 @@ def test_shell_index_preserves_declared_key_order_with_fixed_type_order():
     owner = index["groups"][0]
     assert list(owner) == ["owner", "hints", "rules", "skills", "agents"]
     assert list(owner["hints"]) == list(owner["rules"]) == ["zebra", "alpha"]
+
+
+@pytest.mark.parametrize("render", [claude.session_artifacts, codex.session_artifacts, grok.session_artifacts])
+def test_session_delivery_defaults_to_unhandled_before_native_validation(render):
+    items = tuple(
+        artifact(type, options={name: {"hooks": {}} for name in ("claude-code", "codex", "grok-build")})
+        for type in ArtifactType
+    )
+    duplicate = replace(items[-1], origin=ArtifactOrigin("agent", "agent", "worker", entry="review"))
+    result = render(context(duplicate, *items), configured=None, extra_args=["--"])
+    assert result.argv == ()
+    assert result.application.files == ()
+    assert {item.input_id for item in result.application.deferred} == {item.identity for item in (*items, duplicate)}
+    assert {item.destination for item in result.application.deferred} == {"session"}
+
+
+@pytest.mark.parametrize(
+    "integration,workarounds",
+    [
+        (ClaudeCodeIntegration, claude._SESSION_WORKAROUNDS),
+        (CodexIntegration, codex._SESSION_WORKAROUNDS),
+        (GrokBuildIntegration, grok._SESSION_WORKAROUNDS),
+    ],
+)
+def test_config_workaround_names_match_native_delivery(integration, workarounds):
+    annotation = integration.config_model.model_fields["enabled_workarounds"].annotation
+    names = get_args(get_args(annotation)[0])
+    assert set(names) == set(workarounds.values())
+
+
+@pytest.mark.parametrize(
+    "workaround",
+    get_args(get_args(ShellIntegration.config_model.model_fields["enabled_workarounds"].annotation)[0]),
+)
+@pytest.mark.parametrize("type", list(ArtifactType))
+def test_each_declared_shell_workaround_delivers_artifacts(workaround, type):
+    item = artifact(type)
+    prepared = context(item)
+    integration = ShellIntegration(
+        "shell",
+        {"enabled_workarounds": [workaround]},
+        session_name="s1",
+        vm_name="box",
+        workspace_name="ws",
+        workspace_path="/ws",
+        target=None,
+        admin=True,
+        state={},
+        artifact_context=prepared,
+    )
+    result = integration.start(RunContext())
+    assert isinstance(result, HarnessStart)
+    assert result.artifacts.files
+    assert result.artifacts.deferred == ()
+    assert result.artifacts.artifacts_dir == prepared.directory
+    assert any(
+        file.origins == (item.origin_identity,) and file.path != f"{prepared.directory}/index.json"
+        for file in result.artifacts.files
+    )
+
+
+@pytest.mark.parametrize(
+    "render,workaround,selected,flag",
+    [
+        (
+            claude.session_artifacts,
+            "session-prompt",
+            {ArtifactType.HINT, ArtifactType.RULE},
+            "--append-system-prompt-file",
+        ),
+        (claude.session_artifacts, "session-skill-plugin", {ArtifactType.SKILL}, "--plugin-dir"),
+        (claude.session_artifacts, "session-agent-definitions", {ArtifactType.AGENT}, "--agents"),
+        (codex.session_artifacts, "session-developer-instructions", {ArtifactType.HINT, ArtifactType.RULE}, "-c"),
+        (codex.session_artifacts, "session-agent-config", {ArtifactType.AGENT}, "-c"),
+        (grok.session_artifacts, "session-rules", {ArtifactType.HINT, ArtifactType.RULE}, "--rules"),
+        (grok.session_artifacts, "session-agent-definitions", {ArtifactType.AGENT}, "--agents"),
+    ],
+)
+def test_workaround_selects_only_its_types_including_deferred_ancestors(render, workaround, selected, flag):
+    items = tuple(artifact(type) for type in ArtifactType)
+    items = tuple(
+        replace(item, origin=ArtifactOrigin("agent", "agent", "worker", entry="review"))
+        if item.content.type is ArtifactType.RULE
+        else item
+        for item in items
+    )
+    items = tuple(sorted(items, key=lambda item: item.origin.component == "session"))
+    received_context = context(*items)
+    assert received_context.inputs.deferred
+    result = render(received_context, configured=None, extra_args=[], enabled_workarounds=[workaround])
+    assert flag in result.argv
+    assert {item.input_id for item in result.application.deferred} == {
+        item.identity for item in items if item.content.type not in selected
+    }
+
+
+@pytest.mark.parametrize(
+    "render,workaround,args",
+    [
+        (claude.session_artifacts, "session-agent-definitions", ["--append-system-prompt", "configured"]),
+        (codex.session_artifacts, "session-agent-config", ["-c", 'developer_instructions="configured"']),
+        (grok.session_artifacts, "session-agent-definitions", ["--rules", "configured"]),
+    ],
+)
+def test_unselected_guidance_does_not_restrict_native_guidance_flags(render, workaround, args):
+    result = render(
+        context(artifact(ArtifactType.RULE), artifact(ArtifactType.AGENT)),
+        configured=None,
+        extra_args=args,
+        enabled_workarounds=[workaround],
+    )
+    assert result.argv
+    assert len(result.application.deferred) == 1
+
+
+@pytest.mark.parametrize("implementation", [ClaudeCodeIntegration, CodexIntegration, GrokBuildIntegration])
+def test_skipped_inputs_do_not_probe_or_require_launch_target(monkeypatch, implementation):
+    from agentworks.capabilities.base import RunContext
+    from agentworks.capabilities.harness_integration import HarnessLaunchIntent
+
+    module = __import__(implementation.__module__, fromlist=["probe_native"])
+    monkeypatch.setattr(module, "probe_native", lambda *args, **kwargs: pytest.fail("unexpected artifact probe"))
+    integration = implementation(
+        "native",
+        {},
+        session_name="s1",
+        vm_name="box",
+        workspace_name="ws",
+        workspace_path="/ws",
+        target=None,
+        admin=True,
+        state={},
+        artifact_context=context(artifact(ArtifactType.RULE)),
+    )
+    # Isolate launch selection from independent transcript / identity discovery.
+    monkeypatch.setattr(integration, "_resume_or_launch", lambda *args, **kwargs: "native-command")
+    if implementation is CodexIntegration:
+        monkeypatch.setattr(integration, "_start_fresh", lambda *args, **kwargs: "native-command")
+    result = integration.start(RunContext(), intent=HarnessLaunchIntent.CREATE)
+    assert result.artifacts.files == ()
+    assert len(result.artifacts.deferred) == 1
+
+
+@pytest.mark.parametrize(
+    "version,returncode,snapshot,warn",
+    [
+        ("2.0.64 (Claude Code)", 0, False, False),
+        ("2.1.264 (Claude Code)", 0, False, False),
+        ("2.1.265 (Claude Code)", 0, True, False),
+        ("2.2.0 (Claude Code)", 0, True, False),
+        ("node 22.18.0\n2.1.264 (Claude Code)\n", 0, False, False),
+        ("startup helper 1.0.0\n2.1.265 (Claude Code)\n", 0, True, False),
+        ("2.1.265", 0, False, True),
+        ("unrecognized", 0, False, True),
+        ("2.1.265", 1, False, True),
+    ],
+)
+def test_claude_snapshot_adjustment_is_narrow_and_unknown_versions_warn(
+    monkeypatch, version, returncode, snapshot, warn
+):
+    from unittest.mock import Mock
+
+    from agentworks.ssh import SSHResult
+    from agentworks.transports import Transport
+
+    target = Mock(spec=Transport)
+    target.run.return_value = SSHResult(returncode, version, "")
+    warning = Mock()
+    monkeypatch.setattr(output, "warn", warning)
+    result = claude.session_prompt_snapshot(target, {})
+    assert result == (("--system-prompt-snapshot", "off") if snapshot else ())
+    assert warning.called is warn
+    assert target.run.call_count == 1
+
+
+@pytest.mark.parametrize(
+    "config,workaround",
+    [
+        (ClaudeCodeIntegration.config_model, "session-prompt"),
+        (CodexIntegration.config_model, "session-agent-config"),
+        (GrokBuildIntegration.config_model, "session-rules"),
+    ],
+)
+def test_workaround_config_replaces_inherited_optins_and_refuses_unknown_names(config, workaround):
+    from pydantic import ValidationError
+
+    from agentworks.schema import merge_model
+
+    assert config().enabled_workarounds == []
+    value, _ = merge_model(config, {"enabled_workarounds": [workaround]}, {"enabled_workarounds": []})
+    assert config.model_validate(value).enabled_workarounds == []
+    with pytest.raises(ValidationError):
+        config.model_validate({"enabled_workarounds": ["unknown-workaround"]})
+
+
+def test_claude_snapshot_observation_timeout_warns_and_continues(monkeypatch):
+    from unittest.mock import Mock
+
+    from agentworks.ssh import SSHError
+    from agentworks.transports import Transport
+
+    target = Mock(spec=Transport)
+    target.run.side_effect = SSHError("fixture timed out")
+    warning = Mock()
+    monkeypatch.setattr(output, "warn", warning)
+    assert claude.session_prompt_snapshot(target, {"TOKEN": "fixture-secret"}) == ()
+    warning.assert_called_once()
+
+
+@pytest.mark.parametrize("workaround", [None, "session-skill-plugin", "session-agent-definitions", "session-prompt"])
+def test_claude_observes_version_only_for_delivered_session_prompt(monkeypatch, workaround):
+    from unittest.mock import Mock
+
+    from agentworks.capabilities.base import RunContext
+    from agentworks.capabilities.harness_integration import HarnessLaunchIntent
+    from agentworks.plugins.claude import harness_integration as module
+    from tests.conftest import _FakeTarget
+
+    snapshot = Mock(return_value=("--system-prompt-snapshot", "off"))
+    monkeypatch.setattr(module, "session_prompt_snapshot", snapshot)
+    monkeypatch.setattr(module, "probe_native", lambda *args, **kwargs: "/home/alice/.claude")
+    ancestor = claude.outer_artifacts(received(artifact(ArtifactType.RULE)), "/home/alice/.claude")
+    integration = ClaudeCodeIntegration(
+        "claude-code",
+        {"enabled_workarounds": [workaround] if workaround else []},
+        session_name="s1",
+        vm_name="box",
+        workspace_name="ws",
+        workspace_path="/ws",
+        target=None,
+        admin=True,
+        state={},
+        artifact_context=context(
+            *(artifact(type) for type in ArtifactType), ancestors=tuple(owned(file) for file in ancestor.files)
+        ),
+    )
+    monkeypatch.setattr(integration, "_resume_or_launch", lambda *args, **kwargs: "native-command")
+    integration.start(RunContext(admin_target=_FakeTarget()), intent=HarnessLaunchIntent.CREATE)
+    assert snapshot.called is (workaround == "session-prompt")
+    assert ("--system-prompt-snapshot" in integration._artifact_plan.argv) is (workaround == "session-prompt")

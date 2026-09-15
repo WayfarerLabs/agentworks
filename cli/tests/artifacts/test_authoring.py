@@ -39,7 +39,9 @@ def test_rule_capture_roundtrip_and_native_body(tmp_path, file_source, header):
         assert len(files) == 1
         assert item.content.text.encode() in files[0].data
         assert b"description:" not in files[0].data
-    native = codex.session_artifacts(context(item), configured=None, extra_args=())
+    native = codex.session_artifacts(
+        context(item), configured=None, extra_args=(), enabled_workarounds=["session-developer-instructions"]
+    )
     assert any("Run relevant checks." in arg for arg in native.argv)
     assert all("Repository conventions" not in arg for arg in native.argv)
 

@@ -15,8 +15,9 @@ declarations and recorded delivery through the same graph without applying anyth
 
 The approved first delivery includes workstation and Git sources, hints, rules, standard Agent
 Skills and agent personas. Packaged distribution readers, automatic core hint emission and feature
-execution follow later. Any artifact still unhandled at the session causes a launch error with
-integration-supplied reasons. This policy was accepted with the HLA approval.
+execution follow later. The 2026-09-15 operator ruling makes session delivery opt-in through
+`enabled_workarounds` and treats final unhandled artifacts as warnings. It supersedes the original
+automatic session delivery and launch-error policy.
 
 ## Architecture and flow
 
@@ -68,8 +69,9 @@ flowchart TB
 Each deferred artifact takes one route, so VM inputs are not copied down both branches. The session
 receives its local maps and the applicable deferred groups. VM entries arriving through different
 paths retain their VM owner and occupy disjoint keys within that owner's type maps. The three paths
-do not create three namespaces for the VM. If its facet still cannot handle an artifact, core
-applies the approved final-session error policy.
+do not create three namespaces for the VM. If its facet still cannot handle an artifact, core warns
+with the original owner, artifact and integration-supplied reason, then continues launch. These
+terminal deferrals are persisted as unhandled; no later route is created.
 
 The facet boxes show activated integrations. Without activation, core passes artifacts through: an
 inactive VM routes to user; an inactive user or workspace passes its applicable inputs to session.
@@ -376,16 +378,38 @@ ownership evidence to clean up a failed start idempotently.
 
 Retire the previous run's owned files after it is no longer using them. Session deletion and failed
 creation clean only the directories belonging to that session/run. Reusing a session name cannot
-adopt another UUID's files. An unsupported resume or stale native prompt must fail explicitly before
-teardown; silently continuing with an old artifact set is not successful delivery.
+adopt another UUID's files. Disabling a workaround uses the same retirement path on the next managed
+launch. Unsupported native resume remains separate from optional artifact delivery; unhandled inputs
+warn and cannot be recorded as delivered.
+
+## Conservative session workarounds
+
+Session-facet configuration declares `enabled_workarounds` as a typed list of integration-owned
+names, empty by default. A child list replaces its parent list so `[]` revokes inherited opt-ins.
+Names describe concrete delivery mechanisms, not a blanket permission to invent future fallbacks.
+Unknown names fail ordinary configuration validation. Each adapter filters disabled inputs before
+native rendering, collision checks for proposed outputs, or compatibility probes. Previously applied
+ancestor outputs retain their ordinary discovery and ownership checks.
+
+The implementation uses the existing deferral record to report terminal unhandled inputs with
+`destination: session` and a reason naming a relevant workaround when available. Core validates all
+output structure and destinations before emitting warnings. It stores these terminal results in the
+ordinary applied-state record for inspection. No new routing service, retry loop, native
+compatibility table or hook executor is introduced.
+
+The [native delivery LLD](native-delivery-lld.md) names the methods and the narrow Claude prompt
+recording behavior. Opt-in authorizes using a documented native carrier; an incompatible native CLI
+can still reject that explicit launch configuration. It is not a certification of native support,
+and missing help text is not proof that a flag is unavailable.
 
 ## First-party delivery matrix
 
-The table selects first-delivery behavior from documented mechanisms. Native compatibility probes
-and live acceptance still gate shipping it. Unsupported means a reasoned deferral at an outer facet
-and a launch error if no later facet handles it.
+The table lists native outer behavior and available opt-in session methods. Session delivery is off
+by default for every integration, including shell. Unsupported means a reasoned deferral at an outer
+facet and a terminal warning if no later facet handles it. Unsafe publication and invalid plugin
+results remain errors. Compatibility checks cannot impose a blanket native-version floor.
 
-| Integration | User facet                                                                            | Workspace facet                                                                               | Session facet                                                                                                                   |
+| Integration | User facet                                                                            | Workspace facet                                                                               | Opt-in session facet                                                                                                            |
 | ----------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | Shell       | Publish all types as files below the actual user's `.agentworks-artifacts` directory. | Publish all types in a workspace-owned artifact directory, deliberately shared at this scope. | Publish all remaining types in the private session/run directory.                                                               |
 | Claude Code | Unconditional `.claude/rules`; standard `.claude/skills`; `.claude/agents`.           | Corresponding project directories owned by the workspace.                                     | Additive prompt file for hints/rules; session-only plugin for skills; `--agents` definitions for agents.                        |
@@ -401,7 +425,8 @@ Claude similarly composes existing append instructions with generated hint/rule 
 session plugin is an integration-generated carrier, not workspace marketplace/plugin installation.
 Skill names acquire the documented plugin namespace, for example `agentworks-artifacts:review`;
 inspection reports that name. Persona JSON avoids assuming that plugin persona fields are all
-preserved. Required resume behavior must be tested with the native prompt-snapshot setting.
+preserved. Only the enabled session-prompt workaround considers native prompt recording; ancestor
+rules and skills do not justify changing system-prompt behavior.
 
 Grok uses a flat rules directory and honors discovery exclusions. Its interactive CLI must be
 verified directly; ACP plugin flags are not evidence of support in the launched command. Persona
@@ -412,12 +437,12 @@ separate native launch behavior. Claude supports that selection. Codex's existin
 config is prompt-mediated and does not promise full persona settings. Preserve that distinction in
 the CLI guidance and inspection output instead of claiming primary/delegated parity.
 
-Shell exposes the session publication index through `AGENTWORKS_ARTIFACTS_DIR`; its index records
-types, relative files and provenance for that session/run only. Ancestor publications use fixed
-locations: `~/.agentworks-artifacts/user/` for the actual user and
-`<workspace>/.agentworks-artifacts/` for the workspace. Document these locations without adding
-ancestor-index pointers or retransmitting handled payloads. Publication and discoverability fulfill
-shell delivery; shell does not claim to load rules into model context.
+With its session file workaround enabled, shell exposes the session publication index through
+`AGENTWORKS_ARTIFACTS_DIR`; its index records types, relative files and provenance for that
+session/run only. Ancestor publications use fixed locations: `~/.agentworks-artifacts/user/` for the
+actual user and `<workspace>/.agentworks-artifacts/` for the workspace. Document these locations
+without adding ancestor-index pointers or retransmitting handled payloads. Publication and
+discoverability fulfill shell delivery; shell does not claim to load rules into model context.
 
 Across integrations, hints may be combined into a single context fragment. Rules remain
 always-context guidance within their applicability. Standard skills retain their package and
@@ -465,18 +490,19 @@ Worked cases the HLA and subsequent tests share:
 
 1. **Inactive VM and user.** VM core has captured a rules bundle. Neither ancestor activates Codex.
    Core routes its input to user and lazily passes it through that inactive facet to the selected
-   Codex session. The session injects rule text; it performs no implicit user setup. `show`
-   identifies VM origin and the inactive passthrough.
+   Codex session. The session warns by default, or injects rule text when its named workaround is
+   enabled; it performs no implicit user setup. `show` identifies VM origin and the inactive
+   passthrough.
 2. **Upstream skills.** An agent user activates Codex and applies a skill bundle. Its sessions do
    not receive those skill payloads again. Inspection still lists the user placement and recorded
-   handling. Without upstream handling, the same session skill would fail with an unsupported
-   private-session-placement reason and identify which owner needs configuration.
+   handling. Without upstream handling, the same session skill warns with an unsupported
+   private-session-placement reason and identifies which owner can provide native handling.
 3. **The diamond.** A VM facet routes one entry to user, another to workspace and a third directly
    to session. Each branch sees only its assigned VM entries plus its own local declarations. A
    session joins the three disjoint results; a second user gets an independent evaluation.
 4. **Two users in one workspace.** Workspace artifacts are intentionally shared. Session-owned
-   Claude skills are loaded from each actual user's private session plugin. No session artifact is
-   installed into the shared project directory.
+   Claude skills with the skill-plugin workaround enabled load from each actual user's private
+   session plugin. No session artifact is installed into the shared project directory.
 5. **Change and removal.** Updating a Git ref and reinitializing its owner captures a new commit and
    applies/removes owned outputs. Only descendants whose actual prepared inputs change become stale.
    Inspection explains the mismatch and launch requests the applicable owner setup operation,
@@ -526,6 +552,8 @@ including inactive/stale owners and diamond reuse. Validate native discovery, up
 resume and two-user isolation against the actual shipped executables and a scoped live backend.
 Inspection tests must prove no acquisition, native invocation or state mutation occurs.
 
-The operator approved capture during owning setup, single-destination deferrals, the final-session
-error and the native session skill limitations. The [implementation plan](plan.md) sequences the
-complete delivery on this branch and PR, including the shared identity prerequisite and acceptance.
+The operator approved capture during owning setup and single-destination deferrals. The 2026-09-15
+ruling replaces automatic session delivery and final-session errors with named opt-in workarounds
+and terminal warnings; unsupported native session skill types remain unhandled. The
+[implementation plan](plan.md) sequences the complete delivery on this branch and PR, including the
+shared identity prerequisite and acceptance.

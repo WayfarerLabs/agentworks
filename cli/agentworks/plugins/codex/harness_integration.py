@@ -115,7 +115,6 @@ from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
     defer,
     delivery_files,
-    has_artifacts,
     native_home,
     validate_discovery_paths,
     validate_native_command,
@@ -238,6 +237,11 @@ class CodexConfig(AgwModel):
     disable_strict_config: bool | None = None
     """Turn OFF ``--strict-config``, for a target whose own
     ``config.toml`` a newer codex wrote."""
+
+    enabled_workarounds: Annotated[
+        list[Literal["session-developer-instructions", "session-agent-config"]], MergeStrategy.REPLACE
+    ] = Field(default_factory=list)
+    """Explicitly enabled session artifact carriers. An authored list replaces inherited opt-ins."""
 
     extra_args: Annotated[list[str], MergeStrategy.REPLACE] = Field(default_factory=list)
     """Raw argv tokens appended verbatim after every generated CLI option,
@@ -421,10 +425,11 @@ class CodexIntegration(HarnessIntegration):
         session's target.
 
         User and workspace facets publish standard skills and native agent personas.
-        Hints and rules flow to the session, where they add to `developer_instructions`.
-        Private session skills are unsupported; activate an outer facet for native
-        skill placement. Session persona definitions configure delegated roles;
-        primary `agent` selection remains prompt-mediated.
+        Hints and rules flow to the session and remain unhandled by default.
+        `enabled_workarounds` can opt into `session-developer-instructions` for
+        rules/hints and `session-agent-config` for delegated personas. Private session
+        skills have no supported workaround; activate an outer facet for native skill
+        placement. Primary `agent` selection remains prompt-mediated.
         """,
     )
 
@@ -576,9 +581,12 @@ class CodexIntegration(HarnessIntegration):
             self._session_binding.artifact_context,
             configured=self.config.developer_instructions,
             extra_args=self.config.extra_args,
+            enabled_workarounds=self.config.enabled_workarounds,
         )
         artifact_context = self._session_binding.artifact_context
-        if artifact_context is not None and has_artifacts(artifact_context):
+        if artifact_context is not None and (
+            artifact_context.ancestor_files or self._artifact_plan.application.files or self._artifact_plan.argv
+        ):
             runner = ctx.admin_target() if self._admin else ctx.agent_target()
             if runner is None:
                 raise StateError("artifact delivery requires the actual native launch target")
@@ -590,7 +598,6 @@ class CodexIntegration(HarnessIntegration):
                 home=artifact_context.home,
                 workspace=self._workspace_path,
                 files=files,
-                flags=self._artifact_plan.required_flags,
                 session_plugin="--plugin-dir" in self._artifact_plan.argv,
             )
             validate_discovery_paths(
@@ -618,7 +625,7 @@ class CodexIntegration(HarnessIntegration):
                 self._state.clear()
                 self._state.update(prior_state)
             raise
-        if has_artifacts(self._session_binding.artifact_context):
+        if self._artifact_plan.argv:
             validate_native_command(command)
         return HarnessStart(command, self._decision_note(intent=intent), self._artifact_plan.application)
 
@@ -985,8 +992,8 @@ class CodexIntegration(HarnessIntegration):
         """
         parts = [shlex.quote(token) for token in (*head, *self._managed_flags())]
         parts += ["-c", notify_value_word(self._session_name)]
-        if self.config.developer_instructions is not None and "developer_instructions=" not in " ".join(
-            self._artifact_plan.argv
+        if self.config.developer_instructions is not None and not any(
+            token.startswith("developer_instructions=") for token in self._artifact_plan.argv
         ):
             value = _toml_basic_string(self.config.developer_instructions)
             parts += ["-c", quote_literal_argv(f"developer_instructions={value}")]

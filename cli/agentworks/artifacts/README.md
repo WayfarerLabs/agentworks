@@ -78,8 +78,9 @@ Select these templates through your normal VM, agent and session declarations or
 The VM has no activated shell facet, so core makes its captured hint available to the user facet.
 Agent setup handles it as a file for that actual user. A shell session under that agent does not
 receive the handled hint again. If the user facet were inactive, the hint would instead reach
-session and be published beneath that user's private session artifact directory. Inactive workspace
-facets likewise pass their applicable inputs to session.
+session and produce an unhandled-artifact warning unless the session enables the
+`session-artifact-files` workaround. Inactive workspace facets likewise pass their applicable inputs
+to session.
 
 Use `agw artifact show --agent <agent-name> --integration shell` to inspect the captured input and
 recorded handling. The templates themselves do not create instances. See `agw vm create --help`,
@@ -235,7 +236,7 @@ filesystem disappears with it.
 
 ## Native delivery
 
-| Integration | User and workspace facets                              | Private session delivery                                                                             |
+| Integration | User and workspace facets                              | Opt-in private session delivery                                                                      |
 | ----------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
 | Shell       | Files for every artifact type                          | Files and an index through `AGENTWORKS_ARTIFACTS_DIR`                                                |
 | Claude Code | Native rules, skills, and agent definitions            | Appended context, a session plugin for skills, and agent definitions                                 |
@@ -246,8 +247,8 @@ The map key supplies the native name, with a native namespace where required, su
 session skill plugin. Inspection shows recorded names and locations. Shell uses scope directories
 and a grouped index, so equal names from different owners remain separately accessible. Claude and
 Grok combine hints in `agentworks-hints.md` and same-key rules in a rule file at each destination.
-Their user and project rule discovery is additive. Codex adds deferred hints and rules to session
-developer instructions.
+Their user and project rule discovery is additive. Codex defers hints and rules to the session;
+adding them to developer instructions requires the `session-developer-instructions` workaround.
 
 The native adapters refuse ambiguous skill or persona identities across scopes, including already
 handled ancestors. Before managed launch, a bounded inventory also checks existing native entries in
@@ -278,10 +279,62 @@ There is no separate session filesystem. Session publication uses the actual use
 `~/.agentworks-artifacts/session/<session_uuid>/<run_id>/` directory. It avoids exposing session
 content to other workspace users, but sessions sharing that Linux user share its access. A new
 managed run uses a new directory; reusable session names do not reuse another session's identity.
-Unsupported final-session delivery is a launch error, with the original artifact and reason.
+Session delivery is disabled by default. Inputs left unhandled, including deferrals from ancestors,
+produce warnings with their original owner, type, name and reason. They do not prevent launch and
+are not reported as successfully delivered. Invalid input, unsafe publication and ownership
+conflicts remain errors.
 
 This delivery includes declared bundles and harness handling. Core hint emission, features, hooks,
 and MCP artifacts are later work.
+
+## Session workarounds
+
+Every integration starts with `enabled_workarounds: []` in its session facet. Enable only the
+specific delivery methods you need. A workaround is permission to use that method, not a promise
+that the native harness supports every artifact or option. An incompatible native CLI can still
+reject the explicitly selected launch arguments. Unknown names are configuration errors. The list
+replaces the inherited list; an explicit `[]` disables inherited workarounds. Setup-facet
+activations do not enable session workarounds.
+
+| Integration | Workaround                       | Session inputs and behavior                                                                   |
+| ----------- | -------------------------------- | --------------------------------------------------------------------------------------------- |
+| Claude Code | `session-prompt`                 | Append rules and hints through a private prompt file.                                         |
+| Claude Code | `session-skill-plugin`           | Discover skills through a private plugin; native names gain `agentworks-artifacts:`.          |
+| Claude Code | `session-agent-definitions`      | Supply agent personas through native launch JSON.                                             |
+| Codex       | `session-developer-instructions` | Compose rules and hints into the session's developer instructions.                            |
+| Codex       | `session-agent-config`           | Select private agent configuration files through launch overrides.                            |
+| Grok Build  | `session-rules`                  | Supply rules and hints through the native rules argument.                                     |
+| Grok Build  | `session-agent-definitions`      | Supply agent personas through native launch JSON.                                             |
+| Shell       | `session-artifact-files`         | Publish all types as private files and expose their index through `AGENTWORKS_ARTIFACTS_DIR`. |
+
+Codex and Grok Build have no session skill workaround. Apply those skills at a supported user or
+workspace facet. Unhandled warnings name the relevant workaround when one exists; enabling a
+workaround never implicitly activates an ancestor facet or edits a shared workspace.
+
+For example, opt into Claude session rules and hints while leaving session skills and agents off:
+
+```yaml
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: session-guidance
+spec:
+  harness_integration:
+    name: claude-code
+    enabled_workarounds: [session-prompt]
+```
+
+Reference the desired bundle through the template's ordinary `artifacts.bundles` block. This example
+declares configuration only; it does not create or restart a session. On a subsequent managed
+launch, disabling a workaround retires its previously owned session files through the ordinary
+instance-state cleanup. Already applied user/workspace artifacts remain owned there.
+
+There is no blanket minimum native version for artifacts. Only Claude's enabled `session-prompt`
+workaround consults its version for prompt recording behavior, and only when it emits rules or
+hints: before 2.1.265 the append flag already disables recording; from that version onward the
+integration adds `--system-prompt-snapshot off`. An unknown version produces a warning about
+possibly stale appended guidance on resume. Native rules, skills and personas do not trigger this
+snapshot adjustment. The integration does not install hooks or implement a native release matrix.
 
 ## Inspect before changing state
 

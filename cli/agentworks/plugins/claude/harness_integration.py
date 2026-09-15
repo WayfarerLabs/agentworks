@@ -31,7 +31,7 @@ import json
 import shlex
 import uuid
 from dataclasses import replace
-from typing import TYPE_CHECKING, Annotated, ClassVar
+from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 
 from pydantic import Field
 
@@ -40,7 +40,6 @@ from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
     defer,
     delivery_files,
-    has_artifacts,
     native_home,
     validate_discovery_paths,
     validate_native_command,
@@ -57,7 +56,7 @@ from agentworks.capabilities.harness_integration.base import (
 from agentworks.errors import StateError
 from agentworks.plugins._harness_native.native import setup_user, setup_workspace
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
-from agentworks.plugins.claude.artifacts import outer_artifacts, session_artifacts
+from agentworks.plugins.claude.artifacts import outer_artifacts, session_artifacts, session_prompt_snapshot
 from agentworks.schema import AgwModel, MergeStrategy
 from agentworks.topics import TopicProse
 
@@ -143,6 +142,11 @@ class ClaudeCodeConfig(AgwModel):
     later and replaces this generated setting. False (the default) adds no
     override. A child template's value replaces its parent's."""
 
+    enabled_workarounds: Annotated[
+        list[Literal["session-prompt", "session-skill-plugin", "session-agent-definitions"]], MergeStrategy.REPLACE
+    ] = Field(default_factory=list)
+    """Explicitly enabled session artifact carriers. An authored list replaces inherited opt-ins."""
+
     extra_args: Annotated[list[str], MergeStrategy.REPLACE] = Field(default_factory=list)
     """Appended verbatim after every generated CLI option, so it can carry
     any flag this integration does not model. Claude uses the last
@@ -178,10 +182,12 @@ class ClaudeCodeIntegration(HarnessIntegration):
         session's target.
 
         Artifact bundles activated at a user or workspace facet publish native rules,
-        skills and agent personas. Session guidance uses an additive prompt file;
-        session skills use a private plugin with the `agentworks-artifacts:` namespace.
-        Artifact guidance is refreshed on resume. Raw arguments that disable or
-        replace its native carriers are rejected while artifacts are in use.
+        skills and agent personas. Session artifacts are optional and unhandled by
+        default. `enabled_workarounds` can opt into `session-prompt` for rules/hints,
+        `session-skill-plugin` for skills in a private `agentworks-artifacts:` plugin,
+        and `session-agent-definitions` for personas. The prompt workaround refreshes
+        appended guidance on resume when Claude's version is known. Raw arguments
+        that disable or replace active artifact carriers are rejected.
         """,
     )
 
@@ -320,9 +326,12 @@ class ClaudeCodeIntegration(HarnessIntegration):
             self._session_binding.artifact_context,
             configured=self.config.append_system_prompt,
             extra_args=self.config.extra_args,
+            enabled_workarounds=self.config.enabled_workarounds,
         )
         artifact_context = self._session_binding.artifact_context
-        if artifact_context is not None and has_artifacts(artifact_context):
+        if artifact_context is not None and (
+            artifact_context.ancestor_files or self._artifact_plan.application.files or self._artifact_plan.argv
+        ):
             runner = ctx.admin_target() if self._admin else ctx.agent_target()
             if runner is None:
                 raise StateError("artifact delivery requires the actual native launch target")
@@ -334,10 +343,14 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 home=artifact_context.home,
                 workspace=self._workspace_path,
                 files=files,
-                flags=self._artifact_plan.required_flags,
                 session_plugin="--plugin-dir" in self._artifact_plan.argv,
             )
             validate_discovery_paths(artifact_context, (native_root, f"{self._workspace_path}/.claude"))
+            if "--append-system-prompt-file" in self._artifact_plan.argv:
+                self._artifact_plan = replace(
+                    self._artifact_plan,
+                    argv=self._artifact_plan.argv + session_prompt_snapshot(runner, artifact_context.environment),
+                )
 
         command = self._resume_or_launch(ctx, intent=intent)
         if intent is HarnessLaunchIntent.FORCE_NEW:
@@ -348,7 +361,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
             note = "Existing Claude Code session found. Resuming..."
         else:
             note = "No existing Claude Code session. Starting a new one..."
-        if has_artifacts(self._session_binding.artifact_context):
+        if self._artifact_plan.argv:
             validate_native_command(command)
         return HarnessStart(command, note, self._artifact_plan.application)
 

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, cast
 import agentworks.agents.manager as _mgr
 from agentworks import output
 from agentworks.errors import (
+    AgentworksError,
     AlreadyExistsError,
     ExternalError,
     NotFoundError,
@@ -813,6 +814,11 @@ def reinit_agent(
                             f"Cancelling agent reinit '{name}'. The agent may be in a partial state. "
                             f"Re-run 'agent reinit {name}' to retry. SSH log: {ssh_logger.display_path}"
                         )
+                        raise
+                    except AgentworksError as error:
+                        if error.entity_kind is None and error.entity_name is None:
+                            error.entity_kind = "agent"
+                            error.entity_name = name
                         raise
                     except Exception as e:
                         raise ExternalError(

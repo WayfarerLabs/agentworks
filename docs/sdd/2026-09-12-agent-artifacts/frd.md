@@ -5,8 +5,9 @@
 Approved requirements (2026-09-13). This effort builds on
 [harness-scope-framework](../2026-09-06-harness-scope-framework/frd.md) and participates in the
 [next-steps saga](../2026-08-04-next-steps/target-state.md). The operator approved the
-first-delivery scope and the HLA, including its native support matrix and final-session launch-error
-policy. The [plan](plan.md) tracks implementation and acceptance.
+first-delivery scope and the HLA. The 2026-09-15 operator ruling below supersedes the original
+automatic session delivery and final-session launch-error policy. The [plan](plan.md) tracks
+implementation and acceptance.
 
 ## Problem and intended outcome
 
@@ -257,7 +258,7 @@ and from an implemented facet that needs no native changes. Successful setup alo
 artifact was handled. The approved result contract lists what remains deferred; a successful
 application reports other inputs as handled. The integration must fulfill that delivery obligation
 through its supported native mechanism, which can include launch arguments without a published file.
-Core validates the result and rejects every final-session deferral with its source and reason. An
+Core validates the result and warns for every final-session deferral with its source and reason. An
 integration silently dropping an input violates the handling contract; omission from the deferral
 list does not independently prove native consumption. No per-item acknowledgment ledger or
 file-or-deferral coverage requirement is added.
@@ -389,8 +390,10 @@ Avoid a new universal reconciliation engine or restoring the predecessor's rejec
 ownership ledger.
 
 **R9. Explain unresolved delivery.** Diagnostics identify the selected integration, original owner,
-artifact and the reason it remains unhandled. Core enforces the final-session disposition chosen in
-the HLA; omission, warning or success must not disguise dropped inputs.
+artifact and the reason it remains unhandled. Final-session inputs are optional: warn when an input
+cannot be handled, including the applicable enabled-workaround choice when one exists, and continue
+launch without claiming delivery. Preserve the terminal unhandled result for inspection. Malformed
+input, unsafe publication and ambiguous ownership remain errors.
 
 Provide **`agw artifact show`**, following the scope-selection conventions of `agw env show`, to
 explain artifacts for a VM, an admin or agent user, a workspace, or a session. Include local inputs
@@ -434,8 +437,10 @@ worked manifests and migration guidance with the behavior they explain.
 
 1. First-delivery sources are workstation and Git, with packaged distributions deferred. All source
    readers converge on the same normalized representation.
-2. Artifacts still unhandled at the final session facet cause a launch error with
-   integration-supplied reasons; there is no silent omission or implied successful delivery.
+2. Session artifact delivery is disabled by default across first-party integrations. Explicit
+   `enabled_workarounds` in the session-facet configuration permits specific documented methods.
+   Unhandled inputs warn with integration-supplied reasons and available workaround names; there is
+   no silent omission or implied successful delivery.
 3. The HLA's native support matrix governs first delivery, including its explicit unsupported cases.
 4. Capture occurs in the owning setup operation. The HLA's source refresh, content identity,
    ordering, collision and independent-consumer rules govern implementation.
@@ -452,3 +457,14 @@ disposition. Repetition, update, removal, failure and session reuse are demonstr
 evidence. Operators can use `agw artifact show` to explain local and ancestor declarations,
 provenance and recorded delivery without changing the system. Permanent documentation stands alone,
 and the predecessor's remaining acceptance is not misrepresented as artifact completion.
+
+## Operator ruling: conservative workarounds, 2026-09-15
+
+The operator directed: "let's call it enabled_workarounds" and "the right posture is to warn on
+unhandled session artifacts. They are by definition optional." The direction applies "across all the
+integrations, again with a highly conservative bias."
+
+This supersedes the original automatic session delivery and terminal-error decisions. Native outer
+placement remains the ordinary path. Workarounds are explicit, separately named opt-ins, never
+implicitly enabled by an artifact reference or an ancestor activation. Do not require a tested
+native version as a blanket artifact minimum or build a release-by-release compatibility framework.

@@ -539,6 +539,55 @@ def test_reinit_mutation_failure_wraps_and_keeps_the_agent(
     assert db.get_agent("dev") is not None  # re-runnable, as before
 
 
+@pytest.mark.parametrize("error_type", [StateError, ValidationError, ExternalError])
+@pytest.mark.parametrize("specific_context", [False, True])
+@pytest.mark.parametrize("operation", ["create", "reinit"])
+def test_agent_operations_preserve_known_error_type_and_context(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+    error_type: type[StateError | ValidationError | ExternalError],
+    specific_context: bool,
+    operation: str,
+) -> None:
+    config = make_config()
+    _seed_vm(db)
+    if operation == "reinit":
+        db.insert_agent("dev", "box", "agt-dev", template="default")
+    _reachable(monkeypatch, True)
+    error = error_type(
+        "fixture failure",
+        entity_kind="harness-integration" if specific_context else None,
+        entity_name="fixture" if specific_context else None,
+        hint="fixture remedy",
+    )
+
+    def fail(*args: Any, **kwargs: Any) -> None:
+        raise error
+
+    monkeypatch.setattr(agent_initializer, "create_agent_on_vm", fail)
+    deletes: list[str] = []
+    monkeypatch.setattr(
+        agent_initializer,
+        "delete_agent_on_vm",
+        lambda vm, config_, linux_user, **kwargs: deletes.append(linux_user),
+    )
+    with pytest.raises(error_type) as caught:
+        if operation == "create":
+            agent_manager.create_agent(db, config, name="dev", vm_name="box", interaction=TtyInteractionPolicy.REFUSE)
+        else:
+            agent_manager.reinit_agent(db, config, name="dev", interaction=TtyInteractionPolicy.REFUSE)
+    assert caught.value is error
+    assert (caught.value.entity_kind, caught.value.entity_name, caught.value.hint) == (
+        "harness-integration" if specific_context else "agent",
+        "fixture" if specific_context else "dev",
+        "fixture remedy",
+    )
+    assert (db.get_agent("dev") is not None) == (operation == "reinit")
+    assert deletes == (["agt-dev"] if operation == "create" else [])
+
+
 def test_reinit_build_failure_reports_the_committed_overlay_once(
     db: Database,
     make_config,  # noqa: ANN001
@@ -1313,7 +1362,7 @@ def test_legacy_overlay_conversion_waits_for_successful_native_reinit(
 
     monkeypatch.setattr(ClaudeCodeIntegration, "user_init", setup)
     if fail_setup:
-        with pytest.raises(ExternalError):
+        with pytest.raises(StateError):
             agent_manager.reinit_agent(
                 db,
                 config,
