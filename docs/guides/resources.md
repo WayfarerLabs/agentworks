@@ -337,8 +337,8 @@ explicit selection, ownership, and session prerequisites.
 
 What a session runs is declared as a **harness integration**: the Agentworks capability (registered
 code) that knows how a particular harness or shell is started, restarted, and what executables it
-needs. A session template selects an integration through a map with exactly one key, the integration
-name, whose value holds its configuration:
+needs. A session template pairs an integration with its configuration in one tagged table, exactly
+the way a vm-site pairs a platform with its config:
 
 ```yaml
 apiVersion: agentworks/v1
@@ -348,16 +348,16 @@ metadata:
   description: Live process monitor
 spec:
   harness_integration:
-    shell:
-      command: htop
-      required_commands: [htop]
+    name: shell
+    command: htop
+    required_commands: [htop]
 ```
 
-- `spec.harness_integration` is a map with exactly one integration key naming a
-  `harness-integration` capability row. Its value is the config block that integration owns and
-  validates (unknown keys are errors); there is no inner `name` field. Every effective session
-  template must select an integration explicitly or inherit a selection. The built-in `default`
-  template explicitly selects `shell`; omission alone is not a shell fallback.
+- `spec.harness_integration` is one tagged table: its `name` key names a `harness-integration`
+  capability row, and the remaining keys are the config block that integration owns and validates
+  (unknown keys are errors). Every effective session template must select an integration explicitly
+  or inherit a selection. The built-in `default` template explicitly selects `shell`; omission alone
+  is not a shell fallback.
 - `agw resource explain harness-integration` lists the integrations this build has, and
   `agw resource explain harness-integration/<name>` documents one integration's config field by
   field. That is the reference; what follows is what an operator wants to know beyond the fields
@@ -391,14 +391,14 @@ metadata:
   description: Claude Code session
 spec:
   harness_integration:
-    claude-code:
-      permission_mode: acceptEdits
-      reasoning_effort: high
-      goal: Finish the migration with focused tests passing
-      initial_prompt: Start by inspecting the current failures
-      agent: reviewer
-      append_system_prompt: Keep the change focused and verify the result
-      vim_mode: true
+    name: claude-code
+    permission_mode: acceptEdits
+    reasoning_effort: high
+    goal: Finish the migration with focused tests passing
+    initial_prompt: Start by inspecting the current failures
+    agent: reviewer
+    append_system_prompt: Keep the change focused and verify the result
+    vim_mode: true
 ```
 
 - Its config is all optional, and every field is documented by
@@ -516,16 +516,16 @@ metadata:
   description: Codex session
 spec:
   harness_integration:
-    codex:
-      sandbox: workspace-write # optional; forwarded to `codex -s`
-      approval_policy: on-request # optional; forwarded to `codex -a`
-      approvals_reviewer: auto_review # optional; escalations adjudicated by Codex's reviewer subagent
-      network: true # optional; sandbox network access (off by default)
-      reasoning_effort: high # optional; forwarded to Codex's model_reasoning_effort setting
-      goal: Finish the migration with the focused tests passing # optional; prompt-mediated on fresh start
-      agent: reviewer # optional; follows only the named custom agent's developer_instructions
-      vim_mode: true # optional; start the composer in Vim normal mode
-      web_search: cached # optional; cached | indexed | live | disabled
+    name: codex
+    sandbox: workspace-write # optional; forwarded to `codex -s`
+    approval_policy: on-request # optional; forwarded to `codex -a`
+    approvals_reviewer: auto_review # optional; escalations adjudicated by Codex's reviewer subagent
+    network: true # optional; sandbox network access (off by default)
+    reasoning_effort: high # optional; forwarded to Codex's model_reasoning_effort setting
+    goal: Finish the migration with the focused tests passing # optional; prompt-mediated on fresh start
+    agent: reviewer # optional; follows only the named custom agent's developer_instructions
+    vim_mode: true # optional; start the composer in Vim normal mode
+    web_search: cached # optional; cached | indexed | live | disabled
 ```
 
 The `grok-build` integration runs Grok Build and ships as the opt-in `grok` system plugin. Enable it
@@ -540,13 +540,13 @@ metadata:
   description: Grok Build session
 spec:
   harness_integration:
-    grok-build:
-      permission_mode: auto
-      reasoning_effort: high
-      sandbox: workspace
-      goal: Finish the migration with the focused tests passing
-      agent: reviewer
-      rules: Keep changes focused and verify the result
+    name: grok-build
+    permission_mode: auto
+    reasoning_effort: high
+    sandbox: workspace
+    goal: Finish the migration with the focused tests passing
+    agent: reviewer
+    rules: Keep changes focused and verify the result
 ```
 
 Agentworks assigns the conversation a UUID. A restart resumes that UUID when Grok's local

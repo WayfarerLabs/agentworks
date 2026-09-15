@@ -245,10 +245,12 @@ What the base and the markers buy you:
 
 Whether the model carries a `name` tag depends on the surface. `vm-platform` and
 `git-credential-provider` config models are selected by a `name` key inside their tagged table.
-Harness integration config is untagged: the outer activation map key selects the integration at each
-facet. A secret backend's source config is tagged, while its per-secret mapping is selected by its
-outer map key, carries no tag, and extends `AgwRootModel` rather than `AgwModel` because a mapping
-may be a bare string. Conformance checks both backend models against their separate contracts.
+Harness integration models omit the `name` tag at every facet. The session host owns the
+`harness_integration.name` selector and validates the remaining config against the integration's
+model; setup hosts select the integration through an outer activation map key. A secret backend's
+source config is tagged, while its per-secret mapping is selected by its outer map key, carries no
+tag, and extends `AgwRootModel` rather than `AgwModel` because a mapping may be a bare string.
+Conformance checks both backend models against their separate contracts.
 
 Git credential providers use contract version 3. Each provider owns its entire config model,
 including any acquisition discriminator and every `SecretRef`, and implements `credential_scopes()`

@@ -71,7 +71,7 @@ metadata:
   name: artifact-session
 spec:
   harness_integration:
-    shell: {}
+    name: shell
 ```
 
 Select these templates through your normal VM, agent and session declarations or creation workflow.

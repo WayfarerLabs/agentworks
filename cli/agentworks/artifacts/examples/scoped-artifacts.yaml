@@ -45,4 +45,4 @@ metadata:
   name: artifact-session
 spec:
   harness_integration:
-    codex: {}
+    name: codex

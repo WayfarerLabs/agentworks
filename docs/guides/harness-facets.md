@@ -66,7 +66,7 @@ metadata:
   name: codex-work
 spec:
   harness_integration:
-    codex: {}
+    name: codex
 ```
 
 A session template selects exactly one integration through singular `harness_integration`. Its
@@ -81,6 +81,9 @@ Integration activation maps merge by key:
   deduplicate by default; fields can declare another merge policy.
 - An empty entry activates defaults when new and preserves inherited configuration when already
   selected.
+- A `null` entry disables that integration, including an inherited activation. For example,
+  `harness_integrations: {codex: null}` leaves other integrations active. A later layer can
+  reactivate Codex with `{}` or explicit config; the disabled config is not restored.
 
 For example, this child adds a Claude plugin while retaining the parent's Codex activation and any
 inherited Claude configuration:
@@ -97,16 +100,17 @@ spec:
       plugins: [reviewer@team]
 ```
 
-Session selection is a map with exactly one integration key. Restating the same key merges session
-config according to its model; selecting a different key replaces the previous selection and starts
-that integration's config anew. An omitted or empty map inherits the selection, but an effective
-session without a selection is invalid. Config for integration activations at setup scopes never
-rolls into a session's config, even when both name the same integration. Each host validates its own
-facet. Claude and Codex user facets accept settings, marketplaces, plugins, and artifacts; their
-workspace facets accept settings and artifacts. All shipped integrations implement VM, user,
-workspace, and session facets. VM facets route artifact inputs to a later facet; shell and Grok
-outer facets provide artifact handling. An empty config schema does not itself imply facet support
-for another integration.
+Session selection uses a tagged table: `harness_integration: {name: codex}`. Restating the same
+`name` merges session config according to its model; selecting a different name replaces the
+previous selection and starts that integration's config anew. Omission inherits the selection, but
+an effective session without a selection is invalid. The setup map's `null` opt-out does not apply
+to the session selector. Config for integration activations at setup scopes never rolls into a
+session's config, even when both name the same integration. Each host validates its own facet.
+Claude and Codex user facets accept settings, marketplaces, plugins, and artifacts; their workspace
+facets accept settings and artifacts. All shipped integrations implement VM, user, workspace, and
+session facets. VM facets route artifact inputs to a later facet; shell and Grok outer facets
+provide artifact handling. An empty config schema does not itself imply facet support for another
+integration.
 
 For separate project settings, select both workspace facets and give each its own workstation
 source. Create these source documents before workspace creation; this declaration does not change
@@ -243,10 +247,10 @@ deferral along the actual lineage. Doctor also checks stored evidence; it does n
 repair native drift.
 
 After editing VM/admin or agent activations, run `agw vm reinit <name>` or
-`agw agent reinit <name>`. Removing a declaration becomes native cleanup during the owning
-operation, using its previous applied-state records. Workspace mappings require explicit recreation
-to apply changes; `workspace repair` only repairs its existing access and Git identity
-responsibilities.
+`agw agent reinit <name>`. Removing a declaration, or disabling an inherited activation with `null`,
+becomes native cleanup during the owning operation, using its previous applied-state records.
+Workspace mappings require explicit recreation to apply changes; `workspace repair` only repairs its
+existing access and Git identity responsibilities.
 
 Cleanup only removes effects whose ownership can be established. Removed settings mappings retain
 the document; removed owned plugin associations are reconciled where safe. Obsolete artifact files

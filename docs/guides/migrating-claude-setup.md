@@ -15,7 +15,9 @@ harness_integrations:
 The `harness_integrations` map preserves inherited integrations. Configuration under `claude-code`
 merges with the inherited user-facet config; marketplace and plugin lists append and deduplicate by
 default. Omit the map or write `{}` to inherit it. An empty `claude-code: {}` entry activates
-defaults when Claude is not already selected and preserves its configuration when inherited.
+defaults when Claude is not already selected and preserves its configuration when inherited. Use
+`claude-code: null` to disable an inherited Claude activation. The owning reinit reconciles any
+previously recorded native effects using the normal cleanup rules.
 
 ## Stored instance overlays
 
@@ -57,15 +59,18 @@ Inspection reports the saved shape as unsupported and retains the original paylo
 
 For an agent, use `agw agent reinit NAME --spec` with the complete replacement instance spec, or
 `--spec '{}'` to clear the instance layer. Review the selected template first: inherited
-integrations remain active in the map model. VM and workspace instance specs have no equivalent
+integrations remain active in the map model unless the replacement spec disables them with `null`.
+For example, `harness_integrations: {codex: null}` disables inherited Codex while retaining other
+integrations. These opt-outs do not preserve the old list's whole-config replacement semantics;
+review same-named integration config as well. VM and workspace instance specs have no equivalent
 replacement command. Back up the database before explicitly migrating their saved desired config, or
 recreate the resource with the new declarations. Do not delete a VM or workspace merely to change
 this spelling unless losing its contents is intended.
 
-Saved session selectors using the former tagged shape are read as singleton maps. Their same-name
-merge and changed-name replacement behavior is preserved. Saved applied setup records also retain
-their comparison format, so the authoring change alone does not invalidate existing workspace setup
-or discard ownership records.
+Session selectors keep their tagged shape, such as `harness_integration: {name: codex}`, and need no
+shape migration. Their same-name merge and changed-name replacement behavior is preserved. Saved
+applied setup records also retain their comparison format, so the authoring change alone does not
+invalidate existing workspace setup or discard ownership records.
 
 ## Existing native installations
 

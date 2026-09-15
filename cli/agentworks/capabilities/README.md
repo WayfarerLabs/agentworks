@@ -272,10 +272,13 @@ The derived validation and extraction views have these contracts:
 **How the config reaches the model, on a manifest surface.** The host owns capability selection; the
 selected capability owns its config. Tagged surfaces use a table such as
 `platform: {name: lima, placement: {mode: local}}`, carried as a `CapabilityBlock`: the host
-validates `name`, and the remaining keys belong to that capability. Harness integration surfaces use
-an activation map such as `harness_integrations: {codex: {}}`: the host validates the integration
-keys, and each value is untagged facet config. Session hosts require exactly one effective
-integration key. Decode checks the host shape; finalize validates effective config against the
+validates `name`, and the remaining keys belong to that capability. Harness session selection uses
+this tagged shape too. Harness setup surfaces use an activation map such as
+`harness_integrations: {codex: {}}`: the host validates the integration keys, and each active value
+is untagged facet config. A `null` value disables that integration. Session hosts require one
+effective tagged selection. Every harness facet's native config model is untagged: core extracts the
+session selector before validating config and generates the host-owned name discriminator when
+emitting its schema. Decode checks the host shape; finalize validates effective config against the
 selected capability's own model. Hosts do not duplicate the field definitions of their capabilities.
 
 A **facet** is a scoped part of a capability: the operations and configuration it offers for that
@@ -289,9 +292,10 @@ single-config overrides can still take no arguments. Harness integrations requir
 no config for setup facets. An override can supply a different model at each facet.
 
 Consumers choose the facet, not a resource kind. Admin and agent both select `user`; a session
-launch selects `session`. A `None` answer accepts only empty config under the integration key, with
-all config fields rejected. It is different from an unknown implementation, whose reference fails
-resolution, and it says nothing about which operations the integration supports or enables.
+launch selects `session`. A `None` answer accepts only the session's `name` tag or empty setup
+config under the integration key, with all other config fields rejected. It is different from an
+unknown implementation, whose reference fails resolution, and it says nothing about which operations
+the integration supports or enables.
 
 Registration checks all four harness answers and caches each selection while the implementation's
 `config_model` identity remains unchanged. Validation, merge, references, construction, and secret
@@ -577,8 +581,8 @@ implementation of it:
 - **`registry`, `entry_factory`, `readiness`, `publisher_source`**, how the kind's implementations
   are stored, published as read-only rows, and asked whether this host supports them.
 - **`manifest_sections`** (a sequence of `HostSurface` records), which declarable fields select this
-  capability, each with its chosen facet and selection cardinality. Harness hosts use integration
-  maps, with exactly one effective key at session scope. `secret-backend` is selected by
+  capability, each with its chosen facet and selection cardinality. Harness setup hosts use
+  integration maps; the session host uses a singular tagged block. `secret-backend` is selected by
   `secret-source.backend`; its separate per-secret `backend_mappings` surface is described by
   `mapping_host`.
 

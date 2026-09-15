@@ -21,8 +21,8 @@ metadata:
   description: "Grok Build, default posture: uses Grok's standard permission prompts"
 spec:
   harness_integration:
-    grok-build:
-      permission_mode: default
+    name: grok-build
+    permission_mode: default
 ---
 apiVersion: agentworks/v1
 kind: session-template
@@ -31,8 +31,8 @@ metadata:
   description: "Grok Build, auto posture: safe actions may be approved automatically"
 spec:
   harness_integration:
-    grok-build:
-      permission_mode: auto
+    name: grok-build
+    permission_mode: auto
 ---
 apiVersion: agentworks/v1
 kind: session-template
@@ -41,5 +41,5 @@ metadata:
   description: "Grok Build, yolo posture: skips permission prompts"
 spec:
   harness_integration:
-    grok-build:
-      permission_mode: bypassPermissions
+    name: grok-build
+    permission_mode: bypassPermissions

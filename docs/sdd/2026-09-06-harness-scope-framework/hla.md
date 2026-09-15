@@ -113,16 +113,18 @@ user facet; core supplies the actual user identity.
 | Workspace    | `workspace-template.harness_integrations`                       | workspace, `workspace_init`  | Workspace                 |
 | Session      | Existing `session-template.harness_integration`                 | session, `start(intent=...)` | Session                   |
 
-**Map membership explicitly activates an integration at that resource.** Each key is the integration
-name and its value contains only that facet's config. For example,
+**A config entry in the setup map explicitly activates an integration at that resource.** Each key
+is the integration name and its value contains only that facet's config. A `null` value disables
+that integration, including an inherited activation. For example,
 `harness_integrations: {claude-code: {plugins: [tools@market]}, codex: {}}` activates two
 integrations. An empty config value activates defaults; availability and implemented methods never
 activate an integration. Keys make duplicate integration identities structurally unnecessary.
 
-Session selection uses `harness_integration: {shell: {}}`. It remains explicit and singular: exactly
-one effective integration must be selected. Selecting a different key replaces the previous session
-integration; selecting the same key merges its config using the session facet schema. The
-synthesized default template explicitly selects shell. No fallback fills an absent selection.
+Session selection retains `harness_integration: {name: shell}`. It remains explicit and singular:
+exactly one effective integration must be selected. Selecting a different `name` replaces the
+previous session integration; selecting the same name merges its config using the session facet
+schema. Setup-map opt-outs do not apply to the session selector. The synthesized default template
+explicitly selects shell. No fallback fills an absent selection.
 
 A setup integration activation does not enable its plugin globally, select a session workload, or
 implicitly activate the integration on an ancestor or descendant. Existing plugin enablement and
@@ -148,7 +150,11 @@ an explicit parent selection before use.
 
 For inheriting templates, integration maps preserve parent keys and compose same-key config through
 the selected facet's own merge schema. Omission and an empty map inherit; an empty config value
-activates defaults when the key is new and contributes no overrides when inherited. Admin templates
+activates defaults when the key is new and contributes no overrides when inherited. A `null` entry
+removes that key from the effective activations and discards its former config. A later layer can
+reactivate it with empty or explicit config. Disabled entries do not invoke setup or contribute
+config references, while prior owned effects retire through owning reconciliation. Instance specs
+permit null only directly at an integration key, not inside its config or elsewhere. Admin templates
 retain their non-inheriting behavior, while their instance layer uses the same map merge. Core
 preserves per-setting provenance through these merges and reports the declaring layer for errors and
 referenced resources. Map iteration provides deterministic execution without dependency or priority
@@ -164,16 +170,20 @@ its `config_model` is the session answer and setup facets offer no config. A mul
 overrides `config_for` for the fixed vm, user, workspace, and session vocabulary. Calling a
 multi-facet selection without the consumer's facet must not silently select session config.
 
-No offered model means an activation accepts an empty config map and no fields. It still may invoke
-a method. Offering a model is neither a support claim nor a permission to invoke anything. Only the
-harness kind enumerates the four facet answers during registration/finalize; ordinary capabilities
-do not acquire per-facet declaration tables or new obligations.
+All native harness facet config models are untagged. Setup hosts select by activation map key; the
+session host retains its tagged `CapabilityBlock`, extracts `name`, and validates only the remaining
+config against the session facet model. Session schema projection generates the host-owned name
+discriminator around the selected model. No offered model means an activation accepts empty own
+config and no fields, authored as a name-only session block or an empty setup map entry. It still
+may invoke a method. Offering a model is neither a support claim nor a permission to invoke
+anything. Only the harness kind enumerates the four facet answers during registration/finalize;
+ordinary capabilities do not acquire per-facet declaration tables or new obligations.
 
 Core records each hosting field's selected facet alongside its existing capability-block metadata.
 Admin and agent hosting fields both select user. Harness reference output groups all four facet
 schemas, including an answer with no config; a reference to a particular resource field renders
 exactly that field's answer. The frozen descriptor carries a sequence of hosting surfaces with
-singular, map, or singleton-map cardinality, replacing its current one-field assumption. That
+singular tagged-block or setup-map cardinality, replacing its current one-field assumption. That
 metadata describes consumers; implementations never receive a consumer kind as their config
 selector.
 
@@ -283,9 +293,9 @@ metadata:
   name: team-review
 spec:
   harness_integration:
-    claude-code:
-      permission_mode: default
-      initial_prompt: Review the pending changes.
+    name: claude-code
+    permission_mode: default
+    initial_prompt: Review the pending changes.
 ```
 
 Creating a user from `team-claude` installs both CLIs through core setup, prepares its env, then
@@ -302,7 +312,7 @@ proposed admin-template activation surface. Putting `permission_mode` in the use
 in the session block is a facet-specific validation error. The user's Codex activation does not
 implicitly activate Codex on the workspace or select it for the session. With no inherited
 activation, omitting the workspace map selects none. An empty map preserves inherited selection. To
-use Codex for a session, select `codex: {}` in that session's singleton map.
+use Codex for a session, select `harness_integration: {name: codex}`.
 
 All four integrations retain ordinary session-only use when setup is not requested. These are
 alternative `session-template.spec.harness_integration` blocks, each paired with its existing
@@ -310,21 +320,21 @@ CLI-installing agent template where needed:
 
 ```yaml
 # With example-codex; existing session settings remain here.
-codex:
-  sandbox: read-only
-  approval_policy: on-request
+name: codex
+sandbox: read-only
+approval_policy: on-request
 ---
 # With example-grok; existing session settings remain here.
-grok-build:
-  permission_mode: default
+name: grok-build
+permission_mode: default
 ---
 # Explicit shell selection needs no plugin or broader integration activation; defaults launch a login shell.
-shell: {}
+name: shell
 ```
 
 Absent integration activations at setup scopes do not by themselves prevent these sessions from
 launching. Each checks its executable and any upstream prerequisite the integration declares.
-Name-only shell or Grok setup activation fails explicitly; the default shell retains its ordinary
+Empty-config shell or Grok setup activation fails explicitly; the default shell retains its ordinary
 launch behavior without setup activation. No artifact input, deferral result, shell discovery
 variable, or artifact cleanup method is introduced.
 
@@ -742,8 +752,12 @@ payloads through domain codecs; exercise existing database backup/restore separa
 restored applied-state records cannot bless a different native destination.
 
 Enablement covers empty default config, two integrations with distinct configs and ordered calls,
-disabled/unavailable capabilities, invalid keys, inherited selection, an empty setup map, and
-missing effective session selection. Unselected integrations do no new setup; retirement of prior
+disabled/unavailable capabilities, invalid keys, inherited selection, an empty setup map, null
+opt-outs, reactivation after an opt-out, and missing effective session selection. Saved setup lists
+require explicit migration because same-key config merge differs from whole-list replacement; null
+opt-outs can remove inherited integrations but do not restore the former config merge policy.
+Session selectors require no migration. Existing applied setup records retain their comparison
+format and ownership records. Unselected integrations do no new setup; retirement of prior
 activations still runs cleanup. The synthesized default explicitly selects shell, whose ordinary
 launch and resume behavior remains unchanged.
 

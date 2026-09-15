@@ -13,7 +13,7 @@ user integration's `marketplaces` and `plugins` fields under `harness_integratio
 
 Every effective session template must select `harness_integration`, either directly or through
 inheritance. The built-in `default` template explicitly selects `shell`; a custom lineage that does
-not inherit a selection must add one, such as `harness_integration: {shell: {}}`. See
+not inherit a selection must add one, such as `harness_integration: {name: shell}`. See
 [Harness facets](harness-facets.md) for independent setup and session selections.
 
 Existing running sessions acquire the new process-start fingerprint lazily when a lifecycle command
