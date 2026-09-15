@@ -62,7 +62,8 @@ def _scope() -> OperationScope:
 def _validate(blob: dict[str, object]) -> None:
     validate_capability_config(
         kind="harness-integration",
-        config={"name": "grok-build", **blob},
+        name="grok-build",
+        config=blob,
         owner=RefOwner(kind="session-template", name="grok"),
         facet="session",
     )
@@ -82,14 +83,15 @@ def test_config_implies_no_resource_references() -> None:
     owner = RefOwner(kind="session-template", name="grok")
     assert (
         capability_config_references(
-            kind="harness-integration", config={"name": "grok-build", "model": "grok-4.6"}, owner=owner, facet="session"
+            kind="harness-integration", name="grok-build", config={"model": "grok-4.6"}, owner=owner, facet="session"
         )
         == ()
     )
     assert (
         capability_config_references(
             kind="harness-integration",
-            config={"name": "grok-build", "model": 3, "typo": True},
+            name="grok-build",
+            config={"model": 3, "typo": True},
             owner=owner,
             facet="session",
         )
