@@ -25,9 +25,9 @@ if TYPE_CHECKING:
 
 # Executed in the same login-shell environment as the native workload. Only selected
 # bounded artifact frontmatter and discovery facts return for local identity checks.
-# Native help output, settings bodies and artifact instruction bodies are not returned.
+# Settings bodies and artifact instruction bodies are not returned.
 _PROBE = r"""
-import fnmatch, json, os, pathlib, re, shutil, subprocess, sys, tomllib
+import fnmatch, json, os, pathlib, shutil, subprocess, sys, tomllib
 request = json.load(sys.stdin)
 tool = request['tool']
 home = os.environ.get('HOME', '')
@@ -46,24 +46,6 @@ if request['workspace_only']:
     pass
 elif executable is None:
     problems.append('missing-command')
-else:
-    version = subprocess.run([executable, '--version'], text=True, capture_output=True, timeout=20)
-    match = re.search(r'\b(\d+)\.(\d+)\.(\d+)\b', version.stdout)
-    minimum = {'claude': (2, 1, 265), 'codex': (0, 153, 4), 'grok': (1, 0, 10)}[tool]
-    if version.returncode or match is None or tuple(map(int, match.groups())) < minimum:
-        problems.append('unsupported-native-version')
-if executable and request['flags']:
-    help_result = subprocess.run([executable, '--help'], text=True, capture_output=True, timeout=20)
-    help_text = help_result.stdout
-    if tool == 'claude':
-        # Claude documents the file carrier with an optional suffix in its help.
-        help_text = help_text.replace('--append-system-prompt[-file]',
-                                      '--append-system-prompt --append-system-prompt-file')
-    if help_result.returncode or any(
-        not re.search(r'(?<![\w-])' + re.escape(flag) + r'(?![\w-])', help_text)
-        for flag in request['flags']
-    ):
-        problems.append('unsupported-native-cli')
 roots = [] if request['workspace_only'] else [pathlib.Path(native_home)]
 workspace = request['workspace']
 if workspace:
@@ -304,9 +286,7 @@ print('AGW_ARTIFACT_PROBE=' + json.dumps({
 _PROBLEM_MESSAGES = {
     "home-mismatch": "the login shell changed the actual user's HOME",
     "invalid-native-home": "the native home is not an absolute normalized directory",
-    "missing-command": "the native command is unavailable in the login environment",
-    "unsupported-native-version": "the native version is older than the supported artifact baseline",
-    "unsupported-native-cli": "the native CLI lacks a required artifact carrier flag",
+    "missing-command": "command {tool!r} was not found in the target login shell; install it for this user",
     "native-discovery-exclusions": "a configured discovery exclusion matches an artifact file",
     "unsupported-discovery-pattern": "the adapter cannot evaluate an extended native exclusion pattern",
     "native-plugin-policy": "native configuration restricts the generated artifact plugin",
@@ -369,7 +349,6 @@ def probe_native(
     home: str | None = None,
     workspace: str = "",
     files: Sequence[ArtifactFile | OwnedArtifactFile] = (),
-    flags: tuple[str, ...] = (),
     session_plugin: bool = False,
     workspace_only: bool = False,
     check_policy: bool = True,
@@ -387,7 +366,6 @@ def probe_native(
         "paths": tuple(file.path for file in files),
         "entries": entries,
         "proposed": _proposed_sizes(files, tool),
-        "flags": flags,
         "session_plugin": session_plugin,
         "workspace_only": workspace_only,
         "identities": identities,
@@ -443,11 +421,8 @@ def probe_native(
     if problems:
         raise StateError(
             f"{tool} artifact delivery: "
-            + "; ".join([*(_PROBLEM_MESSAGES[problem] for problem in problems), *details]),
-            hint=(
-                "Inspect the native home, relevant restrictions, and installed CLI version. "
-                "This preflight cannot verify whether another native configuration layer overrides a restriction."
-            ),
+            + "; ".join([*(_PROBLEM_MESSAGES[problem].format(tool=tool) for problem in problems), *details]),
+            hint=f"Native configuration directory: {root!r}",
         )
     return root
 

@@ -14,8 +14,7 @@ from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import MAX_CODEX_PERSONA_BYTES
 from agentworks.artifacts.native.probe import _PROBE, _inventory_problems
 from agentworks.package_sources import CaptureLimits
-from agentworks.plugins.claude.artifacts import session_artifacts
-from tests.artifacts.test_native_delivery import artifact, context
+from tests.artifacts.test_native_delivery import artifact
 from tests.conftest import requires_posix_shell
 
 pytestmark = requires_posix_shell
@@ -32,10 +31,7 @@ def probe(
     entries: dict[str, str] | None = None,
     inventory_bytes: int = CaptureLimits().total_bytes,
     workspace_only: bool = False,
-    flags: tuple[str, ...] = (),
     session_plugin: bool = False,
-    version: str = "99.1.0",
-    help_text: str = "--rules --agents --config",
     environment: dict[str, str] | None = None,
 ) -> dict:
     home = tmp_path / "home"
@@ -53,7 +49,7 @@ def probe(
     binary.mkdir(exist_ok=True)
     executable = binary / tool
     executable.write_text(
-        f'#!{sys.executable}\nimport sys\nprint({version!r} if "--version" in sys.argv else {help_text!r})\n'
+        f'#!{sys.executable}\nraise SystemExit("artifact discovery must not execute the native CLI")\n'
     )
     executable.chmod(0o700)
     workspace = tmp_path / "workspace"
@@ -67,7 +63,6 @@ def probe(
         "paths": paths,
         "entries": entries or {},
         "proposed": proposed or {},
-        "flags": flags,
         "session_plugin": session_plugin,
         "workspace_only": workspace_only,
         "identities": identities,
@@ -148,9 +143,9 @@ def test_native_home_from_effective_environment_is_observed(tmp_path):
     assert result["native_home"] == expected
 
 
-def test_old_or_incompatible_native_binary_is_rejected_before_publication(tmp_path):
-    assert "unsupported-native-version" in probe(tmp_path, version="0.100.0")["problems"]
-    assert "unsupported-native-cli" in probe(tmp_path, flags=("--unsupported-carrier",))["problems"]
+@pytest.mark.parametrize("tool", ["claude", "codex", "grok"])
+def test_native_file_discovery_does_not_certify_versions_or_help(tmp_path, tool):
+    assert probe(tmp_path, tool=tool)["problems"] == []
 
 
 def test_grok_gitignore_check_only_inspects_workspace_owned_files(tmp_path):
@@ -164,44 +159,10 @@ def test_grok_gitignore_check_only_inspects_workspace_owned_files(tmp_path):
     assert "native-discovery-exclusions" in probe(tmp_path, tool="grok", paths=(inside,))["problems"]
 
 
-# Carrier spellings from Claude Code 2.1.265 --help, including its compact file suffix.
-CLAUDE_CARRIER_HELP = """
-  --append-system-prompt <prompt>       Append a system prompt to the default
-                                        via: --system-prompt[-file],
-                                        --append-system-prompt[-file], --add-dir
-                                        (CLAUDE.md dirs), --mcp-config,
-                                        --settings, --agents, --plugin-dir.
-  --system-prompt-snapshot <on|off>     Record the system prompt once per
-"""
-
-
-@pytest.mark.parametrize("type", [ArtifactType.RULE, ArtifactType.HINT])
-@pytest.mark.parametrize("help_text", [CLAUDE_CARRIER_HELP, "--append-system-prompt-file --system-prompt-snapshot"])
-def test_claude_help_accepts_generated_text_carriers(tmp_path, type, help_text):
-    plan = session_artifacts(context(artifact(type)), configured=None, extra_args=[])
-    result = probe(tmp_path, tool="claude", version="2.1.265", help_text=help_text, flags=plan.required_flags)
-    assert result["problems"] == []
-
-
-@pytest.mark.parametrize(
-    "help_text,flag",
-    [
-        ("--append-system-prompt <prompt>", "--append-system-prompt-file"),
-        (CLAUDE_CARRIER_HELP, "--unsupported-carrier"),
-        (CLAUDE_CARRIER_HELP, "--append-system-prompt-file-unknown"),
-        ("--system-prompt-snapshot-extra", "--system-prompt-snapshot"),
-    ],
-)
-def test_claude_help_refuses_absent_or_partial_carrier(tmp_path, help_text, flag):
-    assert "unsupported-native-cli" in probe(tmp_path, tool="claude", help_text=help_text, flags=(flag,))["problems"]
-
-
-def test_claude_supported_carriers_do_not_bypass_plugin_policy(tmp_path):
+def test_claude_plugin_policy_is_independent_of_carrier_certification(tmp_path):
     result = probe(
         tmp_path,
         tool="claude",
-        help_text=CLAUDE_CARRIER_HELP,
-        flags=("--append-system-prompt-file", "--system-prompt-snapshot", "--plugin-dir"),
         session_plugin=True,
         settings={"enabledPlugins": {"agentworks-artifacts@fixture": False}},
     )

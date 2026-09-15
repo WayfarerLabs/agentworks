@@ -7,14 +7,14 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral, ArtifactFile
-from agentworks.artifacts.model import ArtifactType
+from agentworks.artifacts.model import ArtifactInputs, ArtifactType
 from agentworks.errors import ConfigError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from agentworks.artifacts.application import OwnedArtifactFile, SessionArtifactContext
-    from agentworks.artifacts.model import ArtifactFacet, ArtifactInput, ArtifactInputs
+    from agentworks.artifacts.model import ArtifactFacet, ArtifactInput
 
 
 # Agentworks budget for a rendered persona TOML file, including its instruction body.
@@ -27,7 +27,6 @@ class NativeSessionArtifacts:
 
     application: ArtifactApplication = ArtifactApplication()
     argv: tuple[str, ...] = ()
-    required_flags: tuple[str, ...] = ()
 
 
 def defer(inputs: ArtifactInputs, destination: ArtifactFacet, reason: str) -> ArtifactApplication:
@@ -36,6 +35,31 @@ def defer(inputs: ArtifactInputs, destination: ArtifactFacet, reason: str) -> Ar
             ArtifactDeferral(input_id=item.identity, destination=destination, reason=reason) for item in inputs.items()
         )
     )
+
+
+def select_session_artifacts(
+    inputs: ArtifactInputs,
+    enabled_workarounds: Sequence[str],
+    workarounds: Mapping[ArtifactType, str],
+) -> tuple[ArtifactInputs, tuple[ArtifactDeferral, ...]]:
+    """Select explicitly enabled session carriers before validating native delivery."""
+    selected = set()
+    deferred = []
+    for item in inputs.items():
+        workaround = workarounds.get(item.content.type)
+        if workaround is not None and workaround in enabled_workarounds:
+            selected.add(item.identity)
+        else:
+            reason = (
+                f"Session delivery requires enabled_workarounds: [{workaround}]"
+                if workaround is not None
+                else f"No supported session workaround for artifact type {item.content.type.value}"
+            )
+            deferred.append(ArtifactDeferral(input_id=item.identity, destination="session", reason=reason))
+    return ArtifactInputs(
+        local=inputs.local.select(selected) if inputs.local is not None else None,
+        deferred={owner: group.select(selected) for owner, group in inputs.deferred.items()},
+    ), tuple(deferred)
 
 
 def native_home(home: str, environment: Mapping[str, str], variable: str, default: str) -> str:

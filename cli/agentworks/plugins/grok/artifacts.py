@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import yaml
 
-from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral
+from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
@@ -17,6 +17,7 @@ from agentworks.artifacts.native.common import (
     json_text,
     persona_options,
     reject_flags,
+    select_session_artifacts,
     skill_files,
     validate_ancestor_names,
     validate_names,
@@ -32,6 +33,13 @@ if TYPE_CHECKING:
 
 # Only options represented by the interactive JSON and Markdown agent surfaces.
 _OPTIONS = {"model": str, "tools": list}
+
+
+_SESSION_WORKAROUNDS = {
+    ArtifactType.HINT: "session-rules",
+    ArtifactType.RULE: "session-rules",
+    ArtifactType.AGENT: "session-agent-definitions",
+}
 
 
 def _persona(item: ArtifactInput) -> dict[str, object]:
@@ -86,34 +94,33 @@ def session_artifacts(
     *,
     configured: str | None,
     extra_args: Sequence[str],
+    enabled_workarounds: Sequence[str] = (),
 ) -> NativeSessionArtifacts:
     if context is None or not has_artifacts(context):
         return NativeSessionArtifacts()
-    validate_names(context.inputs)
-    reject_flags(
-        extra_args,
-        {
-            "--rules",
-            "--append-system-prompt",
-            "--system-prompt",
-            "--system-prompt-override",
-            "--agents",
-            "--no-subagents",
-            "--plugin-dir",
-            "--disable-skills",
-        },
-        "grok-build",
-    )
+    inputs, deferred = select_session_artifacts(context.inputs, enabled_workarounds, _SESSION_WORKAROUNDS)
+    if not inputs and not context.ancestor_files:
+        return NativeSessionArtifacts(ArtifactApplication(deferred=deferred))
+    validate_names(inputs)
+    selected_types = {item.content.type for item in inputs.items()}
+    ancestor_names = {file.native_identity or "" for file in context.ancestor_files}
+    has_skills = ArtifactType.SKILL in selected_types or any(name.startswith("skill:") for name in ancestor_names)
+    has_agents = ArtifactType.AGENT in selected_types or any(name.startswith("agent:") for name in ancestor_names)
+    forbidden = set()
+    if selected_types & {ArtifactType.HINT, ArtifactType.RULE}:
+        forbidden.update({"--rules", "--append-system-prompt", "--system-prompt", "--system-prompt-override"})
+    if has_agents:
+        forbidden.update({"--agents", "--no-subagents"})
+    if has_skills:
+        forbidden.update({"--plugin-dir", "--disable-skills"})
+    reject_flags(extra_args, forbidden, "grok-build")
     files = []
     argv: list[str] = []
-    deferred = []
-    guidance = tuple(
-        item for item in context.inputs.items() if item.content.type in (ArtifactType.HINT, ArtifactType.RULE)
-    )
+    guidance = tuple(item for item in inputs.items() if item.content.type in (ArtifactType.HINT, ArtifactType.RULE))
     if guidance:
         text = context_text(guidance, configured)
         argv += ["--rules", text]
-    agents = tuple(item for item in context.inputs.items() if item.content.type is ArtifactType.AGENT)
+    agents = tuple(item for item in inputs.items() if item.content.type is ArtifactType.AGENT)
     if agents:
         definitions = {item.content.name: _persona(item) for item in agents}
         for item in agents:
@@ -126,18 +133,7 @@ def session_artifacts(
                 )
             )
         argv += ["--agents", json.dumps(definitions, ensure_ascii=False)]
-    for item in context.inputs.items():
-        if item.content.type is ArtifactType.SKILL:
-            deferred.append(
-                ArtifactDeferral(
-                    input_id=item.identity,
-                    destination="session",
-                    reason="Grok Build's interactive CLI has no supported private skill directory",
-                )
-            )
-    application = ArtifactApplication(tuple(files), tuple(deferred))
+    application = ArtifactApplication(tuple(files), deferred)
     validate_ancestor_names(context, application)
     validate_native_argv(tuple(argv))
-    return NativeSessionArtifacts(
-        application, tuple(argv), (("--rules",) if guidance else ()) + (("--agents",) if agents else ())
-    )
+    return NativeSessionArtifacts(application, tuple(argv))
