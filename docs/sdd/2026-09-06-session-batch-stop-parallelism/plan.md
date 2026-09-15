@@ -1,6 +1,6 @@
 # Implementation Plan: Session Batch Stop Parallelism
 
-- Status: Implementation complete; closeout validation pending
+- Status: Implementation complete; live and published closeout pending
 - Date: 2026-09-06
 - Requirements: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
@@ -166,10 +166,10 @@ not authored prose.
 
 - [x] Update active command reference and session lifecycle/status guidance.
 - [ ] Add `locked.md` from the implemented exact head and run locked-SDD validation.
-- [ ] Run full Python, lint, Rulesync, website, and installed-wheel gates.
-- [ ] Obtain fresh private project-values, Muntz, and cold correctness/security reviews on the exact
+- [x] Run full Python, lint, Rulesync, website, and installed-wheel gates.
+- [x] Obtain fresh private project-values, Muntz, and cold correctness/security reviews on the exact
       implementation head.
-- [ ] Run an isolated shipped-CLI drive with no ambient operator state.
+- [x] Run an isolated shipped-CLI drive with no ambient operator state.
 - [ ] Run operator-approved live validation against disposable dedicated sessions on one and
       multiple VMs when the environment permits.
 - [ ] Publish exact-head evidence, mark the PR ready, and complete up to three authorized final
