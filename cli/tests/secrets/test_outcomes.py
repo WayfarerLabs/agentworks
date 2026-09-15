@@ -13,6 +13,7 @@ from agentworks.secrets.outcomes import (
     ResolutionOutcome,
     ResolutionResolved,
     complete_resolution_error,
+    format_hint,
     format_outcome,
 )
 
@@ -52,6 +53,14 @@ def test_batch_doomed_is_an_unattributed_final_outcome_only() -> None:
     assert outcome.source is None
     with pytest.raises(ValueError):
         ResolutionOutcome("secret", ResolutionBlocked(BlockReason.BATCH_DOOMED), source="fixture")
+
+
+def test_onepassword_deadline_uses_backend_specific_guidance() -> None:
+    failure = ResolutionFailed(FailureReason.DEADLINE_EXCEEDED)
+    onepassword = ResolutionOutcome("secret", failure, source="fixture", backend="onepassword")
+    generic = ResolutionOutcome("secret", failure, source="fixture", backend="fixture")
+
+    assert format_hint(onepassword) != format_hint(generic)
 
 
 @pytest.mark.parametrize(
