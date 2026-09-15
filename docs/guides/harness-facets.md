@@ -215,7 +215,7 @@ that the session integration cannot handle produce warnings with their original 
 Session delivery requires explicit `enabled_workarounds` in the selected integration's session
 config. The default empty list leaves all remaining inputs unhandled. Each named workaround enables
 only its documented delivery method; `[]` replaces inherited opt-ins. See
-`agw guide show agent-artifacts` for the supported methods and their limitations.
+`agw guide show concept-agent-artifacts` for the supported methods and their limitations.
 
 For example, VM-declared skills can reach native user placement by activating only the user facet.
 The same captured VM inputs remain available to every actual user; one user's handling does not
