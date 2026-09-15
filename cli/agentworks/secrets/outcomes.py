@@ -131,7 +131,7 @@ _FAILURE_HINTS: dict[FailureReason, str] = {
     FailureReason.LOOKUP_REJECTED: "check that the provider reference identifies a valid target",
     FailureReason.AUTHENTICATION: "authenticate the configured secret provider and retry",
     FailureReason.CONNECTIVITY: "check connectivity to the configured secret provider",
-    FailureReason.DEADLINE_EXCEEDED: "approve the provider request and retry",
+    FailureReason.DEADLINE_EXCEEDED: "retry the provider request",
     FailureReason.EXTERNAL: "retry after checking the configured secret provider",
     FailureReason.MALFORMED_VALUE: "remove NUL characters from the provider value",
     FailureReason.BACKEND_PROTOCOL: "report the secret backend protocol violation",

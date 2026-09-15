@@ -220,7 +220,7 @@ def preview_hint(preview: ResolutionPreview, *, interaction_opt_in: bool) -> str
             FailureReason.LOOKUP_REJECTED: "check the provider reference",
             FailureReason.AUTHENTICATION: "authenticate the configured secret provider",
             FailureReason.CONNECTIVITY: "check provider connectivity",
-            FailureReason.DEADLINE_EXCEEDED: "approve the provider request and retry",
+            FailureReason.DEADLINE_EXCEEDED: "retry the provider request",
             FailureReason.EXTERNAL: "check the provider and retry",
             FailureReason.MALFORMED_VALUE: "remove NUL characters from the provider value",
             FailureReason.BACKEND_PROTOCOL: "report the secret backend protocol violation",
