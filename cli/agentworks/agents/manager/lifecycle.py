@@ -396,6 +396,7 @@ def delete_agent(
                                 target_owns_session=False,
                                 db=db,
                                 force=True,
+                                legacy_running_authorized=True,
                             )
                         except Exception:
                             unstoppable.append(session.name)

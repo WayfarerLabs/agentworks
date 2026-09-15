@@ -215,6 +215,11 @@ def test_restart_reads_uuid_and_detects_before_killing_old_workload(
     _capture_tmux(monkeypatch, events, captured)
     monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, **kwargs: session)
     monkeypatch.setattr(session_manager, "check_session_status", lambda *args, **kwargs: SessionStatus.RUNNING)
+    monkeypatch.setattr(
+        session_manager,
+        "observe_session_statuses",
+        lambda sessions, **kwargs: {session.name: SessionStatus.RUNNING for session in sessions},
+    )
 
     def teardown(*args: object, **kwargs: object) -> None:
         events.append("kill")
@@ -224,6 +229,7 @@ def test_restart_reads_uuid_and_detects_before_killing_old_workload(
         db,
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),  # type: ignore[arg-type]
         name="s1",
+        yes=True,
         interaction=TtyInteractionPolicy.REFUSE,
     )
 

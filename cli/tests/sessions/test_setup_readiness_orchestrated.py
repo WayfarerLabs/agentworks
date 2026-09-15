@@ -72,17 +72,18 @@ def test_existing_session_setup_precedes_both_secret_passes_and_runtime_changes(
     before = db.get_session("s1")
     evidence = _record_setup_check(monkeypatch, events, severity=severity)
     launch = manager.start_session if operation == "start" else manager.restart_session
+    launch_kwargs = {"yes": True} if operation == "restart" else {}
     try:
         if severity == "required":
             with pytest.raises(RequiredSetupMissingError) as caught:
-                launch(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
+                launch(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE, **launch_kwargs)
             assert (caught.value.entity_kind, caught.value.entity_name) == ("agent", "a1")
             assert events == ["probe", "setup"]
             assert db.get_session("s1") == before
             assert not db.has_any_grant("a1", "ws1")
             assert captured_output.warnings == []
         else:
-            launch(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
+            launch(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE, **launch_kwargs)
             assert events == [
                 "probe",
                 "setup",

@@ -42,7 +42,7 @@ class Lifecycle:
     events: list[str]
 
     def restart(self) -> None:
-        manager.restart_session(self.db, self.config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
+        manager.restart_session(self.db, self.config, name="s1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     def files(self) -> tuple[Path, ...]:
         return tuple(

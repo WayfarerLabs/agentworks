@@ -17,6 +17,8 @@ are driven for real.
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Iterator
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -30,7 +32,7 @@ from agentworks.bootstrap import build_registry as _real_build_registry
 from agentworks.bootstrap import load_request_registry as _real_load_request_registry
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, HarnessStart, ShellIntegration
 from agentworks.db import Database, InitStatus, SessionMode, SessionStatus
-from agentworks.errors import NotFoundError, StateError, ValidationError
+from agentworks.errors import NotFoundError, StateError, UserAbort, ValidationError
 from agentworks.secrets.orchestration import (
     resolve_for_command as _real_resolve_for_command,
 )
@@ -189,6 +191,11 @@ def _restart_fixture(
 
     monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, **k: session)
     monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: status)
+    monkeypatch.setattr(
+        session_manager,
+        "observe_session_statuses",
+        lambda sessions, **kwargs: {session.name: status for session in sessions},
+    )
 
     from agentworks.secrets.resolver import Resolver
 
@@ -251,6 +258,219 @@ def _record_launch_intents(monkeypatch: pytest.MonkeyPatch) -> list[HarnessLaunc
     return intents
 
 
+@pytest.mark.parametrize("force", [False, True])
+def test_running_restart_requires_yes_when_interaction_is_refused_before_preflight(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    force: bool,
+) -> None:
+    from agentworks.sessions.manager import restart_session
+
+    db, events = _restart_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "agentworks.bootstrap.load_request_registry",
+        lambda *args, **kwargs: pytest.fail("refusal must precede registry loading"),
+    )
+    monkeypatch.setattr(
+        "agentworks.orchestration.activation.activation_gate",
+        lambda *args, **kwargs: pytest.fail("refusal must precede activation"),
+    )
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._ensure_pid",
+        lambda *args, **kwargs: pytest.fail("refusal must precede PID repair"),
+    )
+
+    with pytest.raises(StateError) as caught:
+        restart_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+            name="s1",
+            force=force,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )  # type: ignore[arg-type]
+
+    assert caught.value.hint is not None
+    assert events == []
+    db.close()
+
+
+def test_declined_running_restart_aborts_before_preflight(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.sessions.manager import restart_session
+
+    db, events = _restart_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr("agentworks.sessions.manager._lifecycle.output.confirm", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        "agentworks.bootstrap.load_request_registry",
+        lambda *args, **kwargs: pytest.fail("decline must precede registry loading"),
+    )
+    monkeypatch.setattr(
+        "agentworks.orchestration.activation.activation_gate",
+        lambda *args, **kwargs: pytest.fail("decline must precede activation"),
+    )
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._ensure_pid",
+        lambda *args, **kwargs: pytest.fail("decline must precede PID repair"),
+    )
+
+    with pytest.raises(UserAbort):
+        restart_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+            name="s1",
+            interaction=TtyInteractionPolicy.ALLOW,
+        )  # type: ignore[arg-type]
+
+    assert events == []
+    db.close()
+
+
+def test_yes_bypasses_running_restart_confirmation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.sessions.manager import restart_session
+
+    db, events = _restart_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._lifecycle.output.confirm",
+        lambda *_args, **_kwargs: pytest.fail("--yes must bypass confirmation"),
+    )
+
+    restart_session(
+        db,
+        SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+        name="s1",
+        yes=True,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )  # type: ignore[arg-type]
+
+    assert "kill" in events
+    db.close()
+
+
+def test_stopped_restart_does_not_confirm(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.sessions.manager import restart_session
+
+    db, events = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._lifecycle.output.confirm",
+        lambda *_args, **_kwargs: pytest.fail("stopped restart must not confirm"),
+    )
+
+    restart_session(
+        db,
+        SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+        name="s1",
+        interaction=TtyInteractionPolicy.REFUSE,
+    )  # type: ignore[arg-type]
+
+    assert "tmux_create" in events
+    db.close()
+
+
+def test_batch_status_race_refuses_newly_running_session_before_preflight(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.sessions.manager._lifecycle import _launch_existing_session
+
+    db, events = _restart_fixture(tmp_path, monkeypatch)
+
+    with pytest.raises(StateError):
+        _launch_existing_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+            name="s1",
+            replace_running=True,
+            running_restart_authorized=False,
+            interaction=TtyInteractionPolicy.ALLOW,
+        )  # type: ignore[arg-type]
+
+    assert events == []
+    db.close()
+
+
+def test_restart_refuses_a_recreated_session_before_preparation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.sessions.manager import restart_session
+
+    db, events = _restart_fixture(tmp_path, monkeypatch)
+    selected = db.get_session("s1")
+    assert selected is not None
+
+    @contextlib.contextmanager
+    def _replace_at_guard(*args: object, **kwargs: object) -> Iterator[None]:
+        db.delete_session("s1")
+        db.insert_session(
+            "s1",
+            "ws1",
+            "claude",
+            SessionMode.AGENT,
+            agent_name="a1",
+            socket_path="/tmp/replacement.sock",
+        )
+        yield
+
+    monkeypatch.setattr("agentworks.harness_setup.locking.native_mutation_guard", _replace_at_guard)
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._ensure_pid",
+        lambda *args, **kwargs: pytest.fail("identity refusal must precede PID repair"),
+    )
+
+    with pytest.raises(StateError):
+        restart_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+            name="s1",
+            yes=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )  # type: ignore[arg-type]
+
+    replacement = db.get_session("s1")
+    assert replacement is not None
+    assert replacement.session_uuid != selected.session_uuid
+    assert events == []
+    db.close()
+
+
+def test_batch_restart_runs_through_the_real_singular_launcher(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.sessions import manager as session_manager
+
+    db, events = _restart_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        session_manager,
+        "_batch_vm_boundary",
+        lambda *args, **kwargs: contextlib.nullcontext(),
+    )
+    monkeypatch.setattr(
+        session_manager,
+        "ensure_pids_batch",
+        lambda sessions, **kwargs: sessions,
+    )
+
+    session_manager.restart_all_sessions(
+        db,
+        SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+        yes=True,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )  # type: ignore[arg-type]
+
+    assert "kill" in events
+    assert "tmux_create" in events
+    db.close()
+
+
 @pytest.mark.parametrize(
     ("operation_name", "status", "force_new", "resume_only", "expected_intent"),
     [
@@ -277,14 +497,15 @@ def test_existing_session_launch_passes_operator_intent_to_the_harness_integrati
     intents = _record_launch_intents(monkeypatch)
 
     operation = getattr(session_manager, operation_name)
-    operation(
-        db,
-        SimpleNamespace(session=SimpleNamespace(history_limit=1)),
-        name="s1",
-        force_new=force_new,
-        resume_only=resume_only,
-        interaction=TtyInteractionPolicy.REFUSE,
-    )
+    kwargs = {
+        "name": "s1",
+        "force_new": force_new,
+        "resume_only": resume_only,
+        "interaction": TtyInteractionPolicy.REFUSE,
+    }
+    if operation_name == "restart_session":
+        kwargs["yes"] = True
+    operation(db, SimpleNamespace(session=SimpleNamespace(history_limit=1)), **kwargs)
 
     assert intents == [expected_intent]
     refreshed = db.get_session("s1")
@@ -403,6 +624,7 @@ def test_unsupported_resume_only_refuses_before_restart_teardown(
             SimpleNamespace(session=SimpleNamespace(history_limit=1)),
             name="s1",
             resume_only=True,
+            yes=True,
             interaction=TtyInteractionPolicy.REFUSE,
         )  # type: ignore[arg-type]
 
@@ -437,6 +659,7 @@ def test_unavailable_resume_only_refuses_before_restart_teardown(
             SimpleNamespace(session=SimpleNamespace(history_limit=1)),
             name="s1",
             resume_only=True,
+            yes=True,
             interaction=TtyInteractionPolicy.REFUSE,
         )  # type: ignore[arg-type]
 
@@ -535,6 +758,7 @@ def test_restart_probe_fires_at_preflight_before_the_kill(tmp_path: Path, monkey
         db,
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),
         name="s1",
+        yes=True,
         interaction=TtyInteractionPolicy.REFUSE,
     )  # type: ignore[arg-type]
 
@@ -571,6 +795,7 @@ def test_restart_refuses_ssh_identity_before_activation_or_probe(
             db,
             SimpleNamespace(session=SimpleNamespace(history_limit=1)),
             name="s1",
+            yes=True,
             interaction=TtyInteractionPolicy.REFUSE,
         )  # type: ignore[arg-type]
 
@@ -592,6 +817,7 @@ def test_restart_missing_binary_aborts_with_the_old_session_running(
             db,
             SimpleNamespace(session=SimpleNamespace(history_limit=1)),
             name="s1",
+            yes=True,
             interaction=TtyInteractionPolicy.REFUSE,
         )  # type: ignore[arg-type]
 
@@ -610,7 +836,7 @@ def test_restart_broken_without_force_refuses_before_the_resolve(
 ) -> None:
     """A BROKEN session without --force is refused up front. The pass-1
     graph-union resolve must NOT run first (issue #202): a refused
-    restart never prompts. Preflight (read-only) still runs."""
+    broken-state recovery does not prompt. Preflight (read-only) still runs."""
     from agentworks.errors import BrokenStateError
     from agentworks.sessions import manager as session_manager
     from agentworks.sessions.manager import restart_session
@@ -623,6 +849,7 @@ def test_restart_broken_without_force_refuses_before_the_resolve(
             db,
             SimpleNamespace(session=SimpleNamespace(history_limit=1)),
             name="s1",
+            yes=True,
             interaction=TtyInteractionPolicy.REFUSE,
         )  # type: ignore[arg-type]
 
@@ -1375,6 +1602,7 @@ def test_restart_pane_command_uses_resume_command_and_session_workspace(
         db,
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),
         name="s1",
+        yes=True,
         interaction=TtyInteractionPolicy.REFUSE,
     )  # type: ignore[arg-type]
 
@@ -1802,6 +2030,11 @@ def test_restart_multiline_environment_secret_refuses_before_kill(
     monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, **kwargs: session)
     monkeypatch.setattr(session_manager, "check_session_status", lambda *args, **kwargs: SessionStatus.RUNNING)
     monkeypatch.setattr(
+        session_manager,
+        "observe_session_statuses",
+        lambda sessions, **kwargs: {session.name: SessionStatus.RUNNING for session in sessions},
+    )
+    monkeypatch.setattr(
         "agentworks.sessions.manager._lifecycle._teardown_session",
         lambda *args, **kwargs: events.append("kill"),
     )
@@ -1811,6 +2044,7 @@ def test_restart_multiline_environment_secret_refuses_before_kill(
             db,
             config,
             name="s1",
+            yes=True,
             interaction=TtyInteractionPolicy.REFUSE,
         )
 

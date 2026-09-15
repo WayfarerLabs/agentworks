@@ -190,6 +190,7 @@ def test_dedicated_teardown_kills_the_fingerprinted_server_and_not_a_numeric_pid
         target_owns_session=True,
         db=db,
         force=False,
+        legacy_running_authorized=True,
     )
 
     assert killed == ["/run/agentworks/admin-tmux-sockets/admin/s1.sock"]
@@ -227,6 +228,7 @@ def test_dedicated_teardown_refuses_a_fingerprint_mismatch(tmp_path: Path, monke
             target_owns_session=True,
             db=db,
             force=False,
+            legacy_running_authorized=True,
         )
 
 
@@ -277,6 +279,7 @@ def test_admin_transport_elevates_agent_runtime_absence_proof(
                 target_owns_session=False,
                 db=db,
                 force=False,
+                legacy_running_authorized=True,
             )
 
     assert observed_sudo == [True]
@@ -343,6 +346,7 @@ def test_legacy_teardown_uses_root_transport_when_the_target_is_not_the_owner(
         target_owns_session=False,
         db=db,
         force=False,
+        legacy_running_authorized=True,
     )
 
     assert calls == [("probe", True), ("kill", True), ("probe", True)]
@@ -677,7 +681,12 @@ class _NullCM:
         return None
 
 
-def test_restart_migrates_legacy_session_to_per_session_socket(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("operation_name", ["start_session", "restart_session"])
+def test_launch_migrates_legacy_session_to_per_session_socket(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation_name: str,
+) -> None:
     """Legacy admin sessions (created on the VM's default tmux server,
     ``socket_path=None``) used to surface ``check_session_status`` as a
     typed ``StateError`` and force the operator into a delete-then-create
@@ -694,6 +703,7 @@ def test_restart_migrates_legacy_session_to_per_session_socket(tmp_path: Path, m
     NOT ``force_kill_tmux_server``.
     """
     from agentworks.db import SessionMode
+    from agentworks.errors import StateError
     from agentworks.sessions import manager as session_manager
     from agentworks.sessions import tmux as tmux_mod
 
@@ -742,13 +752,28 @@ def test_restart_migrates_legacy_session_to_per_session_socket(tmp_path: Path, m
     monkeypatch.setattr(tmux_mod, "kill_session", _spy_kill_session)
     existence_calls: list[tuple[str, str | None]] = []
 
-    presences = iter((ProbeStatus.PRESENT, ProbeStatus.ABSENT))
+    expected_presences = (
+        (
+            ProbeStatus.PRESENT,
+            ProbeStatus.PRESENT,
+            ProbeStatus.PRESENT,
+            ProbeStatus.PRESENT,
+            ProbeStatus.ABSENT,
+        )
+        if operation_name == "restart_session"
+        else (ProbeStatus.PRESENT, ProbeStatus.ABSENT)
+    )
+    presences = iter(expected_presences)
 
     def _spy_session_presence(name, *, run_command, socket_path):  # type: ignore[no-untyped-def]
         existence_calls.append((name, socket_path))
         return next(presences)
 
     monkeypatch.setattr(tmux_mod, "probe_tmux_session", _spy_session_presence)
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._status.probe_tmux_session",
+        _spy_session_presence,
+    )
 
     # Capture create_tmux_session: returns the new socket and PID so the
     # downstream atomic runtime update lands the migration.
@@ -770,14 +795,37 @@ def test_restart_migrates_legacy_session_to_per_session_socket(tmp_path: Path, m
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
-    # Should not raise: legacy migration flows around check_session_status.
-    session_manager.restart_session(db, config, name="legacy", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
+    if operation_name == "restart_session":
+        with pytest.raises(StateError):
+            session_manager.restart_session(
+                db,
+                config,
+                name="legacy",
+                interaction=TtyInteractionPolicy.REFUSE,
+            )  # type: ignore[arg-type]
+        assert kill_calls == []
+        assert create_calls == []
+
+        session_manager.restart_session(
+            db,
+            config,
+            name="legacy",
+            yes=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )  # type: ignore[arg-type]
+    else:
+        session_manager.start_session(
+            db,
+            config,
+            name="legacy",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )  # type: ignore[arg-type]
 
     assert kill_calls == [("legacy", None)], (
         "kill_session must be invoked with the legacy session name and "
         f"socket_path=None (default server); got {kill_calls}"
     )
-    assert existence_calls == [("legacy", None), ("legacy", None)]
+    assert existence_calls == [("legacy", None)] * len(expected_presences)
     assert len(create_calls) == 1, "create_tmux_session must run once"
     assert create_calls[0]["is_admin"] is True
 
@@ -854,13 +902,28 @@ def test_restart_dead_workload_error_propagates(tmp_path: Path, monkeypatch: pyt
     monkeypatch.setattr(session_manager, "_resolve_session_linux_user", lambda *_a, **_kw: "admin")
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *_a, **_kw: None)
     monkeypatch.setattr(tmux_mod, "kill_session", lambda *_a, **_kw: True)
-    presences = iter((ProbeStatus.PRESENT, ProbeStatus.ABSENT))
-    monkeypatch.setattr(tmux_mod, "probe_tmux_session", lambda *_a, **_kw: next(presences))
+    presences = iter(
+        (
+            ProbeStatus.PRESENT,
+            ProbeStatus.PRESENT,
+            ProbeStatus.PRESENT,
+            ProbeStatus.ABSENT,
+        )
+    )
+    probe = lambda *_a, **_kw: next(presences)  # noqa: E731
+    monkeypatch.setattr(tmux_mod, "probe_tmux_session", probe)
+    monkeypatch.setattr("agentworks.sessions.manager._status.probe_tmux_session", probe)
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
     with pytest.raises(StateError) as excinfo:
-        session_manager.restart_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
+        session_manager.restart_session(
+            db,
+            config,
+            name="s1",
+            yes=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )  # type: ignore[arg-type]
 
     assert excinfo.value.entity_kind == "session"
     db.close()

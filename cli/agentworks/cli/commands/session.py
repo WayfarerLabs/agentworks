@@ -290,6 +290,7 @@ def _launch_sessions(
     force_new: bool,
     resume_only: bool,
     replace_running: bool,
+    yes: bool = False,
 ) -> None:
     """Validate and execute one canonical session launch operation."""
     from agentworks.config import load_config
@@ -320,32 +321,59 @@ def _launch_sessions(
             "--vm, --workspace, --agent, --harness-integration, --console, and --admin require --all"
         )
     if all_sessions:
-        batch_operation = restart_all_sessions if replace_running else start_all_sessions
-        batch_operation(
-            get_db(),
-            load_config(),
-            vm_name=parsed_vm,
-            workspace_name=parsed_workspace,
-            agent_name=parsed_agent,
-            harness_integration_name=parsed_harness_integration,
-            console_name=parsed_console,
-            admin_only=admin,
-            force=force,
-            force_new=force_new,
-            resume_only=resume_only,
-            interaction=interaction,
-        )
+        if replace_running:
+            restart_all_sessions(
+                get_db(),
+                load_config(),
+                vm_name=parsed_vm,
+                workspace_name=parsed_workspace,
+                agent_name=parsed_agent,
+                harness_integration_name=parsed_harness_integration,
+                console_name=parsed_console,
+                admin_only=admin,
+                force=force,
+                force_new=force_new,
+                resume_only=resume_only,
+                yes=yes,
+                interaction=interaction,
+            )
+        else:
+            start_all_sessions(
+                get_db(),
+                load_config(),
+                vm_name=parsed_vm,
+                workspace_name=parsed_workspace,
+                agent_name=parsed_agent,
+                harness_integration_name=parsed_harness_integration,
+                console_name=parsed_console,
+                admin_only=admin,
+                force=force,
+                force_new=force_new,
+                resume_only=resume_only,
+                interaction=interaction,
+            )
     elif name:
-        operation = restart_session if replace_running else start_session
-        operation(
-            get_db(),
-            load_config(),
-            name=name,
-            force=force,
-            force_new=force_new,
-            resume_only=resume_only,
-            interaction=interaction,
-        )
+        if replace_running:
+            restart_session(
+                get_db(),
+                load_config(),
+                name=name,
+                force=force,
+                force_new=force_new,
+                resume_only=resume_only,
+                yes=yes,
+                interaction=interaction,
+            )
+        else:
+            start_session(
+                get_db(),
+                load_config(),
+                name=name,
+                force=force,
+                force_new=force_new,
+                resume_only=resume_only,
+                interaction=interaction,
+            )
     else:
         raise typer.BadParameter("provide a session name or use --all")
 
@@ -409,6 +437,7 @@ def session_restart(
         bool,
         typer.Option("--resume-only", help="Fail unless the existing harness conversation can be resumed"),
     ] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation for running sessions")] = False,
 ) -> None:
     """Restart a session, or all sessions with --all."""
     _launch_sessions(
@@ -424,6 +453,7 @@ def session_restart(
         force_new=force_new,
         resume_only=resume_only,
         replace_running=True,
+        yes=yes,
     )
 
 

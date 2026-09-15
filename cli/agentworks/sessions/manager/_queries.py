@@ -198,6 +198,7 @@ def delete_session(
                     target_owns_session=True,
                     db=db,
                     force=force,
+                    legacy_running_authorized=True,
                 )
 
             # Capture console memberships before delete; the FK cascade on
