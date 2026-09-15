@@ -13,7 +13,7 @@ from pathlib import Path
 
 from agentworks.git_credentials.credential import GitCredentialConfig
 from agentworks.naming import MAX_FREEFORM_NAME_LENGTH
-from agentworks.schema import CapabilityBlock, CapabilityConfig
+from agentworks.schema import CapabilityBlock
 from agentworks.secrets.sources import SecretSourceDecl
 from agentworks.sessions.template import SessionTemplate
 from agentworks.vms.sites import VMSiteDecl
@@ -30,6 +30,7 @@ _HOSTS = [
     ("vm-site", "lab", "platform", "lima"),
     ("git-credential", "gh", "provider", "github"),
     ("secret-source", "ci-env", "backend", "env-var"),
+    ("session-template", "work", "harness_integration", "shell"),
 ]
 
 
@@ -66,13 +67,13 @@ def test_a_git_credential_round_trips() -> None:
 
 
 def test_a_session_template_round_trips() -> None:
-    spec = {"inherits": ["base"], "harness_integration": {"shell": {"command": "htop"}}}
+    spec = {"inherits": ["base"], "harness_integration": {"name": "shell", "command": "htop"}}
 
     assert decode("session-template", "htop", dict(spec)) == SessionTemplate(
         name="htop",
         declared_at=WHERE,
         inherits=["base"],
-        harness_integration={"shell": CapabilityConfig.model_validate({"command": "htop"})},
+        harness_integration=CapabilityBlock.of("shell", **{"command": "htop"}),
     )
 
 

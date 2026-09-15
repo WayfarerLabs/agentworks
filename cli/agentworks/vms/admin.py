@@ -64,7 +64,7 @@ def effective_references(
         for index, name in enumerate(effective.user_install_commands)
     )
     refs.extend(
-        activation_references(effective.harness_integrations, facet="user", source=source, provenance=provenance)
+        activation_references(effective.active_harness_integrations, facet="user", source=source, provenance=provenance)
     )
     return tuple(refs)
 
@@ -145,9 +145,10 @@ class AdminConfig(DeclaredResource):
     """Whether to mark checkouts as git ``safe.directory`` for this user.
     Write booleans unquoted; quoted strings such as ``"no"`` are invalid."""
 
-    harness_integrations: dict[NonEmptyStr, CapabilityConfig] = Field(default_factory=dict)
+    harness_integrations: dict[NonEmptyStr, CapabilityConfig | None] = Field(default_factory=dict)
     """Ordered integrations explicitly activated for native user setup.
-    Entries merge by integration name and facet config; an empty map inherits."""
+    Entries merge by integration name and facet config; an empty map inherits.
+    A null entry disables that integration."""
 
     artifacts: ArtifactsConfig = Field(default_factory=ArtifactsConfig)
     """Artifact bundles selected for the VM admin user."""
@@ -155,6 +156,11 @@ class AdminConfig(DeclaredResource):
     env: EnvTable = Field(default_factory=dict)
     """Environment variables exported whenever a shell is opened as the
     admin user."""
+
+    @property
+    def active_harness_integrations(self) -> dict[str, CapabilityConfig]:
+        """Extract enabled entries from an authored or resolved admin declaration."""
+        return {name: config for name, config in self.harness_integrations.items() if config is not None}
 
     @model_validator(mode="after")
     def _check_mise(self, info: ValidationInfo) -> AdminConfig:
@@ -175,7 +181,7 @@ class AdminConfig(DeclaredResource):
         from agentworks.capabilities.harness_integration.activations import validate_activations
 
         validate_activations(
-            self.harness_integrations,
+            self.active_harness_integrations,
             facet="user",
             source=("admin-template", self.name),
             provenance={},

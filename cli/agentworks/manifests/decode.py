@@ -310,7 +310,8 @@ def _hosted_capability_references(
                 refs.extend(
                     capability_config_references(
                         kind=descriptor.kind,
-                        config=block.tagged,
+                        name=block.name,
+                        config=block.config if descriptor.config_schema.discriminator is None else block.tagged,
                         owner=owner,
                         facet=host.facet,
                     )

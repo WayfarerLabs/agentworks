@@ -1398,7 +1398,7 @@ SESSION_ENV_MANIFESTS = [
     ManifestDoc(
         "session-template",
         "default",
-        {"harness_integration": {"shell": {}}, "env": {"API_KEY": {"secret": "api-key"}}},
+        {"harness_integration": {"name": "shell"}, "env": {"API_KEY": {"secret": "api-key"}}},
     ),
     ManifestDoc("secret", "api-key", description="session runtime input"),
 ]
@@ -1608,7 +1608,7 @@ def test_create_new_agent_on_disabled_plugin_recipe_refuses_before_any_work(
     ("overlay_args", "expected_identity"),
     [
         (
-            {"workspace": "ws1", "admin": True, "spec": '{"harness_integration": {"codex": {}}}'},
+            {"workspace": "ws1", "admin": True, "spec": '{"harness_integration": {"name": "codex"}}'},
             ("harness-integration", "codex"),
         ),
         (
@@ -1763,7 +1763,7 @@ def test_restart_validates_stored_overlay_references_before_lifecycle_work(
     config = make_config()
     _seed_stopped_proxmox_vm(db)
     db.insert_session("s1", "ws1", "default", SessionMode.ADMIN)
-    overlay = parse_instance_spec("session", '{"harness_integration": {"missing": {}}}')
+    overlay = parse_instance_spec("session", '{"harness_integration": {"name": "missing"}}')
     db.instance_state.put_desired_overlay("session", "s1", overlay.payload)
     db.update_session_runtime("s1", socket_path="/tmp/s1.sock", pid=4242, boot_id=BOOT_ID, tmux_server_start_ticks=77)
     events: list[str] = []

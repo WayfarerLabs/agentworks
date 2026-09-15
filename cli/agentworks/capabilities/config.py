@@ -38,7 +38,8 @@ validates**, and its shape follows the kind's dispatch:
   wrote it and exactly as the host row carries it
   (:class:`~agentworks.schema.CapabilityBlock`);
 - a MAP-KEYED config kind would be selected by the key its value sits under.
-  Harness activations use this dispatch at each facet.
+  Setup activation maps pass their key; a singular session host unwraps
+  its tagged block and passes the selected name beside the untagged config.
 
 So a TAGGED kind needs no ``name`` argument at all: the tag inside the
 table is what selects the implementation, and reading it here rather than
@@ -92,6 +93,7 @@ _MAPPING_UNION_CACHE: dict[tuple[str, tuple[type[BaseModel], ...], bool], type[B
 _OFFERED_MODEL_CACHE: dict[tuple[type, Facet | None], tuple[object, object]] = {}
 
 _TAG_MODEL_CACHE: dict[tuple[type, str], type[BaseModel]] = {}
+_HOST_MODEL_CACHE: dict[tuple[type[BaseModel], str], type[BaseModel]] = {}
 
 
 def selected_name(kind: str, config: object, name: str | None) -> str | None:
@@ -395,13 +397,10 @@ def capability_config_union(kind: str, *, facet: Facet | None = None) -> type[Ba
     fixture capability; a deliberate choice, not an oversight.
     """
     descriptor = descriptor_for(kind)
-    discriminator = descriptor.config_schema.discriminator
-    if discriminator is None:
-        raise StateError(
-            f"the {kind} capability kind declares an untagged config_schema, so there is no union to "
-            f"assemble; only a mapping contract may be untagged"
-        )
+    discriminator = descriptor.config_schema.discriminator or "name"
     arms = _arms(descriptor, facet=facet)
+    if descriptor.config_schema.discriminator is None:
+        arms = {name: tagged_host_model(model, name) for name, model in arms.items()}
     key = (kind, facet, frozenset(arms.items()))
     cached = _UNION_CACHE.get(key)
     if cached is not None:
@@ -409,6 +408,21 @@ def capability_config_union(kind: str, *, facet: Facet | None = None) -> type[Ba
     union = _build_union(descriptor, tuple(arms.values()), discriminator)
     _UNION_CACHE[key] = union
     return union
+
+
+def tagged_host_model(model: type[BaseModel], name: str) -> type[BaseModel]:
+    """Add the singular host's selector around an untagged capability config model.
+
+    Capability models continue to own config fields only. The host owns the
+    required name tag used by its emitted discriminated union.
+    """
+    key = (model, name)
+    if key not in _HOST_MODEL_CACHE:
+        tag: Any = Literal[name]
+        _HOST_MODEL_CACHE[key] = create_model(
+            f"{model.__name__}{_class_name(name)}Host", __base__=model, name=(tag, ...)
+        )
+    return _HOST_MODEL_CACHE[key]
 
 
 def capability_mapping_union(kind: str) -> type[BaseModel]:

@@ -162,9 +162,10 @@ class VMTemplate(DeclaredResource):
     ) = None
     """Names of ``system-install-command`` resources run during VM init."""
 
-    harness_integrations: dict[NonEmptyStr, CapabilityConfig] | None = None
+    harness_integrations: dict[NonEmptyStr, CapabilityConfig | None] | None = None
     """Ordered integrations explicitly activated for native vm setup.
-    Entries merge by integration name and facet config; an empty map inherits."""
+    Entries merge by integration name and facet config; an empty map inherits.
+    A null entry disables that integration."""
 
     artifacts: ArtifactsConfig | None = None
     """Artifact bundles selected at this scope; an omitted selection inherits."""

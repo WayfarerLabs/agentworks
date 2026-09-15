@@ -21,7 +21,7 @@ from agentworks.manifests.reference import implementation_reference, kind_refere
 from agentworks.manifests.spec_model import spec_model
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.plugins.base import PluginError
-from agentworks.schema import AgwModel, CapabilityConfig, RefOwner, SecretRef
+from agentworks.schema import AgwModel, CapabilityBlock, CapabilityConfig, RefOwner, SecretRef
 from agentworks.sessions.template import SessionTemplate
 from tests.plugins._fixtures import ConformingHarnessIntegration
 
@@ -176,9 +176,9 @@ def test_reference_root_has_all_answers_and_resource_field_only_session(seated: 
     arm = next(arm for arm in session.alternatives if arm.name == "facet-test")
     assert arm.target == "harness-integration/facet-test"
     model = spec_model("session-template")
-    model.model_validate({"name": "host", "harness_integration": {"facet-test": {"session_token": "x"}}})
+    model.model_validate({"name": "host", "harness_integration": {"name": "facet-test", "session_token": "x"}})
     with pytest.raises(ValidationError):
-        model.model_validate({"name": "host", "harness_integration": {"facet-test": {"user_token": "x"}}})
+        model.model_validate({"name": "host", "harness_integration": {"name": "facet-test", "user_token": "x"}})
 
 
 def test_multiple_hosts_project_each_map_facet(seated: None, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -204,7 +204,7 @@ def test_multiple_hosts_project_each_map_facet(seated: None, monkeypatch: pytest
     value = model.model_validate(
         {
             "name": "host",
-            "harness_integration": {"facet-test": {"session_token": "s"}},
+            "harness_integration": {"name": "facet-test", "session_token": "s"},
             "user_integrations": {"facet-test": {"user_token": "u"}},
         }
     )
@@ -215,7 +215,7 @@ def test_multiple_hosts_project_each_map_facet(seated: None, monkeypatch: pytest
     raw = Host(
         name="host",
         user_integrations={"facet-test": CapabilityConfig.model_validate({"user_token": "first"})},
-        harness_integration={"facet-test": CapabilityConfig.model_validate({"session_token": "session"})},
+        harness_integration=CapabilityBlock.of("facet-test", **{"session_token": "session"}),
     )
     doc = Document(
         kind="session-template",
@@ -231,7 +231,7 @@ def test_multiple_hosts_project_each_map_facet(seated: None, monkeypatch: pytest
     assert any(arm.target == "harness-integration/facet-test" for arm in fields["user_integrations"].alternatives)
 
 
-def test_map_schema_keeps_key_specific_models_and_session_cardinality(seated: None) -> None:
+def test_tagged_session_schema_wraps_untagged_config_models(seated: None) -> None:
     from jsonschema import Draft202012Validator
 
     model = spec_model("session-template")
@@ -240,18 +240,11 @@ def test_map_schema_keeps_key_specific_models_and_session_cardinality(seated: No
     validator = Draft202012Validator(schema)
     config: object
     document: dict[str, object]
-    for config in ({"shell": {}}, {"facet-test": {"session_token": "secret"}}, {}):
+    for config in ({"name": "shell"}, {"name": "facet-test", "session_token": "secret"}):
         document = {"harness_integration": config}
         assert validator.is_valid(document)
         model.model_validate({"name": "test", **document})
-    for config in (
-        {"shell": {"session_token": "secret"}},
-        {"facet-test": {"user_token": "secret"}},
-        {"shell": {"name": "facet-test"}},
-        {"shell": {}, "facet-test": {}},
-        {"unknown": {}},
-        [{"name": "shell"}],
-    ):
+    for config in ({}, {"shell": {}}, {"name": "shell", "session_token": "secret"}, {"name": "unknown"}):
         document = {"harness_integration": config}
         assert not validator.is_valid(document)
         with pytest.raises(ValidationError):
@@ -284,7 +277,7 @@ def test_integration_map_keys_are_not_python_model_fields(name: str) -> None:
     )
     with seated_plugin(Plugin(name="map-keys", capabilities={"harness-integration": (NamedIntegration,)})):
         projected = spec_model("session-template")
-        value: dict[str, object] = {"harness_integration": {name: {}}}
+        value: dict[str, object] = {"harness_integration": {"name": name}}
         assert Draft202012Validator(projected.model_json_schema()).is_valid(value)
         projected.model_validate({"name": "test", **value})
         fields = {entry.name: entry for entry in kind_reference("session-template").spec}

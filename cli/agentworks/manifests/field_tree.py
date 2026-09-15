@@ -609,7 +609,7 @@ def _implementations(capability_kind: str | None) -> dict[tuple[str, type[BaseMo
     """
     if capability_kind is None:
         return {}
-    from agentworks.capabilities.config import config_model_for, registered_implementations
+    from agentworks.capabilities.config import config_model_for, registered_implementations, tagged_host_model
     from agentworks.capabilities.descriptor import descriptor_for
 
     implementations: dict[tuple[str, type[BaseModel]], _Implementation] = {}
@@ -621,6 +621,12 @@ def _implementations(capability_kind: str | None) -> dict[tuple[str, type[BaseMo
                 model=model,
                 summary=description if isinstance(description, str) and description else None,
             )
+            if descriptor_for(capability_kind).config_schema.discriminator is None:
+                hosted = tagged_host_model(model, name)
+                implementations[name, hosted] = _Implementation(
+                    model=hosted,
+                    summary=description if isinstance(description, str) and description else None,
+                )
     return implementations
 
 

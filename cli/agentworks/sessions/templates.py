@@ -277,7 +277,7 @@ def _resolve_with_provenance(
 
         raise ConfigError(
             f"session-template/{name} has no selected harness integration",
-            hint="Set harness_integration: {shell: {}}, select another integration, or inherit a selection.",
+            hint="Set harness_integration: {name: shell}, select another integration, or inherit a selection.",
         )
     result.harness_integration = layered.value.harness.name
     result.harness_integration_config = dict(layered.value.harness.config)
@@ -288,11 +288,10 @@ def _declared_pair(tmpl: SessionTemplate) -> MergedHarness:
     """One template's OWN harness declaration, in the shape the fold
     takes. ``name`` is ``None`` when this template declares no integration.
     """
-    activations = tmpl.harness_integration
-    if not activations:
+    block = tmpl.harness_integration
+    if block is None:
         return MergedHarness()
-    name, config = next(iter(activations.items()))
-    return MergedHarness(name=name, config=config.config)
+    return MergedHarness(name=block.name, config=block.config)
 
 
 def _resolve_walk(
@@ -353,12 +352,12 @@ def _resolve_walk_with_provenance(
     from agentworks.resources.resolved_spec import resolved_spec_default_paths
 
     if "default" not in templates:
-        from agentworks.schema import CapabilityConfig
+        from agentworks.schema import CapabilityBlock
         from agentworks.sessions.template import SessionTemplate
 
         templates = {
             **templates,
-            "default": SessionTemplate(name="default", harness_integration={"shell": CapabilityConfig()}),
+            "default": SessionTemplate(name="default", harness_integration=CapabilityBlock.of("shell")),
         }
     layers = [
         DeclarationLayer(

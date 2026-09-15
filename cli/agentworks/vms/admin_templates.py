@@ -155,7 +155,7 @@ def get_live_overlays(
     if record is None:
         return None
     base = (
-        resolve_template_with_provenance(registry, template_name).value.harness_integrations
+        resolve_template_with_provenance(registry, template_name).value.active_harness_integrations
         if legacy_component(record) is not None
         else None
     )

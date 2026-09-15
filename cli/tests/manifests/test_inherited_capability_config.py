@@ -89,17 +89,17 @@ def test_an_inherited_required_field_loads_and_does_not_validate() -> None:
     # (``DeclaredResource.__pydantic_init_subclass__`` refuses one on an
     # inheriting kind), so there is nothing here for a boundary to render.
     parent = SessionTemplate.model_validate(
-        {"name": "base", "harness_integration": {"demanding": {"workspace": "proj"}}}
+        {"name": "base", "harness_integration": {"name": "demanding", "workspace": "proj"}}
     )
     child = SessionTemplate.model_validate(
-        {"name": "child", "inherits": ["base"], "harness_integration": {"demanding": {}}}
+        {"name": "child", "inherits": ["base"], "harness_integration": {"name": "demanding"}}
     )
     context = FinalizeContext(rows={"session-template": {"base": parent, "child": child}})
     # The loader's answer: the merged blob is complete, so this is fine.
     child.validate_config(context)
 
     # The schema's answer, on the same document.
-    document = _a_child_document({"inherits": ["base"], "harness_integration": {"demanding": {}}})
+    document = _a_child_document({"inherits": ["base"], "harness_integration": {"name": "demanding"}})
     errors = [e.message for e in Draft202012Validator(document_schema("session-template")).iter_errors(document)]
     assert errors, (
         "the divergence this file documents has been closed; if that was deliberate, "
@@ -136,6 +136,6 @@ def test_a_standalone_template_still_gets_the_missing_field_diagnostic() -> None
     Relaxing ``required`` for the inheriting case would take this away.
     """
     with seated_plugin(Plugin(name="demanding-2", capabilities={"harness-integration": (DemandingHarness,)})):
-        document = _a_child_document({"harness_integration": {"demanding": {}}})
+        document = _a_child_document({"harness_integration": {"name": "demanding"}})
         errors = [e.message for e in Draft202012Validator(document_schema("session-template")).iter_errors(document)]
         assert errors

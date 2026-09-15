@@ -94,13 +94,13 @@ def test_session_template_canonical_selector_decodes_to_the_internal_pair(tmp_pa
           name: htop
         spec:
           harness_integration:
-            shell:
-              command: htop
+            name: shell
+            command: htop
         """,
     )
     (entry,) = manifests.entries
-    assert list(entry.resource.harness_integration) == ["shell"]
-    assert entry.resource.harness_integration["shell"].config == {"command": "htop"}
+    assert entry.resource.harness_integration.name == "shell"
+    assert entry.resource.harness_integration.config == {"command": "htop"}
     assert not manifests.issues
 
 
@@ -289,8 +289,8 @@ def test_cli_tagged_shape_loads_cleanly(tmp_path: Path, monkeypatch: pytest.Monk
           name: htop
         spec:
           harness_integration:
-            shell:
-              command: htop
+            name: shell
+            command: htop
         """)
     )
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)

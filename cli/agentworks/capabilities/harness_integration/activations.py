@@ -49,6 +49,12 @@ def merge_activation_layer(
     for name, value in incoming.items():
         config = value.config if isinstance(value, CapabilityConfig) else value
         path = (field, name)
+        if value is None:
+            activations.pop(name, None)
+            operations.append(LayerContribution.reset_prefix(*path))
+            if not activations:
+                operations.append(LayerContribution.replacement(field))
+            continue
         capability_model = capability_config_model("harness-integration", name, facet=facet)
         changes: tuple[LayerContribution, ...]
         if capability_model is None:

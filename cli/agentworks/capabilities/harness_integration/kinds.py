@@ -147,7 +147,6 @@ HARNESS_INTEGRATION_DESCRIPTOR = CapabilityKindDescriptor(
             host_kind="session-template",
             naming_field="harness_integration",
             facet="session",
-            cardinality="mapping",
         ),
     ),
 )

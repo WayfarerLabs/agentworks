@@ -282,9 +282,111 @@ def test_map_entries_merge_through_facet_models_and_keep_field_owners(model, res
 
 
 @pytest.mark.parametrize("model", [VMTemplate, AgentTemplate, WorkspaceTemplate, AdminConfig])
-@pytest.mark.parametrize("value", [[], [{"name": "shell"}], {"": {}}, {"shell": None}])
+@pytest.mark.parametrize("value", [[], [{"name": "shell"}], {"": {}}, {"shell": False}])
 def test_authored_activations_require_nonempty_keys_and_config_tables(model, value) -> None:
     from pydantic import ValidationError
 
     with pytest.raises(ValidationError):
         model.model_validate({"name": "test", "harness_integrations": value})
+
+
+@pytest.mark.parametrize(
+    ("model", "resolve", "kind", "facet"),
+    [
+        (VMTemplate, resolve_vm, "vm-template", "vm"),
+        (AgentTemplate, resolve_agent, "agent-template", "user"),
+        (WorkspaceTemplate, resolve_workspace, "workspace-template", "workspace"),
+    ],
+)
+def test_null_removes_inherited_activation_and_readding_starts_fresh(model, resolve, kind, facet) -> None:
+    from pydantic import Field
+
+    from agentworks.capabilities.harness_integration.activations import activation_references
+
+    class Config(AgwModel):
+        tokens: dict[str, Annotated[str, SecretRef(usage="fixture token")]] = Field(default_factory=dict)
+
+    class Harness(ConformingHarnessIntegration):
+        name = "nullable-fixture"
+        description = "Nullable activation fixture"
+
+        @classmethod
+        def config_for(cls, facet: Facet | None = None) -> type[BaseModel]:
+            return Config
+
+    base = model.model_validate(
+        {
+            "name": "base",
+            "harness_integrations": {
+                "nullable-fixture": {"tokens": {"key": "inherited-secret"}},
+                "shell": {},
+                "unavailable": {},
+            },
+        }
+    )
+    off = model.model_validate(
+        {
+            "name": "off",
+            "inherits": ["base"],
+            "harness_integrations": {
+                "nullable-fixture": None,
+                "unavailable": None,
+            },
+        }
+    )
+    empty = model.model_validate({"name": "empty", "inherits": ["off"], "harness_integrations": {}})
+    again = model.model_validate(
+        {
+            "name": "again",
+            "inherits": ["base", "empty"],
+            "harness_integrations": {
+                "nullable-fixture": {},
+            },
+        }
+    )
+    templates = {row.name: row for row in (base, off, empty, again)}
+    with seated_plugin(Plugin(name="nullable-fixture", capabilities={"harness-integration": (Harness,)})):
+        disabled = resolve(templates, "empty")
+        assert disabled.value.harness_integrations == {"shell": CapabilityConfig()}
+        refs = activation_references(
+            disabled.value.harness_integrations, facet=facet, source=(kind, "empty"), provenance=disabled.provenance
+        )
+        assert [(ref.kind, ref.name) for ref in refs] == [("harness-integration", "shell")]
+        assert not any(path[:2] == ("harness_integrations", "nullable-fixture") for path in disabled.provenance)
+        enabled = resolve(templates, "again")
+        assert list(enabled.value.harness_integrations) == ["shell", "nullable-fixture"]
+        assert enabled.value.harness_integrations["nullable-fixture"].config == {}
+        refs = activation_references(
+            enabled.value.harness_integrations, facet=facet, source=(kind, "again"), provenance=enabled.provenance
+        )
+        assert not any(ref.kind == "secret" for ref in refs)
+        assert next(ref for ref in refs if ref.name == "nullable-fixture").declarer == (kind, "again")
+
+
+def test_admin_null_removal_has_no_enabled_refs_and_records_empty_map_owner() -> None:
+    base = AdminConfig.model_validate({"name": "base", "harness_integrations": {"unavailable": {}}})
+    off = AdminConfig.model_validate({"name": "off", "harness_integrations": {"unavailable": None}})
+    result = resolve_admin({"base": base}, "base", overlay=off, instance_name="vm")
+    assert result.value.harness_integrations == {}
+    assert result.value.active_harness_integrations == {}
+    assert result.provenance[("harness_integrations",)][-1].name == "vm"
+    assert not [ref for ref in off.dependencies(FinalizeContext()) if ref.kind == "harness-integration"]
+    off.validate_config(FinalizeContext())
+
+
+@pytest.mark.parametrize("kind", ["vm-template", "admin-template", "agent-template", "workspace-template"])
+def test_setup_map_schema_accepts_null_opt_out_and_rejects_other_scalars(kind) -> None:
+    from jsonschema import Draft202012Validator
+
+    from agentworks.manifests.spec_model import spec_model
+
+    model = spec_model(kind)
+    validator = Draft202012Validator(model.model_json_schema())
+    value: object
+    raw: dict[str, object]
+    for value in ({}, {"shell": {}}, {"shell": None}):
+        raw = {"harness_integrations": value}
+        assert validator.is_valid(raw)
+        model.model_validate({"name": "test", **raw})
+    for value in ({"shell": False}, {"shell": "off"}):
+        assert not validator.is_valid({"harness_integrations": value})

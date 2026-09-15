@@ -21,11 +21,9 @@ descriptor, the capability config union).
 
 from __future__ import annotations
 
-from copy import copy
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, get_args
 
-from annotated_types import MaxLen
-from pydantic import AfterValidator, BaseModel, Field, StringConstraints, create_model
+from pydantic import BaseModel, Field, StringConstraints, create_model
 from pydantic.fields import FieldInfo
 from pydantic.json_schema import SkipJsonSchema
 
@@ -81,8 +79,8 @@ def spec_model(kind: str) -> type[BaseModel]:
     projected: type[BaseModel] = row
     for descriptor, host in hosted_capabilities(kind):
         from agentworks.capabilities.config import (
-            capability_config_model,
             capability_config_union,
+            config_model_for,
             registered_implementations,
         )
 
@@ -95,18 +93,14 @@ def spec_model(kind: str) -> type[BaseModel]:
                 doc="Integration names select their own facet config.",
                 fields={
                     f"integration_{index}": (
-                        capability_config_model(descriptor.kind, name, facet=host.facet),
+                        config_model_for(implementation, facet=host.facet) | None
+                        if unwrap_optional(get_args(unwrap_optional(field.annotation)[0])[1])[1]
+                        else config_model_for(implementation, facet=host.facet),
                         Field(default=None, validate_default=False, alias=name),
                     )
-                    for index, name in enumerate(registered_implementations(descriptor.kind))
+                    for index, (name, implementation) in enumerate(registered_implementations(descriptor.kind).items())
                 },
             )
-            maximum = next((item.max_length for item in field.metadata if isinstance(item, MaxLen)), None)
-            if maximum is not None:
-                field = copy(field)
-                field.metadata = [item for item in field.metadata if not isinstance(item, MaxLen)]
-                field.json_schema_extra = {"maxProperties": maximum}
-                union = Annotated[union, AfterValidator(_map_limit(maximum))]
         else:
             union = capability_config_union(descriptor.kind, facet=host.facet)
         _declared, optional = unwrap_optional(field.annotation)
@@ -138,17 +132,6 @@ def spec_model(kind: str) -> type[BaseModel]:
             fields={mapping_host.field_name: (mapping, field)},
         )
     return projected
-
-
-def _map_limit(maximum: int) -> Any:
-    """Keep a host map's entry bound when projecting its keys as model fields."""
-
-    def check(value: BaseModel) -> BaseModel:
-        if len(value.model_fields_set) > maximum:
-            raise ValueError(f"at most {maximum} integration entries are allowed")
-        return value
-
-    return check
 
 
 def metadata_model(kind: str) -> type[BaseModel]:
