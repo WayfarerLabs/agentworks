@@ -24,6 +24,7 @@ _INLINE_COMMAND_PATTERNS = (
     re.compile(r'"(agw(?:\s+[^\"]+)?)"'),
 )
 _GENERIC_SEGMENTS = frozenset({"COMMAND", "GROUP", "VALUE"})
+_GUIDANCE_CATEGORIES = frozenset({"guide", "kind", "capability", "hint"})
 
 
 def _authored_commands(text: str) -> set[str]:
@@ -37,77 +38,112 @@ def _authored_commands(text: str) -> set[str]:
     return commands
 
 
-def _string_template(expression: ast.expr) -> str | None:
+def _string_templates(expression: ast.expr) -> tuple[str, ...]:
     if isinstance(expression, ast.Constant) and isinstance(expression.value, str):
-        return expression.value
+        return (expression.value,)
     if isinstance(expression, ast.JoinedStr):
-        return "".join(
-            value.value if isinstance(value, ast.Constant) and isinstance(value.value, str) else "VALUE"
-            for value in expression.values
+        return (
+            "".join(
+                value.value if isinstance(value, ast.Constant) and isinstance(value.value, str) else "VALUE"
+                for value in expression.values
+            ),
         )
     if isinstance(expression, ast.BinOp) and isinstance(expression.op, ast.Add):
-        left = _string_template(expression.left)
-        right = _string_template(expression.right)
-        return None if left is None or right is None else left + right
-    return None
+        return tuple(
+            left + right for left in _string_templates(expression.left) for right in _string_templates(expression.right)
+        )
+    if isinstance(expression, ast.IfExp):
+        return (*_string_templates(expression.body), *_string_templates(expression.orelse))
+    return ()
+
+
+def _is_hint_name(name: str) -> bool:
+    lowered = name.casefold()
+    return lowered == "hint" or lowered.endswith("_hint")
 
 
 def _is_hint_target(target: ast.expr) -> bool:
     if isinstance(target, ast.Name):
-        return target.id == "hint" or target.id.endswith("_hint")
+        return _is_hint_name(target.id)
     if isinstance(target, ast.Attribute):
-        return target.attr == "hint" or target.attr.endswith("_hint")
+        return _is_hint_name(target.attr)
     return False
+
+
+def _assigned_hint_expression(node: ast.AST, indirect_names: set[str]) -> ast.expr | None:
+    if isinstance(node, ast.Assign) and any(
+        _is_hint_target(target) or isinstance(target, ast.Name) and target.id in indirect_names
+        for target in node.targets
+    ):
+        return node.value
+    if (
+        isinstance(node, ast.AnnAssign)
+        and node.value is not None
+        and (_is_hint_target(node.target) or isinstance(node.target, ast.Name) and node.target.id in indirect_names)
+    ):
+        return node.value
+    return None
 
 
 def _hint_templates(path: Path) -> Iterator[tuple[int, str]]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    indirect_names = {
+        keyword.value.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        for keyword in node.keywords
+        if keyword.arg is not None and _is_hint_name(keyword.arg) and isinstance(keyword.value, ast.Name)
+    }
     seen: set[tuple[int, str]] = set()
     for node in ast.walk(tree):
         expressions: list[ast.expr] = []
         if isinstance(node, ast.Call):
             expressions.extend(
-                keyword.value
-                for keyword in node.keywords
-                if keyword.arg is not None and (keyword.arg == "hint" or keyword.arg.endswith("_hint"))
+                keyword.value for keyword in node.keywords if keyword.arg is not None and _is_hint_name(keyword.arg)
             )
-        elif (isinstance(node, ast.Assign) and any(_is_hint_target(target) for target in node.targets)) or (
-            isinstance(node, ast.AnnAssign) and node.value is not None and _is_hint_target(node.target)
-        ):
-            expressions.append(node.value)
+        elif assigned := _assigned_hint_expression(node, indirect_names):
+            expressions.append(assigned)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and _is_hint_name(node.name):
+            expressions.extend(
+                returned.value
+                for returned in ast.walk(node)
+                if isinstance(returned, ast.Return) and returned.value is not None
+            )
         for expression in expressions:
-            template = _string_template(expression)
-            if template is None:
-                continue
-            candidate = (expression.lineno, template)
-            if candidate not in seen:
-                seen.add(candidate)
-                yield candidate
+            for template in _string_templates(expression):
+                candidate = (expression.lineno, template)
+                if candidate not in seen:
+                    seen.add(candidate)
+                    yield candidate
 
 
-def _shipped_guidance(package_root: Path) -> Iterator[tuple[str, str]]:
+def _shipped_guidance(package_root: Path) -> Iterator[tuple[str, str, str]]:
     catalog = discover_concept_shells(package_root)
-    yield catalog.index.source.package_path, render_guide(None, GuideMode.AGENT, package_root=package_root).markdown
+    yield (
+        "guide",
+        catalog.index.source.package_path,
+        render_guide(None, GuideMode.AGENT, package_root=package_root).markdown,
+    )
     for shell in catalog.topics:
-        yield shell.source.package_path, render_shell(shell, GuideMode.AGENT, package_root=package_root)
+        yield "guide", shell.source.package_path, render_shell(shell, GuideMode.AGENT, package_root=package_root)
 
     seat_installed_plugins()
     for kind, subject in sorted(KIND_REGISTRY.items()):
         if summary := summary_of(subject):
-            yield f"kind {kind} description", summary
+            yield "kind", f"kind {kind} description", summary
         if prose := prose_of(subject):
-            yield f"kind {kind} overview", prose.overview
+            yield "kind", f"kind {kind} overview", prose.overview
 
     for descriptor in capability_descriptors():
         for name, subject in sorted(descriptor.registry().items()):
             if summary := summary_of(subject):
-                yield f"capability {descriptor.kind}/{name} description", summary
+                yield "capability", f"capability {descriptor.kind}/{name} description", summary
             if prose := prose_of(subject):
-                yield f"capability {descriptor.kind}/{name} overview", prose.overview
+                yield "capability", f"capability {descriptor.kind}/{name} overview", prose.overview
 
     for path in sorted(package_root.rglob("*.py")):
         for line, template in _hint_templates(path):
-            yield f"{path.relative_to(package_root)}:{line} hint", template
+            yield "hint", f"{path.relative_to(package_root)}:{line} hint", template
 
 
 def _validate_command_prefix_and_options(command: str, root: CommandSpec) -> str | None:
@@ -115,25 +151,34 @@ def _validate_command_prefix_and_options(command: str, root: CommandSpec) -> str
     current = root
     path = [root]
     index = 1
-    while index < len(tokens) and current.subcommands:
+    options_enabled = True
+    while index < len(tokens):
         token = tokens[index]
-        if token.startswith("-"):
-            break
-        if token in _GENERIC_SEGMENTS:
-            return None
-        if token not in current.subcommands:
-            return f"unknown command segment {token!r}"
-        current = current.subcommands[token]
-        path.append(current)
-        index += 1
-
-    options = {option for spec in path for param in spec.params for option in param.opts}
-    options.add("--help")
-    for token in tokens[1:]:
-        if token.startswith("-") and token != "--":
+        if token == "--":
+            options_enabled = False
+            index += 1
+            continue
+        if options_enabled and token.startswith("-"):
             option = token.partition("=")[0]
-            if option not in options:
+            parameter = next(
+                (parameter for spec in path for parameter in spec.params if option in parameter.opts),
+                None,
+            )
+            if parameter is None and option != "--help":
                 return f"unknown option {option!r}"
+            if parameter is not None and not parameter.is_flag and "=" not in token:
+                index += 2 if index + 1 < len(tokens) else 1
+                continue
+            index += 1
+            continue
+        if current.subcommands:
+            if token in _GENERIC_SEGMENTS:
+                return None
+            if token not in current.subcommands:
+                return f"unknown command segment {token!r}"
+            current = current.subcommands[token]
+            path.append(current)
+        index += 1
     return None
 
 
@@ -157,8 +202,10 @@ def test_command_resolution_checks_paths_and_options_without_executing() -> None
 
     assert _validate_command_prefix_and_options("agw vm start NAME", spec) is None
     assert _validate_command_prefix_and_options("agw VALUE", spec) is None
+    assert _validate_command_prefix_and_options("agw guide --agent show TOPIC", spec) is None
     assert _validate_command_prefix_and_options("agw vm retired NAME", spec) is not None
     assert _validate_command_prefix_and_options("agw vm start NAME --retired", spec) is not None
+    assert _validate_command_prefix_and_options("agw guide --agent retired TOPIC", spec) is not None
 
 
 def test_hint_inventory_is_limited_to_hint_values_and_preserves_placeholders(tmp_path: Path) -> None:
@@ -166,24 +213,37 @@ def test_hint_inventory_is_limited_to_hint_values_and_preserves_placeholders(tmp
     source.write_text(
         '''"""`agw retired` is not an error hint."""
 
+def build_hint(operation: str, name: str) -> str:
+    return f"Run `agw session {operation} {name} --force`."
+
 def fail(operation: str, name: str) -> None:
-    raise RuntimeError("failed", hint=f"Run `agw session {operation} {name} --force`.")
+    remedy = build_hint(operation, name)
+    raise RuntimeError("failed", hint=remedy)
+
+def fail_direct(name: str) -> None:
+    remedy = f"Run `agw vm start {name}`."
+    raise RuntimeError("failed", hint=remedy)
 ''',
         encoding="utf-8",
     )
 
-    assert list(_hint_templates(source)) == [(4, "Run `agw session VALUE VALUE --force`.")]
+    assert list(_hint_templates(source)) == [
+        (4, "Run `agw session VALUE VALUE --force`."),
+        (11, "Run `agw vm start VALUE`."),
+    ]
 
 
 def test_shipped_guidance_commands_match_the_cli_spec() -> None:
     package_root = Path(agentworks_file).parent
     spec = build_spec(app)
-    checked = 0
+    checked_categories: set[str] = set()
 
-    for source, text in _shipped_guidance(package_root):
-        for command in sorted(_authored_commands(text)):
+    for category, source, text in _shipped_guidance(package_root):
+        commands = _authored_commands(text)
+        for command in sorted(commands):
             problem = _validate_command_prefix_and_options(command, spec)
             assert problem is None, f"{source}: {command!r}: {problem}"
-            checked += 1
+        if commands:
+            checked_categories.add(category)
 
-    assert checked > 0
+    assert checked_categories == _GUIDANCE_CATEGORIES
