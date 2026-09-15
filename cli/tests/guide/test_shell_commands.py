@@ -72,17 +72,13 @@ def _shell_commands(expression: str) -> Iterator[str]:
     for segment in _shell_segments(expression.replace("\\\n", " ")):
         if not _starts_agw_command(segment):
             continue
-        tokens = shlex.split(segment, comments=True)
+        tokens = shlex.split(segment)
         yield shlex.join(tokens)
 
 
 def _authored_commands(text: str) -> set[str]:
-    commands = {
-        command
-        for pattern in _INLINE_SPAN_PATTERNS
-        for expression in pattern.findall(text)
-        for command in _shell_commands(expression)
-    }
+    commands: set[str] = set()
+    inline_lines: list[str] = []
     fence: str | None = None
     continuation = ""
     for line in text.splitlines():
@@ -96,8 +92,17 @@ def _authored_commands(text: str) -> set[str]:
             else:
                 commands.update(_shell_commands(continuation + line))
                 continuation = ""
+        elif fence is None:
+            inline_lines.append(line)
     if continuation:
         raise ValueError("unfinished continuation in authored shell command")
+    inline_text = "\n".join(inline_lines)
+    commands.update(
+        command
+        for pattern in _INLINE_SPAN_PATTERNS
+        for expression in pattern.findall(inline_text)
+        for command in _shell_commands(expression)
+    )
     return commands
 
 
@@ -334,6 +339,22 @@ Then `echo ok && agw retired`.
 """
 
     assert _authored_commands(text) == {"agw doctor", "agw retired"}
+
+
+def test_inline_spans_inside_shell_fences_are_not_scanned() -> None:
+    text = """```bash
+printf '%s' 'agw retired'
+# 'agw retired' is obsolete
+echo '`agw retired`'
+```
+"""
+
+    assert _authored_commands(text) == set()
+
+
+def test_shell_comments_start_at_word_boundaries() -> None:
+    assert _authored_commands("Use `agw vm start NAME#literal --retired`.") == {"agw vm start 'NAME#literal' --retired"}
+    assert _authored_commands("Use `agw doctor # agw retired`.") == {"agw doctor"}
 
 
 @pytest.mark.parametrize(
