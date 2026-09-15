@@ -9,6 +9,7 @@ import tomllib
 from collections.abc import Callable
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import get_args
 
 import pytest
 
@@ -27,6 +28,8 @@ from agentworks.artifacts.native.probe import probe_native
 from agentworks.artifacts.native.shell import shell_artifacts
 from agentworks.artifacts.publication import validate_application
 from agentworks.artifacts.session import validate_session_application
+from agentworks.capabilities.base import RunContext
+from agentworks.capabilities.harness_integration import HarnessStart
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
 from agentworks.errors import ConfigError, StateError
 from agentworks.plugins.claude import artifacts as claude
@@ -587,6 +590,48 @@ def test_session_delivery_defaults_to_unhandled_before_native_validation(render)
     assert result.application.files == ()
     assert {item.input_id for item in result.application.deferred} == {item.identity for item in (*items, duplicate)}
     assert {item.destination for item in result.application.deferred} == {"session"}
+
+
+@pytest.mark.parametrize(
+    "integration,workarounds",
+    [
+        (ClaudeCodeIntegration, claude._SESSION_WORKAROUNDS),
+        (CodexIntegration, codex._SESSION_WORKAROUNDS),
+        (GrokBuildIntegration, grok._SESSION_WORKAROUNDS),
+    ],
+)
+def test_config_workaround_names_match_native_delivery(integration, workarounds):
+    annotation = integration.config_model.model_fields["enabled_workarounds"].annotation
+    names = get_args(get_args(annotation)[0])
+    assert set(names) == set(workarounds.values())
+
+
+@pytest.mark.parametrize(
+    "workaround",
+    get_args(get_args(ShellIntegration.config_model.model_fields["enabled_workarounds"].annotation)[0]),
+)
+@pytest.mark.parametrize("type", list(ArtifactType))
+def test_each_declared_shell_workaround_delivers_artifacts(workaround, type):
+    item = artifact(type)
+    prepared = context(item)
+    integration = ShellIntegration(
+        "shell",
+        {"enabled_workarounds": [workaround]},
+        session_name="s1",
+        vm_name="box",
+        workspace_name="ws",
+        workspace_path="/ws",
+        target=None,
+        admin=True,
+        state={},
+        artifact_context=prepared,
+    )
+    result = integration.start(RunContext())
+    assert isinstance(result, HarnessStart)
+    assert result.artifacts.files
+    assert result.artifacts.deferred == ()
+    assert result.artifacts.artifacts_dir == prepared.directory
+    assert any(file.origins == (item.origin_identity,) for file in result.artifacts.files)
 
 
 @pytest.mark.parametrize(

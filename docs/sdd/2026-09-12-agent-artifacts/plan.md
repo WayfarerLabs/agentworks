@@ -840,7 +840,7 @@ implementation PR after PR 816; broader template-null policy remains a separate 
 - [x] Update permanent guides, support matrices and design artifacts to the same contract.
 - [x] Complete independent project, correctness and complexity reviews.
 - [x] Finish required gates and isolated-HOME CLI validation.
-- [ ] Publish the complete ready handoff and assess published feedback.
+- [x] Publish the complete ready handoff and assess published feedback.
 
 Acceptance covers default behavior, selective opt-ins, inherited opt-out, unavailable native session
 skills, terminal warning inspection, valid safety failures, cleanup on disable/restart, older native
@@ -862,3 +862,27 @@ explicit disablement across all four integrations; unknown workaround names were
 artifact guide rendered successfully. Fixture HOME removal was independently verified. No live VM or
 native model run was performed here; the ready handoff requests the normal independent validation
 lane. Full SDD acceptance and locking remain separate.
+
+
+## Workarounds feedback round 1, 2026-09-15
+
+The operator authorized one fix round for PR 822 after the first handoff at `e6e1284d`. All lanes
+reported: saga review was clean, and independent integration validation verified default-off and
+opted-in Claude delivery on a real Lima VM, agent-facet delivery and owned-file retirement. Muntz
+identified an unguarded relationship between config-accepted workaround names and delivery mappings.
+Current names match, but adding an unimplemented config name must fail validation tests.
+
+- [x] Compare native config literals with the actual delivery maps, without copying workaround names
+      into the new check.
+- [x] Drive shell delivery separately for every schema-declared workaround and artifact type.
+- [ ] Verify the new checks fail on a one-sided config-name addition; complete private reviews and
+      required gates.
+- [ ] Publish round 1 of 1 as ready and assess its feedback.
+
+The existing selective-delivery tests remain because they check each method's artifact types.
+Runtime behavior and operator configuration do not change in this round. The accepted check needs no
+new runtime registry. The other suggestions remain optional: input presence and emitted delivery
+are distinct predicates; two short lifecycle error handlers retain local ownership; Codex needs
+assignment-aware override parsing; warning acknowledgement would add a new knob. The tester's empty
+non-package session directories are a pre-existing cleanup opportunity, with no retained content,
+and remain outside this correction. The public critical reading records these dispositions.
