@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from agentworks.db.instance_state import InstanceKind
     from agentworks.harness_setup.model import SetupComponent, SetupFacet
     from agentworks.resources.registry import Registry
-    from agentworks.schema import CapabilityBlock
+    from agentworks.schema import CapabilityConfig
     from agentworks.secrets.orchestration import SecretTarget
     from agentworks.secrets.resolver import Resolver
 
@@ -42,7 +42,7 @@ class SetupInputs:
     kind: InstanceKind
     name: str
     component: SetupComponent
-    activations: tuple[CapabilityBlock, ...]
+    activations: Mapping[str, CapabilityConfig]
     target: SecretTarget
     artifacts: ArtifactsConfig = field(default_factory=ArtifactsConfig)
     artifact_snapshot: CapturedArtifacts | None = None
@@ -57,8 +57,8 @@ class SetupInputs:
 
         source = (self.kind, self.name)
         validate_activations(self.activations, facet=self.facet, source=source, provenance={})
-        for block in self.activations:
-            ensure_harness_integration_enabled(registry, block.name)
+        for name in self.activations:
+            ensure_harness_integration_enabled(registry, name)
         resolver.register_targets([self.target])
         for reference in activation_references(self.activations, facet=self.facet, source=source, provenance={}):
             if reference.kind == "secret":
@@ -80,15 +80,18 @@ class SetupInputs:
             **agentworks_identity_env(context),
         }
 
-    def declaration(self, block: CapabilityBlock) -> dict[str, JsonValue]:
+    def declaration(self, name: str, config: CapabilityConfig) -> dict[str, JsonValue]:
         """Capture config, reference names, and freshness hashes without storing env values."""
         model = validate_capability_config(
             kind="harness-integration",
             facet=self.facet,
-            config=block.tagged,
+            config=config.config,
+            name=name,
             owner=RefOwner(kind=self.kind, name=self.name),
         )
-        config = block.tagged if model is None else model.model_dump(mode="json")
+        # Keep the applied-state comparison carrier stable across the authored
+        # map migration; existing workspace setup cannot be rerun in place.
+        captured = {"name": name, **(config.config if model is None else model.model_dump(mode="json"))}
         env = {}
         for name, scope in (
             ("vm", self.target.vm),
@@ -104,4 +107,4 @@ class SetupInputs:
                     else {"sha256": hashlib.sha256((entry.value or "").encode()).hexdigest()}
                     for key, entry in scope.items()
                 }
-        return cast("dict[str, JsonValue]", {"config": config, "env": env})
+        return cast("dict[str, JsonValue]", {"config": captured, "env": env})

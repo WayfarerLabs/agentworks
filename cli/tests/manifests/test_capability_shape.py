@@ -1,10 +1,4 @@
-"""The tagged capability-config shape: the ONE way to name a capability.
-
-Every hosting surface (vm-site's platform, git-credential's provider,
-session-template's harness_integration, and secret-source's backend) takes
-the capability as one tagged table whose ``name`` key selects it and whose
-remaining keys are its config.
-"""
+"""Capability host shapes reject retired selectors and retain their ownership boundaries."""
 
 from __future__ import annotations
 
@@ -100,13 +94,13 @@ def test_session_template_canonical_selector_decodes_to_the_internal_pair(tmp_pa
           name: htop
         spec:
           harness_integration:
-            name: shell
-            command: htop
+            shell:
+              command: htop
         """,
     )
     (entry,) = manifests.entries
-    assert entry.resource.harness_integration.name == "shell"
-    assert entry.resource.harness_integration.config == {"command": "htop"}
+    assert list(entry.resource.harness_integration) == ["shell"]
+    assert entry.resource.harness_integration["shell"].config == {"command": "htop"}
     assert not manifests.issues
 
 
@@ -295,8 +289,8 @@ def test_cli_tagged_shape_loads_cleanly(tmp_path: Path, monkeypatch: pytest.Monk
           name: htop
         spec:
           harness_integration:
-            name: shell
-            command: htop
+            shell:
+              command: htop
         """)
     )
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)

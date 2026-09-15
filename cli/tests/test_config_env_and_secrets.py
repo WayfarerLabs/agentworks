@@ -717,9 +717,7 @@ def test_session_template_required_commands_parsed(tmp_path: Path) -> None:
                 "claude",
                 {
                     "harness_integration": {
-                        "name": "shell",
-                        "command": "claude --name {{session_name}}",
-                        "required_commands": ["claude"],
+                        "shell": {"command": "claude --name {{session_name}}", "required_commands": ["claude"]}
                     }
                 },
             )
@@ -727,8 +725,8 @@ def test_session_template_required_commands_parsed(tmp_path: Path) -> None:
     )
     registry = _load(cfg_file)
     tmpl = registry.lookup("session-template", "claude")
-    assert tmpl.harness_integration.name == "shell"
-    assert tmpl.harness_integration.config == {
+    assert list(tmpl.harness_integration) == ["shell"]
+    assert tmpl.harness_integration["shell"].config == {
         "command": "claude --name {{session_name}}",
         "required_commands": ["claude"],
     }
@@ -744,7 +742,7 @@ def test_session_template_required_commands_must_be_list(tmp_path: Path) -> None
             ManifestDoc(
                 "session-template",
                 "claude",
-                {"harness_integration": {"name": "shell", "command": "claude", "required_commands": "claude"}},
+                {"harness_integration": {"shell": {"command": "claude", "required_commands": "claude"}}},
             )
         ],
     )
@@ -763,7 +761,7 @@ def test_session_template_required_commands_must_be_strings(tmp_path: Path) -> N
             ManifestDoc(
                 "session-template",
                 "claude",
-                {"harness_integration": {"name": "shell", "command": "claude", "required_commands": [123]}},
+                {"harness_integration": {"shell": {"command": "claude", "required_commands": [123]}}},
             )
         ],
     )
@@ -781,14 +779,14 @@ def test_session_template_required_commands_union_on_inherit(tmp_path: Path) -> 
             ManifestDoc(
                 "session-template",
                 "parent",
-                {"harness_integration": {"name": "shell", "required_commands": ["tmux", "claude"]}},
+                {"harness_integration": {"shell": {"required_commands": ["tmux", "claude"]}}},
             ),
             ManifestDoc(
                 "session-template",
                 "child",
                 {
                     "inherits": ["parent"],
-                    "harness_integration": {"name": "shell", "required_commands": ["claude", "jq"]},
+                    "harness_integration": {"shell": {"required_commands": ["claude", "jq"]}},
                 },
             ),
         ],

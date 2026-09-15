@@ -17,7 +17,7 @@ def merge_resolved_template_layer[T](
     declaration: BaseModel,
     _source: object,
     *,
-    facet: Facet,
+    facet: Facet | None = None,
 ) -> tuple[T, tuple[LayerContribution, ...]]:
     """Merge one declaration onto a dataclass-backed resolved template.
 
@@ -52,8 +52,13 @@ def merge_resolved_template_layer[T](
         exclude_unset=True,
     )
     authored = {name: value for name, value in dumped.items() if name in merge_field_names and value is not None}
-    merged, operations = merge_activation_layer(type(declaration), previous, authored, facet=facet)
-    raw = merged
+    if facet is None:
+        from agentworks.schema import merge_model
+
+        merged, operations = merge_model(type(declaration), previous, authored)
+        raw = cast("dict[str, object]", merged)
+    else:
+        raw, operations = merge_activation_layer(type(declaration), previous, authored, facet=facet)
     for field in merge_fields:
         if field.name not in raw:
             raw[field.name] = _field_default(field)

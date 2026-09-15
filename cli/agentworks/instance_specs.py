@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from agentworks.db import Database, DesiredOverlayRecord
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
-    from agentworks.schema import CapabilityBlock
+    from agentworks.schema import CapabilityConfig
     from agentworks.sessions.template import SessionTemplate
     from agentworks.vms.admin import AdminConfig
     from agentworks.vms.template import VMTemplate
@@ -132,7 +132,7 @@ def parse_vm_instance_specs(
 
 
 def decode_stored_overlay(
-    record: DesiredOverlayRecord, *, legacy_user_base: list[CapabilityBlock] | None = None
+    record: DesiredOverlayRecord, *, legacy_user_base: dict[str, CapabilityConfig] | None = None
 ) -> InstanceOverlay[BaseModel] | VMInstanceOverlays:
     """Decode a persisted overlay at the state-database trust boundary."""
     from agentworks.legacy_claude import LegacyClaudeContextRequired, legacy_component, translated_record
@@ -152,9 +152,11 @@ def decode_stored_overlay(
             entity_name=record.instance_name,
             hint="Upgrade Agentworks to a compatible or newer release before applying this instance spec.",
         )
+    raw = _map_session_selector(record)
+    _refuse_stored_activation_list(record, raw)
     try:
         encoded = json.dumps(
-            record.payload.value,
+            raw,
             ensure_ascii=False,
             allow_nan=False,
             sort_keys=True,
@@ -178,7 +180,7 @@ def decode_stored_overlay(
 
 
 def decode_stored_vm_overlays(
-    record: DesiredOverlayRecord, *, legacy_user_base: list[CapabilityBlock] | None = None
+    record: DesiredOverlayRecord, *, legacy_user_base: dict[str, CapabilityConfig] | None = None
 ) -> VMInstanceOverlays:
     """Decode one persisted composite VM declaration at its trust boundary."""
     if record.instance_kind != "vm":
@@ -202,6 +204,9 @@ def decode_stored_vm_overlays(
         raise _unsupported_stored_overlay(record, f"unsupported fields: {', '.join(unknown)}")
     raw_vm = raw.get("vm")
     raw_admin = raw.get("admin")
+    for component in (raw_vm, raw_admin):
+        if isinstance(component, dict):
+            _refuse_stored_activation_list(record, component)
     component_unknown: list[str] = []
     if isinstance(raw_vm, dict):
         component_unknown.extend(f"vm.{field}" for field in _unknown_vm_component_fields(raw_vm))
@@ -251,12 +256,43 @@ def decode_stored_vm_overlays(
     return _vm_instance_overlays(vm_overlay, admin)
 
 
+def _map_session_selector(record: DesiredOverlayRecord) -> JsonObject:
+    """Read the historical tagged session selector without changing its merge semantics."""
+    raw = record.payload.value
+    selector = raw.get("harness_integration")
+    if record.instance_kind != "session" or not isinstance(selector, dict):
+        return raw
+    name = selector.get("name")
+    if not isinstance(name, str):
+        return raw
+    return {**raw, "harness_integration": {name: {key: value for key, value in selector.items() if key != "name"}}}
+
+
+def _refuse_stored_activation_list(record: DesiredOverlayRecord, raw: JsonObject) -> None:
+    """Refuse a saved list whose replacement semantics cannot be preserved by map conversion."""
+    if not isinstance(raw.get("harness_integrations"), list):
+        return
+    remedy = (
+        "Use 'agw agent reinit' with --spec containing the complete replacement instance spec, "
+        "or --spec '{}' to clear it."
+        if record.instance_kind == "agent"
+        else "Back up the state database and explicitly migrate the saved instance spec to activation maps "
+        "before using this resource, or recreate the resource with the new config."
+    )
+    raise UnsupportedStoredOverlayError(
+        f"stored {record.instance_kind} {record.instance_name!r} uses the retired harness activation list format",
+        entity_kind=record.instance_kind,
+        entity_name=record.instance_name,
+        hint=f"{remedy} Maps merge inherited activations; old lists replaced them as a whole.",
+    )
+
+
 def get_instance_overlay(
     db: Database,
     instance_kind: InstanceKind,
     instance_name: str,
     *,
-    legacy_user_base: list[CapabilityBlock] | None = None,
+    legacy_user_base: dict[str, CapabilityConfig] | None = None,
 ) -> InstanceOverlay[BaseModel] | None:
     record = db.instance_state.get_desired_overlay(instance_kind, instance_name)
     if record is None:
@@ -269,7 +305,7 @@ def get_instance_overlay(
 
 
 def get_vm_instance_overlays(
-    db: Database, instance_name: str, *, legacy_user_base: list[CapabilityBlock] | None = None
+    db: Database, instance_name: str, *, legacy_user_base: dict[str, CapabilityConfig] | None = None
 ) -> VMInstanceOverlays | None:
     """Load both final VM declaration components from their one desired row."""
     record = db.instance_state.get_desired_overlay("vm", instance_name)
@@ -345,7 +381,7 @@ def replace_agent_overlay(
         return OverlayOutcome(OverlayDisposition.CLEARED, prior_fields)
 
     prior = db.instance_state.get_desired_overlay("agent", instance_name)
-    if prior is not None:
+    if prior is not None and not supplied:
         with suppress(LegacyClaudeContextRequired):
             decode_stored_overlay(prior)
     if not supplied:
@@ -487,6 +523,7 @@ def _vm_instance_overlays(
 
 def _decode_legacy_stored_vm_overlay(record: DesiredOverlayRecord) -> VMInstanceOverlays:
     """Read the payload-v1 flat VM layer written before paired admin layers."""
+    _refuse_stored_activation_list(record, record.payload.value)
     try:
         unknown = _unknown_vm_component_fields(record.payload.value)
         if unknown:

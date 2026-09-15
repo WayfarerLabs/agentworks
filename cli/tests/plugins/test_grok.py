@@ -86,7 +86,7 @@ def test_disabled_rows_are_hidden_from_default_list(tmp_path: Path) -> None:
 _GROK_TEMPLATE = ManifestDoc(
     "session-template",
     "gk",
-    {"harness_integration": {"name": "grok-build"}},
+    {"harness_integration": {"grok-build": {}}},
     description="Grok Build session",
 )
 

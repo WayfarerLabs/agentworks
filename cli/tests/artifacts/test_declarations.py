@@ -107,9 +107,9 @@ def test_bundle_selection_inherits_or_replaces_with_correct_reference_provenance
     expected_owner = (kind, "base" if not selection else "child")
     assert all(ref.declared_by == expected_owner for ref in refs)
     if kind == "session-template":
-        from agentworks.schema import CapabilityBlock
+        from agentworks.schema import CapabilityConfig
 
-        parent = parent.model_copy(update={"harness_integration": CapabilityBlock.of("shell")})
+        parent = parent.model_copy(update={"harness_integration": {"shell": CapabilityConfig()}})
     layered = resolve({"base": parent, "child": child}, "child")
     assert layered.value.artifacts.bundles == expected
     assert artifact_references(layered.value.artifacts, (kind, "child"), layered.provenance) == tuple(refs)
@@ -137,12 +137,12 @@ def test_instance_overlays_replace_bundle_selection_and_publish_instance_provena
     selection: dict[str, JsonValue],
 ) -> None:
     from agentworks.instance_overlay_codec import decode_overlay_model, encode_overlay_model
-    from agentworks.schema import CapabilityBlock
+    from agentworks.schema import CapabilityConfig
 
     instance_kind = kind.removesuffix("-template")
     template = model(name="base", artifacts=ArtifactsConfig(bundles=["team"]))
     if kind == "session-template":
-        template = template.model_copy(update={"harness_integration": CapabilityBlock.of("shell")})
+        template = template.model_copy(update={"harness_integration": {"shell": CapabilityConfig()}})
     overlay = decode_overlay_model(model, instance_kind, {"artifacts": selection})
     assert encode_overlay_model(overlay, instance_kind) == {"artifacts": selection}
     layered = resolve({"base": template}, "base", overlay=overlay, instance_name="running")

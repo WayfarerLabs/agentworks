@@ -101,7 +101,7 @@ def inspect_owner_artifacts(
     prepared = ArtifactInputs(local=local, deferred=inherited)
     if integration_name is None:
         return ArtifactOwnerView(inputs, captured, capture_status, "current", prepared=prepared)
-    block = next((block for block in inputs.activations if block.name == integration_name), None)
+    block = inputs.activations.get(integration_name)
     if block is None:
         if record is not None and record.artifact_files:
             return ArtifactOwnerView(
@@ -139,7 +139,7 @@ def inspect_owner_artifacts(
             prepared,
         )
     try:
-        declaration = inputs.declaration(block)
+        declaration = inputs.declaration(integration_name, block)
     except ConfigError:
         return ArtifactOwnerView(
             inputs,
@@ -318,7 +318,7 @@ def _vm_inputs(db: Database, registry: Registry, vm: VMRow) -> SetupInputs:
         "vm",
         vm.name,
         "vm",
-        tuple(template.harness_integrations),
+        template.harness_integrations,
         SecretTarget(vm=template.env),
         artifacts=template.artifacts,
     )
@@ -335,7 +335,7 @@ def _user_inputs(
             "vm",
             vm.name,
             "admin",
-            tuple(admin.harness_integrations),
+            admin.harness_integrations,
             SecretTarget(vm=ancestor.target.vm, admin=admin.env),
             artifacts=admin.artifacts,
         )
@@ -349,7 +349,7 @@ def _user_inputs(
         "agent",
         agent.name,
         "agent",
-        tuple(template.harness_integrations),
+        template.harness_integrations,
         SecretTarget(vm=ancestor.target.vm, agent=template.env),
         artifacts=template.artifacts,
     )
@@ -363,7 +363,7 @@ def _workspace_inputs(db: Database, registry: Registry, workspace: WorkspaceRow,
         "workspace",
         workspace.name,
         "workspace",
-        tuple(template.harness_integrations),
+        template.harness_integrations,
         SecretTarget(vm=ancestor.target.vm, workspace=template.env),
         artifacts=template.artifacts,
     )

@@ -26,7 +26,7 @@ from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupR
 from agentworks.harness_setup.state import read_native_setup, replace_setup_record, write_native_setup
 from agentworks.origin import Origin
 from agentworks.resources.registry import Registry
-from agentworks.schema import CapabilityBlock
+from agentworks.schema import CapabilityConfig
 from agentworks.secrets.orchestration import SecretTarget
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.template import VMTemplate
@@ -60,7 +60,7 @@ class Graph:
             component=inputs.component,
             integration="shell",
             destination_id="d" * 64,
-            declaration=inputs.declaration(CapabilityBlock.of("shell")),
+            declaration=inputs.declaration("shell", CapabilityConfig()),
             complete=complete,
             artifact_inputs=tuple(item.identity for item in prepared.items()),
             artifact_files=files,
@@ -102,7 +102,7 @@ def graph(db: Database, *, active: tuple[str, ...] = (), counts: dict[str, int] 
         }
         registry.add("artifact-bundle", bundle_name, ArtifactBundle(name=bundle_name, hints=entries), origin)
         config = ArtifactsConfig(bundles=[bundle_name])
-        activations = [CapabilityBlock.of("shell")] if component in active else []
+        activations = {"shell": CapabilityConfig.model_validate({})} if component in active else {}
         model = {"vm": VMTemplate, "admin": AdminConfig, "agent": AgentTemplate, "workspace": WorkspaceTemplate}[
             component
         ]
@@ -400,7 +400,7 @@ def test_session_projection_shares_canonical_diamond_order(db):
         "session",
         "session",
         "session",
-        (CapabilityBlock.of("shell"),),
+        {"shell": CapabilityConfig.model_validate({})},
         SecretTarget(vm={}, agent={}, workspace={}, session={}),
         artifacts=fixture.owners["agent"].artifacts,
     )
@@ -409,7 +409,7 @@ def test_session_projection_shares_canonical_diamond_order(db):
         component="session",
         integration="shell",
         destination_id="d" * 64,
-        declaration=inputs.declaration(CapabilityBlock.of("shell")),
+        declaration=inputs.declaration("shell", CapabilityConfig()),
         complete=True,
         artifact_inputs=tuple(item.identity for item in ArtifactInputs(local=local.inputs, deferred=inherited).items()),
     )

@@ -21,23 +21,23 @@ defaults when Claude is not already selected and preserves its configuration whe
 
 Agentworks recognizes old Claude fields only in stored agent payload version 1 and the admin
 component of stored VM payload version 2. It resolves the currently selected template without the
-stored layer, retains its full activation list and Claude settings, then appends and deduplicates
+stored layer, retains its activation map and Claude settings, then appends and deduplicates
 the old marketplace/plugin values in order. An old empty list adds nothing; it does not clear
 inherited values. Agent null values mean absent fields; admin null values are invalid. Empty old
 values do not enable an otherwise absent Claude activation.
 
-The converted layer captures the resulting complete activation list under the new replacement
-semantics. Later template changes do not flow through a converted explicit list. Review that list
-with instance inspection and adjust the owning declaration or agent instance spec when needed.
+The converted layer captures the resulting activation map. Later template changes follow ordinary
+map and facet-config merging. Review that map with instance inspection and adjust the owning
+declaration or agent instance spec when needed.
 Template repointing during agent reinit resolves the conversion against the proposed new template.
 
-Old fields and a new activation list in the same stored component are ambiguous and refuse
+Old fields and an activation map in the same stored component are ambiguous and refuse
 conversion. Invalid old value types, unrelated malformed fields, and unsupported future payload
 versions also refuse. Diagnostics identify fields without printing their values. Back up the state
 database before repairing a malformed record; backups preserve the original stored payload.
 
 Inspection computes a contextual view and reports migration pending without changing stored data.
-Record-only doctor can recognize valid legacy data but cannot construct an effective list without
+Record-only doctor can recognize valid legacy data but cannot construct an effective map without
 the selected template; it reports pending conversion rather than assuming an empty base.
 
 Run the owning agent or VM reinit after migrating the authored templates. Automatic conversion is
@@ -47,6 +47,25 @@ warnings leave conversion pending. Unrelated fields and the VM component remain 
 setup or failed conversion checkpoint retains the old overlay for retry. Explicit agent template
 repointing and instance-spec replacement keep their existing desired-state checkpoint before remote
 work; automatic conversion does not move that boundary.
+
+## Saved activation lists
+
+Saved instance specs containing the former `harness_integrations` list require an explicit migration.
+Lists replaced all inherited activations and config; maps preserve inherited integrations and merge
+same-named config. Converting a list mechanically would silently change those decisions. Inspection
+reports the saved shape as unsupported and retains the original payload.
+
+For an agent, use `agw agent reinit NAME --spec` with the complete replacement instance spec, or
+`--spec '{}'` to clear the instance layer. Review the selected template first: inherited integrations
+remain active in the map model. VM and workspace instance specs have no equivalent replacement
+command. Back up the database before explicitly migrating their saved desired config, or recreate
+the resource with the new declarations. Do not delete a VM or workspace merely to change this
+spelling unless losing its contents is intended.
+
+Saved session selectors using the former tagged shape are read as singleton maps. Their same-name
+merge and changed-name replacement behavior is preserved. Saved applied setup records also retain
+their comparison format, so the authoring change alone does not invalidate existing workspace
+setup or discard ownership records.
 
 ## Existing native installations
 

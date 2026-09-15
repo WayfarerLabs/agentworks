@@ -124,7 +124,7 @@ spec:
 
 Owning VM, admin, agent, workspace and session declarations reference bundles through
 `artifacts: {bundles: [team-artifacts]}`. The bundle list uses replacement across template
-inheritance, like integration activation lists: omission inherits, a supplied list replaces, and
+inheritance: omission inherits, a supplied list replaces, and
 `[]` removes inherited references for that owner. Repeated bundle references are rejected. This does
 not suppress another scope's artifacts. A skill's `SKILL.md` name and selected directory, or an
 agent persona's declared name, must agree with the map key. Native namespaces such as a harness
@@ -151,7 +151,7 @@ identical content remains quiet even if its source changes. Ordinary bundle inhe
 resolved its entries before capture; discarded parent definitions are neither acquired nor included
 in this content-based replacement history.
 
-References do not activate integrations. Existing explicit activation syntax remains unchanged:
+References do not activate integrations. Integration maps explicitly activate the desired facets:
 
 ```yaml
 kind: agent-template
@@ -161,8 +161,8 @@ spec:
   artifacts:
     bundles: [team-artifacts]
   harness_integrations:
-    - name: claude-code
-    - name: codex
+    claude-code: {}
+    codex: {}
 ```
 
 Each integration receives the same captured local group and its own deferred ancestor groups. It

@@ -1258,7 +1258,7 @@ def test_active_user_setup_joins_eager_env_and_runs_after_core(
         return ArtifactApplication()
 
     monkeypatch.setattr(ShellIntegration, "user_init", setup)
-    spec = '{"harness_integrations":[{"name":"shell"}],"env":{"SETUP_TOKEN":{"secret":"setup-token"}}}'
+    spec = '{"harness_integrations": {"shell": {}}, "env": {"SETUP_TOKEN": {"secret": "setup-token"}}}'
     if operation == "create":
         agent_manager.create_agent(
             db, config, name="dev", vm_name="box", spec=spec, interaction=TtyInteractionPolicy.REFUSE
@@ -1287,7 +1287,7 @@ def test_legacy_overlay_conversion_waits_for_successful_native_reinit(
             "other",
             {
                 "git_credentials": ["gh"],
-                "harness_integrations": [{"name": "codex"}, {"name": "claude-code", "marketplaces": ["new-base"]}],
+                "harness_integrations": {"codex": {}, "claude-code": {"marketplaces": ["new-base"]}},
             },
         ),
     ]

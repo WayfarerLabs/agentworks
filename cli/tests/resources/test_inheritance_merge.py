@@ -34,7 +34,7 @@ from agentworks.agents.template import AgentTemplate
 from agentworks.agents.templates import resolve_from_dict as resolve_agent
 from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.env.entry import EnvEntry
-from agentworks.schema import CapabilityBlock
+from agentworks.schema import CapabilityConfig
 from agentworks.sessions.template import SessionTemplate
 from agentworks.sessions.templates import resolve_from_dict as resolve_session
 from agentworks.vms.template import VMTemplate
@@ -81,7 +81,7 @@ KINDS = {
             "apt_packages": ["build-tools"],
             "snap": ["go"],
             "system_install_commands": ["docker"],
-            "harness_integrations": [CapabilityBlock.of("shell")],
+            "harness_integrations": {"shell": CapabilityConfig.model_validate({})},
             "env": _ENV,
             "artifacts": ArtifactsConfig(bundles=["team"]),
             "tailscale_auth_key": "prod-ts-key",
@@ -103,7 +103,7 @@ KINDS = {
             "mise_allow_unlocked": True,
             "mise_install_before": "30d",
             "mise_prune_on_reinit": False,
-            "harness_integrations": [CapabilityBlock.of("shell")],
+            "harness_integrations": {"shell": CapabilityConfig.model_validate({})},
             "env": _ENV,
             "artifacts": ArtifactsConfig(bundles=["team"]),
         },
@@ -116,7 +116,7 @@ KINDS = {
             "tmuxinator": False,
             "git_user_name": "Ada Lovelace",
             "git_user_email": "ada@example.com",
-            "harness_integrations": [CapabilityBlock.of("shell")],
+            "harness_integrations": {"shell": CapabilityConfig.model_validate({})},
             "env": _ENV,
             "artifacts": ArtifactsConfig(bundles=["team"]),
         },
@@ -128,7 +128,7 @@ KINDS = {
             "description": "Prod debugging",
             "env": _ENV,
             "artifacts": ArtifactsConfig(bundles=["team"]),
-            "harness_integration": CapabilityBlock.of("shell", **{"command": "htop"}),
+            "harness_integration": {"shell": CapabilityConfig.model_validate({**{"command": "htop"}})},
         },
         # ``shell`` is the only registered harness integration, so no fixture
         # can name a different one; the pair's coverage rides on

@@ -624,3 +624,57 @@ def test_agent_overlay_clear_does_not_remove_generic_malformed_state(db: Databas
 
     assert type(caught.value) is StateError
     assert db.instance_state.get_desired_overlay("agent", "a1") is not None
+
+
+@pytest.mark.parametrize("kind", ["agent", "workspace", "vm"])
+@pytest.mark.parametrize("activations", [[], [{"name": "shell"}]])
+def test_saved_activation_lists_require_explicit_migration(kind, activations) -> None:
+    from agentworks.db import DesiredOverlayRecord
+
+    component = {"harness_integrations": activations}
+    payload = VersionedPayload(2, {"vm": {}, "admin": component}) if kind == "vm" else VersionedPayload(1, component)
+    record = DesiredOverlayRecord(kind, "owner", payload, "2026-09-15")
+    with pytest.raises(UnsupportedStoredOverlayError) as caught:
+        decode_stored_overlay(record)
+    assert caught.value.entity_kind == kind
+    assert caught.value.entity_name == "owner"
+    assert record.payload == payload
+
+
+def test_agent_can_replace_saved_list_without_decoding_its_retired_semantics(db: Database) -> None:
+    db.insert_vm("vm", site="local", hostname="vm")
+    db.insert_agent("agent", "vm", "agt-agent")
+    old = VersionedPayload(1, {"harness_integrations": [{"name": "shell"}]})
+    db.instance_state.put_desired_overlay("agent", "agent", old)
+    with pytest.raises(UnsupportedStoredOverlayError):
+        replace_agent_overlay(db, "agent", None, supplied=False)
+    saved = db.instance_state.get_desired_overlay("agent", "agent")
+    assert saved is not None and saved.payload == old
+    replacement = parse_instance_spec("agent", '{"harness_integrations":{"shell":{}}}')
+    replace_agent_overlay(db, "agent", replacement, supplied=True)
+    saved = db.instance_state.get_desired_overlay("agent", "agent")
+    assert saved is not None and saved.payload == replacement.payload
+
+
+def test_saved_tagged_session_selection_preserves_effective_config() -> None:
+    from agentworks.db import DesiredOverlayRecord
+    from agentworks.schema import CapabilityConfig
+
+    record = DesiredOverlayRecord(
+        "session",
+        "session",
+        VersionedPayload(1, {"harness_integration": {"name": "shell", "command": "bash"}}),
+        "2026-09-15",
+    )
+    decoded = decode_stored_overlay(record)
+    parent = SessionTemplate(
+        name="parent", harness_integration={"shell": CapabilityConfig.model_validate({"required_commands": ["git"]})}
+    )
+    from agentworks.instance_specs import InstanceOverlay
+
+    assert isinstance(decoded, InstanceOverlay) and isinstance(decoded.declaration, SessionTemplate)
+    result = resolve_session({"parent": parent}, "parent", overlay=decoded.declaration)
+    assert result.value.harness_integration == "shell"
+    assert result.value.harness_integration_config["command"] == "bash"
+    assert result.value.harness_integration_config["required_commands"] == ["git"]
+    assert record.payload.value == {"harness_integration": {"name": "shell", "command": "bash"}}

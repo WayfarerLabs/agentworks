@@ -181,7 +181,7 @@ def test_pending_owners_check_fresh_applied_setup_before_launch(
             component=inputs.component,
             integration="shell",
             destination_id="a" * 64,
-            declaration=inputs.declaration(inputs.activations[0]),
+            declaration=inputs.declaration("shell", inputs.activations["shell"]),
             complete=complete,
         )
         write_native_setup(db_, inputs.kind, inputs.name, NativeSetupState(records=(record,)), operation="create")
@@ -200,7 +200,7 @@ def test_pending_owners_check_fresh_applied_setup_before_launch(
     monkeypatch.setattr("agentworks.workspaces.manager.delete_workspace", delete_workspace)
     monkeypatch.setattr("agentworks.agents.grants.add_to_workspace_group", lambda *a, **k: events.append("grant"))
     monkeypatch.setattr("agentworks.sessions.tmux.deploy_restricted_config", lambda *a, **k: events.append("deploy"))
-    spec = '{"harness_integrations":[{"name":"shell"}]}'
+    spec = '{"harness_integrations": {"shell": {}}}'
     try:
 
         def create() -> None:

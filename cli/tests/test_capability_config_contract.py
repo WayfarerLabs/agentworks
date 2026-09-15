@@ -254,7 +254,7 @@ def test_cycle_reported_before_malformed_block(tmp_path: Path) -> None:
         ManifestDoc(
             "session-template",
             "a",
-            {"inherits": ["b"], "harness_integration": {"name": "shell", "nope": "x"}},
+            {"inherits": ["b"], "harness_integration": {"shell": {"nope": "x"}}},
         ),
         ManifestDoc("session-template", "b", {"inherits": ["a"]}),
     )

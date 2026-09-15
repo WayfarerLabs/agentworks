@@ -29,7 +29,7 @@ completion alone never proves a plugin, profile, settings file or executable exi
 
 ## Operation sequence
 
-The owning manager builds the effective activation list and validates every selected facet before
+The owning manager builds the effective activation map and validates every selected facet before
 native setup. The same effective declarations supply capability references, eager secret needs,
 config binding and freshness comparison. The integration lane runs after existing core setup and
 uses a full canonical Transport, never the native ExecTransport bootstrap channel for file transfer.

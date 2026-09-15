@@ -20,7 +20,7 @@ from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupR
 from agentworks.harness_setup.state import read_native_setup, write_native_setup
 from agentworks.origin import Origin
 from agentworks.resources.registry import Registry
-from agentworks.schema import CapabilityBlock
+from agentworks.schema import CapabilityConfig
 from agentworks.secrets.orchestration import SecretTarget
 from agentworks.ssh import SSHLogger as _RealSSHLogger
 from agentworks.transports import Transport
@@ -59,7 +59,7 @@ def test_component_inputs_keep_only_ancestors_and_retirement(db, registry, vm, m
     parent = resolve_vm({})
     parent.env = _env(VM="vm")
     monkeypatch.setattr("agentworks.vms.templates.resolve_live_template", lambda *a: parent)
-    selected = [CapabilityBlock.of("shell")]
+    selected = {"shell": CapabilityConfig.model_validate({})}
     agent = prepare_agent_setup(
         db,
         registry,
@@ -144,7 +144,7 @@ def test_fresh_owner_buffers_setup_until_atomic_row_commit(db, registry, vm, nat
         kind,
         name,
         kind,
-        (CapabilityBlock.of("shell"),),
+        {"shell": CapabilityConfig.model_validate({})},
         SecretTarget(
             vm=_env(VM="parent"), agent=env if kind == "agent" else None, workspace=env if kind == "workspace" else None
         ),
@@ -266,7 +266,7 @@ def test_failed_exclusive_creation_never_arms_realizer_rollback(db, registry, vm
 
 
 def test_config_secret_registration_and_delivery_share_actual_owner(db, vm, native):
-    from typing import Annotated, Literal
+    from typing import Annotated
 
     from agentworks.capabilities.descriptor import Facet
     from agentworks.harness_setup.lifecycle import apply_agent_setup
@@ -275,7 +275,6 @@ def test_config_secret_registration_and_delivery_share_actual_owner(db, vm, nati
     from tests.plugins._fixtures import ConformingHarnessIntegration
 
     class Config(AgwModel):
-        name: Literal["lifecycle-token"]
         token: Annotated[str, SecretRef(usage="fixture credential")]
 
     observed = []
@@ -308,7 +307,7 @@ def test_config_secret_registration_and_delivery_share_actual_owner(db, vm, nati
             "agent",
             "a",
             "agent",
-            (CapabilityBlock.of(Harness.name, token="config-secret"),),
+            {Harness.name: CapabilityConfig.model_validate({"token": "config-secret"})},
             SecretTarget(vm={}, agent=_env(ENV_TOKEN={"secret": "env-secret"})),
         )
         resolver = Mock()
@@ -371,9 +370,11 @@ def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(db, registry,
     from agentworks.vms.initializer.ssh_keys import AuthorizedKeysUnproven
 
     template = resolve_vm({})
-    template.harness_integrations = [CapabilityBlock.of("shell")]
+    template.harness_integrations = {"shell": CapabilityConfig.model_validate({})}
     template.env = _env(VM_ONLY="system", TOKEN={"secret": "vm-token"})
-    admin = AdminConfig(env=_env(ADMIN_ONLY="admin"), harness_integrations=[CapabilityBlock.of("shell")])
+    admin = AdminConfig(
+        env=_env(ADMIN_ONLY="admin"), harness_integrations={"shell": CapabilityConfig.model_validate({})}
+    )
     inputs = prepare_vm_setup(db, registry, name=vm.name, template=template, admin=admin)
     events = []
 

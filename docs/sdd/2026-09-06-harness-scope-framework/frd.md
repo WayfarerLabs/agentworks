@@ -134,6 +134,13 @@ integrations, each with its own config; an available plugin or default config ne
 activates one. A session has one explicit effective integration selection, including when it selects
 the generic shell.
 
+The operator's 2026-09-15 amendment makes every facet's selection a map keyed by integration
+name. A setup resource can activate each integration once; an empty config value activates its
+defaults. Template inheritance preserves parent integrations and merges a same-named integration's
+config according to its facet schema. The session selection uses the same keyed shape while
+remaining singular: a different selected integration replaces the previous selection. This change
+applies to authored templates and instance specs together.
+
 **R6. Env is the pipeline's shared input.** Core assembles env for each owning resource and passes
 it to the harness invocation using the existing env precedence and reserved-variable conventions.
 Integrations consume the completed env without duplicating core's composition rules. User and

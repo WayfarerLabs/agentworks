@@ -10,7 +10,7 @@ from agentworks.artifacts.bundle import resolve_bundle
 from agentworks.errors import NotFoundError, StateError, ValidationError
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.state import read_native_setup
-from agentworks.schema import CapabilityBlock
+from agentworks.schema import CapabilityConfig
 from agentworks.secrets.orchestration import SecretTarget
 
 if TYPE_CHECKING:
@@ -155,9 +155,7 @@ def _owner_inputs(db: Database, registry: Registry, context: ArtifactContext) ->
     from agentworks.workspaces.templates import resolve_live_template as workspace_template
 
     vm = vm_template(db, registry, context.vm.name, context.vm.template)
-    owners = [
-        SetupInputs("vm", context.vm.name, "vm", tuple(vm.harness_integrations), SecretTarget(vm=vm.env), vm.artifacts)
-    ]
+    owners = [SetupInputs("vm", context.vm.name, "vm", vm.harness_integrations, SecretTarget(vm=vm.env), vm.artifacts)]
     user_env, admin_env, workspace_env = None, None, None
     if context.admin:
         user = admin_template(db, registry, context.vm.name, context.vm.admin_template)
@@ -167,7 +165,7 @@ def _owner_inputs(db: Database, registry: Registry, context: ArtifactContext) ->
                 "vm",
                 context.vm.name,
                 "admin",
-                tuple(user.harness_integrations),
+                user.harness_integrations,
                 SecretTarget(vm=vm.env, admin=user.env),
                 user.artifacts,
             )
@@ -180,7 +178,7 @@ def _owner_inputs(db: Database, registry: Registry, context: ArtifactContext) ->
                 "agent",
                 context.agent.name,
                 "agent",
-                tuple(agent.harness_integrations),
+                agent.harness_integrations,
                 SecretTarget(vm=vm.env, agent=agent.env),
                 agent.artifacts,
             )
@@ -193,7 +191,7 @@ def _owner_inputs(db: Database, registry: Registry, context: ArtifactContext) ->
                 "workspace",
                 context.workspace.name,
                 "workspace",
-                tuple(workspace.harness_integrations),
+                workspace.harness_integrations,
                 SecretTarget(vm=vm.env, workspace=workspace.env),
                 workspace.artifacts,
             )
@@ -205,7 +203,7 @@ def _owner_inputs(db: Database, registry: Registry, context: ArtifactContext) ->
                 "session",
                 context.session.name,
                 "session",
-                (CapabilityBlock.of(session.harness_integration, **session.harness_integration_config),),
+                {session.harness_integration: CapabilityConfig.model_validate(session.harness_integration_config)},
                 SecretTarget(vm=vm.env, admin=admin_env, agent=user_env, workspace=workspace_env, session=session.env),
                 session.artifacts,
             )
@@ -240,7 +238,7 @@ def inspect_artifacts(
         names: dict[str, None] = {}
         diagnostics: dict[ArtifactComponent, tuple[str, ...]] = {}
         for owner in owners:
-            names.update((block.name, None) for block in owner.activations)
+            names.update((name, None) for name in owner.activations)
             try:
                 names.update(
                     (record.integration, None)
@@ -362,7 +360,7 @@ def _integration_metadata(owner: SetupInputs, name: str, view: ArtifactOwnerView
     )
     return IntegrationMetadata(
         name,
-        any(block.name == name for block in owner.activations),
+        name in owner.activations,
         view.status,
         view.reason,
         handled,

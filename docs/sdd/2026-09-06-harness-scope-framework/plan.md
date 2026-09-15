@@ -405,3 +405,21 @@ scratch tree and observed all 20 unsupported-activation cases fail, then restore
 This closes B4 under the operator's decision without new runtime routing machinery. The directed
 correction is complete; the handoff records final-head CI separately. Independent live backend
 acceptance, saga-owner pickup, and final SDD locking remain open.
+
+
+## 2026-09-15 activation-map correction
+
+The operator requested a separate implementation PR with name-keyed maps for every harness config
+facet. This supersedes the completed list-shape work above without changing its historical record.
+The new PR branches independently from main. The session selector retains one effective integration
+while adopting the keyed config shape.
+
+- [ ] Replace setup lists and the tagged session selector with keyed config, schema-directed
+      inheritance, per-setting provenance, and strict facet validation.
+- [ ] Carry maps through setup and artifact consumers, retaining applied-state comparison semantics.
+- [ ] Give historical saved setup lists an explicit migration disposition; preserve compatible
+      saved session selections and unrelated instance config.
+- [ ] Update permanent guides, samples, reference projection, and the governing design together.
+- [ ] Verify inheritance, defaults, selection replacement, source attribution, saved-state recovery,
+      readiness, and lifecycle behavior; run required gates and independent private review lanes.
+- [ ] Publish the complete PR ready for review and monitor its feedback under the delivery process.
