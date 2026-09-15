@@ -377,16 +377,20 @@ def test_admin_null_removal_has_no_enabled_refs_and_records_empty_map_owner() ->
 @pytest.mark.parametrize("kind", ["vm-template", "admin-template", "agent-template", "workspace-template"])
 def test_setup_map_schema_accepts_null_opt_out_and_rejects_other_scalars(kind) -> None:
     from jsonschema import Draft202012Validator
+    from pydantic import ValidationError
 
-    from agentworks.manifests.spec_model import spec_model
+    from agentworks.manifests.spec_model import row_model, spec_model
 
     model = spec_model(kind)
     validator = Draft202012Validator(model.model_json_schema())
     value: object
     raw: dict[str, object]
-    for value in ({}, {"shell": {}}, {"shell": None}):
+    for value in ({}, {"shell": {}}, {"shell": None}, {"unavailable": None}):
         raw = {"harness_integrations": value}
         assert validator.is_valid(raw)
         model.model_validate({"name": "test", **raw})
-    for value in ({"shell": False}, {"shell": "off"}):
+        row_model(kind).model_validate({"name": "test", **raw})
+    for value in ({"shell": False}, {"shell": "off"}, {"unavailable": {}}, {"": None}):
         assert not validator.is_valid({"harness_integrations": value})
+        with pytest.raises(ValidationError):
+            model.model_validate({"name": "test", "harness_integrations": value})

@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Annotated, Any, get_args
 
-from pydantic import BaseModel, Field, StringConstraints, create_model
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter, create_model
 from pydantic.fields import FieldInfo
 from pydantic.json_schema import SkipJsonSchema
 
@@ -35,6 +35,16 @@ from agentworks.schema._shape import unwrap_optional
 
 if TYPE_CHECKING:
     from agentworks.capabilities.descriptor import CapabilityKindDescriptor, HostSurface
+
+
+class _ActivationMapProjection(AgwModel):
+    """Unknown integration names may be disabled without loading their implementation."""
+
+    model_config = ConfigDict(
+        extra="allow",
+        json_schema_extra={"propertyNames": TypeAdapter(NonEmptyStr).json_schema()},
+    )
+    __pydantic_extra__: dict[NonEmptyStr, None] = Field(init=False)
 
 
 def declarable_kinds() -> tuple[str, ...]:
@@ -87,14 +97,15 @@ def spec_model(kind: str) -> type[BaseModel]:
         field_name = host.naming_field
         field = projected.model_fields[field_name]
         if host.cardinality == "mapping":
+            null_opt_out = unwrap_optional(get_args(unwrap_optional(field.annotation)[0])[1])[1]
             union: Any = built_model(
                 f"{class_name(kind)}{class_name(field_name)}Map",
-                base=AgwModel,
+                base=_ActivationMapProjection if null_opt_out else AgwModel,
                 doc="Integration names select their own facet config.",
                 fields={
                     f"integration_{index}": (
                         config_model_for(implementation, facet=host.facet) | None
-                        if unwrap_optional(get_args(unwrap_optional(field.annotation)[0])[1])[1]
+                        if null_opt_out
                         else config_model_for(implementation, facet=host.facet),
                         Field(default=None, validate_default=False, alias=name),
                     )
