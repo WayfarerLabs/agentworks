@@ -92,7 +92,6 @@ _MAPPING_UNION_CACHE: dict[tuple[str, tuple[type[BaseModel], ...], bool], type[B
 #: every historical declaration.
 _OFFERED_MODEL_CACHE: dict[tuple[type, Facet | None], tuple[object, object]] = {}
 
-_TAG_MODEL_CACHE: dict[tuple[type, str], type[BaseModel]] = {}
 _HOST_MODEL_CACHE: dict[tuple[type[BaseModel], str], type[BaseModel]] = {}
 
 
