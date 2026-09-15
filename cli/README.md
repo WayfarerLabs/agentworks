@@ -594,9 +594,14 @@ Recognized encrypted legacy key formats that do not expose a public identity are
 unverifiable, not mismatched. SSH-agent identity selection is not part of this comparison contract;
 the configured private-key path remains the identity source.
 
-Non-fatal initialization failures (packages, dotfiles) produce a `partial` status rather than
-aborting. Fatal failures prompt for deletion or reinit. Use `vm describe` to view the full event
-log, current VM and admin declarations, recorded lifecycle evidence, and structural drift. The
+Required system packages, including `python3` for guest-side native setup and artifact helpers, are
+installed on every platform during create and reinit regardless of template configuration. Failure
+to install them stops initialization before dependent setup runs. These helpers use Python's
+standard library and do not require pip or virtual environments.
+
+Non-fatal initialization failures (optional packages, dotfiles) produce a `partial` status rather
+than aborting. Fatal failures prompt for deletion or reinit. Use `vm describe` to view the full
+event log, current VM and admin declarations, recorded lifecycle evidence, and structural drift. The
 hardware evidence is the provisioning request associated with successful creation, not a provider
 observation of realized hardware. Workspace, agent, and session `describe` commands show the same
 current-declaration and stored-instance-layer facts without inventing lifecycle evidence those

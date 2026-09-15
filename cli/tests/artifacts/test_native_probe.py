@@ -321,11 +321,21 @@ def test_launch_checks_unmanaged_workspace_collision_with_only_handled_ancestor(
     }
     observed_requests = []
 
-    def run(command, *, env, **kwargs):
+    def run(command, *, env=None, **kwargs):
+        if "input_data" not in kwargs:
+            from agentworks.ssh import SSHResult
+
+            checked = subprocess.run(["bash", "-c", command], capture_output=True, text=True, check=False)
+            return SSHResult(checked.returncode, checked.stdout, checked.stderr)
         argv = shlex.split(shlex.split(command)[-1])
         observed_requests.append(json.loads(kwargs["input_data"]))
         return subprocess.run(
-            argv, input=kwargs["input_data"], env={**os.environ, **env}, capture_output=True, text=True, check=False
+            argv,
+            input=kwargs["input_data"],
+            env={**os.environ, **(env or {})},
+            capture_output=True,
+            text=True,
+            check=False,
         )
 
     prepared = SessionArtifactContext(
@@ -916,3 +926,73 @@ def test_production_probe_streams_large_valid_package_through_login_shell(tmp_pa
         == expected_home
     )
     assert all(files[-1].path not in command for command in target.commands)
+
+
+@pytest.mark.parametrize("operation", ["files", "probe"])
+def test_missing_python_refuses_before_staging_or_discovery(tmp_path, operation):
+    from agentworks.artifacts.native.probe import probe_native
+    from agentworks.errors import StateError
+    from agentworks.native_files import NativeFiles
+    from tests.native_setup_fixtures import LocalFixtureTransport
+
+    target = LocalFixtureTransport(tmp_path)
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    (binary / "bash").symlink_to("/bin/bash")
+    target.environment["PATH"] = str(binary)
+    before = set(tmp_path.rglob("*"))
+    with pytest.raises(StateError) as caught:
+        if operation == "files":
+            with NativeFiles(target):
+                pytest.fail("missing prerequisite allowed staging")
+        else:
+            probe_native(target, tool="claude", environment=target.environment)
+    assert caught.value.hint
+    assert len(target.commands) == 1
+    assert set(tmp_path.rglob("*")) == before
+
+
+@pytest.mark.parametrize("returncode,stdout", [(127, ""), (1, "AGW_ARTIFACT_PROBE={}\n"), (0, "not-json")])
+def test_failed_native_probe_retains_external_diagnostic(returncode, stdout):
+    from unittest.mock import Mock
+
+    from agentworks.artifacts.native.probe import probe_native
+    from agentworks.errors import ExternalError
+    from agentworks.ssh import SSHResult
+    from agentworks.transports import Transport
+
+    target = Mock(spec=Transport)
+    stderr = "fixture interpreter or login-shell failure"
+    target.run.side_effect = [SSHResult(0, "", ""), SSHResult(returncode, stdout, stderr)]
+    with pytest.raises(ExternalError) as caught:
+        probe_native(target, tool="claude", environment={})
+    assert stderr in str(caught.value) + (caught.value.hint or "")
+    if returncode:
+        assert str(returncode) in str(caught.value)
+
+
+@pytest.mark.parametrize("returncode", [0, 1])
+@pytest.mark.parametrize("padding", ["", " "])
+def test_native_probe_errors_redact_runtime_environment(returncode, padding):
+    import shlex
+    import traceback
+    from unittest.mock import Mock
+
+    from agentworks.artifacts.native.probe import probe_native
+    from agentworks.errors import ExternalError
+    from agentworks.ssh import SSHResult
+    from agentworks.transports import Transport
+
+    short = "fixture-token"
+    long = padding + ("padded-secret" if padding else short) + "-'long value'" + padding
+    environment = {"API_TOKEN": short, "OTHER_TOKEN": long}
+    stderr = f"{long}\nstartup failed: {shlex.quote(long)}; {short}\n{long}"
+    target = Mock(spec=Transport)
+    target.run.side_effect = [SSHResult(0, "", ""), SSHResult(returncode, "invalid", stderr)]
+    with pytest.raises(ExternalError) as caught:
+        probe_native(target, tool="claude", environment=environment)
+    exposed = str(caught.value) + (caught.value.hint or "") + "".join(traceback.format_exception(caught.value))
+    assert short not in exposed
+    assert long.strip() not in exposed
+    assert shlex.quote(long) not in exposed
+    assert "startup failed" in exposed

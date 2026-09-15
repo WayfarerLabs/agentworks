@@ -547,7 +547,7 @@ def _phase_b_setup(
         # only reaches RUNTIME shells (vm shell, agent shell, sessions,
         # consoles), never build-time install machinery.
 
-        # Non-fatal: system repos + packages (mise repo added, then all packages)
+        # Required system packages must succeed before dependent setup runs.
         _install_system_packages(ts_target, logger)
 
         # Non-fatal: apt sources required by selected apt_packages
