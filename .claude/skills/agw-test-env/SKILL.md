@@ -194,13 +194,31 @@ as needed). Core capabilities need nothing: lima/wsl2, shell, env-var/prompt, gi
 
 ## Platform coverage & backends (live-test reachability)
 
-- LIVE-REACHABLE: `aws-ec2` (cloud, on-demand), `azure-vm` (cloud, on-demand), remote-Lima via
-  `<vm-host-alias>`.
-- REMOTE vs LOCAL lima are DIFFERENT code paths, BOTH covered: REMOTE (`<vm-host-alias>` from here)
-  means agw runs HERE, driving limactl over SSH (exercises `run_detached`/`kill_detached`/SSH
-  remoting). LOCAL means agw runs ON `<remote-lima-host>` itself, driving limactl directly (no SSH
-  remoting), through the built-in `lima-local` site. A local install is standing under
-  `<remote-user>`; reuse it:
+Agentworks supports SIX vm platforms. Two ship built in and self-disable on a host that lacks what
+they need (`lima`, `wsl2`); four are plugin-gated and stay not-ready until their plugin is listed
+under `[plugins] system` (`aws-ec2`, `azure-vm`, `gcp-gce`, `proxmox`).
+
+That list is the coverage checklist, so get it from the app rather than from this paragraph:
+
+```console
+agw resource list --kind vm-platform --include-disabled
+```
+
+It names every platform the installed build registers, says whether each is built in or comes from a
+system plugin, and marks the ones disabled or not ready on this host. `--include-disabled` is what
+makes it the full set: a plugin-gated platform is invisible without it, so a reader checking
+coverage on a host that enables only some plugins would otherwise miss the rest. Nothing needs
+enabling to run it. A new platform appears in that output before it appears in any skill, so treat
+the command as authoritative and this section as the commentary.
+
+Report the PLATFORM name, not the site name. A site is one configured place; the platform is the
+code path under test, and two sites can share one.
+
+- `lima` (built in): COVERED, and remote and local are DIFFERENT code paths that both need driving.
+  REMOTE (`<vm-host-alias>` from here) means agw runs HERE, driving limactl over SSH, which
+  exercises `run_detached`/`kill_detached`/SSH remoting. LOCAL means agw runs ON
+  `<remote-lima-host>` itself, driving limactl directly with no SSH remoting, through the built-in
+  `lima-local` site. A local install is standing under `<remote-user>`; reuse it:
   - REFRESH THE LOCAL CHECKOUT to the branch under test before every local-lima run. It is a
     separate checkout from the one this host drives, so a run against a stale one live-validates
     code the PR does not contain and reports a confident false pass. Never copy a Linux `.venv` into
@@ -217,9 +235,26 @@ as needed). Core capabilities need nothing: lima/wsl2, shell, env-var/prompt, gi
   - Use `--template micro` to stay light: the DEFAULT lima-local template is 4cpu/8GiB/50GiB (vz/
     Virtualization.framework). Same budget + cleanup discipline as remote lima (delete +
     `limactl list` after).
-- NOT LIVE-REACHABLE (no host; review + unit only): `proxmox` (needs a PVE box; the least-tested
-  code with the worst pre-existing bugs, #343), `wsl2` (needs Windows+WSL2, #344/#345). Represent
-  these as KNOWN live-test gaps in dispositions, don't imply coverage.
+- `wsl2` (built in, WORKSTATION-BOUND): COVERED. The platform drives host-local tooling, so agw must
+  run on Windows and covering it requires a Windows bed with nested virtualization
+  (`<windows-wsl2-bed>`). Full create/exec/delete plus agent and artifact delivery have been driven
+  there. Two prerequisites are easy to miss and are recorded with the bed: the guest needs a systemd
+  capable WSL build, and agw needs its Tailscale secret exported for the guest's own join.
+- `azure-vm` (plugin `azure`): COVERED. Cloud, on demand, created and destroyed per run.
+- `aws-ec2` (plugin `aws`): COVERED. Cloud, on demand, created and destroyed per run.
+- `proxmox` (plugin `proxmox`): COVERED via a nested-virtualization bed (`<proxmox-bed-host>`)
+  rather than dedicated hardware. Where the platform supports more than one major version of the
+  system it manages, each major version is its own lane: PVE 8 and PVE 9 have both been driven.
+- `gcp-gce` (plugin `gcp`): **NOT COVERED. This is the one remaining platform gap.** Nothing has
+  driven it live, so represent it as a known gap in dispositions rather than implying coverage.
+  Hosting another bed on GCP is not coverage of this platform: `gcp-gce` is the backend agw manages,
+  not the infrastructure a bed happens to sit on, and confusing the two is exactly how a gap gets
+  reported as covered.
+
+Coverage also has a WORKSTATION axis, which is separate from the platform axis and is not implied by
+it. See the `integration-testing` skill's **Coverage axes** section. Driving agw natively on Windows
+against a remote Lima site over Windows OpenSSH is covered (`<windows-workstation-bed>`, or the wsl2
+bed when it is already running); that is a different lane from the `wsl2` platform above.
 
 ## Known standing issues (do not re-report)
 
