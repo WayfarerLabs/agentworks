@@ -21,10 +21,10 @@ from agentworks.plugins.registration import seat_installed_plugins
 from agentworks.resources import KIND_REGISTRY
 from agentworks.topics import prose_of, summary_of
 
-_INLINE_SPAN_PATTERNS = (
-    re.compile(r"(?<!`)`(?!`)([^`\n]+)`(?!`)"),
-    re.compile(r"(?<![\w'])'(?!')([^'\n]+)'(?!')"),
-    re.compile(r'(?<!")"(?!")([^"\n]+)"(?!")'),
+_INLINE_SPAN_PATTERN = re.compile(
+    r"(?<!`)`(?!`)[^`\n]+`(?!`)"
+    r"|(?<![\w'])'(?!')[^'\n]+'(?!')"
+    r'|(?<!")"(?!")[^"\n]+"(?!")'
 )
 _AUTHORED_COMMAND_SEGMENTS = frozenset({"COMMAND", "GROUP"})
 _GUIDANCE_CATEGORIES = frozenset({"guide", "kind", "capability", "hint"})
@@ -140,9 +140,8 @@ def _authored_commands(text: str) -> set[str]:
     inline_text = "\n".join(inline_lines)
     commands.update(
         command
-        for pattern in _INLINE_SPAN_PATTERNS
-        for expression in pattern.findall(inline_text)
-        for command in _shell_commands(expression)
+        for match in _INLINE_SPAN_PATTERN.finditer(inline_text)
+        for command in _shell_commands(match.group()[1:-1])
     )
     return commands
 
@@ -372,13 +371,14 @@ agw vm start \\
     assert _authored_commands("Describe `don't panic` without running a command.") == set()
 
 
-def test_inline_backticks_after_a_shell_fence_remain_independent() -> None:
+def test_inline_spans_after_fences_and_nested_delimiters_remain_independent() -> None:
     text = """```bash
 agw doctor
 ```
 Then `echo ok && agw retired`.
 """
     assert _authored_commands(text) == {"agw doctor", "agw retired"}
+    assert _authored_commands("Use `printf '%s' 'agw retired'`.") == set()
 
 
 def test_inline_spans_inside_shell_fences_are_not_scanned() -> None:
