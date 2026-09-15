@@ -24,6 +24,7 @@ PROVISIONING_PACKAGES = [
 # System packages installed during init (every create/reinit).
 # These are always installed regardless of operator config.
 INIT_SYSTEM_PACKAGES = [
+    "python3",  # Guest helpers use the standard library for guarded files and native discovery.
     "git",
     "unzip",
     "tmux",

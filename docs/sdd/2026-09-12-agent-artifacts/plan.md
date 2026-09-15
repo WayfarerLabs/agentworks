@@ -42,7 +42,8 @@ this follow-up.
 - [x] Rename the command and keep completion, machine output, tests and current documentation
       aligned.
 - [x] Complete private project and complexity review and validate the renamed CLI.
-- [ ] Publish a ready PR and monitor its authorized feedback/fix rounds.
+- [x] Publish a ready PR and monitor its authorized feedback/fix rounds. PR 806 merged on
+      2026-09-15; the one-hour feedback window was clean and no fix round was needed.
 
 ## Authoring amendment, 2026-09-14
 
@@ -790,3 +791,34 @@ command references belong to the saga lead and are called out in the handoff.
 Full non-integration suite: 9,593 passed, seven skipped. Ruff lint/format, mypy over 848 files,
 Typer isolation, locked-SDD and Rulesync checks passed. Website validation passed 160 Python tests,
 103 Node tests and deterministic double builds for both site bases.
+
+## Guest Python prerequisite correction, 2026-09-15
+
+Issue [812](https://github.com/WayfarerLabs/agentworks/issues/812) reports that the minimal WSL
+Debian root filesystem does not include Python. Native file operations and artifact discovery
+already use inline Python programs. Cloud images incidentally supplied the interpreter; that was not
+a declared platform guarantee. The operator directed making required guest dependencies
+unconditional.
+
+- [x] Install `python3` through the common required system-package list on every create/reinit.
+      Guest programs use the standard library; pip and virtual-environment packages are unnecessary.
+- [x] Stop initialization if mandatory package installation fails, before dependent setup. Optional
+      template-package failures retain their existing warning behavior.
+- [x] Share the missing-interpreter check between native staging and artifact discovery; preserve
+      probe process failure diagnostics separately from malformed response errors.
+- [x] Update permanent prerequisite and reinit guidance, including repair of older VMs.
+- [x] Complete private project, complexity and correctness reviews.
+- [x] Finish regression checks: 9,604 tests passed with seven skips; lint, types, Rulesync and
+      website checks passed.
+- [ ] Publish the ready follow-up PR for issue 812 and assess its feedback.
+
+This correction ships on `fix/vm-python-prerequisite`, under the artifact SDD. The initial issue's
+WSL observations are external evidence, not a live WSL rerun by this lead. Full SDD acceptance and
+locking remain separate.
+
+Private review is clean at `5b51afca`. The correctness lane caught runtime-value disclosure through
+probe stderr; the project lane then caught trimming before redaction of whitespace-bearing values.
+Both are corrected and covered on the nonzero-exit and invalid-response paths, including formatted
+tracebacks. Diagnostics retain process exit status and useful stderr after redacting known runtime
+values and their shell-quoted forms. Muntz verified the mandatory package call with bounded fake
+transport probes; the other reviews were source review, not independent full-suite or WSL runs.

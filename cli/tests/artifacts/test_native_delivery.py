@@ -268,6 +268,8 @@ def test_native_probe_passes_environment_separately_and_rejects_policy_failures(
         calls.append((command, kwargs))
         return SimpleNamespace(
             returncode=0,
+            ok=True,
+            stderr="",
             stdout="AGW_ARTIFACT_PROBE="
             + json.dumps(
                 {"native_home": "/home/a/.claude", "problems": ["native-discovery-exclusions"], "inventory": []}
@@ -278,8 +280,8 @@ def test_native_probe_passes_environment_separately_and_rejects_policy_failures(
         probe_native(
             SimpleNamespace(run=run), tool="claude", home="/home/a", environment={"API_TOKEN": "a-secret-value"}
         )
-    assert "a-secret-value" not in calls[0][0]
-    assert calls[0][1]["env"]["API_TOKEN"] == "a-secret-value"
+    assert "a-secret-value" not in calls[-1][0]
+    assert calls[-1][1]["env"]["API_TOKEN"] == "a-secret-value"
 
 
 @pytest.mark.parametrize(
