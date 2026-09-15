@@ -16,6 +16,7 @@ import pytest
 from agentworks.errors import ConfigError
 from agentworks.resources import Origin, Registry
 from agentworks.resources.reference import ResourceReference
+from tests.conftest import registry_with_shell
 
 
 @dataclass(frozen=True)
@@ -63,7 +64,7 @@ def node_kind_registered(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_two_node_cycle_detected(node_kind_registered: None) -> None:
-    r = Registry.empty()
+    r = registry_with_shell()
     _add_node(r, "a", "b")
     _add_node(r, "b", "a")
     with pytest.raises(ConfigError, match="cycle"):
@@ -71,7 +72,7 @@ def test_two_node_cycle_detected(node_kind_registered: None) -> None:
 
 
 def test_three_node_cycle_detected(node_kind_registered: None) -> None:
-    r = Registry.empty()
+    r = registry_with_shell()
     _add_node(r, "a", "b")
     _add_node(r, "b", "c")
     _add_node(r, "c", "a")
@@ -80,7 +81,7 @@ def test_three_node_cycle_detected(node_kind_registered: None) -> None:
 
 
 def test_acyclic_chain_does_not_error(node_kind_registered: None) -> None:
-    r = Registry.empty()
+    r = registry_with_shell()
     # a -> b -> c, no cycle (c gets auto-declared as a leaf)
     _add_node(r, "a", "b")
     _add_node(r, "b", "c")

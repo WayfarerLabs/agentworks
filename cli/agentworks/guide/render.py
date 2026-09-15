@@ -30,6 +30,7 @@ _ATX_RE = re.compile(r"^([ ]{0,3})(#{1,6})(?:[ \t]+|$)(.*?)([ \t]+#+[ \t]*)?$")
 _SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 _CURATED_REPOSITORY_PATHS = {
     "_guide_sources/README.md": "README.md",
+    "_guide_sources/docs/guides/harness-facets.md": "docs/guides/harness-facets.md",
     "_guide_sources/docs/manifesto.md": "docs/manifesto.md",
 }
 _GITHUB_BLOB = "https://github.com/WayfarerLabs/agentworks/blob/main/"

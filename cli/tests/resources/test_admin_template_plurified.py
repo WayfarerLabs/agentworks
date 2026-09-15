@@ -33,11 +33,10 @@ from agentworks.env import EnvEntry
 from agentworks.errors import ConfigError
 from agentworks.resources import (
     Origin,
-    Registry,
 )
 from agentworks.resources.graph import FinalizeContext
 from agentworks.vms.admin import AdminConfig
-from tests.conftest import ManifestDoc, write_cfg, write_manifests
+from tests.conftest import ManifestDoc, registry_with_shell, write_cfg, write_manifests
 
 
 def _write_cfg(path: Path, body: str = "") -> Path:
@@ -97,7 +96,7 @@ def test_registry_can_hold_multiple_admin_template_rows(tmp_path: Path) -> None:
     test exercises the publisher API directly to prove the framework
     is ready for plurified parsing in a future SDD.)
     """
-    registry = Registry.empty()
+    registry = registry_with_shell()
     default = AdminConfig(name="default", shell="bash")
     work = AdminConfig(name="work", shell="zsh")
     origin = Origin.operator_declared(file=tmp_path / "c.toml", line=1)
@@ -145,7 +144,7 @@ def test_admin_template_kind_errors_on_unreserved_name_reference(
                 )
             ]
 
-    registry = Registry.empty()
+    registry = registry_with_shell()
     origin = Origin.operator_declared(file=tmp_path / "c.toml", line=1)
     registry.add("vm-template", "test", _Stub(), origin)
 

@@ -13,9 +13,9 @@ import pytest
 
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
-from agentworks.resources import Origin, Registry
+from agentworks.resources import Origin
 from agentworks.secrets.base import SecretDecl
-from tests.conftest import ManifestDoc, write_manifests
+from tests.conftest import ManifestDoc, registry_with_shell, write_manifests
 
 
 @pytest.fixture()
@@ -47,7 +47,7 @@ def test_add_rejects_names_containing_slash(tmp_path: Path) -> None:
     sources: manifest (YAML) and direct adds hit the same check.
     (config.toml can no longer declare resources, ADR 0022, so there is
     no TOML source leg to exercise.)"""
-    r = Registry.empty()
+    r = registry_with_shell()
     decl = SecretDecl(name="we/ird", description="d")
     with pytest.raises(ConfigError, match="contains '/'"):
         r.add(
@@ -138,7 +138,7 @@ def test_error_miss_policy_includes_reference_usage(
     probe = _MissProbeKind()
     monkeypatch.setitem(KIND_REGISTRY, "miss-probe", probe)
 
-    r = Registry.empty()
+    r = registry_with_shell()
     r.add(
         "miss-probe",
         "seed",
@@ -152,7 +152,7 @@ def test_error_miss_policy_includes_reference_usage(
 
 
 def test_add_then_finalize_makes_queryable(tmp_path: Path) -> None:
-    r = Registry.empty()
+    r = registry_with_shell()
     decl = SecretDecl(name="x", description="X")
     r.add(
         "secret",
@@ -171,7 +171,7 @@ def test_add_then_finalize_makes_queryable(tmp_path: Path) -> None:
 
 
 def test_add_after_finalize_errors(tmp_path: Path) -> None:
-    r = Registry.empty()
+    r = registry_with_shell()
     r.finalize()
     with pytest.raises(RuntimeError, match="frozen"):
         r.add(
@@ -183,7 +183,7 @@ def test_add_after_finalize_errors(tmp_path: Path) -> None:
 
 
 def test_finalize_twice_errors() -> None:
-    r = Registry.empty()
+    r = registry_with_shell()
     r.finalize()
     with pytest.raises(RuntimeError, match="already been finalized"):
         r.finalize()
@@ -198,7 +198,7 @@ def test_iter_kind_returns_published_resources(tmp_path: Path) -> None:
     filters to operator-declared rows to pin the published-name set
     without coupling to which framework-auto-declared rows exist.
     """
-    r = Registry.empty()
+    r = registry_with_shell()
     for n in ["a", "b", "c"]:
         r.add(
             "secret",
@@ -214,7 +214,7 @@ def test_iter_kind_returns_published_resources(tmp_path: Path) -> None:
 
 
 def test_iter_kind_empty_when_kind_absent() -> None:
-    r = Registry.empty()
+    r = registry_with_shell()
     r.finalize()
     assert list(r.iter_kind("nonexistent")) == []
 
@@ -242,7 +242,7 @@ def test_build_registry_equivalent_to_manual_steps(example_config: Path, monkeyp
 
     auto = build_registry(cfg)
 
-    manual = Registry.empty()
+    manual = registry_with_shell()
     builtin_manifests.publish_to(manual)
     publish_capability_rows(manual, descriptor_for("secret-backend"))
     # The bundled vm-site rows (lima, wsl2) reference the vm-platform
@@ -285,7 +285,7 @@ def test_unknown_kind_in_requirement_errors_clearly(tmp_path: Path) -> None:
                 )
             ]
 
-    r = Registry.empty()
+    r = registry_with_shell()
     # Cheat past dataclasses.replace by inserting directly. (The real
     # publish flow always goes through frozen-dataclass Resources;
     # here we just want to trip the finalize-side lookup.)

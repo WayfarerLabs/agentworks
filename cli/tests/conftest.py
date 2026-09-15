@@ -15,10 +15,12 @@ from typing import Protocol
 import pytest
 import yaml
 
+from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.db import Database
 from agentworks.manifests.envelope import API_VERSION
 from agentworks.manifests.loader import RESOURCES_DIRNAME
 from agentworks.output import Role, StatusStyle, _render_header
+from agentworks.resources.registry import Registry
 from agentworks.schema import CapabilityBlock
 from tests.ssh_fixtures import write_test_ssh_keypair
 
@@ -687,6 +689,7 @@ class _StubSessionTemplate:
 
     name = "default"
     harness_integration = "shell"
+    artifacts = ArtifactsConfig()
     harness_integration_config: dict[str, object] = {}  # noqa: RUF012 - mutable class attr is fine for a stub
     env: dict[str, str] = {}  # noqa: RUF012 - mutable class attr is fine for a stub
 
@@ -768,6 +771,7 @@ class _StubRegistry:
 
     _KIND_ATTRS = {
         "secret": "secrets",
+        "artifact-bundle": "artifact_bundles",
         "vm-template": "vm_templates",
         "agent-template": "agent_templates",
         "workspace-template": "workspace_templates",
@@ -1015,3 +1019,18 @@ def _isolated_database(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     their own path and are unaffected.
     """
     monkeypatch.setattr("agentworks.db.DB_PATH", tmp_path / "isolated-test.db")
+
+
+def registry_with_shell() -> Registry:
+    """Minimal registry with the capability selected by the synthesized default."""
+    from agentworks.capabilities.harness_integration.kinds import HarnessIntegrationEntry
+    from agentworks.origin import Origin
+
+    registry = Registry.empty()
+    registry.add(
+        "harness-integration",
+        "shell",
+        HarnessIntegrationEntry(name="shell"),
+        Origin.built_in(source="agentworks.capabilities.harness_integration"),
+    )
+    return registry

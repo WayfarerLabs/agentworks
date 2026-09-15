@@ -57,6 +57,7 @@ from agentworks.secrets.sources import SecretSourceDecl
 from agentworks.sessions.manager._env import _display_harness_integration
 from agentworks.sessions.template import SessionTemplate
 from agentworks.vms.sites import VMSiteDecl, resolve_site
+from tests.conftest import registry_with_shell
 from tests.plugins._fixtures import (
     ConformingGitCredentialProvider,
     ConformingHarnessIntegration,
@@ -184,12 +185,12 @@ def _present(registry: Registry, kind: str, name: str) -> bool:
 
 def test_not_opted_in_plugin_capability_is_disabled_opted_in_is_enabled() -> None:
     with seated_plugin(_capable_plugin()):
-        disabled = Registry.empty()
+        disabled = registry_with_shell()
         _publish_capability(disabled, "vm-platform", "fixture-platform")
         disabled.finalize(enablement_sources=[_plugin_source()])  # PLUGIN not enabled
         assert disabled.graph.enablement_of("vm-platform", "fixture-platform") is Enablement.disabled
 
-        enabled = Registry.empty()
+        enabled = registry_with_shell()
         _publish_capability(enabled, "vm-platform", "fixture-platform")
         enabled.finalize(enablement_sources=[_plugin_source(PLUGIN)])  # opted in
         assert enabled.graph.enablement_of("vm-platform", "fixture-platform") is Enablement.enabled
@@ -199,7 +200,7 @@ def test_no_source_leaves_a_plugin_row_enabled_the_landed_default() -> None:
     """Additive-ness: ``finalize()`` with no sources behaves exactly as the
     landed refactor (all-enabled), even for a system-plugin row."""
     with seated_plugin(_capable_plugin()):
-        registry = Registry.empty()
+        registry = registry_with_shell()
         _publish_capability(registry, "vm-platform", "fixture-platform")
         registry.add(
             "vm-site",
@@ -217,7 +218,7 @@ def test_no_source_leaves_a_plugin_row_enabled_the_landed_default() -> None:
 
 def test_vm_site_on_disabled_plugin_platform_is_not_ready_with_enable_plugin() -> None:
     with seated_plugin(_capable_plugin()):
-        registry = Registry.empty()
+        registry = registry_with_shell()
         _publish_capability(registry, "vm-platform", "fixture-platform")
         registry.add(
             "vm-site",
@@ -243,7 +244,7 @@ def test_disabled_plugin_platform_withholds_its_config_implied_secret() -> None:
     not only the stub source in test_readiness_fold.py."""
 
     def _build(*, enabled: bool) -> Registry:
-        registry = Registry.empty()
+        registry = registry_with_shell()
         _publish_capability(registry, "vm-platform", "fixture-platform")
         registry.add(
             "vm-site",
@@ -267,7 +268,7 @@ def test_disabled_plugin_platform_withholds_its_config_implied_secret() -> None:
         assert _present(enabled, "secret", "fixture-token")  # materializes when opted in
 
     with seated_plugin(_capable_plugin()):
-        registry = Registry.empty()
+        registry = registry_with_shell()
         _publish_capability(registry, "vm-platform", "fixture-platform")
         registry.add(
             "vm-site",
@@ -298,7 +299,7 @@ def _registry_mapping_fixture_backend(mapping: MappingValue, *, publish_source: 
     ``publish_source=False`` omits the configured source row, producing the
     source-first dangling-key case.
     """
-    registry = Registry.empty()
+    registry = registry_with_shell()
     if publish_source:
         _publish_capability(registry, "secret-backend", "fixture-backend")
         registry.add(
@@ -404,7 +405,7 @@ def test_mapping_to_an_absent_backend_reports_the_dangling_edge_not_a_shape_erro
 
 
 def _git_registry() -> Registry:
-    registry = Registry.empty()
+    registry = registry_with_shell()
     _publish_capability(registry, "git-credential-provider", "fixture-provider")
     registry.add(
         "git-credential",
@@ -469,7 +470,7 @@ def test_remote_advisories_skips_a_disabled_git_credential() -> None:
 
 
 def _harness_integration_registry() -> Registry:
-    registry = Registry.empty()
+    registry = registry_with_shell()
     _publish_capability(registry, "harness-integration", "fixture-harness")
     registry.add(
         "session-template",
@@ -537,7 +538,7 @@ def test_compose_enablement_unions_sources_and_first_source_wins_the_reason() ->
 
 def test_second_stub_source_composes_through_finalize_and_precedence_holds() -> None:
     with seated_plugin(_capable_plugin()):
-        registry = Registry.empty()
+        registry = registry_with_shell()
         _publish_capability(registry, "vm-platform", "fixture-platform")
         _publish_capability(registry, "harness-integration", "fixture-harness")
         registry.add(

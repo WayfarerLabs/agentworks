@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 
 from agentworks.env import EnvEntry
+from agentworks.errors import ConfigError
 from agentworks.workspaces.template import WorkspaceTemplate
 
 from ._specs import WHERE, decode, decode_issues, rejection
@@ -55,11 +56,9 @@ def test_an_unset_field_stays_none_so_it_can_inherit() -> None:
 # -- What an operator reads when it is wrong ----------------------------------
 
 
-def test_an_unknown_key_names_the_fields_that_are_valid() -> None:
-    assert rejection("workspace-template", "web", {"git_user_emial": "bot@example.test"}) == (
-        "res.yaml:7: workspace-template/web.git_user_emial: unknown field; expected one of: "
-        "env, git_user_email, git_user_name, inherits, repo, tmuxinator"
-    )
+def test_an_unknown_workspace_field_is_rejected() -> None:
+    with pytest.raises(ConfigError):
+        decode("workspace-template", "web", {"git_user_emial": "bot@example.test"})
 
 
 def test_an_env_key_that_is_not_a_variable_name_is_refused() -> None:

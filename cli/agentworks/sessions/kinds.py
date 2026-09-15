@@ -47,9 +47,9 @@ class _SessionTemplateKind:
         overview="""
         A session is a workload running as an agent (or as the admin) in a workspace on
         a VM, and a session-template says which workload. `spec.harness_integration`
-        selects the integration that owns starting it and resuming prior state; a template that
-        selects none gets `shell`, a plain login shell, so a field-less template is
-        still useful.
+        selects the integration that owns starting it and resuming prior state. Every
+        template lineage must select an integration. Inherit `default` for a plain
+        login shell or select an integration explicitly.
 
         Templates compose through `inherits`, nearest last. `env` tables merge key by
         key. Repeated use of the same integration follows its config model: objects and
@@ -67,6 +67,11 @@ class _SessionTemplateKind:
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
     category: Literal["declarable", "capability"] = "declarable"
     builtin_override: Literal["allow", "reserved"] = "reserved"
+
+    @property
+    def sample_spec(self) -> dict[str, object]:
+        """A standalone sample inherits the built-in explicit shell selection."""
+        return {"inherits": ["default"]}
 
     def resolve_for_show(self, registry: Registry, name: str) -> ResolvedSpec:
         """Resolve one concrete session template for focused inspection."""
@@ -88,7 +93,13 @@ class _SessionTemplateKind:
         the non-empty-``references`` path is preserved.
         """
         source = references[0].source if references else ALWAYS_MATERIALIZE_SOURCE
-        return SessionTemplate(name="default", origin=Origin.auto_declared(source=source))
+        from agentworks.schema import CapabilityBlock
+
+        return SessionTemplate(
+            name="default",
+            origin=Origin.auto_declared(source=source),
+            harness_integration=CapabilityBlock.of("shell"),
+        )
 
 
 @dataclass(frozen=True)

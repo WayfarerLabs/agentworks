@@ -19,7 +19,6 @@ owns only the per-phase step sequences and status/event bookkeeping.
 from __future__ import annotations
 
 import shlex
-from collections.abc import Callable
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
@@ -58,7 +57,6 @@ from .shell_env import (
 )
 from .ssh_keys import (
     AuthorizedKeysApplied,
-    AuthorizedKeysOutcome,
     AuthorizedKeysUnproven,
     _apply_sve_mask,
     _preserve_ssh_host_keys,
@@ -67,12 +65,17 @@ from .ssh_keys import (
 from .workspaces_dir import _setup_workspaces_directory
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
-    from agentworks.db import Database
+    from agentworks.db import Database, DesiredOverlayRecord
+    from agentworks.db.instance_state import VersionedPayload
     from agentworks.debian import DebianRelease
     from agentworks.git_credentials import CredentialRequest
+    from agentworks.harness_setup.inputs import SetupInputs
+    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.resources.registry import Registry
     from agentworks.vms.admin import AdminConfig
     from agentworks.vms.templates import ResolvedVMTemplate
@@ -254,6 +257,10 @@ def run_initialization(
     *,
     debian_release: DebianRelease,
     operation: VMInitializationOperation,
+    setup_inputs: tuple[SetupInputs, ...] = (),
+    setup_guard: NativeMutationGuard | None = None,
+    setup_values: Mapping[str, str] | None = None,
+    legacy_conversion: tuple[DesiredOverlayRecord, VersionedPayload] | None = None,
 ) -> None:
     """Run Phase B (initialization) with status tracking and event logging.
 
@@ -262,79 +269,106 @@ def run_initialization(
     ``operation`` value also drives create-only setup behavior.
     Each credential request carries the provider's scoped context assembler.
     """
-    db.insert_vm_event(vm_name, "init_started")
+    from agentworks.harness_setup.locking import native_mutation_guard
 
-    try:
-        authorized_keys = _phase_b_setup(
-            db,
-            config,
-            registry,
-            vm_template,
-            admin,
-            vm_name,
-            ts_target,
-            credential_requests,
-            home,
-            admin_username,
-            logger,
-            debian_release=debian_release,
-            operation=operation,
+    with native_mutation_guard(db.path, vm_name, held=setup_guard) as guard:
+        from agentworks.harness_setup.lifecycle import require_prepared_setup
+
+        require_prepared_setup(db, "vm", vm_name, ("vm", "admin"), setup_inputs)
+        db.insert_vm_event(vm_name, "init_started")
+
+        try:
+            _phase_b_setup(
+                db,
+                config,
+                registry,
+                vm_template,
+                admin,
+                vm_name,
+                ts_target,
+                credential_requests,
+                home,
+                admin_username,
+                logger,
+                debian_release=debian_release,
+                operation=operation,
+            )
+            if setup_inputs:
+                from agentworks.harness_setup.lifecycle import apply_vm_setup
+
+                vm = db.get_vm(vm_name)
+                assert vm is not None
+                apply_vm_setup(
+                    db,
+                    registry,
+                    inputs=setup_inputs,
+                    vm=vm,
+                    target=ts_target,
+                    values=setup_values or {},
+                    held=guard,
+                    operation=operation.value,
+                )
+            # Terminal guest mutation follows every integration's setup.
+            authorized_keys = _reconcile_authorized_keys(ts_target, config, home, logger)
+        except Exception as e:
+            with db.transaction():
+                db.update_vm_init_status(vm_name, InitStatus.FAILED)
+                db.insert_vm_event(vm_name, "init_failed", logger.sanitize(str(e)))
+            raise
+
+        if isinstance(authorized_keys, AuthorizedKeysUnproven):
+            output.warn(
+                f"SSH identity evidence for VM '{vm_name}' is unknown, so ordinary SSH commands "
+                "will refuse to connect. If the configured key still works, retry with "
+                f"'agw vm reinit {vm_name}'. Otherwise, use "
+                f"'agw vm shell {vm_name} --platform' where supported to restore access before "
+                "reinitializing. If platform recovery is unavailable, recreate the VM."
+            )
+
+        from agentworks.db.instance_state import AppliedStateKey
+        from agentworks.vms.applied_state import build_vm_initialization_slices
+
+        applied_proof = authorized_keys if isinstance(authorized_keys, AuthorizedKeysApplied) else None
+        slices = build_vm_initialization_slices(
+            applied_proof,
+            include_hardware=operation is VMInitializationOperation.VM_CREATE,
         )
-    except Exception as e:
+        ssh_identity_proven = AppliedStateKey.SSH_IDENTITY in slices
+        if applied_proof is not None and not ssh_identity_proven:
+            # File-system identity cannot be checkpointed atomically with the
+            # remote write. A changed or unreadable carrier leaves the remote
+            # result unknown, so remove any older proof.
+            msg = "configured SSH identity changed or became unavailable after authorized_keys update"
+            logger.warning(msg)
+            output.warn(msg)
+
+        final_status = InitStatus.PARTIAL if logger.has_warnings else InitStatus.COMPLETE
+        final_event = "init_partial" if logger.has_warnings else "init_complete"
+        final_detail = f"{len(logger.warnings)} warning(s)" if logger.has_warnings else None
+
+        # Do not include this checkpoint in the Phase B exception arm above: a
+        # local database failure must roll back the complete terminal result and
+        # propagate, leaving the earlier in-progress evidence intact.
         with db.transaction():
-            db.update_vm_init_status(vm_name, InitStatus.FAILED)
-            db.insert_vm_event(vm_name, "init_failed", str(e))
-        raise
+            if legacy_conversion is not None and final_status is InitStatus.COMPLETE:
+                from agentworks.legacy_claude import checkpoint_conversion
 
-    if isinstance(authorized_keys, AuthorizedKeysUnproven):
-        output.warn(
-            f"SSH identity evidence for VM '{vm_name}' is unknown, so ordinary SSH commands "
-            "will refuse to connect. If the configured key still works, retry with "
-            f"'agw vm reinit {vm_name}'. Otherwise, use "
-            f"'agw vm shell {vm_name} --platform' where supported to restore access before "
-            "reinitializing. If platform recovery is unavailable, recreate the VM."
-        )
-
-    from agentworks.db.instance_state import AppliedStateKey
-    from agentworks.vms.applied_state import build_vm_initialization_slices
-
-    applied_proof = authorized_keys if isinstance(authorized_keys, AuthorizedKeysApplied) else None
-    slices = build_vm_initialization_slices(
-        applied_proof,
-        include_hardware=operation is VMInitializationOperation.VM_CREATE,
-    )
-    ssh_identity_proven = AppliedStateKey.SSH_IDENTITY in slices
-    if applied_proof is not None and not ssh_identity_proven:
-        # File-system identity cannot be checkpointed atomically with the
-        # remote write. A changed or unreadable carrier leaves the remote
-        # result unknown, so remove any older proof.
-        msg = "configured SSH identity changed or became unavailable after authorized_keys update"
-        logger.warning(msg)
-        output.warn(msg)
-
-    final_status = InitStatus.PARTIAL if logger.has_warnings else InitStatus.COMPLETE
-    final_event = "init_partial" if logger.has_warnings else "init_complete"
-    final_detail = f"{len(logger.warnings)} warning(s)" if logger.has_warnings else None
-
-    # Do not include this checkpoint in the Phase B exception arm above: a
-    # local database failure must roll back the complete terminal result and
-    # propagate, leaving the earlier in-progress evidence intact.
-    with db.transaction():
-        db.update_vm_init_status(vm_name, final_status)
-        db.insert_vm_event(vm_name, final_event, final_detail)
-        if slices:
-            db.instance_state.replace_applied_slices(
-                "vm",
-                vm_name,
-                operation.value,
-                slices,
-            )
-        if not ssh_identity_proven:
-            db.instance_state.clear_applied_slice(
-                "vm",
-                vm_name,
-                AppliedStateKey.SSH_IDENTITY,
-            )
+                checkpoint_conversion(db, *legacy_conversion)
+            db.update_vm_init_status(vm_name, final_status)
+            db.insert_vm_event(vm_name, final_event, final_detail)
+            if slices:
+                db.instance_state.replace_applied_slices(
+                    "vm",
+                    vm_name,
+                    operation.value,
+                    slices,
+                )
+            if not ssh_identity_proven:
+                db.instance_state.clear_applied_slice(
+                    "vm",
+                    vm_name,
+                    AppliedStateKey.SSH_IDENTITY,
+                )
 
 
 def _phase_a_bootstrap(
@@ -408,7 +442,7 @@ def _phase_b_setup(
     *,
     debian_release: DebianRelease,
     operation: VMInitializationOperation,
-) -> AuthorizedKeysOutcome:
+) -> None:
     """Phase B: Setup (over Tailscale SSH). Non-fatal steps warn and continue."""
     with output.section("VM Initialization"):
         from agentworks.resources.access import kind_dict
@@ -733,13 +767,6 @@ def _phase_b_setup(
         rc_snippets = [MISE_ACTIVATE_LINES] if admin.mise_activate else ["# mise activation disabled"]
         _write_agentworks_rc(ts_target, rc_snippets, logger)
 
-        # Non-fatal: Claude Code marketplaces and plugins for admin user
-        def _admin_run_cmd(cmd: str, timeout: int) -> object:
-            inner = shlex.quote(cmd)
-            return ts_target.run(f"{admin_shell} -lc {inner}", timeout=timeout)
-
-        install_claude_plugins(_admin_run_cmd, admin.claude_marketplaces, admin.claude_plugins, logger)
-
         # Defensive final step: re-ensure source lines in case any earlier
         # step (dotfiles install in particular) overwrote a shell rc file
         # in place. Idempotent grep-or-append.
@@ -749,64 +776,3 @@ def _phase_b_setup(
             shell=admin_shell,
             logger=logger,
         )
-
-        # Final remote mutation: once this succeeds, no later Phase B work can
-        # make the identity proof stale before the local stability check and
-        # transactional terminal checkpoint.
-        return _reconcile_authorized_keys(ts_target, config, home, logger)
-
-
-RunCmd = Callable[[str, int], object]
-"""Callable that runs a shell command with a timeout. Used to abstract
-the choice of ``Transport`` (admin vs agent) at the call site."""
-
-
-def install_claude_plugins(
-    run_cmd: RunCmd,
-    marketplaces: list[str],
-    plugins: list[str],
-    logger: SSHLogger | None = None,
-) -> None:
-    """Register Claude Code marketplaces and install plugins. Non-fatal.
-
-    The caller provides a ``run_cmd`` that wraps the command in a login
-    shell (``{shell} -lc <cmd>``) so the calling user's PATH (mise shims,
-    ``~/.local/bin``, etc.) is in scope. A plain non-interactive SSH
-    invocation gets a non-login shell that sources neither ``.bashrc``
-    nor ``.profile``, so ``command -v claude`` would falsely fail. Both
-    the admin call site (``_phase_b_setup`` in this file) and the agent
-    call site (``create_agent_on_vm`` in ``agents/initializer.py``) wrap
-    accordingly; the helper itself stays transport- and user-agnostic.
-    """
-    if not marketplaces and not plugins:
-        return
-
-    if logger:
-        logger.step("Claude plugins")
-
-    try:
-        # Verify claude is available before attempting marketplace/plugin setup
-        run_cmd("command -v claude >/dev/null 2>&1", 10)
-    except SSHError as e:
-        msg = (
-            f"claude CLI not available; skipping marketplace/plugin setup ({e}). "
-            "Install claude (e.g. via user_install_commands or any other method) and rerun init."
-        )
-        if logger:
-            logger.warning(msg)
-        output.warn(msg)
-        return
-
-    try:
-        for source in marketplaces:
-            output.info(f"Registering Claude marketplace: {source}")
-            run_cmd(f"claude plugin marketplace add {shlex.quote(source)}", 60)
-
-        for plugin in plugins:
-            output.info(f"Installing Claude plugin: {plugin}")
-            run_cmd(f"claude plugin install {shlex.quote(plugin)} --scope user", 60)
-    except SSHError as e:
-        msg = f"Claude plugin install failed: {e}"
-        if logger:
-            logger.warning(msg)
-        output.warn(msg)

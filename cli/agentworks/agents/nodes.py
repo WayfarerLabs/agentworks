@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database
     from agentworks.git_credentials.nodes import GitCredentialNode
+    from agentworks.harness_setup.inputs import SetupInputs
     from agentworks.orchestration.node import Node
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
@@ -161,6 +162,7 @@ class PendingAgentNode:
         self._vm = vm
         self._interaction = interaction
         self._realized = False
+        self.setup_inputs: SetupInputs | None = None
 
     @property
     def key(self) -> str:

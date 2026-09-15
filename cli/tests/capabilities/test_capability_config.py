@@ -25,7 +25,7 @@ from agentworks.capabilities.config import (
     validate_capability_config,
     validate_own_config,
 )
-from agentworks.capabilities.descriptor import descriptor_for
+from agentworks.capabilities.descriptor import Facet, descriptor_for
 from agentworks.errors import ConfigError
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.resources.reference import ConfigReference
@@ -116,7 +116,7 @@ class StatefulPlatform(ConformingVMPlatform):
     selection_calls: ClassVar[int] = 0
 
     @classmethod
-    def config_for(cls) -> type[BaseModel]:
+    def config_for(cls, facet: Facet | None = None) -> type[BaseModel]:
         cls.selection_calls += 1
         return StatefulFirstConfig if cls.selection_calls == 1 else StatefulSecondConfig
 
@@ -205,7 +205,7 @@ def test_registration_and_later_consumers_share_one_stateful_model_selection() -
         assert StatefulPlatform.selection_calls == 1
         assert capability_config_model("vm-platform", StatefulPlatform.name) is StatefulFirstConfig
         capability_config_union("vm-platform")
-        assert offered_model(StatefulPlatform) is StatefulFirstConfig
+        assert offered_model(StatefulPlatform, facet="user") is StatefulFirstConfig
         assert StatefulPlatform.selection_calls == 1
 
 
@@ -264,7 +264,7 @@ def test_the_offered_model_is_read_through_the_hook_not_off_the_declaration() ->
         config_model: ClassVar[type[AgwModel]] = FixtureConfig
 
         @classmethod
-        def config_for(cls) -> type[BaseModel]:
+        def config_for(cls, facet: Facet | None = None) -> type[BaseModel]:
             return OtherConfig
 
     assert offered_model(Overriding) is OtherConfig

@@ -36,7 +36,7 @@ from agentworks.resources.graph_query import (
 )
 from agentworks.resources.graph_render import render_graph_result
 from agentworks.resources.reference import RefRelationship, ResourceReference
-from tests.conftest import ManifestDoc, write_cfg
+from tests.conftest import ManifestDoc, registry_with_shell, write_cfg
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -83,7 +83,7 @@ def _registry(
     by_source: dict[str, list[ResourceReference]] = {}
     for reference in references:
         by_source.setdefault(reference.source[1], []).append(reference)
-    registry = Registry.empty()
+    registry = registry_with_shell()
     ordered_names = reversed(names) if reverse else names
     for name in ordered_names:
         registry.add(
@@ -435,7 +435,7 @@ def test_real_registry_inbound_edges_retain_relationship_and_usage(tmp_path: Pat
 
 
 def test_registry_and_focus_validation_precede_query(monkeypatch: pytest.MonkeyPatch) -> None:
-    unfinished = Registry.empty()
+    unfinished = registry_with_shell()
     with pytest.raises(StateError) as unfinished_error:
         show_graph(
             unfinished,

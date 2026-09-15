@@ -15,10 +15,11 @@ from typing import TYPE_CHECKING, Annotated
 from pydantic import Field, ValidationInfo, model_validator
 from pydantic.json_schema import SkipJsonSchema
 
+from agentworks.artifacts.declarations import ArtifactsConfig, artifact_references
 from agentworks.declared_resource import DeclaredResource
 from agentworks.env.entry import EnvTable, env_references
 from agentworks.git_credentials.credential import credential_references
-from agentworks.schema import ResourceRef
+from agentworks.schema import CapabilityBlock, MergeStrategy, ResourceRef
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -35,6 +36,7 @@ def effective_references(
     provenance: Mapping[ProvenancePath, tuple[LayerSource, ...]],
 ) -> tuple[ResourceReference, ...]:
     """References required by one effective VM admin declaration."""
+    from agentworks.capabilities.harness_integration.activations import activation_references
     from agentworks.resources.reference import ResourceReference as _ResourceReq
     from agentworks.value_provenance import longest_prefix_value
 
@@ -44,6 +46,7 @@ def effective_references(
 
     by_env = {key: declared_by for key in effective.env if (declared_by := owner(("env", key))) is not None}
     refs: list[ResourceReference] = list(env_references(effective.env, source, by_env))
+    refs.extend(artifact_references(effective.artifacts, source, provenance))
     by_credential = {
         name: declared_by
         for index, name in enumerate(effective.git_credentials)
@@ -59,6 +62,9 @@ def effective_references(
             declared_by=owner(("user_install_commands", index)),
         )
         for index, name in enumerate(effective.user_install_commands)
+    )
+    refs.extend(
+        activation_references(effective.harness_integrations, facet="user", source=source, provenance=provenance)
     )
     return tuple(refs)
 
@@ -139,11 +145,12 @@ class AdminConfig(DeclaredResource):
     """Whether to mark checkouts as git ``safe.directory`` for this user.
     Write booleans unquoted; quoted strings such as ``"no"`` are invalid."""
 
-    claude_marketplaces: list[str] = Field(default_factory=list)
-    """Claude Code marketplaces to register for the admin user."""
+    harness_integrations: Annotated[list[CapabilityBlock], MergeStrategy.REPLACE] = Field(default_factory=list)
+    """Ordered integrations explicitly activated for native user setup.
+    An instance list replaces this template selection; an empty list activates none."""
 
-    claude_plugins: list[str] = Field(default_factory=list)
-    """Claude Code plugins to install for the admin user."""
+    artifacts: ArtifactsConfig = Field(default_factory=ArtifactsConfig)
+    """Artifact bundles selected for the VM admin user."""
 
     env: EnvTable = Field(default_factory=dict)
     """Environment variables exported whenever a shell is opened as the
@@ -162,21 +169,15 @@ class AdminConfig(DeclaredResource):
         return self
 
     def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
-        from agentworks.resources.reference import (
-            ResourceReference as _ResourceReq,
-        )
+        return list(effective_references(self, ("admin-template", self.name), {}))
 
-        source = ("admin-template", self.name)
-        refs: list[ResourceReference] = list(env_references(self.env, source))
-        refs.extend(credential_references(self.git_credentials, source))
-        # Install-command references for user_install_commands.
-        for cmd in self.user_install_commands:
-            refs.append(
-                _ResourceReq(
-                    name=cmd,
-                    kind="user-install-command",
-                    usage="a user install command",
-                    source=source,
-                )
-            )
-        return refs
+    def validate_config(self, context: FinalizeContext) -> None:
+        from agentworks.capabilities.harness_integration.activations import validate_activations
+
+        validate_activations(
+            self.harness_integrations,
+            facet="user",
+            source=("admin-template", self.name),
+            provenance={},
+            location=self.error_location,
+        )

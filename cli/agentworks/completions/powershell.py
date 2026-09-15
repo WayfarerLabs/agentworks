@@ -58,6 +58,11 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
         " | ForEach-Object { ($_ -split '/', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
+    "harness_integrations": (
+        "(agw resource list --kind harness-integration --names-only 2>$null"
+        " | ForEach-Object { ($_ -split '/', 2)[1] }"
+        ' | Where-Object { $_ -like "$wordToComplete*" })'
+    ),
     "secrets": ('(agw secret list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
     "resource_kinds": ('(agw resource kinds --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
     "resource_refs": ('(agw resource list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),

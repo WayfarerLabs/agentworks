@@ -202,14 +202,12 @@ def test_session_create_frames_phases_like_a_plan(
     db.close()
 
 
-def test_realize_bodies_take_domain_shaped_kwargs_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pin the realization-body seam contract: the bodies are
-    phase-free domain code and receive domain-shaped kwargs ONLY. Everything power-shaped arrives already
-    prepared by the orchestrator: the agent body's credential requests carry
-    scoped provider contexts prepared at the one boundary,
-    and NO resolver, values mapping, or platform threads through, so a
-    body structurally cannot re-run a resolve or re-frame phases. If
-    someone widens this seam to "save" a resolve, this test trips."""
+def test_realizers_receive_the_same_prepared_setup_after_one_resolve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pending setup joins the eager boundary and reaches the realizer unchanged."""
+    from agentworks.harness_setup.inputs import SetupInputs
+    from agentworks.secrets.orchestration import SecretTarget
     from agentworks.sessions.manager import create_session
 
     db = Database(tmp_path / "test.db")
@@ -220,10 +218,34 @@ def test_realize_bodies_take_domain_shaped_kwargs_only(tmp_path: Path, monkeypat
     db._conn.commit()
     _install_session_prep_stubs(monkeypatch)
 
-    seam_kwargs: dict[str, set[str]] = {}
+    prepared = {kind: SetupInputs(kind, "s1", kind, (), SecretTarget(vm={})) for kind in ("agent", "workspace")}
+    for kind, inputs in prepared.items():
+        monkeypatch.setattr(
+            f"agentworks.harness_setup.lifecycle.prepare_{kind}_setup",
+            lambda *args, selected=inputs, **kwargs: selected,
+        )
+    registered = []
+    resolved: list[dict[str, str]] = []
+    original_register = SetupInputs.register
+    original_resolve = Resolver.resolve
+
+    def register(self, resolver, registry):
+        assert not resolved
+        registered.append(self)
+        original_register(self, resolver, registry)
+
+    def resolve(self):
+        assert registered == [prepared["workspace"], prepared["agent"]]
+        original_resolve(self)
+        resolved.append(self.values)
+
+    monkeypatch.setattr(SetupInputs, "register", register)
+    monkeypatch.setattr(Resolver, "resolve", resolve)
+    seam_kwargs: dict[str, dict[str, object]] = {}
 
     def _ws_spy(db: object, config: object, registry: object, **kwargs: object) -> None:
-        seam_kwargs["realize_workspace"] = set(kwargs)
+        seam_kwargs["workspace"] = kwargs
+        assert len(resolved) == 1
         db._conn.execute(  # type: ignore[attr-defined]
             "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES (?, ?, ?, ?)",
             (kwargs["name"], kwargs["vm"].name, "/tmp/ws", f"ws-{kwargs['name']}"),  # type: ignore[attr-defined]
@@ -231,7 +253,8 @@ def test_realize_bodies_take_domain_shaped_kwargs_only(tmp_path: Path, monkeypat
         db._conn.commit()  # type: ignore[attr-defined]
 
     def _ag_spy(db: object, config: object, registry: object, **kwargs: object) -> None:
-        seam_kwargs["realize_agent"] = set(kwargs)
+        seam_kwargs["agent"] = kwargs
+        assert len(resolved) == 1
         db.insert_agent(kwargs["name"], kwargs["vm"].name, f"aw-{kwargs['name']}")  # type: ignore[attr-defined,union-attr]
 
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
@@ -258,19 +281,11 @@ def test_realize_bodies_take_domain_shaped_kwargs_only(tmp_path: Path, monkeypat
             interaction=TtyInteractionPolicy.REFUSE,
         )
 
-    # Allowlist, not denylist: the seam contract is domain-shaped args
-    # and NOTHING else, so any smuggled kwarg (values, resolver,
-    # platform, ...) trips this regardless of its name.
-    assert seam_kwargs["realize_workspace"] == {"name", "vm", "template", "overlay", "defer_overlay_report"}
-    assert seam_kwargs["realize_agent"] == {
-        "name",
-        "vm",
-        "template",
-        "overlay",
-        "credential_requests",
-        "credential_redactions",
-        "defer_overlay_report",
-    }
+    for kind, kwargs in seam_kwargs.items():
+        assert kwargs["setup_inputs"] is prepared[kind]
+        assert kwargs["setup_values"] == resolved[0]
+        assert "resolver" not in kwargs
+    assert set(seam_kwargs) == {"agent", "workspace"}
     db.close()
 
 

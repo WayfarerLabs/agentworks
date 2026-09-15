@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 from agentworks.capabilities.base import Capability
 
@@ -89,7 +89,7 @@ class GitCredentialProvider(Capability):
     target user's files or Git configuration.
     """
 
-    owner_kind: ClassVar[str] = "git-credential"
+    owner_kind: str = "git-credential"
 
     def __init__(
         self,
@@ -104,7 +104,7 @@ class GitCredentialProvider(Capability):
     @property
     def config(self) -> BaseModel:
         """This credential's validated provider-owned configuration."""
-        return self._config
+        return self._require_config()
 
     def review_remote(self, url: str) -> list[str]:
         """Return provider-owned advisories for a declared remote URL."""

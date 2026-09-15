@@ -34,7 +34,7 @@ from agentworks.schema import (
 )
 
 if TYPE_CHECKING:
-    from agentworks.capabilities.descriptor import CapabilityKindDescriptor
+    from agentworks.capabilities.descriptor import CapabilityKindDescriptor, Facet
 
 _MISSING = object()
 
@@ -59,31 +59,30 @@ def conformance_error(descriptor: CapabilityKindDescriptor, impl: type) -> str |
     if preliminary is not None:
         return preliminary
 
-    model, hook_error = _offered_config_model(impl)
-    if hook_error is not None:
-        return hook_error
-    model_label = "config_model"
-    if inspect.getattr_static(impl, "config_model", _MISSING) is not model:
-        model_label = "config_for() offered model"
-    return (
-        _model_error(
-            descriptor,
-            impl,
-            model_label,
-            descriptor.config_schema,
-            model=model,
-        )
-        or (
-            _model_error(
-                descriptor,
-                impl,
-                "mapping_model",
-                descriptor.mapping_schema,
+    facets = descriptor.config_facets or (None,)
+    for facet in facets:
+        model, hook_error = _offered_config_model(impl, facet=facet)
+        if hook_error is not None:
+            return hook_error
+        if model is None and descriptor.config_facets:
+            continue
+        label = f"config_for({facet!r}) offered model"
+        if facet is None:
+            label = (
+                "config_model"
+                if inspect.getattr_static(impl, "config_model", _MISSING) is model
+                else "config_for() offered model"
             )
-            if descriptor.mapping_schema is not None
-            else None
-        )
-        or _forbidden_reference_error(descriptor, model, model_label)
+        error = _model_error(descriptor, impl, label, descriptor.config_schema, model=model)
+        if error is not None:
+            return error
+        error = _forbidden_reference_error(descriptor, model, label)
+        if error is not None:
+            return error
+    return (
+        _model_error(descriptor, impl, "mapping_model", descriptor.mapping_schema)
+        if descriptor.mapping_schema is not None
+        else None
     )
 
 
@@ -136,12 +135,12 @@ def _config_hook_error(impl: type) -> str | None:
     return None
 
 
-def _offered_config_model(impl: type) -> tuple[object, str | None]:
+def _offered_config_model(impl: type, *, facet: Facet | None) -> tuple[object, str | None]:
     """Call the checked model-selection hook once at the registration seam."""
     from agentworks.capabilities.config import offered_model
 
     try:
-        return offered_model(impl), None
+        return offered_model(impl, facet=facet), None
     except Exception as exc:
         return None, (
             f"its 'config_for' raised {type(exc).__name__} while selecting the config model, "

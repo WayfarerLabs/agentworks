@@ -125,6 +125,7 @@ def _refs(blob: dict[str, object]) -> tuple[object, ...]:
         kind="harness-integration",
         config={"name": "shell", **blob},
         owner=RefOwner(kind="session-template", name="claude"),
+        facet="session",
     )
 
 
@@ -141,6 +142,7 @@ def _validate(blob: dict[str, object]) -> None:
         kind="harness-integration",
         config={"name": "shell", **blob},
         owner=RefOwner(kind="session-template", name="claude"),
+        facet="session",
     )
 
 

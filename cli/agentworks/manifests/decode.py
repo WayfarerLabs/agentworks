@@ -25,8 +25,6 @@ validated here: its shape check is the finalize ``validate_config`` pass
 
 from __future__ import annotations
 
-from functools import cache
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError as PydanticValidationError
@@ -40,7 +38,6 @@ from agentworks.schema._shape import Collection, shape_of
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from agentworks.capabilities.descriptor import CapabilityKindDescriptor
     from agentworks.env import EnvEntry
     from agentworks.manifests.envelope import Document
     from agentworks.schema.reference import ConfigReference
@@ -61,46 +58,6 @@ def _sample_hint(kind: str) -> str:
     vm-site platform enumeration, the git-credential provider list).
     """
     return f"`agw resource sample {kind}` prints this kind's fields"
-
-
-@cache
-def _hosting_descriptors() -> Mapping[str, CapabilityKindDescriptor]:
-    """Declarable kind -> the descriptor of the capability kind its spec
-    selects.
-
-    The whole descriptor rather than its ``manifest_section`` alone,
-    because a caller needs both halves: the field names to read
-    (``manifest_section``) and the capability kind to validate or extract
-    against (``kind``).
-
-    Derived from the capability-kind descriptor table, which is where a
-    kind records how it is selected inside its host's spec. Three of the
-    four kinds have a host surface (``vm-site`` hosts vm-platform,
-    ``git-credential`` hosts git-credential-provider, ``session-template``
-    hosts harness-integration); ``secret-backend`` has none, because the
-    per-secret ``backend_mappings`` map key already names the capability.
-    Membership IS the dispatch: a declarable kind in this map gets the
-    capability fold, and one absent from it names no capability.
-
-    An accessor rather than a module-level constant, for UNIFORMITY with the
-    derived sites where laziness is forced, not because a cycle threatens
-    here: none of the four contributing ``kinds.py`` modules loads anything
-    under ``agentworks.manifests``, and ``agentworks.manifests.__init__``
-    already loads all four. It does keep the load boundary where the
-    descriptor module puts it, collecting the table on first use rather than
-    at import of whoever imports this.
-
-    Host kinds are unique across the table (a declarable kind hosts at most
-    one capability kind), so keying by ``host_kind`` loses nothing. The
-    descriptor-table tests assert that, because if two records ever claimed
-    the same host, one of them would silently vanish here along with its
-    fold.
-    """
-    from agentworks.capabilities.descriptor import capability_descriptors
-
-    return MappingProxyType(
-        {descriptor.manifest_section.host_kind: descriptor for descriptor in capability_descriptors()}
-    )
 
 
 def decode_document(doc: Document, issues: list[str]) -> Any:
@@ -328,17 +285,25 @@ def _hosted_capability_references(
     idempotent and cannot re-enter: building the index only seats impls,
     and the bundled manifests a plugin ships are published later.
     """
-    descriptor = _hosting_descriptors().get(doc.kind)
-    if descriptor is None:
-        return ()
-    import agentworks.plugins  # noqa: F401  (imported for the seating side effect)
     from agentworks.capabilities.config import capability_config_references
+    from agentworks.manifests.spec_model import hosted_capabilities
     from agentworks.schema import CapabilityBlock
 
-    block = getattr(resource, descriptor.manifest_section.naming_field, None)
-    if not isinstance(block, CapabilityBlock):
-        return ()
-    return capability_config_references(kind=descriptor.kind, config=block.tagged, owner=owner)
+    refs: list[ConfigReference] = []
+    for descriptor, host in hosted_capabilities(doc.kind):
+        value = getattr(resource, host.naming_field, None)
+        blocks = value if host.cardinality == "list" and isinstance(value, (list, tuple)) else (value,)
+        for block in blocks:
+            if isinstance(block, CapabilityBlock):
+                refs.extend(
+                    capability_config_references(
+                        kind=descriptor.kind,
+                        config=block.tagged,
+                        owner=owner,
+                        facet=host.facet,
+                    )
+                )
+    return tuple(refs)
 
 
 def _conforming_secret(name: str) -> bool:

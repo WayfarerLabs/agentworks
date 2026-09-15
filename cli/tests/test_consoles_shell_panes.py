@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import Database
+from agentworks.db import Database, SessionMode
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import multi_console
 from agentworks.sessions.multi_console import add_shell, delete_console
@@ -82,10 +82,7 @@ def test_split_shell_pane_agent_branch_uses_sudo(db: Database, fake_target: _Fak
     db._conn.execute(
         "INSERT INTO agents (name, vm_name, linux_user) VALUES ('bot', 'vm1', 'bot-user')",
     )
-    db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode, agent_name, socket_path) "
-        "VALUES ('s', 'ws-vm1', 'default', 'agent', 'bot', '/tmp/s.sock')",
-    )
+    db.insert_session("s", "ws-vm1", "default", SessionMode.AGENT, agent_name="bot", socket_path="/tmp/s.sock")
     db._conn.commit()
     create_console(db, name="con", vm_name="vm1", session_specs=["s"])
 
@@ -129,10 +126,7 @@ def _seed_agent_session_console(db: Database) -> None:
     db._conn.execute(
         "INSERT INTO agents (name, vm_name, linux_user) VALUES ('bot', 'vm1', 'bot-user')",
     )
-    db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode, agent_name, socket_path) "
-        "VALUES ('s', 'ws-vm1', 'default', 'agent', 'bot', '/tmp/s.sock')",
-    )
+    db.insert_session("s", "ws-vm1", "default", SessionMode.AGENT, agent_name="bot", socket_path="/tmp/s.sock")
     db._conn.commit()
     create_console(db, name="con", vm_name="vm1", session_specs=["s"])
 
@@ -285,10 +279,7 @@ def test_split_shell_pane_emits_workspace_identity_only(db: Database, fake_targe
     db._conn.execute(
         "INSERT INTO agents (name, vm_name, linux_user) VALUES ('bot', 'vm1', 'bot-user')",
     )
-    db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode, agent_name, socket_path) "
-        "VALUES ('s', 'ws-vm1', 'default', 'agent', 'bot', '/tmp/s.sock')",
-    )
+    db.insert_session("s", "ws-vm1", "default", SessionMode.AGENT, agent_name="bot", socket_path="/tmp/s.sock")
     db._conn.commit()
     create_console(db, name="con", vm_name="vm1", session_specs=["s"])
 

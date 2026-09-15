@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.config import load_config
-from agentworks.db import Database, VersionedPayload
+from agentworks.db import Database, SessionMode, VersionedPayload
 from agentworks.env.show import ResolvedEnvRow, show_env
 from agentworks.errors import StateError, ValidationError
 from agentworks.instance_specs import parse_instance_spec
@@ -97,10 +97,13 @@ def _seed_db(
     if with_agent:
         db.insert_agent("claude", "vm-1", "aw-claude")
     if with_session:
-        db._conn.execute(
-            "INSERT INTO sessions (name, workspace_name, template, mode, agent_name, socket_path) "
-            "VALUES ('s1', 'ws-a', 'default', 'agent', 'claude', "
-            "'/run/agentworks/agent-tmux-sockets/aw-claude/s1.sock')"
+        db.insert_session(
+            "s1",
+            "ws-a",
+            "default",
+            SessionMode.AGENT,
+            agent_name="claude",
+            socket_path="/run/agentworks/agent-tmux-sockets/aw-claude/s1.sock",
         )
     db._conn.commit()
 
@@ -222,10 +225,12 @@ def test_copied_workspace_template_shows_no_workspace_env_and_does_not_crash(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group, template) "
         "VALUES ('ws-proj', 'vm-1', '/home/agentworks/ws-proj', 'ws-ws-proj', 'proj')"
     )
-    db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode, socket_path) "
-        "VALUES ('s-copied', 'ws-copied', 'default', 'admin', "
-        "'/run/agentworks/admin-tmux-sockets/agentworks/s-copied.sock')"
+    db.insert_session(
+        "s-copied",
+        "ws-copied",
+        "default",
+        SessionMode.ADMIN,
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/s-copied.sock",
     )
     db._conn.commit()
 
@@ -342,7 +347,7 @@ def test_session_scope_wins_over_vm_for_same_key(
     cfg = _write_config(
         tmp_path,
         vm_template=ManifestDoc("vm-template", "default", {"env": {"EDITOR": "vim"}}),
-        manifests=[ManifestDoc("session-template", "shell", {"env": {"EDITOR": "nvim"}})],
+        manifests=[ManifestDoc("session-template", "shell", {"inherits": ["default"], "env": {"EDITOR": "nvim"}})],
     )
     config = load_config(cfg, warn_issues=False)
     _seed_db(db, with_workspace=True, with_agent=True, with_session=True)
@@ -545,7 +550,13 @@ def test_identity_var_overlays_user_env(
     at render time (per FRD R1; the operator's value is replaced)."""
     cfg = _write_config(
         tmp_path,
-        manifests=[ManifestDoc("session-template", "shell", {"env": {"AGENTWORKS_SESSION": "operator-override"}})],
+        manifests=[
+            ManifestDoc(
+                "session-template",
+                "shell",
+                {"inherits": ["default"], "env": {"AGENTWORKS_SESSION": "operator-override"}},
+            )
+        ],
     )
     config = load_config(cfg, warn_issues=False)
     _seed_db(db, with_workspace=True, with_agent=True, with_session=True)

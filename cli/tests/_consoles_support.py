@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentworks.db import Database
+from agentworks.db import Database, SessionMode
 from tests.conftest import stub_build_registry
 
 
@@ -54,10 +54,12 @@ def _seed_sessions(db: Database, names: list[str], *, workspace_name: str = "ws-
         # Per the env-and-secrets SDD, all sessions (admin and agent) carry
         # a per-session socket path. Tests that only need the row's existence
         # use a sentinel path; tests that actually probe tmux replace it.
-        db._conn.execute(
-            "INSERT INTO sessions (name, workspace_name, template, mode, socket_path) "
-            "VALUES (?, ?, 'default', 'admin', ?)",
-            (n, workspace_name, f"/run/agentworks/admin-tmux-sockets/admin/{n}.sock"),
+        db.insert_session(
+            n,
+            workspace_name,
+            "default",
+            SessionMode.ADMIN,
+            socket_path=f"/run/agentworks/admin-tmux-sockets/admin/{n}.sock",
         )
     db._conn.commit()
 

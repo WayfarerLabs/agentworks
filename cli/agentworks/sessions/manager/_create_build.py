@@ -320,6 +320,31 @@ def _build_session_graph(
         allow_transient_auto_declare=True,
     )
 
+    from agentworks.harness_setup.lifecycle import prepare_agent_setup, prepare_workspace_setup
+
+    if pending_workspace is not None:
+        assert workspace_tmpl is not None
+        pending_workspace.setup_inputs = prepare_workspace_setup(
+            db,
+            registry,
+            vm=vm,
+            name=workspace_name,
+            template=workspace_tmpl,
+        )
+        if pending_workspace.setup_inputs is not None:
+            pending_workspace.setup_inputs.register(resolver, registry)
+    if pending_agent is not None:
+        assert agent_tmpl is not None and agent_name is not None
+        pending_agent.setup_inputs = prepare_agent_setup(
+            db,
+            registry,
+            vm=vm,
+            name=agent_name,
+            template=agent_tmpl,
+        )
+        if pending_agent.setup_inputs is not None:
+            pending_agent.setup_inputs.register(resolver, registry)
+
     scope = OperationScope(
         level=ScopeLevel.SESSION,
         system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,

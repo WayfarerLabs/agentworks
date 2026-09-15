@@ -48,6 +48,7 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
+    from agentworks.capabilities.descriptor import Facet
     from agentworks.config import Config
     from agentworks.resources.graph import Readiness
     from agentworks.resources.reference import ConfigReference
@@ -296,7 +297,7 @@ class Capability(ABC):
     reference), which is why nothing authors a second one-liner beside
     ``prose``."""
 
-    owner_kind: ClassVar[str]
+    owner_kind: str
 
     prose: ClassVar[TopicProse | None] = None
     """The authored paragraphs about this implementation: what it needs,
@@ -336,33 +337,28 @@ class Capability(ABC):
     contract (``CapabilityKindDescriptor.config_schema``)."""
 
     @classmethod
-    def config_for(cls) -> type[BaseModel]:
+    def config_for(cls, facet: Facet | None = None) -> type[BaseModel] | None:
         """The config model this capability offers.
 
-        A capability DECLARES the config it offers the way it declares its
-        API methods, and the core reads the declaration rather than asking
-        the capability to do anything with it. This hook is the override
-        point for a capability whose answer is not simply ``config_model``,
-        and reading the config THROUGH it is what makes such a capability
-        an ordinary registration rather than a framework change. Nothing
-        overrides it today.
+        A facet is a scoped part of a capability. Ordinary capabilities share
+        one config across operations and ignore the optional facet. Harness
+        integrations currently select among the fixed vm, user, workspace,
+        and session facets. Consumers choose the facet; implementations never
+        receive resource kinds as config selectors.
 
-        Config is offered per FACET by contract, a facet being the LEVEL a
-        capability is driven at (vm, user, workspace, session). CONSUMERS
-        choose the facet they drive, so a producer never has to know who is
-        asking, and facets are deliberately NOT scopes: core owns the
-        mapping, so two surfaces meaning the same level get the same answer
-        by construction. Nothing under ``capabilities/`` spells a scope. The
-        signature takes no facet argument because no capability offers more
-        than one config yet.
-
-        Offering a config is not a claim to support a level, and offering
-        none is not a claim to lack one; support is carried by the
-        implementation. ``capabilities/README.md`` has the full contract.
+        Offering no model means a name-only integration activation, not a
+        support claim.
         """
         return cls.config_model
 
-    def __init__(self, owner_name: str, config: Mapping[str, object]) -> None:
+    def __init__(
+        self,
+        owner_name: str,
+        config: Mapping[str, object] | None,
+        *,
+        facet: Facet | None = None,
+        owner_kind: str | None = None,
+    ) -> None:
         """Bind to ``(owner_name, config)``, validated.
 
         Config validity is a construct-time invariant: the blob is
@@ -380,20 +376,34 @@ class Capability(ABC):
         What is validated is whatever :meth:`config_for` answers with, so a
         capability that overrides the hook is bound to the model it
         actually offers rather than to its ``config_model`` declaration.
+        ``owner_kind`` can identify the actual config host for a facet; the
+        capability kind supplies the ordinary default. Absent config binds a
+        retiring integration activation only and never derives new defaults.
         """
-        from agentworks.capabilities.config import validate_own_config
+        from agentworks.capabilities.config import config_model_for, validate_own_config
         from agentworks.schema import extract_references, filled_defaults
 
         self.owner_name = owner_name
+        if owner_kind is not None:
+            self.owner_kind = owner_kind
+        self._config: BaseModel | None = None
+        self._secret_refs: tuple[ConfigReference, ...] = ()
+        if config is None:
+            from agentworks.capabilities.descriptor import descriptor_for_impl
+
+            descriptor = descriptor_for_impl(type(self))
+            if descriptor is None or not descriptor.config_facets or facet not in ("vm", "user", "workspace"):
+                raise StateError("absent config is reserved for retiring integration activations")
+            return
         owner = RefOwner(kind=self.owner_kind, name=owner_name)
-        model = type(self).config_for()
-        self._config = validate_own_config(type(self), config, owner=owner)
+        model = config_model_for(type(self), facet=facet)
+        self._config = validate_own_config(type(self), config, owner=owner, facet=facet)
         # Extracted from the FILLED blob, exactly as the finalize pass
         # extracts: the boundary fill is the one renderer of templated
         # defaults (validation above applies the same fill), so an
         # instance's declared secrets are the same set the graph carries
         # for it.
-        self._secret_refs: tuple[ConfigReference, ...] = tuple(
+        self._secret_refs = tuple(
             ref for ref in extract_references(model, filled_defaults(model, config, owner)) if ref.kind == "secret"
         )
 
@@ -406,6 +416,12 @@ class Capability(ABC):
         :meth:`_config_as`, so an operation reads a typed field and mypy
         checks it.
         """
+        return self._require_config()
+
+    def _require_config(self) -> BaseModel:
+        """Read bound config without invoking a subclass's narrowing property."""
+        if self._config is None:
+            raise StateError("a retiring integration has no desired config")
         return self._config
 
     def _config_as[M: BaseModel](self, model: type[M]) -> M:
@@ -419,12 +435,13 @@ class Capability(ABC):
         surface as an ``AttributeError`` somewhere in an operation
         instead.
         """
-        if not isinstance(self._config, model):
+        config = self._require_config()
+        if not isinstance(config, model):
             raise StateError(
-                f"{type(self).__name__} bound a {type(self._config).__name__} config "
+                f"{type(self).__name__} bound a {type(config).__name__} config "
                 f"where its own declared model is {model.__name__}"
             )
-        return self._config
+        return config
 
     @property
     def _owner_display(self) -> str:

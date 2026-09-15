@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import VMStatus
+from agentworks.db import SessionMode, VMStatus
 from agentworks.errors import StateError, ValidationError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -289,10 +289,7 @@ def test_restore_session_stopped_vm_drives_the_real_gated_composition(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
         "VALUES ('ws1', 'box', '/srv/ws1', 'ws-ws1')"
     )
-    db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode, socket_path) "
-        "VALUES ('s1', 'ws1', 'default', 'admin', '/tmp/s1.sock')"
-    )
+    db.insert_session("s1", "ws1", "default", SessionMode.ADMIN, socket_path="/tmp/s1.sock")
     db._conn.execute(
         "INSERT INTO console_sessions (console_name, session_name, shells, position) VALUES ('c1', 's1', '[]', 0)"
     )

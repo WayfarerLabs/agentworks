@@ -45,7 +45,7 @@ def test_admin_to_git_credentials_to_secret_walk(tmp_path: Path) -> None:
             ManifestDoc(
                 "admin-template",
                 "default",
-                {"git_credentials": ["github"], "claude_marketplaces": [], "claude_plugins": []},
+                {"git_credentials": ["github"]},
             ),
         ],
     )
@@ -125,7 +125,7 @@ def test_collect_secrets_for_walks_admin_subgraph(tmp_path: Path) -> None:
             ManifestDoc(
                 "admin-template",
                 "default",
-                {"git_credentials": ["github", "azdo"], "claude_marketplaces": [], "claude_plugins": []},
+                {"git_credentials": ["github", "azdo"]},
             ),
         ],
     )

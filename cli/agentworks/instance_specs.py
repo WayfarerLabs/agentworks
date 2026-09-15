@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import math
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, cast
@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from agentworks.db import Database, DesiredOverlayRecord
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
+    from agentworks.schema import CapabilityBlock
     from agentworks.sessions.template import SessionTemplate
     from agentworks.vms.admin import AdminConfig
     from agentworks.vms.template import VMTemplate
@@ -130,8 +131,17 @@ def parse_vm_instance_specs(
     return _vm_instance_overlays(vm_overlay, admin)
 
 
-def decode_stored_overlay(record: DesiredOverlayRecord) -> InstanceOverlay[BaseModel] | VMInstanceOverlays:
+def decode_stored_overlay(
+    record: DesiredOverlayRecord, *, legacy_user_base: list[CapabilityBlock] | None = None
+) -> InstanceOverlay[BaseModel] | VMInstanceOverlays:
     """Decode a persisted overlay at the state-database trust boundary."""
+    from agentworks.legacy_claude import LegacyClaudeContextRequired, legacy_component, translated_record
+
+    if legacy_component(record) is not None:
+        decoded = decode_stored_overlay(translated_record(record, legacy_user_base))
+        if legacy_user_base is None:
+            raise LegacyClaudeContextRequired("stored Claude setup needs its selected template before conversion")
+        return decoded
     if record.instance_kind == "vm":
         return decode_stored_vm_overlays(record)
     if record.payload.payload_version != _NON_VM_RECORD_PAYLOAD_VERSION:
@@ -167,10 +177,19 @@ def decode_stored_overlay(record: DesiredOverlayRecord) -> InstanceOverlay[BaseM
         ) from error
 
 
-def decode_stored_vm_overlays(record: DesiredOverlayRecord) -> VMInstanceOverlays:
+def decode_stored_vm_overlays(
+    record: DesiredOverlayRecord, *, legacy_user_base: list[CapabilityBlock] | None = None
+) -> VMInstanceOverlays:
     """Decode one persisted composite VM declaration at its trust boundary."""
     if record.instance_kind != "vm":
         raise TypeError("a VM desired declaration requires a VM record")
+    from agentworks.legacy_claude import LegacyClaudeContextRequired, legacy_component, translated_record
+
+    if legacy_component(record) is not None:
+        decoded = decode_stored_vm_overlays(translated_record(record, legacy_user_base))
+        if legacy_user_base is None:
+            raise LegacyClaudeContextRequired("stored Claude setup needs its selected admin template before conversion")
+        return decoded
     if record.payload.payload_version == _LEGACY_VM_RECORD_PAYLOAD_VERSION:
         return _decode_legacy_stored_vm_overlay(record)
     if record.payload.payload_version != _VM_RECORD_PAYLOAD_VERSION:
@@ -236,19 +255,25 @@ def get_instance_overlay(
     db: Database,
     instance_kind: InstanceKind,
     instance_name: str,
+    *,
+    legacy_user_base: list[CapabilityBlock] | None = None,
 ) -> InstanceOverlay[BaseModel] | None:
     record = db.instance_state.get_desired_overlay(instance_kind, instance_name)
     if record is None:
         return None
     if instance_kind == "vm":
-        return cast("InstanceOverlay[BaseModel] | None", decode_stored_vm_overlays(record).vm)
-    return cast("InstanceOverlay[BaseModel]", decode_stored_overlay(record))
+        return cast(
+            "InstanceOverlay[BaseModel] | None", decode_stored_vm_overlays(record, legacy_user_base=legacy_user_base).vm
+        )
+    return cast("InstanceOverlay[BaseModel]", decode_stored_overlay(record, legacy_user_base=legacy_user_base))
 
 
-def get_vm_instance_overlays(db: Database, instance_name: str) -> VMInstanceOverlays | None:
+def get_vm_instance_overlays(
+    db: Database, instance_name: str, *, legacy_user_base: list[CapabilityBlock] | None = None
+) -> VMInstanceOverlays | None:
     """Load both final VM declaration components from their one desired row."""
     record = db.instance_state.get_desired_overlay("vm", instance_name)
-    return None if record is None else decode_stored_vm_overlays(record)
+    return None if record is None else decode_stored_vm_overlays(record, legacy_user_base=legacy_user_base)
 
 
 def persist_creation_overlay(
@@ -304,6 +329,8 @@ def replace_agent_overlay(
     supplied: bool,
 ) -> OverlayOutcome | None:
     """Apply agent-reinit retain, replace, and clear semantics in an outer transaction."""
+    from agentworks.legacy_claude import LegacyClaudeContextRequired
+
     if supplied and overlay is not None and not overlay.payload.value:
         prior_record = db.instance_state.get_desired_overlay("agent", instance_name)
         if prior_record is None:
@@ -312,14 +339,19 @@ def replace_agent_overlay(
             prior_fields = decode_stored_overlay(prior_record).fields
         except UnsupportedStoredOverlayError:
             prior_fields = ()
+        except LegacyClaudeContextRequired:
+            prior_fields = tuple(sorted(prior_record.payload.value))
         db.instance_state.clear_desired_overlay("agent", instance_name)
         return OverlayOutcome(OverlayDisposition.CLEARED, prior_fields)
 
-    prior = get_instance_overlay(db, "agent", instance_name)
+    prior = db.instance_state.get_desired_overlay("agent", instance_name)
+    if prior is not None:
+        with suppress(LegacyClaudeContextRequired):
+            decode_stored_overlay(prior)
     if not supplied:
         if prior is None:
             return None
-        return OverlayOutcome(OverlayDisposition.RETAINED, prior.fields)
+        return OverlayOutcome(OverlayDisposition.RETAINED, tuple(sorted(prior.payload.value)))
     if overlay is None:
         raise TypeError("a supplied instance spec must be parsed")
     db.instance_state.put_desired_overlay("agent", instance_name, overlay.payload)

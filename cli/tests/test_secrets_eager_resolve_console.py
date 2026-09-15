@@ -19,6 +19,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from agentworks.db import SessionMode
 from agentworks.errors import SecretUnavailableError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import ProbeStatus
@@ -45,9 +46,7 @@ def test_console_add_shell_eager_resolve_fires_before_db_update(
     db = _seed_basic_db(tmp_path)
 
     # Seed: a session + a console + a console-session membership.
-    db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode) VALUES ('s1', 'ws1', 'default', 'admin')"
-    )
+    db.insert_session("s1", "ws1", "default", SessionMode.ADMIN)
     db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')")
     db._conn.execute(
         "INSERT INTO console_sessions (console_name, session_name, shells, position) VALUES ('c1', 's1', '[]', 0)"
@@ -100,9 +99,7 @@ def test_console_add_shell_promotes_admin_for_admin_mode_session(
     from agentworks.sessions import multi_console
 
     db = _seed_basic_db(tmp_path)
-    db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode) VALUES ('s1', 'ws1', 'default', 'admin')"
-    )
+    db.insert_session("s1", "ws1", "default", SessionMode.ADMIN)
     db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')")
     db._conn.execute(
         "INSERT INTO console_sessions (console_name, session_name, shells, position) VALUES ('c1', 's1', '[]', 0)"
@@ -231,9 +228,7 @@ def test_console_build_secret_targets_excludes_session_attach_panes(
 
     db = _seed_basic_db(tmp_path)
     # Seed: console with admin_shell=True + one session with two shells.
-    db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode) VALUES ('s1', 'ws1', 'default', 'admin')"
-    )
+    db.insert_session("s1", "ws1", "default", SessionMode.ADMIN)
     db._conn.execute("INSERT INTO consoles (name, vm_name, admin_shell) VALUES ('c1', 'vm1', 1)")
     # Two shells: one --admin, one not. Admin-mode session promotes the
     # non-admin shell to admin via use_admin = ... or session_user ==
@@ -348,9 +343,7 @@ def test_console_add_sessions_does_not_eager_resolve_live_branch(
     from agentworks.sessions import multi_console
 
     db = _seed_basic_db(tmp_path)
-    db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode) VALUES ('s1', 'ws1', 'default', 'admin')"
-    )
+    db.insert_session("s1", "ws1", "default", SessionMode.ADMIN)
     db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')")
     db._conn.commit()
 
@@ -407,9 +400,7 @@ def test_console_add_sessions_does_not_eager_resolve_db_only_branch(
     from agentworks.sessions import multi_console
 
     db = _seed_basic_db(tmp_path)
-    db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode) VALUES ('s1', 'ws1', 'default', 'admin')"
-    )
+    db.insert_session("s1", "ws1", "default", SessionMode.ADMIN)
     db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')")
     db._conn.commit()
 
@@ -447,9 +438,7 @@ def test_console_add_sessions_with_shells_eager_resolves(
     from agentworks.sessions import multi_console
 
     db = _seed_basic_db(tmp_path)
-    db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode) VALUES ('s1', 'ws1', 'default', 'admin')"
-    )
+    db.insert_session("s1", "ws1", "default", SessionMode.ADMIN)
     db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')")
     db._conn.commit()
 
@@ -500,9 +489,7 @@ def test_console_add_sessions_without_shells_does_not_eager_resolve(
     from agentworks.sessions import multi_console
 
     db = _seed_basic_db(tmp_path)
-    db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode) VALUES ('s1', 'ws1', 'default', 'admin')"
-    )
+    db.insert_session("s1", "ws1", "default", SessionMode.ADMIN)
     db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')")
     db._conn.commit()
 
@@ -540,9 +527,7 @@ def test_restore_session_window_missing_branch_eager_resolves(
     from agentworks.sessions import multi_console
 
     db = _seed_basic_db(tmp_path)
-    db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode) VALUES ('s1', 'ws1', 'default', 'admin')"
-    )
+    db.insert_session("s1", "ws1", "default", SessionMode.ADMIN)
     db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')")
     # Two configured shells so the rebuild would open new panes.
     db._conn.execute(

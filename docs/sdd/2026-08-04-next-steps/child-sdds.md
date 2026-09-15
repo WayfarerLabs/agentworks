@@ -214,6 +214,14 @@ Adopting it collapses ledger structure rather than adding it. The pre-0.14 test-
 and the prose-test-purge child are both absorbed here, and the closeout wave's test-consolidation
 item shrinks to a verification sweep.
 
+**Caveat, 2026-09-14:** that last clause assumes the simplification pass executes the trim early.
+The pass's disposition is now an open operator decision (see the standing-loop ruling below), and
+the transport rebuild will delete the execution-stack portion of its territory outright. If the pass
+winds down without executing the trim, the closeout wave's test-consolidation item does not shrink
+to a verification sweep for the remaining estate, and either the standing loop covers it before
+closeout or the closeout wave carries it. Recorded so the closeout is not planned against a premise
+that quietly stopped holding.
+
 - [x] Seeded by the effort lead (findings, FRD, HLA, plan, migration strategy; PR #509 in draft
       artifact review). The first draft was a 35-item coordinated program, cut by operator direction
       to three steps: rule adjustment, deletion waves, reassess
@@ -650,8 +658,109 @@ Merged work the ledger owes a line, recorded from the merges themselves.
   sanctioned exception, so the 2026-09-04 lock held. This is an addendum to that effort, not a fifth
   effort in the reconstruction below.
 
-Not recorded yet, because their PRs are open and merged PRs are this ledger's truth source: wave 4's
-pickup by an effort lead (PR #761) and the artifact-delivery reconciliation (PR #765).
+- **Artifact delivery reconciled** (PR #765, merged 2026-09-08). `target-state.md` and
+  `scope-participation-contract.md` now carry the 2026-09-06 artifact-delivery and
+  explicit-enablement rulings, corrected in place. The single-enforcement-point rule they originally
+  recorded is gone: the operator reopened whether an artifact entry still deferred at the session
+  facet blocks launch, and the artifacts successor SDD settles it. What survives is that such an
+  entry receives an explicit disposition and that silent loss is never one.
+- **`2026-09-06-degraded-runnable-recovery` locked** (PR #764, merged 2026-09-10, `locked.md` dated
+  2026-09-09). The effort the saga lead's review of PR #756 split out, settled on the axis recorded
+  there: inventory tolerates a degraded runnable, while focused operations and mutations stay
+  strict. Its restore work also hardened the database-use lock that wave 4's native setup locking
+  later had to merge with, so the two efforts met in `db/database.py` rather than only on paper.
+- **Wave 4 merged** (PR #761, merged 2026-09-12 as `7c744828`; its SDD is **not yet locked**). The
+  harness scope framework landed with design and implementation in one PR, after PR #780 was closed
+  unmerged and consolidated into it. What shipped is the facet framework and native setup: five
+  scopes and four facets, core env preparation then explicitly activated integrations, per-facet
+  config and schema propagation, actual-user required/recommended readiness, native Claude and Codex
+  user marketplaces and plugins, workstation settings mappings with four merge policies, and
+  instance-state applied state for setup, drift, and cleanup.
+  - **Deferred to the artifacts successor**, not built here: the `artifacts` block, artifact kinds
+    and producer APIs, acquisition, the normalized representation, propagation and deferral, content
+    storage, shell artifact delivery, and the early `session_uuid` slice. Feature capability kinds
+    remain future work with their pipeline position preserved as guidance.
+  - **Integration testing found four blockers at the first ready flip.** Three were fixed by
+    deleting the machinery that produced them, a round removing 272 net production lines: the
+    receipt-dependent VM deletion refusal, the destination-change veto, the settings ownership
+    ledger, and the changed-key classifier. The fourth, an activation at an unimplemented facet
+    banking a `complete` receipt that readiness read back as `current`, was fixed by making the base
+    setup methods reject unsupported invocations.
+  - **That fourth fix supersedes this saga's own ruling** at
+    `scope-participation-contract.md:72-74`, which chose base no-op defaults over an
+    absence-means-unsupported rule on the premise that "review and testing catch a mistyped
+    override." Eight of twelve integration-by-facet cells shipped accepted and inert, so the premise
+    did not hold. The effort relayed the operator's direction in
+    `message-2026-09-11-harness-unsupported-facets.md` and correctly did not edit this saga's
+    artifacts. Reconciling the contract is the saga lead's, pending the operator's direction.
+  - **Open after merge:** live VM acceptance of the harness integrations, which no lane has
+    performed, and the effort's final SDD lock.
+- **Agent artifacts merged** (PR #794, merged 2026-09-14 as `908258a9`; SDD **not yet locked**). The
+  wave 4 successor, seeded and delivered by the same lead, carrying the artifact half that
+  facets-first deferred: `artifact-bundle` resources and `artifacts` blocks, workstation and Git
+  acquisition into one normalized representation, integration-owned routing, native delivery for
+  Claude, Codex, grok and shell, `agw artifacts show`, and instance-state-backed ownership with
+  idempotent retirement.
+  - **It also delivered the shared session-identity slice** the saga had settled in August and no
+    effort owned. `SessionRow` now carries `session_uuid` (`NOT NULL UNIQUE`, so never-reused is a
+    schema constraint) and a nullable `run_id`. Existing sessions received a durable UUID; none
+    received an invented run. This is the dependency #770 was blocked on, and that lane has been
+    told.
+  - **Two relayed rulings on this effort contradict each other and need reconciling here**, not by
+    date-sorting: `message-2026-09-11-harness-unsupported-facets.md` routes inactive-VM inputs
+    directly to session; `message-2026-09-13-agent-artifacts-user-default.md` supersedes it with
+    user. The newer states the supersession; the older does not yet say it was superseded.
+  - **Open after merge:** live acceptance, the effort's SDD lock, and the saga-side reconciliation
+    of the superseded no-op-defaults rule at `scope-participation-contract.md:72-74`.
+- **Session cgroups adopted** (PR #770, adopted 2026-09-14 by operator ruling recorded in
+  `target-state.md`). An adjacent standalone child: saga-lead-seeded and reviewed, not a numbered
+  wave, and not gating the saga lock. It contains what an agent can do on its VM through cgroups and
+  a protected service registration. Status at adoption: round 1 handed off 2026-09-07 at `c306c139`,
+  both private reviewers clean on that head, still draft with `review-requested`, two published
+  rounds remaining. Its declared design gates stay open by intent, not by neglect: precise pane
+  lifetime, Bookworm versus a required Trixie upgrade, and side-by-side pricing of restricted
+  same-UID execution against per-run users. Its session-identity dependency is discharged, since
+  `session_uuid` and `run_id` landed on `main` with PR #794; that lane has been told.
+- **Transport and SSH rebuild adopted** (PRs #795 and #796, adopted 2026-09-14 by operator ruling
+  recorded in `target-state.md`). Two coordinated adjacent standalone children replacing the
+  execution layer rather than cleaning it in place: transport-improv
+  (`docs/sdd/2026-09-12-transport-improv/`) owns one shared execution contract through
+  permission-scoped views; ssh-connection-contracts
+  (`docs/sdd/2026-09-05-ssh-connection-contracts/`, superseding the design vehicle in PR #757) owns
+  an independent installed-OpenSSH carrier. The new stack may not import, wrap, subclass, or call
+  legacy execution code. Cutover and physical deletion of the old stack are transport-owned
+  deliverables.
+  - **Unlike the other adjacent standalone efforts, these bear prerequisites.** Waves 5 and 7 build
+    on the execution contract they define, so neither wave should be chartered against today's
+    transport. Recorded in `phasing.md` against both waves.
+  - **Saga-lead condition at adoption:** inventory the old stack's incident-derived behaviors before
+    deletion and re-prove each against the new stack. Those lessons live only in tests and comments
+    (forced TTY versus closed stdin, Windows stdin newline rewriting, the Git-for-Windows POSIX
+    toolchain dependency), and permission to copy useful tests does not protect them. The precedent
+    is wave 4's acquisition-safety design, which left the tree entirely when artifacts were deferred
+    and was recoverable only because the saga lead went looking for it.
+- **Simplification becomes a standing loop** (operator ruling 2026-09-14, recorded in
+  `target-state.md`). An operator-directed loop in the smol-dev shape, pointed at idle parts of the
+  codebase, replaces one-shot sweeps. **Establishing the loop is saga work; running it is not**, so
+  the closeout may wait on the loop existing and proven and must not wait on it finishing.
+  - **The simplification pass (PR #771) is not yet closed by this ruling.** Its disposition is an
+    open operator decision. The factors, recorded so the decision is not re-derived: much of its
+    sweep territory is the execution stack the transport rebuild will delete outright; it carries a
+    live correctness defect in its callee walk, where functions are marked seen before the depth
+    gate so verdicts depend on traversal order and `single-raise-path` authorizes mechanical deletes
+    on fifteen rows; and fixing that requires re-running the map and re-deriving every marker. The
+    2026-08-17 ruling already made it non-gating, so nothing is blocked either way. The saga lead
+    recommends winding it down and salvaging its tooling, having seeded its restart and reviewed
+    every round, and notes that stake here rather than presenting the recommendation as neutral.
+  - **Salvage before wind-down, if wind-down is the call:** the sweep tool and its verifier, which
+    the integration tester audited by running rather than reading, plus the accumulated
+    dispositions. Those are the durable output and should feed the loop.
+- **Artifact frontmatter validation merged** (PR #803, merged 2026-09-14 as `adc2d3e0`). The first
+  follow-on to the agent-artifacts child: rules accept optional description-only YAML frontmatter,
+  and rule and agent metadata now refuses unsupported fields, invalid structure, duplicate keys, and
+  non-string keys rather than silently accepting ineffective configuration. It also refuses YAML
+  aliases and anchors and bounds document depth, which matters because artifact sources can be Git
+  references, so this parser reads content the operator did not author.
 
 ### Efforts that ran without ledger entries (reconstructed 2026-09-06)
 
@@ -703,9 +812,9 @@ Planned children, seeded when their prerequisites land (see `phasing.md`):
   span: `phasing.md`'s wave 4 is the setup pipeline and one vertical integration, and it places
   session runtime and tmux on the observability track rather than its own. The fix touches the
   shared SSH transport contract, so it was filed rather than fixed in passing under Scope discipline
-- Wave 5: session observability phase 1
+- Wave 5: session observability phase 1 (depends on the new execution contract; see `phasing.md`)
 - Wave 6: agentic artifacts and distillation
-- Wave 7: structured control
+- Wave 7: structured control (depends on the new execution contract; see `phasing.md`)
 - Wave 8: external plugin API
 - CLI grammar child: spawned, completed, and locked; see its ledger section above.
 - Security-architecture doc child: seeds after wave 3 merges; carries the per-platform

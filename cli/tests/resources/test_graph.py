@@ -26,7 +26,7 @@ from agentworks.resources import (
     collect_secrets_for,
 )
 from agentworks.resources.reference import ReferenceEntry, RefRelationship
-from tests.conftest import ManifestDoc, write_cfg
+from tests.conftest import ManifestDoc, registry_with_shell, write_cfg
 
 
 @dataclass(frozen=True)
@@ -58,7 +58,7 @@ def _graph_from(edges: dict[str, list[str]]) -> Registry:
     given outbound edges. Every name mentioned (source or target) is
     published, so finalize dispatches no miss policy."""
     names = set(edges) | {dst for dsts in edges.values() for dst in dsts}
-    r = Registry.empty()
+    r = registry_with_shell()
     origin = Origin.built_in(source="tests.graph")
     for name in sorted(names):
         reqs = tuple(_edge(name, dst) for dst in edges.get(name, []))
@@ -449,6 +449,6 @@ def test_graph_is_frozen_and_registry_rejects_refinalize() -> None:
 
 
 def test_graph_property_before_finalize_raises() -> None:
-    reg = Registry.empty()
+    reg = registry_with_shell()
     with pytest.raises(RuntimeError, match="only after finalize"):
         _ = reg.graph

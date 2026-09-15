@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 import shlex
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -129,6 +130,28 @@ def _extract_ref(query: str) -> str:
     if len(refs) != 1 or not refs[0]:
         raise SourceRefError("git source query must contain exactly one non-empty ref parameter")
     return refs[0]
+
+
+def snapshot_workstation_file(source: str) -> bytes:
+    """Capture a local source once, using the invoking process's home and cwd.
+
+    This boundary accepts operator-authored references and filesystem input.
+    Errors omit source values and OS exception details, which can contain paths
+    or credentials. No transport or persistent staging file is involved.
+    """
+    try:
+        reference = parse_source_ref(source)
+    except SourceRefError:
+        raise SourceRefError("invalid workstation file source reference") from None
+    if reference.kind != "file":
+        raise SourceRefError("workstation snapshots require a local file source")
+    try:
+        path = Path(reference.path).expanduser()
+        if not stat.S_ISREG(path.stat().st_mode):
+            raise SourceRefError("workstation source must be a regular file")
+        return path.read_bytes()
+    except (OSError, ValueError, RuntimeError):
+        raise SourceRefError("could not read workstation source file") from None
 
 
 def fetch_file(

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Annotated
 
 from pydantic import Field
 
+from agentworks.artifacts.declarations import ArtifactsConfig, artifact_references
 from agentworks.declared_resource import DeclaredResource
 from agentworks.env.entry import EnvTable, env_references
 from agentworks.schema import CapabilityBlock, RefOwner, ResourceRef
@@ -60,6 +61,7 @@ def effective_references(
 
     by_env = {key: declared_by for key in resolved.env if (declared_by := owner(("env", key))) is not None}
     refs: list[ResourceReference] = list(env_references(resolved.env, source, by_env))
+    refs.extend(artifact_references(resolved.artifacts, source, provenance))
     if integration is None:
         return tuple(refs)
     selector_owner = owner(("harness_integration",))
@@ -76,6 +78,7 @@ def effective_references(
         sourced_references(
             capability_config_references(
                 kind="harness-integration",
+                facet="session",
                 config={"name": integration, **integration_config},
                 owner=RefOwner(kind=source[0], name=source[1]),
             ),
@@ -123,12 +126,17 @@ def validate_effective_harness(
         name = effective.harness_integration
         config = effective.harness_integration_config
     if name is None:
-        from agentworks.sessions.templates import DEFAULT_HARNESS_INTEGRATION
+        from agentworks.errors import ConfigError
+        from agentworks.schema.errors import located
 
-        name = DEFAULT_HARNESS_INTEGRATION
+        raise ConfigError(
+            located(location, f"{source[0]}/{source[1]} has no selected harness integration"),
+            hint="Set harness_integration: {name: shell}, select another integration, or inherit a selection.",
+        )
 
     validate_capability_config(
         kind="harness-integration",
+        facet="session",
         config={"name": name, **config},
         owner=RefOwner(kind=source[0], name=source[1]),
         location=location,
@@ -157,8 +165,8 @@ class SessionTemplate(DeclaredResource):
     means "not declared here", never "off".
 
     ``harness_integration.name`` selects the workload capability and its
-    remaining keys configure it. ``None`` inherits and ultimately defaults
-    to the ``shell`` integration.
+    remaining keys configure it. ``None`` inherits a selection; a complete
+    lineage must select an integration. The synthesized default selects ``shell``.
     """
 
     inherits: list[
@@ -177,6 +185,9 @@ class SessionTemplate(DeclaredResource):
     """The workload this session runs: one table whose ``name`` selects the
     harness integration and whose remaining keys are that integration's own
     config (``{name: shell, command: htop}``)."""
+
+    artifacts: ArtifactsConfig | None = None
+    """Artifact bundles selected at this scope; an omitted selection inherits."""
 
     env: EnvTable = Field(default_factory=dict)
     """Environment variables exported in this session, as a plaintext value
@@ -231,10 +242,8 @@ class SessionTemplate(DeclaredResource):
         provenance rides along so an error on an inherited key names the
         template that declared it.
 
-        Unlike ``dependencies``, this uses the ``shell`` DEFAULT when the
-        lineage names no integration, and the asymmetry is deliberate: an
-        edge records what the operator named, while validation checks what
-        the session will actually run.
+        A lineage without a selection fails here. Dependency discovery remains
+        total so it can report the authored graph before validation.
         """
         from agentworks.sessions.templates import effective_template_with_provenance
 

@@ -36,6 +36,8 @@ def test_projection_is_complete_ordered_and_maps_layer_roles() -> None:
         "apt_packages",
         "snap",
         "system_install_commands",
+        "harness_integrations",
+        "artifacts",
         "env",
         "tailscale_auth_key",
     ]

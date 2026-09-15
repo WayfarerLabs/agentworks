@@ -39,6 +39,8 @@ dependencies = [
     # for its comment-preserving config.toml edits. Both went with it
     # (operator ruling, 2026-08-07). Settings parse through stdlib tomllib.
     "pyyaml>=6.0.3",
+    # Native harness settings merge semantically; TOML reads use stdlib tomllib.
+    "tomli-w>=1.2.0",
 ]
 
 [project.urls]

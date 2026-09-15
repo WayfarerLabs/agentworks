@@ -94,8 +94,6 @@ def test_every_agent_template_field_round_trips() -> None:
         "mise_allow_unlocked": True,
         "mise_install_before": "30d",
         "mise_prune_on_reinit": False,
-        "claude_marketplaces": ["me/market"],
-        "claude_plugins": ["thing@me/market"],
     }
 
     row = decode("agent-template", "claude", dict(spec))

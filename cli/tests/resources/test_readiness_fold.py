@@ -32,6 +32,7 @@ from agentworks.resources.graph import DependencyState, DisabledMark, Enablement
 from agentworks.resources.registry import Registry
 from agentworks.schema import CapabilityBlock
 from agentworks.vms.sites import VMSiteDecl
+from tests.conftest import registry_with_shell
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -66,7 +67,7 @@ def _finalized(*sites: VMSiteDecl) -> Registry:
     from agentworks.capabilities.descriptor import descriptor_for
     from agentworks.capabilities.publish import publish_capability_rows
 
-    registry = Registry.empty()
+    registry = registry_with_shell()
     publish_capability_rows(registry, descriptor_for("vm-platform"))
     for decl in sites:
         registry.add("vm-site", decl.name, decl, Origin.operator_declared(file=Path("sites.yaml"), line=1))
@@ -99,7 +100,7 @@ def _finalized_with_proxmox(
     from agentworks.plugins import publish_plugins
     from agentworks.plugins.enablement import plugin_enablement_source
 
-    registry = Registry.empty()
+    registry = registry_with_shell()
     publish_capability_rows(registry, descriptor_for("vm-platform"))
     config = cast("Config", SimpleNamespace(enabled_system_plugins=("proxmox",)))
     publish_plugins(registry, config)
@@ -156,7 +157,7 @@ def test_disabled_platform_node_folds_end_to_end_to_enable_its_unit() -> None:
     from agentworks.capabilities.descriptor import descriptor_for
     from agentworks.capabilities.publish import publish_capability_rows
 
-    registry = Registry.empty()
+    registry = registry_with_shell()
     publish_capability_rows(registry, descriptor_for("vm-platform"))
     registry.add(
         "vm-site",
@@ -185,7 +186,7 @@ def test_disabled_secret_backend_makes_its_active_source_not_ready() -> None:
     from agentworks.secrets.resolve import active_sources
     from agentworks.secrets.sources import SecretSourceDecl, publish_builtin_secret_sources
 
-    registry = Registry.empty()
+    registry = registry_with_shell()
     publish_capability_rows(registry, descriptor_for("secret-backend"))
     publish_builtin_secret_sources(registry)
     # onepassword ships as a system plugin now (its built-in row is gone), so
@@ -240,7 +241,7 @@ def test_r9_9_mapping_is_validated_whether_or_not_its_backend_is_enabled(disable
     from agentworks.secrets.sources import SecretSourceDecl
 
     def _build(mapping: str) -> Registry:
-        registry = Registry.empty()
+        registry = registry_with_shell()
         publish_capability_rows(registry, descriptor_for("secret-backend"))
         # onepassword's row now comes from the plugin path, not a built-in.
         plugin_config = cast("Config", SimpleNamespace(enabled_system_plugins=("onepassword",)))

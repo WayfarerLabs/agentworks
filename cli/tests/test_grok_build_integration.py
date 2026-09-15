@@ -64,6 +64,7 @@ def _validate(blob: dict[str, object]) -> None:
         kind="harness-integration",
         config={"name": "grok-build", **blob},
         owner=RefOwner(kind="session-template", name="grok"),
+        facet="session",
     )
 
 
@@ -81,9 +82,7 @@ def test_config_implies_no_resource_references() -> None:
     owner = RefOwner(kind="session-template", name="grok")
     assert (
         capability_config_references(
-            kind="harness-integration",
-            config={"name": "grok-build", "model": "grok-4.6"},
-            owner=owner,
+            kind="harness-integration", config={"name": "grok-build", "model": "grok-4.6"}, owner=owner, facet="session"
         )
         == ()
     )
@@ -92,6 +91,7 @@ def test_config_implies_no_resource_references() -> None:
             kind="harness-integration",
             config={"name": "grok-build", "model": 3, "typo": True},
             owner=owner,
+            facet="session",
         )
         == ()
     )

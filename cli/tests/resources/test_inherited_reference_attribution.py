@@ -28,6 +28,7 @@ from agentworks.errors import ConfigError
 from agentworks.resources import Origin, Registry
 from agentworks.resources.render import format_reference_entry
 from agentworks.vms.template import VMTemplate
+from tests.conftest import registry_with_shell
 
 
 def _origin(name: str) -> Origin:
@@ -36,7 +37,7 @@ def _origin(name: str) -> Origin:
 
 def _child_first(parent: VMTemplate, child: VMTemplate) -> Registry:
     """A registry publishing ``child`` before ``parent``, finalized."""
-    registry = Registry.empty()
+    registry = registry_with_shell()
     registry.add("vm-template", child.name, child, _origin(child.name))
     registry.add("vm-template", parent.name, parent, _origin(parent.name))
     registry.finalize()
@@ -71,7 +72,7 @@ def test_two_descendants_of_one_declarer_do_not_read_as_two_declarations() -> No
     from agentworks.env.entry import EnvEntry
 
     parent = VMTemplate(name="base", env={"BASE": EnvEntry({"secret": "base-secret"})})
-    registry = Registry.empty()
+    registry = registry_with_shell()
     for name in ("kid-a", "kid-b"):
         registry.add("vm-template", name, VMTemplate(name=name, inherits=["base"]), _origin(name))
     registry.add("vm-template", "base", parent, _origin("base"))

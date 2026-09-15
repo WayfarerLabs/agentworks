@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.errors import ConfigError, NotFoundError, unknown_template_error
 
 if TYPE_CHECKING:
@@ -19,6 +20,7 @@ if TYPE_CHECKING:
     from agentworks.env.entry import EnvEntry
     from agentworks.resources.inheritance import LayeredResolution
     from agentworks.resources.registry import Registry
+    from agentworks.schema import CapabilityBlock
     from agentworks.workspaces.template import WorkspaceTemplate
 
 
@@ -31,6 +33,8 @@ class ResolvedTemplate:
     tmuxinator: bool = True
     git_user_name: str | None = None
     git_user_email: str | None = None
+    harness_integrations: list[CapabilityBlock] = field(default_factory=list)
+    artifacts: ArtifactsConfig = field(default_factory=ArtifactsConfig)
     env: dict[str, EnvEntry] = field(default_factory=dict)
 
 

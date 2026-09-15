@@ -130,6 +130,10 @@ def session_list(
         str | None,
         typer.Option("--agent", help="Filter by agent (agent-mode sessions only)"),
     ] = None,
+    harness_integration: Annotated[
+        str | None,
+        typer.Option("--harness-integration", help="Filter by harness integration"),
+    ] = None,
     admin: Annotated[bool, typer.Option("--admin", help="Only admin-mode sessions (no agent)")] = False,
     status: Annotated[bool, typer.Option("--status", help="Include live runtime status")] = False,
     sort: Annotated[
@@ -183,6 +187,7 @@ def session_list(
                 workspace_name=parse_csv_filter(workspace),
                 vm_name=parse_csv_filter(vm),
                 agent_name=parsed_agent,
+                harness_integration_name=parse_csv_filter(harness_integration),
                 admin_only=admin,
                 include_status=status,
                 require_vm_names=True,
@@ -199,6 +204,7 @@ def session_list(
         workspace_name=parse_csv_filter(workspace),
         vm_name=parse_csv_filter(vm),
         agent_name=parsed_agent,
+        harness_integration_name=parse_csv_filter(harness_integration),
         admin_only=admin,
         include_status=status,
         names_only=names_only,
@@ -213,6 +219,10 @@ def session_stop(
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM (with --all)")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace (with --all)")] = None,
     agent: Annotated[str | None, typer.Option("--agent", help="Filter by agent (with --all)")] = None,
+    harness_integration: Annotated[
+        str | None,
+        typer.Option("--harness-integration", help="Filter by harness integration (with --all)"),
+    ] = None,
     console: Annotated[str | None, typer.Option("--console", help="Filter by console (with --all)")] = None,
     admin: Annotated[
         bool,
@@ -228,14 +238,19 @@ def session_stop(
     parsed_vm = parse_csv_filter(vm)
     parsed_workspace = parse_csv_filter(workspace)
     parsed_agent = parse_csv_filter(agent)
+    parsed_harness_integration = parse_csv_filter(harness_integration)
     parsed_console = parse_csv_filter(console)
 
     if name and all_sessions:
         raise typer.BadParameter("provide a session name or --all, not both")
     if admin and parsed_agent is not None:
         raise typer.BadParameter("--admin and --agent are mutually exclusive")
-    if (parsed_vm or parsed_workspace or parsed_agent or parsed_console or admin) and not all_sessions:
-        raise typer.BadParameter("--vm, --workspace, --agent, --console, and --admin require --all")
+    if (
+        parsed_vm or parsed_workspace or parsed_agent or parsed_harness_integration or parsed_console or admin
+    ) and not all_sessions:
+        raise typer.BadParameter(
+            "--vm, --workspace, --agent, --harness-integration, --console, and --admin require --all"
+        )
     if all_sessions:
         stop_all_sessions(
             get_db(),
@@ -243,6 +258,7 @@ def session_stop(
             vm_name=parsed_vm,
             workspace_name=parsed_workspace,
             agent_name=parsed_agent,
+            harness_integration_name=parsed_harness_integration,
             console_name=parsed_console,
             admin_only=admin,
             force=force,
@@ -267,6 +283,7 @@ def _launch_sessions(
     vm: str | None,
     workspace: str | None,
     agent: str | None,
+    harness_integration: str | None,
     console: str | None,
     admin: bool,
     force: bool,
@@ -286,6 +303,7 @@ def _launch_sessions(
     parsed_vm = parse_csv_filter(vm)
     parsed_workspace = parse_csv_filter(workspace)
     parsed_agent = parse_csv_filter(agent)
+    parsed_harness_integration = parse_csv_filter(harness_integration)
     parsed_console = parse_csv_filter(console)
     interaction = ordinary_tty_interaction_policy()
 
@@ -295,8 +313,12 @@ def _launch_sessions(
         raise typer.BadParameter("provide a session name or --all, not both")
     if admin and parsed_agent is not None:
         raise typer.BadParameter("--admin and --agent are mutually exclusive")
-    if (parsed_vm or parsed_workspace or parsed_agent or parsed_console or admin) and not all_sessions:
-        raise typer.BadParameter("--vm, --workspace, --agent, --console, and --admin require --all")
+    if (
+        parsed_vm or parsed_workspace or parsed_agent or parsed_harness_integration or parsed_console or admin
+    ) and not all_sessions:
+        raise typer.BadParameter(
+            "--vm, --workspace, --agent, --harness-integration, --console, and --admin require --all"
+        )
     if all_sessions:
         batch_operation = restart_all_sessions if replace_running else start_all_sessions
         batch_operation(
@@ -305,6 +327,7 @@ def _launch_sessions(
             vm_name=parsed_vm,
             workspace_name=parsed_workspace,
             agent_name=parsed_agent,
+            harness_integration_name=parsed_harness_integration,
             console_name=parsed_console,
             admin_only=admin,
             force=force,
@@ -337,6 +360,10 @@ def session_start(
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM (with --all)")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace (with --all)")] = None,
     agent: Annotated[str | None, typer.Option("--agent", help="Filter by agent (with --all)")] = None,
+    harness_integration: Annotated[
+        str | None,
+        typer.Option("--harness-integration", help="Filter by harness integration (with --all)"),
+    ] = None,
     console: Annotated[str | None, typer.Option("--console", help="Filter by console (with --all)")] = None,
     admin: Annotated[bool, typer.Option("--admin", help="Only admin-mode sessions (with --all)")] = False,
     force: Annotated[bool, typer.Option("--force", help="Recover broken session state")] = False,
@@ -353,6 +380,7 @@ def session_start(
         vm=vm,
         workspace=workspace,
         agent=agent,
+        harness_integration=harness_integration,
         console=console,
         admin=admin,
         force=force,
@@ -369,6 +397,10 @@ def session_restart(
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM (with --all)")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace (with --all)")] = None,
     agent: Annotated[str | None, typer.Option("--agent", help="Filter by agent (with --all)")] = None,
+    harness_integration: Annotated[
+        str | None,
+        typer.Option("--harness-integration", help="Filter by harness integration (with --all)"),
+    ] = None,
     console: Annotated[str | None, typer.Option("--console", help="Filter by console (with --all)")] = None,
     admin: Annotated[bool, typer.Option("--admin", help="Only admin-mode sessions (with --all)")] = False,
     force: Annotated[bool, typer.Option("--force", help="Recover broken session state")] = False,
@@ -385,6 +417,7 @@ def session_restart(
         vm=vm,
         workspace=workspace,
         agent=agent,
+        harness_integration=harness_integration,
         console=console,
         admin=admin,
         force=force,

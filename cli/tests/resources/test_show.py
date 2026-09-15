@@ -28,7 +28,7 @@ from agentworks.resources.show import project_declaration, resource_show_data, s
 from agentworks.schema import AgwModel
 from agentworks.topics import TopicProse
 from agentworks.vms.template import VMTemplate
-from tests.conftest import ManifestDoc, write_cfg
+from tests.conftest import ManifestDoc, registry_with_shell, write_cfg
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -80,7 +80,7 @@ class _ReadinessKind:
         raise AssertionError("error-policy kinds do not synthesize")
 
 
-def _request_context(tmp_path: Path) -> tuple[Config, Registry]:
+def _request_context(tmp_path: Path, *extra: ManifestDoc) -> tuple[Config, Registry]:
     config_path = write_cfg(
         tmp_path,
         ManifestDoc(
@@ -89,6 +89,7 @@ def _request_context(tmp_path: Path) -> tuple[Config, Registry]:
             {"hint": "rotate quarterly", "backend_mappings": {"env-var": "NPM_TOKEN"}},
             description="npm registry token",
         ),
+        *extra,
     )
     config = load_config(config_path, warn_issues=False)
     return config, build_registry(config, probe_host_readiness=False)
@@ -112,7 +113,7 @@ def _readiness_registry(
 ) -> Registry:
     kind = _ReadinessKind()
     monkeypatch.setitem(KIND_REGISTRY, kind.kind, kind)
-    registry = Registry.empty()
+    registry = registry_with_shell()
     registry.add(
         kind.kind,
         verdict,
@@ -213,9 +214,10 @@ def test_service_projects_declarable_and_capability_rows(tmp_path: Path) -> None
     assert not capability.readiness.is_available
 
 
-def test_exactly_the_selectable_template_kinds_project_resolution(tmp_path: Path) -> None:
-    config, registry = _request_context(tmp_path)
+def test_selectable_templates_and_artifact_bundles_project_resolution(tmp_path: Path) -> None:
+    config, registry = _request_context(tmp_path, ManifestDoc("artifact-bundle", "fixture", {}))
     expected = {
+        "artifact-bundle",
         "vm-template",
         "admin-template",
         "workspace-template",
@@ -225,7 +227,9 @@ def test_exactly_the_selectable_template_kinds_project_resolution(tmp_path: Path
 
     assert {kind for kind, handler in KIND_REGISTRY.items() if isinstance(handler, ResolvedSpecKind)} == expected
     for kind in expected:
-        shown = _show(config, registry, ResourceIdentity(kind, "default"), tmp_path)
+        shown = _show(
+            config, registry, ResourceIdentity(kind, "fixture" if kind == "artifact-bundle" else "default"), tmp_path
+        )
         assert shown.resolution is not None
         resource = resource_show_data(shown)["resource"]
         assert isinstance(resource, dict)

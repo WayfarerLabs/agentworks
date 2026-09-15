@@ -250,6 +250,37 @@ code was written against, a failure there is a finding about the code rather tha
 it is the most valuable kind: it is the drift no unit suite can see. Record the bed's version
 alongside its toolchain so a reader can tell which of the two a result speaks to.
 
+## Exercising harness integrations
+
+Harness work is tested by driving **every** integration as far as it goes, not just the one that is
+convenient, and by reading what it actually wrote.
+
+- **Authenticate where you can.** The operator environment carries a Claude credential, so
+  `claude-code` can be driven with real authentication. `agw-test-env` names the variable.
+- **The others do not need auth to be worth testing.** Install and configure them through the
+  integrations, then confirm the resulting native files and settings exist at the expected path for
+  the actual user, parse as valid JSON or TOML, carry the declared marketplaces, plugins and mapped
+  settings, have sane permissions, and contain no resolved secret values. Reading the written
+  artifact is the test; an exit code of 0 is not evidence the file is right.
+- **Not every integration implements every facet.** Check which of `vm_init`, `user_init` and
+  `workspace_init` an integration actually overrides before declaring it at a facet. An activation
+  at a facet the integration does not implement is a refusal by design, and that refusal is itself
+  worth driving.
+- **Build a routing-only integration when the question is the model, not the tool.** A scratch
+  harness-integration that implements the setup facets and does nothing but record and route what it
+  received exercises the facet and deferral model end to end with full observability, no native CLI,
+  and no credentials. Use it for the diamond, inactive passthrough, deferral destinations, and
+  anything where a real harness would only add noise.
+
+### Use what already ships
+
+Reach for the built-in plugins before authoring anything. `agw resource list --include-disabled` is
+the place to start: it shows every plugin-provided resource including those from plugins this
+operator has not enabled, which is exactly the inventory a test needs. The harness CLIs already have
+`user-install-command` resources (`claude`, `codex`, `grok`), Node has an `apt-package` and its
+`apt-source`, and there are install commands for uv, fnm, nvm, bun, starship and more. Hand-rolling
+a resource that ships in the box tests your YAML instead of the product, and it will drift.
+
 ## Live-testing discipline
 
 - Run long operations (provisioning, initialization, teardown) synchronously with generous timeouts.

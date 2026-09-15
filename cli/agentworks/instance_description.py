@@ -36,7 +36,7 @@ class InstanceSpec:
     status: InstanceSpecStatus
     recorded_at: str | None = None
     spec: JsonObject | None = None
-    reason: Literal["malformed", "unsupported-version"] | None = None
+    reason: Literal["malformed", "unsupported-version", "migration-pending"] | None = None
 
     def __post_init__(self) -> None:
         if self.status == "absent":
@@ -113,6 +113,7 @@ class InstanceStateIssueCode(StrEnum):
 
     INSTANCE_SPEC_MALFORMED = "instance-spec-malformed"
     INSTANCE_SPEC_UNSUPPORTED = "instance-spec-unsupported"
+    INSTANCE_SPEC_MIGRATION_PENDING = "instance-spec-migration-pending"
     CURRENT_DECLARATION_UNRESOLVED = "current-declaration-unresolved"
     REGISTRY_UNAVAILABLE = "registry-unavailable"
     RECORD_MALFORMED = "record-malformed"
@@ -236,6 +237,7 @@ def single_declaration_instance_state[T: BaseModel, R](
         UnsupportedStoredOverlayError,
         decode_stored_overlay,
     )
+    from agentworks.legacy_claude import LegacyClaudeContextRequired
     from agentworks.resources.resolved_spec import UnresolvedSpec, project_resolved_spec
 
     unconsumed, metadata_issues = inspection_metadata_facts(inspection)
@@ -249,7 +251,23 @@ def single_declaration_instance_state[T: BaseModel, R](
         instance_spec = InstanceSpec("absent")
     else:
         try:
-            decoded = decode_stored_overlay(record)
+            from agentworks.legacy_claude import legacy_component
+
+            base = None
+            if instance_kind == "agent" and resolve is not None and legacy_component(record) is not None:
+                from agentworks.agents.templates import ResolvedAgentTemplate
+
+                try:
+                    base_value = resolve(None).value
+                except NotFoundError:
+                    base_value = None
+                if isinstance(base_value, ResolvedAgentTemplate):
+                    base = base_value.harness_integrations
+            decoded = decode_stored_overlay(record, legacy_user_base=base)
+            if legacy_component(record) is not None:
+                issues.append(
+                    InstanceStateIssue(InstanceStateIssueCode.INSTANCE_SPEC_MIGRATION_PENDING, slot=instance_kind)
+                )
             if not isinstance(decoded, InstanceOverlay) or decoded.instance_kind != instance_kind:
                 raise AssertionError("a non-VM desired record must decode to one matching overlay")
             declaration = cast("T", decoded.declaration)
@@ -257,6 +275,12 @@ def single_declaration_instance_state[T: BaseModel, R](
                 "present",
                 recorded_at=record.recorded_at,
                 spec=decoded.payload.value,
+            )
+        except LegacyClaudeContextRequired:
+            unavailable = True
+            instance_spec = InstanceSpec("unavailable", reason="migration-pending")
+            issues.append(
+                InstanceStateIssue(InstanceStateIssueCode.INSTANCE_SPEC_MIGRATION_PENDING, slot=instance_kind)
             )
         except UnsupportedStoredOverlayError:
             unavailable = True
@@ -300,7 +324,9 @@ def single_declaration_instance_state[T: BaseModel, R](
                 )
             )
 
-    return InstanceStateDescription(
+    from agentworks.harness_setup.inspection import include_native_setup
+
+    state = InstanceStateDescription(
         declarations=(
             DeclarationSlot(
                 instance_kind,
@@ -312,6 +338,8 @@ def single_declaration_instance_state[T: BaseModel, R](
         unconsumed_records=unconsumed,
         issues=tuple(issues),
     )
+
+    return include_native_setup(state, inspection)
 
 
 def instance_state_data(state: InstanceStateDescription) -> JsonObject:

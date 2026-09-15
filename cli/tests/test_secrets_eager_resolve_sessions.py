@@ -177,11 +177,8 @@ def test_session_restart_broken_no_force_bails_before_eager_resolve(
     # A non-NULL socket_path keeps this session on the new per-session-socket
     # model; with socket_path=None, restart_session treats the row as a
     # legacy migration target and skips the gates these tests exist to pin.
-    db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode, pid, socket_path) "
-        "VALUES ('s1', 'ws1', 'default', ?, 9999, '/tmp/sock')",
-        (SessionMode.ADMIN.value,),
-    )
+    db.insert_session("s1", "ws1", "default", SessionMode.ADMIN, socket_path="/tmp/sock")
+    db._conn.execute("UPDATE sessions SET pid = 9999 WHERE name = 's1'")
     db._conn.commit()
 
     monkeypatch.setattr(
@@ -237,11 +234,8 @@ def test_session_restart_eager_resolve_fires_before_teardown(
     # A non-NULL socket_path keeps this session on the new per-session-socket
     # model; with socket_path=None, restart_session treats the row as a
     # legacy migration target and skips the gates these tests exist to pin.
-    db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode, pid, socket_path) "
-        "VALUES ('s1', 'ws1', 'default', ?, 9999, '/tmp/sock')",
-        (SessionMode.ADMIN.value,),
-    )
+    db.insert_session("s1", "ws1", "default", SessionMode.ADMIN, socket_path="/tmp/sock")
+    db._conn.execute("UPDATE sessions SET pid = 9999 WHERE name = 's1'")
     db._conn.commit()
 
     # Status probes report running so the restart path would try to tear down.
@@ -311,10 +305,8 @@ def test_session_attach_does_not_eager_resolve(
     from agentworks.sessions import manager as session_manager
 
     db = _seed_basic_db(tmp_path)
-    db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode, pid) VALUES ('s1', 'ws1', 'default', ?, 1234)",
-        (SessionMode.ADMIN.value,),
-    )
+    db.insert_session("s1", "ws1", "default", SessionMode.ADMIN)
+    db._conn.execute("UPDATE sessions SET pid = 1234 WHERE name = 's1'")
     db._conn.commit()
 
     resolve_called: list[bool] = []
@@ -377,10 +369,7 @@ def test_session_list_does_not_eager_resolve(
     from agentworks.sessions import manager as session_manager
 
     db = _seed_basic_db(tmp_path)
-    db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode) VALUES ('s1', 'ws1', 'default', ?)",
-        (SessionMode.ADMIN.value,),
-    )
+    db.insert_session("s1", "ws1", "default", SessionMode.ADMIN)
     db._conn.commit()
 
     resolve_called: list[bool] = []
@@ -411,10 +400,7 @@ def test_session_describe_does_not_eager_resolve(
     from agentworks.sessions import manager as session_manager
 
     db = _seed_basic_db(tmp_path)
-    db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode) VALUES ('s1', 'ws1', 'default', ?)",
-        (SessionMode.ADMIN.value,),
-    )
+    db.insert_session("s1", "ws1", "default", SessionMode.ADMIN)
     db._conn.commit()
 
     resolve_called: list[bool] = []

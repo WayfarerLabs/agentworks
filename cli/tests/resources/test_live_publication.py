@@ -271,8 +271,9 @@ def test_secret_used_by_v1_preserves_mode_sensitive_effective_environment(
         socket_path="/tmp/agent-run.sock",
     )
     db._conn.execute(
-        "INSERT INTO sessions (name, workspace_name, template, mode, agent_name, socket_path) "
-        "VALUES ('future-run', 'work', 'default', 'future-mode', 'dev', '/tmp/future-run.sock')"
+        "INSERT INTO sessions (name, workspace_name, template, mode, agent_name, socket_path, session_uuid) "
+        "VALUES ('future-run', 'work', 'default', 'future-mode', 'dev', '/tmp/future-run.sock', "
+        "'01b50158-bb80-4e07-bfb6-a8d31169651d')"
     )
     db._conn.commit()
     for name in ("admin-run", "agent-run"):

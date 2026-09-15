@@ -11,10 +11,11 @@ import pytest
 
 from agentworks.errors import ConfigError
 from agentworks.manifests.loader import load_manifests
-from agentworks.resources import Origin, Registry
+from agentworks.resources import Origin
 from agentworks.resources.graph import FinalizeContext
 from agentworks.schema import CapabilityBlock
 from agentworks.vms.sites import VMSiteDecl
+from tests.conftest import registry_with_shell
 
 SITE_DOC = """\
 apiVersion: agentworks/v1
@@ -200,7 +201,7 @@ def test_unknown_platform_site_hard_errors_at_finalize(tmp_path: Path) -> None:
     # The platform edge is always emitted now (suppression removed).
     assert [(r.kind, r.name) for r in site.dependencies(FinalizeContext())] == [("vm-platform", "nope")]
 
-    registry = Registry.empty()
+    registry = registry_with_shell()
     registry.add("vm-site", "mystery", site, Origin.built_in(source="test"))
     with pytest.raises(ConfigError, match="unknown vm-platform 'nope'"):
         registry.finalize()
@@ -364,7 +365,7 @@ def test_bundled_sites_are_reserved(tmp_path: Path) -> None:
         "apiVersion: agentworks/v1\nkind: vm-site\nmetadata:\n  name: lima-local\nspec:\n  platform:\n    name: lima\n"
     )
     manifests = load_manifests(tmp_path)
-    registry = Registry.empty()
+    registry = registry_with_shell()
     builtin_manifests.publish_to(registry)
     with pytest.raises(ConfigError, match="lima-local"):
         manifests.publish_to(registry)
@@ -379,7 +380,7 @@ def test_bundled_sites_finalize_against_the_platform_rows(
     from tests.conftest import stub_platform_support
 
     stub_platform_support(monkeypatch)
-    registry = Registry.empty()
+    registry = registry_with_shell()
     builtin_manifests.publish_to(registry)
     publish_capability_rows(registry, descriptor_for("vm-platform"))
     registry.finalize()

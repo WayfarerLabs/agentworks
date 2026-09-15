@@ -33,7 +33,7 @@ class SecretBackend(Capability):
     resolution runs before either lifecycle stage.
     """
 
-    owner_kind: ClassVar[str] = "secret-source"
+    owner_kind: str = "secret-source"
     contract_version: ClassVar[int]
     config_model: ClassVar[type[AgwModel]]
     mapping_model: ClassVar[type[AgwRootModel[Any]]]
