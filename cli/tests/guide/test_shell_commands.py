@@ -20,14 +20,18 @@ from agentworks.plugins.registration import seat_installed_plugins
 from agentworks.resources import KIND_REGISTRY
 from agentworks.topics import prose_of, summary_of
 
-_INLINE_COMMAND_PATTERNS = (
-    re.compile(r"`(agw(?:\s+[^`]+)?)`"),
-    re.compile(r"'(agw(?:\s+[^']+)?)'"),
-    re.compile(r'"(agw(?:\s+[^\"]+)?)"'),
+_INLINE_SPAN_PATTERNS = (
+    re.compile(r"(?<!`)`(?!`)([^`\n]+)`(?!`)"),
+    re.compile(r"(?<![\w'])'(?!')([^'\n]+)'(?!')"),
+    re.compile(r'(?<!")"(?!")([^"\n]+)"(?!")'),
 )
 _AUTHORED_COMMAND_SEGMENTS = frozenset({"COMMAND", "GROUP"})
 _GUIDANCE_CATEGORIES = frozenset({"guide", "kind", "capability", "hint"})
 _SHELL_OPERATOR_CHARS = frozenset("();|&")
+
+
+def _starts_agw_command(segment: str) -> bool:
+    return bool(segment) and segment.split(maxsplit=1)[0] == "agw"
 
 
 def _shell_segments(expression: str) -> Iterator[str]:
@@ -55,23 +59,27 @@ def _shell_segments(expression: str) -> Iterator[str]:
             if segment := expression[start:index].strip():
                 yield segment
             start = index + 1
+    segment = expression[start:].strip()
     if quote is not None or escaped:
-        raise ValueError("malformed shell quoting in authored command")
-    if segment := expression[start:].strip():
+        if _starts_agw_command(segment):
+            raise ValueError("malformed shell quoting in authored command")
+        return
+    if segment:
         yield segment
 
 
 def _shell_commands(expression: str) -> Iterator[str]:
     for segment in _shell_segments(expression.replace("\\\n", " ")):
+        if not _starts_agw_command(segment):
+            continue
         tokens = shlex.split(segment, comments=True)
-        if tokens and tokens[0] == "agw":
-            yield shlex.join(tokens)
+        yield shlex.join(tokens)
 
 
 def _authored_commands(text: str) -> set[str]:
     commands = {
         command
-        for pattern in _INLINE_COMMAND_PATTERNS
+        for pattern in _INLINE_SPAN_PATTERNS
         for expression in pattern.findall(text)
         for command in _shell_commands(expression)
     }
@@ -290,7 +298,8 @@ def _validate_command_prefix_and_options(command: str, root: CommandSpec) -> str
 
 
 def test_authored_command_extraction_covers_quotes_fences_and_shell_boundaries() -> None:
-    text = """Use `agw vm start NAME && agw doctor` or 'agw resource kinds'.
+    text = """Use `agw vm start NAME && agw doctor` or 'echo ok && agw resource kinds'.
+Also use "printf ok; agw version" when checking the installed CLI.
 Keep the quoted operator in `agw vm start 'A|B'` as an operand.
 
 ```bash
@@ -305,6 +314,7 @@ agw vm start \\
         "agw doctor",
         "agw resource kinds",
         "agw resource list --kind vm-site",
+        "agw version",
         "agw vm start 'A|B'",
         "agw vm start NAME",
         "agw vm start OTHER",
@@ -312,6 +322,18 @@ agw vm start \\
 
     with pytest.raises(ValueError, match="malformed shell quoting"):
         _authored_commands('Use `agw retired "unterminated`.')
+
+    assert _authored_commands("Describe `don't panic` without running a command.") == set()
+
+
+def test_inline_backticks_after_a_shell_fence_remain_independent() -> None:
+    text = """```bash
+agw doctor
+```
+Then `echo ok && agw retired`.
+"""
+
+    assert _authored_commands(text) == {"agw doctor", "agw retired"}
 
 
 @pytest.mark.parametrize(

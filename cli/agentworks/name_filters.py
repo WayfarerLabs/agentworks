@@ -28,6 +28,7 @@ def _check_filter(
     kind: str,
     label: str,
     defined: set[str],
+    hint: str,
 ) -> None:
     """Raise ``NotFoundError`` naming every unknown element of one filter.
 
@@ -42,21 +43,11 @@ def _check_filter(
         message = f"unknown {label} '{unknown[0]}'"
     else:
         message = f"unknown {label}s: " + ", ".join(f"'{n}'" for n in unknown)
-    if kind == "vm":
-        list_command = "vm list"
-    elif kind == "workspace":
-        list_command = "workspace list"
-    elif kind == "agent":
-        list_command = "agent list"
-    elif kind == "console":
-        list_command = "console list"
-    else:
-        raise AssertionError(f"unsupported name filter kind: {kind}")
     raise NotFoundError(
         message,
         entity_kind=kind,
         entity_name=unknown[0],
-        hint=f"Run 'agw {list_command}' to see the defined {label}s.",
+        hint=hint,
     )
 
 
@@ -83,6 +74,7 @@ def validate_name_filters(
             kind="vm",
             label="VM",
             defined={vm.name for vm in db.list_vms()},
+            hint="Run 'agw vm list' to see the defined VMs.",
         )
     if workspace_name is not None:
         _check_filter(
@@ -90,6 +82,7 @@ def validate_name_filters(
             kind="workspace",
             label="workspace",
             defined={ws.name for ws in db.list_workspaces()},
+            hint="Run 'agw workspace list' to see the defined workspaces.",
         )
     if agent_name is not None:
         _check_filter(
@@ -97,6 +90,7 @@ def validate_name_filters(
             kind="agent",
             label="agent",
             defined={agent.name for agent in db.list_agents()},
+            hint="Run 'agw agent list' to see the defined agents.",
         )
     if console_name is not None:
         _check_filter(
@@ -104,4 +98,5 @@ def validate_name_filters(
             kind="console",
             label="console",
             defined={console.name for console in db.list_consoles()},
+            hint="Run 'agw console list' to see the defined consoles.",
         )
