@@ -256,21 +256,25 @@ running model has loaded the content.
 
 Generated instruction sections use `<!-- BEGIN AGENTWORKS GENERATED -->` and
 `<!-- END AGENTWORKS GENERATED -->` on their own lines. Applying replaces everything between a
-complete pair, including edits to the generated content, and preserves unrelated text and existing
-file metadata. An absent or empty file can receive a new section. A file containing ordinary
-instructions but no markers retains those instructions and receives a section. A missing partner,
-reversed pair or duplicate marker warns and skips that file without modifying it. Inspection records
-the skipped application; it is not reported as applied or silently rerouted. Restore a complete pair
-or remove the broken markers, then retry the owning setup. Retirement removes only a complete
-generated section and preserves surrounding content; an empty instruction file may remain.
+complete pair, including edits to the generated content, and preserves unrelated text, ownership,
+permissions and extended attributes (including ACLs). An absent or empty file can receive a new
+section. A file containing ordinary instructions but no markers retains those instructions and
+receives a section. A missing partner, reversed pair or duplicate marker warns and skips that file
+without modifying it. Inspection records the skipped application; it is not reported as applied or
+silently rerouted. Restore a complete pair or remove the broken markers, then retry the owning
+setup. Retirement removes only a complete generated section and preserves surrounding content; an
+empty instruction file may remain. A malformed obsolete section retains cleanup evidence. An active
+integration can continue with that skip; removing the whole activation retains its pending cleanup
+until the section is repaired or removed. Existing section ownership never authorizes replacing the
+entire file.
 
 Claude's VM instructions use the same section mechanism in `/etc/claude-code/CLAUDE.md`. Its managed
 skill and agent directories are `/etc/claude-code/.claude/skills/` and
 `/etc/claude-code/.claude/agents/`. Codex machine skills use `/etc/codex/skills/`. VM publication
 creates root-owned files readable by VM users; existing directory permissions and generated-file
-metadata are preserved. It does not inspect descendant activations. Grok's
-system-configured discovery paths require additional configuration composition and trust handling,
-so this integration defers VM inputs to native user placement.
+ownership, permissions and extended attributes are preserved. It does not inspect descendant
+activations. Grok's system-configured discovery paths require additional configuration composition
+and trust handling, so this integration defers VM inputs to native user placement.
 
 Application prints one line per applied artifact type, counting a skill package once. Up to three
 names are shown in full; larger groups show the first two and `...`. Deferral output similarly names
@@ -300,8 +304,9 @@ special files are refused. This permits unowned notes to survive skill retiremen
 the removed skill active. Symlinked or nested candidate layouts are explicitly unsupported. These
 are conservative Agentworks support limits, not claims that those layouts are invalid native
 configurations. The inventory does not claim to cover additional ancestor repository roots,
-third-party plugin locations, or changes after preflight. Unknown native discovery extensions
-require separate verification; a successful preflight is not an exhaustive native inventory.
+third-party plugin locations, Codex system-configuration policy, or changes after preflight. Unknown
+native discovery extensions require separate verification; a successful preflight is not an
+exhaustive native inventory.
 
 There is no separate session filesystem. Session publication uses the actual user's private
 `~/.agentworks-artifacts/session/<session_uuid>/<run_id>/` directory. It avoids exposing session
@@ -404,11 +409,11 @@ and the selected integration's reusable results along one actual VM/user/workspa
 Handling an input for one user does not consume the VM result for another user.
 
 `application.py` defines integration results, file/section ownership and recorded skips.
-`publication.py` validates
-plugin output and uses the shared guarded `NativeFiles` transport utility. Native formats and policy
-live in integration adapters. Existing unowned files are never adopted merely because their bytes
-match. Changed whole files are retained and diagnosed, with evidence for retry. Generated instruction
-sections instead follow their explicit replaceable-section contract.
+`publication.py` validates plugin output and uses the shared guarded `NativeFiles` transport
+utility. Native formats and policy live in integration adapters. Existing unowned files are never
+adopted merely because their bytes match. Changed whole files are retained and diagnosed, with
+evidence for retry. Generated instruction sections instead follow their explicit replaceable-section
+contract.
 
 `session.py` prepares the launch context, stages a new private run before old-runtime teardown, then
 retires obsolete owned files after teardown. No artifact bookkeeping changes VM deletion.

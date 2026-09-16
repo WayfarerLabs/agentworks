@@ -65,10 +65,11 @@ Codex hints/rules use the selected native instruction file: `$CODEX_HOME/AGENTS.
 precedence. Claude VM hints/rules use `/etc/claude-code/CLAUDE.md`. These files opt into generated
 section publication with fixed `<!-- BEGIN AGENTWORKS GENERATED -->` and
 `<!-- END AGENTWORKS GENERATED -->` delimiters. Core replaces a complete section regardless of
-changes inside it and preserves surrounding bytes and existing metadata. Missing partners, reversed
-or duplicate markers warn and skip the file, recording the reason separately from deferrals. Cleanup
-removes only the generated section; it may leave an empty file. The existing whole-file ownership
-checks remain unchanged for skills, personas and separate native rule files.
+changes inside it and preserves surrounding bytes, ownership, permissions and extended attributes.
+Missing partners, reversed or duplicate markers warn and skip the file, recording the reason
+separately from deferrals. Cleanup removes only the generated section; it may leave an empty file.
+The existing whole-file ownership checks remain unchanged for skills, personas and separate native
+rule files.
 
 Skill members retain their captured bytes and executable intent. Adapters neither flatten skills
 into prompts nor omit supporting files. The Claude session plugin is named `agentworks-artifacts`;

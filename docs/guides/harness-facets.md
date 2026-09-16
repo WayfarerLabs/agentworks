@@ -213,9 +213,9 @@ An inactive user or workspace facet passes its inputs onward to the session. An 
 applies what it can and defers the remainder. Handled inputs stop at that facet. The session joins
 its actual user and workspace results with anything routed directly from the VM. Remaining inputs
 that the session integration cannot handle produce warnings with their original source and reason.
-Native harness session delivery requires explicit `enabled_workarounds` in the selected integration's session
-config. The default empty list leaves all remaining inputs unhandled. Each named workaround enables
-only its documented delivery method; `[]` replaces inherited opt-ins. See
+Native harness session delivery requires explicit `enabled_workarounds` in the selected
+integration's session config. The default empty list leaves all remaining inputs unhandled. Each
+named workaround enables only its documented delivery method; `[]` replaces inherited opt-ins. See
 `agw guide show concept-agent-artifacts` for the supported methods and their limitations. Shell
 publishes directly as files at every activated facet, including the private session directory.
 
@@ -226,11 +226,10 @@ activation, those inputs reach the session through user passthrough.
 
 Claude applies VM instructions, skills and agents in its managed locations. Codex applies VM skills
 and defers other types to user. Grok defers VM inputs to user. Shell applies all VM types under
-`/opt/agentworks/artifacts`.
-Workspace-owned bundles remain useful independently: their workspace facet handles them in project
-locations or passes them to each consuming session. Workspace placement is shared with other users
-of that workspace, so session-only content belongs in the private session directory under the actual
-user's home.
+`/opt/agentworks/artifacts`. Workspace-owned bundles remain useful independently: their workspace
+facet handles them in project locations or passes them to each consuming session. Workspace
+placement is shared with other users of that workspace, so session-only content belongs in the
+private session directory under the actual user's home.
 
 Applying files at a facet updates its native locations during that setup. Whether a running workload
 reloads them depends on the harness. Deferring inputs updates only the reusable result; existing

@@ -7,46 +7,39 @@ from dataclasses import replace
 import pytest
 
 from agentworks import output
-from agentworks.artifacts.application import ArtifactDeferral, ArtifactSkip, OwnedArtifactFile
+from agentworks.artifacts.application import ArtifactDeferral, ArtifactSkip
 from agentworks.artifacts.model import ArtifactType
-from agentworks.artifacts.reporting import report_application
+from agentworks.artifacts.reporting import report_applied, report_deferrals
+from agentworks.plugins.codex import artifacts as codex
+from agentworks.plugins.grok import artifacts as grok
 from tests.artifacts._fixtures import received
-from tests.artifacts.test_native_delivery import artifact
+from tests.artifacts.test_native_delivery import artifact, context
 
 
 @pytest.mark.parametrize("count,visible", [(1, 1), (2, 2), (3, 3), (4, 2), (8, 2)])
 def test_progress_counts_artifacts_not_package_members(monkeypatch, count, visible):
     items = tuple(artifact(ArtifactType.SKILL, name=f"entry-{chr(97 + index)}") for index in range(count))
-    files = tuple(
-        OwnedArtifactFile(
-            path=f"/skills/{item.content.name}/{member}", sha256="a" * 64, origins=(item.origin_identity,)
-        )
-        for item in items
-        for member in ("SKILL.md", "extra.txt")
-    )
+    assert all(len(item.content.members) > 1 for item in items)
     messages: list[str] = []
     monkeypatch.setattr(output, "info", messages.append)
-    report_application(received(*items), integration="native", owner="user", files=files)
+    report_applied(received(*items), integration="native", owner="user")
     assert len(messages) == 1
     assert str(count) in messages[0]
     for index, item in enumerate(items):
         assert (item.content.name in messages[0]) == (index < visible)
 
 
-def test_skipped_and_unpublished_inputs_are_not_reported_as_applied(monkeypatch):
+def test_skipped_and_deferred_inputs_are_not_reported_as_applied(monkeypatch):
     applied = artifact(ArtifactType.RULE, name="published")
     skipped = artifact(ArtifactType.RULE, name="malformed")
     unpublished = artifact(ArtifactType.RULE, name="unpublished")
-    owned = OwnedArtifactFile(
-        path="/AGENTS.md", sha256="a" * 64, origins=(applied.origin_identity, skipped.origin_identity)
-    )
     messages: list[str] = []
     monkeypatch.setattr(output, "info", messages.append)
-    report_application(
+    report_applied(
         received(applied, skipped, unpublished),
         integration="native",
         owner="user",
-        files=(owned,),
+        deferred=(ArtifactDeferral(input_id=unpublished.identity, destination="session", reason="later"),),
         skipped=(ArtifactSkip(path="/AGENTS.md", origins=(skipped.origin_identity,), reason="broken markers"),),
     )
     assert len(messages) == 1
@@ -70,7 +63,7 @@ def test_deferrals_keep_routes_reasons_and_duplicate_owner_names(monkeypatch):
     messages: list[str] = []
     monkeypatch.setattr(output, "warn", messages.append)
     monkeypatch.setattr(output, "info", lambda message: None)
-    report_application(received(first, second, third), integration="native", owner="vm", deferred=routes)
+    report_deferrals(received(first, second, third), integration="native", owner="vm", deferred=routes)
     assert len(messages) == 2
     assert all(value in messages[0] for value in ("2", "alice", "bob", routes[0].reason, routes[0].destination))
     assert all(value in messages[1] for value in ("1", third.content.name, routes[2].reason, routes[2].destination))
@@ -79,10 +72,14 @@ def test_deferrals_keep_routes_reasons_and_duplicate_owner_names(monkeypatch):
 def test_aggregate_file_reports_each_artifact_type(monkeypatch):
     rule = artifact(ArtifactType.RULE, name="policy")
     hint = replace(rule, content=replace(rule.content, type=ArtifactType.HINT))
-    owned = OwnedArtifactFile(path="/AGENTS.md", sha256="a" * 64, origins=(rule.origin_identity, hint.origin_identity))
+    inputs = received(rule, hint)
+    rendered = codex.outer_artifacts(
+        inputs, skills_root="/skills", agents_root="/agents", instructions_path="/AGENTS.md"
+    )
+    assert len(rendered.files) == 1 and len(rendered.files[0].origins) == 2
     messages: list[str] = []
     monkeypatch.setattr(output, "info", messages.append)
-    report_application(received(rule, hint), integration="native", owner="user", files=(owned,))
+    report_applied(inputs, integration="native", owner="user", deferred=rendered.deferred)
     assert len(messages) == 2
     assert hint.content.type.value in messages[0]
     assert rule.content.type.value in messages[1]
@@ -97,10 +94,28 @@ def test_terminal_deferrals_group_names_but_retain_original_owner(monkeypatch):
     progress: list[str] = []
     monkeypatch.setattr(output, "warn", messages.append)
     monkeypatch.setattr(output, "info", progress.append)
-    report_application(received(*items), integration="native", owner="session facet", deferred=deferred, terminal=True)
+    report_deferrals(received(*items), integration="native", owner="session facet", deferred=deferred, terminal=True)
     assert len(messages) == 1
     assert all(item.content.name in messages[0] for item in items)
     assert items[0].origin.resource_name in messages[0]
     assert items[0].origin.bundle in messages[0]
     assert deferred[0].reason in messages[0]
     assert not progress
+
+
+@pytest.mark.parametrize(
+    "render,workaround",
+    [(codex.session_artifacts, "session-developer-instructions"), (grok.session_artifacts, "session-rules")],
+)
+def test_argument_only_delivery_reports_each_applied_type(monkeypatch, render, workaround):
+    rule = artifact(ArtifactType.RULE, name="policy")
+    hint = artifact(ArtifactType.HINT, name="setup")
+    prepared = context(rule, hint)
+    plan = render(prepared, configured=None, extra_args=(), enabled_workarounds=(workaround,))
+    assert plan.argv and not plan.application.files and not plan.application.deferred
+    messages: list[str] = []
+    monkeypatch.setattr(output, "info", messages.append)
+    report_applied(prepared.inputs, integration="native", owner="session", deferred=plan.application.deferred)
+    assert len(messages) == 2
+    assert hint.content.name in messages[0]
+    assert rule.content.name in messages[1]

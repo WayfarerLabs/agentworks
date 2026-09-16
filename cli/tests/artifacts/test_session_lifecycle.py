@@ -15,10 +15,11 @@ from typing import Any
 
 import pytest
 
-from agentworks.artifacts.application import ArtifactApplication
+from agentworks.artifacts.application import ArtifactApplication, ArtifactFile
 from agentworks.artifacts.bundle import ArtifactBundle
 from agentworks.artifacts.declarations import ArtifactsConfig, HintArtifactSpec
 from agentworks.artifacts.native.common import defer
+from agentworks.artifacts.sections import BEGIN
 from agentworks.artifacts.session import cleanup_session_artifacts
 from agentworks.capabilities.harness_integration import HarnessStart, ShellIntegration
 from agentworks.db import Database, SessionStatus
@@ -196,7 +197,7 @@ def test_source_failure_preserves_old_runtime_run_and_files(lifecycle):
     assert "kill" not in lifecycle.events
 
 
-def _leave_session_inputs_unhandled(monkeypatch):
+def _leave_session_inputs_unhandled(monkeypatch: pytest.MonkeyPatch) -> None:
     """Exercise core's unhandled protocol with a deliberately declining integration."""
 
     def start(integration, *args, **kwargs):
@@ -205,6 +206,26 @@ def _leave_session_inputs_unhandled(monkeypatch):
         return HarnessStart("", artifacts=defer(context.inputs, "session", "Unsupported fixture artifacts"))
 
     monkeypatch.setattr(ShellIntegration, "start", start)
+
+
+def test_skipped_session_section_is_recorded_without_claiming_delivery(lifecycle, monkeypatch, captured_output):
+    def start(integration, *args, **kwargs):
+        context = integration._session_binding.artifact_context
+        item = next(context.inputs.items())
+        path = Path(context.directory) / "AGENTS.md"
+        # Simulate an externally malformed file at the integration-selected destination.
+        path.parent.mkdir(parents=True)
+        path.write_bytes(BEGIN + b"\nmissing end delimiter")
+        file = ArtifactFile(str(path), b"replacement", (item.origin_identity,), generated_section=True)
+        return HarnessStart("true", artifacts=ArtifactApplication(files=(file,)))
+
+    monkeypatch.setattr(ShellIntegration, "start", start)
+    lifecycle.restart()
+    record = read_native_setup(lifecycle.db, "session", "s1").records[0]
+    assert record.complete and len(record.skipped) == 1
+    assert not record.artifact_files and not record.deferred
+    assert Path(record.skipped[0].path).read_bytes() == BEGIN + b"\nmissing end delimiter"
+    assert len(captured_output.warnings) == 1
 
 
 def test_unhandled_session_inputs_warn_launch_and_retire_previous_files(lifecycle, monkeypatch, captured_output):

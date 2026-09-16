@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from agentworks.artifacts.application import ArtifactApplication, OwnedArtifactFile, SessionArtifactContext
 from agentworks.artifacts.publication import publish_artifacts, validate_application
-from agentworks.artifacts.reporting import report_application
+from agentworks.artifacts.reporting import report_applied, report_deferrals
 from agentworks.artifacts.state import CapturedArtifacts, capture_owner, write_capture
 from agentworks.errors import StateError
 from agentworks.harness_setup.inputs import SetupInputs
@@ -111,7 +111,7 @@ def validate_session_application(
         raise StateError("session artifacts conflict with an ancestor artifact destination")
     if any(not item.path.startswith(context.directory + "/") for item in result.files):
         raise StateError("session artifact publication must use its private run directory")
-    report_application(
+    report_deferrals(
         context.inputs, integration=integration, owner="session facet", deferred=result.deferred, terminal=True
     )
     return result
@@ -150,11 +150,15 @@ def stage_session_artifacts(
 
     checkpoint(())
     published = publish_artifacts(runner, application.files, (), checkpoint, roots=(context.directory,))
-    report_application(
+    if published.skipped:
+        current = current.model_copy(update={"skipped": published.skipped})
+        state = replace_setup_record(state, current)
+        write_native_setup(db, "session", name, state, operation="session-prepare")
+    report_applied(
         context.inputs,
         integration=integration,
         owner=f"session '{name}'",
-        files=published.files,
+        deferred=application.deferred,
         skipped=published.skipped,
     )
 

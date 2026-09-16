@@ -52,12 +52,13 @@ it is persisted for inspection and never routed again. Returning the old `None` 
 error even for an empty invocation.
 
 `ArtifactFile.generated_section` selects a bounded Agentworks-generated section in an instruction
-file. Core replaces a complete section while preserving surrounding bytes and existing metadata;
-malformed delimiters warn and produce a recorded skip. A skip is separate from the integration's
-deferral result and does not claim delivery or send the artifact to another facet. Whole-file
-publication still requires ownership of any existing destination. VM publication uses privileged
-destination operations and makes new files readable by VM users. Native directory selection remains
-the integration's responsibility. Shell publishes all types directly at every activated facet.
+file. Core replaces a complete section while preserving surrounding bytes, ownership, permissions
+and extended attributes; malformed delimiters warn and produce a recorded skip. A skip is separate
+from the integration's deferral result and does not claim delivery or send the artifact to another
+facet. Whole-file publication still requires ownership of any existing destination. VM publication
+uses privileged destination operations and makes new files readable by VM users. Native directory
+selection remains the integration's responsibility. Shell publishes all types directly at every
+activated facet.
 
 An `ArtifactFile` may supply an exact `package_root` for guarded empty-parent cleanup. The shared
 skill renderer sets it on every package member, and publication persists it in that member's

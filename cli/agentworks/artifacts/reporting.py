@@ -11,7 +11,7 @@ from agentworks.artifacts.model import ArtifactType
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from agentworks.artifacts.application import ArtifactDeferral, ArtifactSkip, OwnedArtifactFile
+    from agentworks.artifacts.application import ArtifactDeferral, ArtifactSkip
     from agentworks.artifacts.model import ArtifactInput, ArtifactInputs
 
 
@@ -29,28 +29,43 @@ def _names(items: Sequence[ArtifactInput]) -> str:
     return ", ".join(names)
 
 
-def report_application(
+def report_applied(
     inputs: ArtifactInputs,
     *,
     integration: str,
     owner: str,
-    files: Sequence[OwnedArtifactFile] = (),
     deferred: Sequence[ArtifactDeferral] = (),
     skipped: Sequence[ArtifactSkip] = (),
-    terminal: bool = False,
 ) -> None:
-    """Report confirmed publication and explicit non-delivery without counting package members."""
+    """Report successfully handled inputs, whether delivered as files or launch arguments."""
     items = tuple(inputs.items())
     omitted = {origin for entry in skipped for origin in entry.origins}
-    applied = {origin for file in files for origin in file.origins} - omitted
-    routes = {entry.input_id: entry for entry in deferred}
+    deferred_ids = {entry.input_id for entry in deferred}
     for artifact_type in ArtifactType:
         delivered = tuple(
-            item for item in items if item.content.type is artifact_type and item.origin_identity in applied
+            item
+            for item in items
+            if item.content.type is artifact_type
+            and item.origin_identity not in omitted
+            and item.identity not in deferred_ids
         )
         if delivered:
             noun = artifact_type.value if len(delivered) == 1 else artifact_type.map_name
             output.info(f"Applying {len(delivered)} {noun} ({_names(delivered)}) via {integration} at {owner}")
+
+
+def report_deferrals(
+    inputs: ArtifactInputs,
+    *,
+    integration: str,
+    owner: str,
+    deferred: Sequence[ArtifactDeferral],
+    terminal: bool = False,
+) -> None:
+    """Name routed or finally unhandled inputs without promising eventual delivery."""
+    items = tuple(inputs.items())
+    routes = {entry.input_id: entry for entry in deferred}
+    for artifact_type in ArtifactType:
         grouped: dict[tuple[str, str, str], list[ArtifactInput]] = {}
         for item in items:
             if item.content.type is artifact_type and item.identity in routes:

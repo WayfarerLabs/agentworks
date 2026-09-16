@@ -14,7 +14,7 @@ from agentworks import output
 from agentworks.artifacts.application import ArtifactDeferral
 from agentworks.artifacts.model import ArtifactInputs
 from agentworks.artifacts.publication import publish_artifacts, validate_application
-from agentworks.artifacts.reporting import report_application
+from agentworks.artifacts.reporting import report_applied, report_deferrals
 from agentworks.artifacts.state import write_capture
 from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled, harness_integration_for
 from agentworks.capabilities.harness_integration.setup import (
@@ -238,14 +238,18 @@ def run_setup(
                 state = replace_setup_record(state, current)
             persist(state)
             if block is not None and current.complete:
-                planned_paths = {item.path for item in application.files}
-                report_application(
+                report_applied(
                     artifacts,
                     integration=name,
                     owner=f"{inputs.component}/{inputs.name}",
-                    files=tuple(item for item in publication.files if item.path in planned_paths),
                     deferred=application.deferred,
                     skipped=publication.skipped,
+                )
+                report_deferrals(
+                    artifacts,
+                    integration=name,
+                    owner=f"{inputs.component}/{inputs.name}",
+                    deferred=application.deferred,
                 )
         if fallback and not any(
             record.pending_cleanup for record in state.records if record.component == inputs.component
@@ -256,10 +260,9 @@ def run_setup(
 
 def _report_fallback(inputs: SetupInputs, deferred: tuple[ArtifactDeferral, ...]) -> None:
     if deferred and inputs.artifact_snapshot is not None:
-        report_application(
+        report_deferrals(
             ArtifactInputs(local=inputs.artifact_snapshot.inputs),
             integration="core fallback",
             owner=f"{inputs.component}/{inputs.name}",
-            files=(),
             deferred=deferred,
         )
