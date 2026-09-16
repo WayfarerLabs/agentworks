@@ -19,8 +19,9 @@ integrations deliver natively.
 ### ⚠ BREAKING CHANGES
 
 * `agw session resume`, `agw console attach --recreate`, and `agw session list --no-status` are no
-  longer accepted. Use `agw session start` and `agw session restart`, whose behavior these
-  wrappers had been forwarding to since 0.18.
+  longer accepted. These were the 0.18 compatibility shims for the aligned runnable grammar; use
+  `agw session start`, `agw session restart`, and `list --status`, which they had been forwarding
+  to.
 * `agw session start --all` now starts only sessions observed as stopped. Recovering a broken
   session in bulk requires `--force`; `--force-new` still refuses running sessions.
 * **`agw session restart` asks before replacing a session it positively detects as running**, named
@@ -29,6 +30,14 @@ integrations deliver natively.
 
 ### Features
 
+* **VMs, sessions, and consoles behave alike.** The runnable surface introduced in 0.18 is now the
+  only one: `list`, `describe`, and `start`/`stop` are spelled the same for all three, with
+  `restart` and `attach` where they apply, and `list --status` is the single opt-in for live runtime
+  state everywhere. Status output is aligned and sorted, reports uptime for running runnables, and
+  session lists name their target user. Bulk `--all` forms share one selection story: `session
+  start --all` takes only stopped sessions, and `restart --all` confirms before replacing running
+  ones. Inventory stays readable when a stored relationship is broken, so a damaged row no longer
+  makes `list` unusable; focused operations and mutations remain strict.
 * **Harness setup across resource facets.** VM, admin, agent, and workspace templates can activate
   harness integrations through a `harness_integrations` map keyed by integration name, with
   per-facet configuration. Claude and Codex install user marketplaces and plugins and map
@@ -65,7 +74,12 @@ integrations deliver natively.
   exclusive `--resume-only` and `--force-new`.
 * **Bulk operations can filter by integration.** `--harness-integration` is accepted by
   `agw session list` and by the `--all` forms of `session stop`, `start`, and `restart`.
-* **`agw session list` reports uptime and target users**, and list-like output is sorted.
+* **VM platforms execute natively.** Every version-1 VM platform now provides a native execution
+  transport, so core bootstrap and recovery no longer depend on an overlay network being up.
+  Proxmox executes through the QEMU Guest Agent. `vm shell --platform` remains limited to platforms
+  offering a full interactive native transport, and points Proxmox users at console access instead.
+* **`agw guide list` and `agw guide show` accept `--agent` and `--human` directly**, in addition to
+  the existing group-level forms; a leaf `show` flag overrides the group selection.
 
 ### Fixes
 
