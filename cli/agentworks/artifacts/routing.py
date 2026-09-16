@@ -236,7 +236,8 @@ def session_artifacts(
     active: list[ArtifactFacet] = []
     for view in (vm_view, user_view, workspace_view):
         if view.status == "current" and view.record is not None and (view.prepared or view.record.artifact_files):
-            files.extend(view.record.artifact_files)
+            skipped_paths = {item.path for item in view.record.skipped}
+            files.extend(item for item in view.record.artifact_files if item.path not in skipped_paths)
             active.append(view.owner.facet)
     return RoutingResult(result, tuple(files), tuple(active))
 

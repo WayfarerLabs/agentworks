@@ -14,6 +14,7 @@ from agentworks.schema import CapabilityConfig
 from agentworks.secrets.orchestration import SecretTarget
 
 if TYPE_CHECKING:
+    from agentworks.artifacts.application import ArtifactSkip
     from agentworks.artifacts.declarations import ArtifactsConfig
     from agentworks.artifacts.model import (
         ArtifactComponent,
@@ -126,6 +127,7 @@ class IntegrationMetadata:
     placements: tuple[PlacementMetadata, ...] = ()
     passthrough_inputs: tuple[str, ...] = ()
     passthrough_destination: ArtifactFacet | None = None
+    recorded_skipped: tuple[ArtifactSkip, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -348,10 +350,17 @@ def _integration_metadata(owner: SetupInputs, name: str, view: ArtifactOwnerView
         else tuple(DeferralMetadata(item.input_id, item.destination, item.reason) for item in record.deferred)
     )
     deferred_ids = {item.input_id for item in deferred}
+    skipped = () if record is None else record.skipped
+    skipped_origins = {origin for item in skipped for origin in item.origins}
+    skipped_ids = {
+        item.identity
+        for item in (() if view.prepared is None else view.prepared.items())
+        if item.origin_identity in skipped_origins
+    }
     handled = (
         ()
-        if record is None or not record.complete
-        else tuple(input_id for input_id in record.artifact_inputs or () if input_id not in deferred_ids)
+        if record is None or not record.complete or (skipped and view.prepared is None)
+        else tuple(input_id for input_id in record.artifact_inputs or () if input_id not in deferred_ids | skipped_ids)
     )
     placements = (
         ()
@@ -368,6 +377,7 @@ def _integration_metadata(owner: SetupInputs, name: str, view: ArtifactOwnerView
         placements,
         tuple(item.identity for group in (passthrough or {}).values() for item in group.items()),
         destination if passthrough else None,
+        skipped,
     )
 
 
@@ -421,6 +431,8 @@ def render_artifacts(inspection: ArtifactInspection) -> None:
                     output.info(f"    Recorded unhandled: {item.input_id[:12]}: {item.reason}")
                 else:
                     output.info(f"    Recorded deferred: {item.input_id[:12]} to {item.destination}: {item.reason}")
+            for skipped in integration.recorded_skipped:
+                output.info(f"    Recorded skipped: {skipped.path}: {skipped.reason}")
             for placement in integration.placements:
                 output.info(f"    Recorded placement: {placement.path} ({placement.native_identity or 'file'})")
     output.info("Recorded application does not verify current native files or model context.")
@@ -480,6 +492,10 @@ def inspection_data(inspection: ArtifactInspection) -> JsonObject:
                         "recorded_deferred": [
                             {"input_id": value.input_id, "destination": value.destination, "reason": value.reason}
                             for value in item.recorded_deferred
+                        ],
+                        "recorded_skipped": [
+                            {"path": value.path, "origins": list(value.origins), "reason": value.reason}
+                            for value in item.recorded_skipped
                         ],
                         "placements": [
                             {

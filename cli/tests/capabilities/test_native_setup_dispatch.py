@@ -290,7 +290,12 @@ def test_inactive_capture_notice_requires_local_artifacts(db, facet_case, monkey
 @pytest.mark.parametrize("component", ["vm"])
 @pytest.mark.parametrize("outcome", ["deferred", "handled", "hook-failure", "publication-failure", "pending-cleanup"])
 def test_deferral_notice_follows_successful_application(db, facet_case, monkeypatch, outcome):
-    from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral, OwnedArtifactFile
+    from agentworks.artifacts.application import (
+        ArtifactApplication,
+        ArtifactDeferral,
+        ArtifactPublication,
+        OwnedArtifactFile,
+    )
     from agentworks.artifacts.model import (
         ArtifactContent,
         ArtifactInput,
@@ -339,11 +344,109 @@ def test_deferral_notice_follows_successful_application(db, facet_case, monkeypa
         )
     elif outcome == "pending-cleanup":
         leftover = OwnedArtifactFile(path="/home/fixture/old", sha256="a" * 64, origins=(artifacts[0].origin_identity,))
-        monkeypatch.setattr("agentworks.harness_setup.dispatch.publish_artifacts", lambda *a, **k: (leftover,))
+        monkeypatch.setattr(
+            "agentworks.harness_setup.dispatch.publish_artifacts",
+            lambda *a, **k: ArtifactPublication(files=(leftover,)),
+        )
     if outcome in ("hook-failure", "publication-failure"):
         with pytest.raises(RuntimeError):
             run_setup(db, Mock(), inputs, invocation, operation="fixture-setup", buffered=True)
     else:
         state = run_setup(db, Mock(), inputs, invocation, operation="fixture-setup", buffered=True)
         assert state.records[0].complete == (outcome != "pending-cleanup")
-    assert warning.call_count == (1 if outcome == "deferred" else 0)
+    assert warning.call_count == (
+        len({item.destination for item in application.deferred}) if outcome == "deferred" else 0
+    )
+
+
+@pytest.mark.parametrize("component", ["vm"])
+def test_vm_publication_uses_root_and_records_skips_without_rerouting(db, facet_case, monkeypatch):
+    from agentworks.artifacts.application import ArtifactApplication, ArtifactFile, ArtifactPublication, ArtifactSkip
+    from agentworks.artifacts.model import (
+        ArtifactContent,
+        ArtifactInput,
+        ArtifactOrigin,
+        ArtifactProvenance,
+        ArtifactType,
+    )
+    from agentworks.harness_setup.state import read_native_setup
+    from tests.artifacts._fixtures import received
+
+    inputs, invocation = facet_case
+    item = ArtifactInput(
+        ArtifactContent(ArtifactType.RULE, "policy", text="rule"),
+        ArtifactProvenance(),
+        ArtifactOrigin("vm", "vm", "owner", entry="policy"),
+    )
+    desired = ArtifactFile("/etc/harness/AGENTS.md", b"rule", (item.origin_identity,), generated_section=True)
+    skip = ArtifactSkip(path=desired.path, origins=desired.origins, reason="partial section")
+
+    class Applying(ConformingHarnessIntegration):
+        name = "applying"
+        description = "Machine artifact fixture"
+
+        def vm_init(self, invocation):
+            return ArtifactApplication(files=(desired,))
+
+    publish = Mock(return_value=ArtifactPublication(skipped=(skip,)))
+    monkeypatch.setattr("agentworks.harness_setup.dispatch.harness_integration_for", lambda name: Applying)
+    monkeypatch.setattr("agentworks.harness_setup.dispatch.publish_artifacts", publish)
+    monkeypatch.setattr("agentworks.artifacts.routing.setup_artifacts", lambda *args: received(item))
+    monkeypatch.setattr(SetupInputs, "declaration", lambda *args: {})
+    inputs = replace(inputs, activations={"applying": CapabilityConfig.model_validate({})})
+    state = run_setup(db, Mock(), inputs, invocation, operation="fixture-setup")
+    assert publish.call_args.kwargs["roots"] == ("/",)
+    assert publish.call_args.kwargs["root"] is True
+    record = state.records[0]
+    assert record.complete and not record.pending_cleanup
+    assert not record.artifact_files and not record.deferred
+    assert record.skipped == (skip,)
+    assert read_native_setup(db, inputs.kind, inputs.name).records[0].skipped == (skip,)
+
+
+@pytest.mark.parametrize("component", ["agent"])
+@pytest.mark.parametrize("activated", [False, True])
+def test_malformed_obsolete_section_only_blocks_removal_of_entire_activation(db, facet_case, monkeypatch, activated):
+    from agentworks.artifacts.application import (
+        ArtifactApplication,
+        ArtifactPublication,
+        ArtifactSkip,
+        OwnedArtifactFile,
+    )
+
+    inputs, invocation = facet_case
+    old = OwnedArtifactFile(
+        path="/home/agent/AGENTS.md",
+        sha256="a" * 64,
+        origins=("b" * 64,),
+        generated_section=True,
+    )
+    skipped = ArtifactSkip(path=old.path, origins=old.origins, reason="partial section")
+    previous = SetupRecord(
+        component=inputs.component,
+        integration="fixture",
+        destination_id="a" * 64,
+        declaration={},
+        complete=True,
+        artifact_files=(old,),
+        artifact_inputs=(),
+    )
+    write_native_setup(db, inputs.kind, inputs.name, NativeSetupState(records=(previous,)), operation="fixture")
+
+    class SectionOwner(ConformingHarnessIntegration):
+        name = "fixture"
+        description = "Section cleanup fixture"
+
+        def user_init(self, invocation):
+            return ArtifactApplication()
+
+    monkeypatch.setattr("agentworks.harness_setup.dispatch.harness_integration_for", lambda name: SectionOwner)
+    monkeypatch.setattr(SetupInputs, "declaration", lambda *args: {})
+    monkeypatch.setattr(
+        "agentworks.harness_setup.dispatch.publish_artifacts",
+        lambda *args, **kwargs: ArtifactPublication(files=(old,), skipped=(skipped,)),
+    )
+    inputs = replace(inputs, activations={"fixture": CapabilityConfig()} if activated else {})
+    record = run_setup(db, Mock(), inputs, invocation, operation="fixture").records[0]
+    assert record.artifact_files == (old,) and record.skipped == (skipped,)
+    assert record.complete == activated and record.pending_cleanup != activated

@@ -498,7 +498,7 @@ def test_large_skill_retirement_does_not_leave_an_inventory_lockout(tmp_path):
         tuple(previous),
         lambda files: None,
         roots=(str(target.home),),
-    )
+    ).files
     assert len(retained) == 1 and not removed.exists()
     assert probe(tmp_path, tool="claude", entries={str(keep): "skill:review"})["problems"] == []
 
@@ -694,7 +694,7 @@ def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(
         artifacts=received(removed, kept),
     )
     first = integration.user_init(invocation)
-    current = publish_artifacts(target, first.files, (), lambda files: None, roots=(str(target.home),))
+    current = publish_artifacts(target, first.files, (), lambda files: None, roots=(str(target.home),)).files
     if rootless:
         current = tuple(record.model_copy(update={"package_root": None}) for record in current)
     entrypoint = target.home / ".claude/skills/review/SKILL.md"
@@ -732,7 +732,9 @@ def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(
     invocation = replace(invocation, prior=invocation.prior.model_copy(update={"artifact_files": checkpoints[-1]}))
     # This actual user_init invokes native preflight before retrying publication.
     retried = integration.user_init(invocation)
-    finished = publish_artifacts(target, retried.files, checkpoints[-1], checkpoints.append, roots=(str(target.home),))
+    finished = publish_artifacts(
+        target, retried.files, checkpoints[-1], checkpoints.append, roots=(str(target.home),)
+    ).files
     assert not entrypoint.exists()
     assert entrypoint.parent.exists() == (rootless or unowned_leftovers)
     if unowned_leftovers:
@@ -743,7 +745,8 @@ def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(
     invocation = replace(invocation, prior=invocation.prior.model_copy(update={"artifact_files": finished}))
     subsequent = integration.user_init(invocation)
     assert (
-        publish_artifacts(target, subsequent.files, finished, checkpoints.append, roots=(str(target.home),)) == finished
+        publish_artifacts(target, subsequent.files, finished, checkpoints.append, roots=(str(target.home),)).files
+        == finished
     )
 
 

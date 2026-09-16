@@ -360,3 +360,28 @@ def test_inactive_inspection_projects_only_applicable_vm_inputs(db: Database, co
     integration = encoded["owners"][-1]["integrations"][0]
     assert integration["passthrough_inputs"] == [item.identity for item in expected]
     assert integration["passthrough_destination"] == destination
+
+
+def test_skipped_section_is_inspectable_without_being_handled_or_deferred(db: Database) -> None:
+    from agentworks.artifacts.application import ArtifactSkip
+    from agentworks.artifacts.inspection import inspect_artifacts, inspection_data
+    from agentworks.harness_setup.state import read_native_setup, write_native_setup
+    from tests.artifacts.test_routing import graph
+
+    fixture = graph(db, active=("agent",))
+    fixture.save("agent", inherited=fixture.captures["vm"].inputs)
+    item = tuple(fixture.captures["agent"].inputs.items())[0]
+    skipped = ArtifactSkip(
+        path="/home/worker/AGENTS.md", origins=(item.origin_identity,), reason="malformed delimiters"
+    )
+    state = read_native_setup(db, "agent", "agent")
+    record = state.records[0].model_copy(update={"skipped": (skipped,)})
+    write_native_setup(db, "agent", "agent", state.model_copy(update={"records": (record,)}), operation="fixture")
+    result = inspect_artifacts(db, fixture.registry, agent_name="agent")
+    integration = result.owners[-1].integrations[0]
+    assert integration.status == "current"
+    assert item.identity not in integration.recorded_handled
+    assert not integration.recorded_deferred
+    assert integration.recorded_skipped == (skipped,)
+    encoded = json.dumps(inspection_data(result))
+    assert skipped.path in encoded and item.content.text not in encoded
