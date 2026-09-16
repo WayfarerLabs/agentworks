@@ -966,10 +966,10 @@ correction. The allowed trees are `/etc/claude-code`, `/etc/codex` and `/opt/age
 The existing `NativeFiles` helper remains the migration seam for the proposed Transport file APIs in
 PR 795.
 
-- [ ] Enforce the global boundary on elevated reads, writes and cleanup, including persisted paths.
-- [ ] Verify refusals before I/O and preserve normal unprivileged operation.
+- [x] Enforce the global boundary on elevated reads, writes and cleanup, including persisted paths.
+- [x] Verify refusals before I/O and preserve normal unprivileged operation.
 - [x] Update the integration and artifact guides and architecture.
-- [ ] Complete private project, correctness and complexity reviews and validation.
+- [x] Complete private project, correctness and complexity reviews and validation.
 - [ ] Publish and describe the exact corrected head, then return PR 825 to ready.
 
 The first handoff's independent live Lima test verified Codex user guidance, surrounding-content and
@@ -977,3 +977,18 @@ metadata preservation, malformed-section refusal without changing bytes, and rec
 not exercise VM publication or large progress groups. Its clean report is evidence for those
 user-scope paths, not live proof of privileged publication. The operator closed the unavailable
 post-merge PR 822 report question; no additional report is claimed reviewed.
+
+Private review is clean through `cf6dd921`. The project reviewer ran 191 targeted cases; Muntz ran
+160 cases and confirmed that removing direct helper enforcement fails 33 tests, while removing
+publication-wide preflight fails six. The correctness lane independently checked 121 invalid
+elevated operations, persisted paths, cleanup bounds, broader caller scopes and retained symlink
+refusal. The first review found one stale dispatch expectation requiring unrestricted VM roots; that
+test now checks the shared allowlist and uses an approved fixture path.
+
+Final validation: 9,900 non-integration tests passed, seven skipped; Ruff lint/format, strict mypy
+(857 files), file lint, locked-SDD, exact CI Typer isolation and Rulesync 7.14.0 passed. The first
+full test run failed only the stale dispatch expectation already corrected; the final full rerun is
+clean. Website Python (160), Node (103) and both deterministic double builds passed. The real CLI
+rendered the updated artifact guide in an isolated HOME, which was removed afterwards. Filesystem
+tests use real local helper execution with simulated elevation; no live VM publication is claimed
+for this correction.
