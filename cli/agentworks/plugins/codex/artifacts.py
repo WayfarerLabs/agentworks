@@ -90,7 +90,7 @@ def outer_artifacts(
 
 
 def vm_artifacts(inputs: ArtifactInputs) -> ArtifactApplication:
-    """Codex documents machine-wide skills, but no machine-wide rules or agents."""
+    """Use machine skill discovery; other types need native user placement here."""
     validate_names(inputs)
     files: list[ArtifactFile] = []
     deferred = []
@@ -102,7 +102,10 @@ def vm_artifacts(inputs: ArtifactInputs) -> ArtifactApplication:
                 ArtifactDeferral(
                     input_id=item.identity,
                     destination="user",
-                    reason=f"Codex has no supported machine-wide {item.content.type.map_name} location",
+                    reason=(
+                        "This integration has no additive machine-wide location for "
+                        f"Codex {item.content.type.map_name}; using native user placement"
+                    ),
                 )
             )
     return ArtifactApplication(tuple(files), tuple(deferred))

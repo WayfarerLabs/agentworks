@@ -160,6 +160,7 @@ def test_ownership_mode_switch_refuses_existing_destination_before_any_writes(ta
     path = target.home / "AGENTS.md"
     if original_section:
         path.write_bytes(b"unmanaged instructions\n")
+        path.chmod(0o600)
     original = replace(section(path), generated_section=original_section)
     first = apply(target, (original,))
     before = path.read_bytes()

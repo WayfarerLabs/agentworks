@@ -342,7 +342,8 @@ activations do not enable session workarounds.
 Shell requires no workaround. It publishes files at every activated facet, using the VM directory
 above, `~/.agentworks-artifacts/user/`, `<workspace>/.agentworks-artifacts/`, and the private
 session/run directory. Session publication exposes its index through `AGENTWORKS_ARTIFACTS_DIR`.
-Remove the former `session-artifact-files` setting from shell configurations.
+Remove `enabled_workarounds` from shell configurations; `session-artifact-files` is no longer
+needed.
 
 Codex and Grok Build have no session skill workaround. Apply those skills at a supported user or
 workspace facet. Unhandled warnings name the relevant workaround when one exists; enabling a

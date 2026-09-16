@@ -909,18 +909,18 @@ per-type application and deferral progress, and direct shell publication at ever
 supersedes shell's session opt-in and the initial VM routing-only implementation. Earlier completed
 checkboxes remain the historical record.
 
-- [ ] Support generated instruction sections, replacing a complete managed extent while preserving
+- [x] Support generated instruction sections, replacing a complete managed extent while preserving
       surrounding bytes and metadata; warn, retain and record malformed sections as skipped.
-- [ ] Publish VM artifact files using the existing transport and ownership lifecycle, with
+- [x] Publish VM artifact files using the existing transport and ownership lifecycle, with
       machine-readable permissions and no new VM deletion prerequisite.
-- [ ] Apply Codex hints/rules at user and workspace scope through the selected native instruction
+- [x] Apply Codex hints/rules at user and workspace scope through the selected native instruction
       file; apply verified Claude and Codex artifacts at VM scope.
-- [ ] Publish shell artifacts directly at VM, user, workspace and session scope without an opt-in.
-- [ ] Report actual application by artifact type and bounded name list; report deferral reasons and
+- [x] Publish shell artifacts directly at VM, user, workspace and session scope without an opt-in.
+- [x] Report actual application by artifact type and bounded name list; report deferral reasons and
       destinations without promising that restart alone guarantees delivery.
-- [ ] Update native inventory, inspection, permanent guides, support matrices and design response.
+- [x] Update native inventory, inspection, permanent guides, support matrices and design response.
 - [ ] Assess Muntz's post-merge PR 822 feedback against this implementation.
-- [ ] Complete independent project, complexity and correctness reviews plus required validation.
+- [x] Complete independent project, complexity and correctness reviews plus required validation.
 - [ ] Publish the complete ready PR and assess its feedback.
 
 Acceptance includes empty and pre-existing instruction files; edited complete sections; missing,
@@ -928,3 +928,32 @@ reversed and duplicate delimiters; unrelated content and mode preservation; gene
 retirement; privileged VM publication readable by consumers; native cross-scope identity checks;
 shell publication without deferral; and progress counts per artifact rather than per package file.
 No native model calls are necessary for these filesystem and lifecycle claims.
+
+Private review is clean at `0179eee5`. Project review ran 105 targeted cases. Correctness review
+reproduced extended-attribute loss and a section-to-whole ownership promotion; both are fixed with
+real guest-program regressions, including ACL preservation and failure before replacement. Muntz
+found that file-based reporting omitted argument-only Codex/Grok delivery. Reporting now counts
+handled inputs minus explicit deferrals and skips. Both real renderers report hints and rules even
+with no generated files. Its follow-up passed 57 tests and verified the ownership and attribute
+checks through deletion experiments. A final fixture permission adjustment makes both existing-file
+ownership-transition directions fail when that guard is removed; Muntz independently confirmed it.
+The remaining changes clarify existing limitations and migration wording, not runtime policy.
+
+Validation passed: 9,810 non-integration tests, seven skipped; Ruff lint/format; strict mypy over
+856 files; file lint; locked-SDD and Typer checks; Rulesync 7.14.0. Website validation passed 160
+Python tests, 103 Node tests and deterministic builds for both site bases. One website
+keyboard-input timing test initially failed under concurrent load, passed its isolated retry, and
+then passed in another complete 160-test run. Real isolated-HOME CLI checks covered native
+default/opt-in/inherited/ explicitly-disabled workaround configuration, direct shell configuration,
+refusal of the removed shell setting, and rendered artifact guidance. Temporary HOME and build
+artifacts were removed. Guest filesystem tests execute the actual publication helper; root elevation
+is intercepted within local fixtures, so they are not evidence of live privileged VM publication. No
+live VM inventory is configured for this session, and no model calls were made. The ready handoff
+requests the normal independent integration-validation lane.
+
+PR 822's visible Muntz finding and dispositions were re-read and accounted for: native workaround
+name parity remains covered, shell's obsolete setting and its associated checks are removed, and its
+optional unrelated simplifications remain outside this correction. As of the final local review,
+GitHub returned no separate post-merge report in issue comments, reviews or inline comments. The
+operator was asked for its link; the additional report remains pending rather than being claimed
+reviewed.
