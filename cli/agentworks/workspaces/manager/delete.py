@@ -160,6 +160,7 @@ def delete_workspace(
                                 target_owns_session=session.agent_name is None,
                                 db=db,
                                 force=True,
+                                legacy_running_authorized=True,
                             )
                         except Exception:
                             unstoppable.append(session.name)

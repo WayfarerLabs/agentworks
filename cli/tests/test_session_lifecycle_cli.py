@@ -31,6 +31,7 @@ def command_calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, 
         (["start", "coding", "--force-new"], "start_session", {"name": "coding", "force_new": True}),
         (["start", "coding", "--resume-only"], "start_session", {"name": "coding", "resume_only": True}),
         (["restart", "coding", "--force"], "restart_session", {"name": "coding", "force": True}),
+        (["restart", "coding", "--yes"], "restart_session", {"name": "coding", "yes": True}),
         (
             ["start", "--all", "--vm", "vm1", "--workspace", "ws1"],
             "start_all_sessions",
@@ -38,6 +39,7 @@ def command_calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, 
         ),
         (["restart", "--all", "--agent", "agent1"], "restart_all_sessions", {"agent_name": "agent1"}),
         (["restart", "--all", "--resume-only"], "restart_all_sessions", {"resume_only": True}),
+        (["restart", "--all", "-y"], "restart_all_sessions", {"yes": True}),
     ],
 )
 def test_canonical_launch_commands_route_to_matching_service(
@@ -65,6 +67,13 @@ def test_resume_only_and_force_new_are_mutually_exclusive(
     )
 
     assert result.exit_code != 0
+    assert command_calls == []
+
+
+def test_start_does_not_accept_yes(command_calls: list[tuple[str, dict[str, Any]]]) -> None:
+    result = CliRunner().invoke(app, ["session", "start", "coding", "--yes"])
+
+    assert result.exit_code == 2
     assert command_calls == []
 
 

@@ -247,6 +247,11 @@ def test_session_restart_eager_resolve_fires_before_teardown(
     monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: SessionStatus.RUNNING)
     monkeypatch.setattr(
         session_manager,
+        "observe_session_statuses",
+        lambda sessions, **kwargs: {session.name: SessionStatus.RUNNING for session in sessions},
+    )
+    monkeypatch.setattr(
+        session_manager,
         "_build_session_target",
         lambda *a, **k: SimpleNamespace(run=lambda *a, **k: None),
     )
@@ -282,6 +287,7 @@ def test_session_restart_eager_resolve_fires_before_teardown(
             db,
             config,  # type: ignore[arg-type]
             name="s1",
+            yes=True,
             interaction=TtyInteractionPolicy.REFUSE,
         )
 
