@@ -1,5 +1,100 @@
 # Changelog
 
+## [0.19.0](https://github.com/WayfarerLabs/agentworks/compare/v0.18.0...v0.19.0) (2026-09-16)
+
+Harness integrations can now configure the VM, user, and workspace that a session runs in, and
+operators can declare reusable agent artifacts (hints, rules, skills, and agent personas) that those
+integrations deliver natively.
+
+### Upgrade notes
+
+* **Guest helpers now use Python on the VM.** Most images already provide `python3`, so this is
+  usually invisible. It is now part of the mandatory system packages installed during VM create and
+  reinit, so it is guaranteed going forward. Minimal images may not have it, and an existing VM that
+  lacks it can be brought up to date with `agw vm reinit <vm-name>`.
+* **A database migration runs automatically.** Sessions gain a durable `session_uuid` and a
+  per-launch `run_id`. Existing sessions receive a UUID on migration; they take their first `run_id`
+  at their next managed launch. Session names remain the human key and stay reusable.
+
+### ⚠ BREAKING CHANGES
+
+* `agw session resume`, `agw console attach --recreate`, and `agw session list --no-status` are no
+  longer accepted. These were the 0.18 compatibility shims for the aligned runnable grammar; use
+  `agw session start`, `agw session restart`, and `list --status`, which they had been forwarding
+  to.
+* `agw session start --all` now starts only sessions observed as stopped. Recovering a broken
+  session in bulk requires `--force`; `--force-new` still refuses running sessions.
+* **`agw session restart` asks before replacing a session it positively detects as running**, named
+  or batch. Pass `--yes` (`-y`) to proceed without the prompt; `--force` stays independent and
+  remains limited to broken-state recovery. Scripts that restart live sessions need the new flag.
+
+### Features
+
+* **VMs, sessions, and consoles behave alike.** The runnable surface introduced in 0.18 is now the
+  only one: `list`, `describe`, and `start`/`stop` are spelled the same for all three, with
+  `restart` and `attach` where they apply, and `list --status` is the single opt-in for live runtime
+  state everywhere. Status output is aligned and sorted, reports uptime for running runnables, and
+  session lists name their target user. Bulk `--all` forms share one selection story: `session
+  start --all` takes only stopped sessions, and `restart --all` confirms before replacing running
+  ones. Inventory stays readable when a stored relationship is broken, so a damaged row no longer
+  makes `list` unusable; focused operations and mutations remain strict.
+* **Harness setup across resource facets.** VM, admin, agent, and workspace templates can activate
+  harness integrations through a `harness_integrations` map keyed by integration name, with
+  per-facet configuration. Claude and Codex install user marketplaces and plugins and map
+  workstation settings files into their native user or project settings, with four merge policies
+  (replace, merge-overwrite, merge-preserve, skip-existing). Inheritance is additive: omitting the
+  map or `{}` inherits, and `codex: null` disables one integration while preserving the others.
+  Sessions report required and recommended upstream prerequisites without performing setup.
+* **Agent artifacts.** A new `artifact-bundle` resource declares hints, rules, skills, and agent
+  personas; resources reference bundles through an `artifacts` block. Sources are workstation files
+  or Git references (hints and rules may also be inline text), captured once into one normalized
+  representation before native delivery. Git sources resolve to an immutable commit per operation.
+  Claude, Codex, and Grok receive native placement; the shell integration publishes files for
+  explicit workload use and does not claim to load them into model context.
+* **Artifacts are delivered at native scopes.** Claude receives instructions, skills, and agent
+  personas at machine scope; Codex receives skills there and its hints and rules in an
+  Agentworks-generated section of the selected `AGENTS.md` (or an existing nonempty
+  `AGENTS.override.md`). Reapplying replaces that generated section and preserves surrounding
+  content, ownership, permissions, and extended attributes; malformed delimiters leave the file
+  untouched, warn, and record a skip. Elevated native file access is confined to one core-owned
+  allowlist: `/etc/claude-code`, `/etc/codex`, and `/opt/agentworks/artifacts`.
+* **Shell publishes files directly** at every activated facet: `/opt/agentworks/artifacts` for the
+  VM, the user's own directory at user scope, and a private run directory per session.
+* **Native harness session delivery is off by default** for Claude, Codex, and Grok Build, enabled
+  per integration through `enabled_workarounds`. An explicit empty list clears inherited opt-ins and
+  an unrecognized name is a configuration error.
+* **An artifact left unhandled does not prevent launch.** It warns with its owning resource, type,
+  name, and reason, and is not reported as delivered. `agw artifact show` records the same
+  deferrals, so they stay visible after the launch output is gone. Invalid input, unsafe
+  publication, and ownership conflicts remain errors.
+* **Harness versions are no longer gated.** Artifact delivery no longer rejects otherwise usable
+  harness versions; an unrecognized version warns and continues.
+* **`agw artifact show`** explains declarations and recorded delivery without applying anything.
+* **Explicit launch policies.** `agw session start` and `agw session restart` accept mutually
+  exclusive `--resume-only` and `--force-new`.
+* **Bulk operations can filter by integration.** `--harness-integration` is accepted by
+  `agw session list` and by the `--all` forms of `session stop`, `start`, and `restart`.
+* **VM platforms execute natively.** Every version-1 VM platform now provides a native execution
+  transport, so core bootstrap and recovery no longer depend on an overlay network being up.
+  Proxmox executes through the QEMU Guest Agent. `vm shell --platform` remains limited to platforms
+  offering a full interactive native transport, and points Proxmox users at console access instead.
+* **`agw guide list` and `agw guide show` accept `--agent` and `--human` directly**, in addition to
+  the existing group-level forms; a leaf `show` flag overrides the group selection.
+
+### Fixes
+
+* Inventory commands stay usable when a session's workspace or VM relationship is broken; focused
+  operations and mutations remain strict.
+* VM initialization failures now say what actually failed, including the path involved when a
+  harness-owned settings path is refused.
+* Mandatory system-package installation now fails initialization rather than warning and
+  continuing, so later setup cannot proceed on a guest missing its prerequisites.
+* Rule and agent persona frontmatter is validated: unsupported fields, duplicate or non-string
+  keys, YAML aliases and anchors, and excessive nesting are refused rather than silently accepted.
+* 1Password secret resolution handles timeouts more reliably, and its guidance now tells you to
+  retry and then approve the request, which is the order the approval actually appears in.
+* Console window order follows configuration again.
+
 ## [0.18.0](https://github.com/WayfarerLabs/agentworks/compare/v0.17.0...v0.18.0) (2026-09-05)
 
 
