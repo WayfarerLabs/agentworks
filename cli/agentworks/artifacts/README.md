@@ -276,6 +276,11 @@ ownership, permissions and extended attributes are preserved. It does not inspec
 activations. Grok's system-configured discovery paths require additional configuration composition
 and trust handling, so this integration defers VM inputs to native user placement.
 
+Elevated native file operations share a fixed allowlist: `/etc/claude-code`, `/etc/codex` and
+`/opt/agentworks/artifacts`. Reads, writes and cleanup outside those trees are refused, including
+cleanup paths from previously applied state. This guards file-helper use; it does not sandbox
+integration code or remove the guest account's existing privileges.
+
 Application prints one line per applied artifact type, counting a skill package once. Up to three
 names are shown in full; larger groups show the first two and `...`. Deferral output similarly names
 the affected artifacts, destination and reason. A later setup or restart reconsiders those inputs;

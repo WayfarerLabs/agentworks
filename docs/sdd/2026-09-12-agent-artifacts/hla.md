@@ -264,9 +264,11 @@ acknowledgment list is added.
 Each VM item has one next facet: user, workspace or session. User and workspace can defer only to
 session. Routing to a sibling or back outward is invalid. VM facets apply directly where the native
 harness supports machine-wide discovery and defer unsupported types toward user handling. Core
-publishes VM files with root privilege and permissions allowing VM users to read them. Shell
-publishes all types directly under `/opt/agentworks/artifacts`. Leaving the VM facet inactive still
-uses the core default toward user. Activation of an unimplemented hook remains a hard error.
+publishes VM files with root privilege and permissions allowing VM users to read them. One global
+core-owned allowlist bounds elevated native file operations to `/etc/claude-code`, `/etc/codex` and
+`/opt/agentworks/artifacts`, including reads and retirement from persisted state. Shell publishes
+all types directly under `/opt/agentworks/artifacts`. Leaving the VM facet inactive still uses the
+core default toward user. Activation of an unimplemented hook remains a hard error.
 
 An integration can select a generated instruction section instead of whole-file ownership. Core
 preserves bytes outside its fixed delimiters and replaces all existing generated content, without

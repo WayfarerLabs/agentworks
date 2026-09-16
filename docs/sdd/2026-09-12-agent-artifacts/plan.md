@@ -919,9 +919,9 @@ checkboxes remain the historical record.
 - [x] Report actual application by artifact type and bounded name list; report deferral reasons and
       destinations without promising that restart alone guarantees delivery.
 - [x] Update native inventory, inspection, permanent guides, support matrices and design response.
-- [ ] Assess Muntz's post-merge PR 822 feedback against this implementation.
+- [x] Close the unavailable post-merge PR 822 feedback question per operator direction.
 - [x] Complete independent project, complexity and correctness reviews plus required validation.
-- [ ] Publish the complete ready PR and assess its feedback.
+- [x] Publish the complete ready PR 825 and assess its initial feedback.
 
 Acceptance includes empty and pre-existing instruction files; edited complete sections; missing,
 reversed and duplicate delimiters; unrelated content and mode preservation; generated-section
@@ -957,3 +957,23 @@ optional unrelated simplifications remain outside this correction. As of the fin
 GitHub returned no separate post-merge report in issue comments, reviews or inline comments. The
 operator was asked for its link; the additional report remains pending rather than being claimed
 reviewed.
+
+## PR 825: global elevated-file boundary correction
+
+The operator approved one global fixed allowlist shared by all integrations, instead of either
+unrestricted VM destinations or per-integration grants. PR 825 is draft during this directed
+correction. The allowed trees are `/etc/claude-code`, `/etc/codex` and `/opt/agentworks/artifacts`.
+The existing `NativeFiles` helper remains the migration seam for the proposed Transport file APIs in
+PR 795.
+
+- [ ] Enforce the global boundary on elevated reads, writes and cleanup, including persisted paths.
+- [ ] Verify refusals before I/O and preserve normal unprivileged operation.
+- [x] Update the integration and artifact guides and architecture.
+- [ ] Complete private project, correctness and complexity reviews and validation.
+- [ ] Publish and describe the exact corrected head, then return PR 825 to ready.
+
+The first handoff's independent live Lima test verified Codex user guidance, surrounding-content and
+metadata preservation, malformed-section refusal without changing bytes, and recorded skips. It did
+not exercise VM publication or large progress groups. Its clean report is evidence for those
+user-scope paths, not live proof of privileged publication. The operator closed the unavailable
+post-merge PR 822 report question; no additional report is claimed reviewed.

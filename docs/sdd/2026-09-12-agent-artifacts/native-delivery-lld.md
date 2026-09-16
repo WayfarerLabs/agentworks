@@ -56,9 +56,14 @@ filesystem consumers; it does not load assistant context.
 
 VM publication uses the existing admin transport with privileged destination operations, not an
 admin-user placement. Files are root-owned and readable by VM users; newly created directories are
-traversable. Destination selection remains integration-owned; core permits VM filesystem paths
-without a harness-name registry. VM deletion still removes the filesystem without artifact cleanup
-becoming a prerequisite.
+traversable. Destination selection remains integration-owned within one global core allowlist:
+`/etc/claude-code`, `/etc/codex` and `/opt/agentworks/artifacts`. `NativeFiles` checks elevated
+reads, writes, directory operations and cleanup before dispatch or payload staging. Publication also
+checks all desired and persisted destinations and package boundaries before opening staging. The
+existing destination-side checks reject symlink traversal. This is a file-helper restriction, not a
+sandbox for in-process integration code. The helper is the replacement seam for the proposed
+Transport file APIs in PR 795; this correction adds no new execution interface or per-integration
+grants. VM deletion still removes the filesystem without artifact cleanup becoming a prerequisite.
 
 Codex hints/rules use the selected native instruction file: `$CODEX_HOME/AGENTS.md` for users and
 `<workspace>/AGENTS.md` for workspaces, unless an existing nonempty `AGENTS.override.md` takes
