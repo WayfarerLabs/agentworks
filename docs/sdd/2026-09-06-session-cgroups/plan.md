@@ -38,9 +38,9 @@ Review evidence belongs in the handoff; unchecked items make no claim about impl
       operator.
 - [ ] Select and prove the supervised tmux anchor, pane-exit semantics, startup diagnosis, companion
       shell lifetime, concurrent-fork termination, and empty-group evidence.
-- [ ] Produce an identity/lifecycle LLD covering schema ownership, protected registration, process
-      identity races, namespace views, Unix socket attribution, secrets, concurrent operations,
-      crash recovery, and run invalidation.
+- [ ] Produce an identity/lifecycle LLD integrating PR #794's shared identity fields and launch
+      allocation with protected registration, process identity races, namespace views, Unix socket
+      attribution, secrets, concurrent operations, crash recovery, and run invalidation.
 - [ ] Settle the legacy transition proof and interruption policy using the migration strategy.
 
 Definition of done for this stage: the FRD's guarantees have a concrete enforceable design,

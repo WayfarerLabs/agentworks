@@ -1,7 +1,8 @@
 # Session Cgroups: High-Level Architecture
 
 - Status: Draft response to the [FRD](frd.md); review checkpoint, no merge intent.
-- Saga: [next-steps](../2026-08-04-next-steps/target-state.md).
+- Saga: [next-steps](../2026-08-04-next-steps/target-state.md), adjacent standalone child; not a
+  numbered wave or a prerequisite for the saga lock.
 - Baseline inspected: `b22cc49c984aa91e8205e035c5766b5a2aede90a` (2026-09-06).
 
 ## Architectural choice
@@ -63,9 +64,16 @@ Use the saga's existing logical model: `session_uuid` identifies a logical sessi
 identifies each workload incarnation. See the
 [scope participation contract](../2026-08-04-next-steps/scope-participation-contract.md#session-and-run-identity).
 Its historical reference to "resume" maps here to actual new incarnations from create, start, or
-restart; attaching or observing does not create a run. These fields are not implemented at the
-inspected baseline. Coordinate their introduction with the saga's observability work instead of
-adding a competing generation identifier. No event-stream implementation is required here.
+restart; attaching or observing does not create a run.
+
+The original baseline above predates the shared identity implementation. Dependency refresh
+(2026-09-15): [PR #794](https://github.com/WayfarerLabs/agentworks/pull/794) merged at
+`908258a932c7715ff92dc75a7a64163a99920872`. Its `SessionRow` supplies `session_uuid` and nullable
+`run_id`; migration 38 assigns existing rows a logical UUID without inventing a legacy run. Consume
+those fields and core's managed-launch allocation instead of introducing another schema or
+identifier. The identity/lifecycle LLD must integrate that allocation with protected registration
+and crash recovery; shared database identity alone does not authenticate a live process or prove
+containment. No event-stream implementation is required here.
 
 Service names are derived from validated immutable identities, with the display name available for
 operator readability. Names are not credentials. A protected VM record binds the logical session,
