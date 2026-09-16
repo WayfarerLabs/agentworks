@@ -80,8 +80,8 @@ is the design:
   `run`, including an independent stdin payload.
 - `start` accepts either command form and returns a managed job reference after launch
   acknowledgement. Waiting is a subsequent operation.
-- File operations transfer/read/write content, merge JSON, manage directories and permitted
-  metadata, and create/remove runtime FIFOs under bound filesystem grants.
+- File operations transfer/read/write content, merge JSON, inspect bounded inventories, and manage
+  directories, permitted metadata and conditional removal under bound filesystem grants.
 - `interactive` attaches a terminal only when that optional feature is present.
 
 Foreground execution captures output by default. An explicit direct-streaming mode is available on
@@ -201,6 +201,11 @@ available at provisioning. The LLD must enumerate the minimal shell/tools used b
 helpers and demonstrate that delivering those helpers does not depend on themselves. No Phase B
 package install or Tailscale access can be a hidden prerequisite.
 
+Release 0.19.0 installs Python3 during Phase B and its current file helper depends on it. That is
+not evidence of availability in base images, early recovery or SSH-accessed virtualization hosts.
+The helper LLD must distinguish these targets and prove prerequisite delivery before use; it cannot
+reuse the shipped helper's assumption for bootstrap or no-staging readiness.
+
 Read-only readiness probes use a direct invocation or bounded reads. They cannot trigger the
 staging/spooling/job fallback that writes guest files. Readiness call sites choose bounded probes;
 the LLD must provide a way to prevent implicit preparation writes in a readiness target. This is an
@@ -213,15 +218,21 @@ unqualified recursive-delete default. Atomicity and crash durability are distinc
 
 ### File-only provisioning and the core ceiling
 
-Shared file helpers own structured updates, metadata, FIFO lifecycle and confined publication, not
-the SSH carrier or individual harness resources. A file-only view may use trusted internal commands
-to implement an authorized operation; it never accepts caller shell fragments, a remote transform
-callback or a command/job handle. Ordinary file reads/writes reject special objects. FIFO lifecycle
-does not open the pipe for communication or replace tmux's session ownership.
+Shared file helpers own structured updates, metadata, bounded inventory and confined publication,
+not the SSH carrier or individual harness resources. A file-only view may use trusted internal
+commands to implement an authorized operation; it never accepts caller shell fragments, a remote
+transform callback or a command/job handle. Ordinary file reads/writes reject special objects. Tmux
+creates its own sockets; FileAccess manages directories and exact stale-socket removal only after
+the session owner establishes runtime absence. FIFO creation is outside the initial contract.
 
 Helper executables, interpreters, working directory and environment are core-controlled. They do not
 inherit resource-controlled PATH, startup or loader settings that could turn a file-only call into
 arbitrary execution. The LLD enumerates the trusted tools and carrier bootstrap prerequisites.
+
+The 0.19.0 `native_files.py` helper and root allowlist are explicitly replaced, not retained behind
+FileAccess. Transport owns the successor and deletion; reviewed mechanisms/tests may be copied.
+Harness/artifact domain logic survives and consumes RunContext directly. The
+[migration inventory](migration-strategy.md) names those seams and preservation obligations.
 
 Core owns a small allowlist of approved exact files/subtrees, actions and metadata limits. Context
 composition resolves core-approved identity-dependent roots and binds a recipient's narrower file
@@ -343,9 +354,12 @@ boundary: unrestricted user execution includes that account's guest authority, i
 sudo privileges, and hostile in-process plugin containment needs a separate security design.
 
 Migrate context constructors and consumers together, including VM boundaries, agent realization,
-session readiness/roll-forward, git-credential operations, and harness setup. Setup invocation types
-that carry a runner receive the same execution target; their domain data need not all be folded into
-`RunContext`. They must not retain a second execution API.
+session readiness/roll-forward, git-credential operations, and harness setup. Setup/readiness
+invocation types carry RunContext alongside their domain data instead of a raw runner. Resources
+obtain files/commands from its bound target views, with no NativeFiles or setup-runner facade. Core
+supplies trusted home/destination identity and bounded native inventory; file-only plugins do not
+acquire general exec merely for discovery. Native CLI operations that genuinely execute remain
+separately authorized. Readiness retains its no-staging/no-requested-startup policy.
 
 ## CLI and recovery composition
 
@@ -362,9 +376,8 @@ LLD that preserves existing command quoting and stdin behavior intentionally.
 Native shell requests check optional interaction and preserve provider-specific console guidance
 when unavailable. Failed optional interaction does not imply native recovery is unavailable.
 
-Retain PR #789's separation of power activation from canonical repair. Reconcile its execution entry
-point with this shared service rather than carrying parallel implementations indefinitely. The
-current draft takes no action on that PR.
+Retain the historical, now-closed PR #789's separation of power activation from canonical repair.
+Implement the shared service against current main rather than integrating that unmerged branch.
 
 ## Results, errors, and observability
 
@@ -427,7 +440,8 @@ weaken trust checks.
 The order is mandatory: settle the small seam, prove it, reconcile both SDDs, build in parallel,
 validate complete workflows, then cut over and delete. The [plan](plan.md) owns the gate criteria.
 Only the bounded proof precedes reconciliation; broad adapter/helper development waits. The current
-authorization is to rewrite design artifacts, not to run that proof or start implementation.
+checkpoint performs the operator-authorized artifact feedback rounds. The effort mandate remains the
+complete build, migration and deletion; live proof still needs a concrete isolated test charter.
 
 Use the destination package structure for the new stack, with development/test composition roots
 that exercise its contracts while production factories and `RunContext` retain the old stack. Use an

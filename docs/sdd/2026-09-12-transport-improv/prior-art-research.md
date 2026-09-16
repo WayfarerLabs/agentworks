@@ -1,6 +1,6 @@
 # Transport Improvements: Prior Art
 
-- Inspected: 2026-09-12; file-contract research added 2026-09-15
+- Inspected: 2026-09-16 against v0.19.0; original investigation began 2026-09-12
 - Scope: Design input, not live provider validation
 
 ## Findings
@@ -35,7 +35,8 @@ Source: [QEMU guest-agent protocol](https://www.qemu.org/docs/master/interop/qem
 
 ### Current Agentworks implementation
 
-Snapshot: repository commit `7c744828184ccb0ad9ffd90a8a02226384fb384e`.
+Snapshot: v0.19.0, repository commit `e440a28c49935df722e4e80685ef12f6d8247ff8`. The release-impact
+audit compares the original `7c744828` baseline to this revision.
 
 | Evidence                                                                                                          | Design consequence                                                                     |
 | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
@@ -58,10 +59,10 @@ during rollback. Shared execution/job mechanics therefore need to represent the 
 host and preserve supported host userspace, including macOS. Guest-only identity and Debian tool
 assumptions would miss an existing caller.
 
-Issue #788 and PR #789 were read as problem and implementation evidence. The PR demonstrates the
-need to separate native recovery from canonical repair, while its proposed limited native CLI path
-motivates shared execution semantics. Its published test reports are external evidence, not runs
-performed for this draft.
+Issue #788 and the now-closed, unmerged PR #789 were read as problem and implementation evidence.
+The PR demonstrates the need to separate native recovery from canonical repair, while its proposed
+limited native CLI path motivates shared execution semantics. Its published test reports are
+external evidence, not runs performed for this draft.
 
 ### Coordination and caller evidence
 
@@ -91,7 +92,7 @@ classification.
 
 The two in-tree production `run_detached` calls are remote Lima provisioning and backup. Lima sets
 `reuse_completed=False` at `capabilities/vm_platform/lima.py:623`; backup creates a fresh directory
-at `vms/backup.py:345` before calling the helper at `:357`. Neither is an intentional
+at `vms/backup.py:348` before calling the helper at `:360`. Neither is an intentional
 cross-invocation completed-result consumer. This narrows migration obligations; it does not remove
 the future developer requirement for explicit job references and later observation. Existing callers
 are evidence about today's migration, not a ceiling on the new interface.
@@ -113,21 +114,59 @@ on its side effects, but the API does not certify arbitrary account hooks as rea
 [RFC 7396](https://www.rfc-editor.org/rfc/rfc7396) defines JSON Merge Patch: object members merge,
 null removes a member, and arrays/non-object values replace rather than merge element by element. It
 works on values, not text layout, and does not offer a literal-null setter through an object member.
-Decision: propose this named semantic for `merge_json` rather than inventing an unspecified deep
-merge; validate actual harness needs before freezing it in the file LLD. It supplies no filesystem
-authorization, writer coordination or publication protocol.
+The shipped `capabilities/harness_integration/settings.py:78-91,166-175` instead supports replace,
+merge-overwrite, merge-preserve and skip-existing, with literal JSON null and whole-value arrays.
+Decision: preserve those semantics in the proposed API rather than silently interpreting null as
+deletion. RFC 7396 was considered and rejected for this migration, not assigned to an LLD to
+rediscover the incompatibility. TOML values and generated-section editing remain domain logic; none
+of these formats supplies authorization, writer coordination or publication mechanics.
 
 The operator's 2026-09-15 direction adds whole-file and structured provisioning, privileged
-placement, runtime FIFO lifecycle and core-reviewed exact-file/subtree mutation locations. The
-contract/HLA place enforcement above delivery and at destination-side mutation. Registration-time
-requests and user approval remain deferred. These are design requirements, not evidence that
-existing helpers confine paths or that approved configuration cannot cause later execution.
+placement and core-reviewed exact-file/subtree mutation locations. On 2026-09-16 the operator
+removes FIFO creation from the initial contract after confirming that current runtime objects are
+sockets. The contract/HLA place enforcement above delivery and at destination-side mutation.
+Registration-time requests and user approval remain deferred. These are design requirements, not
+evidence that existing helpers confine paths or that approved configuration cannot cause later
+execution.
 
 The SSH replacement design in [PR #796](https://github.com/WayfarerLabs/agentworks/pull/796) at
 `2494f6e2` supersedes the historical #757 design discussed above. Its independent carrier and
 proof-first assignment match this SDD; shared file semantics and the core allowlist remain with
 transport, not the SSH carrier. Its OpenSSH 8.5 floor concerns builder-owned clients, not sshd;
 provider-inner clients need their own inventory. Design alignment is not runtime proof.
+
+### Shipped file helpers and release impact
+
+PR #825 is included in the inspected 0.19.0 baseline. `cli/agentworks/native_files.py:192-238`
+defines `ROOT_FILE_DIRECTORIES` and `root_native_path`, allowing elevated operations beneath
+`/etc/claude-code`, `/etc/codex` and `/opt/agentworks/artifacts`, with distinct directory-root
+handling. `NativeFiles` (`:258-305`) is still a facade over legacy Transport; ordinary operations do
+not have the same core location ceiling. The new FileAccess therefore replaces a concrete shipped
+module, not an unimplemented idea. Transport owns replacement and deletion, including the policy;
+the [migration inventory](migration-strategy.md) records consumer-by-consumer disposition.
+
+The helper's held-directory/no-follow traversal (`:82-126`), staged ownership/mode/extended
+attributes and replacement (`:149-179`) are useful implementation inputs. Its expected-hash check at
+`:140` precedes unlink/rename without a remote cooperating-writer lock, and the fingerprint is not a
+complete file/metadata identity. Existing tests that edit before the helper runs do not prove the
+check-to-publication window. The earlier general warning about check-then-rename now has this
+specific migration example; it is not a claim that the shipped helper is a naive prefix check.
+
+The release adds artifact publication and generated sections, per-facet activation maps, persistent
+session/run identity and guarded restart consent. It also makes Python3 an initialization package,
+not a universal early-bootstrap prerequisite. These affect target composition, metadata/conflict
+semantics, observation, rollback and test coverage. Preserve domain behavior while replacing runner
+delivery and public staging access; do not delete `artifacts/` or preserve a second file facade.
+
+There are no FIFO-creation consumers in the inspected `cli/agentworks` tree. Actual runtime roots
+are `sessions/tmux.py:36,66`'s agent/admin tmux socket directories. Directory/mode management and
+confirmed stale-socket removal migrate; tmux owns socket creation. Examples now use shipped roots,
+not `/opt/agentworks/harnesses` or a fictional session event pipe.
+
+The fine-grained recipient grant shape is an explicit future-facing contract choice. Today
+`RunContext` passes through targets (`capabilities/base.py:226-233`); the new stack introduces small
+bound grants so core callers and later plugins need not receive the whole core ceiling. This is not
+evidence of an existing consent system, nor permission to build one during transport replacement.
 
 ## Claims not relied upon
 

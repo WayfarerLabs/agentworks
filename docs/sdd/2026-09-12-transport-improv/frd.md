@@ -41,10 +41,18 @@ Operator direction on 2026-09-15 adds robust file-only provisioning and a core-o
 mutation allowlist. Registration-time resource grant requests and user approval/denial are future
 work; they may narrow, but never widen, that core ceiling.
 
+On 2026-09-16 the operator confirms this effort owns building the independent stack with the SSH
+effort, migrating every consumer and deleting the legacy stack. The 0.19.0 file helpers are
+migration inputs, not a second permanent API. This checkpoint covers up to two authorized artifact
+feedback rounds after rebasing onto that release. The operator also removes FIFO creation from the
+initial contract: current session objects are tmux sockets, whose directories and controlled cleanup
+remain in scope.
+
 The requirements below are proposed details of that direction, pending review. The current
-deliverable is a draft PR for design discussion. It changes no runtime behavior and neither merges
-nor closes [issue #788](https://github.com/WayfarerLabs/agentworks/issues/788) or
-[PR #789](https://github.com/WayfarerLabs/agentworks/pull/789).
+deliverable is a draft PR for design discussion, not completion of the effort's build/migration
+mandate. It changes no runtime behavior.
+[Issue #788](https://github.com/WayfarerLabs/agentworks/issues/788) and the now-closed
+[PR #789](https://github.com/WayfarerLabs/agentworks/pull/789) remain historical input.
 
 In scope for the eventual implementation:
 
@@ -210,10 +218,12 @@ must cover an active operation; releasing a client context must not masquerade a
 
 Every target supports finite byte-exact file upload and download, file-content writes, and the
 directory movement required by current workflows. File-only resources can also read/stat files,
-create directories, merge JSON configuration, manage permitted ownership/modes, remove permitted
-objects, and create/remove FIFOs without command or job access. These are required file semantics on
-supported VM targets, not SSH-only conveniences. FIFO creation does not grant communication through
-it; regular-file operations must reject special objects rather than block opening a pipe.
+create directories, inspect bounded directory inventories, merge JSON configuration, manage
+permitted ownership/modes and conditionally replace/remove permitted objects without command or job
+access. These are required file semantics on supported VM targets, not SSH-only conveniences.
+Regular-file operations reject special objects rather than block opening a pipe. Session owners can
+remove an exact stale socket only after establishing runtime absence; the file API does not perform
+that liveness check, create sockets or provide FIFO creation.
 
 Callers select ordinary or elevated placement without hand-writing copy, chmod, or sudo wrappers.
 Elevation covers staging, publication and metadata under the bound file grant, not general admin
@@ -227,8 +237,11 @@ specified before implementation. Cleanup is restricted to artifacts the operatio
 
 Structured updates accept data, not caller-supplied remote scripts or callbacks. They preserve
 unrelated JSON values and define nested objects, arrays, deletion, missing files and invalid input
-explicitly. Invalid configuration is not silently replaced with an empty document. Formatting
-preservation is not implied. Update results distinguish changed, unchanged, conflict, failure and
+explicitly. Preserve shipped harness merge policies and literal JSON null values; null must not
+silently become deletion. Merge operations reject malformed existing configuration; explicit replace
+and skip-existing retain their distinct semantics. Formatting preservation is not implied. Read
+snapshots and conditional writes/removal let domain code preserve generated-section surroundings
+without remote callbacks. Update results distinguish changed, unchanged, conflict, failure and
 uncertain publication without returning existing contents to a caller lacking read access. Internal
 read/modify/write is permitted by the merge grant; it does not confer public download authority.
 
@@ -311,6 +324,12 @@ File views bind permitted paths, actions and metadata/elevation limits within R7
 admin identity alone does not confer unrestricted file mutation. Future registration-time requests
 and user approval may select narrower grants without replacing the enforcement boundary; this effort
 implements explicit core composition, not that future consent workflow.
+
+Fine-grained recipient grants are an intentional contract investment ahead of that workflow, not a
+claim that 0.19.0 already has a general plugin authorization system. Keep the implementation to
+small bound values and checks. Core composition can give a settings publisher only its reviewed
+locations/actions while retaining broader recovery authority; it needs no registration service or
+generic policy language to express those different views.
 
 Views are bound before delivery and cannot widen their authority through `sudo=True`, another
 identity, an environment-derived view, a saved job reference, or public access to an unrestricted
@@ -406,9 +425,10 @@ derived views and saved job references do not restore withheld authority. The sa
 a restricted plugin view and a fully authorized recovery view without changing its feature
 description.
 
-File-only acceptance provisions whole files and merges harness JSON under an approved `/etc`
-subtree, installs content in an approved `/opt` subtree, and creates/removes session FIFOs under an
-approved `/run` subtree with commands/jobs withheld. Prove ordinary and elevated ownership/modes,
+File-only acceptance provisions whole files and merges harness JSON under an approved `/etc` subtree
+and installs content under `/opt/agentworks/artifacts` with commands/jobs withheld. A session slice
+manages the approved tmux socket directories and removes a confirmed stale socket without granting
+socket creation or treating it as a regular file. Prove ordinary and elevated ownership/modes,
 unrelated-key preservation, malformed-input refusal, cooperating-writer conflict handling and
 secret-safe results over SSH and native delivery. Prove refusals leave protected objects unchanged
 for parent/sibling/prefix collisions, traversal, links, concurrent path substitution, unauthorized

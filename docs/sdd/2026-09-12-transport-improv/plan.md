@@ -1,6 +1,6 @@
 # Transport Improvements: Design and Delivery Sequence
 
-- Status: Revised draft; current authorization covers artifact rewriting and draft PR publication
+- Status: Revised draft; 2026-09-16 authorization covers up to two artifact feedback/fix rounds
 - Delivery vehicle: Draft PR #795 for design review, labeled `sdd:transport-improv`
 - Requirements: [FRD](frd.md)
 - Architecture: [HLA](hla.md)
@@ -10,6 +10,31 @@ The required order is: agree on the small contract, prove it, reconcile both SDD
 independently in parallel, validate complete workflows, then cut over and physically delete the old
 stack. The proof is a bounded joint slice, not permission to start the broad rebuild. This revision
 runs no prototype or live test and claims no implementation completion. All gates below remain open.
+
+The transport lead owns this entire sequence, not just the API design. The operator confirms the
+mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
+The [0.19.0 migration inventory](migration-strategy.md) is the current baseline. `NativeFiles` is
+retired, while useful domain behavior and evidence are preserved through direct RunContext access.
+
+## Parallel ownership without overlapping edits
+
+After the shared seam and LLD gates, the lead may charter bounded migration packages against one
+pinned contract. The following is an assignment plan, not a claim that developers are allocated:
+
+| Package                                       | Exclusive responsibility                                                                                                                                                            |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Transport lead                                | Shared execution API/helpers/file policy, `capabilities/base.py`, composition boundaries, integration gates and final deletion.                                                     |
+| SSH developer                                 | `execution/carriers/ssh/`, connection/trust migration and associated tests, per #796.                                                                                               |
+| Optional harness/artifact migration developer | `harness_setup/`, harness setup/readiness invocation types, artifact publication/probes and harness plugin consumers; preserve domain behavior while replacing runner/file facades. |
+| Optional session migration developer          | Session/tmux/console consumers and tests; preserve session/run identity, restart consent, runtime evidence and owned cleanup.                                                       |
+| Optional platform/CLI migration developer     | Non-SSH adapters, VM exec/recovery, backup and workspace transfer consumers, with explicit per-file assignment before starting.                                                     |
+
+Every charter names exact files and tests; overlapping files remain with the lead or are handed off
+explicitly before another developer touches them. Separate working trees/branches share the pinned
+contract, not a mutable working tree. Cross-package requests return to the lead; only the lead
+integrates changes to common types and the production composition switch. Independent build and
+migration work can proceed in parallel without releasing two public stacks or moving final removal
+out of this effort. Refresh the inventory again at each integration boundary.
 
 ## 1. Agree on the small contract and proof charter
 
@@ -24,7 +49,7 @@ runs no prototype or live test and claims no implementation completion. All gate
       delivery and trust/configuration migration. Remote Lima is the first consumer of SSH-backed
       platform access, not a concept inside SSH or a dependency for later platform consumers.
 - [ ] Obtain a bounded proof/live-test charter naming isolated resources, tool versions, workload,
-      cleanup and evidence. Current documentation authorization does not cover running the proof.
+      cleanup and evidence. This artifact round does not run the proof or select live resources.
 
 ## 2. Prove the shared boundary before broad implementation
 
@@ -62,7 +87,10 @@ execution modules. This is not a full file/job implementation or a preliminary l
       Proxmox/WSL2 feasibility under an authorized live-test charter; the small proof does not stand
       in for these checks.
 - [ ] Complete the file LLD for R7: whole-file publication, JSON merge semantics, ownership/mode and
-      security metadata preservation, directories/FIFOs/removal, concurrency and uncertain results.
+      security metadata preservation, bounded inventory, directories/conditional removal,
+      concurrency and uncertain results. Preserve the shipped four settings strategies and JSON
+      literal-null behavior rather than adopting RFC 7396 deletion implicitly. Keep TOML and
+      generated-section transforms in their domain, backed by snapshots/conditional publication.
       Enumerate tools available during native bootstrap and on supported platform hosts; prove
       destination-side confinement rather than relying on a preflight path check. Define trusted
       ancestors/mounts, private staging/locks, root creation and fail-closed behavior.
@@ -73,6 +101,8 @@ execution modules. This is not a full file/job implementation or a preliminary l
 - [ ] Finalize scoped command/file/job interfaces and bound restrictions, including the core file
       ceiling. Keep registration requests, user consent, a general plugin policy evaluator and
       hostile-code isolation out of scope. Map FRD R11's future workflows to tests.
+- [ ] Reconcile #796's pinned transport reference with the final reviewed contract and later
+      file-only slice. SSH owns its artifact edits; shared file semantics and cutover stay here.
 
 ## 4. Build the independent stacks in parallel
 
@@ -87,8 +117,9 @@ execution modules. This is not a full file/job implementation or a preliminary l
       Preserve configuration and complete trust records without importing old execution code.
 - [ ] Deliver a shared file-only vertical slice through SSH and native QGA, with commands/jobs
       withheld: whole-file installation, privileged JSON merge preserving unrelated keys, approved
-      directory creation/metadata and FIFO lifecycle. Keep the initial small carrier proof intact;
-      this later slice gates broader file-consumer migration, not the independent SSH build.
+      directory creation/metadata and conditional removal. Add a session-owned stale-socket case;
+      tmux creates sockets and no FIFO creation is required. Keep the initial small carrier proof
+      intact; this later slice gates broader file-consumer migration, not the independent SSH build.
 - [ ] Prove the file boundary with behavioral tests: default denial, exact-file/subtree scopes, root
       versus parent authority, prefix collisions/traversal, links and concurrent substitution,
       confined extraction, forbidden metadata/removal, and inability to widen grants. Cover
@@ -96,7 +127,9 @@ execution modules. This is not a full file/job implementation or a preliminary l
       cooperating writers, external-writer limits, malformed JSON, special-object refusal, sensitive
       diagnostics, partial transfer/cleanup and uncertain publication. No runtime fallback may
       expose commands to the file-only caller; unavailable safe mechanics block acceptance. Record
-      live target/platform evidence under an authorized charter.
+      live target/platform evidence under an authorized charter. Adapt 0.19.0's boundary, settings,
+      generated-section/ACL, publication-checkpoint and native-inventory tests to new delivery;
+      copying tests does not establish the stronger race/concurrency promises by itself.
 
 ## 5. Validate complete workflows, cut over, and retire
 
@@ -104,14 +137,22 @@ execution modules. This is not a full file/job implementation or a preliminary l
       backup, host provisioning/rollback and interactive attachment through new internal entry
       points. Cover required operations, optional refusal, sensitive data and supported workstation/
       platform versions. Missing evidence requires operator disposition, never a passing claim.
-- [ ] Complete the [migration inventory and cutover gates](migration-strategy.md): reconcile #789,
-      audit caller shells/identity/I/O/lifetimes/grants and approved filesystem destinations,
-      migrate file-provisioning shell snippets to FileAccess where it expresses the operation,
-      resolve surviving jobs, plugin compatibility, state migration and rollback. Every old entry
-      point has a destination and removal point.
+- [ ] Complete the [migration inventory and cutover gates](migration-strategy.md): retain #789's
+      historical recovery intent without integrating its closed branch, audit caller
+      shells/identity/I/O/lifetimes/grants and approved filesystem destinations, migrate
+      file-provisioning shell snippets to FileAccess where it expresses the operation, resolve
+      surviving jobs, plugin compatibility, state migration and rollback. Every old entry point has
+      a destination and removal point.
+- [ ] Replace `NativeFiles`, `files.runner`, exposed staging slots and raw setup/readiness runners
+      with RunContext access. Preserve artifact ownership/checkpoints, JSON/TOML settings behavior,
+      generated-section surroundings/metadata, session/run identities and restart confirmation.
+      Validate native inventory and identity discovery without granting exec to file-only plugins.
+      Keep genuinely executable harness CLI work behind command access, not a disguised file API.
 - [ ] Switch factories, `RunContext` producers/consumers, plugins and direct services coherently;
       prove real production workflows after physically deleting old execution modules and temporary
       scaffolding. Transport owns this complete cutover, not just preference for the new runner.
+      Delete `agentworks.native_files` and its old policy at the same cutover; only the new
+      core-owned allowlist remains.
 
 The default implementation landing unit contains the new stack and complete cutover together.
 Separating delivery later requires independently complete units and an explicit removal point, not

@@ -63,15 +63,15 @@ execution identity, not the workstation SSH process. A deadline is one monotonic
 preparation and observation; omission follows the explicitly bound operation policy, not a
 carrier-selected timeout or retry default.
 
-| Surface                                                                   | Proposed behavior                                                                                                               |
-| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `features`, identity/route metadata                                       | Passive values from the bound target; no connection or authority discovery.                                                     |
-| `read_file`, `stat`, `write_file`, `upload`, `download`                   | Bounded bytes or explicit paths, metadata and publication policy; file reads are separately granted.                            |
-| `upload_directory`, `download_directory`                                  | Explicit merge/replace choice, confined paths and extraction; no implicit recursive deletion.                                   |
-| `merge_json`, `ensure_directory`, `set_metadata`, `remove`, `ensure_fifo` | Structured updates and filesystem lifecycle under core-approved paths/actions; no command grant required.                       |
-| `observe`, `read_output`, `wait`                                          | Separate status, bounded cursor-based output reads, and waiting for a known job; observing never deletes its records.           |
-| `cancel`, `dispose`                                                       | Request cancellation with truthful confirmation, or dispose owned terminal-job artifacts; neither guesses authority from a PID. |
-| `interactive(invocation, ...)`                                            | Explicit command or shell invocation with terminal attachment; optional feature, not an implicit login-shell selector.          |
+| Surface                                                                       | Proposed behavior                                                                                                               |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `features`, identity/route metadata                                           | Passive values from the bound target; no connection or authority discovery.                                                     |
+| `read_file`, `stat`, `write_file`, `upload`, `download`                       | Bounded bytes or explicit paths, metadata and publication policy; file reads are separately granted.                            |
+| `upload_directory`, `download_directory`                                      | Explicit merge/replace choice, confined paths and extraction; no implicit recursive deletion.                                   |
+| `update_json`, `list_directory`, `ensure_directory`, `set_metadata`, `remove` | Structured updates, bounded inventory and filesystem lifecycle under core-approved paths/actions; no command grant required.    |
+| `observe`, `read_output`, `wait`                                              | Separate status, bounded cursor-based output reads, and waiting for a known job; observing never deletes its records.           |
+| `cancel`, `dispose`                                                           | Request cancellation with truthful confirmation, or dispose owned terminal-job artifacts; neither guesses authority from a PID. |
+| `interactive(invocation, ...)`                                                | Explicit command or shell invocation with terminal attachment; optional feature, not an implicit login-shell selector.          |
 
 `ExecutionResult` carries available guest exit status, byte output and completeness, and the outcome
 facts needed to distinguish failure, timeout, and uncertainty. A typed execution error carries the
@@ -84,32 +84,39 @@ requests and unavailable optional features are typed refusals regardless of `che
 File calls accept paths/data and explicit metadata/publication options, not shell source, remote
 callbacks or arbitrary tool arguments. Proposed forms below assume a file-only target with the
 necessary pre-bound grants; `sudo=True` requests the granted implementation privilege, not a new
-grant. These paths illustrate separate reviewed core entries, not blanket `/etc`, `/opt` or `/run`
-access:
+grant. The machine roots below already exist in 0.19.0's core policy. User settings and tmux paths
+are existing consumers whose narrower file grants must be reviewed during cutover, not blanket home
+or `/run` access. `user_files` is the ordinary-user view and `settings_path` is that user's resolved
+`.claude/settings.json`; both come from authorized composition/domain inputs. The owning session
+operation has already established that `stale_socket_path` belongs to it and has no live tmux
+server:
 
 ```python
 files.ensure_directory("/etc/claude-code", owner="root", group="root", mode=0o755, sudo=True)
-files.write_file("/opt/agentworks/harnesses/claude-code/settings.json", config_bytes, sudo=True)
-files.merge_json("/etc/claude-code/settings.json", patch, create=False, sudo=True)
-files.ensure_fifo("/run/agentworks/sessions/session-id/events", mode=0o600, sudo=True)
-files.remove("/run/agentworks/sessions/session-id/events", expected_type="fifo", sudo=True)
+files.write_file("/etc/claude-code/CLAUDE.md", instruction_bytes, expected=revision, sudo=True)
+user_files.update_json(settings_path, settings, strategy="merge-overwrite", create=False)
+files.ensure_directory("/opt/agentworks/artifacts", owner="root", group="root", mode=0o755, sudo=True)
+files.remove(stale_socket_path, expected_type="socket", expected=socket_revision, sudo=True)
 ```
 
 Exact option types belong in the file LLD. The intended behaviors are:
 
-- `read_file`/`stat` return bounded content or metadata only under the respective read grant.
+- `read_file`/`stat` return bounded content or metadata only under the respective read grant. The
+  read/stat result can carry a revision for `write_file(..., expected=revision)` and conditional
+  removal. `list_directory` bounds entries/depth and refuses unsafe traversal; no generic remote
+  predicate or arbitrary command is accepted. Exact snapshot/limit types belong in the LLD.
   Regular-file transfers never open FIFOs/devices or follow unapproved links.
 - `write_file`/`upload` publish complete bytes with explicit create/replace and metadata rules;
   neither implicitly creates parents nor inherits unrestricted chmod/chown authority.
-- `merge_json` proposes JSON Merge Patch semantics (RFC 7396): recursively merge objects, replace
-  arrays as values and use null object members for deletion. This is not an append-to-array or
-  literal-null setter. Missing files require explicit creation; invalid or ambiguous JSON is
-  refused. Unrelated values survive, not necessarily whitespace or member ordering. The LLD must
-  settle parsing/encoding/size limits and show the semantics satisfy harness config needs before
-  freezing this choice; no general transform language is introduced.
-- `ensure_directory`/`ensure_fifo` distinguish absent, matching and conflicting object types. They
-  never replace a conflicting object implicitly. A matching FIFO is not opened, truncated or
-  recreated; changing metadata needs its own grant. New objects have safe initial permissions.
+- `update_json` preserves the shipped settings vocabulary: explicit `replace`, `merge-overwrite`,
+  `merge-preserve` or `skip-existing`. Merge recurses into objects; arrays/scalars follow the
+  winning side, and JSON null is a value, not deletion. Source validation always applies; replace
+  need not parse old bytes, skip preserves existing bytes, and merge parses the old document.
+  Missing files and create permission remain distinct from an existing empty/invalid file. These are
+  not RFC 7396 semantics. No new patch/deletion language is required for initial delivery.
+- `ensure_directory` distinguishes absent, matching and conflicting object types; it never replaces
+  a conflicting object implicitly. Changing metadata needs its own grant. New objects have safe
+  initial permissions. There is no FIFO or socket-creation API in the initial contract.
 - `set_metadata` is bounded by approved owner/group/mode values. `remove` defaults to one object of
   the expected type; recursive deletion and approved-root removal need separate explicit authority.
   Directory extraction checks every entry and does not introduce link escapes.
@@ -133,16 +140,22 @@ content diff without a separate read grant. All mutation methods participate in 
 cooperating-writer protocol. Its external-writer limits, metadata preservation, path/mount trust
 assumptions, cleanup and failure behavior must be proven in the file-only acceptance slice.
 
+Generated-section edits and TOML serialization stay in the resource domain, using authorized
+read/snapshot and conditional publication, not caller-supplied remote callbacks. Shared pure merge
+logic may be copied into the new implementation where useful. The
+[migration inventory](migration-strategy.md) owns the disposition of the shipped `NativeFiles`
+facade and its callers.
+
 ### Permission-scoped access
 
 The proposed view has three passive accessors. Their interfaces use the operation vocabulary above;
 the view itself has no forwarding `run`, `upload`, or other all-authority convenience methods.
 
-| View accessor                                    | Exposed operations when granted                                                                               |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| `commands()` returning `CommandAccess` or `None` | `run`, `script`, `interactive`, subject to the bound action and elevation restrictions.                       |
-| `files()` returning `FileAccess` or `None`       | R7 file/JSON/directory/FIFO operations, with independently bound read, mutation, metadata and removal grants. |
-| `jobs()` returning `JobAccess` or `None`         | `start`, observation/output/wait, cancellation and disposal, independently granted for owned jobs.            |
+| View accessor                                    | Exposed operations when granted                                                                          |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| `commands()` returning `CommandAccess` or `None` | `run`, `script`, `interactive`, subject to the bound action and elevation restrictions.                  |
+| `files()` returning `FileAccess` or `None`       | R7 file/JSON/directory operations, with independently bound read, mutation, metadata and removal grants. |
+| `jobs()` returning `JobAccess` or `None`         | `start`, observation/output/wait, cancellation and disposal, independently granted for owned jobs.       |
 
 These are small typed interfaces over shared execution mechanics, not new transport subclasses or a
 generic permissions registry. Withhold a whole interface when none of its actions is granted. For a
@@ -152,6 +165,10 @@ dispatch when denial is knowable from the bound grant, regardless of `check`. Fi
 confinement checks occur at the destination before the protected mutation. Do not dynamically delete
 Python methods or rely on callers checking metadata to enforce the restriction. Exact grant value
 representations belong in the LLD.
+
+The fine-grained values intentionally establish the future permission-ready contract now; they are
+not evidence of a shipped registration/consent mechanism. Core constructs them directly, with no
+policy DSL or redundant registry. A file-only view need not receive every path in the core ceiling.
 
 The composition root binds recipient, identity, route, permitted actions and elevation once before
 delivery. Core composition binds file grants within the core allowlist now. Future registration
@@ -328,7 +345,7 @@ cli/agentworks/
     target.py                   bound execution mechanics and target view
     access.py                   typed command/file/job access and bound restrictions
     preparation.py              identity, shell, env/cwd and helper preparation
-    files.py                    transfer, JSON updates, metadata, FIFO and publication semantics
+    files.py                    transfer, JSON updates, inventory, metadata and publication semantics
     file_policy.py              core allowlist, scoped file grants and confinement policy values
     jobs.py                     shared job protocol and observation
     diagnostics.py              safe execution diagnostics, no legacy SSHLogger
@@ -371,11 +388,11 @@ adapter by bypassing package initialization in tests would not prove independenc
 ## Independence and removal boundary
 
 The retirement set starts with `agentworks.transports`, `agentworks.ssh`, `agentworks.remote_exec`,
-`agentworks.harness_setup.runner`, and `agentworks.plugins.proxmox.transport`. The new
-implementation and its tests must not import them, subclass their types, call their functions, or
-reach them indirectly through shared utilities. This includes old result/error/logger types, aliases
-and lazy imports. Merely renaming an import or placing a facade in the new package does not satisfy
-independence.
+`agentworks.harness_setup.runner`, `agentworks.native_files`, and
+`agentworks.plugins.proxmox.transport`. The new implementation and its tests must not import them,
+subclass their types, call their functions, or reach them indirectly through shared utilities. This
+includes old result/error/logger types, aliases and lazy imports. Merely renaming an import or
+placing a facade in the new package does not satisfy independence.
 
 Ordinary retained project facilities such as the base error taxonomy and terminal restoration may be
 reused after a dependency audit. This does not require copying all of `agentworks`.
