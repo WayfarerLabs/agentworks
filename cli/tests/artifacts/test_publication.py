@@ -29,10 +29,10 @@ def artifact(path: Path, data: bytes = b"content", *, executable: bool = False) 
 def test_owned_file_update_mode_and_idempotent_removal(target):
     path = target.home / "skills/review/run.sh"
     checkpoints: list[tuple[OwnedArtifactFile, ...]] = []
-    first = publish_artifacts(target, (artifact(path),), (), checkpoints.append, roots=(str(target.home),))
+    first = publish_artifacts(target, (artifact(path),), (), checkpoints.append, roots=(str(target.home),)).files
     assert path.read_bytes() == b"content"
     before = path.stat().st_mtime_ns
-    same = publish_artifacts(target, (artifact(path),), first, checkpoints.append, roots=(str(target.home),))
+    same = publish_artifacts(target, (artifact(path),), first, checkpoints.append, roots=(str(target.home),)).files
     assert same == first and path.stat().st_mtime_ns == before
     updated = publish_artifacts(
         target,
@@ -40,12 +40,12 @@ def test_owned_file_update_mode_and_idempotent_removal(target):
         first,
         checkpoints.append,
         roots=(str(target.home),),
-    )
+    ).files
     assert path.stat().st_mode & 0o777 == 0o700
     assert len(checkpoints) == 2
-    assert publish_artifacts(target, (), updated, checkpoints.append, roots=(str(target.home),)) == ()
+    assert publish_artifacts(target, (), updated, checkpoints.append, roots=(str(target.home),)).files == ()
     assert not path.exists()
-    assert publish_artifacts(target, (), updated, checkpoints.append, roots=(str(target.home),)) == ()
+    assert publish_artifacts(target, (), updated, checkpoints.append, roots=(str(target.home),)).files == ()
 
 
 def test_entire_plan_collision_checked_before_first_write(target):
@@ -60,9 +60,9 @@ def test_entire_plan_collision_checked_before_first_write(target):
 
 def test_modified_obsolete_file_retains_ownership(target):
     path = target.home / "managed"
-    owned = publish_artifacts(target, (artifact(path),), (), lambda files: None, roots=(str(target.home),))
+    owned = publish_artifacts(target, (artifact(path),), (), lambda files: None, roots=(str(target.home),)).files
     path.write_bytes(b"operator edit")
-    assert publish_artifacts(target, (), owned, lambda files: None, roots=(str(target.home),)) == owned
+    assert publish_artifacts(target, (), owned, lambda files: None, roots=(str(target.home),)).files == owned
     assert path.read_bytes() == b"operator edit"
     with pytest.raises(StateError):
         publish_artifacts(target, (artifact(path, b"update"),), owned, lambda files: None, roots=(str(target.home),))
@@ -70,11 +70,11 @@ def test_modified_obsolete_file_retains_ownership(target):
 
 def test_modified_file_mode_is_preserved_and_diagnosed(target):
     path = target.home / "managed"
-    owned = publish_artifacts(target, (artifact(path),), (), lambda files: None, roots=(str(target.home),))
+    owned = publish_artifacts(target, (artifact(path),), (), lambda files: None, roots=(str(target.home),)).files
     path.chmod(0o700)
     with pytest.raises(StateError):
         publish_artifacts(target, (artifact(path),), owned, lambda files: None, roots=(str(target.home),))
-    assert publish_artifacts(target, (), owned, lambda files: None, roots=(str(target.home),)) == owned
+    assert publish_artifacts(target, (), owned, lambda files: None, roots=(str(target.home),)).files == owned
     assert path.exists() and path.stat().st_mode & 0o777 == 0o700
 
 
@@ -142,7 +142,7 @@ def test_skill_retirement_prunes_only_owned_file_parents_and_retries_interruptio
         replace(artifact(root / "SKILL.md"), native_identity="skill:review", package_root=str(root)),
         replace(artifact(root / "scripts/nested/check.sh"), native_identity="skill:review", package_root=str(root)),
     )
-    previous = publish_artifacts(target, files, (), lambda files: None, roots=(str(target.home),))
+    previous = publish_artifacts(target, files, (), lambda files: None, roots=(str(target.home),)).files
     checkpoints = [previous]
     prune = NativeFiles.prune_empty_parents
     calls = 0
@@ -161,7 +161,7 @@ def test_skill_retirement_prunes_only_owned_file_parents_and_retries_interruptio
     assert [Path(file.path).name for file in checkpoints[-1]] == ["SKILL.md"]
     assert not Path(checkpoints[-1][0].path).exists()
     monkeypatch.setattr(NativeFiles, "prune_empty_parents", prune)
-    assert publish_artifacts(target, (), checkpoints[-1], checkpoints.append, roots=(str(target.home),)) == ()
+    assert publish_artifacts(target, (), checkpoints[-1], checkpoints.append, roots=(str(target.home),)).files == ()
     assert not root.exists()
     assert root.parent.is_dir()
 
@@ -175,7 +175,7 @@ def test_skill_retirement_preserves_modified_and_unowned_files(target, rootless)
         replace(artifact(root / path), native_identity="skill:review", package_root=str(root))
         for path in ("SKILL.md", "scripts/modified.sh", "data/retired.txt")
     )
-    previous = publish_artifacts(target, files, (), lambda files: None, roots=(str(target.home),))
+    previous = publish_artifacts(target, files, (), lambda files: None, roots=(str(target.home),)).files
     if rootless != "none":
         previous = tuple(
             record.model_copy(update={"package_root": None})
@@ -185,7 +185,7 @@ def test_skill_retirement_preserves_modified_and_unowned_files(target, rootless)
         )
     (root / "scripts/modified.sh").write_text("operator change")
     (root / "data/unowned.txt").write_text("unowned content")
-    remaining = publish_artifacts(target, (), previous, lambda files: None, roots=(str(target.home),))
+    remaining = publish_artifacts(target, (), previous, lambda files: None, roots=(str(target.home),)).files
     assert [Path(file.path).name for file in remaining] == ["SKILL.md", "modified.sh"]
     assert (root / "SKILL.md").exists()
     assert (root / "scripts/modified.sh").read_text() == "operator change"
@@ -217,9 +217,9 @@ def test_recorded_package_root_never_prunes_same_named_ancestor_components(tmp_p
     native_home = target.home / ".claude"
     package = native_home / "skills/review"
     plan = outer_artifacts(received(native_artifact(ArtifactType.SKILL)), str(native_home))
-    records = publish_artifacts(target, plan.files, (), lambda files: None, roots=(str(target.home),))
+    records = publish_artifacts(target, plan.files, (), lambda files: None, roots=(str(target.home),)).files
     assert {file.package_root for file in records} == {str(package)}
-    assert publish_artifacts(target, (), records, lambda files: None, roots=(str(target.home),)) == ()
+    assert publish_artifacts(target, (), records, lambda files: None, roots=(str(target.home),)).files == ()
     assert not package.exists()
     assert native_home.is_dir() and package.parent.is_dir() and target.home.is_dir()
 
@@ -241,7 +241,7 @@ def test_rootless_records_without_package_root_retire_files_without_guessing(tar
         }
     )
     assert rootless.package_root is None
-    assert publish_artifacts(target, (), (rootless,), lambda files: None, roots=(str(target.home),)) == ()
+    assert publish_artifacts(target, (), (rootless,), lambda files: None, roots=(str(target.home),)).files == ()
     assert not path.exists() and root.is_dir()
 
 
@@ -286,9 +286,9 @@ def test_rootless_skill_entrypoints_retire_deepest_first_after_supporting_member
         replace(artifact(root / path), native_identity="skill:review")
         for path in ("SKILL.md", "nested/SKILL.md", "nested/support.txt")
     )
-    previous = publish_artifacts(target, files, (), lambda files: None, roots=(str(target.home),))
+    previous = publish_artifacts(target, files, (), lambda files: None, roots=(str(target.home),)).files
     checkpoints: list[tuple[OwnedArtifactFile, ...]] = []
-    assert publish_artifacts(target, (), previous, checkpoints.append, roots=(str(target.home),)) == ()
+    assert publish_artifacts(target, (), previous, checkpoints.append, roots=(str(target.home),)).files == ()
     assert [[Path(file.path).relative_to(root).as_posix() for file in records] for records in checkpoints] == [
         ["SKILL.md", "nested/SKILL.md"],
         ["SKILL.md"],
@@ -310,7 +310,7 @@ def test_final_root_permission_denial_only_completes_when_directory_is_verified_
         (),
         lambda files: None,
         roots=(str(target.home),),
-    )
+    ).files
     if unowned:
         (root / "operator-note.txt").write_text("retain this")
     warnings: list[str] = []
@@ -331,12 +331,12 @@ def test_final_root_permission_denial_only_completes_when_directory_is_verified_
                 publish_artifacts(target, (), previous, checkpoints.append, roots=(str(target.home),))
             assert checkpoints[-1] == previous and not warnings
         else:
-            assert publish_artifacts(target, (), previous, checkpoints.append, roots=(str(target.home),)) == ()
+            assert publish_artifacts(target, (), previous, checkpoints.append, roots=(str(target.home),)).files == ()
             assert checkpoints[-1] == () and len(warnings) == 1
         assert not (root / "SKILL.md").exists() and root.is_dir()
     finally:
         root.parent.chmod(0o700)
-    assert publish_artifacts(target, (), checkpoints[-1], checkpoints.append, roots=(str(target.home),)) == ()
+    assert publish_artifacts(target, (), checkpoints[-1], checkpoints.append, roots=(str(target.home),)).files == ()
     assert removals == [str(root / "SKILL.md")]
     if unowned:
         assert (root / "operator-note.txt").read_text() == "retain this"

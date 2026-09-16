@@ -901,3 +901,94 @@ build comparisons passed. The 16 real CLI configuration cases and unknown-name r
 temporary HOME and build outputs were independently verified removed. The first handoff's
 independent live Lima evidence covers the unchanged runtime; this tests-and-plan correction did not
 run another VM workload.
+
+## Native defining-scope placement correction, 2026-09-15
+
+The operator approved replacing unnecessary native deferrals, generated instruction sections,
+per-type application and deferral progress, and direct shell publication at every facet. This
+supersedes shell's session opt-in and the initial VM routing-only implementation. Earlier completed
+checkboxes remain the historical record.
+
+- [x] Support generated instruction sections, replacing a complete managed extent while preserving
+      surrounding bytes and metadata; warn, retain and record malformed sections as skipped.
+- [x] Publish VM artifact files using the existing transport and ownership lifecycle, with
+      machine-readable permissions and no new VM deletion prerequisite.
+- [x] Apply Codex hints/rules at user and workspace scope through the selected native instruction
+      file; apply verified Claude and Codex artifacts at VM scope.
+- [x] Publish shell artifacts directly at VM, user, workspace and session scope without an opt-in.
+- [x] Report actual application by artifact type and bounded name list; report deferral reasons and
+      destinations without promising that restart alone guarantees delivery.
+- [x] Update native inventory, inspection, permanent guides, support matrices and design response.
+- [x] Close the unavailable post-merge PR 822 feedback question per operator direction.
+- [x] Complete independent project, complexity and correctness reviews plus required validation.
+- [x] Publish the complete ready PR 825 and assess its initial feedback.
+
+Acceptance includes empty and pre-existing instruction files; edited complete sections; missing,
+reversed and duplicate delimiters; unrelated content and mode preservation; generated-section
+retirement; privileged VM publication readable by consumers; native cross-scope identity checks;
+shell publication without deferral; and progress counts per artifact rather than per package file.
+No native model calls are necessary for these filesystem and lifecycle claims.
+
+Private review is clean at `0179eee5`. Project review ran 105 targeted cases. Correctness review
+reproduced extended-attribute loss and a section-to-whole ownership promotion; both are fixed with
+real guest-program regressions, including ACL preservation and failure before replacement. Muntz
+found that file-based reporting omitted argument-only Codex/Grok delivery. Reporting now counts
+handled inputs minus explicit deferrals and skips. Both real renderers report hints and rules even
+with no generated files. Its follow-up passed 57 tests and verified the ownership and attribute
+checks through deletion experiments. A final fixture permission adjustment makes both existing-file
+ownership-transition directions fail when that guard is removed; Muntz independently confirmed it.
+The remaining changes clarify existing limitations and migration wording, not runtime policy.
+
+Validation passed: 9,810 non-integration tests, seven skipped; Ruff lint/format; strict mypy over
+856 files; file lint; locked-SDD and Typer checks; Rulesync 7.14.0. Website validation passed 160
+Python tests, 103 Node tests and deterministic builds for both site bases. One website
+keyboard-input timing test initially failed under concurrent load, passed its isolated retry, and
+then passed in another complete 160-test run. Real isolated-HOME CLI checks covered native
+default/opt-in/inherited/ explicitly-disabled workaround configuration, direct shell configuration,
+refusal of the removed shell setting, and rendered artifact guidance. Temporary HOME and build
+artifacts were removed. Guest filesystem tests execute the actual publication helper; root elevation
+is intercepted within local fixtures, so they are not evidence of live privileged VM publication. No
+live VM inventory is configured for this session, and no model calls were made. The ready handoff
+requests the normal independent integration-validation lane.
+
+PR 822's visible Muntz finding and dispositions were re-read and accounted for: native workaround
+name parity remains covered, shell's obsolete setting and its associated checks are removed, and its
+optional unrelated simplifications remain outside this correction. As of the final local review,
+GitHub returned no separate post-merge report in issue comments, reviews or inline comments. The
+operator was asked for its link; the additional report remains pending rather than being claimed
+reviewed.
+
+## PR 825: global elevated-file boundary correction
+
+The operator approved one global fixed allowlist shared by all integrations, instead of either
+unrestricted VM destinations or per-integration grants. PR 825 is draft during this directed
+correction. The allowed trees are `/etc/claude-code`, `/etc/codex` and `/opt/agentworks/artifacts`.
+The existing `NativeFiles` helper remains the migration seam for the proposed Transport file APIs in
+PR 795.
+
+- [x] Enforce the global boundary on elevated reads, writes and cleanup, including persisted paths.
+- [x] Verify refusals before I/O and preserve normal unprivileged operation.
+- [x] Update the integration and artifact guides and architecture.
+- [x] Complete private project, correctness and complexity reviews and validation.
+- [ ] Publish and describe the exact corrected head, then return PR 825 to ready.
+
+The first handoff's independent live Lima test verified Codex user guidance, surrounding-content and
+metadata preservation, malformed-section refusal without changing bytes, and recorded skips. It did
+not exercise VM publication or large progress groups. Its clean report is evidence for those
+user-scope paths, not live proof of privileged publication. The operator closed the unavailable
+post-merge PR 822 report question; no additional report is claimed reviewed.
+
+Private review is clean through `cf6dd921`. The project reviewer ran 191 targeted cases; Muntz ran
+160 cases and confirmed that removing direct helper enforcement fails 33 tests, while removing
+publication-wide preflight fails six. The correctness lane independently checked 121 invalid
+elevated operations, persisted paths, cleanup bounds, broader caller scopes and retained symlink
+refusal. The first review found one stale dispatch expectation requiring unrestricted VM roots; that
+test now checks the shared allowlist and uses an approved fixture path.
+
+Final validation: 9,900 non-integration tests passed, seven skipped; Ruff lint/format, strict mypy
+(857 files), file lint, locked-SDD, exact CI Typer isolation and Rulesync 7.14.0 passed. The first
+full test run failed only the stale dispatch expectation already corrected; the final full rerun is
+clean. Website Python (160), Node (103) and both deterministic double builds passed. The real CLI
+rendered the updated artifact guide in an isolated HOME, which was removed afterwards. Filesystem
+tests use real local helper execution with simulated elevation; no live VM publication is claimed
+for this correction.

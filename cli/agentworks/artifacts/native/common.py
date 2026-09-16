@@ -171,10 +171,12 @@ def has_artifacts(context: SessionArtifactContext | None) -> bool:
     return context is not None and bool(context.inputs or context.ancestor_files)
 
 
-def validate_discovery_paths(context: SessionArtifactContext, roots: tuple[str, ...]) -> None:
+def validate_discovery_paths(
+    context: SessionArtifactContext, roots: tuple[str, ...], *, files: tuple[str, ...] = ()
+) -> None:
     """Previously applied files must remain inside directories this launch discovers."""
     for file in context.ancestor_files:
-        if not any(file.path.startswith(root + "/") for root in roots):
+        if file.path not in files and not any(file.path.startswith(root + "/") for root in roots):
             raise ConfigError(
                 "native artifact discovery no longer includes an applied ancestor destination",
                 hint="Restore the native home override or reinitialize the owning facet with the intended home.",

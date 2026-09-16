@@ -11,8 +11,10 @@ from typing import TYPE_CHECKING, Literal, cast
 from pydantic import ValidationError
 
 from agentworks import output
+from agentworks.artifacts.application import ArtifactDeferral
 from agentworks.artifacts.model import ArtifactInputs
 from agentworks.artifacts.publication import publish_artifacts, validate_application
+from agentworks.artifacts.reporting import report_applied, report_deferrals
 from agentworks.artifacts.state import write_capture
 from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled, harness_integration_for
 from agentworks.capabilities.harness_integration.setup import (
@@ -25,10 +27,10 @@ from agentworks.errors import ConfigError, StateError
 from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
 from agentworks.harness_setup.state import read_native_setup, replace_setup_record, write_native_setup
+from agentworks.native_files import ROOT_FILE_DIRECTORIES
 
 if TYPE_CHECKING:
     from agentworks.artifacts.application import OwnedArtifactFile
-    from agentworks.artifacts.model import ArtifactFacet
     from agentworks.db import Database, VMRow
     from agentworks.harness_setup.inputs import SetupInputs
     from agentworks.harness_setup.locking import NativeMutationGuard
@@ -81,11 +83,18 @@ def run_setup(
             write_capture(db, inputs.kind, inputs.name, inputs.component, inputs.artifact_snapshot, operation=operation)
         state = read_native_setup(db, inputs.kind, inputs.name)
         prior = {record.integration: record for record in state.records if record.component == inputs.component}
-        fallback: tuple[ArtifactFacet, ...] = ()
+        fallback: tuple[ArtifactDeferral, ...] = ()
         if not inputs.activations and inputs.artifact_snapshot is not None and inputs.artifact_snapshot.inputs:
-            fallback = (inactive_destination(inputs.facet),)
+            fallback = tuple(
+                ArtifactDeferral(
+                    input_id=item.identity,
+                    destination=inactive_destination(inputs.facet),
+                    reason="no activated harness integrations",
+                )
+                for item in inputs.artifact_snapshot.inputs.items()
+            )
         if not inputs.activations and not prior:
-            _warn_artifact_deferrals(inputs, fallback)
+            _report_fallback(inputs, fallback)
             return state
         location = (
             invocation.home
@@ -196,18 +205,20 @@ def run_setup(
             else:
                 raise StateError("unknown native setup invocation")
             application = validate_application(application, artifacts, inputs.facet, integration=name)
-            if isinstance(call, VMSetupInvocation) and application.files:
-                raise StateError("VM artifacts must be routed to an inner facet")
-            roots = () if location is None else (location,)
-            owned = publish_artifacts(
+            roots = ROOT_FILE_DIRECTORIES if location is None else (location,)
+            publication = publish_artifacts(
                 call.runner,
                 application.files,
                 current.artifact_files,
                 checkpoint_files,
                 roots=roots,
                 group=call.linux_group if isinstance(call, WorkspaceSetupInvocation) else "",
+                root=isinstance(call, VMSetupInvocation),
             )
-            current = current.model_copy(update={"artifact_files": owned, "deferred": application.deferred})
+            owned = publication.files
+            current = current.model_copy(
+                update={"artifact_files": owned, "deferred": application.deferred, "skipped": publication.skipped}
+            )
             if block is None:
                 if current.claims or current.artifact_files:
                     current = current.model_copy(update={"pending_cleanup": True})
@@ -222,33 +233,37 @@ def run_setup(
                         )
                     )
             else:
-                pending_files = any(item.path not in {file.path for file in application.files} for item in owned)
+                settled_paths = {file.path for file in application.files} | {item.path for item in publication.skipped}
+                pending_files = any(item.path not in settled_paths for item in owned)
                 current = current.model_copy(update={"complete": not pending_files, "pending_cleanup": pending_files})
                 state = replace_setup_record(state, current)
             persist(state)
             if block is not None and current.complete:
-                _warn_artifact_deferrals(inputs, tuple(item.destination for item in current.deferred), name)
+                report_applied(
+                    artifacts,
+                    integration=name,
+                    owner=f"{inputs.component}/{inputs.name}",
+                    deferred=application.deferred,
+                    skipped=publication.skipped,
+                )
+                report_deferrals(
+                    artifacts,
+                    integration=name,
+                    owner=f"{inputs.component}/{inputs.name}",
+                    deferred=application.deferred,
+                )
         if fallback and not any(
             record.pending_cleanup for record in state.records if record.component == inputs.component
         ):
-            _warn_artifact_deferrals(inputs, fallback)
+            _report_fallback(inputs, fallback)
         return state
 
 
-def _warn_artifact_deferrals(
-    inputs: SetupInputs, destinations: tuple[ArtifactFacet, ...], integration: str | None = None
-) -> None:
-    """Explain when deferred artifacts can reach their next owning setup."""
-    if not destinations:
-        return
-    refresh = {
-        "user": "user: next setup of each actual user",
-        "workspace": "workspace: creation only; existing workspaces cannot refresh in place",
-        "session": "session: next managed start or restart; running sessions are not refreshed",
-    }
-    routes = "; ".join(refresh[destination] for destination in dict.fromkeys(destinations))
-    handler = integration or "core fallback (no activated harness integrations)"
-    output.warn(
-        f"Artifact setup for {inputs.component} '{inputs.name}' via {handler} leaves artifacts deferred ({routes}). "
-        "Already-applied native files follow the harness's own reload behavior."
-    )
+def _report_fallback(inputs: SetupInputs, deferred: tuple[ArtifactDeferral, ...]) -> None:
+    if deferred and inputs.artifact_snapshot is not None:
+        report_deferrals(
+            ArtifactInputs(local=inputs.artifact_snapshot.inputs),
+            integration="core fallback",
+            owner=f"{inputs.component}/{inputs.name}",
+            deferred=deferred,
+        )

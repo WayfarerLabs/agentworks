@@ -7,9 +7,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication, OwnedArtifactFile, SessionArtifactContext
 from agentworks.artifacts.publication import publish_artifacts, validate_application
+from agentworks.artifacts.reporting import report_applied, report_deferrals
 from agentworks.artifacts.state import CapturedArtifacts, capture_owner, write_capture
 from agentworks.errors import StateError
 from agentworks.harness_setup.inputs import SetupInputs
@@ -111,16 +111,9 @@ def validate_session_application(
         raise StateError("session artifacts conflict with an ancestor artifact destination")
     if any(not item.path.startswith(context.directory + "/") for item in result.files):
         raise StateError("session artifact publication must use its private run directory")
-    artifacts = {item.identity: item for item in context.inputs.items()}
-    for deferred in result.deferred:
-        artifact = artifacts[deferred.input_id]
-        origin = artifact.origin
-        output.warn(
-            f"Integration '{integration}' left {artifact.content.type.value} '{artifact.content.name}' "
-            f"from {origin.component} {origin.resource_kind}/{origin.resource_name} "
-            f"(producer {origin.producer}, bundle {origin.bundle}) unhandled at the session facet: "
-            f"{deferred.reason}"
-        )
+    report_deferrals(
+        context.inputs, integration=integration, owner="session facet", deferred=result.deferred, terminal=True
+    )
     return result
 
 
@@ -156,7 +149,18 @@ def stage_session_artifacts(
         write_native_setup(db, "session", name, state, operation="session-prepare")
 
     checkpoint(())
-    publish_artifacts(runner, application.files, (), checkpoint, roots=(context.directory,))
+    published = publish_artifacts(runner, application.files, (), checkpoint, roots=(context.directory,))
+    if published.skipped:
+        current = current.model_copy(update={"skipped": published.skipped})
+        state = replace_setup_record(state, current)
+        write_native_setup(db, "session", name, state, operation="session-prepare")
+    report_applied(
+        context.inputs,
+        integration=integration,
+        owner=f"session '{name}'",
+        deferred=application.deferred,
+        skipped=published.skipped,
+    )
 
 
 def commit_session_artifacts(
@@ -192,9 +196,9 @@ def commit_session_artifacts(
         )
         updated = record.model_copy(
             update={
-                "artifact_files": (*keep, *remaining),
+                "artifact_files": (*keep, *remaining.files),
                 "complete": record.integration == integration,
-                "pending_cleanup": record.integration != integration and bool(remaining),
+                "pending_cleanup": record.integration != integration and bool(remaining.files),
             }
         )
         state = replace_setup_record(state, updated)
@@ -228,5 +232,5 @@ def cleanup_session_artifacts(db: Database, session: SessionRow, runner: Transpo
             checkpoint,
             roots=(f"{home}/.agentworks-artifacts/session/{session.session_uuid}",),
         )
-        if remaining:
+        if remaining.files:
             raise StateError("modified session artifacts remain; inspect them before deleting their ownership record")

@@ -165,7 +165,7 @@ class GrokBuildIntegration(HarnessIntegration):
         return (
             ArtifactApplication()
             if self.retiring
-            else defer(invocation.artifacts, "user", "Grok Build discovers native artifacts for an actual user")
+            else defer(invocation.artifacts, "user", "Grok Build has no supported machine-wide artifact file location")
         )
 
     def user_init(self, invocation: UserSetupInvocation) -> ArtifactApplication:

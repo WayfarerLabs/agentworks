@@ -535,3 +535,26 @@ def test_database_round_trip_retains_map_order_and_current_routing(db):
     deferred = deferred_inputs(view, "session")
     assert deferred is not None
     assert list(deferred[capture.inputs.owner].hints) == ["zebra", "alpha"]
+
+
+def test_skipped_reapplication_keeps_cleanup_evidence_without_ancestor_delivery(db):
+    from agentworks.artifacts.application import ArtifactSkip
+
+    fixture = graph(db, active=("agent",))
+    item = tuple(fixture.captures["agent"].inputs.items())[0]
+    prior = OwnedArtifactFile(
+        path="/home/worker/AGENTS.md",
+        sha256="a" * 64,
+        origins=(item.origin_identity,),
+        generated_section=True,
+    )
+    record = fixture.save("agent", inherited=fixture.captures["vm"].inputs, files=(prior,))
+    skipped = ArtifactSkip(path=prior.path, origins=prior.origins, reason="partial section")
+    state = replace_setup_record(
+        read_native_setup(db, "agent", "agent"), record.model_copy(update={"skipped": (skipped,)})
+    )
+    write_native_setup(db, "agent", "agent", state, operation="fixture")
+    result = fixture.route()
+    assert result.ancestor_files == ()
+    assert item.identity not in {value.identity for value in result.inputs.items()}
+    assert read_native_setup(db, "agent", "agent").records[0].artifact_files == (prior,)

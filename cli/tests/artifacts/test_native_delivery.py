@@ -154,13 +154,19 @@ def test_session_artifact_directory_is_bound_to_the_prepared_run():
             validate_session_application(replace(application, artifacts_dir=directory), prepared, integration="shell")
 
 
-def test_codex_outer_routes_context_and_installs_standard_skills_and_personas():
+def test_codex_outer_installs_context_and_standard_skills_and_personas():
     items = tuple(artifact(type, name=type.value) for type in ArtifactType)
     result = codex.outer_artifacts(
-        received(*items), skills_root="/home/a/.agents/skills", agents_root="/home/a/.codex/agents"
+        received(*items),
+        skills_root="/home/a/.agents/skills",
+        agents_root="/home/a/.codex/agents",
+        instructions_path="/home/a/.codex/AGENTS.md",
     )
-    assert {entry.input_id for entry in result.deferred} == {item.identity for item in items[:2]}
-    assert {entry.destination for entry in result.deferred} == {"session"}
+    assert result.deferred == ()
+    guidance = next(file for file in result.files if file.path.endswith("/AGENTS.md"))
+    assert guidance.generated_section
+    assert guidance.origins == tuple(item.origin_identity for item in items[:2])
+    assert all(item.content.text.encode() in guidance.data for item in items[:2])
     role = tomllib.loads(next(file.data.decode() for file in result.files if file.path.endswith(".toml")))
     assert role["developer_instructions"] == items[-1].content.text
     assert role["name"] == "agent"
@@ -309,16 +315,14 @@ def test_native_probe_passes_environment_separately_and_rejects_policy_failures(
     assert calls[-1][1]["env"]["API_TOKEN"] == "a-secret-value"
 
 
-@pytest.mark.parametrize(
-    "implementation", [ShellIntegration, ClaudeCodeIntegration, CodexIntegration, GrokBuildIntegration]
-)
+@pytest.mark.parametrize("implementation", [CodexIntegration, GrokBuildIntegration])
 def test_vm_deferral_preserves_input_identity_without_descendant_knowledge(implementation):
     integration = implementation.for_setup(owner_name="box", owner_kind="vm", facet="vm", config={})
     item = artifact(ArtifactType.RULE)
     result = integration.vm_init(SimpleNamespace(artifacts=received(item)))
     assert result.files == ()
     assert result.deferred[0].input_id == item.identity
-    assert result.deferred[0].destination == ("session" if implementation is ShellIntegration else "user")
+    assert result.deferred[0].destination == "user"
 
 
 @pytest.mark.parametrize(
@@ -546,22 +550,31 @@ def test_codex_external_home_does_not_block_home_owned_skills(db, monkeypatch):
             checkpoint=lambda claims: None,
             username="alice",
             home="/home/alice",
-            artifacts=received(artifact(ArtifactType.SKILL), artifact(ArtifactType.HINT, name="setup")),
+            artifacts=received(artifact(ArtifactType.SKILL)),
         )
     )
     assert all(file.path.startswith("/home/alice/.agents/skills/") for file in result.files)
-    assert len(result.deferred) == 1
+    assert result.deferred == ()
 
 
 def test_codex_persona_serialization_rejects_output_beyond_inventory_bound(monkeypatch):
     item = artifact(ArtifactType.AGENT)
-    rendered = codex.outer_artifacts(received(item), skills_root="/skills", agents_root="/agents")
+    rendered = codex.outer_artifacts(
+        received(item), skills_root="/skills", agents_root="/agents", instructions_path="/AGENTS.md"
+    )
     limit = len(rendered.files[0].data)
     monkeypatch.setattr(codex, "MAX_CODEX_PERSONA_BYTES", limit)
-    assert codex.outer_artifacts(received(item), skills_root="/skills", agents_root="/agents") == rendered
+    assert (
+        codex.outer_artifacts(
+            received(item), skills_root="/skills", agents_root="/agents", instructions_path="/AGENTS.md"
+        )
+        == rendered
+    )
     monkeypatch.setattr(codex, "MAX_CODEX_PERSONA_BYTES", limit - 1)
     with pytest.raises(ConfigError):
-        codex.outer_artifacts(received(item), skills_root="/skills", agents_root="/agents")
+        codex.outer_artifacts(
+            received(item), skills_root="/skills", agents_root="/agents", instructions_path="/AGENTS.md"
+        )
 
 
 def test_shell_index_preserves_declared_key_order_with_fixed_type_order():
@@ -606,17 +619,13 @@ def test_config_workaround_names_match_native_delivery(integration, workarounds)
     assert set(names) == set(workarounds.values())
 
 
-@pytest.mark.parametrize(
-    "workaround",
-    get_args(get_args(ShellIntegration.config_model.model_fields["enabled_workarounds"].annotation)[0]),
-)
 @pytest.mark.parametrize("type", list(ArtifactType))
-def test_each_declared_shell_workaround_delivers_artifacts(workaround, type):
+def test_shell_delivers_session_artifacts_without_workarounds(type):
     item = artifact(type)
     prepared = context(item)
     integration = ShellIntegration(
         "shell",
-        {"enabled_workarounds": [workaround]},
+        {},
         session_name="s1",
         vm_name="box",
         workspace_name="ws",

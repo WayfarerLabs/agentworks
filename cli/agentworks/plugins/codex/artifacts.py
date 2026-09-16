@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import tomli_w
@@ -24,12 +25,14 @@ from agentworks.artifacts.native.common import (
     validate_native_argv,
 )
 from agentworks.errors import ConfigError
+from agentworks.native_files import NativeFiles
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from agentworks.artifacts.application import SessionArtifactContext
     from agentworks.artifacts.model import ArtifactInput, ArtifactInputs
+    from agentworks.transports import Transport
 
 
 _OPTIONS = {"model": str, "model_reasoning_effort": str}
@@ -55,10 +58,24 @@ def _persona(item: ArtifactInput, *, role_layer: bool = False) -> str:
     return rendered
 
 
-def outer_artifacts(inputs: ArtifactInputs, *, skills_root: str, agents_root: str) -> ArtifactApplication:
+def guidance_path(runner: Transport, root: str) -> str:
+    """Use the instruction file Codex actually selects at this directory."""
+    override = f"{root}/AGENTS.override.md"
+    with NativeFiles(runner) as files:
+        content = files.read(override)
+    return override if content and content.strip() else f"{root}/AGENTS.md"
+
+
+def outer_artifacts(
+    inputs: ArtifactInputs, *, skills_root: str, agents_root: str, instructions_path: str
+) -> ArtifactApplication:
     validate_names(inputs)
     files: list[ArtifactFile] = []
-    deferred = []
+    guidance = tuple(item for item in inputs.items() if item.content.type in (ArtifactType.HINT, ArtifactType.RULE))
+    if guidance:
+        files.append(
+            replace(artifact_file(instructions_path, context_text(guidance), guidance), generated_section=True)
+        )
     for item in inputs.items():
         content = item.content
         if content.type is ArtifactType.SKILL:
@@ -69,12 +86,26 @@ def outer_artifacts(inputs: ArtifactInputs, *, skills_root: str, agents_root: st
                     f"{agents_root}/{content.name}.toml", _persona(item), (item,), identity=f"agent:{content.name}"
                 )
             )
+    return ArtifactApplication(tuple(files))
+
+
+def vm_artifacts(inputs: ArtifactInputs) -> ArtifactApplication:
+    """Use machine skill discovery; other types need native user placement here."""
+    validate_names(inputs)
+    files: list[ArtifactFile] = []
+    deferred = []
+    for item in inputs.items():
+        if item.content.type is ArtifactType.SKILL:
+            files.extend(skill_files("/etc/codex/skills", item))
         else:
             deferred.append(
                 ArtifactDeferral(
                     input_id=item.identity,
-                    destination="session",
-                    reason="Codex loads additive artifact guidance through session configuration",
+                    destination="user",
+                    reason=(
+                        "This integration has no additive machine-wide location for "
+                        f"Codex {item.content.type.map_name}; using native user placement"
+                    ),
                 )
             )
     return ArtifactApplication(tuple(files), tuple(deferred))

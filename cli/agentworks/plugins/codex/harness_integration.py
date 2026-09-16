@@ -111,9 +111,9 @@ from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, NamedTuple
 from pydantic import Field
 
 from agentworks.artifacts.application import ArtifactApplication
+from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
-    defer,
     delivery_files,
     native_home,
     validate_discovery_paths,
@@ -131,7 +131,7 @@ from agentworks.capabilities.harness_integration.base import (
 from agentworks.errors import StateError
 from agentworks.plugins._harness_native.native import setup_user, setup_workspace
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
-from agentworks.plugins.codex.artifacts import outer_artifacts, session_artifacts
+from agentworks.plugins.codex.artifacts import guidance_path, outer_artifacts, session_artifacts, vm_artifacts
 from agentworks.plugins.codex.recorder import home_word, notify_value_word, provision_fragment, thread_tail
 from agentworks.schema import AgwModel, MergeStrategy
 from agentworks.topics import TopicProse
@@ -424,8 +424,10 @@ class CodexIntegration(HarnessIntegration):
         Ships as the opt-in `codex` system plugin, and needs the `codex` CLI on the
         session's target.
 
-        User and workspace facets publish standard skills and native agent personas.
-        Hints and rules flow to the session and remain unhandled by default.
+        The VM facet publishes machine-wide skills. User and workspace facets publish
+        standard skills, native agent personas, and generated instruction sections in
+        the selected `AGENTS.md` or `AGENTS.override.md`. Session artifacts remain
+        unhandled by default.
         `enabled_workarounds` can opt into `session-developer-instructions` for
         rules/hints and `session-agent-config` for delegated personas. Private session
         skills have no supported workaround; activate an outer facet for native skill
@@ -461,11 +463,12 @@ class CodexIntegration(HarnessIntegration):
         return super().config_for(facet)
 
     def vm_init(self, invocation: VMSetupInvocation) -> ArtifactApplication:
-        return (
-            ArtifactApplication()
-            if self.retiring
-            else defer(invocation.artifacts, "user", "Native artifact discovery belongs to an actual user")
-        )
+        plan = ArtifactApplication() if self.retiring else vm_artifacts(invocation.artifacts)
+        if plan.files:
+            probe_native(
+                invocation.runner, tool="codex", environment=invocation.environment, files=plan.files, vm_only=True
+            )
+        return plan
 
     def user_init(self, invocation: UserSetupInvocation) -> ArtifactApplication:
         """Apply native setup and return the user's artifact publication plan."""
@@ -490,6 +493,14 @@ class CodexIntegration(HarnessIntegration):
                 invocation.artifacts,
                 skills_root=f"{invocation.home}/.agents/skills",
                 agents_root=f"{root}/agents",
+                instructions_path=(
+                    guidance_path(invocation.runner, root)
+                    if any(
+                        item.content.type in (ArtifactType.HINT, ArtifactType.RULE)
+                        for item in invocation.artifacts.items()
+                    )
+                    else f"{root}/AGENTS.md"
+                ),
             )
         )
         validate_user_placement(plan, invocation.home)
@@ -517,6 +528,14 @@ class CodexIntegration(HarnessIntegration):
                 invocation.artifacts,
                 skills_root=f"{invocation.root}/.agents/skills",
                 agents_root=f"{invocation.root}/.codex/agents",
+                instructions_path=(
+                    guidance_path(invocation.runner, invocation.root)
+                    if any(
+                        item.content.type in (ArtifactType.HINT, ArtifactType.RULE)
+                        for item in invocation.artifacts.items()
+                    )
+                    else f"{invocation.root}/AGENTS.md"
+                ),
             )
         )
         setup_workspace("codex", config, invocation)
@@ -607,6 +626,13 @@ class CodexIntegration(HarnessIntegration):
                     f"{native_root}/agents",
                     f"{self._workspace_path}/.agents/skills",
                     f"{self._workspace_path}/.codex/agents",
+                    "/etc/codex/skills",
+                ),
+                files=(
+                    f"{native_root}/AGENTS.md",
+                    f"{native_root}/AGENTS.override.md",
+                    f"{self._workspace_path}/AGENTS.md",
+                    f"{self._workspace_path}/AGENTS.override.md",
                 ),
             )
 

@@ -41,15 +41,26 @@ bundles replace whole same-type/key definitions within an owner; different owner
 each other. Normalized content and map keys enforce the same portable lowercase artifact-name
 contract used by declarations and persisted captures. An integration must consume those groups
 without flattening away equal names. Setup methods return an `ArtifactApplication`: concrete native
-files plus deferrals for inputs requiring a later facet. Core performs guarded whole-file
-publication and checkpoints confirmed ownership. The integration owns native formats, placement,
-compatibility checks and routing decisions. A successful application reports inputs omitted from its
-deferral list as handled. The integration must fulfill that delivery obligation, through native
-files, launch arguments or another supported native mechanism; omission is its handling report, not
-independent proof of consumption. Core validates the result and warns about final-session deferrals.
-A session deferral targets `session` as a terminal unhandled result; it is persisted for inspection
-and never routed again. Returning the old `None` result is a contract error even for an empty
-invocation.
+files plus deferrals for inputs requiring a later facet. Core performs guarded whole-file or
+generated-section publication and checkpoints confirmed ownership. The integration owns native
+formats, placement, compatibility checks and routing decisions. A successful application reports
+inputs omitted from its deferral list as handled. The integration must fulfill that delivery
+obligation, through native files, launch arguments or another supported native mechanism; omission
+is its handling report, not independent proof of consumption. Core validates the result and warns
+about final-session deferrals. A session deferral targets `session` as a terminal unhandled result;
+it is persisted for inspection and never routed again. Returning the old `None` result is a contract
+error even for an empty invocation.
+
+`ArtifactFile.generated_section` selects a bounded Agentworks-generated section in an instruction
+file. Core replaces a complete section while preserving surrounding bytes, ownership, permissions
+and extended attributes; malformed delimiters warn and produce a recorded skip. A skip is separate
+from the integration's deferral result and does not claim delivery or send the artifact to another
+facet. Whole-file publication still requires ownership of any existing destination. VM publication
+uses privileged destination operations and makes new files readable by VM users. Elevated file
+access is bounded by one core-owned allowlist shared by every integration: `/etc/claude-code`,
+`/etc/codex` and `/opt/agentworks/artifacts`. Integrations select destinations within those trees;
+root reads, writes and cleanup outside them are refused. Shell publishes all types directly at every
+activated facet.
 
 An `ArtifactFile` may supply an exact `package_root` for guarded empty-parent cleanup. The shared
 skill renderer sets it on every package member, and publication persists it in that member's

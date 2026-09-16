@@ -468,3 +468,24 @@ This supersedes the original automatic session delivery and terminal-error decis
 placement remains the ordinary path. Workarounds are explicit, separately named opt-ins, never
 implicitly enabled by an artifact reference or an ancestor activation. Do not require a tested
 native version as a blanket artifact minimum or build a release-by-release compatibility framework.
+
+## Operator ruling: native scope placement and progress, 2026-09-15
+
+The operator directed: "We want to apply at the producing scope wherever possible."
+
+"We should create an Agentworks generated section of AGENTS.md. The only issue is potentially
+conflicting with other harnesses that use AGENTS.md, but I think that's the best we can do for now."
+
+"When re-applying, both an empty file and a correctly-delineated Agentworks section are fine, with
+any existing Agentworks content completely replaced. A partial Agentworks section (start delimiter
+with and end one or vice versa) should warn and skip application."
+
+"And then we do need to output more in general. My thinking is that during application, each applied
+type gets an output line (\"Applying N <types> (<list>)\"). With a small number of artifacts of that
+type (say <= 3), they are all listed. Otherwise we should list the first two then \"...\"."
+
+"And we should similarly communicate deferrals."
+
+"And yeah, VM artifacts should apply in that scope if possible, otherwise defer. And since shell is
+completely made up, we should just make up scope locations but there should be no deferrals. For vm,
+maybe /opt/agentworks/artifacts/?"

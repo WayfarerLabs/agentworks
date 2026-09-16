@@ -31,6 +31,7 @@ def probe(
     entries: dict[str, str] | None = None,
     inventory_bytes: int = CaptureLimits().total_bytes,
     workspace_only: bool = False,
+    vm_only: bool = False,
     session_plugin: bool = False,
     environment: dict[str, str] | None = None,
 ) -> dict:
@@ -65,6 +66,7 @@ def probe(
         "proposed": proposed or {},
         "session_plugin": session_plugin,
         "workspace_only": workspace_only,
+        "vm_only": vm_only,
         "identities": identities,
         "check_policy": True,
     }
@@ -77,8 +79,12 @@ def probe(
         "GROK_HOME": str(native),
         **(environment or {}),
     }
+    # Guest machine paths are isolated alongside HOME and the workspace.
+    program = _PROBE.replace("/etc/claude-code", str(tmp_path / "etc/claude-code")).replace(
+        "/etc/codex", str(tmp_path / "etc/codex")
+    )
     result = subprocess.run(
-        [sys.executable, "-c", _PROBE], input=json.dumps(request), env=env, capture_output=True, text=True, check=True
+        [sys.executable, "-c", program], input=json.dumps(request), env=env, capture_output=True, text=True, check=True
     )
     observed = json.loads(result.stdout.removeprefix("AGW_ARTIFACT_PROBE="))
     assert isinstance(observed, dict)
@@ -358,6 +364,7 @@ def test_codex_generated_outer_persona_above_header_limit_remains_discoverable(t
         received(item),
         skills_root=str(tmp_path / "home/.agents/skills"),
         agents_root=str(tmp_path / "home/.codex/agents"),
+        instructions_path=str(tmp_path / "home/.codex/AGENTS.md"),
     )
     file = application.files[0]
     assert len(file.data) > 32768
@@ -498,7 +505,7 @@ def test_large_skill_retirement_does_not_leave_an_inventory_lockout(tmp_path):
         tuple(previous),
         lambda files: None,
         roots=(str(target.home),),
-    )
+    ).files
     assert len(retained) == 1 and not removed.exists()
     assert probe(tmp_path, tool="claude", entries={str(keep): "skill:review"})["problems"] == []
 
@@ -694,7 +701,7 @@ def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(
         artifacts=received(removed, kept),
     )
     first = integration.user_init(invocation)
-    current = publish_artifacts(target, first.files, (), lambda files: None, roots=(str(target.home),))
+    current = publish_artifacts(target, first.files, (), lambda files: None, roots=(str(target.home),)).files
     if rootless:
         current = tuple(record.model_copy(update={"package_root": None}) for record in current)
     entrypoint = target.home / ".claude/skills/review/SKILL.md"
@@ -732,7 +739,9 @@ def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(
     invocation = replace(invocation, prior=invocation.prior.model_copy(update={"artifact_files": checkpoints[-1]}))
     # This actual user_init invokes native preflight before retrying publication.
     retried = integration.user_init(invocation)
-    finished = publish_artifacts(target, retried.files, checkpoints[-1], checkpoints.append, roots=(str(target.home),))
+    finished = publish_artifacts(
+        target, retried.files, checkpoints[-1], checkpoints.append, roots=(str(target.home),)
+    ).files
     assert not entrypoint.exists()
     assert entrypoint.parent.exists() == (rootless or unowned_leftovers)
     if unowned_leftovers:
@@ -743,7 +752,8 @@ def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(
     invocation = replace(invocation, prior=invocation.prior.model_copy(update={"artifact_files": finished}))
     subsequent = integration.user_init(invocation)
     assert (
-        publish_artifacts(target, subsequent.files, finished, checkpoints.append, roots=(str(target.home),)) == finished
+        publish_artifacts(target, subsequent.files, finished, checkpoints.append, roots=(str(target.home),)).files
+        == finished
     )
 
 

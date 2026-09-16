@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import yaml
@@ -54,26 +55,35 @@ def _persona(item: ArtifactInput) -> dict[str, object]:
     }
 
 
-def outer_artifacts(inputs: ArtifactInputs, root: str) -> ArtifactApplication:
+def outer_artifacts(inputs: ArtifactInputs, root: str, *, instructions_path: str | None = None) -> ArtifactApplication:
     validate_names(inputs)
     files = []
-    hints = tuple(item for item in inputs.items() if item.content.type is ArtifactType.HINT)
-    if hints:
-        files.append(
-            artifact_file(f"{root}/rules/agentworks-hints.md", "# Agentworks setup\n\n" + context_text(hints), hints)
-        )
-    rules: dict[str, list[ArtifactInput]] = {}
-    for group in inputs.groups():
-        for name, item in group.rules.items():
-            rules.setdefault(name, []).append(item)
-    for name, contributions in rules.items():
-        files.append(
-            artifact_file(
-                f"{root}/rules/agentworks-rule-{name}.md",
-                f"# {name}\n\n" + context_text(tuple(contributions)),
-                tuple(contributions),
+    if instructions_path is not None:
+        guidance = tuple(item for item in inputs.items() if item.content.type in (ArtifactType.HINT, ArtifactType.RULE))
+        if guidance:
+            files.append(
+                replace(artifact_file(instructions_path, context_text(guidance), guidance), generated_section=True)
             )
-        )
+    else:
+        hints = tuple(item for item in inputs.items() if item.content.type is ArtifactType.HINT)
+        if hints:
+            files.append(
+                artifact_file(
+                    f"{root}/rules/agentworks-hints.md", "# Agentworks setup\n\n" + context_text(hints), hints
+                )
+            )
+        rules: dict[str, list[ArtifactInput]] = {}
+        for group in inputs.groups():
+            for name, item in group.rules.items():
+                rules.setdefault(name, []).append(item)
+        for name, contributions in rules.items():
+            files.append(
+                artifact_file(
+                    f"{root}/rules/agentworks-rule-{name}.md",
+                    f"# {name}\n\n" + context_text(tuple(contributions)),
+                    tuple(contributions),
+                )
+            )
     for item in inputs.items():
         content = item.content
         if content.type is ArtifactType.SKILL:

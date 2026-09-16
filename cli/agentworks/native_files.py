@@ -21,7 +21,9 @@ if TYPE_CHECKING:
 # replacement cannot redirect reads or publication into another directory tree.
 _FILE_PROGRAM = r"""
 import errno, grp, hashlib, json, os, secrets, stat, sys
-op, destination, staging, expected, group, executable = sys.argv[1:]
+op, destination, staging, expected, group, executable = sys.argv[1:7]
+public = len(sys.argv) > 7 and sys.argv[7] == '1'
+preserve = len(sys.argv) > 8 and sys.argv[8] == '1'
 parts = destination.split('/')[1:]
 if not destination.startswith('/') or any(p in ('', '.', '..') for p in parts):
     sys.exit(1)
@@ -86,8 +88,10 @@ try:
             if op in ('read', 'fingerprint', 'delete', 'directory'):
                 print(json.dumps({'exists': False}))
                 sys.exit(0)
-            os.mkdir(component, 0o700 if not group else 0o2770, dir_fd=fd)
+            os.mkdir(component, 0o755 if public else (0o700 if not group else 0o2770), dir_fd=fd)
             next_fd = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            if public:
+                os.fchmod(next_fd, 0o755)
             if group:
                 os.fchown(next_fd, -1, grp.getgrnam(group).gr_gid)
                 os.fchmod(next_fd, 0o2770)
@@ -99,6 +103,8 @@ try:
     content = None
     actual = '-'
     mode = 0
+    metadata = None
+    attributes = {}
     try:
         source_fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
     except FileNotFoundError:
@@ -107,7 +113,8 @@ try:
         with os.fdopen(source_fd, 'rb') as source:
             if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
                 sys.exit(4)
-            mode = stat.S_IMODE(os.fstat(source.fileno()).st_mode)
+            metadata = os.fstat(source.fileno())
+            mode = stat.S_IMODE(metadata.st_mode)
             if op == 'read':
                 content = source.read()
             else:
@@ -115,6 +122,8 @@ try:
                 while chunk := source.read(256 * 1024):
                     digest.update(chunk)
                 actual = digest.hexdigest()
+            if preserve:
+                attributes = {key: os.getxattr(source.fileno(), key) for key in os.listxattr(source.fileno())}
     if op == 'fingerprint':
         print(json.dumps({'exists': actual != '-', 'sha256': actual, 'mode': mode}))
         sys.exit(0)
@@ -122,6 +131,9 @@ try:
         if content is not None:
             output_fd = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(output_fd, 'wb') as output:
+                if public:
+                    staging_owner = os.stat(os.path.dirname(staging), follow_symlinks=False)
+                    os.fchown(output.fileno(), staging_owner.st_uid, staging_owner.st_gid)
                 output.write(content)
         print(json.dumps({'exists': content is not None}))
     else:
@@ -138,11 +150,26 @@ try:
         try:
             output_fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=fd)
             with os.fdopen(output_fd, 'wb') as output:
-                os.fchown(output.fileno(), -1, gid)
-                mode = (0o700 if executable == '1' else 0o600) if not group else (0o770 if executable == '1' else 0o660)
-                os.fchmod(output.fileno(), mode)
                 output.write(replacement)
                 output.flush()
+                uid = metadata.st_uid if preserve and metadata is not None else -1
+                gid = metadata.st_gid if preserve and metadata is not None else gid
+                os.fchown(output.fileno(), uid, gid)
+                if not preserve or metadata is None:
+                    mode = (0o755 if executable == '1' else 0o644) if public else (
+                        (0o700 if executable == '1' else 0o600) if not group
+                        else (0o770 if executable == '1' else 0o660)
+                    )
+                os.fchmod(output.fileno(), mode)
+                if preserve and metadata is not None:
+                    current_attributes = {
+                        key: os.getxattr(output.fileno(), key) for key in os.listxattr(output.fileno())
+                    }
+                    for key in current_attributes.keys() - attributes.keys():
+                        os.removexattr(output.fileno(), key)
+                    for key, value in attributes.items():
+                        if current_attributes.get(key) != value:
+                            os.setxattr(output.fileno(), key, value)
                 os.fsync(output.fileno())
             os.replace(name, parts[-1], src_dir_fd=fd, dst_dir_fd=fd)
             sync_fd = os.open('.', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
@@ -161,6 +188,9 @@ finally:
     os.close(fd)
 """
 
+
+# Shared by every integration. These are directory boundaries, never file targets.
+ROOT_FILE_DIRECTORIES = ("/etc/claude-code", "/etc/codex", "/opt/agentworks/artifacts")
 
 _UNSUITABLE_PATH = 4
 _DENIED_PATH = 5
@@ -196,6 +226,18 @@ def native_path(path: str) -> str:
     return str(PurePosixPath(path))
 
 
+def root_native_path(path: str, *, directory: bool = False) -> str:
+    """Constrain elevated plugin paths and persisted cleanup paths before I/O.
+
+    Boundary directories may be inspected or created, but file operations and
+    removable package roots must stay strictly beneath them.
+    """
+    path = native_path(path)
+    if not any(path.startswith(root + "/") or (directory and path == root) for root in ROOT_FILE_DIRECTORIES):
+        raise StateError(f"Elevated native file access is outside the allowed directories: '{path}'")
+    return path
+
+
 def require_python3(runner: Transport) -> None:
     """Check the guest prerequisite before native setup, including older VMs."""
     if not runner.run("command -v python3 >/dev/null", check=False, discard_output=True).ok:
@@ -206,10 +248,16 @@ def require_python3(runner: Transport) -> None:
 
 
 class NativeFiles(AbstractContextManager["NativeFiles"]):
-    """One operation's private remote/local staging, removed on every handled exit."""
+    """Private staging with optional elevation for guarded VM destinations.
 
-    def __init__(self, runner: Transport) -> None:
+    Transfers and staging stay owned by the transport user. Only the guarded
+    guest helper runs as root for VM publication; new VM files are readable
+    by all users, while generated-section updates preserve existing metadata.
+    """
+
+    def __init__(self, runner: Transport, *, root: bool = False) -> None:
         self.runner = runner
+        self.root = root
         self._local: tempfile.TemporaryDirectory[str] | None = None
         self.remote = ""
         self._counter = 0
@@ -249,15 +297,23 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
         self._counter += 1
         return f"{self.remote}/{self._counter}", Path(self._local.name) / str(self._counter)
 
+    def _command(self, arguments: list[str], *, preserve_metadata: bool = False) -> str:
+        prefix = ["sudo", "-n", "--"] if self.root else []
+        return shlex.join([*prefix, *arguments, "1" if self.root else "0", "1" if preserve_metadata else "0"])
+
+    def _path(self, destination: str, *, directory: bool = False) -> str:
+        return root_native_path(destination, directory=directory) if self.root else native_path(destination)
+
     def directory(self, destination: str, *, create: bool = False) -> bool:
         """Check or create a native directory through guarded parent descriptors."""
-        command = shlex.join(
+        destination = self._path(destination, directory=True)
+        command = self._command(
             [
                 "python3",
                 "-c",
                 _FILE_PROGRAM,
                 "mkdir" if create else "directory",
-                native_path(destination),
+                destination,
                 "-",
                 "-",
                 "",
@@ -266,7 +322,7 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
         )
         result = self.runner.run(command, check=False)
         if not result.ok:
-            raise _path_failure("native config directory", native_path(destination), result.returncode)
+            raise _path_failure("native config directory", destination, result.returncode)
         try:
             exists = json.loads(result.stdout)["exists"]
             if not isinstance(exists, bool):
@@ -277,9 +333,9 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
 
     def read(self, destination: str) -> bytes | None:
         """Read a regular native file without emitting its contents into logs."""
-        destination = native_path(destination)
+        destination = self._path(destination)
         remote, local = self.slot()
-        command = shlex.join(["python3", "-c", _FILE_PROGRAM, "read", destination, remote, "-", "", "0"])
+        command = self._command(["python3", "-c", _FILE_PROGRAM, "read", destination, remote, "-", "", "0"])
         result = self.runner.run(command, check=False, discard_output=False)
         if not result.ok:
             raise _path_failure("native settings file", destination, result.returncode)
@@ -298,15 +354,22 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
             raise ExternalError("could not capture native settings file") from None
 
     def publish(
-        self, destination: str, content: bytes, *, expected: str | None, group: str = "", executable: bool = False
+        self,
+        destination: str,
+        content: bytes,
+        *,
+        expected: str | None,
+        group: str = "",
+        executable: bool = False,
+        preserve_metadata: bool = False,
     ) -> None:
         """Atomically replace a guarded file only while its observed bytes match."""
-        destination = native_path(destination)
+        destination = self._path(destination)
         remote, local = self.slot()
         local.write_bytes(content)
         try:
             self.runner.copy_to(local, remote)
-            command = shlex.join(
+            command = self._command(
                 [
                     "python3",
                     "-c",
@@ -317,7 +380,8 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
                     expected or "-",
                     group,
                     "1" if executable else "0",
-                ]
+                ],
+                preserve_metadata=preserve_metadata,
             )
             result = self.runner.run(command, check=False, discard_output=True)
         except Exception:
@@ -331,8 +395,8 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
 
     def remove(self, destination: str, *, expected: str) -> None:
         """Remove only a regular file that still matches its recorded ownership."""
-        destination = native_path(destination)
-        command = shlex.join(["python3", "-c", _FILE_PROGRAM, "delete", destination, "-", expected, "", "0"])
+        destination = self._path(destination)
+        command = self._command(["python3", "-c", _FILE_PROGRAM, "delete", destination, "-", expected, "", "0"])
         result = self.runner.run(command, check=False, discard_output=True)
         if result.returncode == 2:
             raise StateError("owned native file changed; retaining it for operator inspection")
@@ -343,10 +407,10 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
 
     def prune_empty_parents(self, destination: str, *, root: str) -> None:
         """Prune only empty parents of a retired file, through its package root."""
-        destination, root = native_path(destination), native_path(root)
+        destination, root = self._path(destination), self._path(root)
         if not destination.startswith(root + "/"):
             raise StateError("retired native file is outside its package root")
-        command = shlex.join(["python3", "-c", _FILE_PROGRAM, "prune", destination, root, "-", "", "0"])
+        command = self._command(["python3", "-c", _FILE_PROGRAM, "prune", destination, root, "-", "", "0"])
         result = self.runner.run(command, check=False, discard_output=True)
         if result.returncode == 3:
             output.warn(
@@ -360,8 +424,8 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
 
     def fingerprint(self, destination: str) -> tuple[str, int] | None:
         """Stream a guarded file's hash and mode without copying or logging its body."""
-        destination = native_path(destination)
-        command = shlex.join(["python3", "-c", _FILE_PROGRAM, "fingerprint", destination, "-", "-", "", "0"])
+        destination = self._path(destination)
+        command = self._command(["python3", "-c", _FILE_PROGRAM, "fingerprint", destination, "-", "-", "", "0"])
         result = self.runner.run(command, check=False)
         if not result.ok:
             raise _path_failure("artifact destination", destination, result.returncode)

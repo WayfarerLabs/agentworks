@@ -112,7 +112,7 @@ def test_large_skill_entrypoint_is_published_before_supporting_files_and_setup_c
     )
     # Exercise real user_init preflight before the retry publication.
     retry = integration.user_init(invocation)
-    final = publish_artifacts(target, retry.files, checkpoints[-1], checkpoints.append, roots=(str(target.home),))
+    final = publish_artifacts(target, retry.files, checkpoints[-1], checkpoints.append, roots=(str(target.home),)).files
     assert len(final) == 516
     assert all(Path(file.path).read_bytes() == file.data for file in retry.files)
 
@@ -120,7 +120,7 @@ def test_large_skill_entrypoint_is_published_before_supporting_files_and_setup_c
 def test_inner_parent_permission_failure_retains_entrypoint_and_actual_setup_retry(large_skill_setup, monkeypatch):
     target, integration, invocation = large_skill_setup
     initial = integration.user_init(invocation)
-    current = publish_artifacts(target, initial.files, (), lambda files: None, roots=(str(target.home),))
+    current = publish_artifacts(target, initial.files, (), lambda files: None, roots=(str(target.home),)).files
     assert invocation.artifacts.local is not None
     kept = invocation.artifacts.local.skills["kept"]
     invocation = replace(
@@ -159,7 +159,9 @@ def test_inner_parent_permission_failure_retains_entrypoint_and_actual_setup_ret
         retry = integration.user_init(pending)
     finally:
         container.chmod(0o700)
-    finished = publish_artifacts(target, retry.files, checkpoints[-1], checkpoints.append, roots=(str(target.home),))
+    finished = publish_artifacts(
+        target, retry.files, checkpoints[-1], checkpoints.append, roots=(str(target.home),)
+    ).files
     assert all(record.native_identity == "skill:kept" for record in finished)
     assert removed.count(removed[0]) == 1
     assert not package.exists()
