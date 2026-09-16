@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
+from typing import TYPE_CHECKING, ClassVar
 
 from pydantic import Field
 
 from agentworks.artifacts.application import ArtifactApplication
-from agentworks.artifacts.native.common import defer
 from agentworks.artifacts.native.shell import shell_artifacts
 from agentworks.capabilities.harness_integration.base import (
     HarnessIntegration,
@@ -17,7 +16,7 @@ from agentworks.capabilities.harness_integration.base import (
     HarnessStartResult,
     require_commands,
 )
-from agentworks.schema import AgwModel, MergeStrategy
+from agentworks.schema import AgwModel
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
@@ -64,13 +63,6 @@ class ShellConfig(AgwModel):
     """Commands that must exist on the session's target before it starts.
     Inheritance combines parent and child entries."""
 
-    enabled_workarounds: Annotated[list[Literal["session-artifact-files"]], MergeStrategy.REPLACE] = Field(
-        default_factory=list
-    )
-    """Opt into session artifact files and AGENTWORKS_ARTIFACTS_DIR. These files
-    do not load themselves into a model's context. An authored list replaces
-    inherited choices; an empty list disables them."""
-
 
 class ShellSetupConfig(AgwModel):
     """Activate shell artifact publication at an outer facet."""
@@ -98,12 +90,11 @@ class ShellIntegration(HarnessIntegration):
         turns a missing binary into a clear message instead of a pane that dies
         immediately.
 
-        Artifact bundles publish as files, with no model-context claim. User files
-        live in `~/.agentworks-artifacts/user/`; workspace files live in
-        `<workspace>/.agentworks-artifacts/`. A session with remaining artifacts
-        leaves them unhandled by default. Opt into `session-artifact-files` through
-        `enabled_workarounds` to publish a private run directory and expose it through
-        `AGENTWORKS_ARTIFACTS_DIR`.
+        Artifact bundles publish as files, with no model-context claim. VM files
+        live in `/opt/agentworks/artifacts/`; user files live in
+        `~/.agentworks-artifacts/user/`; workspace files live in
+        `<workspace>/.agentworks-artifacts/`. Session artifacts publish in a private
+        run directory exposed through `AGENTWORKS_ARTIFACTS_DIR`.
         """,
     )
 
@@ -117,9 +108,7 @@ class ShellIntegration(HarnessIntegration):
         return (
             ArtifactApplication()
             if self.retiring
-            else defer(
-                invocation.artifacts, "session", "Shell publishes VM artifacts in the consuming session directory"
-            )
+            else shell_artifacts(invocation.artifacts, "/opt/agentworks/artifacts")
         )
 
     def user_init(self, invocation: UserSetupInvocation) -> ArtifactApplication:
@@ -159,16 +148,7 @@ class ShellIntegration(HarnessIntegration):
         context = self._session_binding.artifact_context
         application = ArtifactApplication()
         if context:
-            application = (
-                shell_artifacts(context.inputs, context.directory, session=True)
-                if "session-artifact-files" in self.config.enabled_workarounds
-                else defer(
-                    context.inputs,
-                    "session",
-                    "Session file delivery requires enabled_workarounds: [session-artifact-files] "
-                    "in the shell session config",
-                )
-            )
+            application = shell_artifacts(context.inputs, context.directory, session=True)
         return HarnessStart(command, artifacts=application)
 
     def _probe_target(self, transport: Transport) -> None:

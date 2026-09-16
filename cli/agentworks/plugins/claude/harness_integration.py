@@ -38,7 +38,6 @@ from pydantic import Field
 from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
-    defer,
     delivery_files,
     native_home,
     validate_discovery_paths,
@@ -208,11 +207,18 @@ class ClaudeCodeIntegration(HarnessIntegration):
         return super().config_for(facet)
 
     def vm_init(self, invocation: VMSetupInvocation) -> ArtifactApplication:
-        return (
+        plan = (
             ArtifactApplication()
             if self.retiring
-            else defer(invocation.artifacts, "user", "Native artifact discovery belongs to an actual user")
+            else outer_artifacts(
+                invocation.artifacts, "/etc/claude-code/.claude", instructions_path="/etc/claude-code/CLAUDE.md"
+            )
         )
+        if plan.files:
+            probe_native(
+                invocation.runner, tool="claude", environment=invocation.environment, files=plan.files, vm_only=True
+            )
+        return plan
 
     def user_init(self, invocation: UserSetupInvocation) -> ArtifactApplication:
         """Apply native setup and return the user's artifact publication plan."""
@@ -345,7 +351,11 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 files=files,
                 session_plugin="--plugin-dir" in self._artifact_plan.argv,
             )
-            validate_discovery_paths(artifact_context, (native_root, f"{self._workspace_path}/.claude"))
+            validate_discovery_paths(
+                artifact_context,
+                (native_root, f"{self._workspace_path}/.claude", "/etc/claude-code/.claude"),
+                files=("/etc/claude-code/CLAUDE.md",),
+            )
             if "--append-system-prompt-file" in self._artifact_plan.argv:
                 self._artifact_plan = replace(
                     self._artifact_plan,

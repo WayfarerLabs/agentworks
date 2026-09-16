@@ -197,14 +197,6 @@ def test_validation_rejects_unsupported_workarounds(value: object) -> None:
         _validate({"enabled_workarounds": value})
 
 
-def test_workarounds_default_off_and_child_can_clear_inherited_opt_in() -> None:
-    assert _harness_integration({}).config.enabled_workarounds == []
-    parent = {"enabled_workarounds": ["session-artifact-files"]}
-    _validate(parent)
-    assert _merge(parent, {}) == parent
-    assert _merge(parent, {"enabled_workarounds": []}) == {"enabled_workarounds": []}
-
-
 def test_construct_revalidates_config() -> None:
     """A shape error dies at construction: the base validates the blob
     into the declared model and binds the result."""
