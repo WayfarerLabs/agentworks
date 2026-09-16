@@ -19,16 +19,17 @@ commands and guest-hop integration; the shared SSH carrier and host target do no
 Another platform can compose the same host access without inheriting Lima behavior or introducing
 another SSH runner. Existing host/guest identities and operation lifetimes remain distinct.
 
-| Current owner                                                                   | Target change                                                                                          |
-| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `transports/base.py`, concrete transports, Proxmox transport                    | Common execution target above carrier delivery; explicit optional interaction.                         |
-| `transports/__init__.py`, VM platform native/provision results                  | Construct the new target under the same explicit route ownership.                                      |
-| `capabilities/base.py`, VM/agent/session context constructors                   | Deliver the new target type through existing identity accessors.                                       |
-| Capability readiness and operations, setup invocation runners                   | Consume the common type without rebuilding transports or context authority.                            |
-| `harness_setup/runner.py`                                                       | Move prepared environment policy into shared target defaults; retire forwarding implementation.        |
-| `remote_exec.py`, backup, remote Lima host provisioning/rollback, native logout | Use managed job start/observe/wait/dispose with explicit retention and actual execution-host identity. |
-| VM/agent exec and shell, sessions/consoles                                      | Preserve command/stdin and terminal behavior while using shared execution and feature checks.          |
-| SSH-named shared result/error/logger types                                      | Move generic execution facts into transport-neutral vocabulary.                                        |
+| Current owner                                                                   | Target change                                                                                                            |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `transports/base.py`, concrete transports, Proxmox transport                    | Common execution target above carrier delivery; explicit optional interaction.                                           |
+| `transports/__init__.py`, VM platform native/provision results                  | Construct the new target under the same explicit route ownership.                                                        |
+| `capabilities/base.py`, VM/agent/session context constructors                   | Deliver the new target type through existing identity accessors.                                                         |
+| Capability readiness and operations, setup invocation runners                   | Consume the common type without rebuilding transports or context authority.                                              |
+| `harness_setup/runner.py`                                                       | Move prepared environment policy into shared target defaults; retire forwarding implementation.                          |
+| `remote_exec.py`, backup, remote Lima host provisioning/rollback, native logout | Use managed job start/observe/wait/dispose with explicit retention and actual execution-host identity.                   |
+| VM/agent exec and shell, sessions/consoles                                      | Preserve command/stdin and terminal behavior while using shared execution and feature checks.                            |
+| SSH-named shared result/error/logger types                                      | Move generic execution facts into transport-neutral vocabulary.                                                          |
+| Harness config/file provisioning and session runtime-object setup               | Use file-only grants for whole-file/JSON updates, metadata, directories and FIFO lifecycle where no execution is needed. |
 
 ## Parallel build after the proof gate
 
@@ -47,17 +48,19 @@ New contexts deliver the scoped target/access interfaces from the contract propo
 implementation object. Core composition explicitly supplies required operations and elevation; test
 composition also supplies restricted views. The future third-party plugin policy evaluator is not a
 dependency of this cutover, but the API must not require another redesign to withhold commands, file
-directions, job actions or elevation later.
+directions, job actions or elevation later. File grants are bounded now by the core-owned mutation
+allowlist, not deferred until that evaluator exists. Registration requests and user approval are
+future selection mechanisms within the same ceiling.
 
 Develop against the [proposed carrier contract and destination layout](execution-contract.md). The
 proposed revised SSH assignment is a new carrier and connection/trust implementation under
 `execution/carriers/ssh/`, not consolidation of the old runner. This effort builds shared semantics
-and the other adapters, then composes the new SSH carrier. This differs from #757's currently
-published plan; the SSH developer supports the revised assignment in feedback relayed by the
-operator, and their artifacts still need reconciliation after the proof. No old execution code is
-called from the new stack, directly or indirectly. Copying useful code and tests is permitted.
-Transport owns applying reusable SSH policy in platform-host access, Lima adapters/provisioning and
-provider-inner paths; SSH owns the policy/guarantees and independent connection/trust migration.
+and the other adapters, then composes the new SSH carrier. The independent-carrier design in #796 at
+`2494f6e2` supersedes #757's legacy consolidation; both SDDs still need reconciliation after the
+proof. No old execution code is called from the new stack, directly or indirectly. Copying useful
+code and tests is permitted. Transport owns applying reusable SSH policy in platform-host access,
+Lima adapters/provisioning and provider-inner paths; SSH owns the policy/guarantees and independent
+connection/trust migration.
 
 Old and new implementation code intentionally coexist during development; production continues using
 only the old stack until the coherent cutover. Configuration and trust records are retained state,
@@ -85,9 +88,9 @@ workflows on isolated resources, never by sending one production request down bo
    Validate new context delivery independently while the production context still uses the old API.
 5. Prepare and validate the complete caller cutover against the settled contract. Audit every call's
    invocation form, shell/startup policy, identity, environment, stdio, deadline, and job lifetime.
-   Audit each consumer's needed action interfaces and elevation, not merely its admin/agent
-   identity. Resolve surviving legacy work, SSH configuration/trust state, and the external plugin
-   compatibility policy before switching.
+   Audit each consumer's needed action interfaces, file locations/metadata and elevation, not merely
+   its admin/agent identity. Resolve surviving legacy work, SSH configuration/trust state, and the
+   external plugin compatibility policy before switching.
 6. Cut over factories, `RunContext` producers/consumers, plugins, and direct service entry points in
    one coherent production increment. Run the same workflow gates through real production entry
    points, physically remove the old stack and temporary test scaffolding, and update collateral.
@@ -106,6 +109,27 @@ explicit removal point. Temporary coexistence during development is not a promis
 public APIs or a runtime selection flag.
 
 ## Existing jobs and compatibility
+
+### File consumer migration
+
+Refresh the baseline inventory against then-current harness integrations before implementation.
+Classify shell snippets that only create/write/merge/chmod/chown/remove files or manage FIFOs and
+move those operations to FileAccess. Withhold commands/jobs from resources whose remaining work
+needs only files; do not assume every existing shell snippet requires an execution grant forever.
+
+For each destination record the core entry, exact-file/subtree and root-creation scope, approved
+actions and metadata, owning resource, and whether a consumer interprets its contents as commands.
+Include session-scoped roots derived from trusted session identity, native recovery paths, helper
+scratch and platform-host locations. Missing approval requires a core policy change before cutover,
+not an automatic parent-wide grant, plugin override or fallback to public exec. This ceiling governs
+the file API, not arbitrary commands that were separately authorized for real execution work.
+
+Validate the plan's file-only slice before migrating the wider estate. Prove privileged placement,
+JSON value preservation/conflicts and FIFO lifecycle with the execution interfaces absent, then run
+the full harness/session workflows. Required file operations remain available on native routes;
+registration consent and a general plugin permission evaluator are not cutover prerequisites.
+
+### Jobs and plugin compatibility
 
 The two in-tree production `run_detached` callers do not implement intentional cross-invocation
 reuse of a completed result: Lima provisioning passes `reuse_completed=False` (`lima.py:616`), and
@@ -149,7 +173,7 @@ acknowledged detached launch; later observation opens a fresh authorized context
 - A context target can outlive its route accidentally. Lifetime checks and later-observation tests
   must cover both normal exit and exceptions.
 - In-flight SSH changes can move migration sites. Reconcile the artifacts after the shared proof;
-  developer support for the direction does not mean #757 already records the proven contract.
+  #796 records the intended split, not evidence that its runtime contract has been demonstrated.
 - Contract versions and any job persistence changes require an explicit compatibility decision after
   the caller inventory. This draft does not assume that aliases or a database migration are
   necessary.

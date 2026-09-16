@@ -50,9 +50,9 @@ execution modules. This is not a full file/job implementation or a preliminary l
 
 ## 3. Reconcile designs and publish the implementation boundary
 
-- [ ] Incorporate proof findings into this SDD; have the SSH owner revise #757's artifacts to the
-      independent-carrier assignment, version floor and same proven contract. Do not first land
-      legacy consolidation. Each effort edits only its own artifacts.
+- [ ] Incorporate proof findings into this SDD and have the SSH owner reconcile #796's independent
+      carrier design against the same proven contract. #796 supersedes #757; no legacy consolidation
+      precedes the rebuild. Each effort edits only its own artifacts.
 - [ ] Review and publish matching design revisions before broad parallel work. The current draft is
       a review vehicle; artifact promotion/merge requires operator direction. Record the common
       contract revision and evidence both efforts will build against.
@@ -61,8 +61,18 @@ execution modules. This is not a full file/job implementation or a preliminary l
       stale records. Preserve macOS host jobs before guest creation. Establish remaining
       Proxmox/WSL2 feasibility under an authorized live-test charter; the small proof does not stand
       in for these checks.
-- [ ] Finalize scoped command/file/job interfaces and bound restrictions, keeping plugin policy
-      evaluation and hostile-code isolation out of scope. Map FRD R11's future workflows to tests.
+- [ ] Complete the file LLD for R7: whole-file publication, JSON merge semantics, ownership/mode and
+      security metadata preservation, directories/FIFOs/removal, concurrency and uncertain results.
+      Enumerate tools available during native bootstrap and on supported platform hosts; prove
+      destination-side confinement rather than relying on a preflight path check. Define trusted
+      ancestors/mounts, private staging/locks, root creation and fail-closed behavior.
+- [ ] Inventory required mutation destinations and actions for harness configuration, `/opt`
+      provisioning, `/run` session objects, recovery and platform hosts. Review execution-bearing
+      content and select explicit core allowlist entries, trusted dynamic-root resolution and
+      recipient subsets. No broad parent grant or public-exec workaround to make a caller pass.
+- [ ] Finalize scoped command/file/job interfaces and bound restrictions, including the core file
+      ceiling. Keep registration requests, user consent, a general plugin policy evaluator and
+      hostile-code isolation out of scope. Map FRD R11's future workflows to tests.
 
 ## 4. Build the independent stacks in parallel
 
@@ -75,6 +85,17 @@ execution modules. This is not a full file/job implementation or a preliminary l
       selector, shared legacy runner, or duplicate mutation dispatch is allowed.
 - [ ] Specify and validate SSH state transition, concurrent-writer ownership and rollback evidence.
       Preserve configuration and complete trust records without importing old execution code.
+- [ ] Deliver a shared file-only vertical slice through SSH and native QGA, with commands/jobs
+      withheld: whole-file installation, privileged JSON merge preserving unrelated keys, approved
+      directory creation/metadata and FIFO lifecycle. Keep the initial small carrier proof intact;
+      this later slice gates broader file-consumer migration, not the independent SSH build.
+- [ ] Prove the file boundary with behavioral tests: default denial, exact-file/subtree scopes, root
+      versus parent authority, prefix collisions/traversal, links and concurrent substitution,
+      confined extraction, forbidden metadata/removal, and inability to widen grants. Cover
+      cooperating writers, external-writer limits, malformed JSON, special-object refusal, sensitive
+      diagnostics, partial transfer/cleanup and uncertain publication. No runtime fallback may
+      expose commands to the file-only caller; unavailable safe mechanics block acceptance. Record
+      live target/platform evidence under an authorized charter.
 
 ## 5. Validate complete workflows, cut over, and retire
 
@@ -83,9 +104,10 @@ execution modules. This is not a full file/job implementation or a preliminary l
       points. Cover required operations, optional refusal, sensitive data and supported workstation/
       platform versions. Missing evidence requires operator disposition, never a passing claim.
 - [ ] Complete the [migration inventory and cutover gates](migration-strategy.md): reconcile #789,
-      audit caller shells/identity/I/O/lifetimes/grants, resolve surviving jobs, plugin
-      compatibility, state migration and rollback. Every old entry point has a destination and
-      removal point.
+      audit caller shells/identity/I/O/lifetimes/grants and approved filesystem destinations,
+      migrate file-provisioning shell snippets to FileAccess where it expresses the operation,
+      resolve surviving jobs, plugin compatibility, state migration and rollback. Every old entry
+      point has a destination and removal point.
 - [ ] Switch factories, `RunContext` producers/consumers, plugins and direct services coherently;
       prove real production workflows after physically deleting old execution modules and temporary
       scaffolding. Transport owns this complete cutover, not just preference for the new runner.

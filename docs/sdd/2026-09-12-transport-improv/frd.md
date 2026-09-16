@@ -37,6 +37,10 @@ The operator intends future third-party plugin permissions to determine what `Ru
 This design supports separately granted operations and identities now, without implementing the
 future permission-policy system or claiming to sandbox in-process plugins.
 
+Operator direction on 2026-09-15 adds robust file-only provisioning and a core-owned filesystem
+mutation allowlist. Registration-time resource grant requests and user approval/denial are future
+work; they may narrow, but never widen, that core ceiling.
+
 The requirements below are proposed details of that direction, pending review. The current
 deliverable is a draft PR for design discussion. It changes no runtime behavior and neither merges
 nor closes [issue #788](https://github.com/WayfarerLabs/agentworks/issues/788) or
@@ -62,7 +66,8 @@ Outside this effort:
 - New cloud execution carriers, such as replacing public-IP SSH with a provider command service.
 - A general scheduler, durable workflow engine, or replacement for tmux-backed sessions.
 - A new plugin sandbox or general requester-permission policy system. Permission-scoped interface
-  composition is in scope; plugin grant configuration and policy evaluation are future work.
+  composition and the core file allowlist are in scope; registration-time grant requests, user
+  consent, plugin grant configuration and a general policy evaluator are future work.
 - Requiring native interaction on a platform that cannot supply it.
 
 ## Users and outcomes
@@ -204,14 +209,69 @@ must cover an active operation; releasing a client context must not masquerade a
 ### R7. Files
 
 Every target supports finite byte-exact file upload and download, file-content writes, and the
-directory movement required by current workflows. Callers select ordinary or elevated placement
-without hand-writing copy, chmod, or sudo wrappers. Transfer may be slower on a native API channel,
-but native recovery must be able to deliver scripts and retrieve diagnostic files.
+directory movement required by current workflows. File-only resources can also read/stat files,
+create directories, merge JSON configuration, manage permitted ownership/modes, remove permitted
+objects, and create/remove FIFOs without command or job access. These are required file semantics on
+supported VM targets, not SSH-only conveniences. FIFO creation does not grant communication through
+it; regular-file operations must reject special objects rather than block opening a pipe.
+
+Callers select ordinary or elevated placement without hand-writing copy, chmod, or sudo wrappers.
+Elevation covers staging, publication and metadata under the bound file grant, not general admin
+execution authority. Transfer may be slower on a native API channel, but native recovery must be
+able to deliver scripts and retrieve diagnostic files.
 
 Atomic file replacement means staging and replacement on the destination filesystem, with the
 requested access mode applied before publication. It does not promise an atomic directory-tree
 replacement. Partial-transfer cleanup, ownership, symlink handling, and overwrite behavior must be
 specified before implementation. Cleanup is restricted to artifacts the operation owns.
+
+Structured updates accept data, not caller-supplied remote scripts or callbacks. They preserve
+unrelated JSON values and define nested objects, arrays, deletion, missing files and invalid input
+explicitly. Invalid configuration is not silently replaced with an empty document. Formatting
+preservation is not implied. Update results distinguish changed, unchanged, conflict, failure and
+uncertain publication without returning existing contents to a caller lacking read access. Internal
+read/modify/write is permitted by the merge grant; it does not confer public download authority.
+
+Read/modify/write operations must not silently lose updates from cooperating writers. Define the
+serialization and conflict protocol, and its limits with external non-cooperating writers, before
+implementation. A content check followed by rename is not atomic compare-and-swap. Metadata
+preservation/change rules include existing ownership/mode and relevant ACLs or security attributes;
+unsupported preservation must be explicit, not silent loss. Secret-bearing content follows R4 and
+must not leak through diffs, errors or mutation results. Multi-file operations do not imply a
+transaction; report partial progress and uncertain outcomes without blind replay.
+
+#### Core-owned mutation allowlist
+
+Every public file mutation is limited by a core-maintained allowlist and the recipient's bound
+grant. Entries identify exact files or whole subtrees, allowed operations and ownership/mode limits,
+with explicit target identity/scope. Unlisted destinations are denied by default. Resource/plugin
+registration, call arguments, configuration and elevation cannot add entries or widen them. A new
+location or operation outside that ceiling requires a reviewed core change, not a plugin override.
+Core composition may resolve approved per-agent/session roots from trusted identity data; a caller
+cannot supply an arbitrary root under the guise of an approved template.
+
+For example, a subtree entry for `/etc/claude-code` can allow configuration updates beneath it
+without granting writes to siblings, mutation of `/etc` itself, or removal/replacement of the
+approved root. Creating that root is a separate explicit permission under its trusted parent.
+Ownership/mode changes and recursive deletion are not implied by content-write authority. Read
+access remains independently granted; a mutation allowlist is not a read grant.
+
+Enforcement covers all mutation paths, including both ends of a move, extraction, directory
+replacement, metadata changes and cleanup. Validate known grant/path denials before preparation;
+enforce filesystem-dependent confinement at the point of use, including elevated helpers. Reject
+traversal, symlink/hard-link aliasing and race-based escapes rather than relying on string prefixes
+or a preflight path check. The implementation must define its trusted-parent and mount assumptions
+and fail closed when it cannot establish the boundary. Guest root remains outside this containment
+claim. Internal staging/locks use narrowly core-authorized locations and owned names, never a
+caller-selectable bypass or an implicit write grant on the destination's parent.
+
+Review each allowed location for how its files are consumed: an approved configuration may contain
+command hooks, and an executable or service definition conveys execution-related authority. The
+allowlist does not certify arbitrary content as non-executable or confine separately granted exec.
+Use a narrower structured operation or withhold a grant where arbitrary bytes are inappropriate;
+this effort does not add a generic application-schema policy engine. Core provisioning and recovery
+must have their required file destinations inventoried and approved, not bypass denial by routing a
+file-only request through public commands.
 
 ### R8. Bootstrap and native recovery
 
@@ -247,10 +307,17 @@ failure are distinct conditions. Authorization denial must not be reported as an
 transport operation. Authorized core provisioning and recovery still receive everything they need;
 restricting plugin views must not weaken required native functionality.
 
+File views bind permitted paths, actions and metadata/elevation limits within R7's core ceiling. An
+admin identity alone does not confer unrestricted file mutation. Future registration-time requests
+and user approval may select narrower grants without replacing the enforcement boundary; this effort
+implements explicit core composition, not that future consent workflow.
+
 Views are bound before delivery and cannot widen their authority through `sudo=True`, another
 identity, an environment-derived view, a saved job reference, or public access to an unrestricted
-target/carrier. Refusal happens before staging, dispatch, or other effects. Accessors are passive;
-they expose the bound decision rather than evaluating plugin policy or discovering authority.
+target/carrier. Denials knowable from bound grants happen before staging, dispatch or other effects;
+filesystem-dependent confinement is enforced at use time before the protected mutation. Accessors
+are passive; they expose the bound decision rather than evaluating plugin policy or discovering
+authority.
 
 Context construction and accessors do not connect, start VMs, open routes, resolve secrets, switch
 identities, or select a fallback. The orchestrator delivers the selected route and scoped secrets at
@@ -338,6 +405,16 @@ without cancellation, and admin views without API elevation. Missing grants fail
 derived views and saved job references do not restore withheld authority. The same carrier supports
 a restricted plugin view and a fully authorized recovery view without changing its feature
 description.
+
+File-only acceptance provisions whole files and merges harness JSON under an approved `/etc`
+subtree, installs content in an approved `/opt` subtree, and creates/removes session FIFOs under an
+approved `/run` subtree with commands/jobs withheld. Prove ordinary and elevated ownership/modes,
+unrelated-key preservation, malformed-input refusal, cooperating-writer conflict handling and
+secret-safe results over SSH and native delivery. Prove refusals leave protected objects unchanged
+for parent/sibling/prefix collisions, traversal, links, concurrent path substitution, unauthorized
+metadata/deletion and archive escapes. Exercise root creation separately from root replacement,
+cleanup after partial transfer and uncertain publication. Do not turn confinement gaps into an
+unsupported native feature or silently fall back to caller-visible exec.
 
 | Scenario                      | Observable success                                                                                                                                        |
 | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |

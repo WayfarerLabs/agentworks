@@ -1,6 +1,6 @@
 # Transport Improvements: Prior Art
 
-- Inspected: 2026-09-12
+- Inspected: 2026-09-12; file-contract research added 2026-09-15
 - Scope: Design input, not live provider validation
 
 ## Findings
@@ -108,6 +108,27 @@ separates Agentworks-controlled payload/helper preparation from carrier bootstra
 cannot prevent hooks that have already run. Readiness does not request startup evaluation or depend
 on its side effects, but the API does not certify arbitrary account hooks as read-only.
 
+### File-only configuration updates
+
+[RFC 7396](https://www.rfc-editor.org/rfc/rfc7396) defines JSON Merge Patch: object members merge,
+null removes a member, and arrays/non-object values replace rather than merge element by element. It
+works on values, not text layout, and does not offer a literal-null setter through an object member.
+Decision: propose this named semantic for `merge_json` rather than inventing an unspecified deep
+merge; validate actual harness needs before freezing it in the file LLD. It supplies no filesystem
+authorization, writer coordination or publication protocol.
+
+The operator's 2026-09-15 direction adds whole-file and structured provisioning, privileged
+placement, runtime FIFO lifecycle and core-reviewed exact-file/subtree mutation locations. The
+contract/HLA place enforcement above delivery and at destination-side mutation. Registration-time
+requests and user approval remain deferred. These are design requirements, not evidence that
+existing helpers confine paths or that approved configuration cannot cause later execution.
+
+The SSH replacement design in [PR #796](https://github.com/WayfarerLabs/agentworks/pull/796) at
+`2494f6e2` supersedes the historical #757 design discussed above. Its independent carrier and
+proof-first assignment match this SDD; shared file semantics and the core allowlist remain with
+transport, not the SSH carrier. Its OpenSSH 8.5 floor concerns builder-owned clients, not sshd;
+provider-inner clients need their own inventory. Design alignment is not runtime proof.
+
 ## Claims not relied upon
 
 - A common API makes every backend interactive.
@@ -118,6 +139,10 @@ on its side effects, but the API does not certify arbitrary account hooks as rea
 - QEMU protocol support proves Proxmox endpoint availability on every supported major.
 - An absent old-stack caller means a credible core/plugin workflow should be excluded.
 - A shared transport API can select an application shell implicitly from its carrier.
+- An approved pathname makes arbitrary configuration contents non-executable.
+- Path-prefix validation or a preflight symlink check establishes mutation-time confinement.
+- Atomic file replacement prevents lost updates or makes a directory tree transactional.
+- Withholding public exec prevents trusted file helpers from using internal command delivery.
 
 ## Open evidence
 

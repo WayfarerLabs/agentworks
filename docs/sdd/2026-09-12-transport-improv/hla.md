@@ -80,7 +80,8 @@ is the design:
   `run`, including an independent stdin payload.
 - `start` accepts either command form and returns a managed job reference after launch
   acknowledgement. Waiting is a subsequent operation.
-- File operations upload, download, write content, and compose directory movement.
+- File operations transfer/read/write content, merge JSON, manage directories and permitted
+  metadata, and create/remove runtime FIFOs under bound filesystem grants.
 - `interactive` attaches a terminal only when that optional feature is present.
 
 Foreground execution captures output by default. An explicit direct-streaming mode is available on
@@ -150,7 +151,7 @@ Agentworks' resource capability model.
 | -------------------------------------------------- | -------------------------------------- | ------------------------------- |
 | Buffered commands/scripts, finite stdin, env, cwd  | Required                               | Required                        |
 | Bound identity and explicit permitted elevation    | Required                               | Required                        |
-| File and directory movement                        | Required                               | Required                        |
+| File management and confined mutation (FRD R7)     | Required                               | Required                        |
 | Managed detached start and observation             | Required                               | Required                        |
 | Managed cancellation request with truthful outcome | Required                               | Required                        |
 | Interactive terminal                               | Required for current sessions/consoles | Optional; absent on Proxmox QGA |
@@ -209,6 +210,41 @@ File writes stage beside the destination and publish by rename after setting per
 ownership. File downloads publish locally only after complete receipt. Directory helpers retain
 explicit merge/replace semantics with confined extraction and cleanup; they do not inherit an
 unqualified recursive-delete default. Atomicity and crash durability are distinct promises.
+
+### File-only provisioning and the core ceiling
+
+Shared file helpers own structured updates, metadata, FIFO lifecycle and confined publication, not
+the SSH carrier or individual harness resources. A file-only view may use trusted internal commands
+to implement an authorized operation; it never accepts caller shell fragments, a remote transform
+callback or a command/job handle. Ordinary file reads/writes reject special objects. FIFO lifecycle
+does not open the pipe for communication or replace tmux's session ownership.
+
+Core owns a small allowlist of approved exact files/subtrees, actions and metadata limits. Context
+composition resolves core-approved identity-dependent roots and binds a recipient's narrower file
+grant. Effective authority is the intersection of those grants, never their union. No plugin
+registration or runtime option extends the catalog; new locations require a core PR. Host targets
+use their own approved host locations rather than inheriting guest paths. R7 owns the confinement
+requirements and the distinction between creating an approved root and mutating its parent.
+
+Enforcement has two parts: reject known policy violations before dispatch, and enforce safe object
+resolution and mutation inside the destination-side trusted helper. An adapter optimization cannot
+bypass either. The file LLD must prove link/race confinement on the supported guest and host
+substrates, including trusted ancestors and mount assumptions; it cannot substitute a local path
+prefix check or a check-then-shell-command sequence. Internal scratch, locks and publication names
+have narrowly defined core authority, separate from public mutation grants. No caller can redirect
+these helpers to an arbitrary destination or widen access by requesting elevation.
+
+Structured operations implement a specified data transformation and protected read/modify/publish
+sequence. Internal reads do not grant content disclosure. All cooperating mutation paths share the
+chosen serialization protocol; external writer limits must be explicit. Atomic rename does not
+supply conflict detection. Preserve required metadata or refuse, and carry changed/unchanged,
+conflict, partial and uncertain outcomes without leaking document contents.
+
+This is a file API boundary, not confinement of arbitrary exec or hostile in-process plugins. Review
+allowed locations for execution-bearing contents; use narrower resource operations when needed
+rather than claiming a safe pathname sanitizes command hooks. Registration-time grant requests and
+user approval are deferred. Their future role is to select grants within the same core ceiling, not
+introduce another filesystem implementation or a bypass.
 
 ## Detached jobs and lifetimes
 
@@ -293,14 +329,14 @@ distinguish lifecycle unavailability from withheld access. Neither is an optiona
 requesting an action without a grant produces an authorization refusal, not a channel-support error.
 
 Preserve `OperationScope` as descriptive data and `ScopedSecrets` as delivery of declared resolved
-names. This effort supplies the interface decomposition and bound restriction checks; current core
-composition explicitly supplies its required access. A future plugin permission system determines
-the grants for each recipient, rather than being implemented here as roles, policy configuration or
-a new evaluator. Capability consumers receive no public raw-carrier or unrestricted-target escape.
-This does not authorize secret discovery through a factory hidden inside a capability. FRD R9 owns
-the limits of this API boundary: unrestricted user execution includes that account's guest
-authority, including configured sudo privileges, and hostile in-process plugin containment needs a
-separate security design.
+names. This effort supplies the interface decomposition, core file ceiling and bound restriction
+checks; current core composition explicitly supplies its required access within that ceiling. A
+future plugin permission system selects narrower grants through registration requests and user
+approval, rather than being implemented here as roles, consent UI or a general evaluator. Capability
+consumers receive no public raw-carrier or unrestricted-target escape. This does not authorize
+secret discovery through a factory hidden inside a capability. FRD R9 owns the limits of this API
+boundary: unrestricted user execution includes that account's guest authority, including configured
+sudo privileges, and hostile in-process plugin containment needs a separate security design.
 
 Migrate context constructors and consumers together, including VM boundaries, agent realization,
 session readiness/roll-forward, git-credential operations, and harness setup. Setup invocation types
@@ -343,21 +379,22 @@ policy remains at the layer that can prove whether repeated dispatch is safe.
 
 ## Coordination with the new SSH stack
 
-This boundary follows the SSH developer's feedback relayed by the operator, following the FRD/HLA in
-[PR #757](https://github.com/WayfarerLabs/agentworks/pull/757) at `2694d31a`. It records this
-effort's integration plan and records the developer's support for the independent carrier
-assignment. It does not amend the SSH effort's owned artifacts or claim the seam is already proven.
-This supersedes integration of consolidated legacy SSH internals; both efforts must incorporate
-proof findings into their designs before broad parallel implementation begins.
+This boundary follows the SSH developer's feedback relayed by the operator and the independent
+carrier design in [PR #796](https://github.com/WayfarerLabs/agentworks/pull/796) at `2494f6e2`,
+which supersedes #757. It records this effort's integration plan, not an amendment to the SSH
+effort's owned artifacts or a claim that the seam is already proven. This supersedes integration of
+consolidated legacy SSH internals; both efforts must incorporate proof findings into their designs
+before broad parallel implementation begins.
 
 | Responsibility                                                                                         | Owner                                         |
 | ------------------------------------------------------------------------------------------------------ | --------------------------------------------- |
-| Explicit SSH endpoint, user, identity, agent selection, trust and trust migration                      | SSH effort (#757)                             |
-| OpenSSH config isolation, common SSH/scp options, forwarding, subprocess I/O and connection keepalives | SSH effort (#757)                             |
-| New standalone SSH carrier, with no dependency on legacy SSH execution modules                         | SSH effort (#757)                             |
+| Explicit SSH endpoint, user, identity, agent selection, trust and trust migration                      | SSH effort (#796)                             |
+| OpenSSH config isolation, common SSH/scp options, forwarding, subprocess I/O and connection keepalives | SSH effort (#796)                             |
+| New standalone SSH carrier, with no dependency on legacy SSH execution modules                         | SSH effort (#796)                             |
 | Applying SSH policy in platform-host access, Lima adapters/provisioning and provider-inner paths       | `transport-improv`                            |
 | Application shell policy, commands/scripts, environment, cwd, elevation, sensitive-data policy         | `transport-improv`                            |
 | Common targets, optional features, files/jobs, results/errors and safe command retry policy            | `transport-improv`                            |
+| File-only provisioning, structured updates, core allowlist and destination-side confinement            | `transport-improv`                            |
 | `RunContext` production cutover and core/plugin consumer migration                                     | `transport-improv`                            |
 | Final target composition and full-stack production cutover                                             | `transport-improv`, using the new SSH carrier |
 
@@ -421,7 +458,7 @@ those operations common while making the small set of real optional I/O features
 
 Before implementation, finalize the proposed request/result signatures, readiness no-staging
 enforcement, job storage/ownership/retention and process-group protocol, shell startup/lookup
-behavior, transfer bounds and path policy, and WSL2 lifetime evidence. Review the proposed
-integration seam with the SSH developer and re-inventory then-current callers before implementation.
-The new API remains driven by the execution contract rather than by preserving the old runner's
-structure.
+behavior, transfer bounds, file confinement/concurrency/metadata policy, and WSL2 lifetime evidence.
+Review the proposed integration seam with the SSH developer and re-inventory then-current callers
+before implementation. The new API remains driven by the execution contract rather than by
+preserving the old runner's structure.
