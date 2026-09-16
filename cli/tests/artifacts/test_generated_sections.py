@@ -152,3 +152,106 @@ def test_root_publication_elevates_only_guarded_operations_and_sets_public_modes
     # Reapplication reads a protected destination into transport-owned staging.
     assert publish_artifacts(target, desired, result.files, lambda files: None, roots=("/",), root=True) == result
     assert (directory / "AGENTS.md").stat().st_uid == os.getuid()
+
+
+@pytest.mark.parametrize("original_section", [False, True])
+@pytest.mark.parametrize("missing", [False, True])
+def test_ownership_mode_switch_refuses_existing_destination_before_any_writes(target, original_section, missing):
+    path = target.home / "AGENTS.md"
+    if original_section:
+        path.write_bytes(b"unmanaged instructions\n")
+    original = replace(section(path), generated_section=original_section)
+    first = apply(target, (original,))
+    before = path.read_bytes()
+    if missing:
+        path.unlink()
+    other = target.home / "other-rule.md"
+    desired = (
+        replace(original, path=str(other)),
+        replace(original, generated_section=not original_section, data=b"replacement"),
+    )
+    if missing:
+        result = apply(target, desired, first.files)
+        assert len(result.files) == 2
+        assert next(item for item in result.files if item.path == str(path)).generated_section != original_section
+        assert path.read_bytes() != before
+    else:
+        with pytest.raises(StateError):
+            apply(target, desired, first.files)
+        assert path.read_bytes() == before
+        assert not other.exists()
+
+
+def test_generated_section_preserves_extended_attributes_on_update_and_retirement(target):
+    path = target.home / "AGENTS.md"
+    path.write_bytes(b"operator instructions\n")
+    os.setxattr(path, "user.artifact-test", b"operator metadata")
+    first = apply(target, (section(path),))
+    assert os.getxattr(path, "user.artifact-test") == b"operator metadata"
+    os.setxattr(path, "user.artifact-test", b"updated metadata")
+    second = apply(target, (section(path, b"new instructions"),), first.files)
+    assert os.getxattr(path, "user.artifact-test") == b"updated metadata"
+    assert not apply(target, (), second.files).files
+    assert os.getxattr(path, "user.artifact-test") == b"updated metadata"
+
+
+def test_generated_section_preserves_posix_acl(target):
+    import shutil
+    import subprocess
+
+    setfacl = shutil.which("setfacl")
+    if setfacl is None:
+        pytest.skip("setfacl is required to provision the ACL fixture")
+    path = target.home / "AGENTS.md"
+    path.write_bytes(b"operator instructions\n")
+    subprocess.run([setfacl, "-m", f"u:{os.getuid()}:r", str(path)], check=True, capture_output=True)
+    acl = os.getxattr(path, "system.posix_acl_access")
+    mode = path.stat().st_mode
+    first = apply(target, (section(path),))
+    assert os.getxattr(path, "system.posix_acl_access") == acl
+    assert path.stat().st_mode == mode
+    assert not apply(target, (), first.files).files
+    assert os.getxattr(path, "system.posix_acl_access") == acl
+    assert path.stat().st_mode == mode
+
+
+def test_attribute_copy_failure_leaves_original_unchanged(target, monkeypatch):
+    import agentworks.native_files as native
+
+    path = target.home / "AGENTS.md"
+    before = b"operator instructions\n"
+    path.write_bytes(before)
+    os.setxattr(path, "user.artifact-test", b"operator metadata")
+    metadata = path.stat()
+    monkeypatch.setattr(
+        native,
+        "_FILE_PROGRAM",
+        "import os, errno\n"
+        "def deny_attribute_copy(*args):\n"
+        "    raise OSError(errno.EPERM, 'fixture attribute copy denial')\n"
+        "os.setxattr = deny_attribute_copy\n" + native._FILE_PROGRAM,
+    )
+    with pytest.raises(StateError):
+        apply(target, (section(path),))
+    assert path.read_bytes() == before
+    assert path.stat().st_ino == metadata.st_ino
+    assert os.getxattr(path, "user.artifact-test") == b"operator metadata"
+    assert not list(path.parent.glob(".agentworks-settings-*"))
+
+
+def test_generated_section_does_not_inherit_a_new_directory_acl(target):
+    import errno
+    import shutil
+    import subprocess
+
+    setfacl = shutil.which("setfacl")
+    if setfacl is None:
+        pytest.skip("setfacl is required to provision the ACL fixture")
+    path = target.home / "AGENTS.md"
+    path.write_bytes(b"operator instructions\n")
+    assert "system.posix_acl_access" not in os.listxattr(path)
+    subprocess.run([setfacl, "-d", "-m", f"u:{os.getuid()}:r", str(path.parent)], check=True, capture_output=True)
+    apply(target, (section(path),))
+    with pytest.raises(OSError) as error:
+        os.getxattr(path, "system.posix_acl_access")
+    assert error.value.errno == errno.ENODATA

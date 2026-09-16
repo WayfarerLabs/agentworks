@@ -104,6 +104,7 @@ try:
     actual = '-'
     mode = 0
     metadata = None
+    attributes = {}
     try:
         source_fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
     except FileNotFoundError:
@@ -121,6 +122,8 @@ try:
                 while chunk := source.read(256 * 1024):
                     digest.update(chunk)
                 actual = digest.hexdigest()
+            if preserve:
+                attributes = {key: os.getxattr(source.fileno(), key) for key in os.listxattr(source.fileno())}
     if op == 'fingerprint':
         print(json.dumps({'exists': actual != '-', 'sha256': actual, 'mode': mode}))
         sys.exit(0)
@@ -147,6 +150,8 @@ try:
         try:
             output_fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=fd)
             with os.fdopen(output_fd, 'wb') as output:
+                output.write(replacement)
+                output.flush()
                 uid = metadata.st_uid if preserve and metadata is not None else -1
                 gid = metadata.st_gid if preserve and metadata is not None else gid
                 os.fchown(output.fileno(), uid, gid)
@@ -156,8 +161,15 @@ try:
                         else (0o770 if executable == '1' else 0o660)
                     )
                 os.fchmod(output.fileno(), mode)
-                output.write(replacement)
-                output.flush()
+                if preserve and metadata is not None:
+                    current_attributes = {
+                        key: os.getxattr(output.fileno(), key) for key in os.listxattr(output.fileno())
+                    }
+                    for key in current_attributes.keys() - attributes.keys():
+                        os.removexattr(output.fileno(), key)
+                    for key, value in attributes.items():
+                        if current_attributes.get(key) != value:
+                            os.setxattr(output.fileno(), key, value)
                 os.fsync(output.fileno())
             os.replace(name, parts[-1], src_dir_fd=fd, dst_dir_fd=fd)
             sync_fd = os.open('.', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)

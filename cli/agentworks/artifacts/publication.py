@@ -101,6 +101,13 @@ def publish_artifacts(
     skipped: list[ArtifactSkip] = []
     with NativeFiles(runner, root=root) as files:
         observed = {path: files.fingerprint(path) for path in dict.fromkeys((*planned, *current))}
+        for path, item in planned.items():
+            prior = current.get(path)
+            if observed[path] is not None and prior is not None and prior.generated_section != item.generated_section:
+                raise StateError(
+                    f"Artifact destination '{path}' cannot change between whole-file and generated-section ownership",
+                    hint="Retire the old placement and use a separate destination for the new artifact.",
+                )
         sections: dict[str, tuple[bytes | None, bytes]] = {}
         skipped_paths: set[str] = set()
         for path in observed:
