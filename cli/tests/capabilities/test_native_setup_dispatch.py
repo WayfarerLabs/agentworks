@@ -18,6 +18,7 @@ from agentworks.harness_setup.dispatch import run_setup
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
 from agentworks.harness_setup.state import read_native_setup, write_native_setup
+from agentworks.native_files import ROOT_FILE_DIRECTORIES
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.schema import CapabilityConfig
 from agentworks.secrets.orchestration import SecretTarget
@@ -378,7 +379,7 @@ def test_vm_publication_uses_root_and_records_skips_without_rerouting(db, facet_
         ArtifactProvenance(),
         ArtifactOrigin("vm", "vm", "owner", entry="policy"),
     )
-    desired = ArtifactFile("/etc/harness/AGENTS.md", b"rule", (item.origin_identity,), generated_section=True)
+    desired = ArtifactFile("/etc/codex/AGENTS.md", b"rule", (item.origin_identity,), generated_section=True)
     skip = ArtifactSkip(path=desired.path, origins=desired.origins, reason="partial section")
 
     class Applying(ConformingHarnessIntegration):
@@ -395,7 +396,7 @@ def test_vm_publication_uses_root_and_records_skips_without_rerouting(db, facet_
     monkeypatch.setattr(SetupInputs, "declaration", lambda *args: {})
     inputs = replace(inputs, activations={"applying": CapabilityConfig.model_validate({})})
     state = run_setup(db, Mock(), inputs, invocation, operation="fixture-setup")
-    assert publish.call_args.kwargs["roots"] == ("/",)
+    assert publish.call_args.kwargs["roots"] == ROOT_FILE_DIRECTORIES
     assert publish.call_args.kwargs["root"] is True
     record = state.records[0]
     assert record.complete and not record.pending_cleanup
