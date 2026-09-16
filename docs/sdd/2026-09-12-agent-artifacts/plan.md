@@ -901,3 +901,30 @@ build comparisons passed. The 16 real CLI configuration cases and unknown-name r
 temporary HOME and build outputs were independently verified removed. The first handoff's
 independent live Lima evidence covers the unchanged runtime; this tests-and-plan correction did not
 run another VM workload.
+
+## Native defining-scope placement correction, 2026-09-15
+
+The operator approved replacing unnecessary native deferrals, generated instruction sections,
+per-type application and deferral progress, and direct shell publication at every facet. This
+supersedes shell's session opt-in and the initial VM routing-only implementation. Earlier completed
+checkboxes remain the historical record.
+
+- [ ] Support generated instruction sections, replacing a complete managed extent while preserving
+      surrounding bytes and metadata; warn, retain and record malformed sections as skipped.
+- [ ] Publish VM artifact files using the existing transport and ownership lifecycle, with
+      machine-readable permissions and no new VM deletion prerequisite.
+- [ ] Apply Codex hints/rules at user and workspace scope through the selected native instruction
+      file; apply verified Claude and Codex artifacts at VM scope.
+- [ ] Publish shell artifacts directly at VM, user, workspace and session scope without an opt-in.
+- [ ] Report actual application by artifact type and bounded name list; report deferral reasons and
+      destinations without promising that restart alone guarantees delivery.
+- [ ] Update native inventory, inspection, permanent guides, support matrices and design response.
+- [ ] Assess Muntz's post-merge PR 822 feedback against this implementation.
+- [ ] Complete independent project, complexity and correctness reviews plus required validation.
+- [ ] Publish the complete ready PR and assess its feedback.
+
+Acceptance includes empty and pre-existing instruction files; edited complete sections; missing,
+reversed and duplicate delimiters; unrelated content and mode preservation; generated-section
+retirement; privileged VM publication readable by consumers; native cross-scope identity checks;
+shell publication without deferral; and progress counts per artifact rather than per package file.
+No native model calls are necessary for these filesystem and lifecycle claims.

@@ -136,9 +136,10 @@ to the session selector. Config for integration activations at setup scopes neve
 session's config, even when both name the same integration. Each host validates its own facet.
 Claude and Codex user facets accept settings, marketplaces, plugins, and artifacts; their workspace
 facets accept settings and artifacts. All shipped integrations implement VM, user, workspace, and
-session facets. VM facets route artifact inputs to a later facet; shell and Grok outer facets
-provide artifact handling. An empty config schema does not itself imply facet support for another
-integration.
+session facets. VM facets apply artifacts at machine scope where supported and route unsupported
+types to a later facet. Shell publishes files directly at every activated facet, including
+`/opt/agentworks/artifacts` at VM scope. An empty config schema does not itself imply facet support
+for another integration.
 
 For separate project settings, select both workspace facets and give each its own workstation
 source. Create these source documents before workspace creation; this declaration does not change
@@ -212,17 +213,20 @@ An inactive user or workspace facet passes its inputs onward to the session. An 
 applies what it can and defers the remainder. Handled inputs stop at that facet. The session joins
 its actual user and workspace results with anything routed directly from the VM. Remaining inputs
 that the session integration cannot handle produce warnings with their original source and reason.
-Session delivery requires explicit `enabled_workarounds` in the selected integration's session
+Native harness session delivery requires explicit `enabled_workarounds` in the selected integration's session
 config. The default empty list leaves all remaining inputs unhandled. Each named workaround enables
 only its documented delivery method; `[]` replaces inherited opt-ins. See
-`agw guide show concept-agent-artifacts` for the supported methods and their limitations.
+`agw guide show concept-agent-artifacts` for the supported methods and their limitations. Shell
+publishes directly as files at every activated facet, including the private session directory.
 
 For example, VM-declared skills can reach native user placement by activating only the user facet.
 The same captured VM inputs remain available to every actual user; one user's handling does not
 consume another's inputs. Admin and agent users remain separate. With neither VM nor user
 activation, those inputs reach the session through user passthrough.
 
-Shipped Claude, Codex, and Grok VM facets route to user; the shell VM facet routes to session.
+Claude applies VM instructions, skills and agents in its managed locations. Codex applies VM skills
+and defers other types to user. Grok defers VM inputs to user. Shell applies all VM types under
+`/opt/agentworks/artifacts`.
 Workspace-owned bundles remain useful independently: their workspace facet handles them in project
 locations or passes them to each consuming session. Workspace placement is shared with other users
 of that workspace, so session-only content belongs in the private session directory under the actual

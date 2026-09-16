@@ -236,6 +236,40 @@ that exact entry point is proven, and requires native verification of persona in
 - Keep Codex and Grok interactive session skill delivery unsupported unless a documented and tested
   native mechanism is established. Do not redirect their whole user home or emulate native skills.
 
+## Defining-scope audit, 2026-09-15
+
+The follow-up audit compared the merged implementation at `b00b39be` with current native
+documentation. It found two implementation restrictions that were not native limitations:
+unconditional Codex hint/rule deferral and core's refusal of all VM artifact files.
+
+- [Codex instructions](https://learn.chatgpt.com/docs/agent-configuration/agents-md) documents user
+  and project `AGENTS.md` discovery. A nonempty `AGENTS.override.md` takes precedence; fallback
+  names do not add a second instruction file from the same directory. Therefore an owned generated
+  section must coexist with the selected instruction file. Creating an override sidecar would
+  suppress existing guidance. Native context limits remain relevant after file publication.
+- [Codex skills](https://learn.chatgpt.com/docs/build-skills) documents `/etc/codex/skills` as a
+  machine-wide location, alongside actual-user and repository skill roots. No corresponding
+  standalone machine agent directory was established by this audit; those inputs continue toward
+  user handling.
+- [Claude memory](https://code.claude.com/docs/en/memory) documents the Linux managed instruction
+  file `/etc/claude-code/CLAUDE.md`. The [skills](https://code.claude.com/docs/en/skills) and
+  [subagents](https://code.claude.com/docs/en/sub-agents) references document `.claude/skills` and
+  `.claude/agents` within the managed settings directory. Do not infer that an arbitrary
+  `/etc/claude-code/rules` directory is discovered.
+- [Grok system configuration](https://docs.x.ai/build/enterprise#configuration) and its
+  [settings reference](https://docs.x.ai/build/settings/reference) offer configured discovery paths.
+  Higher-layer replacement and per-user plugin trust prevent treating registration as universal
+  machine delivery. The audited
+  [upstream source](https://github.com/xai-org/grok-build/tree/482711333c7195dc16a272777f86086d615e2afb)
+  also exposes extra rule directories, but this was not established as a shipped stable guarantee.
+  The correction retains explicit Grok VM-to-user deferral rather than guessing.
+
+The operator selected generated instruction sections and accepted visibility to other harnesses
+reading the same `AGENTS.md`. Application replaces all content inside a complete generated section;
+broken delimiters warn and skip. This is an Agentworks publication contract, not native section
+management. The implementation does not add blanket version floors or promise exhaustive native
+configuration certification. Research used documentation and source; it made no model calls.
+
 ## Sources
 
 | Source                                                              | Quality and angle                                                       |
