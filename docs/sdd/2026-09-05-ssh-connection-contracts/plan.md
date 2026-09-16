@@ -1,10 +1,10 @@
 # Independent SSH Carrier: Design and Delivery Plan
 
-- Updated: 2026-09-12
+- Updated: 2026-09-16
 - Requirements: [frd.md](frd.md)
 - Architecture: [hla.md](hla.md)
 - Shared sequence and proof matrix:
-  [transport plan at `698ddb23`](https://github.com/WayfarerLabs/agentworks/blob/698ddb23b278f364e460f0ae15bac5fab8c74b12/docs/sdd/2026-09-12-transport-improv/plan.md)
+  [transport plan at `6809827f`](https://github.com/WayfarerLabs/agentworks/blob/6809827f64fb288880167fe2a4d9d7b42e29a21e/docs/sdd/2026-09-12-transport-improv/plan.md)
 
 ## State and delivery
 
@@ -12,17 +12,23 @@ The earlier reduced-design review converged with zero of two additional fix roun
 legacy-consolidation work through `2f11662d` is superseded as a delivery approach and preserved as
 source material; it is not an independent-carrier implementation or proof result.
 
-The current task is rewriting SSH artifacts to match the reviewed #795 proposal. No prototype/live
-proof, broad rebuild, production cutover or merge starts under this artifact task. The old
-implementation-push plan does not bypass the new proof gate. The operator requested a fresh branch
-and draft PR to supersede #757. Branch `feat/ssh-carrier-design` starts from main `7c744828` and
-contains these artifacts only. Preserve `feat/ssh-connection-contracts` and its commits as
-reference; none of its runtime changes are part of this checkpoint. Keep the replacement PR draft.
+The current checkpoint compares the SSH design with main and the current #795 proposal under the
+operator's 2026-09-16 lead handoff. The [main comparison](main-comparison.md) pins the inspected
+revisions, records source evidence and identifies migration/proof risks. PR #796 remains a draft
+artifact checkpoint. Its branch `feat/ssh-carrier-design` now includes main `e440a28c`; the earlier
+`feat/ssh-connection-contracts` runtime work remains reference material only. No prototype/live
+proof, broad rebuild, production cutover or merge is claimed by this revision.
 
 The default eventual landing unit is the new stack plus complete transport-owned cutover/removal,
 not an independently released replacement of legacy SSH callers. Coordinate the delivery vehicle
 with the transport owner after proof. Artifact promotion/merge and new proof resources require
 operator direction. No lockfile or new-stack completion is claimed here.
+
+## 0. Compare the design with current code
+
+- [x] Compare main `e440a28c` with the original `7c744828` baseline and transport proposal
+      `6809827f`; record source anchors and revise SSH-owned design/migration obligations. This
+      completes the source comparison only, not contract agreement or runtime proof.
 
 ## 1. Agree on the small contract and proof charter
 
@@ -32,7 +38,9 @@ operator direction. No lockfile or new-stack completion is claimed here.
 - [ ] Inventory executable selection, OpenSSH versions and server compatibility at workstation,
       platform-host and provider-inner sites under the HLA's version boundary. Specify version
       refusal, account-shell/bootstrap combinations and prerequisites in an SSH LLD before accepting
-      proof evidence. Do not infer another hop's compatibility from the workstation client.
+      proof evidence. Include initial delivery before Python installation and supported
+      platform-host prerequisites. Do not infer another hop's compatibility from the workstation
+      client.
 - [ ] Obtain an authorized bounded proof charter with isolated resources, credentials, workload,
       versions, cleanup and evidence. Coordinate real QGA access with transport; no operator hosts,
       trust stores or credentials are implicitly in scope.
@@ -61,11 +69,14 @@ definition, not a second protocol specification maintained here.
       own artifacts. Publish matching candidate-contract revisions through the agreed design
       checkpoint before broad parallel implementation.
 - [ ] Resolve detailed SSH policy, executable/path handling, trust/config schema and migration,
-      process/terminal/forwarding lifetimes, diagnostics and acceptance fixtures. Preserve the
-      common layer's ownership of application semantics and use one set of shared carrier types.
-- [ ] Confirm transport's execution/file/job LLD and remaining Proxmox/WSL2/macOS-host feasibility
-      gates are satisfied or have operator disposition. This is dependency review, not a claim to
-      implement or complete the other effort's work.
+      process/terminal/forwarding lifetimes, diagnostics and acceptance fixtures. Name the authority
+      and refresh procedure for copied CA/revocation policy, including failure and rollback
+      behavior. Preserve the common layer's ownership of application semantics and use one set of
+      shared carrier types.
+- [ ] Confirm the shared execution boundary needed for the SSH build; track transport's file/job LLD
+      and remaining Proxmox/WSL2/macOS-host feasibility gates against their consumers. The later
+      file-only slice gates broader file migration, not independent SSH implementation. This is
+      dependency review, not a claim to complete the other effort's work.
 
 ## 4. Build and verify independently
 
@@ -83,6 +94,11 @@ definition, not a second protocol specification maintained here.
       modules unavailable, including dependency closure and normal package imports.
 - [ ] Integrate with transport's host/platform/provisioning paths and review their provider-inner
       isolation evidence. Exercise host composition independently of Lima management commands.
+- [ ] Supply SSH delivery and failure evidence for transport's later file-only SSH/QGA slice:
+      whole-file publication, privileged JSON updates, directories/metadata and FIFO lifecycle with
+      public commands/jobs withheld. Transport owns destination confinement, grants and mutation
+      semantics; optional SCP must honor them. Review transport's results before wider file
+      migration, without duplicating its file API or proof harness.
 - [ ] Record Linux/macOS/Windows workstation evidence separately from target/provider/inner-client
       versions. Missing required coverage needs operator disposition; mocks are not live acceptance.
 
@@ -91,6 +107,11 @@ definition, not a second protocol specification maintained here.
 - [ ] Deliver tested connection/trust migration and rollback evidence to the transport-owned
       cutover. Resolve writer ownership, surviving jobs and plugin compatibility with their owners
       before switching production; no duplicate mutation dispatch or old/new public selector.
+- [ ] Reconcile the current artifact/setup/session consumers recorded in the main comparison with
+      transport's migration inventory. Resolve structured discovery under sensitive environments,
+      preserve ownership/cleanup checkpoints and activation-map behavior, and verify initial
+      provisioning separately from initialized guests. No caller may weaken sensitivity to recover
+      output or use public exec to bypass file grants.
 - [ ] Verify SSH-backed production workflows through the complete new stack after transport
       physically deletes the retirement set. Run required local/hosted gates and independent
       project, complexity and correctness reviews at the agreed implementation head.

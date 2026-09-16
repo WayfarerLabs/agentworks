@@ -1,10 +1,10 @@
 # Independent SSH Carrier: Migration Strategy
 
 - Status: Proposed transition, not a completed conversion or acceptance record
-- Updated: 2026-09-12
+- Updated: 2026-09-16
 - Requirements: [frd.md](frd.md)
 - Shared cutover:
-  [transport migration at `698ddb23`](https://github.com/WayfarerLabs/agentworks/blob/698ddb23b278f364e460f0ae15bac5fab8c74b12/docs/sdd/2026-09-12-transport-improv/migration-strategy.md)
+  [transport migration at `6809827f`](https://github.com/WayfarerLabs/agentworks/blob/6809827f64fb288880167fe2a4d9d7b42e29a21e/docs/sdd/2026-09-12-transport-improv/migration-strategy.md)
 
 ## Baselines and destination
 
@@ -12,7 +12,10 @@ The published SSH design at `2694d31a` proposed interface-preserving isolation/c
 work through `2f11662d` includes explicit connection settings and a shared legacy builder; it was
 not pushed as an implementation handoff. That local code and its earlier fixtures may inform the new
 implementation but do not establish its independence or semantics. Refresh the production inventory
-against main before preparing cutover rather than assuming this branch is deployed.
+against main before preparing cutover rather than assuming this branch is deployed. The
+[2026-09-16 main comparison](main-comparison.md) records the current baseline and new consumers.
+Core delivery code is unchanged from the original baseline; artifact publication, discovery and
+session cleanup expand the transport-owned migration inventory.
 
 | Existing surface                                                  | Destination and owner                                                                                                                 |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
@@ -35,9 +38,11 @@ command. Runtime value ownership belongs to SSH; transport owns composition and 
 
 The existing local proposal of operator defaults under `[operator.ssh]` and explicit placement
 fields is a candidate storage mapping, not a newly shipped schema or finalized conversion format.
-Freeze config spellings, paths and refusal guidance in the SSH LLD before build/cutover. A
-representative desired connection is a literal host/user/identity/port plus explicit trust sources,
-not an alias interpreted through the operator's SSH configuration.
+Current main still uses `operator.ssh_private_key` and alias-based platform-host placement; it has
+no `[operator.ssh]` connection/trust schema. Freeze config spellings, paths and refusal guidance in
+the SSH LLD before build/cutover. A representative desired connection is a literal
+host/user/identity/port plus explicit trust sources, not an alias interpreted through the operator's
+SSH configuration.
 
 Operators supply values hidden in existing aliases; migration does not run ssh -G, evaluate Match
 clauses or discover arbitrary routing policy. Identity selection is independent of agent selection:
@@ -87,6 +92,12 @@ writers. Before cutover, identify old/new writers, serialize or quiesce the tran
 original configuration and trust evidence. Resolve exact locking/publication mechanics in the SSH
 LLD with the transport-owned cutover; no unproven concurrency claim belongs in this draft.
 
+For each copied trust or revocation source, the LLD also names its post-cutover authority and
+maintenance path: who supplies CA rotations and revocation updates, how owned copies are refreshed,
+and how failed updates retain evidence and prevent use of policy known to be superseded. An import
+is a snapshot, not an automatic subscription to its source. This is part of the existing trust
+preservation obligation; no background synchronization service is proposed.
+
 Source rollback and state rollback are distinct. Record which paths and formats old code can read
 and how trust learned after cutover is retained; never restore an older empty or incomplete trust
 snapshot merely to restore old code. If safe rollback cannot preserve evidence and policy, stop and
@@ -95,7 +106,11 @@ choose an operator-approved forward repair. Credential material is not copied in
 Transport inventories all production/plugin consumers and surviving detached work, settles their
 migration/compatibility policy, and deletes legacy modules only after complete new-stack workflow
 validation. SSH supplies its migration and isolation evidence; it does not claim to dispose jobs or
-complete that cross-stack cutover on its own.
+complete that cross-stack cutover on its own. Include current native artifact publication,
+inspection, retirement and session restore/cleanup in that inventory. Preserve ownership records and
+partial-failure checkpoints while replacing their command/copy calls with shared execution and file
+operations. The later file-only slice precedes broader file-consumer migration, while the small
+carrier proof still precedes independent SSH implementation.
 
 ## Required evidence
 

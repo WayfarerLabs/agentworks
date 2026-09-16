@@ -1,10 +1,10 @@
 # Independent SSH Carrier: Functional Requirements
 
 - Status: Revised design; joint proof and new implementation remain uncompleted
-- Updated: 2026-09-12
+- Updated: 2026-09-16
 - Architecture: [hla.md](hla.md)
 - Coordination:
-  [transport proposal at `698ddb23`](https://github.com/WayfarerLabs/agentworks/tree/698ddb23b278f364e460f0ae15bac5fab8c74b12/docs/sdd/2026-09-12-transport-improv)
+  [transport proposal at `6809827f`](https://github.com/WayfarerLabs/agentworks/tree/6809827f64fb288880167fe2a4d9d7b42e29a21e/docs/sdd/2026-09-12-transport-improv)
 
 ## Purpose and direction
 

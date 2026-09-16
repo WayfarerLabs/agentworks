@@ -1,10 +1,10 @@
 # Independent SSH Carrier: High-Level Architecture
 
-- Status: Design aligned before the joint proof; not a proven implementation boundary
-- Updated: 2026-09-12
+- Status: Reconciled with current main and transport proposal; joint proof remains open
+- Updated: 2026-09-16
 - Requirements: [frd.md](frd.md)
 - Shared contract:
-  [transport proposal `698ddb23`](https://github.com/WayfarerLabs/agentworks/blob/698ddb23b278f364e460f0ae15bac5fab8c74b12/docs/sdd/2026-09-12-transport-improv/execution-contract.md)
+  [transport proposal `6809827f`](https://github.com/WayfarerLabs/agentworks/blob/6809827f64fb288880167fe2a4d9d7b42e29a21e/docs/sdd/2026-09-12-transport-improv/execution-contract.md)
 
 ## Boundary and ownership
 
@@ -24,7 +24,10 @@ Proposed SSH files are `connection.py`, `client.py`, `trust.py` and `forwarding.
 package, with exports in `__init__.py` and independent tests under
 `cli/tests/execution/carriers/ssh/`. These are responsibilities, not a class hierarchy. Optional SCP
 acceleration stays below shared file publication semantics; it is not required to prove the
-mandatory execute primitive.
+mandatory execute primitive. The later file-only SSH/QGA slice belongs to transport: core path and
+action grants, JSON updates, privileged publication and FIFO lifecycle stay above delivery. An
+optimization cannot bypass shared destination checks or expose command access to a file-only
+consumer.
 
 ## Connection and policy
 
@@ -85,6 +88,12 @@ OpenSSH facilities before proposing framing. An inner payload cannot undo hooks 
 sshd/account-shell startup. Supported bootstrap combinations and refusal behavior must be explicit;
 no broad implementation begins while these boundaries remain unresolved.
 
+The [main comparison](main-comparison.md) identifies a bootstrap constraint: Python is installed
+during initialization, after SSH is already in use. Initial delivery, package installation and
+no-staging readiness cannot assume that prerequisite is present. Transport owns helper preparation
+and must identify which lifecycle stages can use which tools; SSH does not install them or infer
+platform-host prerequisites from an initialized guest.
+
 ## SSH-backed platform access
 
 A platform operation composes the same SSH carrier with a host target and invokes its management
@@ -112,13 +121,13 @@ has its own transition and rollback policy; deleting code never licenses deletin
 
 The [plan](plan.md) follows #795: agree on the small contract and charter, prove it jointly,
 reconcile both SDDs with observations, then build independently, validate workflows and cut over.
-This rewrite aligns the proposed assignment now; post-proof reconciliation remains required. Only
-the SSH owner edits these artifacts; common-contract amendments return to the transport owner.
+The current comparison updates the candidate assignment; post-proof reconciliation remains required.
+Only the SSH owner edits these artifacts; common-contract amendments return to the transport owner.
 
 ## Evidence and references
 
 The
-[transport prior-art record](https://github.com/WayfarerLabs/agentworks/blob/698ddb23b278f364e460f0ae15bac5fab8c74b12/docs/sdd/2026-09-12-transport-improv/prior-art-research.md)
+[transport prior-art record](https://github.com/WayfarerLabs/agentworks/blob/6809827f64fb288880167fe2a4d9d7b42e29a21e/docs/sdd/2026-09-12-transport-improv/prior-art-research.md)
 supplies shared execution research. No new library-selection study is required: installed OpenSSH is
 settled. Primary SSH references are [ssh](https://man.openbsd.org/ssh.1),
 [ssh_config](https://man.openbsd.org/ssh_config.5), [sshd](https://man.openbsd.org/sshd.8) and
