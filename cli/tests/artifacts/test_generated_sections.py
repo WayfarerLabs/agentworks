@@ -123,7 +123,9 @@ def test_section_race_does_not_overwrite_concurrent_operator_edit(target, monkey
     assert path.read_bytes() == b"concurrent edit"
 
 
-def test_root_publication_elevates_only_guarded_operations_and_sets_public_modes(target):
+def test_root_publication_elevates_only_guarded_operations_and_sets_public_modes(target, monkeypatch):
+    import agentworks.native_files as native
+
     # Record elevation at the transport boundary, while executing inside this
     # unprivileged fixture. No test changes the host's machine-wide directories.
     run = target.run
@@ -136,12 +138,14 @@ def test_root_publication_elevates_only_guarded_operations_and_sets_public_modes
         return run(command, **kwargs)
 
     target.run = run_guarded
-    directory = target.root / "machine/artifacts/skill"
+    boundary = target.root / "machine/artifacts"
+    monkeypatch.setattr(native, "ROOT_FILE_DIRECTORIES", (str(boundary),))
+    directory = boundary / "skill"
     desired = (
         replace(section(directory / "AGENTS.md"), generated_section=True),
         ArtifactFile(str(directory / "run"), b"executable", ("b" * 64,), executable=True),
     )
-    result = publish_artifacts(target, desired, (), lambda files: None, roots=("/",), root=True)
+    result = publish_artifacts(target, desired, (), lambda files: None, roots=(str(boundary),), root=True)
     assert len(result.files) == 2 and elevated
     assert (directory / "AGENTS.md").stat().st_mode & 0o777 == 0o644
     assert (directory / "run").stat().st_mode & 0o777 == 0o755
@@ -150,7 +154,10 @@ def test_root_publication_elevates_only_guarded_operations_and_sets_public_modes
     assert all("python3 -c" in command for command in elevated)
     assert not list((target.root / "tmp").iterdir())
     # Reapplication reads a protected destination into transport-owned staging.
-    assert publish_artifacts(target, desired, result.files, lambda files: None, roots=("/",), root=True) == result
+    assert (
+        publish_artifacts(target, desired, result.files, lambda files: None, roots=(str(boundary),), root=True)
+        == result
+    )
     assert (directory / "AGENTS.md").stat().st_uid == os.getuid()
 
 

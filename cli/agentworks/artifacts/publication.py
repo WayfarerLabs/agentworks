@@ -17,7 +17,7 @@ from agentworks.artifacts.application import (
 from agentworks.artifacts.model import ALLOWED_DEFERRALS
 from agentworks.artifacts.sections import MalformedSectionError, replace_section
 from agentworks.errors import StateError
-from agentworks.native_files import NativeFiles, native_path
+from agentworks.native_files import NativeFiles, native_path, root_native_path
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -86,14 +86,18 @@ def publish_artifacts(
     """
     if not desired and not previous:
         return ArtifactPublication()
-    boundaries = tuple("/" if boundary == "/" else native_path(boundary).rstrip("/") + "/" for boundary in roots)
+    boundaries = tuple(native_path(boundary) + "/" for boundary in roots)
     entries: tuple[ArtifactFile | OwnedArtifactFile, ...] = (*desired, *previous)
     for entry in entries:
-        if not native_path(entry.path).startswith(boundaries):
+        path = root_native_path(entry.path) if root else native_path(entry.path)
+        if not path.startswith(boundaries):
             raise StateError("artifact destination is outside its owning scope")
         package_root = _validate_package_root(entry)
-        if package_root is not None and not package_root.startswith(boundaries):
-            raise StateError("artifact package root is outside its owning scope")
+        if package_root is not None:
+            if root:
+                root_native_path(package_root)
+            if not package_root.startswith(boundaries):
+                raise StateError("artifact package root is outside its owning scope")
     current = {item.path: item for item in previous}
     planned = {item.path: item for item in desired}
     if len(planned) != len(desired) or len(current) != len(previous):

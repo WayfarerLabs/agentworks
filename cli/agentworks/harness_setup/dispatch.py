@@ -27,6 +27,7 @@ from agentworks.errors import ConfigError, StateError
 from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
 from agentworks.harness_setup.state import read_native_setup, replace_setup_record, write_native_setup
+from agentworks.native_files import ROOT_FILE_DIRECTORIES
 
 if TYPE_CHECKING:
     from agentworks.artifacts.application import OwnedArtifactFile
@@ -204,7 +205,7 @@ def run_setup(
             else:
                 raise StateError("unknown native setup invocation")
             application = validate_application(application, artifacts, inputs.facet, integration=name)
-            roots = ("/",) if location is None else (location,)
+            roots = ROOT_FILE_DIRECTORIES if location is None else (location,)
             publication = publish_artifacts(
                 call.runner,
                 application.files,

@@ -189,6 +189,9 @@ finally:
 """
 
 
+# Shared by every integration. These are directory boundaries, never file targets.
+ROOT_FILE_DIRECTORIES = ("/etc/claude-code", "/etc/codex", "/opt/agentworks/artifacts")
+
 _UNSUITABLE_PATH = 4
 _DENIED_PATH = 5
 
@@ -221,6 +224,18 @@ def native_path(path: str) -> str:
     ):
         raise StateError("native settings require an absolute, normalized guest path")
     return str(PurePosixPath(path))
+
+
+def root_native_path(path: str, *, directory: bool = False) -> str:
+    """Constrain elevated plugin paths and persisted cleanup paths before I/O.
+
+    Boundary directories may be inspected or created, but file operations and
+    removable package roots must stay strictly beneath them.
+    """
+    path = native_path(path)
+    if not any(path.startswith(root + "/") or (directory and path == root) for root in ROOT_FILE_DIRECTORIES):
+        raise StateError(f"Elevated native file access is outside the allowed directories: '{path}'")
+    return path
 
 
 def require_python3(runner: Transport) -> None:
@@ -286,15 +301,19 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
         prefix = ["sudo", "-n", "--"] if self.root else []
         return shlex.join([*prefix, *arguments, "1" if self.root else "0", "1" if preserve_metadata else "0"])
 
+    def _path(self, destination: str, *, directory: bool = False) -> str:
+        return root_native_path(destination, directory=directory) if self.root else native_path(destination)
+
     def directory(self, destination: str, *, create: bool = False) -> bool:
         """Check or create a native directory through guarded parent descriptors."""
+        destination = self._path(destination, directory=True)
         command = self._command(
             [
                 "python3",
                 "-c",
                 _FILE_PROGRAM,
                 "mkdir" if create else "directory",
-                native_path(destination),
+                destination,
                 "-",
                 "-",
                 "",
@@ -303,7 +322,7 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
         )
         result = self.runner.run(command, check=False)
         if not result.ok:
-            raise _path_failure("native config directory", native_path(destination), result.returncode)
+            raise _path_failure("native config directory", destination, result.returncode)
         try:
             exists = json.loads(result.stdout)["exists"]
             if not isinstance(exists, bool):
@@ -314,7 +333,7 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
 
     def read(self, destination: str) -> bytes | None:
         """Read a regular native file without emitting its contents into logs."""
-        destination = native_path(destination)
+        destination = self._path(destination)
         remote, local = self.slot()
         command = self._command(["python3", "-c", _FILE_PROGRAM, "read", destination, remote, "-", "", "0"])
         result = self.runner.run(command, check=False, discard_output=False)
@@ -345,7 +364,7 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
         preserve_metadata: bool = False,
     ) -> None:
         """Atomically replace a guarded file only while its observed bytes match."""
-        destination = native_path(destination)
+        destination = self._path(destination)
         remote, local = self.slot()
         local.write_bytes(content)
         try:
@@ -376,7 +395,7 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
 
     def remove(self, destination: str, *, expected: str) -> None:
         """Remove only a regular file that still matches its recorded ownership."""
-        destination = native_path(destination)
+        destination = self._path(destination)
         command = self._command(["python3", "-c", _FILE_PROGRAM, "delete", destination, "-", expected, "", "0"])
         result = self.runner.run(command, check=False, discard_output=True)
         if result.returncode == 2:
@@ -388,7 +407,7 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
 
     def prune_empty_parents(self, destination: str, *, root: str) -> None:
         """Prune only empty parents of a retired file, through its package root."""
-        destination, root = native_path(destination), native_path(root)
+        destination, root = self._path(destination), self._path(root)
         if not destination.startswith(root + "/"):
             raise StateError("retired native file is outside its package root")
         command = self._command(["python3", "-c", _FILE_PROGRAM, "prune", destination, root, "-", "", "0"])
@@ -405,7 +424,7 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
 
     def fingerprint(self, destination: str) -> tuple[str, int] | None:
         """Stream a guarded file's hash and mode without copying or logging its body."""
-        destination = native_path(destination)
+        destination = self._path(destination)
         command = self._command(["python3", "-c", _FILE_PROGRAM, "fingerprint", destination, "-", "-", "", "0"])
         result = self.runner.run(command, check=False)
         if not result.ok:
