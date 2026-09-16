@@ -92,6 +92,7 @@ execution modules. This is not a full file/job implementation or a preliminary l
 - [ ] Prove the file boundary with behavioral tests: default denial, exact-file/subtree scopes, root
       versus parent authority, prefix collisions/traversal, links and concurrent substitution,
       confined extraction, forbidden metadata/removal, and inability to widen grants. Cover
+      attempted helper redirection through caller environment, PATH or working directory,
       cooperating writers, external-writer limits, malformed JSON, special-object refusal, sensitive
       diagnostics, partial transfer/cleanup and uncertain publication. No runtime fallback may
       expose commands to the file-only caller; unavailable safe mechanics block acceptance. Record

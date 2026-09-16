@@ -219,6 +219,10 @@ to implement an authorized operation; it never accepts caller shell fragments, a
 callback or a command/job handle. Ordinary file reads/writes reject special objects. FIFO lifecycle
 does not open the pipe for communication or replace tmux's session ownership.
 
+Helper executables, interpreters, working directory and environment are core-controlled. They do not
+inherit resource-controlled PATH, startup or loader settings that could turn a file-only call into
+arbitrary execution. The LLD enumerates the trusted tools and carrier bootstrap prerequisites.
+
 Core owns a small allowlist of approved exact files/subtrees, actions and metadata limits. Context
 composition resolves core-approved identity-dependent roots and binds a recipient's narrower file
 grant. Effective authority is the intersection of those grants, never their union. No plugin
