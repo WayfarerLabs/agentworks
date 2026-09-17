@@ -804,6 +804,27 @@ Merged work the ledger owes a line, recorded from the merges themselves.
     order. That is the defensible split: retirement has a real sequencing constraint, while
     application order between independent integrations at one scope has no principled basis to
     prefer. Recorded here because the answer otherwise lives only in a merged diff.
+- **Artifact delivery hardened before the cut** (PRs #822 and #825, merged 2026-09-15 and
+  2026-09-16). #822 made native session delivery opt-in per integration through
+  `enabled_workarounds`, defaulting to off, and removed blanket native version floors so an
+  unrecognized harness version warns rather than refusing launch. It also settled the reopened
+  final-session disposition as warn-and-launch, with each unhandled artifact naming its owner, type,
+  name, and reason, and `agw artifact show` recording the same deferrals so they survive the
+  terminal output. #825 then applied artifacts at native scopes, put Codex hints and rules in a
+  generated section of `AGENTS.md`, confined elevated file access to one core-owned allowlist, and
+  removed `enabled_workarounds` from shell, which now publishes directly at every activated facet.
+  - **Saga note:** #822's disposition is the second answer settled in code that the
+    scope-participation contract still poses as an open question, alongside the integration-ordering
+    answer from #816. Both reconciliations wait on operator direction.
+- **`agw session restart` now confirms before replacing a running session** (PR #824, merged
+  2026-09-16). Named and batch forms both prompt when a session is positively detected as running,
+  with `--yes`/`-y` to skip and `--force` staying independent for broken-state recovery. Recorded
+  because it changes behavior for anyone scripting restarts, which is why the release notes carry it
+  under breaking changes despite its `fix` commit type.
+- **The transport rebuild's design merged** (PR #795, merged 2026-09-17). The transport-improv
+  effort adopted on 2026-09-14 landed its FRD and HLA; implementation began immediately on PR #826
+  with the bounded shared carrier proof. Its SSH counterpart (PR #796) remains open. Waves 5 and 7
+  build on the execution contract this defines, as recorded in `phasing.md`.
 
 ### Efforts that ran without ledger entries (reconstructed 2026-09-06)
 
