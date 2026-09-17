@@ -61,9 +61,12 @@ combined tree.
 Transport fixed the earlier spelling and formatting findings, then corrected the restoration
 commit's additional README formatting at `a570a2de`. SSH consumes that correction without editing
 transport-owned files. The combined execution suite passed 260 tests with one native Windows case
-skipped on Linux after the dependency refresh. SSH runtime and test code are unchanged from the
-privately reviewed `e57e02e4`; the bootstrap dependency and tester prerequisites were re-reviewed.
-The PR handoff records the final gate results and exact reviewed head.
+skipped on Linux after the dependency refresh. At that review, SSH runtime and tests were unchanged
+from `e57e02e4`; the bootstrap dependency and tester prerequisites were re-reviewed. Windows CI then
+exposed a fixture newline assumption in the two EOF-input cases: Python text output emitted CRLF
+while the assertion expected LF. The fixture now writes explicit bytes; the carrier continues to
+preserve raw output without normalization. All other selected Windows tests passed at that
+candidate. The PR handoff records the corrected gate results and exact reviewed head.
 
 No external feedback/fix round has started. The operator's allowance remains four rounds, each
 waiting for the full integration report before the next iteration.

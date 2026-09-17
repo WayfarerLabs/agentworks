@@ -158,7 +158,7 @@ def test_duplex_pressure_delivers_all_input_once(synthetic: SyntheticSSH) -> Non
 
 @pytest.mark.parametrize("finite", [False, True])
 def test_empty_input_observes_eof(synthetic: SyntheticSSH, finite: bool) -> None:
-    synthetic.command = "import sys; assert sys.stdin.buffer.read() == b''; print('eof')"
+    synthetic.command = "import sys; assert sys.stdin.buffer.read() == b''; sys.stdout.buffer.write(b'eof\\n')"
     report = synthetic.execute(CarrierIO(input=FiniteInput(b"")) if finite else CarrierIO())
     assert report.stdout.data == b"eof\n"
     assert report.failure is None
