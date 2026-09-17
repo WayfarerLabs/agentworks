@@ -15,10 +15,11 @@ The operator directs two SSH implementation PRs under this SDD. PR #796, on
 `feat/ssh-carrier-design`, carries the entire SSH portion of the joint proof of concept (PoC) and
 these artifacts. The second SSH PR carries full implementation and the remaining integration and
 retirement obligations. There is no SSH design-only PR to merge. The operator has accepted the
-artifact checkpoint and authorized PoC implementation. The joint buffered proof is accepted; #796
-remains draft during final SSH closeout reviews and gates. Use `review-requested` for a coherent
-implementation checkpoint. The operator's existing integration tester combines the two branches
-locally and supplies live evidence. A design-only main merge is explicitly unnecessary.
+artifact checkpoint and authorized PoC implementation. The joint buffered proof and SSH closeout
+reviews are complete. The final #796 handoff records its published head and gates before merge
+intent; `review-requested` is for implementation checkpoints. The operator's existing integration
+tester combines the two branches locally and supplies live evidence. A design-only main merge is
+explicitly unnecessary.
 
 The operator authorizes up to four feedback/fix rounds. Post integration-testing considerations
 before raising `review-requested`; all private review lanes must be complete first. Remove the label
@@ -73,10 +74,10 @@ status without changing the accepted requirements.
       their qualifications, and run private reviews and applicable gates. Post the exact macOS
       fixture retest considerations before raising the label. Joint acceptance remains with
       transport; one authorized fix round remains after this handoff.
-- [ ] Complete round 4 after the full reports and collection window: consume the reviewed transport
+- [x] Complete round 4 after the full reports and collection window: consume the reviewed transport
       acceptance record, record the successful macOS fixture retest and unchanged-tree evidence,
       reconcile the SSH artifacts and rebase onto the final transport head. Complete independent
-      closeout reviews and gates, then publish testing considerations before the review signal. This
+      closeout reviews and gates, and prepare testing considerations for the final handoff. This
       exhausts the operator's four-round allowance; further material fixes need direction.
 
 ## Baseline work
@@ -146,9 +147,15 @@ status without changing the accepted requirements.
 - [x] Update this SDD and `ssh-lld.md` with observed SSH decisions and the transport-owned proven
       revision. Transport updates its own artifacts. Carry the reconciled SSH artifacts in #796 with
       the PoC, not in an intervening design-only PR.
-- [ ] Complete independent project, complexity and correctness reviews, applicable local/hosted
-      gates and authorized live-proof evidence at the exact handoff head. Remove `review-requested`
-      when promoting the completed PoC to merge intent. Keep this SDD unlocked.
+- [x] Complete independent project, complexity and correctness reviews, applicable local/hosted
+      gates and authorized live-proof evidence at the evaluated closeout head. Record its pinned
+      results and the unchanged-code basis for final readiness bookkeeping in `poc-results.md`. Keep
+      this SDD unlocked.
+
+Final delivery on #796 publishes the testing considerations before the ready signal, with the exact
+published head's CI green and `review-requested` removed when no checkpoint remains. Transport #826
+lands first. This PR's ready state, head and checks record that handoff; these completed work items
+do not authorize a merge or replace its final checks.
 
 **Phase 1 definition of done:** #796 contains all SSH PoC code, independent fixtures, observed SSH
 evidence, cleanup results and reconciled artifacts. Its transport implementation dependencies are

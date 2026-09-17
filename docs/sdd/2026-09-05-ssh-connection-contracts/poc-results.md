@@ -3,9 +3,9 @@
 # SSH PoC Evidence
 
 Status: The buffered proof has six measured live cells and a successful macOS fixture retest.
-Existing reports cover the combined candidate through verified unchanged CLI and runtime trees.
-Transport accepts the joint buffered PoC; final SSH reviews and gates are in progress. Production
-readiness remains Phase 2.
+Existing reports cover the combined candidate through verified unchanged runtime and test code.
+Transport accepts the joint buffered PoC; SSH closeout reviews and gates pass. The final PR handoff
+records the published head and its checks. Production readiness remains Phase 2.
 
 ## Revisions and delivery
 
@@ -345,6 +345,17 @@ acknowledgment for the documentation combination; transport's
 independently verified tree equality above establish that the existing reports already cover it.
 That additional gate was unnecessary, not a missing test or a requirement waiver. No new SSH runtime
 change or live-test claim follows from this closeout.
+
+At rebased SSH `21a4f128`, all three independent closeout lanes are clear. Every local gate returned
+zero: Ruff lint/format, mypy, typer isolation, 10,217 Python tests with 11 skips, file lint,
+locked-SDD protection, Rulesync drift, 160 website Python tests, 103 website Node tests and both
+deterministic double-build comparisons.
+[Hosted CI](https://github.com/WayfarerLabs/agentworks/actions/runs/35263964123) passes Linux Python
+3.12/3.13/3.14, Windows Python 3.13 and all repository gates. The final readiness bookkeeping
+records these results and completes plan checkboxes; it changes no runtime or executable test. Its
+own published-head CI and testing considerations belong to the final #796 handoff. All four
+authorized rounds are used, with no unresolved material finding; further material fixes require
+operator direction.
 
 ## Joint acceptance and remaining scope
 
