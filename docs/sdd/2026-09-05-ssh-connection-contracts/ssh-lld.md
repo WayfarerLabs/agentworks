@@ -73,7 +73,9 @@ itself warns about
 The filter is case-insensitive, preserves ordinary variables and the parent environment, and applies
 to both version probing and dispatch. POSIX spawning retains its normal inherited environment. An
 installed-client Windows regression exercises clean and contaminated state against an owned local
-peer. That pre-authentication test does not replace the original failed live workload.
+peer. The later authenticated retest passed in both the original SSH-parent context and a clean
+launch, as recorded in [poc-results.md](poc-results.md); that is separate evidence from the local
+pre-authentication regression.
 
 Capture is bounded separately per stream and overflow reports incomplete retained output. Discard
 and sensitive suppression drain without retaining payload. Raw stdout has carrier provenance; stderr
@@ -94,11 +96,15 @@ the accepted PoC limitation and the production cancellation gate. SSH does not a
 cancellation protocol or retry. Bounded guest work may finish later; local return is not proof that
 it did.
 
-A natural local exit from 0 through 254 supplies POSIX prepared-invocation completion. Status 255,
-local signals and Windows native crash codes leave that completion unknown; SSH adds no completion
-oracle. Dispatch is unknown once a client starts without stronger completion evidence, and not-sent
+A natural local exit from 0 through 254 supplies the remote command evaluation status exposed by
+OpenSSH, including destination account-shell startup. The account shell can refuse before the
+bootstrap starts; this raw status alone proves neither bootstrap nor application execution. Captured
+output requires transport's framing checks, and suppressed output supplies no such proof. Transport
+owns public result interpretation and the stronger evidence it requires; SSH remains
+framing-agnostic. Status 255, local signals and Windows native crash codes leave remote completion
+unknown. Dispatch is unknown once a client starts without stronger channel evidence, and not-sent
 only when local checks or spawning establish that no command process started. Output failure and
-partial capture remain visible even when completion is known. See OpenSSH's
+partial capture remain visible even when a raw remote status is known. See OpenSSH's
 [exit-status definition](https://man.openbsd.org/ssh#EXIT_STATUS).
 
 An induced trust or authentication refusal can be known to the tester while the carrier still sees

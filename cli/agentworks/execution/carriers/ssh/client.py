@@ -30,8 +30,9 @@ _VERSION = re.compile(rb"\AOpenSSH_(?:for_Windows_)?(\d+)\.(\d+)(?:p\d+)?(?:[,\s
 class SSHCarrier:
     """One command dispatch, without replay or claims about guest cancellation.
 
-    A status from 0 through 254 establishes the POSIX prepared invocation's
-    completion. Status 255, signals and Windows crash codes leave it unknown.
+    A status from 0 through 254 observes remote command evaluation, including
+    account-shell startup. It alone proves neither bootstrap nor application
+    execution. Status 255, signals and Windows crash codes leave it unknown.
     Raw stderr mixes client diagnostics with the remote stderr channel.
     """
 
