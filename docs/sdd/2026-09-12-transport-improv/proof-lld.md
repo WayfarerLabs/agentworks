@@ -186,7 +186,7 @@ encoder by its input pipe, interrupt that owned process while the fixture payloa
 resume a successful payload. Removing either encoder wait causes the corresponding regression to
 fail instead of accepting a successful helper exit.
 
-During stress, opening process handles for every descendant before filtering produced errno 22 on
+During stress, opening process handles for every descendant before filtering produced error 22 on
 short-lived candidates. The revised fixture matches the owned argv, pipe and required state before
 opening a handle, then rechecks those criteria with the handle pinned. It does not suppress the
 error; its exact kernel cause was not established. The implementation lane's final Python 3.12.13
