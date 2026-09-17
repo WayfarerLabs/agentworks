@@ -50,6 +50,14 @@ Application script source and application stdin use distinct descriptors. Fixed 
 actual destination account's supported default shell are separate choices. Login/interactive startup
 combinations require their own proof and must not be silently accepted.
 
+The parent observes source/stdin producer termination and output encoders before returning. An
+unexpected producer failure emits bootstrap-failure evidence and returns 125, even if the payload
+exited zero; the report still describes the prepared invocation, not a nested exit oracle. Early
+consumer closure may produce SIGPIPE and is allowed without claiming all input was consumed. GNU
+env's `--default-signal=PIPE` is an explicit prerequisite of this experiment. Local fault injection
+kills only decoders descended from the fixture's bootstrap and checks that partial delivery cannot
+be reported as complete.
+
 Guest stdout and stderr are separately armored into a shared record stream. Raw carrier stderr
 remains diagnostic or mixed provenance. Framing validation, output bounds and end markers must
 establish complete guest streams before interpreting them as such. Invalid or incomplete framing is

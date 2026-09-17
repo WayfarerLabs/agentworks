@@ -95,7 +95,9 @@ def _text(value: str) -> bytes:
     try:
         return value.encode("utf-8")
     except UnicodeEncodeError:
-        raise ValidationError("Textual execution fields must be valid UTF-8") from None
+        pass
+    # A chained codec error retains the complete payload, even with from None.
+    raise ValidationError("Textual execution fields must be valid UTF-8")
 
 
 def prepare(

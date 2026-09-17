@@ -10,11 +10,15 @@ observed completion of that invocation, local status, raw stream provenance, com
 retention. Local status alone is not a guest exit. Payload fields have no diagnostic representation.
 
 `preparation.py` prepares literal commands and explicit sh/bash scripts, ordinary environment/cwd
-and finite input. Source, environment and input are encoded into stdin, not process arguments.
-The Linux bootstrap needs Bash, GNU base64/env and `/dev/fd`; destination account-shell lookup also
+and finite input. Source, environment and input are encoded into stdin, not process arguments. The
+Linux bootstrap needs Bash, GNU base64/env and `/dev/fd`; destination account-shell lookup also
 needs getent/id. It uses no installed guest helper, Python or staging files. Login and interactive
 startup are explicitly refused by this proof subset. Preparation accepts at most 256 KiB of encoded
 input; carriers can impose smaller documented delivery limits.
+
+The bootstrap waits for source and stdin producers as well as output encoders. Unexpected producer
+failure invalidates delivery even if the command exits zero. Intentional early input closure is
+allowed; GNU env's `--default-signal=PIPE` ensures its SIGPIPE outcome is observable.
 
 The shared decoder validates separately tagged guest stdout/stderr inside carrier stdout. Raw
 carrier stderr remains diagnostic/mixed data and is never promoted to guest stderr. Stream markers
@@ -33,5 +37,5 @@ access, complete platform coverage and production integration are not implemente
 
 Run the local evidence from `cli/` with `uv run pytest tests/execution`. The reusable vectors in
 `tests.execution.conformance` require an explicitly supplied carrier. Their local process oracle
-does not establish SSH or live Proxmox compatibility. The native carrier is isolated from the
-plugin registry because importing that registry currently loads legacy execution modules.
+does not establish SSH or live Proxmox compatibility. The native carrier is isolated from the plugin
+registry because importing that registry currently loads legacy execution modules.

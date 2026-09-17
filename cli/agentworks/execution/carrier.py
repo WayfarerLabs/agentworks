@@ -149,8 +149,6 @@ class Failure(StrEnum):
     DISPATCH = "dispatch"
     OBSERVATION = "observation"
     INVALID_RESPONSE = "invalid_response"
-    INPUT = "input"
-    OUTPUT = "output"
     OUTPUT_LIMIT = "output_limit"
 
 

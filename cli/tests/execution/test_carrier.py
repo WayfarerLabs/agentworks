@@ -98,3 +98,20 @@ def test_unretained_output_cannot_keep_bytes(retention: Retention) -> None:
 def test_local_status_does_not_manufacture_completion() -> None:
     report = CarrierReport(Dispatch.UNKNOWN, local_status=255)
     assert report.completion is None
+
+
+@pytest.mark.parametrize("field", ["source", "environment", "arguments"])
+def test_invalid_sensitive_text_does_not_retain_a_codec_exception(field: str) -> None:
+    from agentworks.execution.preparation import Command, Script, Shell, prepare
+
+    value = "synthetic-private-payload\ud800"
+    with pytest.raises(ValidationError) as failure:
+        if field == "source":
+            prepare(Script(value, Shell.fixed("sh")), sensitive=True)
+        elif field == "environment":
+            prepare(Command(("/bin/true",)), env={"PRIVATE": value}, sensitive=True)
+        else:
+            prepare(Command(("/bin/true", value)), sensitive=True)
+    assert failure.value.__context__ is None
+    assert failure.value.__cause__ is None
+    assert "synthetic-private-payload" not in repr(failure.value)

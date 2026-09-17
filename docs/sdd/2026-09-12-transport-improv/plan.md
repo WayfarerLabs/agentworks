@@ -1,7 +1,8 @@
 # Transport Improvements: Design and Delivery Sequence
 
-- Status: Design baseline for publication; proof and implementation gates remain open
-- Delivery vehicle: PR #795 for early design publication, labeled `sdd:transport-improv`
+- Status: Transport-side proof implementation in progress; joint acceptance gates remain open
+- Delivery vehicle: Merged design PR #795, followed by draft PoC PR #826, labeled
+  `sdd:transport-improv`
 - Requirements: [FRD](frd.md)
 - Architecture: [HLA](hla.md)
 - Proposed interfaces and layout: [Execution contract](execution-contract.md)
@@ -10,8 +11,8 @@
 The required order is: settle the transport-owned small contract, prove it, reconcile both SDDs,
 build independently in parallel, validate complete workflows, then cut over and physically delete
 the old stack. The proof is a bounded joint slice, not permission to start the broad rebuild. This
-revision runs no prototype or live test and claims no implementation completion. All gates below
-remain open.
+proof now has a transport-side implementation and local tests, not joint or live acceptance. All
+gates below remain open.
 
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
