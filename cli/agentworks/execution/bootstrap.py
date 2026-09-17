@@ -4,6 +4,8 @@ The helper needs Bash, GNU base64, env, and Linux /dev/fd. Account-shell
 selection additionally needs getent and id. Its argv is constant: application
 arguments, source, environment, directory, and input arrive only through stdin.
 This is neither a completion protocol nor an isolation boundary for shell code.
+Private helper names use the unexported _agw_ namespace. Its parsing locale is
+restored before the application environment is applied.
 """
 
 BOOTSTRAP_ARGV = (
@@ -22,105 +24,114 @@ BOOTSTRAP_ARGV = (
     "-c",
     r"""
 set -o pipefail
+for _agw_name in "${!_agw_@}"; do export -n "$_agw_name"; done
+unset _agw_name
+_agw_inherited_lc_all_set=${LC_ALL+x}
+_agw_inherited_lc_all=${LC_ALL-}
 export LC_ALL=C
 exec 3<&0 7>&1
-token=
-fail() {
-    if [[ $token =~ ^[0-9a-f]{32}$ ]]; then
-        printf '%s F\n' "$token" >&7
+_agw_token=
+_agw_fail() {
+    if [[ $_agw_token =~ ^[0-9a-f]{32}$ ]]; then
+        printf '%s F\n' "$_agw_token" >&7
     fi
     exit 125
 }
-line() { IFS= read -r "$1" <&3 || fail; }
-decode() {
-    local encoded decoded
-    line encoded
-    decoded=$(printf '%s' "$encoded" | /usr/bin/base64 --decode && printf '.') || fail
-    decoded=${decoded%.}
-    printf -v "$1" '%s' "$decoded"
+_agw_line() { IFS= read -r "$1" <&3 || _agw_fail; }
+_agw_decode() {
+    local _agw_encoded _agw_decoded
+    _agw_line _agw_encoded
+    _agw_decoded=$(printf '%s' "$_agw_encoded" | /usr/bin/base64 --decode && printf '.') || _agw_fail
+    _agw_decoded=${_agw_decoded%.}
+    printf -v "$1" '%s' "$_agw_decoded"
 }
-line version
-[[ $version == AGW1 ]] || fail
-line token
-[[ $token =~ ^[0-9a-f]{32}$ ]] || fail
-line sensitive
-[[ $sensitive == 0 || $sensitive == 1 ]] || fail
-line kind
-[[ $kind == command || $kind == script ]] || fail
-line shell_choice
-line count
-[[ $count =~ ^[0-9]+$ && ${#count} -le 4 && $count -le 1024 ]] || fail
-args=()
-for ((i=0; i<count; i++)); do
-    decode value
-    args+=("$value")
+_agw_line _agw_version
+[[ $_agw_version == AGW1 ]] || _agw_fail
+_agw_line _agw_token
+[[ $_agw_token =~ ^[0-9a-f]{32}$ ]] || _agw_fail
+_agw_line _agw_sensitive
+[[ $_agw_sensitive == 0 || $_agw_sensitive == 1 ]] || _agw_fail
+_agw_line _agw_kind
+[[ $_agw_kind == command || $_agw_kind == script ]] || _agw_fail
+_agw_line _agw_shell_choice
+_agw_line _agw_count
+[[ $_agw_count =~ ^[0-9]+$ && ${#_agw_count} -le 4 && $_agw_count -le 1024 ]] || _agw_fail
+_agw_args=()
+for ((_agw_i=0; _agw_i<_agw_count; _agw_i++)); do
+    _agw_decode _agw_value
+    _agw_args+=("$_agw_value")
 done
-line count
-[[ $count =~ ^[0-9]+$ && ${#count} -le 4 && $count -le 1024 ]] || fail
-env_keys=()
-env_values=()
-for ((i=0; i<count; i++)); do
-    line key
-    [[ $key =~ ^[A-Za-z_][A-Za-z_0-9]*$ ]] || fail
-    case $key in _agw_*|BASH_ENV|ENV|SHELLOPTS|BASHOPTS|BASH_XTRACEFD) fail ;; esac
-    decode value
-    env_keys+=("$key")
-    env_values+=("$value")
+_agw_line _agw_count
+[[ $_agw_count =~ ^[0-9]+$ && ${#_agw_count} -le 4 && $_agw_count -le 1024 ]] || _agw_fail
+_agw_env_keys=()
+_agw_env_values=()
+for ((_agw_i=0; _agw_i<_agw_count; _agw_i++)); do
+    _agw_line _agw_key
+    [[ $_agw_key =~ ^[A-Za-z_][A-Za-z_0-9]*$ ]] || _agw_fail
+    case $_agw_key in _agw_*|BASH_ENV|ENV|SHELLOPTS|BASHOPTS|BASH_XTRACEFD) _agw_fail ;; esac
+    _agw_decode _agw_value
+    _agw_env_keys+=("$_agw_key")
+    _agw_env_values+=("$_agw_value")
 done
-decode directory
-line source
-line input
-printf '%s' "$source" | /usr/bin/base64 --decode >/dev/null || fail
-printf '%s' "$input" | /usr/bin/base64 --decode >/dev/null || fail
-if IFS= read -r remainder <&3 || [[ -n $remainder ]]; then fail; fi
+_agw_decode _agw_directory
+_agw_line _agw_source
+_agw_line _agw_input
+printf '%s' "$_agw_source" | /usr/bin/base64 --decode >/dev/null || _agw_fail
+printf '%s' "$_agw_input" | /usr/bin/base64 --decode >/dev/null || _agw_fail
+if IFS= read -r _agw_remainder <&3 || [[ -n $_agw_remainder ]]; then _agw_fail; fi
 exec 3<&-
 
-encode_stream() {
-    local tag=$1 chunk
-    if /usr/bin/base64 --wrap=76 | while IFS= read -r chunk; do
-        printf '%s %s %s\n' "$token" "$tag" "$chunk" || exit 1
+_agw_encode_stream() {
+    local _agw_tag=$1 _agw_chunk
+    if /usr/bin/base64 --wrap=76 | while IFS= read -r _agw_chunk; do
+        printf '%s %s %s\n' "$_agw_token" "$_agw_tag" "$_agw_chunk" || exit 1
     done; then
-        printf '%s %s !\n' "$token" "$tag"
+        printf '%s %s !\n' "$_agw_token" "$_agw_tag"
     else
-        printf '%s F\n' "$token"
+        printf '%s F\n' "$_agw_token"
         return 1
     fi
 }
 
-run_payload() {
-    local executable account _agw_assignment _agw_token=$token
-    if [[ $kind == script ]]; then
-        case $shell_choice in
-            sh) executable=/bin/sh ;;
-            bash) executable=/bin/bash ;;
+_agw_run_payload() {
+    local _agw_executable _agw_account _agw_assignment
+    if [[ $_agw_kind == script ]]; then
+        case $_agw_shell_choice in
+            sh) _agw_executable=/bin/sh ;;
+            bash) _agw_executable=/bin/bash ;;
             user_default)
-                account=$(/usr/bin/getent passwd "$(/usr/bin/id -u)") || fail
-                executable=${account##*:}
-                case $executable in
+                _agw_account=$(/usr/bin/getent passwd "$(/usr/bin/id -u)") || _agw_fail
+                _agw_executable=${_agw_account##*:}
+                case $_agw_executable in
                     /bin/sh|/usr/bin/sh|/bin/bash|/usr/bin/bash) ;;
-                    *) fail ;;
+                    *) _agw_fail ;;
                 esac
                 ;;
-            *) fail ;;
+            *) _agw_fail ;;
         esac
-        [[ -x $executable ]] || fail
+        [[ -x $_agw_executable ]] || _agw_fail
     else
-        [[ ${#args[@]} -gt 0 ]] || fail
+        [[ ${#_agw_args[@]} -gt 0 ]] || _agw_fail
     fi
-    [[ -z $directory ]] || cd -- "$directory" || fail
-    exec 5< <(printf '%s' "$source" | /usr/bin/base64 --decode)
-    exec 0< <(printf '%s' "$input" | /usr/bin/base64 --decode)
-    if [[ $kind == script ]]; then
-        set -- "$executable" /dev/fd/5
+    [[ -z $_agw_directory ]] || cd -- "$_agw_directory" || _agw_fail
+    exec 5< <(printf '%s' "$_agw_source" | /usr/bin/base64 --decode)
+    exec 0< <(printf '%s' "$_agw_input" | /usr/bin/base64 --decode)
+    if [[ $_agw_kind == script ]]; then
+        set -- "$_agw_executable" /dev/fd/5
     else
         exec 5<&-
-        set -- "${args[@]}"
+        set -- "${_agw_args[@]}"
     fi
-    assignments=()
-    for ((i=0; i<${#env_keys[@]}; i++)); do
-        assignments+=("${env_keys[i]}=${env_values[i]}")
+    _agw_assignments=()
+    for ((_agw_i=0; _agw_i<${#_agw_env_keys[@]}; _agw_i++)); do
+        _agw_assignments+=("${_agw_env_keys[_agw_i]}=${_agw_env_values[_agw_i]}")
     done
-    for _agw_assignment in "${assignments[@]}"; do
+    if [[ $_agw_inherited_lc_all_set == x ]]; then
+        export LC_ALL="$_agw_inherited_lc_all"
+    else
+        unset LC_ALL
+    fi
+    for _agw_assignment in "${_agw_assignments[@]}"; do
         export "$_agw_assignment" || {
             printf '%s F\n' "$_agw_token" >&7
             exit 125
@@ -130,21 +141,22 @@ run_payload() {
     exec "$@"
 }
 
-printf '%s B\n' "$token" >&7
-if [[ $sensitive == 1 ]]; then
-    (run_payload) >/dev/null 2>/dev/null
-    status=$?
+export -n -f _agw_fail _agw_line _agw_decode _agw_encode_stream _agw_run_payload
+printf '%s B\n' "$_agw_token" >&7
+if [[ $_agw_sensitive == 1 ]]; then
+    (_agw_run_payload) >/dev/null 2>/dev/null
+    _agw_status=$?
 else
-    exec 8> >(encode_stream O >&7)
-    out_pid=$!
-    exec 9> >(exec 8>&-; encode_stream E >&7)
-    err_pid=$!
-    (run_payload) >&8 2>&9
-    status=$?
+    exec 8> >(_agw_encode_stream O >&7)
+    _agw_out_pid=$!
+    exec 9> >(exec 8>&-; _agw_encode_stream E >&7)
+    _agw_err_pid=$!
+    (_agw_run_payload) >&8 2>&9
+    _agw_status=$?
     exec 8>&- 9>&-
-    wait "$out_pid" || fail
-    wait "$err_pid" || fail
+    wait "$_agw_out_pid" || _agw_fail
+    wait "$_agw_err_pid" || _agw_fail
 fi
-exit "$status"
+exit "$_agw_status"
 """,
 )
