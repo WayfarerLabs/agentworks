@@ -139,7 +139,8 @@ class _ProxmoxWire:
 class ProxmoxCarrier:
     """Deliver prepared ASCII bootstrap work through the QGA REST endpoints.
 
-    Completion establishes the bootstrap's exit, not a nested application's.
+    Completion records the submitted command's exit, not proof that the
+    bootstrap or application ran.
     Deadlines cover preparation, worker startup and each HTTP request. Stopping
     the local HTTP worker does not cancel a command already submitted to QGA.
     No status read is retried after failure: a terminal QGA read reaps its record.
