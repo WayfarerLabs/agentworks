@@ -1,7 +1,7 @@
 # SSH PoC Evidence
 
-Status: Buffered implementation and 95 local SSH tests pass. Full gates and private reviews are in
-progress; joint live acceptance is pending.
+Status: Buffered implementation and 98 local SSH tests pass; one native Windows status test is
+selected for Windows CI. Joint live acceptance is pending.
 
 ## Revisions and delivery
 
@@ -45,14 +45,26 @@ POSIX completion to 0 through 254, preserves other local statuses as unknown, an
 portable mapping regressions plus a native Windows process-status test. The complexity review found
 no blocking complexity; its repeated path-validation simplification and stale checkpoint sentence
 were corrected. After those changes, the focused SSH suite passes 98 tests with the one native
-Windows case skipped on Linux. The exact corrected head and follow-up review results belong in the
-PR handoff.
+Windows case skipped on Linux. All three lanes re-reviewed `e57e02e4` with no outstanding material
+findings. The full corrected suite passed with 10,170 passed and 8 skipped in 137.32 seconds. The PR
+handoff records subsequent evidence-only commits and hosted results.
 
-The repository file-lint gate currently fails solely on inherited transport-owned files at
+The repository file-lint gate on this pinned base fails solely on inherited transport-owned files at
 `81e5f6c3`: Prettier reports `cli/agentworks/execution/README.md` and
-`cli/tests/execution/README.md`, and cspell reports `asdict` twice in the latter. Markdown lint
-passes. These files are unchanged by SSH; transport #826 reports the same failing gate. This is an
-outstanding dependency, not a green-gate claim or authorization to edit the partner's artifacts.
+`cli/tests/execution/README.md`, and cspell reports the dataclass conversion helper name twice in
+the latter. Markdown lint passes. These files are unchanged by SSH. Transport subsequently fixed
+them at `5b9977de`; SSH has not imported that update yet.
+
+## Coordination hold
+
+Transport #826 was rebased and advanced to `5b9977de3411f55828c6e1203ca4da00520ee877` during SSH
+validation. In addition to bootstrap corrections and the README fixes, it removed `Failure.INPUT`
+and `Failure.OUTPUT` from the shared candidate. SSH uses those values to distinguish pipe failures.
+The current SSH head still pins `81e5f6c3`; combining it directly with the new transport candidate
+requires disposition of that incompatibility. The SSH lead recommends retaining both values and has
+escalated to the operator before changing the shared contract or silently remapping evidence. The PR
+remains draft without `review-requested` while that coordination is pending. No authorized external
+feedback/fix round has started.
 
 ## Outstanding acceptance
 
