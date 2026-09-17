@@ -11,7 +11,7 @@
 The required order is: settle the transport-owned small contract, prove it, reconcile both SDDs,
 build independently in parallel, validate complete workflows, then cut over and physically delete
 the old stack. The proof is a bounded joint slice, not permission to start the broad rebuild. This
-proof now has a transport-side implementation, local tests and a first joint live report. The
+proof now has a transport-side implementation, local tests and two joint live reports. The
 [proof evidence](proof-lld.md) separates measured cells from unresolved acceptance. No broad-build
 or production-cutover gate is completed by those measurements.
 
@@ -47,6 +47,12 @@ waive the production workload-lifecycle gate below or permit automatic replay.
       [evidence record](proof-lld.md) preserves gaps and does not declare joint acceptance.
 - [ ] Close the authorized feedback rounds and retest affected behavior at the final pinned
       transport/SSH combination, with independent cleanup evidence, before proof merge readiness.
+- [x] Obtain the second joint live report on 2026-09-17 at transport `d75c0bd3` and SSH `1c32e415`:
+      native TLS retesting, the Bash 5.1 floor and cleanup addendum are measured. The Windows SSH
+      failure remains unresolved; this is evidence collection, not proof acceptance.
+- [ ] Obtain explicit live destination-account default-shell evidence through both carriers, and the
+      reviewed SSH candidate's Windows disposition and affected-case retest. The eight shared
+      vectors alone do not exercise `Shell.user_default()` or establish Windows delivery.
 
 ## Parallel ownership without overlapping edits
 

@@ -59,9 +59,9 @@ are prerequisites to measure, not claims about every supported target.
 
 Bash 5.1 is the mechanism minimum for saving and waiting on each process-substitution PID;
 [the Bash maintainer's explanation](https://lists.nongnu.org/archive/html/bug-bash/2024-07/msg00044.html)
-distinguishes it from earlier, narrower wait behavior. Local tests measure Bash 5.2.15. Exact guest
-versions and older-version execution remain separate evidence, not inferred from executable presence
-or that upstream explanation.
+distinguishes it from earlier, narrower wait behavior. Local tests measure Bash 5.2.15. The second
+live report below separately measures Bash 5.1.16 with coreutils 8.32; compatibility is not inferred
+from executable presence or that upstream explanation.
 
 Application argv, script source, environment, directory and finite stdin travel in an ASCII input
 envelope. The bootstrap argv is fixed implementation source, not caller source or secret values.
@@ -147,10 +147,12 @@ the same vectors for the SSH and QGA constructions, then their fault-injection a
 lanes. Report transport-only results separately from combined-tree evidence. An affected code or
 contract change invalidates the corresponding prior observations and requires retesting.
 
-The first live report below establishes the measured native and SSH cells, not complete acceptance.
-Supported tool versions and shell startup combinations, identity/elevation, remaining fault and
-boundary cases, final cleanup evidence and the full joint matrix remain open. Live I/O is not
-implemented by the finite-input slice and cannot be enabled without its separate ownership proof.
+The live reports below establish the measured native and SSH cells, not complete acceptance. The
+second report closes the affected native trust retest and cleanup addendum, but adds a Windows SSH
+failure. The supported destination-account default-shell path still needs explicit live evidence:
+the eight shared vectors select only fixed interpreters. Broader shell/startup and
+identity/elevation coverage remains unproven. Live I/O is not implemented by the finite-input slice
+and cannot be enabled without its separate ownership proof.
 
 ### First live integration report (2026-09-17)
 
@@ -176,6 +178,42 @@ independence coverage. Those drive the first feedback round. The wider final cle
 addendum is requested: the GCP instance was still provisioning at report time. GCP, Windows carrier
 execution, WSL2, other guest shells, demoted QGA and multi-node Proxmox were not covered. No
 test-bed network/certificate mutation or new provisioning authority is inferred from the report.
+
+### Second live integration report (2026-09-17)
+
+The integration-testing lane's
+[complete retest](https://github.com/WayfarerLabs/agentworks/pull/826#issuecomment-5714595742)
+combines transport `d75c0bd3e699cfea3f5dcf40d2d34cb32c8bbe91` and unchanged SSH
+`1c32e4155c4a41304638d7637e1418459cc90092` at integrated `d3c300ba7e51c83ee53da4b76760451b33a49e98`,
+without conflicts or manual resolutions. The tester reports the same tree and 292 passing execution
+tests with one skip as the lead's local combined checkout. This is separate from the live
+observations:
+
+- All eight shared vectors passed on SSH Debian 13 and Ubuntu 22.04.5 destinations, and native
+  Debian 13 guests on PVE 8.4.21 and 9.2.11. Ubuntu supplies measured Bash 5.1.16/coreutils 8.32
+  evidence. Native execution remained root, not a demotion or permission-binding proof.
+- Actual cluster CA and matching certificate name succeeded on both PVE majors. System trust without
+  that CA, an unrelated CA, and a mismatched name each refused. The tester reached the real cluster
+  API through an SSH forward using the certificate's loopback SAN because its named DNS route was
+  stale. This proves the reported live TLS controls, not direct DNS reachability or multi-node
+  behavior; no server-name override or verification bypass was used.
+- Near-limit input, oversized refusal before dispatch, output truncation, already-elapsed deadlines,
+  interrupted observation and sensitive suppression passed in all four cells. The measured raw-input
+  sizes were composition-specific, not new universal limits.
+- The all-modules independence check included the combined SSH package. The report supplied final
+  cleanup evidence for guest processes and test resources, including the earlier GCP addendum. The
+  unrelated incomplete GCE metadata cleanup issue was reported to the operator.
+- Bounded workloads were observed finishing and draining their bootstrap trees after observation
+  ended. This narrows the earlier report's indefinite-survival wording; it does not establish
+  automatic cancellation, a reaper for unbounded work, or guaranteed cleanup for every workload.
+
+Three real Windows Server 2022 carrier attempts at this combined tree exhausted their 30-second
+deadlines with no completion, while manual SSH reached the target. Their `local_status=1` can arise
+from deadline cleanup; it does not prove the client exited before the deadline. The mechanism is
+unresolved in this report and belongs to the SSH owner. Hosted Windows tests do not establish real
+SSH delivery. Any corrected SSH candidate requires reviewed, pinned combined-tree retesting before
+joint proof acceptance. Windows success, WSL2, demoted QGA identity, additional account shells and
+multi-node Proxmox are not implied by the passing cells.
 
 ### Local fault-injection evidence (2026-09-17)
 

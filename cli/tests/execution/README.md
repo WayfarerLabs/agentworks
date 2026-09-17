@@ -62,6 +62,15 @@ initial slice refuses login/interactive startup. MacOS/Windows workstations, oth
 identity/elevation, live streams and terminals require their own evidence. An affected code or
 contract change requires retesting the corresponding observations.
 
+The eight vectors use fixed interpreters, not `Shell.user_default()`. Also exercise the supported
+destination-account default shell through each carrier. Independently record the destination UID and
+account-shell path, then prepare a harmless `/bin/cat` script with `Shell.user_default()`, finite
+binary stdin and `env={"SHELL": "/does/not/exist"}`. Require byte-exact output, complete guest
+streams, no framing/bootstrap failure, observed completion zero and no carrier failure. The invalid
+environment hint must not replace the real account lookup. The buffered proof supports sh/bash
+account paths only; do not change an account shell to manufacture a pass. Account startup hooks
+remain distinct from the requested script interpreter and need separately scoped evidence.
+
 Record exact guest Bash/coreutils versions, not just executable presence. Locally, the fault tests
 have measured Bash 5.2.15; a documented 5.1 minimum is not evidence of a 5.1 run. Near-limit input
 checks must account for the complete encoded envelope: 262,144 bytes at preparation, 65,536 for
