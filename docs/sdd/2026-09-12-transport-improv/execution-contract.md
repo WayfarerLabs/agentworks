@@ -14,6 +14,10 @@ feasibility still blocks proof acceptance, and requirement changes return to the
 implementation imports the legacy execution stack. Publishing this baseline precedes the proof and
 does not claim that the implementation boundary has been demonstrated.
 
+The [active proof LLD](proof-lld.md) records the buffered implementation subset, shared framing,
+native adapter placement and evidence gaps. The proposed public and live-I/O interfaces below are
+not claims that the initial proof package implements them.
+
 ## Caller contract
 
 Core and plugin consumers import public types from `agentworks.execution` and receive a scoped
