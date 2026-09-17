@@ -126,3 +126,24 @@ Acceptance remains open for SSH contribution/integration, live native evidence, 
 shell startup combinations, identity/elevation, strict deadline behavior, bounded live I/O and the
 full joint matrix. Record actual command results here when observed; do not convert pending items
 into passing claims because the carrier's local unit tests pass.
+
+### Local fault-injection evidence (2026-09-17)
+
+Python 3.14 CI exposed a race in the original decoder-kill fixture. A 100-run local reproduction
+selected the intended source decoder 61 times, a different decoder 38 times, and an already-exited
+decoder once. In that last case the signal interrupted no source delivery and the helper correctly
+returned zero, reproducing the CI assertion failure. Process traversal also observed disappearing
+`/proc` entries. This evidence did not demonstrate a production bootstrap defect.
+
+The repaired fixture pauses its own payload before further consumption, matches the producer's
+stdout to the intended source/input pipe, and uses a process handle to stop, verify and signal the
+same live process. It observes producer termination before resuming the payload. This replaces
+timing-based target selection without weakening the failure/partial-stream assertions or adding a
+production test hook. An unusually large pipe that can hold the entire fixture input is explicitly
+reported as an unsupported fault-injection case, not silently passed.
+
+The implementation lane measured 550 bounded cases each on Python 3.12.13 and 3.14.7: 400 targeted
+producer failures across source/stdin and inherited signal variants, 100 early stdin closes, 25
+early script exits and 25 sensitive early closes. All 1,100 cases passed; measured producer pipes
+held 65,536 bytes and none of these runs skipped the fault. These are local Linux fixture results,
+not SSH authentication, native QGA or live platform evidence.
