@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import os
+import shutil
+import socket
 import subprocess
 import sys
 import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from subprocess import Popen
+from threading import Thread
 from typing import Any
 
 import pytest
@@ -498,3 +502,77 @@ def test_descendant_output_handles_do_not_block_cleanup(
         while not done.exists() and time.monotonic() < until:
             time.sleep(0.01)
         assert done.exists()
+
+
+@pytest.mark.parametrize("inherited_mode", [None, "stdio", "descriptors"])
+def test_installed_ssh_owns_fresh_pipe_handles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, inherited_mode: str | None
+) -> None:
+    """Drive a real client to an owned local peer, before any authentication."""
+    if inherited_mode is not None and os.name != "nt":
+        pytest.skip("OpenSSH Windows process-private descriptor metadata")
+    executable = shutil.which("ssh")
+    if executable is None:
+        pytest.skip("Installed OpenSSH is unavailable")
+    if inherited_mode == "stdio":
+        monkeypatch.setenv("OPENSSH_STDIO_MODE", "nonsock")
+    elif inherited_mode == "descriptors":
+        # Windows OpenSSH's std_fd_state: zero extra handles, three async
+        # handles (type 2), and padding. Python creates synchronous pipes.
+        state = base64.b64encode(bytes((0, 0, 0, 0, 2, 2, 2, 0))).decode("ascii")
+        monkeypatch.setenv("c28fc6f98a2c44abbbd89d6a3037d0d9_POSIX_FD_STATE", state)
+    key = tmp_path / "identity"
+    trust = tmp_path / "known_hosts"
+    key.write_bytes(b"fixture identity; authentication is never reached")
+    trust.write_bytes(b"")
+    received: list[bytes] = []
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        listener.settimeout(10)
+
+        def refuse() -> None:
+            try:
+                connection, _ = listener.accept()
+                with connection:
+                    connection.settimeout(5)
+                    received.append(connection.recv(256))
+                    connection.sendall(b"SSH-2.0-agentworks-local-fixture\r\n")
+            except OSError:
+                # Main-thread assertions report missing connection or evidence.
+                return
+
+        peer = Thread(target=refuse)
+        peer.start()
+        try:
+            carrier = SSHCarrier(
+                SSHConnection(
+                    "127.0.0.1",
+                    "fixture",
+                    key,
+                    trust,
+                    port=listener.getsockname()[1],
+                    ssh_executable=executable,
+                )
+            )
+            report = carrier.execute(
+                PreparedInvocation(("true",)),
+                io=CarrierIO(input=FiniteInput(b"synthetic input")),
+                deadline=Deadline.after(5),
+            )
+            assert received and received[0].startswith(b"SSH-2.0-")
+            assert report.failure == Failure.OBSERVATION
+            assert report.local_status == 255
+            assert report.completion is None
+            assert report.stderr.data
+            assert report.stdout.complete and report.stderr.complete
+        finally:
+            # Wake accept even when the client refuses before connecting. Every
+            # peer operation and join is bounded and the fixture owns all sockets.
+            try:
+                with socket.create_connection(listener.getsockname(), timeout=1):
+                    pass
+            except OSError:
+                pass
+            peer.join(timeout=6)
+            assert not peer.is_alive()
