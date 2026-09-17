@@ -181,12 +181,12 @@ test-bed network/certificate mutation or new provisioning authority is inferred 
 
 The first feedback round adds malformed source/stdin cases that inspect decoded output and an actual
 fixture-file side effect, rather than looking for plaintext inside armored output. Removing either
-prevalidation causes its regression to fail. New encoder fault cases pin the stdout/stderr encoder
-by its input pipe, interrupt that owned process while the fixture payload is stopped, then resume a
-successful payload. Removing either encoder wait causes the corresponding regression to fail instead
-of accepting a successful helper exit.
+initial validation step causes its regression to fail. New encoder fault cases pin the stdout/stderr
+encoder by its input pipe, interrupt that owned process while the fixture payload is stopped, then
+resume a successful payload. Removing either encoder wait causes the corresponding regression to
+fail instead of accepting a successful helper exit.
 
-During stress, opening process handles for every descendant before filtering produced EINVAL on
+During stress, opening process handles for every descendant before filtering produced errno 22 on
 short-lived candidates. The revised fixture matches the owned argv, pipe and required state before
 opening a handle, then rechecks those criteria with the handle pinned. It does not suppress the
 error; its exact kernel cause was not established. The implementation lane's final Python 3.12.13
