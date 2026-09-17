@@ -5,6 +5,7 @@
 - Requirements: [FRD](frd.md)
 - Architecture: [HLA](hla.md)
 - Proposed interfaces and layout: [Execution contract](execution-contract.md)
+- Active proof implementation: [Proof LLD and evidence](proof-lld.md)
 
 The required order is: settle the transport-owned small contract, prove it, reconcile both SDDs,
 build independently in parallel, validate complete workflows, then cut over and physically delete
@@ -22,6 +23,13 @@ gives both efforts a common design reference; it does not pass the proof, comple
 the SDD. Proof-informed amendments follow through the same artifact owners. The transport lead owns
 the carrier contract and acceptance criteria; SSH supplies implementation and feasibility input, not
 a separately owned copy of that contract. Requirement changes still return to the operator.
+
+After #795 merged, the operator authorized transport-side PoC work in a new PR while the SSH owner
+updates its SDD. Both efforts start from the published contract, without another prerequisite
+design-only merge. Transport integrates one joint proof delivery with the SSH contribution; SSH's
+complete carrier implementation follows proof acceptance as a separate code delivery. The
+[proof LLD](proof-lld.md) records this first implementation's exact subset, placement and evidence
+gaps. None of the joint proof checkboxes below is completed by starting that work.
 
 ## Parallel ownership without overlapping edits
 
