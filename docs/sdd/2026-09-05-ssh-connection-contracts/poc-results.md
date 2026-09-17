@@ -1,0 +1,45 @@
+# SSH PoC Evidence
+
+Status: Buffered implementation and 95 local SSH tests pass. Full gates and private reviews are in
+progress; joint live acceptance is pending.
+
+## Revisions and delivery
+
+- Governing merged transport design: #795, `857110df`.
+- Transport candidate, preparation and shared vectors: #826,
+  `81e5f6c3141c3988df8fe36bd0460a6fffd8c10e`.
+- SSH implementation: #796, the commit carrying this record and subsequent reviewed corrections. The
+  PR handoff records the exact pushed head; live reports must record their tested SSH commit.
+- The operator explicitly confirmed that #796 carries design and the entire SSH PoC. The later
+  implementation PR completes this same SDD. Earlier feedback suggesting a separate design merge is
+  disposed by that direction.
+
+PR #796 is stacked on the actual transport code dependency. The operator's tester may combine both
+branches locally without either merging to main. Record transport SHA, SSH SHA, integrated SHA,
+installation revision and any conflict resolutions in each live report. The candidate contract
+remains transport-owned.
+
+## Evidence boundary
+
+The implementation uses explicit isolated policy and the shared buffered candidate without legacy
+execution imports. Local tests exercise synthetic children, real local pipes, actual shared
+preparation and its existing vectors. Installed OpenSSH option parsing is offline. Test-created
+files are temporary synthetic fixtures; no operator credentials, trust state or live targets are
+used. The [LLD](ssh-lld.md) and [test handoff](../../../cli/tests/execution/carriers/ssh/README.md)
+describe the measured surfaces and reproducible commands.
+
+Local toolchain observed: Linux workstation, Python 3.12.13, OpenSSH 9.2p1 Debian client. This is
+not a server inventory or a live compatibility result. macOS/Windows execution, minimum-version live
+behavior, platform-host and provider-inner clients, server/authentication combinations and
+initial-image prerequisites remain unmeasured here.
+
+## Outstanding acceptance
+
+The operator's integration tester owns the authorized live inventory, credentials, workload budget
+and cleanup checks. No live report exists in this record yet. Transport must evaluate the combined
+proof against its [authoritative plan](../2026-09-12-transport-improv/plan.md), including native
+delivery and cases beyond the current buffered candidate. An unsupported or missing case is a gap,
+not permission to defer a required PoC case to Phase 2.
+
+Record reports and dispositions here when available. Until then, the Phase 1 live-evidence and
+acceptance checkboxes remain open; no lockfile or production-readiness claim is made.

@@ -83,6 +83,7 @@ def test_ipv6_and_explicit_nondefault_port_are_preserved(connection: SSHConnecti
     assert argv[-7:-1] == ["-p", "2200", "-l", "account", "--", "::1"]
 
 
+@pytest.mark.windows
 def test_files_checked_at_operation_time_without_mutation(connection: SSHConnection, tmp_path: Path) -> None:
     with pytest.raises(ValidationError):
         validate_connection_files(connection)
@@ -138,6 +139,7 @@ def test_command_position_is_literal(connection: SSHConnection, tmp_path: Path, 
     assert observed.returncode == 17
 
 
+@pytest.mark.windows
 def test_installed_openssh_parses_isolated_policy(connection: SSHConnection, tmp_path: Path) -> None:
     ssh = shutil.which("ssh")
     if ssh is None:
