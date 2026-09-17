@@ -57,6 +57,13 @@ waive the production workload-lifecycle gate below or permit automatic replay.
       integrated head, and obtain affected macOS drain evidence or a precise case-level
       justification. Raw completion alone must not establish bootstrap or application execution.
 
+The final-candidate report at transport `6617f6e6` / SSH `1ccc304b` measures exit 37 with
+suppression in all six cells and fresh macOS live/local-pipe evidence. Its separate SSH-owned
+socket-fixture portability failure remains open until corrected and retested on macOS. The
+feedback-closeout and merge-readiness checkbox above remains incomplete; the detailed report and
+scope qualifications are in the
+[proof evidence](proof-lld.md#final-candidate-live-report-2026-09-17).
+
 ## Parallel ownership without overlapping edits
 
 After the shared seam and LLD gates, the lead may charter bounded migration packages against one

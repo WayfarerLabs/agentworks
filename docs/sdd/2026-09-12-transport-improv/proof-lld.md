@@ -95,7 +95,8 @@ The sensitive conformance case reflects synthetic input/output and deliberately 
 that distinctive exit alongside suppression rejects a shell that consumes input and exits zero
 before bootstrap. A local process regression exercises that refusal. This is controlled-case proof,
 not authentication against arbitrary shell startup behavior. Earlier live reports used the original
-zero-exit vector; the strengthened case requires fresh live measurement through both carriers.
+zero-exit vector; the final-candidate report below measures the strengthened case through both
+carriers.
 
 ## Native adapter placement
 
@@ -159,10 +160,11 @@ contract change invalidates the corresponding prior observations and requires re
 
 The live reports below establish the measured native and SSH cells, not complete acceptance. The
 later reports close the measured Windows failure and add explicit destination-account default-shell
-evidence, separately from the eight fixed-interpreter vectors. The strengthened sensitive vector and
-affected macOS drain behavior still require current evidence. Broader shell/startup and
-identity/elevation coverage remains unproven. Live I/O is not implemented by the finite-input slice
-and cannot be enabled without its separate ownership proof.
+evidence, separately from the eight fixed-interpreter vectors. The final-candidate report measures
+the strengthened sensitive vector and affected macOS drain behavior, while identifying an SSH-owned
+socket-fixture portability failure that still requires correction and retesting. Broader
+shell/startup and identity/elevation coverage remains unproven. Live I/O is not implemented by the
+finite-input slice and cannot be enabled without its separate ownership proof.
 
 ### First live integration report (2026-09-17)
 
@@ -263,6 +265,56 @@ do not establish login/interactive startup, arbitrary account hooks, WSL2, QGA d
 streams/terminals, Bookworm or multi-node behavior. Published requests for additional beds do not
 authorize this session to provision them. Bounded observed guest drains remain distinct from
 cancellation of unbounded work.
+
+### Final-candidate live report (2026-09-17)
+
+The [combined report](https://github.com/WayfarerLabs/agentworks/pull/796#issuecomment-5717455178)
+and [native companion](https://github.com/WayfarerLabs/agentworks/pull/826#issuecomment-5717456803)
+test transport `6617f6e6c025cdca76551fa44fe61e377da1df41` as an ancestor of SSH
+`1ccc304b339a22baeb0df8ef5a7534a3c9e6f8ec`. The SSH head is the combined tree; there was no merge or
+conflict resolution. The tester installed that tree and checked the new `reported_exit` feature on
+the remote workstations. The local Linux execution suite passed 296 tests with four skips.
+
+All eight current vectors passed in six cells: Linux aarch64 to Debian 13 and Debian 12 over SSH,
+macOS 26.3 arm64 to Debian 13 over SSH, both Windows Server 2022 launch contexts, and native QGA to
+a Debian 13 guest on PVE 9.2.11 as UID 0. Every sensitive case reported exit 37, no carrier failure,
+explicit suppression and zero retained stdout/stderr. This closes the changed-vector measurement
+gap, not the separate public-outcome or arbitrary-startup proof.
+
+MacOS used OpenSSH 10.2p1 and freshly passed authenticated byte preservation, output bounds, early
+input closure and deadlines. Its local execution suite reported 254 passed, 45 skipped and one
+failed. The failure was `test_agent_endpoint_is_explicit_and_must_be_a_socket`: its 133-byte fixture
+path exceeded the measured 103-byte Unix-socket limit. Binding failed before positive socket
+validation; non-socket refusal had already passed. SSH owns the fixture correction and affected
+macOS retest. This report does not establish a green macOS suite or coverage of its unnamed skips.
+The named local output-descendant and input-descendant tests have no macOS skip and fall within the
+reported passing cases; they are distinct from remote detached-child observations.
+
+Windows used Python 3.12.14 and the installed system OpenSSH 9.5p2 client. Both the SSH-parent and
+usable-identity clean launch passed the new vectors, exact bytes, bounds and deadlines. The earlier
+authenticated timeout remains resolved. Local cleanup status 1 after expiry, versus -9 on the
+measured POSIX workstations, does not identify an earlier natural client exit.
+
+The Bookworm destination adds Debian 12, Bash 5.2.15 and coreutils 9.1 compatibility evidence. It
+was provisioned outside Agentworks, and its key was initially pinned by trust on first use rather
+than independently authenticated acquisition. It is not evidence of Agentworks provisioning or
+strict initial trust. The earlier Ubuntu 22.04 Bash 5.1.16/coreutils 8.32 observation retains its
+original provenance; a few measured releases do not prove every version above the minimum.
+
+Native PVE 9 also preserved completion at the output cap, refused already-expired work before
+dispatch, and retained sent-but-uncompleted evidence when observation expired. PVE 8 was not rebuilt
+for this round. Its earlier delivery, TLS and bounds evidence carries forward for the unchanged
+native runtime; the changed shared vector was measured on PVE 9, not newly measured on PVE 8.
+Default-shell lookup retains the preceding report's SSH/PVE9 attribution. None of these results adds
+WSL2, provider-inner policy, demotion, multi-node, arbitrary account hooks, live streams or
+terminals.
+
+On a shared SSH destination, the tester observed ten bootstrap processes and two guest sleeps at 30
+seconds after deadline lanes, five and one at 60 and 90 seconds, and zero at 120 seconds. Earlier
+native and Bookworm deadline work was also gone when checked. This is observed drain of bounded
+work, not cancellation or a reaper. The reports record no carrier staging observed in destination
+`/tmp`, and independent provider-level cleanup of destinations, native guest/token, stopped beds and
+workstation access/scratch. No replay or new infrastructure authority follows from this evidence.
 
 ### Local fault-injection evidence (2026-09-17)
 
