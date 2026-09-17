@@ -159,8 +159,8 @@ The operator's integration-testing lane published reports on
 [#796](https://github.com/WayfarerLabs/agentworks/pull/796#issuecomment-5709203388). Installed input
 was SSH `1c32e4155c4a41304638d7637e1418459cc90092`, containing transport `a570a2de` as an ancestor,
 with Python 3.12.13 on aarch64 Linux. Transport `e3d93736` changed only tests/evidence, not shipped
-code. Later trust/bootstrap changes require affected-case retesting; the old report is not evidence
-for untested revised behavior.
+code. Later trust changes require affected-case retesting; the old report is not evidence for
+untested revised behavior.
 
 | Measured scope                                                                                             | Reported observation                                                                                                                       |
 | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -178,6 +178,30 @@ execution, WSL2, other guest shells, demoted QGA and multi-node Proxmox were not
 test-bed network/certificate mutation or new provisioning authority is inferred from the report.
 
 ### Local fault-injection evidence (2026-09-17)
+
+The first feedback round adds malformed source/stdin cases that inspect decoded output and an actual
+fixture-file side effect, rather than looking for plaintext inside armored output. Removing either
+prevalidation causes its regression to fail. New encoder fault cases pin the stdout/stderr encoder
+by its input pipe, interrupt that owned process while the fixture payload is stopped, then resume a
+successful payload. Removing either encoder wait causes the corresponding regression to fail instead
+of accepting a successful helper exit.
+
+During stress, opening process handles for every descendant before filtering produced EINVAL on
+short-lived candidates. The revised fixture matches the owned argv, pipe and required state before
+opening a handle, then rechecks those criteria with the handle pinned. It does not suppress the
+error; its exact kernel cause was not established. The implementation lane's final Python 3.12.13
+and 3.14.7 runs each passed 200 producer faults, 200 encoder faults and 100 malformed-input cases,
+1,000 total with no skips. This refines test selection only, not bootstrap runtime or guest
+lifetime.
+
+The same round replaces native `verify_tls=False` with explicit CA trust and mandatory hostname
+checking. Local loopback HTTPS tests observe correct-CA/host success, wrong-CA/host refusal before
+HTTP dispatch, safe missing/invalid bundle failure, normal default trust and no ambient-trust
+fallback when an explicit bundle is selected. These are workstation TLS tests, not live cluster
+acceptance. A combined-checkout mutation adding a legacy import to the SSH package fails the new
+all-modules independence guard; the restored package passes.
+
+### Earlier decoder-selection repair
 
 Python 3.14 CI exposed a race in the original decoder-kill fixture. A 100-run local reproduction
 selected the intended source decoder 61 times, a different decoder 38 times, and an already-exited
