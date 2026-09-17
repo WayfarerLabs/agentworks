@@ -1,6 +1,6 @@
 # Transport Improvements: High-Level Architecture
 
-- Status: Revised draft for operator review
+- Status: Design baseline for publication; implementation remains unproven
 - Requirements: [FRD](frd.md)
 - Supporting work: [Prior art](prior-art-research.md), [migration](migration-strategy.md),
   [proposed contract and package layout](execution-contract.md), [plan](plan.md)
@@ -403,6 +403,11 @@ effort's owned artifacts or a claim that the seam is already proven. This supers
 consolidated legacy SSH internals; both efforts must incorporate proof findings into their designs
 before broad parallel implementation begins.
 
+The transport lead owns the carrier contract and acceptance criteria. SSH owns implementation and
+provides feasibility evidence; consultation does not divide contract ownership. Transport publishes
+contract amendments, while requirement changes return to the operator. The initial baseline can land
+on `main` before proof; later reconciliation records what the proof actually establishes.
+
 | Responsibility                                                                                         | Owner                                         |
 | ------------------------------------------------------------------------------------------------------ | --------------------------------------------- |
 | Explicit SSH endpoint, user, identity, agent selection, trust and trust migration                      | SSH effort (#796)                             |
@@ -439,9 +444,10 @@ weaken trust checks.
 
 The order is mandatory: settle the small seam, prove it, reconcile both SDDs, build in parallel,
 validate complete workflows, then cut over and delete. The [plan](plan.md) owns the gate criteria.
-Only the bounded proof precedes reconciliation; broad adapter/helper development waits. The current
-checkpoint performs the operator-authorized artifact feedback rounds. The effort mandate remains the
-complete build, migration and deletion; live proof still needs a concrete isolated test charter.
+Only the bounded proof precedes proof-informed reconciliation; broad adapter/helper development
+waits. The current PR publishes the operator-authorized design baseline, not proof results. The
+effort mandate remains the complete build, migration and deletion; live proof still needs a concrete
+isolated test charter.
 
 Use the destination package structure for the new stack, with development/test composition roots
 that exercise its contracts while production factories and `RunContext` retain the old stack. Use an
@@ -461,8 +467,8 @@ after physical deletion of those modules. A compatibility facade that reaches ba
 an acceptable intermediate implementation of the new stack.
 
 This permits development coexistence without a released old/new selector or two plugin execution
-APIs. The current PR remains a design checkpoint; implementation landing units are decided in the
-plan after the dependency and complete-cutover scope are known.
+APIs. The current PR publishes design only; implementation landing units are decided in the plan
+after the dependency and complete-cutover scope are known.
 
 ## Alternatives and remaining decisions
 

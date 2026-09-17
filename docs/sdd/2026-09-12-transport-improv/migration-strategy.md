@@ -1,6 +1,6 @@
 # Transport Improvements: Migration Outline
 
-- Status: Revised draft; contract proof, design reconciliation, parallel build, complete cutover
+- Status: Design baseline; contract proof, design reconciliation, parallel build, complete cutover
 - Baseline: v0.19.0, `e440a28c49935df722e4e80685ef12f6d8247ff8`, inspected 2026-09-16
 - Release delta reviewed: `7c744828..e440a28c`; file helpers, artifacts, harness facets and session
   lifecycle
@@ -91,11 +91,12 @@ Tests use the real tmux paths and never substitute an invented event-pipe workfl
 
 ## Parallel build after the proof gate
 
-The [design and delivery plan](plan.md) owns the mandatory sequence and proof matrix. First agree
-and prove the small shared contract, then incorporate findings into both efforts' artifacts. Broad
-parallel implementation starts only after that gate, not while stream separation or shell bootstrap
-is being independently improvised. The OpenSSH 8.5 floor and its applicable locations are recorded
-before proof acceptance. The proof is not full-platform acceptance or a production cutover.
+The [design and delivery plan](plan.md) owns the mandatory sequence and proof matrix. First specify
+and prove the transport-owned contract with SSH implementation input, then incorporate findings into
+both efforts' artifacts. Broad parallel implementation starts only after that gate, not while stream
+separation or shell bootstrap is being independently improvised. The OpenSSH 8.5 floor and its
+applicable locations are recorded before proof acceptance. The proof is not full-platform acceptance
+or a production cutover.
 
 Build the destination execution stack in separate modules while the old production path remains
 operational. New internal entry points and test composition roots exercise common requests/results,
@@ -161,10 +162,11 @@ shell-policy coverage, and supported workstation/platform live evidence. Missing
 operator disposition; a successful SSH fixture alone cannot satisfy it.
 
 Implementation can use successive commits and internal test harnesses on its feature branch. The
-current delivery remains a draft design PR. The default implementation landing unit contains the new
-stack and complete cutover together; splitting it later requires independently complete units and an
-explicit removal point. Temporary coexistence during development is not a promise to release two
-public APIs or a runtime selection flag.
+current delivery publishes the reviewed design baseline before proof, without claiming a proven
+implementation boundary. The default implementation landing unit contains the new stack and complete
+cutover together; splitting it later requires independently complete units and an explicit removal
+point. Temporary coexistence during development is not a promise to release two public APIs or a
+runtime selection flag.
 
 ## Existing jobs and compatibility
 

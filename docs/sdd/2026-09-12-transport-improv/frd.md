@@ -1,6 +1,6 @@
 # Transport Improvements: Functional Requirements
 
-- Status: Revised draft for operator review; implementation is not authorized by this document.
+- Status: Design baseline for publication; implementation acceptance remains unproven.
 - Started: 2026-09-12
 - Effort: `transport-improv`
 - Companion: [High-level architecture](hla.md)
@@ -48,9 +48,10 @@ feedback rounds after rebasing onto that release. The operator also removes FIFO
 initial contract: current session objects are tmux sockets, whose directories and controlled cleanup
 remain in scope.
 
-The requirements below are proposed details of that direction, pending review. The current
-deliverable is a draft PR for design discussion, not completion of the effort's build/migration
-mandate. It changes no runtime behavior.
+The operator now directs publication of the reviewed design baseline before the proof, with the
+transport lead owning the carrier contract and its acceptance criteria. The current deliverable is
+that design baseline, not completion of the effort's build/migration mandate. It changes no runtime
+behavior and leaves proof, detailed design and implementation acceptance open.
 [Issue #788](https://github.com/WayfarerLabs/agentworks/issues/788) and the now-closed
 [PR #789](https://github.com/WayfarerLabs/agentworks/pull/789) remain historical input.
 

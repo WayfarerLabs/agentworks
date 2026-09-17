@@ -1,20 +1,27 @@
 # Transport Improvements: Design and Delivery Sequence
 
-- Status: Revised draft; 2026-09-16 authorization covers up to two artifact feedback/fix rounds
-- Delivery vehicle: Draft PR #795 for design review, labeled `sdd:transport-improv`
+- Status: Design baseline for publication; proof and implementation gates remain open
+- Delivery vehicle: PR #795 for early design publication, labeled `sdd:transport-improv`
 - Requirements: [FRD](frd.md)
 - Architecture: [HLA](hla.md)
 - Proposed interfaces and layout: [Execution contract](execution-contract.md)
 
-The required order is: agree on the small contract, prove it, reconcile both SDDs, build
-independently in parallel, validate complete workflows, then cut over and physically delete the old
-stack. The proof is a bounded joint slice, not permission to start the broad rebuild. This revision
-runs no prototype or live test and claims no implementation completion. All gates below remain open.
+The required order is: settle the transport-owned small contract, prove it, reconcile both SDDs,
+build independently in parallel, validate complete workflows, then cut over and physically delete
+the old stack. The proof is a bounded joint slice, not permission to start the broad rebuild. This
+revision runs no prototype or live test and claims no implementation completion. All gates below
+remain open.
 
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the current baseline. `NativeFiles` is
 retired, while useful domain behavior and evidence are preserved through direct RunContext access.
+
+The operator directs publication of this reviewed baseline to `main` before the proof. Publication
+gives both efforts a common design reference; it does not pass the proof, complete an LLD or freeze
+the SDD. Proof-informed amendments follow through the same artifact owners. The transport lead owns
+the carrier contract and acceptance criteria; SSH supplies implementation and feasibility input, not
+a separately owned copy of that contract. Requirement changes still return to the operator.
 
 ## Parallel ownership without overlapping edits
 
@@ -36,11 +43,12 @@ integrates changes to common types and the production composition switch. Indepe
 migration work can proceed in parallel without releasing two public stacks or moving final removal
 out of this effort. Refresh the inventory again at each integration boundary.
 
-## 1. Agree on the small contract and proof charter
+## 1. Specify the small contract and proof charter
 
-- [ ] Agree on `PreparedInvocation`, the single input choice in `CarrierIO`, stream ownership,
-      failure behavior and `CarrierReport`. Done when both efforts use the same proposed values,
-      single-attempt semantics and proof expectations rather than independently inventing them.
+- [ ] Specify `PreparedInvocation`, the single input choice in `CarrierIO`, stream ownership,
+      failure behavior and `CarrierReport`, with SSH implementation input. Done when transport
+      publishes one candidate contract and acceptance matrix for both efforts to use, including
+      single-attempt semantics and explicit treatment of unresolved feasibility questions.
 - [ ] Record the OpenSSH 8.5 minimum's applicable binaries/locations and server compatibility in the
       SSH-owned design. Include workstation, platform-host and provider-inner invocation sites; no
       version requirement may be silently assumed from another hop's client.
@@ -78,9 +86,9 @@ execution modules. This is not a full file/job implementation or a preliminary l
 - [ ] Incorporate proof findings into this SDD and have the SSH owner reconcile #796's independent
       carrier design against the same proven contract. #796 supersedes #757; no legacy consolidation
       precedes the rebuild. Each effort edits only its own artifacts.
-- [ ] Review and publish matching design revisions before broad parallel work. The current draft is
-      a review vehicle; artifact promotion/merge requires operator direction. Record the common
-      contract revision and evidence both efforts will build against.
+- [ ] Review and publish proof-informed design revisions before broad parallel work. Record the
+      transport-owned contract revision and evidence both efforts will build against. Publishing the
+      initial baseline in #795 does not satisfy this post-proof gate.
 - [ ] Complete execution/context and file/job LLDs: shell/startup combinations, no-staging
       readiness, bootstrap tools, bounded transfer/path policy, jobs/cancellation/retention and
       stale records. Preserve macOS host jobs before guest creation. Establish remaining

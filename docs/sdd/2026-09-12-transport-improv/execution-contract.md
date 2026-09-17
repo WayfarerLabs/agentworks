@@ -1,14 +1,18 @@
 # Transport Improvements: Proposed Contract and Package Layout
 
-- Status: Design proposal for operator and SSH-developer review, not a shipped API
+- Status: Design baseline for publication, not a shipped or proven API
 - Governing requirements: [FRD](frd.md), especially R2-R6, R9-R11
 - Architecture and ownership: [HLA](hla.md)
 
 This is the proposed implementation boundary for parallel work. It gives concrete interface shapes
-without claiming the shell bootstrap, file transfer, or job protocol LLDs are complete. Agree on
-this seam, then pass the [small-contract proof gate](plan.md) before broad parallel implementation.
-The transport effort owns the common contracts; the SSH effort owns its new carrier implementation.
-Neither imports the legacy execution stack.
+without claiming the shell bootstrap, file transfer, or job protocol LLDs are complete. Transport
+settles this seam with SSH implementation input, then the efforts pass the
+[small-contract proof gate](plan.md) before broad parallel implementation. The transport lead is the
+sole owner of the carrier contract and acceptance criteria. SSH owns its new carrier implementation
+and raises feasibility concerns to transport; it does not maintain a second contract. Unresolved
+feasibility still blocks proof acceptance, and requirement changes return to the operator. Neither
+implementation imports the legacy execution stack. Publishing this baseline precedes the proof and
+does not claim that the implementation boundary has been demonstrated.
 
 ## Caller contract
 
