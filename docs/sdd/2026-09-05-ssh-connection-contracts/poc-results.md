@@ -9,7 +9,7 @@ actual workstation retest; combined acceptance remains open. This is not product
 ## Revisions and delivery
 
 - Governing merged transport design: #795, `857110df`.
-- Current transport candidate: #826, `6617f6e6c025cdca76551fa44fe61e377da1df41`.
+- Current transport candidate: #826, `e41a44827e8e283a4b9fe3369224ef41c42a95a5`.
 - SSH implementation: #796. The PR handoff records the exact pushed head for each review.
 - First live run: SSH and integrated SHA `1c32e4155c4a41304638d7637e1418459cc90092`, containing
   transport `a570a2de3b30ed754cca7195fb932af25488673e`; no merge or conflicts were necessary.
@@ -255,8 +255,23 @@ It accepts the new live evidence with the qualifications above and fixes only th
 test's temporary path. The previous fixture failed locally under a deliberately long pytest base
 directory; the corrected test passes under that same base and leaves no owned socket directory. This
 Linux reproduction and correction do not substitute for the requested macOS retest. No carrier
-runtime or shared contract changes are included. One of four authorized fix rounds remains after
-this round's handoff; its exact head, private reviews and gate results belong in that handoff.
+runtime or shared contract changes are included.
+
+The first round-3 candidate, `00ed8354`, passed all local gates and private reviews. Hosted Windows
+[job 105297331787](https://github.com/WayfarerLabs/agentworks/actions/runs/35249288856/job/105297331787)
+then failed transport's unchanged default-trust test: its five-second deadline expired after the
+synthetic POST, before GET. The job reported 268 passed, 16 skipped and one failure; the other
+hosted jobs passed. The requested diagnostic rerun was unavailable to this session's token, not a
+second test outcome. Transport's
+[owned correction](https://github.com/WayfarerLabs/agentworks/pull/796#issuecomment-5718274104)
+gives that trust-test helper 30 seconds for two real worker starts and TLS/HTTP. Its controlled
+delayed-start experiment supports timing sensitivity without proving the exact Windows cause. Trust
+assertions, production deadlines and separate deadline-enforcement tests remain unchanged. SSH
+consumes the reviewed correction and transport's evidence update by rebasing onto `e41a4482`.
+
+One of four authorized fix rounds remains after this round's handoff; its exact head, private
+reviews and fresh combined gate results belong in that handoff. The failed job remains part of the
+evidence rather than being replaced by a later green result.
 
 ## Outstanding acceptance
 
