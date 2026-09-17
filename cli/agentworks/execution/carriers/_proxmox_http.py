@@ -48,10 +48,7 @@ def _request(payload: dict[str, Any]) -> bytes:
     request.add_header("Authorization", f"PVEAPIToken={connection['token_id']}={connection['token_secret']}")
     if body is not None:
         request.add_header("Content-Type", "application/json")
-    context = ssl.create_default_context()
-    if not connection["verify_tls"]:
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
+    context = ssl.create_default_context(cafile=connection["ca_bundle"])
     opener = urllib.request.build_opener(
         urllib.request.ProxyHandler({}),
         urllib.request.HTTPSHandler(context=context),
