@@ -1,10 +1,9 @@
 # Independent SSH Carrier: Migration Strategy
 
 - Status: Proposed transition, not a completed conversion or acceptance record
-- Updated: 2026-09-16
+- Updated: 2026-09-17
 - Requirements: [frd.md](frd.md)
-- Shared cutover:
-  [transport migration at `6809827f`](https://github.com/WayfarerLabs/agentworks/blob/6809827f64fb288880167fe2a4d9d7b42e29a21e/docs/sdd/2026-09-12-transport-improv/migration-strategy.md)
+- Shared cutover: [transport migration](../2026-09-12-transport-improv/migration-strategy.md)
 
 ## Baselines and destination
 
@@ -25,10 +24,24 @@ session cleanup expand the transport-owned migration inventory.
 | Application wrappers, results/logging, files and detached helpers | Shared execution semantics owned by transport, not copied into a new SSH-specific API.                                                |
 | Lima host commands and provider-inner delivery                    | Platform-owned consumers of reusable SSH policy, not SSH configuration or special cases.                                              |
 
-There is no preliminary legacy consolidation release. Build the replacement independently after the
-joint proof and design reconciliation, validate internal workflows, then switch production and
+There is no preliminary legacy consolidation release. Complete the independent replacement in Phase
+2 after the joint proof and reconciliation, validate internal workflows, then switch production and
 physically remove the old execution stack in the transport-owned cutover. Do not introduce a
 permanent bridge, runtime old/new selector, or a second mutation for comparison.
+
+## Phase boundaries
+
+PR #796 carries the complete SSH PoC and these artifacts. It uses isolated explicit connection and
+trust inputs and exercises the transport-defined proof without migrating production callers or
+operator state. The second SSH PR implements the complete connection/trust transition and remaining
+carrier behavior after proof acceptance. Both phases belong to this SDD; there is no intervening SSH
+design-only merge.
+
+Transport owns the common implementation and production cutover dependencies. Stack on those
+branches when they are actual dependencies, using pinned revisions for proof and workflow evidence.
+Before a phase is ready to merge, its dependency must be available in the landing order and the
+combined state must pass its gates. This does not permit a second public execution stack or a leaf
+implementation handoff that silently drops cutover obligations.
 
 ## Configuration shape and compatibility
 
@@ -109,8 +122,8 @@ validation. SSH supplies its migration and isolation evidence; it does not claim
 complete that cross-stack cutover on its own. Include current native artifact publication,
 inspection, retirement and session restore/cleanup in that inventory. Preserve ownership records and
 partial-failure checkpoints while replacing their command/copy calls with shared execution and file
-operations. The later file-only slice precedes broader file-consumer migration, while the small
-carrier proof still precedes independent SSH implementation.
+operations. The later file-only slice precedes broader file-consumer migration, while the Phase 1
+carrier proof still precedes the full Phase 2 SSH implementation.
 
 ## Required evidence
 

@@ -1,10 +1,9 @@
 # Independent SSH Carrier: Functional Requirements
 
-- Status: Revised design; joint proof and new implementation remain uncompleted
-- Updated: 2026-09-16
+- Status: Two-phase delivery; PoC and full implementation remain uncompleted
+- Updated: 2026-09-17
 - Architecture: [hla.md](hla.md)
-- Coordination:
-  [transport proposal at `6809827f`](https://github.com/WayfarerLabs/agentworks/tree/6809827f64fb288880167fe2a4d9d7b42e29a21e/docs/sdd/2026-09-12-transport-improv)
+- Coordination: [transport design](../2026-09-12-transport-improv/hla.md)
 
 ## Purpose and direction
 
@@ -18,8 +17,14 @@ owns common execution semantics, applying SSH policy in platform/provisioning pa
 production/plugin cutover followed by physical deletion of the old stack. This serves
 [isolation #745](https://github.com/WayfarerLabs/agentworks/issues/745) and
 [consolidation #740](https://github.com/WayfarerLabs/agentworks/issues/740) through replacement, not
-a preliminary migration of legacy callers. This revision changes artifacts only; it does not run the
-proof, authorize broad implementation, or claim the shared contract is proven.
+a preliminary migration of legacy callers.
+
+Delivery under this SDD has two phases: PR #796 carries the entire SSH portion of the joint PoC with
+these artifacts; the second SSH PR carries full implementation and its integration/retirement
+obligations. There is no separate SSH design PR to merge. The current artifact checkpoint requests
+feedback before PoC implementation and does not claim proof completion. Transport is the sole owner
+of the carrier contract and acceptance criteria; SSH contributes implementation and feasibility
+input. The [plan](plan.md) defines phase gates without maintaining a second shared contract.
 
 ## R1. Independent, reusable SSH delivery
 
@@ -73,29 +78,22 @@ previously trusted identity or applicable CA policy, not automatic acceptance at
 
 ## R4. One attempt, byte-safe I/O and truthful evidence
 
-Implement the shared carrier contract owned by transport. Input has one home in CarrierIO: EOF,
-finite source, live source or terminal. Borrow caller streams without closing them; close owned
-pipes, stop pumps and restore terminal state before returning or propagating interruption. Meet
-bounded flow control, cancellation and source/sink failure behavior without hidden input replay.
+Implement the
+[transport-owned carrier contract](../2026-09-12-transport-improv/execution-contract.md#carrier-contract),
+including its input/stream ownership, sensitivity, deadline, one-attempt delivery and evidence
+rules. Those rules and the transport FRD remain the source of truth for shared execution semantics.
+SSH consumes the shared types directly and never weakens them to accommodate installed-client
+limits.
 
-Preserve raw bytes and explicit output completeness; decoding belongs above the carrier. Honor the
-effective sensitivity and authorized live presentation supplied by shared preparation. Payloads must
-not leak through process arguments, diagnostics, exceptions or retained artifacts. Application
-script source and stdin remain separate; transport owns preparing their delivery and public output
-suppression, while SSH enforces the resulting carrier I/O policy.
+The SSH binding must preserve bytes and expose only evidence the installed client actually supplies.
+Mixed client/guest stderr cannot become pure guest output by relabeling it, status 255 alone cannot
+establish a connection drop, and local process cleanup cannot establish remote cancellation.
+Preparation and public result interpretation remain transport-owned. Unresolved feasibility returns
+to transport before proof acceptance; requirement changes return to the operator.
 
-Each execute call makes at most one dispatch attempt and uses the remaining shared deadline without
-resetting it. Report dispatch/completion evidence, local status, observed guest status and output
-provenance separately. Status 255 or stderr wording alone does not prove a connection drop. Local
-cleanup does not prove remote cancellation. Nested host completion does not establish inner guest
-completion. Source/sink failure retains safe partial evidence; interruption propagates after
-cleanup.
-
-The proof must establish the public distinct-guest-stream contract through shared preparation and
-SSH delivery, including no-staging readiness. Do not relabel mixed client/guest stderr as pure guest
-output. Unknown outcomes remain unknown; no SSH completion-envelope protocol, reconnect manager,
-pool, mux implementation or new SSH library is implied. AsyncSSH remains excluded. Shared managed
-jobs and later observation belong to transport, not a second SSH-specific job implementation.
+No SSH-specific completion-envelope protocol, reconnect manager, pool, mux implementation or new SSH
+library is implied. AsyncSSH remains excluded. Shared managed jobs and later observation belong to
+transport, not a second SSH-specific job implementation.
 
 Explicit terminal and live-streaming behavior remain available for their supported workflows.
 Requested forwarding has an explicit lifetime and setup failure; inherited forwarding is disabled.
@@ -105,11 +103,13 @@ Preserve the stdin/terminal guarantees of
 
 ## R5. Proof, integration and acceptance
 
-Agree on the small contract and authorized proof resources, demonstrate the joint buffered SSH slice
-and bounded real QGA case, then incorporate findings into both SDDs before broad parallel work.
-Transport owns preparation, outcomes and the proof harness; SSH owns its connection/delivery
-portion. The [plan](plan.md) tracks our obligations without claiming the other effort's work is
-done.
+Use the transport-owned
+[joint PoC definition](../2026-09-12-transport-improv/plan.md#2-prove-the-shared-boundary-before-broad-implementation)
+and its prerequisites as the single acceptance matrix. Phase 1 delivers all SSH implementation,
+fixtures and observed evidence required by that definition, integrated with transport's preparation,
+outcomes and proof harness. Transport owns the non-SSH proof and the combined acceptance record. SSH
+records its findings and reconciles this SDD against the transport-owned proven revision before
+Phase 2 begins. The [plan](plan.md) tracks our work without declaring the other effort's work done.
 
 New-stack tests must work with legacy execution modules unavailable. Final acceptance additionally
 requires complete production workflows after physical retirement under the transport-owned cutover.

@@ -1,10 +1,11 @@
-# SSH Design Comparison with Current Main
+# SSH Design Comparison with the Production Baseline
 
 - Inspected: 2026-09-16
 - Production baseline: `e440a28c49935df722e4e80685ef12f6d8247ff8`
 - Original design base: `7c744828`
 - SSH design before this revision: `2494f6e2` (PR #796)
 - Companion proposal: `6809827f64fb288880167fe2a4d9d7b42e29a21e` (PR #795)
+- Reconciled: 2026-09-17 against merged transport baseline `857110df` (content `7228e3a2`)
 - Scope: Source comparison and design revision; no runtime or joint-proof evidence
 
 ## Conclusion
@@ -13,8 +14,10 @@ The independent carrier and transport ownership split still fits current code. K
 `agentworks.execution.carriers.ssh` boundary and the proof-first sequence. The material drift is in
 execution consumers and the companion file contract, not a new production SSH implementation.
 
-Source anchors below refer to the pinned production baseline. Refresh them before cutover; this is a
-bounded comparison, not transport's complete caller or external-plugin inventory.
+Source anchors below refer to the pinned production baseline. The merge of #795 changes no runtime
+code relative to that snapshot. This document preserves comparison evidence, not a live transport
+contract or complete caller inventory. Phase 2 retires it after transferring every remaining risk's
+disposition to the plan or relevant LLD; transport refreshes its own inventory at integration.
 
 ## What is unchanged
 
@@ -56,15 +59,19 @@ independent-carrier or live proof evidence.
 
 ## Companion design reconciliation
 
-PR #795 at `6809827f` acknowledges #796 and adds a later file-only SSH/QGA slice for whole-file
-publication, privileged JSON updates, directory metadata and FIFO lifecycle. Core path/action grants
-and destination-side enforcement remain transport-owned. Its small buffered carrier proof remains
-first; the later slice gates wider file-consumer migration, not the independent SSH build.
+The original companion pin above records what the 2026-09-16 comparison inspected. The current
+reference is now the merged [transport design](../2026-09-12-transport-improv/hla.md), its
+[carrier contract](../2026-09-12-transport-improv/execution-contract.md#carrier-contract) and
+[PoC definition](../2026-09-12-transport-improv/plan.md#2-prove-the-shared-boundary-before-broad-implementation).
+Transport owns those definitions and acceptance criteria; SSH supplies implementation and
+feasibility input. This revision removes the mirrored file-operation inventory and bilateral
+contract-publication language identified in PR #796 feedback. Shared file semantics stay solely in
+transport's artifacts, including its later file-only acceptance slice.
 
-This revision pins the SSH references to that candidate, adds our delivery obligations for the later
-slice and removes the implication that finishing the entire file/job design gates SSH construction.
-It does not declare bilateral contract agreement or copy the file API into SSH. PR #795's artifacts
-remain with their owner.
+The operator directs two SSH implementation PRs: the complete SSH PoC in #796, then full
+implementation under this same SDD. The [plan](plan.md) replaces the earlier separate-design landing
+approach and records phase definitions of done. This artifact checkpoint has not passed the proof or
+changed production callers. PR #795's artifacts remain with their owner.
 
 ## Open risks and required disposition
 
@@ -80,7 +87,7 @@ remain with their owner.
    binding. Transport must design and verify a discovery path compatible with that policy before
    cutover; any necessary requirement change returns to the operator. Do not relabel the environment
    as ordinary or add an SSH-specific output exemption. This is a migration risk inferred from code
-   and the candidate contract, not an observed new-stack failure.
+   and the transport contract, not an observed new-stack failure.
 3. **Trust maintenance.** Copying trust files preserves a snapshot. The SSH LLD must name the
    authority and update path for subsequent CA rotations and revocations, coordinated with writer
    ownership and rollback. No automatic synchronization is assumed.
@@ -90,6 +97,6 @@ remain with their owner.
    bounded proof charter gate remains open; this comparison uses no operator credentials, hosts or
    trust stores.
 
-The [plan](plan.md) tracks these obligations at their proof, build or cutover gate. No architectural
-scope change is needed for the source comparison; unresolved behavior must be settled at the named
-gate rather than silently weakened during implementation.
+The [plan](plan.md) tracks these obligations within Phase 1 proof or Phase 2 implementation/cutover.
+No architectural scope change is needed for the source comparison; unresolved behavior must be
+settled at the named gate rather than silently weakened during implementation.

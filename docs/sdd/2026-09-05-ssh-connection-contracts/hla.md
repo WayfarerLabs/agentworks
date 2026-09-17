@@ -1,10 +1,10 @@
 # Independent SSH Carrier: High-Level Architecture
 
-- Status: Reconciled with current main and transport proposal; joint proof remains open
-- Updated: 2026-09-16
+- Status: SSH response to the merged transport baseline; PoC acceptance remains open
+- Updated: 2026-09-17
 - Requirements: [frd.md](frd.md)
 - Shared contract:
-  [transport proposal `6809827f`](https://github.com/WayfarerLabs/agentworks/blob/6809827f64fb288880167fe2a4d9d7b42e29a21e/docs/sdd/2026-09-12-transport-improv/execution-contract.md)
+  [transport-owned carrier contract](../2026-09-12-transport-improv/execution-contract.md#carrier-contract)
 
 ## Boundary and ownership
 
@@ -16,7 +16,7 @@ models, platform selection or legacy runners.
 | Owner                          | Responsibility                                                                                                                                    |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | SSH effort                     | Explicit connection/trust values and migration, isolated SSH/scp options, process delivery, keepalives and explicitly owned forwarding resources. |
-| Transport effort               | Shared contract/types, preparation, public outcomes/sensitivity policy, commands/files/jobs, other carriers and scoped RunContext delivery.       |
+| Transport effort               | Sole ownership of the carrier contract/acceptance criteria, shared types, preparation, public semantics, other carriers and RunContext delivery.  |
 | Transport/platform integration | Apply reusable SSH policy in host access, Lima/provisioning and provider-inner paths; own management commands and route/VM holds.                 |
 | Transport cutover              | All production/plugin caller migration, state-transition coordination, workflow acceptance and physical legacy deletion.                          |
 
@@ -24,10 +24,26 @@ Proposed SSH files are `connection.py`, `client.py`, `trust.py` and `forwarding.
 package, with exports in `__init__.py` and independent tests under
 `cli/tests/execution/carriers/ssh/`. These are responsibilities, not a class hierarchy. Optional SCP
 acceleration stays below shared file publication semantics; it is not required to prove the
-mandatory execute primitive. The later file-only SSH/QGA slice belongs to transport: core path and
-action grants, JSON updates, privileged publication and FIFO lifecycle stay above delivery. An
-optimization cannot bypass shared destination checks or expose command access to a file-only
-consumer.
+mandatory execute primitive. SSH supplies delivery and failure evidence for transport's
+[later file-only slice](../2026-09-12-transport-improv/plan.md#4-build-the-independent-stacks-in-parallel).
+Its operations, policy and acceptance criteria have one definition there. An optimization cannot
+bypass shared destination checks or expose command access to a file-only consumer.
+
+## Two-phase construction
+
+PR #796 delivers the complete SSH portion of the transport-defined PoC in the destination package,
+with independent fixtures and reproducible evidence through transport's harness. It exercises the
+real SSH binding without changing production factories, caller APIs or operator trust/configuration.
+Transport supplies the common contract, preparation and harness; SSH does not create temporary local
+copies of those components. If that code is not yet on main, use an explicit dependency on the
+transport PoC branch and integrate its pinned revision before accepting results.
+
+After the combined proof passes and each owner reconciles its artifacts, the second SSH PR extends
+the proven code to the full R1-R5 implementation, configuration/trust migration and workflow
+integration. It also removes or promotes any proof-only scaffolding under SSH ownership. Full
+implementation coordinates with transport's coherent production switch and physical deletion;
+completing a leaf package alone does not complete this SDD. The [plan](plan.md) owns the delivery
+checklists and definitions of done. Neither phase is a separately merged design-only PR.
 
 ## Connection and policy
 
@@ -65,22 +81,17 @@ client floor; server/authentication compatibility is separately recorded and tes
 
 ## Prepared delivery and I/O
 
-Use the shared PreparedInvocation, CarrierIO, Deadline and CarrierReport rather than cloning them
-into SSH. PreparedInvocation supplies literal bootstrap argv and a safe label, with no stdin field.
-CarrierIO is the sole input selector and carries output mode, sensitivity and authorized
-presentation. SSH serializes prepared argv through the supported account-shell bootstrap; it does
-not add application-shell, login, sudo, environment or directory policy a second time.
+Consume the leaf types from the transport-owned
+[carrier contract](../2026-09-12-transport-improv/execution-contract.md#carrier-contract) directly.
+That contract defines input selection, borrowed streams, cancellation, sensitivity, output and
+failure evidence; this document defines only the SSH implementation response. SSH serializes
+prepared argv through the supported account-shell bootstrap without adding application-shell, login,
+sudo, environment or directory policy a second time.
 
-The shared contract owns borrowed-stream and failure rules. SSH consumes once, drains concurrently
-with bounded buffering, handles short writes and EOF, and leaves no pump using borrowed streams
-after return. Owned processes/pipes and terminal state receive bounded cleanup. An I/O failure
-retains partial facts, not a successful overall result or a claim of guest termination.
-KeyboardInterrupt propagates so operation rollback still runs. Raw bytes are not newline-normalized.
-
-Carrier reports distinguish dispatch evidence, completion evidence, client status and observed guest
-status. Do not parse error prose into connection classification or retry after uncertain delivery.
-No SSH-specific completion envelope is planned. Shared job evidence may establish a later result;
-the carrier does not own job records or reconnect policy.
+Installed-client process/pipes and concurrent I/O pumps implement those rules with bounded cleanup.
+Do not parse diagnostic prose into a connection classification or retry uncertain dispatch. An SSH
+process exit supplies local evidence; shared preparation and result interpretation determine what
+can be concluded about the guest. No SSH-specific job records or completion envelope are introduced.
 
 The proof must settle guest stdout/stderr separation from client diagnostics, application source
 versus stdin delivery, account-shell startup effects and readiness without staging. Test installed
@@ -109,27 +120,29 @@ store.
 
 ## Independence and coordination gates
 
-The initial retirement set is `agentworks.transports`, `agentworks.ssh`, `agentworks.remote_exec`,
-`agentworks.harness_setup.runner` and `agentworks.plugins.proxmox.transport`. New code and tests
-cannot reach them through result/error/logger aliases, lazy imports or shared utilities. Audit
-retained utilities such as terminal restoration and identity parsing before reuse. Copy/adapt useful
-implementation with provenance; do not copy automatic replay or text-normalizing result semantics.
+Use transport's
+[independence and removal boundary](../2026-09-12-transport-improv/execution-contract.md#independence-and-removal-boundary)
+as the authoritative retirement set, including its newly explicit `agentworks.native_files` entry.
+New code and tests cannot reach retired modules through result/error/logger aliases, lazy imports or
+shared utilities. Audit retained utilities such as terminal restoration and identity parsing before
+reuse. Copy/adapt useful implementation with provenance; do not copy automatic replay or
+text-normalizing result semantics.
 
 Run isolated new-stack tests with retirement modules unavailable, including normal package imports.
 Transport later proves installed production entry points after physical deletion. Trust/config data
 has its own transition and rollback policy; deleting code never licenses deleting operator evidence.
 
-The [plan](plan.md) follows #795: agree on the small contract and charter, prove it jointly,
-reconcile both SDDs with observations, then build independently, validate workflows and cut over.
-The current comparison updates the candidate assignment; post-proof reconciliation remains required.
-Only the SSH owner edits these artifacts; common-contract amendments return to the transport owner.
+Transport specifies the carrier contract and acceptance criteria with SSH feasibility input. Phase 1
+proves that definition and incorporates findings into each owner's artifacts; Phase 2 implements the
+full SSH response and supports transport's cutover. Contract amendments go to transport; SSH never
+publishes a matching copy. Unresolved feasibility blocks proof acceptance even though the baseline
+is merged. Only the SSH owner edits these artifacts.
 
 ## Evidence and references
 
-The
-[transport prior-art record](https://github.com/WayfarerLabs/agentworks/blob/6809827f64fb288880167fe2a4d9d7b42e29a21e/docs/sdd/2026-09-12-transport-improv/prior-art-research.md)
-supplies shared execution research. No new library-selection study is required: installed OpenSSH is
-settled. Primary SSH references are [ssh](https://man.openbsd.org/ssh.1),
+The [transport prior-art record](../2026-09-12-transport-improv/prior-art-research.md) supplies
+shared execution research. No new library-selection study is required: installed OpenSSH is settled.
+Primary SSH references are [ssh](https://man.openbsd.org/ssh.1),
 [ssh_config](https://man.openbsd.org/ssh_config.5), [sshd](https://man.openbsd.org/sshd.8) and
 [8.5 release notes](https://www.openssh.org/releasenotes.html#8.5p1). They inform the design, not
 proof of our implementation, native path handling, provider-inner isolation or platform coverage.
