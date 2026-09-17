@@ -107,14 +107,12 @@ def build_ssh_argv(connection: SSHConnection, invocation: PreparedInvocation) ->
     checks. No option here steals input or introduces application shell policy.
     """
     options = [
+        # Authentication, trust and input overrides.
         "BatchMode=yes",
         "StrictHostKeyChecking=yes",
         "GlobalKnownHostsFile=none",
-        "KnownHostsCommand=none",
         "UpdateHostKeys=no",
         "CheckHostIP=no",
-        "VerifyHostKeyDNS=no",
-        "CanonicalizeHostname=no",
         "IdentitiesOnly=yes",
         # OpenSSH 8.5 treats CertificateFile=none as a relative filename:
         # https://github.com/openssh/openssh-portable/blob/V_8_5_P1/ssh.c#L2312-L2320
@@ -122,14 +120,20 @@ def build_ssh_argv(connection: SSHConnection, invocation: PreparedInvocation) ->
         # a certificate, including the loader's automatic .pub probe.
         f'CertificateFile="{(connection.identity_file / "disabled-certificate").as_posix()}"',
         "PreferredAuthentications=publickey",
-        "PKCS11Provider=none",
         "SecurityKeyProvider=none",
         "PasswordAuthentication=no",
         "KbdInteractiveAuthentication=no",
+        "ClearAllForwardings=yes",
+        "EscapeChar=none",
+        # Pin disabled features even when they match a client's defaults:
+        # isolation must hold across supported OpenSSH versions (8.5 and newer).
+        "KnownHostsCommand=none",
+        "VerifyHostKeyDNS=no",
+        "CanonicalizeHostname=no",
+        "PKCS11Provider=none",
         "HostbasedAuthentication=no",
         "ForwardAgent=no",
         "ForwardX11=no",
-        "ClearAllForwardings=yes",
         "Tunnel=no",
         "ProxyCommand=none",
         "ProxyJump=none",
@@ -137,8 +141,8 @@ def build_ssh_argv(connection: SSHConnection, invocation: PreparedInvocation) ->
         "ControlPath=none",
         "ControlPersist=no",
         "PermitLocalCommand=no",
-        "EscapeChar=none",
         "ConnectionAttempts=1",
+        # Explicit caller selections.
         f'IdentityFile="{connection.identity_file.as_posix()}"',
         f'UserKnownHostsFile="{connection.known_hosts_file.as_posix()}"',
         (

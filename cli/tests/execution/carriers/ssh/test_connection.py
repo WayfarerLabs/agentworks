@@ -140,6 +140,47 @@ def test_command_position_is_literal(connection: SSHConnection, tmp_path: Path, 
 
 
 @pytest.mark.windows
+def test_argv_explicitly_enforces_isolation_policy(connection: SSHConnection) -> None:
+    argv = build_ssh_argv(connection, PreparedInvocation(("true",)))
+    assert argv[argv.index("-F") + 1] == "none"
+    assert "-T" in argv
+    assert "-n" not in argv
+    options = {argv[index + 1] for index, arg in enumerate(argv) if arg == "-o"}
+    # Missing controls must fail even when ssh -G omits their disabled values
+    # or the installed client's defaults happen to match the required policy.
+    assert {
+        "BatchMode=yes",
+        "StrictHostKeyChecking=yes",
+        "GlobalKnownHostsFile=none",
+        "KnownHostsCommand=none",
+        "UpdateHostKeys=no",
+        "CheckHostIP=no",
+        "VerifyHostKeyDNS=no",
+        "CanonicalizeHostname=no",
+        "IdentitiesOnly=yes",
+        "PreferredAuthentications=publickey",
+        "PKCS11Provider=none",
+        "SecurityKeyProvider=none",
+        "PasswordAuthentication=no",
+        "KbdInteractiveAuthentication=no",
+        "HostbasedAuthentication=no",
+        "IdentityAgent=none",
+        "ForwardAgent=no",
+        "ForwardX11=no",
+        "ClearAllForwardings=yes",
+        "Tunnel=no",
+        "ProxyCommand=none",
+        "ProxyJump=none",
+        "ControlMaster=no",
+        "ControlPath=none",
+        "ControlPersist=no",
+        "PermitLocalCommand=no",
+        "EscapeChar=none",
+        "ConnectionAttempts=1",
+    } <= options
+
+
+@pytest.mark.windows
 def test_installed_openssh_parses_isolated_policy(connection: SSHConnection, tmp_path: Path) -> None:
     ssh = shutil.which("ssh")
     if ssh is None:
@@ -172,10 +213,12 @@ def test_installed_openssh_parses_isolated_policy(connection: SSHConnection, tmp
     assert settings["forwardagent"] in {"false", "no"}
     assert settings["clearallforwardings"] == "yes"
     assert settings["controlmaster"] in {"false", "no"}
+    # OpenSSH omits some disabled settings from -G output. Explicit presence
+    # is covered separately at the returned-argv boundary above.
     assert settings.get("controlpath", "none") == "none"
     assert settings.get("proxycommand", "none") == "none"
     assert settings.get("proxyjump", "none") == "none"
     assert settings.get("securitykeyprovider", "none") == "none"
     assert settings.get("pkcs11provider", "none") == "none"
+    assert settings.get("knownhostscommand", "none") == "none"
     assert settings.get("sendenv") is None
-    assert "-n" not in argv
