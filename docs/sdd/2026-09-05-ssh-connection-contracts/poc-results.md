@@ -3,19 +3,19 @@
 # SSH PoC Evidence
 
 Status: Live Linux/macOS evidence exists, and the original Windows timeout is resolved in both
-measured launch contexts. Completion-evidence clarification, affected macOS coverage and combined
-acceptance remain open. This is not production readiness.
+measured launch contexts. Live proof of the strengthened sensitive vector, affected macOS coverage
+and combined acceptance remain open. This is not production readiness.
 
 ## Revisions and delivery
 
 - Governing merged transport design: #795, `857110df`.
-- Current transport candidate: #826, `d75c0bd3e699cfea3f5dcf40d2d34cb32c8bbe91`.
+- Current transport candidate: #826, `6617f6e6c025cdca76551fa44fe61e377da1df41`.
 - SSH implementation: #796. The PR handoff records the exact pushed head for each review.
 - First live run: SSH and integrated SHA `1c32e4155c4a41304638d7637e1418459cc90092`, containing
   transport `a570a2de3b30ed754cca7195fb932af25488673e`; no merge or conflicts were necessary.
-- Later live run: the same SSH input plus current transport above, integrated as
-  `d3c300ba7e51c83ee53da4b76760451b33a49e98`, with no conflicts. This was a real merge, not the
-  earlier ancestor relationship carried forward.
+- Later live run: the same SSH input plus transport `d75c0bd3e699cfea3f5dcf40d2d34cb32c8bbe91`,
+  integrated as `d3c300ba7e51c83ee53da4b76760451b33a49e98`, with no conflicts. This was a real
+  merge, not the earlier ancestor relationship carried forward.
 - Windows retest: SSH and integrated SHA `901d9614181da0fb209e9896c8e747a44118d123`, containing
   transport `d75c0bd3`; the tester rechecked ancestry and installed the candidate on Windows.
 - Default-shell proof: SSH `901d9614` plus transport `6687ef88f2138c819600ff11fa777924f707d9d9`,
@@ -95,8 +95,11 @@ hooks or the same new lane on PVE 8.
 Account-shell refusal before bootstrap is different: measured tcsh/false accounts returned raw SSH
 status 1 while captured output had a framing error. The shared harness rejected those calls. Raw
 status alone cannot establish that bootstrap or application execution occurred, and suppressed
-output intentionally supplies no framing proof. Transport owns the corresponding evidence wording
-and stronger sensitive-vector regression; SSH must not supply a private framing oracle.
+output intentionally supplies no framing proof. The current transport candidate corrects the shared
+wording and strengthens the sensitive vector to require exit 37 after synthetic reflection, with a
+regression rejecting a pre-bootstrap zero. This improves the controlled proof, not authentication
+against arbitrary startup behavior. SSH consumes the renamed `reported_exit` observation without a
+private framing oracle.
 
 Both later runs measured 295 execution tests passed with four skips. The reports independently
 verified destination removal, temporary identities/access and tester-file cleanup, no live test
@@ -182,16 +185,17 @@ evidence, closes the original measured Windows case.
 The [second round](https://github.com/WayfarerLabs/agentworks/pull/796#issuecomment-5716704189)
 started after the full reports and review window, with the label removed before edits. It records
 the Windows resolution, distinguishes raw channel completion from bootstrap/application evidence,
-and consumes transport's reviewed harness correction when available. The
-[critical reading](https://github.com/WayfarerLabs/agentworks/pull/796#issuecomment-5716400569) also
-retains affected macOS coverage and other unmeasured cells as open evidence. Two of the four
+and consumes transport's
+[reviewed harness correction](https://github.com/WayfarerLabs/agentworks/pull/796#issuecomment-5717038529).
+The [critical reading](https://github.com/WayfarerLabs/agentworks/pull/796#issuecomment-5716400569)
+also retains affected macOS coverage and other unmeasured cells as open evidence. Two of the four
 authorized fix rounds remain after this round's handoff.
 
 ## Outstanding acceptance
 
-The corrected shared evidence boundary and sensitive vector, affected macOS drain behavior,
-unexercised workstation/platform combinations, account startup hooks, provider-inner client policy,
-demoted native identity, and the remainder of transport's matrix need measured evidence or explicit
+Live measurements of the strengthened sensitive vector, affected macOS drain behavior, unexercised
+workstation/platform combinations, account startup hooks, provider-inner client policy, demoted
+native identity, and the remainder of transport's matrix need measured evidence or explicit
 disposition. WSL2, multi-node Proxmox and Debian Bookworm were not exercised. Supported
 default-shell results above do not establish arbitrary account-shell compatibility. Live streams and
 terminals remain unavailable in the buffered candidate; required PoC cases cannot be silently

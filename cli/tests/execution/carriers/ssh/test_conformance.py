@@ -48,7 +48,7 @@ def test_shared_vectors_through_ssh_process_delivery(local_binding: SSHConnectio
     observations = check_buffered_contract(SSHCarrier(local_binding))
     ambiguous = next(row for row in observations if row.case == "exit-255")
     assert ambiguous.local_status == 255
-    assert ambiguous.prepared_exit is None
+    assert ambiguous.reported_exit is None
     assert ambiguous.streams_complete
     assert observations[-1].suppressed
 
