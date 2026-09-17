@@ -51,9 +51,17 @@ class ProxmoxConnection:
 
     def __post_init__(self) -> None:
         """Validate connection inputs supplied by the composition boundary."""
-        parsed = urllib.parse.urlsplit(self.api_url)
+        parsed = None
+        try:
+            candidate = urllib.parse.urlsplit(self.api_url)
+            port = candidate.port
+            if port is None or port > 0:
+                parsed = candidate
+        except ValueError:
+            pass
         if (
-            parsed.scheme != "https"
+            parsed is None
+            or parsed.scheme != "https"
             or not parsed.hostname
             or parsed.username is not None
             or parsed.password is not None

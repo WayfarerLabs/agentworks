@@ -77,6 +77,30 @@ def test_connection_rejects_unsafe_origin(url: str) -> None:
         ProxmoxConnection(url, "node1", 123, "token", "secret")
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://user:synthetic-secret@pve.example\uff1a8006",
+        "https://pve.example:synthetic-secret",
+        "https://pve.example:65536",
+        "https://pve.example:0",
+    ],
+)
+def test_invalid_origin_discards_parser_exception_graph(monkeypatch: pytest.MonkeyPatch, url: str) -> None:
+    network = MagicMock()
+    worker = MagicMock()
+    monkeypatch.setattr(urllib.request, "build_opener", network)
+    monkeypatch.setattr(subprocess, "Popen", worker)
+    with pytest.raises(ValidationError) as raised:
+        ProxmoxConnection(url, "node1", 123, "token", "synthetic-secret")
+    assert "synthetic-secret" not in str(raised.value)
+    assert "synthetic-secret" not in repr(raised.value)
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
+    network.assert_not_called()
+    worker.assert_not_called()
+
+
 @pytest.mark.parametrize("node,vmid", [("../node", 123), ("node/other", 123), ("node1", True), ("node1", 0)])
 def test_connection_rejects_ambiguous_vm_address(node: str, vmid: int) -> None:
     with pytest.raises(ValidationError):
