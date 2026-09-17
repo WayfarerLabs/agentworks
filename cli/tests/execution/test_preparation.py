@@ -76,6 +76,12 @@ def test_absent_input_is_eof_and_empty_script_succeeds() -> None:
     assert decoded.stdout_complete and decoded.stderr_complete
 
 
+def test_helper_pipeline_failure_option_does_not_change_application_shell() -> None:
+    status, decoded, _ = _run(prepare(Script("false | true", Shell.fixed("bash"))))
+    assert status == 0
+    assert decoded.stdout_complete and decoded.stderr_complete
+
+
 @pytest.mark.parametrize("code", [0, 1, 255])
 def test_bootstrap_returns_payload_status_without_encoding_a_completion_claim(code: int) -> None:
     status, decoded, _ = _run(prepare(Script(f"printf observed; exit {code}", Shell.fixed("sh"))))
@@ -116,6 +122,58 @@ def test_account_shell_is_resolved_at_destination_not_from_shell_environment() -
     else:
         assert status == 125
         assert decoded.bootstrap_failed
+
+
+@pytest.mark.parametrize("inherited", [None, "", "POSIX"])
+def test_internal_locale_does_not_change_payload_environment(inherited: str | None) -> None:
+    environment = dict(os.environ)
+    environment.pop("LC_ALL", None)
+    if inherited is not None:
+        environment["LC_ALL"] = inherited
+    prepared = prepare(Script('printf "%s:%s" "${LC_ALL+x}" "${LC_ALL-}"', Shell.fixed("sh")))
+    status, decoded, _ = _run(prepared, env=environment)
+    assert status == 0
+    assert decoded.stdout == (b":" if inherited is None else b"x:" + inherited.encode())
+
+
+def test_explicit_payload_locale_wins_over_inherited_and_internal_locale() -> None:
+    environment = {**os.environ, "LC_ALL": "C"}
+    prepared = prepare(Script('printf "%s" "$LC_ALL"', Shell.fixed("sh")), env={"LC_ALL": "POSIX"})
+    status, decoded, _ = _run(prepared, env=environment)
+    assert status == 0
+    assert decoded.stdout == b"POSIX"
+
+
+def test_inherited_exported_variables_keep_their_values_in_payload() -> None:
+    values = {name: f"inherited-{name}" for name in ("source", "input", "token", "args", "count", "decoded")}
+    prepared = prepare(Command(("/usr/bin/env", "-0")), stdin=b"application-input")
+    status, decoded, _ = _run(prepared, env={**os.environ, **values})
+    assert status == 0
+    entries = decoded.stdout.split(b"\0")
+    assert all(key.encode() + b"=" + value.encode() in entries for key, value in values.items())
+
+
+def test_inherited_reserved_exports_cannot_expose_helper_payload_or_functions() -> None:
+    reserved = (
+        "source",
+        "input",
+        "token",
+        "encoded",
+        "decoded",
+        "value",
+        "inherited_lc_all",
+        "inherited_lc_all_set",
+        "assignment",
+    )
+    environment = {**os.environ, **dict.fromkeys((f"_agw_{name}" for name in reserved), "inherited-value")}
+    environment["BASH_FUNC__agw_fail%%"] = "() { printf inherited-function; }"
+    canary = b"synthetic-input-canary"
+    prepared = prepare(Script("/usr/bin/env -0", Shell.fixed("bash")), stdin=canary)
+    status, decoded, _ = _run(prepared, env=environment)
+    assert status == 0
+    assert canary not in decoded.stdout
+    assert base64.b64encode(canary) not in decoded.stdout
+    assert not any(entry.startswith((b"_agw_", b"BASH_FUNC__agw_")) for entry in decoded.stdout.split(b"\0"))
 
 
 def test_no_staging_and_inherited_bash_env_does_not_run(tmp_path: Path) -> None:
