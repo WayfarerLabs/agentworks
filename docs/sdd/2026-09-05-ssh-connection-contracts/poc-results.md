@@ -7,7 +7,7 @@ selected for Windows CI. Joint live acceptance is pending.
 
 - Governing merged transport design: #795, `857110df`.
 - Transport candidate, preparation and shared vectors: #826,
-  `81e5f6c3141c3988df8fe36bd0460a6fffd8c10e`.
+  `2321c47fcc19cdfa7523f11af8bf667bd22a7590`.
 - SSH implementation: #796, the commit carrying this record and subsequent reviewed corrections. The
   PR handoff records the exact pushed head; live reports must record their tested SSH commit.
 - The operator explicitly confirmed that #796 carries design and the entire SSH PoC. The later
@@ -49,22 +49,22 @@ Windows case skipped on Linux. All three lanes re-reviewed `e57e02e4` with no ou
 findings. The full corrected suite passed with 10,170 passed and 8 skipped in 137.32 seconds. The PR
 handoff records subsequent evidence-only commits and hosted results.
 
-The repository file-lint gate on this pinned base fails solely on inherited transport-owned files at
-`81e5f6c3`: Prettier reports `cli/agentworks/execution/README.md` and
-`cli/tests/execution/README.md`, and cspell reports the dataclass conversion helper name twice in
-the latter. Markdown lint passes. These files are unchanged by SSH. Transport subsequently fixed
-them at `5b9977de`; SSH has not imported that update yet.
+## Dependency refresh
 
-## Coordination hold
+Transport restored `Failure.INPUT` and `Failure.OUTPUT` at `2321c47f`, retaining the distinctions
+used by SSH without changing SSH's evidence mapping. The operator confirmed the restoration and
+directed this effort to continue. SSH rebased its own commits onto that candidate without conflicts.
+The bootstrap now observes source/input producer failures and requires GNU env's
+`--default-signal=PIPE`; the shared vectors and independent import proof must pass again on the
+combined tree.
 
-Transport #826 was rebased and advanced to `5b9977de3411f55828c6e1203ca4da00520ee877` during SSH
-validation. In addition to bootstrap corrections and the README fixes, it removed `Failure.INPUT`
-and `Failure.OUTPUT` from the shared candidate. SSH uses those values to distinguish pipe failures.
-The current SSH head still pins `81e5f6c3`; combining it directly with the new transport candidate
-requires disposition of that incompatibility. The SSH lead recommends retaining both values and has
-escalated to the operator before changing the shared contract or silently remapping evidence. The PR
-remains draft without `review-requested` while that coordination is pending. No authorized external
-feedback/fix round has started.
+Transport fixed the earlier spelling and formatting findings. Its restoration commit introduced a
+new Prettier failure in `cli/agentworks/execution/README.md`, confirmed by its hosted lint job
+`105073346401`. That file remains transport-owned and unchanged by SSH. The current checks and exact
+handoff head will be recorded after the refreshed review and gates complete.
+
+No external feedback/fix round has started. The operator's allowance remains four rounds, each
+waiting for the full integration report before the next iteration.
 
 ## Outstanding acceptance
 

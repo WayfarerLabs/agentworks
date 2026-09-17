@@ -43,12 +43,13 @@ for observation in check_buffered_contract(carrier):
 ```
 
 The selected installed client must be OpenSSH 8.5 or newer. The initial shared vectors need Linux
-Bash/base64 and descriptor support on the destination; account-shell startup remains part of the
-live proof. The current candidate advertises neither live streams nor terminals. Run the same shared
-vectors against transport's native carrier, then its required fault and interruption lanes. Record
-workstation OS/client separately from VM platform/server, selected authentication/trust policy,
-measured prerequisites, gaps, and independent cleanup. Retain safe observation fields; do not
-publish credentials, key contents or raw sensitive diagnostics.
+Bash/base64, GNU env with `--default-signal=PIPE`, and descriptor support on the destination;
+account-shell startup remains part of the live proof. The current candidate advertises neither live
+streams nor terminals. Run the same shared vectors against transport's native carrier, then its
+required fault and interruption lanes. Record workstation OS/client separately from VM
+platform/server, selected authentication/trust policy, measured prerequisites, gaps, and independent
+cleanup. Retain safe observation fields; do not publish credentials, key contents or raw sensitive
+diagnostics.
 
 Failures remain evidence for the owners. In particular, local status 255 is ambiguous, strict trust
 failure does not authorize enrollment, and timeout does not confirm remote cancellation. Re-run

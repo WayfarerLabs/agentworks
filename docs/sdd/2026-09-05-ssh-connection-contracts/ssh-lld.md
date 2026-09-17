@@ -6,7 +6,7 @@ Status: Phase 1 implementation; joint live proof and Phase 2 remain open.
 
 `agentworks.execution.carriers.ssh.SSHCarrier` consumes the actual transport-owned types in
 `execution/carrier.py`. The implementation dependency is transport PR #826 at
-`81e5f6c3141c3988df8fe36bd0460a6fffd8c10e`. Its
+`2321c47fcc19cdfa7523f11af8bf667bd22a7590`. Its
 [proof LLD](../2026-09-12-transport-improv/proof-lld.md) describes the candidate buffered subset and
 the shared preparation experiment. This SSH implementation adds no contract types, framing,
 application-shell policy or outcome decoder. Production composition remains Phase 2.
