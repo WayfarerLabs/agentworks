@@ -1,16 +1,19 @@
 # Transport Improvements: Design and Delivery Sequence
 
-- Status: Design baseline for publication; proof and implementation gates remain open
-- Delivery vehicle: PR #795 for early design publication, labeled `sdd:transport-improv`
+- Status: Joint buffered PoC accepted; design reconciliation and production gates remain open
+- Delivery vehicle: Merged design PR #795, followed by transport PoC PR #826, labeled
+  `sdd:transport-improv`
 - Requirements: [FRD](frd.md)
 - Architecture: [HLA](hla.md)
 - Proposed interfaces and layout: [Execution contract](execution-contract.md)
+- Active proof implementation: [Proof LLD and evidence](proof-lld.md)
 
 The required order is: settle the transport-owned small contract, prove it, reconcile both SDDs,
 build independently in parallel, validate complete workflows, then cut over and physically delete
 the old stack. The proof is a bounded joint slice, not permission to start the broad rebuild. This
-revision runs no prototype or live test and claims no implementation completion. All gates below
-remain open.
+proof now has a transport-side implementation, local tests and successive joint live reports. The
+[proof evidence](proof-lld.md) records acceptance of the finite-input slice and its limits. No
+broad-build or production-cutover gate is completed by those measurements.
 
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
@@ -22,6 +25,55 @@ gives both efforts a common design reference; it does not pass the proof, comple
 the SDD. Proof-informed amendments follow through the same artifact owners. The transport lead owns
 the carrier contract and acceptance criteria; SSH supplies implementation and feasibility input, not
 a separately owned copy of that contract. Requirement changes still return to the operator.
+
+After #795 merged, the operator authorized transport-side PoC work in a new PR while the SSH owner
+updates its SDD. Both efforts start from the published contract, without another prerequisite
+design-only merge. Transport integrates one joint proof delivery with the SSH contribution; SSH's
+complete carrier implementation follows proof acceptance as a separate code delivery. The
+[proof LLD](proof-lld.md) records this first implementation's exact subset, placement and evidence
+gaps. None of the joint proof checkboxes below is completed by starting that work.
+
+On 2026-09-17 the operator accepted deferring guest cancellation from the buffered PoC. Deadlines
+remain local observation bounds. Live tests demonstrated surviving guest process trees after expiry;
+the PoC has neither a remote cancellation handle nor a reaper. Recording that limitation does not
+waive the production workload-lifecycle gate below or permit automatic replay.
+
+## Buffered PoC checkpoint record
+
+- [x] Publish the finite-input transport candidate and local fault evidence at `e3d93736` in #826;
+      production factories and RunContext remain unchanged.
+- [x] Obtain the first joint live report on 2026-09-17 at SSH `1c32e415` containing transport
+      `a570a2de`: all eight shared vectors passed on the measured SSH cells and native PVE 8/9. The
+      [evidence record](proof-lld.md) preserves gaps and does not declare joint acceptance.
+- [x] Close the authorized feedback rounds and retest affected behavior at the final pinned
+      transport/SSH combination, with independent cleanup evidence, before proof merge readiness.
+- [x] Obtain the second joint live report on 2026-09-17 at transport `d75c0bd3` and SSH `1c32e415`:
+      native TLS retesting, the Bash 5.1 floor and cleanup addendum are measured. The Windows SSH
+      failure remains unresolved; this is evidence collection, not proof acceptance.
+- [x] Obtain explicit live destination-account default-shell evidence through both carriers, and the
+      reviewed SSH candidate's Windows disposition and affected-case retest. The eight shared
+      vectors alone do not exercise `Shell.user_default()` or establish Windows delivery.
+- [x] Retest the strengthened sensitive-reflection vector through both carriers on the final
+      integrated head, and obtain affected macOS drain evidence or a precise case-level
+      justification. Raw completion alone must not establish bootstrap or application execution.
+
+The final-candidate report at transport `6617f6e6` / SSH `1ccc304b` measures exit 37 with
+suppression in all six cells and fresh macOS live/local-pipe evidence. At transport `e41a4482` / SSH
+`bc2a0711`, the tester independently verified unchanged runtime and carried those live cells
+forward, rather than claiming fresh measurements. The affected macOS socket-fixture retest passed
+under normal and long temporary paths; its local execution suite now reports 255 passed, 45
+accounted platform-scoped skips and zero failures. The lead independently verified ancestry and
+runtime equivalence and ran the combined Linux suite, 296 passed and four skipped. The four
+authorized feedback rounds are closed. The final transport delta at `931ad8ef` is documentation
+only; its local combination with SSH `bc2a0711` at `2b1f1d39` has an identical `cli/` tree to the
+tested SSH candidate. The tester explicitly carried forward native evidence and found no need for
+another live retest. Transport accepts the joint buffered proof using those reports and verified
+tree equivalence, not an additional tester acknowledgment. The
+[proof evidence](proof-lld.md#final-macos-delta-and-unchanged-runtime-evidence-2026-09-17) records
+exact pins, independent cleanup and unchanged broader limitations. The
+[acceptance disposition](proof-lld.md#joint-buffered-proof-acceptance-2026-09-17) maps the proof
+matrix to that evidence. Design reconciliation, the broader contract and production gates remain
+open; the SDD is not complete and must not be locked.
 
 ## Parallel ownership without overlapping edits
 
@@ -76,10 +128,18 @@ execution modules. This is not a full file/job implementation or a preliminary l
 | I/O ownership and failure             | Focused stream tests prove EOF, borrowed-stream lifetime, short writes, bounded flow control/cancellation and safe source/sink failure. Failure cannot become success, silent discard or confirmed remote cancellation.                                         |
 | Non-SSH shape                         | A bounded Proxmox QGA case exercises the same request/report contract, finite input, output limits and no-staging readiness. A fake alone does not establish live feasibility or supported-version coverage.                                                    |
 
-- [ ] Complete the proof matrix with observed evidence and a pinned candidate contract. A failed or
+- [x] Complete the proof matrix with observed evidence and a pinned candidate contract. A failed or
       unresolved shell/input/stream boundary blocks broad parallel implementation; revise the seam
       and repeat the affected cases. If the needed mechanism changes scope, return to the operator.
       This gate does not claim exact SSH exit/drop classification or full platform acceptance.
+
+This completion covers the defined buffered candidate: finite bytes/EOF, capture/discard and the
+authorized connection identity. The
+[acceptance disposition](proof-lld.md#joint-buffered-proof-acceptance-2026-09-17) records each row's
+applicable evidence. Optional live/terminal modes, scoped elevation and arbitrary startup hooks are
+not advertised or accepted by this slice. The specification and reconciliation tasks remain
+responsible for the broader interface before parallel implementation; neither this checkbox nor the
+PoC merge enables production use.
 
 ## 3. Reconcile designs and publish the implementation boundary
 
@@ -94,6 +154,10 @@ execution modules. This is not a full file/job implementation or a preliminary l
       stale records. Preserve macOS host jobs before guest creation. Establish remaining
       Proxmox/WSL2 feasibility under an authorized live-test charter; the small proof does not stand
       in for these checks.
+- [ ] Before production enablement, implement and validate owned workload lifecycle and explicit
+      cancellation, including ordinary descendants, stale/reused process identity, disconnected
+      observation, bounded cleanup and truthful confirmation or uncertainty. Keep local waiting
+      deadlines distinct from guest lifetime. The operator deferred this from the PoC only.
 - [ ] Complete the file LLD for R7: whole-file publication, JSON merge semantics, ownership/mode and
       security metadata preservation, bounded inventory, directories/conditional removal,
       concurrency and uncertain results. Preserve the shipped four settings strategies and JSON
@@ -141,6 +205,12 @@ execution modules. This is not a full file/job implementation or a preliminary l
 
 ## 5. Validate complete workflows, cut over, and retire
 
+- [ ] Complete the
+      [incident-derived behavior inventory](migration-strategy.md#incident-derived-behavior-inventory)
+      before deleting legacy code/tests. Each entry records its old source/test, new owner and
+      replacement regression, required workstation/platform evidence, and explicit disposition. ADR
+      0020, Windows stdin conversion and Git-for-Windows toolchain assumptions are seed cases, not
+      an exhaustive inventory or a claim of new-stack validation.
 - [ ] Validate complete provisioning, native recovery without Tailscale, scoped plugin operations,
       backup, host provisioning/rollback and interactive attachment through new internal entry
       points. Cover required operations, optional refusal, sensitive data and supported workstation/

@@ -14,6 +14,10 @@ feasibility still blocks proof acceptance, and requirement changes return to the
 implementation imports the legacy execution stack. Publishing this baseline precedes the proof and
 does not claim that the implementation boundary has been demonstrated.
 
+The [active proof LLD](proof-lld.md) records the buffered implementation subset, shared framing,
+native adapter placement and evidence gaps. The proposed public and live-I/O interfaces below are
+not claims that the initial proof package implements them.
+
 ## Caller contract
 
 Core and plugin consumers import public types from `agentworks.execution` and receive a scoped
@@ -225,18 +229,25 @@ plugin can implement it but ordinary capability consumers cannot use it to bypas
 Optional terminal/live-streaming behavior is selected explicitly through `CarrierIO` and refused
 before dispatch when absent from the channel's one immutable feature description.
 
-| Value                | Contract                                                                                                                                                                                                                                                    |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PreparedInvocation` | Literal bootstrap argv and safe diagnostic label, with no stdin field. Application shell, final identity, env and cwd are already prepared above the carrier. Any helper interpreter is explicit. Payload-bearing fields have no diagnostic representation. |
-| `CarrierIO`          | One explicit input choice: EOF, finite source, live source, or terminal endpoint. Output is bounded capture, discard, explicit byte-stream sinks, or terminal presentation. Carries effective sensitivity and authorized presentation policy.               |
-| `Deadline`           | Remaining total budget, passed through local startup, dispatch and observation; never restarted for each poll. An explicitly unbounded operation remains distinct from a default.                                                                           |
-| `CarrierReport`      | Dispatch evidence (`not_sent`, `sent`, or `unknown`), completion evidence, observed guest status if known, carrier/local status separately, available output with completeness/provenance, and safe diagnostics.                                            |
+| Value                | Contract                                                                                                                                                                                                                                      |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PreparedInvocation` | Literal bootstrap argv, with no stdin field. Application shell, final identity, env and cwd are already prepared above the carrier. Any helper interpreter is explicit. Payload-bearing fields have no diagnostic representation.             |
+| `CarrierIO`          | One explicit input choice: EOF, finite source, live source, or terminal endpoint. Output is bounded capture, discard, explicit byte-stream sinks, or terminal presentation. Carries effective sensitivity and authorized presentation policy. |
+| `Deadline`           | Remaining total budget, passed through local startup, dispatch and observation; never restarted for each poll. An explicitly unbounded operation remains distinct from a default.                                                             |
+| `CarrierReport`      | Dispatch evidence (`not_sent`, `sent`, or `unknown`), completion evidence, observed guest status if known, carrier/local status separately, available output with completeness/provenance, and safe diagnostics.                              |
 
 `sent` means the delivery request was submitted, not that the application started or finished.
-`not_sent` requires positive evidence that no remote dispatch could have occurred. Completion is
-reported only from evidence about the submitted invocation. A local SSH process terminating is not
-by itself proof of guest completion. For nested delivery, the outer report proves only the outer
-invocation; the remote Lima adapter cannot manufacture guest status from an ambiguous inner hop.
+`not_sent` requires positive evidence that no remote dispatch could have occurred. Raw completion
+records the observed remote command-chain exit or signal. It can include destination account-shell
+startup or refusal before the prepared bootstrap runs; it does not independently prove bootstrap or
+application execution. A local SSH process terminating is not by itself proof of guest completion.
+For nested delivery, outer completion cannot establish an inner guest outcome; the remote Lima
+adapter cannot manufacture guest status from an ambiguous inner hop.
+
+Shared preparation/outcome interpretation owns the evidence needed for a public application result.
+Captured guest streams require valid framing. Suppressed or discarded output supplies no framing
+proof, and neither raw zero nor absent retained bytes alone establishes application success. The
+buffered PoC exposes internal evidence only; it does not implement or waive the public-result gate.
 
 ### Input and stream ownership
 
@@ -283,6 +294,15 @@ Control-flow interruption, including `KeyboardInterrupt`, propagates after bound
 regardless of `check`. Safe partial evidence may accompany it but must not convert it to an ordinary
 returned result or checked-command error. The owning operation's interrupt rollback must still run;
 remote cancellation remains a separate explicit action.
+
+For the buffered PoC, the operator accepted deferring guest cancellation on 2026-09-17. Live
+deadline tests confirmed that ordinary guest processes and bootstrap descendants can remain running
+after local observation ends. This is a measured limitation, not just an uncertain termination
+report. The PoC has no cancellation handle or guest reaper; it must not back production operations
+until shared workload ownership and cancellation are implemented and validated. Do not turn a local
+deadline into an implicit guest kill or replay an uncertain command. The later execution/job
+lifecycle must provide explicit cancellation of owned ordinary descendants without depending on
+either carrier maintaining its original connection.
 
 Captured bytes are not silently truncated: limits produce explicit incomplete-output evidence.
 Common helpers arrange bounded transfer/spooling for required large data, while readiness targets

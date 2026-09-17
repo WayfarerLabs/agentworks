@@ -89,6 +89,25 @@ confirmed stale-socket cleanup are file consumers; creating a socket remains tmu
 current FIFO consumer; the operator removed FIFO creation from the initial contract on 2026-09-16.
 Tests use the real tmux paths and never substitute an invented event-pipe workflow.
 
+## Incident-derived behavior inventory
+
+This inventory is a required migration deliverable. Refresh it while auditing every old entry point;
+the seed cases below are not exhaustive. Deletion is blocked until each behavior has a new-stack
+owner, concrete replacement regression, workstation/platform evidence, and a disposition of
+preserved, deliberately replaced, or retired with rationale. Copying an old test is not evidence
+that its relevant behavior is exercised through the new stack.
+
+| Behavior and existing evidence                                                                                                                                                               | New-stack owner and replacement evidence required                                                                                                                                                                                                                                                                                                                  | Current disposition                                                                                                                                               |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Forced TTY versus closed stdin: [ADR 0020](../../adrs/0020-close-ssh-stdin-instead-of-forcing-a-tty.md), `tests/test_ssh_input.py`, `tests/transports/test_ssh.py`                           | SSH carrier plus shared preparation. Prove bounded repeated short commands on a Windows workstation with no inherited console input, no forced terminal, distinct guest streams, byte-exact output and application EOF. The prepared envelope itself needs finite carrier stdin even when application input is EOF; do not mechanically add `ssh -n` to that path. | Preserve the behavior, not the old argv recipe. Live Windows evidence remains open.                                                                               |
+| Windows text-mode stdin rewrites LF: `subprocess_io.py`, `tests/test_subprocess_io.py`                                                                                                       | Every workstation subprocess delivery path. Exercise finite binary input, NUL, CR/LF and all byte values through new carriers on Windows and a POSIX workstation. New reports retain raw bytes; legacy output newline normalization is deliberately not the new contract.                                                                                          | Preserve byte-exact input. Retire implicit output normalization only after callers choose any needed text decoding explicitly. Replacement evidence remains open. |
+| Git-for-Windows tools are not a Linux guest: `tests/conftest.py:requires_posix_shell`, `tests/test_bootstrap_script.py`, `tests/test_codex_integration.py`, `tests/test_session_liveness.py` | Shared preparation and platform adapters. Run guest shell mechanics on actual supported targets; separately exercise native Windows path/argv/pipe handling with its actual SSH client. Record Bash/coreutils prerequisites and any shell-test skip by axis, not as a guest compatibility pass.                                                                    | Retain the distinction. A local Git Bash fixture cannot establish Linux guest behavior; platform-host macOS commands also need their own userspace evidence.      |
+
+Transport owns this list and final deletion. SSH and other migration owners supply their assigned
+regression/evidence entries; completion is assessed on the integrated tree, including imports with
+retired modules unavailable. The broader release behavior table above and every newly discovered
+incident follow the same disposition rule.
+
 ## Parallel build after the proof gate
 
 The [design and delivery plan](plan.md) owns the mandatory sequence and proof matrix. First specify
