@@ -49,10 +49,10 @@ accepts the joint buffered PoC. Production state changes, full implementation an
 lockfile remain Phase 2.
 
 Current dependency provenance lives in [poc-results.md](poc-results.md#revisions-and-delivery).
-Completed checkboxes below record the revisions used when their work happened, including the first
-candidate pin; they are historical records, not floating dependency declarations. The operator-owned
-FRD retains its earlier checkpoint narration; this plan and the proof record carry current delivery
-status without changing the accepted requirements.
+Completed checkboxes below record the revisions used when their work happened; they are historical
+records, not floating dependency declarations. The operator-owned FRD retains its earlier checkpoint
+narration; this plan and the proof record carry current delivery status without changing the
+accepted requirements.
 
 ## External feedback rounds
 
@@ -97,8 +97,8 @@ status without changing the accepted requirements.
 - [x] Consume transport's concrete candidate types and acceptance criteria. Record the exact
       contract and code revisions in the proof record; send unresolved SSH feasibility questions to
       transport before accepting the boundary. Transport owns any common-contract correction. The
-      implementation consumes #826 at `81e5f6c3`; [poc-results.md](poc-results.md) records the
-      boundary and outstanding combined acceptance.
+      [proof record](poc-results.md#revisions-and-delivery) records the consumed transport
+      revisions, boundary and combined acceptance.
 - [x] Write [ssh-lld.md](ssh-lld.md) with the SSH decisions needed for the PoC: explicit connection
       and trust inputs, executable selection/version refusal, supported account-shell bootstrap,
       subprocess I/O and cleanup. Separate observed decisions from open hypotheses and from Phase 2
