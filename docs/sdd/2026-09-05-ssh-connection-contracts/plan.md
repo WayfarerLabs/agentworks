@@ -59,11 +59,16 @@ candidate pin; they are historical records, not floating dependency declarations
       measured evidence and limitations, and re-run private reviews and affected gates. Post exact
       tester instructions before raising `review-requested` again. Windows completion and joint
       acceptance remain open until measured; a synthetic or parser-only pass cannot close them.
-- [ ] Complete round 2 after the full reports and collection window: record the authenticated
+- [x] Complete round 2 after the full reports and collection window: record the authenticated
       Windows resolution, align SSH wording and its harness field use with transport's reviewed
       completion evidence correction, and retain affected macOS coverage as open until measured. Run
       the private review lanes and applicable gates, then post the tester handoff before raising the
       label. This round does not weaken public outcomes or claim completed joint acceptance.
+- [ ] Complete round 3 after the full reports and collection window: correct the macOS agent-socket
+      fixture's path length without changing carrier behavior, record the six current live cells and
+      their qualifications, and run private reviews and applicable gates. Post the exact macOS
+      fixture retest considerations before raising the label. Joint acceptance remains with
+      transport; one authorized fix round remains after this handoff.
 
 ## Baseline work
 

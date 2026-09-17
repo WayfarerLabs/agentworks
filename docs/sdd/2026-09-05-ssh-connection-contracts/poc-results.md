@@ -2,9 +2,9 @@
 
 # SSH PoC Evidence
 
-Status: Live Linux/macOS evidence exists, and the original Windows timeout is resolved in both
-measured launch contexts. Live proof of the strengthened sensitive vector, affected macOS coverage
-and combined acceptance remain open. This is not production readiness.
+Status: The strengthened sensitive vector passes in six measured cells, with fresh macOS live
+coverage and both Windows launch contexts. A macOS agent-socket test fixture correction awaits its
+actual workstation retest; combined acceptance remains open. This is not production readiness.
 
 ## Revisions and delivery
 
@@ -21,6 +21,10 @@ and combined acceptance remain open. This is not production readiness.
 - Default-shell proof: SSH `901d9614` plus transport `6687ef88f2138c819600ff11fa777924f707d9d9`,
   integrated as `c188b32ea89ba0da1aadf07bda5461dd033009bf` without conflicts. Transport's
   intervening change was documentation only; this run required a merge.
+- Revised-vector proof: SSH and integrated SHA `1ccc304b339a22baeb0df8ef5a7534a3c9e6f8ec`,
+  containing transport `6617f6e6`. The tester rechecked ancestry, installed that tree and verified
+  the renamed `Observation.reported_exit` field on each workstation. No merge or resolutions were
+  needed.
 
 The operator explicitly directs the full SSH PoC and artifacts in #796, then full implementation,
 migration and integration in a second PR under this SDD. There is no design-only merge. The tester
@@ -37,8 +41,8 @@ Both installed the pinned combined package with Python 3.12.13 on aarch64 Linux.
 explicitly withdraws its local-only report as the integration deliverable; that evidence remains
 separate.
 
-The following table records those earlier runs; the Windows failure is superseded by the retest
-below, while affected macOS behavior still needs a current measurement.
+The following table records those earlier runs; the Windows failure and affected macOS coverage are
+superseded by the later measurements below.
 
 | Workstation                                        | Destination/platform                                      | Reported result                                                                                                                                     |
 | -------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -78,8 +82,8 @@ account could not use the fixture identity; the successful rerun used an accessi
 independently verified authentication first.
 
 The same head passed the affected Linux lanes against Debian 13 with Bash 5.2.37 and coreutils 9.7.
-The report carried earlier macOS results forward, but the pipe-drain change is cross-platform.
-Affected macOS coverage therefore remains open. A remote detached child's prompt return does not
+That report carried earlier macOS results forward, leaving the cross-platform pipe-drain change
+unmeasured there until the subsequent retest below. A remote detached child's prompt return does not
 test a workstation descendant retaining the local client's pipe handles; the dedicated local
 regression covers that separate case.
 
@@ -106,6 +110,52 @@ verified destination removal, temporary identities/access and tester-file cleanu
 tailnet nodes and empty VM inventory, plus provider state. The Windows bed was deallocated; the
 native run destroyed its guest, revoked its token and stopped the bed. These remain attributed
 tester observations.
+
+### Revised sensitive vector and macOS retest
+
+The
+[current SSH report](https://github.com/WayfarerLabs/agentworks/pull/796#issuecomment-5717455178)
+and [native companion](https://github.com/WayfarerLabs/agentworks/pull/826#issuecomment-5717456803)
+measure `1ccc304b` with transport `6617f6e6`. All eight shared vectors passed in each of six cells:
+Linux aarch64/OpenSSH 9.2p1 to Debian 13, macOS 26.3 arm64/OpenSSH 10.2p1 to Debian 13, Linux to
+Debian 12, native QGA on PVE 9.2.11, and both Windows launch contexts. The revised sensitive case
+reported exit 37, both streams suppressed, zero retained bytes and no carrier failure everywhere.
+This is controlled-case evidence, not proof against arbitrary account startup behavior.
+
+Windows Server 2022 used Python 3.12.14 and native OpenSSH 9.5p2. The SSH-parent context had private
+descriptor state present and stdio mode absent; the clean context had both absent. Both preserved
+binary bytes without CRLF translation, enforced output limits, refused elapsed deadlines before
+dispatch and retained unknown completion for deadlines during work. The original authenticated
+timeout remains resolved. Cleanup status 1 on Windows versus -9 on POSIX proves no earlier natural
+exit.
+
+Fresh macOS live measurements passed the vectors, byte preservation, output bounds, early stdin
+closure and both deadline lanes. The local execution suite reported 254 passed, 45 skipped and one
+failure: `test_agent_endpoint_is_explicit_and_must_be_a_socket` tried to bind a 133-byte path under
+pytest's temporary directory, exceeding the measured 103-byte Unix-socket limit. Non-socket refusal
+ran, but genuine-socket acceptance did not. The skips were not individually enumerated. The named
+descendant-output and descendant-stdin regressions have no macOS skip, so the sole reported failure
+supports those specific passes; it does not make the whole suite green. Round 3 corrects the fixture
+using a short owned directory and retains both assertions. The actual macOS retest remains open.
+
+The Debian 12 cell measured Bash 5.2.15, coreutils 9.1, `/bin/bash` and UID 1000. It establishes
+guest compatibility, with two qualifications: provisioning used `gcloud` outside Agentworks, and
+initial host-key pinning used TOFU. It is not proof of Agentworks provisioning or independently
+authenticated initial trust. The separate trust-refusal cells retain their own provenance.
+
+Native execution remained UID 0 on PVE 9.2.11. PVE 8.4.21 did not receive the new vector in this
+run. Transport's
+[disposition](https://github.com/WayfarerLabs/agentworks/pull/826#issuecomment-5717481315) accepts
+carry-forward of its unchanged delivery/TLS/bounds evidence while explicitly retaining that
+measurement distinction. SSH does not declare native or combined acceptance.
+
+The tester observed bootstrap/sleep counts of 10/2 at 30 seconds, 5/1 at 60 and 90 seconds, and 0/0
+at 120 seconds after deadline lanes. These bounded workloads drained after finishing; no reaper or
+cancellation guarantee follows. No carrier staging appeared in destination `/tmp`. Reported cleanup
+removed destinations and the Bookworm instance, destroyed the native guest and revoked its token,
+stopped both beds, removed Windows access/keys/files and disabled sshd, and removed macOS keys and
+scratch. Provider-level checks independently verified teardown. This session did not perform those
+live mutations.
 
 ## Lifetime and cleanup
 
@@ -191,15 +241,33 @@ The [critical reading](https://github.com/WayfarerLabs/agentworks/pull/796#issue
 also retains affected macOS coverage and other unmeasured cells as open evidence. Two of the four
 authorized fix rounds remain after this round's handoff.
 
+The [round-2 handoff](https://github.com/WayfarerLabs/agentworks/pull/796#issuecomment-5717218075)
+records all three private reviews clear at `1ccc304b`, 10,217 local tests passed with 11 skipped,
+296 execution tests passed with four skipped, and the complete green local/hosted gate set. Hosted
+Windows measured 269 passed with 16 skipped. Those fixture results remain separate from the live
+report above.
+
+## Feedback round 3
+
+The [third round](https://github.com/WayfarerLabs/agentworks/pull/796#issuecomment-5718050777)
+started after the full reports and collection window, with `review-requested` removed before edits.
+It accepts the new live evidence with the qualifications above and fixes only the SSH-owned socket
+test's temporary path. The previous fixture failed locally under a deliberately long pytest base
+directory; the corrected test passes under that same base and leaves no owned socket directory. This
+Linux reproduction and correction do not substitute for the requested macOS retest. No carrier
+runtime or shared contract changes are included. One of four authorized fix rounds remains after
+this round's handoff; its exact head, private reviews and gate results belong in that handoff.
+
 ## Outstanding acceptance
 
-Live measurements of the strengthened sensitive vector, affected macOS drain behavior, unexercised
-workstation/platform combinations, account startup hooks, provider-inner client policy, demoted
-native identity, and the remainder of transport's matrix need measured evidence or explicit
-disposition. WSL2, multi-node Proxmox and Debian Bookworm were not exercised. Supported
-default-shell results above do not establish arbitrary account-shell compatibility. Live streams and
-terminals remain unavailable in the buffered candidate; required PoC cases cannot be silently
-deferred to Phase 2. Transport owns joint acceptance.
+The corrected agent-socket fixture still needs its actual macOS retest. Unexercised workstation and
+platform combinations, account startup hooks, provider-inner client policy, demoted native identity,
+and the remainder of transport's matrix need measured evidence or explicit disposition. WSL2 and
+multi-node Proxmox remain unmeasured. The new sensitive vector was not rerun on PVE 8; Bookworm is
+measured only with the qualifications above. Supported default-shell results do not establish
+arbitrary account-shell compatibility. Live streams and terminals remain unavailable in the buffered
+candidate; required PoC cases cannot be silently deferred to Phase 2. Transport owns joint
+acceptance.
 
 No new credentials, destinations, provisioning or network mutations are authorized by these reports.
 The existing integration tester owns the authorized inventory and cleanup. This SDD stays unlocked,

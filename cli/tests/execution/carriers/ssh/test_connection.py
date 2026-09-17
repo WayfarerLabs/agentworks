@@ -6,6 +6,7 @@ import os
 import shutil
 import socket
 import subprocess
+import tempfile
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 
@@ -104,18 +105,20 @@ def test_files_checked_at_operation_time_without_mutation(connection: SSHConnect
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Explicit Unix-domain agent sockets")
-def test_agent_endpoint_is_explicit_and_must_be_a_socket(connection: SSHConnection, tmp_path: Path) -> None:
+def test_agent_endpoint_is_explicit_and_must_be_a_socket(connection: SSHConnection) -> None:
     connection.identity_file.touch()
     connection.known_hosts_file.touch()
-    endpoint = tmp_path / "agent"
-    selected = replace(connection, agent_socket=str(endpoint))
-    endpoint.touch()
-    with pytest.raises(ValidationError):
-        validate_connection_files(selected)
-    endpoint.unlink()
-    with socket.socket(socket.AF_UNIX) as agent:
-        agent.bind(str(endpoint))
-        validate_connection_files(selected)
+    # macOS's default temporary path plus pytest nesting can exceed AF_UNIX limits.
+    with tempfile.TemporaryDirectory(prefix="agw-ssh-agent-", dir="/tmp") as directory:
+        endpoint = Path(directory) / "agent"
+        selected = replace(connection, agent_socket=str(endpoint))
+        endpoint.touch()
+        with pytest.raises(ValidationError):
+            validate_connection_files(selected)
+        endpoint.unlink()
+        with socket.socket(socket.AF_UNIX) as agent:
+            agent.bind(str(endpoint))
+            validate_connection_files(selected)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX account-shell serialization")
