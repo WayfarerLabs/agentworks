@@ -1,6 +1,7 @@
 # Transport Improvements: Design and Delivery Sequence
 
-- Status: Transport-side proof implementation in progress; joint acceptance gates remain open
+- Status: Buffered implementation validated; final checkpoint review pending; joint acceptance gates
+  remain open
 - Delivery vehicle: Merged design PR #795, followed by draft PoC PR #826, labeled
   `sdd:transport-improv`
 - Requirements: [FRD](frd.md)
@@ -53,16 +54,21 @@ waive the production workload-lifecycle gate below or permit automatic replay.
 - [x] Obtain explicit live destination-account default-shell evidence through both carriers, and the
       reviewed SSH candidate's Windows disposition and affected-case retest. The eight shared
       vectors alone do not exercise `Shell.user_default()` or establish Windows delivery.
-- [ ] Retest the strengthened sensitive-reflection vector through both carriers on the final
+- [x] Retest the strengthened sensitive-reflection vector through both carriers on the final
       integrated head, and obtain affected macOS drain evidence or a precise case-level
       justification. Raw completion alone must not establish bootstrap or application execution.
 
 The final-candidate report at transport `6617f6e6` / SSH `1ccc304b` measures exit 37 with
-suppression in all six cells and fresh macOS live/local-pipe evidence. Its separate SSH-owned
-socket-fixture portability failure remains open until corrected and retested on macOS. The
-feedback-closeout and merge-readiness checkbox above remains incomplete; the detailed report and
-scope qualifications are in the
-[proof evidence](proof-lld.md#final-candidate-live-report-2026-09-17).
+suppression in all six cells and fresh macOS live/local-pipe evidence. At transport `e41a4482` / SSH
+`bc2a0711`, the tester independently verified unchanged runtime and carried those live cells
+forward, rather than claiming fresh measurements. The affected macOS socket-fixture retest passed
+under normal and long temporary paths; its local execution suite now reports 255 passed, 45
+accounted platform-scoped skips and zero failures. The lead independently verified ancestry and
+runtime equivalence and ran the combined Linux suite, 296 passed and four skipped. The
+feedback-closeout checkbox remains pending the final checkpoint disposition. The
+[proof evidence](proof-lld.md#final-macos-delta-and-unchanged-runtime-evidence-2026-09-17) records
+exact pins, independent cleanup and unchanged broader limitations. No broad joint-proof or
+production gate is completed here.
 
 ## Parallel ownership without overlapping edits
 

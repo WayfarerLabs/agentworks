@@ -1,6 +1,7 @@
 # Transport Boundary Proof
 
-Status: Implementation in progress; not acceptance of the joint proof.
+Status: Buffered implementation validated; final checkpoint review pending. Broader joint proof
+gates remain open.
 
 ## Delivery and ownership
 
@@ -161,8 +162,8 @@ contract change invalidates the corresponding prior observations and requires re
 The live reports below establish the measured native and SSH cells, not complete acceptance. The
 later reports close the measured Windows failure and add explicit destination-account default-shell
 evidence, separately from the eight fixed-interpreter vectors. The final-candidate report measures
-the strengthened sensitive vector and affected macOS drain behavior, while identifying an SSH-owned
-socket-fixture portability failure that still requires correction and retesting. Broader
+the strengthened sensitive vector and affected macOS drain behavior. The subsequent macOS delta
+report verifies the SSH-owned socket-fixture correction and a clean local suite. Broader
 shell/startup and identity/elevation coverage remains unproven. Live I/O is not implemented by the
 finite-input slice and cannot be enabled without its separate ownership proof.
 
@@ -315,6 +316,39 @@ native and Bookworm deadline work was also gone when checked. This is observed d
 work, not cancellation or a reaper. The reports record no carrier staging observed in destination
 `/tmp`, and independent provider-level cleanup of destinations, native guest/token, stopped beds and
 workstation access/scratch. No replay or new infrastructure authority follows from this evidence.
+
+### Final macOS delta and unchanged-runtime evidence (2026-09-17)
+
+The
+[complete delta report](https://github.com/WayfarerLabs/agentworks/pull/796#issuecomment-5718460281)
+tests SSH `bc2a0711c4b9eb9a069c8df9ec9be512d9a28bae`, containing transport
+`e41a44827e8e283a4b9fe3369224ef41c42a95a5`. Both the tester and transport lead independently
+verified this ancestry and an empty `cli/agentworks/` diff from measured `1ccc304b` to `bc2a0711`.
+No merge or resolutions were needed. The six live carrier cells above carry forward on that
+unchanged-runtime basis; they were not rerun. The lead's current combined Linux execution suite
+passed 296 tests with four skips, with execution lint, format and type checks also passing.
+
+On macOS 26.3 arm64 with Python 3.12.13, the tester verified installed fixture contents against the
+candidate's checksum. The corrected fixture uses a private short-path temporary directory, closes
+its socket before directory cleanup, and retains both non-socket refusal and genuine-socket
+acceptance. Each assertion pair passed under the normal temporary environment and an intentionally
+long, 165-byte pytest base path. The actual socket path remained 33 bytes, below the measured
+103-byte limit, and independent cleanup checks found no owned directory residue. An earlier
+misquoted setup produced a 15-character base path; the report explicitly excludes that attempt as
+long-path evidence.
+
+The macOS SSH-focused suite passed 99 tests with six skips. The combined execution suite passed 255
+tests with 45 skips and zero failures, superseding the preceding 254/45/1 result. All 45 skips are
+accounted for: 41 require Linux bootstrap, account-lookup or fault-injection facilities, and four
+require Windows process/descriptor behavior. They remain unmeasured cases on macOS, not passes or
+proof of complete workstation coverage. The named local descendant-pipe regressions are among the
+255 passing tests, separately from remote detached work.
+
+This delta used only tester-owned macOS scratch, verified removed; no VM or bed was created or
+started. PVE 8's revised exit-37 vector is still not newly measured, and its earlier unchanged
+runtime evidence keeps its original attribution. Bookworm's provisioning/trust qualifications and
+all broader unmeasured scope above remain unchanged. This resolves the reported fixture regression,
+not the full proof matrix, production workload lifecycle or cutover gates.
 
 ### Local fault-injection evidence (2026-09-17)
 
