@@ -154,8 +154,10 @@ def endpoint(tmp_path: Path) -> Iterator[_Endpoint]:
 
 def _execute(url: str, ca_bundle: Path | None):
     connection = ProxmoxConnection(url, "node1", 123, "test@pve!token", _TOKEN, ca_bundle=ca_bundle)
+    # Trust decisions need two real worker starts on loaded CI, not a speed assertion.
+    # Deadline enforcement is exercised separately in test_proxmox.py.
     return ProxmoxCarrier(connection).execute(
-        PreparedInvocation(("/bin/true",)), io=CarrierIO(), deadline=Deadline.after(5)
+        PreparedInvocation(("/bin/true",)), io=CarrierIO(), deadline=Deadline.after(30)
     )
 
 

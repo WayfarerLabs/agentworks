@@ -318,6 +318,14 @@ workstation access/scratch. No replay or new infrastructure authority follows fr
 
 ### Local fault-injection evidence (2026-09-17)
 
+Windows CI later exposed a five-second safety timeout in the positive default-trust fixture, after
+the endpoint received POST but before GET. The adjacent explicit-CA positive case took 4.38 seconds.
+A controlled Linux experiment with 2.6 seconds added to each worker start reproduced the same
+POST-only deadline result at five seconds; a 30-second budget completed POST and GET with exit zero.
+This supports allowing scheduling time in the TLS correctness fixture, not a claim to have traced
+the exact Windows slowdown. The fixture now allows 30 seconds without retries or weakened trust
+assertions. Production deadlines and their separate enforcement tests are unchanged.
+
 The first feedback round adds malformed source/stdin cases that inspect decoded output and an actual
 fixture-file side effect, rather than looking for plaintext inside armored output. Removing either
 initial validation step causes its regression to fail. New encoder fault cases pin the stdout/stderr
