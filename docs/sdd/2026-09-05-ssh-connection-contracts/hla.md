@@ -1,6 +1,6 @@
 # Independent SSH Carrier: High-Level Architecture
 
-- Status: SSH response to the merged transport baseline; PoC acceptance remains open
+- Status: Joint buffered PoC accepted; full implementation and migration remain Phase 2
 - Updated: 2026-09-17
 - Requirements: [frd.md](frd.md)
 - Shared contract:

@@ -83,15 +83,13 @@ fresh pipes. Compare bounded, independent read-only cases and run the shared vec
 original-context results separately from a clean workstation launch. The local peer test covers the
 reproduced descriptor hazard before authentication, not the complete live invocation.
 
-The current macOS live report covers the shared vectors and affected I/O/deadline lanes. Its local
-suite found that pytest's nested temporary directory exceeded the Unix-socket path limit before the
-agent-socket acceptance assertion ran. The fixture now owns a short directory under `/tmp`,
-retaining both non-socket refusal and genuine-socket acceptance. Verify that test on macOS with its
-normal temporary environment and a deliberately long pytest base directory, and check that the owned
-socket directory is removed. Run the local SSH suite and report failures and skip reasons
-separately. A Linux long-path reproduction does not replace that macOS measurement. Keep remote
-detached children separate from local descendants retaining the client's pipe handles when reporting
-ownership tests.
+The agent-socket fixture owns a short directory under `/tmp` because macOS limits Unix-socket path
+length. It checks both non-socket refusal and genuine-socket acceptance, then closes the socket and
+removes its directory. When changing that fixture, test on macOS under its normal temporary
+environment and a deliberately long pytest base directory, and verify cleanup. Report local suite
+failures and skip reasons separately. Keep remote detached children separate from local descendants
+retaining the client's pipe handles when reporting ownership tests. The proof record links the
+measured macOS fixture and local ownership results.
 
 Keep account-shell delivery prerequisites separate from the application's selected interpreter.
 Transport's default-shell lane requires independent destination identity/account-shell evidence;

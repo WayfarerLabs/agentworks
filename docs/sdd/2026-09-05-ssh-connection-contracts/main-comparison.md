@@ -73,6 +73,12 @@ implementation under this same SDD. The [plan](plan.md) replaces the earlier sep
 approach and records phase definitions of done. This artifact checkpoint has not passed the proof or
 changed production callers. PR #795's artifacts remain with their owner.
 
+The comparison above records the earlier artifact checkpoint. The subsequent
+[buffered PoC evidence](poc-results.md#joint-acceptance-and-remaining-scope) now resolves its Phase
+1 bootstrap and shared-boundary questions under transport's accepted candidate. The migration risks
+below remain a source inventory for Phase 2; acceptance of finite buffered delivery does not close
+borrowed/live I/O, platform-host prerequisites, trust migration or sensitive consumer conversion.
+
 ## Open risks and required disposition
 
 1. **Bootstrap tools.** Main's Python installation does not establish its availability before

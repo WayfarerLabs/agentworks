@@ -15,10 +15,10 @@ The operator directs two SSH implementation PRs under this SDD. PR #796, on
 `feat/ssh-carrier-design`, carries the entire SSH portion of the joint proof of concept (PoC) and
 these artifacts. The second SSH PR carries full implementation and the remaining integration and
 retirement obligations. There is no SSH design-only PR to merge. The operator has accepted the
-artifact checkpoint and authorized PoC implementation. Keep #796 draft while live proof and joint
-acceptance remain outstanding; use `review-requested` for a coherent implementation checkpoint. The
-operator's existing integration tester combines the two branches locally and supplies live evidence.
-A design-only main merge is explicitly unnecessary.
+artifact checkpoint and authorized PoC implementation. The joint buffered proof is accepted; #796
+remains draft during final SSH closeout reviews and gates. Use `review-requested` for a coherent
+implementation checkpoint. The operator's existing integration tester combines the two branches
+locally and supplies live evidence. A design-only main merge is explicitly unnecessary.
 
 The operator authorizes up to four feedback/fix rounds. Post integration-testing considerations
 before raising `review-requested`; all private review lanes must be complete first. Remove the label
@@ -42,12 +42,16 @@ authorize edits to transport-owned artifacts.
 
 The earlier legacy-consolidation work through `2f11662d` is superseded and retained as source
 material only; it is not independent-carrier implementation or proof evidence. Local proof fixtures
-now exercise the new buffered carrier. No live acceptance, production state change, full
-implementation or lockfile is claimed by this implementation checkpoint.
+now exercise the new buffered carrier. Transport's
+[acceptance disposition](../2026-09-12-transport-improv/proof-lld.md#joint-buffered-proof-acceptance-2026-09-17)
+accepts the joint buffered PoC. Production state changes, full implementation and this SDD's
+lockfile remain Phase 2.
 
 Current dependency provenance lives in [poc-results.md](poc-results.md#revisions-and-delivery).
 Completed checkboxes below record the revisions used when their work happened, including the first
-candidate pin; they are historical records, not floating dependency declarations.
+candidate pin; they are historical records, not floating dependency declarations. The operator-owned
+FRD retains its earlier checkpoint narration; this plan and the proof record carry current delivery
+status without changing the accepted requirements.
 
 ## External feedback rounds
 
@@ -64,11 +68,16 @@ candidate pin; they are historical records, not floating dependency declarations
       completion evidence correction, and retain affected macOS coverage as open until measured. Run
       the private review lanes and applicable gates, then post the tester handoff before raising the
       label. This round does not weaken public outcomes or claim completed joint acceptance.
-- [ ] Complete round 3 after the full reports and collection window: correct the macOS agent-socket
+- [x] Complete round 3 after the full reports and collection window: correct the macOS agent-socket
       fixture's path length without changing carrier behavior, record the six current live cells and
       their qualifications, and run private reviews and applicable gates. Post the exact macOS
       fixture retest considerations before raising the label. Joint acceptance remains with
       transport; one authorized fix round remains after this handoff.
+- [ ] Complete round 4 after the full reports and collection window: consume the reviewed transport
+      acceptance record, record the successful macOS fixture retest and unchanged-tree evidence,
+      reconcile the SSH artifacts and rebase onto the final transport head. Complete independent
+      closeout reviews and gates, then publish testing considerations before the review signal. This
+      exhausts the operator's four-round allowance; further material fixes need direction.
 
 ## Baseline work
 
@@ -95,14 +104,15 @@ candidate pin; they are historical records, not floating dependency declarations
       details. Inventory workstation, platform-host and provider-inner client locations under the
       HLA's OpenSSH 8.5 boundary, recording actual versions and separate server compatibility for
       the exercised cases. Record unexercised locations as gaps, not inherited compatibility.
-- [ ] Resolve proof prerequisites with transport, including initial SSH delivery before Python
+- [x] Resolve proof prerequisites with transport, including initial SSH delivery before Python
       installation and no-staging readiness. A proposed helper must not require the package that the
       first invocation needs to install. Platform-host userspace is a separate inventory.
-- [ ] The operator's integration tester supplies the bounded live-proof charter naming isolated
-      resources, credentials, versions, workload, budgets, cleanup and evidence. Transport owns QGA
-      access and the joint harness; the SSH portion must identify its resource limits explicitly.
-      This artifact review does not select operator hosts or permit implicit use of operator trust
-      stores.
+- [x] Use the operator's integration tester and existing authorized inventory/budgets for the
+      bounded live-proof charter. The [proof record](poc-results.md#proof-charter-and-prerequisites)
+      links the shared and SSH handoffs, explicit fixture identity/trust, measured versions, bounded
+      workloads, carrier resource limits and independent cleanup reports. Transport owns QGA access
+      and the joint harness. Private inventory and spending ceilings remain with the tester; no new
+      resource authority or implicit operator trust-store access is conveyed by this SDD.
 
 ### Build and demonstrate the complete SSH contribution
 
@@ -115,7 +125,7 @@ candidate pin; they are historical records, not floating dependency declarations
       strict fixture trust, version refusal and ambient-config isolation. Build enough real policy
       to substantiate those guarantees; do not disable verification to make the fixture pass.
       Production config conversion and the complete migration matrix belong to Phase 2.
-- [ ] Exercise every SSH-applicable case of the transport-owned PoC matrix and detailed carrier
+- [x] Exercise every SSH-applicable case of the transport-owned PoC matrix and detailed carrier
       contract through the joint harness, including its focused I/O ownership/failure tests. Link
       results to the authoritative cases rather than copying their inventory here. No failed or
       missing SSH proof case can be deferred to Phase 2 and called a complete SSH PoC.
@@ -129,11 +139,11 @@ candidate pin; they are historical records, not floating dependency declarations
 
 ### Accept the PoC and reconcile
 
-- [ ] Have transport evaluate the combined proof, including its real non-SSH case, against its
+- [x] Have transport evaluate the combined proof, including its real non-SSH case, against its
       acceptance criteria. Record the disposition and links to its evidence without claiming SSH
       performed or owns that work. Unresolved feasibility blocks acceptance; a changed mechanism
       returns for the appropriate contract or operator decision and affected cases run again.
-- [ ] Update this SDD and `ssh-lld.md` with observed SSH decisions and the transport-owned proven
+- [x] Update this SDD and `ssh-lld.md` with observed SSH decisions and the transport-owned proven
       revision. Transport updates its own artifacts. Carry the reconciled SSH artifacts in #796 with
       the PoC, not in an intervening design-only PR.
 - [ ] Complete independent project, complexity and correctness reviews, applicable local/hosted

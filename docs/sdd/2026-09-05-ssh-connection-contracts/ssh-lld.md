@@ -1,6 +1,6 @@
 # Buffered SSH Carrier
 
-Status: Phase 1 implementation; joint live proof and Phase 2 remain open.
+Status: Joint buffered PoC accepted; full implementation and migration remain Phase 2.
 
 ## Boundary
 
@@ -126,8 +126,10 @@ authentication or platform coverage.
 The operator's integration tester combines pinned transport and SSH branches locally, records both
 inputs and the integrated revision, and exercises the shared acceptance cases using their authorized
 resources. Contract-changing conflicts return to transport and the operator. No design-only main
-merge is needed to perform that work. The [proof record](poc-results.md) distinguishes local results
-from outstanding live evidence.
+merge is needed to perform that work. The [proof record](poc-results.md) separates local results,
+measured live cells and carried-forward evidence. Transport's
+[acceptance disposition](../2026-09-12-transport-improv/proof-lld.md#joint-buffered-proof-acceptance-2026-09-17)
+accepts the buffered boundary and maps its authoritative matrix to those results.
 
 Full live-stream and terminal ownership, forwarding, production configuration/trust conversion,
 provider-inner policy and complete workstation/platform evidence remain tracked in
