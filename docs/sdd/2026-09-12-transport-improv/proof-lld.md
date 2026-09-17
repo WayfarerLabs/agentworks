@@ -33,6 +33,12 @@ code. Payloads and captured bytes have no diagnostic representation; provider ex
 a diagnostic. Interruption propagates after local cleanup, never as successful execution or
 confirmed cancellation.
 
+The buffered candidate retains distinct input-delivery and output-collection failures, consumed by
+the SSH pipe implementation. They are not remote exit classifications. Expected early consumer
+closure needs to be distinguished from incomplete required delivery, and capture-limit exhaustion
+retains its separate code. An I/O failure must not erase independently observed invocation
+completion, promote incomplete streams to complete, or imply cancellation/replay permission.
+
 An observed exit belongs to the prepared invocation. It does not independently establish a nested
 application's outcome. In particular, an SSH local status of 255 remains ambiguous. Output parsing
 does not introduce an SSH completion guarantee.

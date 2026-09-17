@@ -9,6 +9,12 @@ CarrierIO holds the only finite input source. A report distinguishes submitted/u
 observed completion of that invocation, local status, raw stream provenance, completeness and
 retention. Local status alone is not a guest exit. Payload fields have no diagnostic representation.
 
+`Failure.INPUT` records failed or incomplete required input delivery; intentional consumer closure
+is not automatically a failure. `Failure.OUTPUT` records failed output collection, including a
+stream whose EOF cannot be established within the carrier's collection bound. `OUTPUT_LIMIT` is
+the distinct capture-limit outcome. These local failures preserve independently observed completion
+and partial-stream evidence; none establishes guest cancellation or permits replay.
+
 `preparation.py` prepares literal commands and explicit sh/bash scripts, ordinary environment/cwd
 and finite input. Source, environment and input are encoded into stdin, not process arguments. The
 Linux bootstrap needs Bash, GNU base64/env and `/dev/fd`; destination account-shell lookup also
