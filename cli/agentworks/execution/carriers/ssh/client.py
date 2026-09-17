@@ -16,9 +16,8 @@ from agentworks.execution.carrier import (
     ExitStatus,
     Failure,
     Provenance,
-    Retention,
 )
-from agentworks.execution.carriers.ssh._io import run_process
+from agentworks.execution.carriers.ssh._io import output_retention, run_process
 from agentworks.execution.carriers.ssh.connection import build_ssh_argv, validate_connection_files
 
 if TYPE_CHECKING:
@@ -57,7 +56,7 @@ class SSHCarrier:
         )
         if version.failure is not None:
             return _not_sent(io, version.failure)
-        match = _VERSION.match(version.stderr.data or version.stdout.data)
+        match = _VERSION.match(version.stderr.data)
         if version.exit_status != 0 or match is None or tuple(map(int, match.groups())) < (8, 5):
             return _not_sent(io, Failure.DISPATCH)
 
@@ -77,13 +76,7 @@ class SSHCarrier:
 
 
 def _not_sent(io: CarrierIO, failure: Failure) -> CarrierReport:
-    retention = (
-        Retention.SUPPRESSED
-        if io.sensitive
-        else Retention.CAPTURED
-        if isinstance(io.output, Capture)
-        else Retention.DISCARDED
-    )
+    retention = output_retention(io)
     return CarrierReport(
         Dispatch.NOT_SENT,
         stdout=CapturedOutput(provenance=Provenance.CARRIER_STDOUT, retention=retention),

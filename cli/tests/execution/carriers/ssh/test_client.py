@@ -504,6 +504,62 @@ def test_descendant_output_handles_do_not_block_cleanup(
         assert done.exists()
 
 
+def test_natural_exit_with_descendant_holding_stdin_reports_unsent_input(
+    synthetic: SyntheticSSH, tmp_path: Path
+) -> None:
+    release = tmp_path / "release"
+    done = tmp_path / "done"
+    descendant = (
+        "import pathlib,time; "
+        f"release=pathlib.Path({str(release)!r}); done=pathlib.Path({str(done)!r}); "
+        "end=time.monotonic()+5\n"
+        "while not release.exists() and time.monotonic()<end: time.sleep(.01)\n"
+        "done.touch()"
+    )
+    synthetic.command = (
+        "import subprocess,sys; "
+        f"subprocess.Popen([sys.executable,'-c',{descendant!r}], "
+        "stdin=sys.stdin, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
+        "sys.stdout.write('parent'); sys.exit(23)"
+    )
+    try:
+        started = time.monotonic()
+        report = synthetic.execute(CarrierIO(input=FiniteInput(b"x" * 2_000_000)), seconds=None)
+        assert time.monotonic() - started < 2
+        assert report.failure == Failure.INPUT
+        assert report.completion == ExitStatus(code=23)
+        assert report.stdout.data == b"parent"
+        assert report.local_status == 23
+        synthetic.assert_closed()
+    finally:
+        release.touch()
+        until = time.monotonic() + 5
+        while not done.exists() and time.monotonic() < until:
+            time.sleep(0.01)
+        assert done.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows child descriptor environment")
+def test_child_environment_preserves_parent_and_unrelated_values(
+    synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    descriptor_name = "c28fc6f98a2c44abbbd89d6a3037d0d9_POSIX_FD_STATE"
+    monkeypatch.setenv(descriptor_name, "fixture metadata")
+    monkeypatch.setenv("OPENSSH_STDIO_MODE", "nonsock")
+    monkeypatch.setenv("AGW_SSH_PIPE_FIXTURE", "ordinary caller value")
+    synthetic.command = (
+        "import os; "
+        f"assert {descriptor_name!r} not in os.environ; "
+        "assert 'OPENSSH_STDIO_MODE' not in os.environ; "
+        "assert os.environ['AGW_SSH_PIPE_FIXTURE'] == 'ordinary caller value'"
+    )
+    report = synthetic.execute()
+    assert report.completion == ExitStatus(code=0)
+    assert report.failure is None
+    assert os.environ[descriptor_name] == "fixture metadata"
+    assert os.environ["OPENSSH_STDIO_MODE"] == "nonsock"
+
+
 @pytest.mark.parametrize("inherited_mode", [None, "stdio", "descriptors"])
 def test_installed_ssh_owns_fresh_pipe_handles(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, inherited_mode: str | None

@@ -90,15 +90,33 @@ def _cleanup(process: subprocess.Popen[bytes]) -> bool:
     return True
 
 
-def run_process(argv: list[str], *, io: CarrierIO, deadline: Deadline) -> _ProcessResult:
-    """Send finite input once while fairly draining two independently capped streams."""
-    retention = (
+def output_retention(io: CarrierIO) -> Retention:
+    """Use one retention policy for pre-dispatch and process evidence."""
+    return (
         Retention.SUPPRESSED
         if io.sensitive
         else Retention.CAPTURED
         if isinstance(io.output, Capture)
         else Retention.DISCARDED
     )
+
+
+def _child_environment() -> dict[str, str] | None:
+    if os.name != "nt":
+        return None
+    # These describe OpenSSH's parent's handles, never our new Python pipes.
+    # https://github.com/PowerShell/openssh-portable/blob/v9.5.0.0/contrib/win32/win32compat/w32fd.c#L115-L128
+    # Newer clients also accept OPENSSH_STDIO_MODE to select handle semantics.
+    return {
+        name: value
+        for name, value in os.environ.items()
+        if name.upper() not in ("C28FC6F98A2C44ABBBD89D6A3037D0D9_POSIX_FD_STATE", "OPENSSH_STDIO_MODE")
+    }
+
+
+def run_process(argv: list[str], *, io: CarrierIO, deadline: Deadline) -> _ProcessResult:
+    """Send finite input once while fairly draining two independently capped streams."""
+    retention = output_retention(io)
     limit = io.output.max_bytes if isinstance(io.output, Capture) else 0
     stdout = _Output(Provenance.CARRIER_STDOUT, retention, limit)
     stderr = _Output(Provenance.MIXED_STDERR, retention, limit)
@@ -111,6 +129,7 @@ def run_process(argv: list[str], *, io: CarrierIO, deadline: Deadline) -> _Proce
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             bufsize=0,
+            env=_child_environment(),
         )
     except (OSError, ValueError):
         return _ProcessResult(False, None, None, stdout.report(), stderr.report(), Failure.DISPATCH)
@@ -163,11 +182,6 @@ def run_process(argv: list[str], *, io: CarrierIO, deadline: Deadline) -> _Proce
                     failure = Failure.INPUT
                     break
                 if stdout.eof and stderr.eof:
-                    break
-                if not progressed:
-                    # A descendant may retain handles after ssh exits. Never
-                    # infer EOF from exit or wait indefinitely for that process.
-                    failure = Failure.OUTPUT
                     break
             if not progressed:
                 remaining = deadline.remaining()
