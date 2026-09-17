@@ -237,10 +237,17 @@ before dispatch when absent from the channel's one immutable feature description
 | `CarrierReport`      | Dispatch evidence (`not_sent`, `sent`, or `unknown`), completion evidence, observed guest status if known, carrier/local status separately, available output with completeness/provenance, and safe diagnostics.                              |
 
 `sent` means the delivery request was submitted, not that the application started or finished.
-`not_sent` requires positive evidence that no remote dispatch could have occurred. Completion is
-reported only from evidence about the submitted invocation. A local SSH process terminating is not
-by itself proof of guest completion. For nested delivery, the outer report proves only the outer
-invocation; the remote Lima adapter cannot manufacture guest status from an ambiguous inner hop.
+`not_sent` requires positive evidence that no remote dispatch could have occurred. Raw completion
+records the observed remote command-chain exit or signal. It can include destination account-shell
+startup or refusal before the prepared bootstrap runs; it does not independently prove bootstrap or
+application execution. A local SSH process terminating is not by itself proof of guest completion.
+For nested delivery, outer completion cannot establish an inner guest outcome; the remote Lima
+adapter cannot manufacture guest status from an ambiguous inner hop.
+
+Shared preparation/outcome interpretation owns the evidence needed for a public application result.
+Captured guest streams require valid framing. Suppressed or discarded output supplies no framing
+proof, and neither raw zero nor absent retained bytes alone establishes application success. The
+buffered PoC exposes internal evidence only; it does not implement or waive the public-result gate.
 
 ### Input and stream ownership
 

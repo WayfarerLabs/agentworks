@@ -19,7 +19,7 @@ class Observation:
 
     case: str
     dispatch: Dispatch
-    prepared_exit: int | None
+    reported_exit: int | None
     local_status: int | None
     failure: Failure | None
     streams_complete: bool
@@ -101,14 +101,14 @@ def check_buffered_contract(carrier: Carrier, *, seconds_per_case: float = 15.0)
         ("exit-255", Script("exit 255", Shell.fixed("sh")), b"", {}, None, False, b"", b"", 255),
         (
             "sensitive-reflection",
-            Script("/bin/cat; printf private >&2", Shell.fixed("sh")),
+            Script("/bin/cat; printf private >&2; exit 37", Shell.fixed("sh")),
             secret,
             {"AGW_PROOF_SECRET": "synthetic-environment"},
             None,
             True,
             b"",
             b"",
-            0,
+            37,
         ),
     ]
     for name, request, stdin, env, cwd, sensitive, expected_out, expected_err, expected_exit in cases:

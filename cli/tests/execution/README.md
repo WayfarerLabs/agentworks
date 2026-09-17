@@ -47,14 +47,18 @@ passing observation, including under optimized Python. Results contain case name
 not payloads or credentials. The 255 case accepts truthful SSH ambiguity, never guessed success.
 
 The vectors cover literal arguments, binary source/input separation, explicit Bash, environment/cwd,
-EOF with an unusable TMPDIR, exits 0/1/255 and sensitive reflection suppression. They do not alone
-prove no staging or the whole carrier contract. Also run the carrier-specific deadline, dropped
-observation, interruption, truncation and cleanup cases. Deadline expiry stops local observation,
-not guest execution; ordinary guest process trees can survive and this proof has no cancellation
-handle or reaper. Use bounded harmless workloads, independently verify owned descendants terminate,
-and never use a command-pattern kill as proof of complete cleanup. Never replay a possibly
-dispatched case to obtain a prettier result. Record tool versions, workstation OS and VM-platform
-versions.
+EOF with an unusable TMPDIR, exits 0/1/255 and sensitive reflection suppression with deliberate
+exit 37. The distinctive sensitive exit rejects an outer shell that merely consumes input and exits
+zero; it is controlled-case evidence, not authentication against arbitrary account startup behavior.
+`Observation.reported_exit` records raw remote command-chain completion, not proof that the prepared
+bootstrap or application ran. Captured output must pass guest framing checks; suppressed/discarded
+output provides no such evidence. The vectors do not alone prove no staging or the whole carrier
+contract. Also run the carrier-specific deadline, dropped observation, interruption, truncation and
+cleanup cases. Deadline expiry stops local observation, not guest execution; ordinary guest process
+trees can survive and this proof has no cancellation handle or reaper. Use bounded harmless
+workloads, independently verify owned descendants terminate, and never use a command-pattern kill as
+proof of complete cleanup. Never replay a possibly dispatched case to obtain a prettier result.
+Record tool versions, workstation OS and VM-platform versions.
 
 Linux prerequisite checks include Bash 5.1 or newer, GNU base64/env (including
 `--default-signal=PIPE`), `/dev/fd`, and getent/id for destination account-shell selection. The

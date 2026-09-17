@@ -28,7 +28,7 @@ close operation. The later live-source/sink shape remains unimplemented until bo
 short-write and borrowed-stream tests establish it.
 
 `Deadline` carries one monotonic expiry, or an explicit absence of a time limit. Carriers do not
-renew the budget while polling. `CarrierReport` separates dispatch evidence, prepared-invocation
+renew the budget while polling. `CarrierReport` separates dispatch evidence, remote command-chain
 completion, local process status, raw output provenance/completeness/retention and a closed failure
 code. Payloads and captured bytes have no diagnostic representation; provider exception text is not
 a diagnostic. Interruption propagates after local cleanup, never as successful execution or
@@ -46,9 +46,10 @@ closure needs to be distinguished from incomplete required delivery, and capture
 retains its separate code. An I/O failure must not erase independently observed invocation
 completion, promote incomplete streams to complete, or imply cancellation/replay permission.
 
-An observed exit belongs to the prepared invocation. It does not independently establish a nested
-application's outcome. In particular, an SSH local status of 255 remains ambiguous. Output parsing
-does not introduce an SSH completion guarantee.
+An observed exit can belong to an account shell that refused before running the prepared bootstrap.
+It does not independently establish bootstrap execution or a nested application's outcome. In
+particular, an SSH local status of 255 remains ambiguous. Output parsing does not introduce an SSH
+completion guarantee.
 
 ## Shared no-staging preparation experiment
 
@@ -71,21 +72,30 @@ combinations require their own proof and must not be silently accepted.
 
 The parent observes source/stdin producer termination and output encoders before returning. An
 unexpected producer failure emits bootstrap-failure evidence and returns 125, even if the payload
-exited zero; the report still describes the prepared invocation, not a nested exit oracle. Early
-consumer closure may produce SIGPIPE and is allowed without claiming all input was consumed. GNU
-env's `--default-signal=PIPE` is an explicit prerequisite of this experiment. Local fault injection
-kills only decoders descended from the fixture's bootstrap and checks that partial delivery cannot
-be reported as complete.
+exited zero; the report still records remote command-chain completion, not a nested exit oracle.
+Early consumer closure may produce SIGPIPE and is allowed without claiming all input was consumed.
+GNU env's `--default-signal=PIPE` is an explicit prerequisite of this experiment. Local fault
+injection kills only decoders descended from the fixture's bootstrap and checks that partial
+delivery cannot be reported as complete.
 
 Guest stdout and stderr are separately armored into a shared record stream. Raw carrier stderr
 remains diagnostic or mixed provenance. Framing validation, output bounds and end markers must
 establish complete guest streams before interpreting them as such. Invalid or incomplete framing is
 a failed proof, not an empty successful command. The envelope does not carry a new exit-status
-oracle; the carrier's actual completion evidence remains authoritative for its invocation.
+oracle; the carrier's actual completion evidence describes only the remote command chain.
 
 Sensitive execution suppresses workload output in the bootstrap and retained carrier output.
 Suppression is not permission to retain raw sensitive frames for diagnostics. A suppressed stream
-must be reported as suppressed rather than as a decoded empty guest stream.
+must be reported as suppressed rather than as a decoded empty guest stream. Suppressed or discarded
+bytes provide no framing evidence. Neither raw zero nor absent retained output alone proves
+application success. The eventual shared public-result interpreter must honor that distinction; this
+internal buffered proof does not implement or waive it.
+
+The sensitive conformance case reflects synthetic input/output and deliberately exits 37. Requiring
+that distinctive exit alongside suppression rejects a shell that consumes input and exits zero
+before bootstrap. A local process regression exercises that refusal. This is controlled-case proof,
+not authentication against arbitrary shell startup behavior. Earlier live reports used the original
+zero-exit vector; the strengthened case requires fresh live measurement through both carriers.
 
 ## Native adapter placement
 
@@ -148,9 +158,9 @@ lanes. Report transport-only results separately from combined-tree evidence. An 
 contract change invalidates the corresponding prior observations and requires retesting.
 
 The live reports below establish the measured native and SSH cells, not complete acceptance. The
-second report closes the affected native trust retest and cleanup addendum, but adds a Windows SSH
-failure. The supported destination-account default-shell path still needs explicit live evidence:
-the eight shared vectors select only fixed interpreters. Broader shell/startup and
+later reports close the measured Windows failure and add explicit destination-account default-shell
+evidence, separately from the eight fixed-interpreter vectors. The strengthened sensitive vector and
+affected macOS drain behavior still require current evidence. Broader shell/startup and
 identity/elevation coverage remains unproven. Live I/O is not implemented by the finite-input slice
 and cannot be enabled without its separate ownership proof.
 
@@ -214,6 +224,45 @@ unresolved in this report and belongs to the SSH owner. Hosted Windows tests do 
 SSH delivery. Any corrected SSH candidate requires reviewed, pinned combined-tree retesting before
 joint proof acceptance. Windows success, WSL2, demoted QGA identity, additional account shells and
 multi-node Proxmox are not implied by the passing cells.
+
+### Windows resolution and destination-account lookup (2026-09-17)
+
+The [SSH retest](https://github.com/WayfarerLabs/agentworks/pull/796#issuecomment-5715862216)
+installed SSH `901d9614181da0fb209e9896c8e747a44118d123`, containing transport `d75c0bd3`, with 295
+execution tests passing and four skipped. Windows Server 2022, Python 3.12.14 and installed OpenSSH
+9.5p2 passed repeated authenticated smoke calls and all eight original vectors from both an
+SSH-parent launch and a clean launch. Both measured contexts also preserved the full byte range,
+enforced output bounds, delivered large finite input, refused wrong pinned keys and suppressed
+sensitive output. The first clean-context harness attempt failed because its SYSTEM identity could
+not use the fixture key; the corrected run is separately reported, not a controlled same-account
+comparison. The original Windows timeout is resolved on these measured cells, not all versions or
+launch arrangements.
+
+The
+[combined lookup report](https://github.com/WayfarerLabs/agentworks/pull/826#issuecomment-5716019566)
+merges transport `6687ef88f2138c819600ff11fa777924f707d9d9` and SSH `901d9614` at
+`c188b32ea89ba0da1aadf07bda5461dd033009bf`, without conflicts or resolutions; 295 execution tests
+passed with four skipped. Transport's intervening change was documentation only. Independently
+observed destination identities and account shells were UID 1000 with `/usr/bin/bash` over SSH on
+Debian 13, and UID 0 with `/bin/bash` over native QGA on PVE 9.2.11. `Shell.user_default()`
+preserved all 2048 input bytes with complete streams, no framing/bootstrap/carrier failure and
+reported exit zero, despite `SHELL=/does/not/exist`. Neither account shell was changed for the
+positive case. A separate `/bin/dash` account produced bootstrap refusal 125, confirming the
+documented allowlist rather than support for that path. The new native lookup measurement covers PVE
+9 only; earlier PVE 8/9 delivery and trust evidence remains attributed to its original run.
+
+The SSH report also measured account-shell refusal before bootstrap. Captured output rejected the
+missing framing; raw completion alone did not identify application execution. This prompted the
+shared terminology and sensitive-vector correction above. Remote detached-child measurements are not
+evidence for a workstation descendant retaining local client pipes; the SSH-owned local regression
+covers that separate case. The earlier macOS whole-cell pass does not automatically cover changed
+cross-platform drain code and needs affected-case retesting or explicit justification.
+
+Both reports supply independent cleanup evidence for their guest processes and test resources. They
+do not establish login/interactive startup, arbitrary account hooks, WSL2, QGA demotion, live
+streams/terminals, Bookworm or multi-node behavior. Published requests for additional beds do not
+authorize this session to provision them. Bounded observed guest drains remain distinct from
+cancellation of unbounded work.
 
 ### Local fault-injection evidence (2026-09-17)
 

@@ -6,8 +6,10 @@ they must not be handed directly to capability consumers.
 
 `carrier.py` defines the buffered adapter boundary. Preparation supplies literal bootstrap argv;
 CarrierIO holds the only finite input source. A report distinguishes submitted/unknown dispatch,
-observed completion of that invocation, local status, raw stream provenance, completeness and
-retention. Local status alone is not a guest exit. Payload fields have no diagnostic representation.
+observed remote command-chain completion, local status, raw stream provenance, completeness and
+retention. Completion can belong to an account shell that refused before the bootstrap ran; it is
+not independent proof of bootstrap or application execution. Local status alone is not a guest exit.
+Payload fields have no diagnostic representation.
 
 `Failure.INPUT` records failed or incomplete required input delivery; intentional consumer closure
 is not automatically a failure. `Failure.OUTPUT` records failed output collection, including a
@@ -31,7 +33,10 @@ allowed; GNU env's `--default-signal=PIPE` ensures its SIGPIPE outcome is observ
 The shared decoder validates separately tagged guest stdout/stderr inside carrier stdout. Raw
 carrier stderr remains diagnostic/mixed data and is never promoted to guest stderr. Stream markers
 are not completion evidence. Sensitive calls suppress workload output and retained carrier bytes;
-suppression is reported explicitly, not as a successfully decoded empty stream.
+suppression is reported explicitly, not as a successfully decoded empty stream. Suppressed or
+discarded output provides no framing evidence. Neither an observed zero nor absent retained bytes
+alone establishes application success; public outcome interpretation is not enabled by this internal
+proof.
 
 `carriers/proxmox.py` accepts resolved connection authority for one VM. It makes one dispatch and
 polls QGA status without replay after a failed observation. Input must be ASCII and at most 65,536

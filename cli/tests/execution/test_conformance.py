@@ -76,3 +76,20 @@ def test_harness_rejects_success_without_guest_stream_evidence() -> None:
 
     with pytest.raises(AssertionError):
         check_buffered_contract(EmptySuccess())
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="The first bootstrap proof targets Linux userspace")
+def test_harness_rejects_suppression_without_sensitive_payload_execution() -> None:
+    class EarlyShellSuccess(_LocalOracle):
+        bypassed = False
+
+        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+            if io.sensitive:
+                self.bypassed = True
+                invocation = PreparedInvocation(("/bin/sh", "-c", "/bin/cat >/dev/null; exit 0"))
+            return super().execute(invocation, io=io, deadline=deadline)
+
+    carrier = EarlyShellSuccess()
+    with pytest.raises(AssertionError):
+        check_buffered_contract(carrier)
+    assert carrier.bypassed

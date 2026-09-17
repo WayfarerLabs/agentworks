@@ -1,6 +1,6 @@
 """Buffered invocation boundary for independent carrier implementations.
 
-Reports describe the prepared invocation, not an application nested inside it.
+Reports describe channel observations, not proof that a bootstrap or application ran.
 Payload fields deliberately have no diagnostic representation. No type imports
 the legacy execution stack, resolves credentials, or opens a connection.
 """
@@ -154,7 +154,7 @@ class Failure(StrEnum):
 
 @dataclass(frozen=True)
 class ExitStatus:
-    """Observed completion of the prepared invocation, by exit or signal."""
+    """Observed remote command-chain exit or signal, possibly before bootstrap."""
 
     code: int | None = None
     signal: int | None = None
