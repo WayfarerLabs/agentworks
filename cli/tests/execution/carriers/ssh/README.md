@@ -73,10 +73,25 @@ running until the workload ends or receives separately authorized cleanup. See t
 [observation and guest lifetime](../../../../agentworks/execution/README.md#observation-and-guest-lifetime).
 This PoC must not back production operations until that shared lifecycle gate is satisfied.
 
-For the Windows retest, use the same authenticated launch path that timed out, including a session
-entered through Windows OpenSSH when applicable. Record the actual client path/version and whether
-the two OpenSSH-private handle variables are present, without dumping environment values. The
-carrier clears those variables only for its child processes because it owns fresh pipes. Compare
-bounded, independent read-only cases and run the shared vectors; report original-context results
-separately from a clean workstation launch. The local peer test covers the reproduced descriptor
-hazard before authentication, not the complete live invocation.
+The authenticated Windows retest passed in both the original SSH-parent context and a clean launch;
+the [proof record](../../../../../docs/sdd/2026-09-05-ssh-connection-contracts/poc-results.md) links
+the measured report. For subsequent Windows regressions, preserve those separate launch contexts,
+including a session entered through Windows OpenSSH when applicable. Record the actual client
+path/version and whether the two OpenSSH-private handle variables are present, without dumping
+environment values. The carrier clears those variables only for its child processes because it owns
+fresh pipes. Compare bounded, independent read-only cases and run the shared vectors; report
+original-context results separately from a clean workstation launch. The local peer test covers the
+reproduced descriptor hazard before authentication, not the complete live invocation.
+
+The earlier macOS live result predates the cross-platform pipe-drain correction. Re-run the affected
+shared vectors and local pipe-ownership cases on macOS at the combined candidate, or give a precise
+case-level justification for inherited evidence. A remote detached child and a local descendant
+retaining the client's pipe handles exercise different ownership; report them separately.
+
+Keep account-shell delivery prerequisites separate from the application's selected interpreter.
+Transport's default-shell lane requires independent destination identity/account-shell evidence;
+fixed-interpreter vectors do not cover it. A refusing account shell can return a raw SSH status
+before the bootstrap starts, so a status alone is not an application verdict. Captured output also
+needs the shared framing checks; suppressed output supplies no framing proof. Use the current shared
+sensitive vector, including its expected status, rather than treating empty retained output alone as
+proof that sensitive reflection ran.

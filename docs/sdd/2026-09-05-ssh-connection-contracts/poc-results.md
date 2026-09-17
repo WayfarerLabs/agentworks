@@ -1,7 +1,10 @@
+<!-- cspell:ignore tcsh -->
+
 # SSH PoC Evidence
 
-Status: Live Linux/macOS evidence exists. Windows delivery has a reported failure under
-investigation. Combined acceptance and production integration remain open.
+Status: Live Linux/macOS evidence exists, and the original Windows timeout is resolved in both
+measured launch contexts. Completion-evidence clarification, affected macOS coverage and combined
+acceptance remain open. This is not production readiness.
 
 ## Revisions and delivery
 
@@ -13,6 +16,11 @@ investigation. Combined acceptance and production integration remain open.
 - Later live run: the same SSH input plus current transport above, integrated as
   `d3c300ba7e51c83ee53da4b76760451b33a49e98`, with no conflicts. This was a real merge, not the
   earlier ancestor relationship carried forward.
+- Windows retest: SSH and integrated SHA `901d9614181da0fb209e9896c8e747a44118d123`, containing
+  transport `d75c0bd3`; the tester rechecked ancestry and installed the candidate on Windows.
+- Default-shell proof: SSH `901d9614` plus transport `6687ef88f2138c819600ff11fa777924f707d9d9`,
+  integrated as `c188b32ea89ba0da1aadf07bda5461dd033009bf` without conflicts. Transport's
+  intervening change was documentation only; this run required a merge.
 
 The operator explicitly directs the full SSH PoC and artifacts in #796, then full implementation,
 migration and integration in a second PR under this SDD. There is no design-only merge. The tester
@@ -28,6 +36,9 @@ Both installed the pinned combined package with Python 3.12.13 on aarch64 Linux.
 [Muntz provenance correction](https://github.com/WayfarerLabs/agentworks/pull/796#issuecomment-5708775662)
 explicitly withdraws its local-only report as the integration deliverable; that evidence remains
 separate.
+
+The following table records those earlier runs; the Windows failure is superseded by the retest
+below, while affected macOS behavior still needs a current measurement.
 
 | Workstation                                        | Destination/platform                                      | Reported result                                                                                                                                     |
 | -------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -48,6 +59,50 @@ The second report verified the updated shared input accounting, Bash floor and a
 independence guard. Native TLS used the real cluster CA and certificate, with the matching loopback
 SAN reached over an SSH forward because the trusted DNS route was unavailable. This is the reported
 network-path qualification, not an SSH ruling on native trust acceptance.
+
+### Windows resolution and later shell proof
+
+The [Windows retest](https://github.com/WayfarerLabs/agentworks/pull/796#issuecomment-5715862216)
+installed `901d9614` and verified its child-environment helper on the Windows bed, rather than
+relying on a release version string. Windows Server 2022, Python 3.12.14 and
+`C:\Windows\System32\OpenSSH\ssh.exe` (OpenSSH 9.5p2) reached a Debian 13 destination using explicit
+fixture identity and strict trust.
+
+Both the original Windows OpenSSH-parent context and a clean launch passed three smoke calls, all
+eight shared vectors, exact binary delivery, output limits, 150,000-byte finite input, strict trust
+refusal and sensitive suppression. Smoke calls completed in 0.8 to 1.0 seconds; the original context
+had previously expired three times at 30 seconds. Only the SSH-parent context inherited private
+descriptor state. These observations resolve that measured failure, not every Windows version or
+launch arrangement. The tester disclosed and discarded an initial clean-context setup whose SYSTEM
+account could not use the fixture identity; the successful rerun used an accessible identity and
+independently verified authentication first.
+
+The same head passed the affected Linux lanes against Debian 13 with Bash 5.2.37 and coreutils 9.7.
+The report carried earlier macOS results forward, but the pipe-drain change is cross-platform.
+Affected macOS coverage therefore remains open. A remote detached child's prompt return does not
+test a workstation descendant retaining the local client's pipe handles; the dedicated local
+regression covers that separate case.
+
+The
+[default-shell report](https://github.com/WayfarerLabs/agentworks/pull/826#issuecomment-5716019566)
+measured `Shell.user_default()` through SSH and native QGA on PVE 9.2.11. Independent observations
+established UID 1000 with `/usr/bin/bash` and UID 0 with `/bin/bash`, respectively. Both preserved
+all 2048 input bytes, completed guest streams and reported zero without framing, bootstrap or
+carrier failure despite `SHELL=/does/not/exist`. A separate `/bin/dash` default-shell account
+reached the bootstrap's explicit refusal. This does not establish login/interactive startup, startup
+hooks or the same new lane on PVE 8.
+
+Account-shell refusal before bootstrap is different: measured tcsh/false accounts returned raw SSH
+status 1 while captured output had a framing error. The shared harness rejected those calls. Raw
+status alone cannot establish that bootstrap or application execution occurred, and suppressed
+output intentionally supplies no framing proof. Transport owns the corresponding evidence wording
+and stronger sensitive-vector regression; SSH must not supply a private framing oracle.
+
+Both later runs measured 295 execution tests passed with four skips. The reports independently
+verified destination removal, temporary identities/access and tester-file cleanup, no live test
+tailnet nodes and empty VM inventory, plus provider state. The Windows bed was deallocated; the
+native run destroyed its guest, revoked its token and stopped the bed. These remain attributed
+tester observations.
 
 ## Lifetime and cleanup
 
@@ -101,8 +156,9 @@ actual dispositions.
 
 ### Windows investigation
 
-The real Windows timeout remains material. Its reported `local_status=1` can result from our local
-kill/reap path; it does not prove a natural exit ignored by the pump.
+The original Windows timeout was material. Its reported `local_status=1` can result from our local
+kill/reap path; it does not prove a natural exit ignored by the pump. The later report explicitly
+accepts that correction.
 
 The investigation traced Windows OpenSSH's inherited private descriptor state, which can describe a
 launching SSH process's handles instead of Python's newly created pipes. Hosted
@@ -113,18 +169,33 @@ Clean and alternate stdio-state cases passed. The fixture uses an owned loopback
 reaches authentication, so no operator credentials were used.
 
 The correction filters the two OpenSSH-private variables from the Windows child environment only.
-Ordinary variables and the parent remain intact, with case-insensitive matching. Corrected native CI
-and independent review must verify the same regression; the next full live report must establish
-whether this fixes the original authenticated Windows case. Source plausibility and the local-peer
-reproduction alone do not close that case.
+Ordinary variables and the parent remain intact, with case-insensitive matching. Corrected
+[Windows CI](https://github.com/WayfarerLabs/agentworks/actions/runs/35231092083/job/105235070534)
+passed 269 tests with 16 skips. All three private review lanes cleared `901d9614`; local full tests
+passed 10,216 with 11 skips and execution tests passed 295 with four skips. The
+[round-1 handoff](https://github.com/WayfarerLabs/agentworks/pull/796#issuecomment-5715778967)
+records the complete green gate set. The authenticated retest above, separately from this local
+evidence, closes the original measured Windows case.
+
+## Feedback round 2
+
+The [second round](https://github.com/WayfarerLabs/agentworks/pull/796#issuecomment-5716704189)
+started after the full reports and review window, with the label removed before edits. It records
+the Windows resolution, distinguishes raw channel completion from bootstrap/application evidence,
+and consumes transport's reviewed harness correction when available. The
+[critical reading](https://github.com/WayfarerLabs/agentworks/pull/796#issuecomment-5716400569) also
+retains affected macOS coverage and other unmeasured cells as open evidence. Two of the four
+authorized fix rounds remain after this round's handoff.
 
 ## Outstanding acceptance
 
-Windows delivery, unexercised workstation/platform combinations, non-Bash account-shell behavior,
-provider-inner client policy, demoted native identity, and the remainder of transport's matrix need
-measured evidence or explicit disposition. WSL2 and multi-node Proxmox were not exercised. Live
-streams and terminals remain unavailable in the buffered candidate; required PoC cases cannot be
-silently deferred to Phase 2. Transport owns joint acceptance.
+The corrected shared evidence boundary and sensitive vector, affected macOS drain behavior,
+unexercised workstation/platform combinations, account startup hooks, provider-inner client policy,
+demoted native identity, and the remainder of transport's matrix need measured evidence or explicit
+disposition. WSL2, multi-node Proxmox and Debian Bookworm were not exercised. Supported
+default-shell results above do not establish arbitrary account-shell compatibility. Live streams and
+terminals remain unavailable in the buffered candidate; required PoC cases cannot be silently
+deferred to Phase 2. Transport owns joint acceptance.
 
 No new credentials, destinations, provisioning or network mutations are authorized by these reports.
 The existing integration tester owns the authorized inventory and cleanup. This SDD stays unlocked,

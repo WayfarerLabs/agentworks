@@ -55,10 +55,15 @@ candidate pin; they are historical records, not floating dependency declarations
       transport, and the published complexity review. Remove `review-requested` and open round 1
       under the operator's four-round allowance after the review window. Record findings and
       dispositions on #796 before changing the implementation.
-- [ ] Complete round 1 policy and process regressions, investigate the real Windows timeout, update
+- [x] Complete round 1 policy and process regressions, investigate the real Windows timeout, update
       measured evidence and limitations, and re-run private reviews and affected gates. Post exact
       tester instructions before raising `review-requested` again. Windows completion and joint
       acceptance remain open until measured; a synthetic or parser-only pass cannot close them.
+- [ ] Complete round 2 after the full reports and collection window: record the authenticated
+      Windows resolution, align SSH wording and its harness field use with transport's reviewed
+      completion evidence correction, and retain affected macOS coverage as open until measured. Run
+      the private review lanes and applicable gates, then post the tester handoff before raising the
+      label. This round does not weaken public outcomes or claim completed joint acceptance.
 
 ## Baseline work
 
