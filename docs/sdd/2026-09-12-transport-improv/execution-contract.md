@@ -229,12 +229,12 @@ plugin can implement it but ordinary capability consumers cannot use it to bypas
 Optional terminal/live-streaming behavior is selected explicitly through `CarrierIO` and refused
 before dispatch when absent from the channel's one immutable feature description.
 
-| Value                | Contract                                                                                                                                                                                                                                                    |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PreparedInvocation` | Literal bootstrap argv and safe diagnostic label, with no stdin field. Application shell, final identity, env and cwd are already prepared above the carrier. Any helper interpreter is explicit. Payload-bearing fields have no diagnostic representation. |
-| `CarrierIO`          | One explicit input choice: EOF, finite source, live source, or terminal endpoint. Output is bounded capture, discard, explicit byte-stream sinks, or terminal presentation. Carries effective sensitivity and authorized presentation policy.               |
-| `Deadline`           | Remaining total budget, passed through local startup, dispatch and observation; never restarted for each poll. An explicitly unbounded operation remains distinct from a default.                                                                           |
-| `CarrierReport`      | Dispatch evidence (`not_sent`, `sent`, or `unknown`), completion evidence, observed guest status if known, carrier/local status separately, available output with completeness/provenance, and safe diagnostics.                                            |
+| Value                | Contract                                                                                                                                                                                                                                      |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PreparedInvocation` | Literal bootstrap argv, with no stdin field. Application shell, final identity, env and cwd are already prepared above the carrier. Any helper interpreter is explicit. Payload-bearing fields have no diagnostic representation.             |
+| `CarrierIO`          | One explicit input choice: EOF, finite source, live source, or terminal endpoint. Output is bounded capture, discard, explicit byte-stream sinks, or terminal presentation. Carries effective sensitivity and authorized presentation policy. |
+| `Deadline`           | Remaining total budget, passed through local startup, dispatch and observation; never restarted for each poll. An explicitly unbounded operation remains distinct from a default.                                                             |
+| `CarrierReport`      | Dispatch evidence (`not_sent`, `sent`, or `unknown`), completion evidence, observed guest status if known, carrier/local status separately, available output with completeness/provenance, and safe diagnostics.                              |
 
 `sent` means the delivery request was submitted, not that the application started or finished.
 `not_sent` requires positive evidence that no remote dispatch could have occurred. Completion is
@@ -287,6 +287,15 @@ Control-flow interruption, including `KeyboardInterrupt`, propagates after bound
 regardless of `check`. Safe partial evidence may accompany it but must not convert it to an ordinary
 returned result or checked-command error. The owning operation's interrupt rollback must still run;
 remote cancellation remains a separate explicit action.
+
+For the buffered PoC, the operator accepted deferring guest cancellation on 2026-09-17. Live
+deadline tests confirmed that ordinary guest processes and bootstrap descendants can remain running
+after local observation ends. This is a measured limitation, not just an uncertain termination
+report. The PoC has no cancellation handle or guest reaper; it must not back production operations
+until shared workload ownership and cancellation are implemented and validated. Do not turn a local
+deadline into an implicit guest kill or replay an uncertain command. The later execution/job
+lifecycle must provide explicit cancellation of owned ordinary descendants without depending on
+either carrier maintaining its original connection.
 
 Captured bytes are not silently truncated: limits produce explicit incomplete-output evidence.
 Common helpers arrange bounded transfer/spooling for required large data, while readiness targets

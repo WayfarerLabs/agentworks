@@ -6,10 +6,13 @@ Run local checks from `cli/`:
 uv run pytest tests/execution
 ```
 
-The bootstrap tests run synthetic Linux commands locally. Native tests use controlled REST responses
-and local worker processes. These are not evidence of live SSH or Proxmox compatibility. The
-fresh-process import test makes the retired execution modules unavailable rather than assuming
-pytest's already-loaded modules establish independence.
+The bootstrap tests run synthetic Linux commands locally. Native tests use controlled REST
+responses, local worker processes and fixture-owned loopback HTTPS servers. These are not evidence
+of live SSH or Proxmox compatibility. The fresh-process import test makes the retired execution
+modules unavailable rather than assuming pytest's already-loaded modules establish independence. It
+discovers and imports every supplied execution module, so a combined checkout exercises SSH
+automatically and any failed import fails the check. A standalone checkout does not claim coverage
+of an absent carrier.
 
 ## Combined-tree integration run
 
@@ -33,6 +36,12 @@ for observation in observations:
     print(observation)
 ```
 
+For native delivery, construct `ProxmoxConnection` with an HTTPS origin whose hostname matches the
+node certificate and an independently trusted cluster `ca_bundle=Path(...)` when system trust is
+insufficient. Verification cannot be disabled. Confirm trusted-CA success and wrong-CA/wrong-host
+refusal without publishing credentials. Do not install certificates or change test-bed networking
+unless the tester's existing authority permits it; report an unavailable trusted route explicitly.
+
 Run the same vectors against both carriers. A failed measurement raises rather than generating a
 passing observation, including under optimized Python. Results contain case names and safe evidence,
 not payloads or credentials. The 255 case accepts truthful SSH ambiguity, never guessed success.
@@ -40,11 +49,23 @@ not payloads or credentials. The 255 case accepts truthful SSH ambiguity, never 
 The vectors cover literal arguments, binary source/input separation, explicit Bash, environment/cwd,
 EOF with an unusable TMPDIR, exits 0/1/255 and sensitive reflection suppression. They do not alone
 prove no staging or the whole carrier contract. Also run the carrier-specific deadline, dropped
-observation, interruption, truncation and cleanup cases. Never replay a possibly dispatched case to
-obtain a prettier result. Record tool versions, workstation OS and VM-platform versions.
+observation, interruption, truncation and cleanup cases. Deadline expiry stops local observation,
+not guest execution; ordinary guest process trees can survive and this proof has no cancellation
+handle or reaper. Use bounded harmless workloads, independently verify owned descendants terminate,
+and never use a command-pattern kill as proof of complete cleanup. Never replay a possibly
+dispatched case to obtain a prettier result. Record tool versions, workstation OS and VM-platform
+versions.
 
-Linux prerequisite checks include Bash, GNU base64/env (including `--default-signal=PIPE`),
-`/dev/fd`, and getent/id for destination account-shell selection. The initial slice refuses
-login/interactive startup. MacOS/Windows workstations, other guest shells, identity/elevation, live
-streams and terminals require their own evidence. An affected code or contract change requires
-retesting the corresponding observations.
+Linux prerequisite checks include Bash 5.1 or newer, GNU base64/env (including
+`--default-signal=PIPE`), `/dev/fd`, and getent/id for destination account-shell selection. The
+initial slice refuses login/interactive startup. MacOS/Windows workstations, other guest shells,
+identity/elevation, live streams and terminals require their own evidence. An affected code or
+contract change requires retesting the corresponding observations.
+
+Record exact guest Bash/coreutils versions, not just executable presence. Locally, the fault tests
+have measured Bash 5.2.15; a documented 5.1 minimum is not evidence of a 5.1 run. Near-limit input
+checks must account for the complete encoded envelope: 262,144 bytes at preparation, 65,536 for
+native delivery, shared among all request fields. Record pre-dispatch refusal separately from
+provider acceptance, and preserve actual boundary values rather than generalizing one raw-stdin
+example. Close the report with independent process, provider-record and test-resource cleanup
+observations, including the disposition of any unfinished provisioning from the run.

@@ -11,8 +11,9 @@
 The required order is: settle the transport-owned small contract, prove it, reconcile both SDDs,
 build independently in parallel, validate complete workflows, then cut over and physically delete
 the old stack. The proof is a bounded joint slice, not permission to start the broad rebuild. This
-proof now has a transport-side implementation and local tests, not joint or live acceptance. All
-gates below remain open.
+proof now has a transport-side implementation, local tests and a first joint live report. The
+[proof evidence](proof-lld.md) separates measured cells from unresolved acceptance. No broad-build
+or production-cutover gate is completed by those measurements.
 
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
@@ -31,6 +32,21 @@ design-only merge. Transport integrates one joint proof delivery with the SSH co
 complete carrier implementation follows proof acceptance as a separate code delivery. The
 [proof LLD](proof-lld.md) records this first implementation's exact subset, placement and evidence
 gaps. None of the joint proof checkboxes below is completed by starting that work.
+
+On 2026-09-17 the operator accepted deferring guest cancellation from the buffered PoC. Deadlines
+remain local observation bounds. Live tests demonstrated surviving guest process trees after expiry;
+the PoC has neither a remote cancellation handle nor a reaper. Recording that limitation does not
+waive the production workload-lifecycle gate below or permit automatic replay.
+
+## Buffered PoC checkpoint record
+
+- [x] Publish the finite-input transport candidate and local fault evidence at `e3d93736` in #826;
+      production factories and RunContext remain unchanged.
+- [x] Obtain the first joint live report on 2026-09-17 at SSH `1c32e415` containing transport
+      `a570a2de`: all eight shared vectors passed on the measured SSH cells and native PVE 8/9. The
+      [evidence record](proof-lld.md) preserves gaps and does not declare joint acceptance.
+- [ ] Close the authorized feedback rounds and retest affected behavior at the final pinned
+      transport/SSH combination, with independent cleanup evidence, before proof merge readiness.
 
 ## Parallel ownership without overlapping edits
 
@@ -103,6 +119,10 @@ execution modules. This is not a full file/job implementation or a preliminary l
       stale records. Preserve macOS host jobs before guest creation. Establish remaining
       Proxmox/WSL2 feasibility under an authorized live-test charter; the small proof does not stand
       in for these checks.
+- [ ] Before production enablement, implement and validate owned workload lifecycle and explicit
+      cancellation, including ordinary descendants, stale/reused process identity, disconnected
+      observation, bounded cleanup and truthful confirmation or uncertainty. Keep local waiting
+      deadlines distinct from guest lifetime. The operator deferred this from the PoC only.
 - [ ] Complete the file LLD for R7: whole-file publication, JSON merge semantics, ownership/mode and
       security metadata preservation, bounded inventory, directories/conditional removal,
       concurrency and uncertain results. Preserve the shipped four settings strategies and JSON
@@ -150,6 +170,12 @@ execution modules. This is not a full file/job implementation or a preliminary l
 
 ## 5. Validate complete workflows, cut over, and retire
 
+- [ ] Complete the
+      [incident-derived behavior inventory](migration-strategy.md#incident-derived-behavior-inventory)
+      before deleting legacy code/tests. Each entry records its old source/test, new owner and
+      replacement regression, required workstation/platform evidence, and explicit disposition. ADR
+      0020, Windows stdin conversion and Git-for-Windows toolchain assumptions are seed cases, not
+      an exhaustive inventory or a claim of new-stack validation.
 - [ ] Validate complete provisioning, native recovery without Tailscale, scoped plugin operations,
       backup, host provisioning/rollback and interactive attachment through new internal entry
       points. Cover required operations, optional refusal, sensitive data and supported workstation/

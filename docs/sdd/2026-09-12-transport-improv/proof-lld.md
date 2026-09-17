@@ -20,11 +20,12 @@ the complete permission-scoped public API are not part of this slice.
 
 ## Candidate carrier boundary
 
-`PreparedInvocation` owns literal bootstrap argv and a safe diagnostic label, never stdin.
-`CarrierIO` owns exactly one input, EOF or immutable finite bytes, and capture or discard output.
-Its sensitivity is the union of request and input sensitivity; an input marker cannot be cleared.
-Finite bytes need no borrowed stream or close operation. The later live-source/sink shape remains
-unimplemented until bounded cancellation, short-write and borrowed-stream tests establish it.
+`PreparedInvocation` owns literal bootstrap argv, never stdin. The unused diagnostic-label field was
+removed from the buffered candidate; no carrier consumed it. `CarrierIO` owns exactly one input, EOF
+or immutable finite bytes, and capture or discard output. Its sensitivity is the union of request
+and input sensitivity; an input marker cannot be cleared. Finite bytes need no borrowed stream or
+close operation. The later live-source/sink shape remains unimplemented until bounded cancellation,
+short-write and borrowed-stream tests establish it.
 
 `Deadline` carries one monotonic expiry, or an explicit absence of a time limit. Carriers do not
 renew the budget while polling. `CarrierReport` separates dispatch evidence, prepared-invocation
@@ -32,6 +33,12 @@ completion, local process status, raw output provenance/completeness/retention a
 code. Payloads and captured bytes have no diagnostic representation; provider exception text is not
 a diagnostic. Interruption propagates after local cleanup, never as successful execution or
 confirmed cancellation.
+
+The 2026-09-17 live run observed surviving bootstrap descendants and the ordinary guest workload
+after local deadline expiry through both carriers. The operator accepted deferring guest
+cancellation from this PoC. The implementation intentionally has no remote reaper or cancellation
+handle; a caller must not retry on expiry as if the earlier work had stopped. Shared owned workload
+lifecycle/cancellation remains a pre-production gate, separate from this local deadline.
 
 The buffered candidate retains distinct input-delivery and output-collection failures, consumed by
 the SSH pipe implementation. They are not remote exit classifications. Expected early consumer
@@ -49,6 +56,12 @@ The initial test lane is Linux. It investigates an explicit Bash bootstrap with 
 using pipes and `/dev/fd` rather than temporary files or an installed guest helper. It does not
 assume Python is available during native recovery or readiness. Bash, base64 and descriptor support
 are prerequisites to measure, not claims about every supported target.
+
+Bash 5.1 is the mechanism minimum for saving and waiting on each process-substitution PID;
+[the Bash maintainer's explanation](https://lists.nongnu.org/archive/html/bug-bash/2024-07/msg00044.html)
+distinguishes it from earlier, narrower wait behavior. Local tests measure Bash 5.2.15. Exact guest
+versions and older-version execution remain separate evidence, not inferred from executable presence
+or that upstream explanation.
 
 Application argv, script source, environment, directory and finite stdin travel in an ASCII input
 envelope. The bootstrap argv is fixed implementation source, not caller source or secret values.
@@ -96,9 +109,21 @@ Each native HTTP request runs in an owned workstation-Python worker. Connection 
 request contents arrive on its stdin, never argv. The parent applies the remaining total budget,
 kills/reaps the worker on timeout or interruption, and never retries the request. This bounds DNS,
 TLS and response observation, not just socket inactivity. It does not cancel an already-submitted
-guest process. Redirects and environment proxies are disabled; TLS verification is on by default.
-The wire worker caps a response at 4 MiB. PVE input is capped at 65,536 ASCII bytes; whole-request
-acceptance, including bootstrap argv, remains a live-test measurement rather than a guessed limit.
+guest process. Redirects and environment proxies are disabled; TLS verification is mandatory. An
+explicit cluster CA bundle provides an alternative to the connection type's default trust without
+disabling hostname verification. Use a certificate-matching API hostname, not a server-name
+override. The wire worker caps a response at 4 MiB. PVE input is capped at 65,536 ASCII bytes;
+whole-request acceptance, including bootstrap argv, remains a live-test measurement rather than a
+guessed limit.
+
+Preparation caps the complete encoded input envelope at 262,144 bytes. Source, argv, environment,
+cwd, framing and application stdin share that budget; neither encoded limit is a raw-stdin
+allowance. A sh script containing `/bin/cat`, with no env or cwd, permits 196,554 raw stdin bytes at
+preparation and 49,098 for native delivery. Literal `/bin/cat` argv instead permits 196,551/49,095
+bytes. These examples were measured locally, not promised for other compositions. The final
+envelope's byte length is the exact preflight quantity. Carrier rejection above its bound occurs
+before dispatch; this PoC does not implement the production bounded-transfer/spooling mechanism
+required by FRD R4.
 
 ## Test scope and evidence
 
@@ -122,10 +147,35 @@ the same vectors for the SSH and QGA constructions, then their fault-injection a
 lanes. Report transport-only results separately from combined-tree evidence. An affected code or
 contract change invalidates the corresponding prior observations and requires retesting.
 
-Acceptance remains open for SSH contribution/integration, live native evidence, supported tools and
-shell startup combinations, identity/elevation, strict deadline behavior, bounded live I/O and the
-full joint matrix. Record actual command results here when observed; do not convert pending items
-into passing claims because the carrier's local unit tests pass.
+The first live report below establishes the measured native and SSH cells, not complete acceptance.
+Supported tool versions and shell startup combinations, identity/elevation, remaining fault and
+boundary cases, final cleanup evidence and the full joint matrix remain open. Live I/O is not
+implemented by the finite-input slice and cannot be enabled without its separate ownership proof.
+
+### First live integration report (2026-09-17)
+
+The operator's integration-testing lane published reports on
+[#826](https://github.com/WayfarerLabs/agentworks/pull/826#issuecomment-5709203617) and
+[#796](https://github.com/WayfarerLabs/agentworks/pull/796#issuecomment-5709203388). Installed input
+was SSH `1c32e4155c4a41304638d7637e1418459cc90092`, containing transport `a570a2de` as an ancestor,
+with Python 3.12.13 on aarch64 Linux. Transport `e3d93736` changed only tests/evidence, not shipped
+code. Later trust/bootstrap changes require affected-case retesting; the old report is not evidence
+for untested revised behavior.
+
+| Measured scope                                                                                             | Reported observation                                                                                                                       |
+| ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Linux workstation to native QGA, PVE 8.4.21 and 9.2.11, Debian 13 guests                                   | All eight shared vectors passed on both. Execution identity was root; no demotion was tested.                                              |
+| Linux workstation to SSH destinations on remote Lima, AWS and Azure; macOS 26.3 workstation to remote Lima | All eight shared vectors passed. Clients were OpenSSH 9.2p1 and 10.2p1, respectively.                                                      |
+| Native output bound                                                                                        | A 400 KB producer retained exactly 32,768 bytes with OUTPUT_LIMIT, incomplete output and observed completion 0.                            |
+| Sensitive native and SSH calls                                                                             | Synthetic canaries absent from sampled destination/local argv and returned reports; retained bytes suppressed.                             |
+| Native deadline on both PVE majors, and SSH deadline on Lima                                               | Six guest processes remained at 60 seconds after local return, then zero after explicit tester cleanup. No guest cancellation was claimed. |
+| PVE response types                                                                                         | The live provider returned integer exited/truncation fields, validating normalization of both boolean and 0/1 wire shapes.                 |
+
+The report also identifies CA trust, composition-dependent input limits and missing automated SSH
+independence coverage. Those drive the first feedback round. The wider final cleanup/evidence
+addendum is requested: the GCP instance was still provisioning at report time. GCP, Windows carrier
+execution, WSL2, other guest shells, demoted QGA and multi-node Proxmox were not covered. No
+test-bed network/certificate mutation or new provisioning authority is inferred from the report.
 
 ### Local fault-injection evidence (2026-09-17)
 

@@ -55,6 +55,16 @@ behavior and leaves proof, detailed design and implementation acceptance open.
 [Issue #788](https://github.com/WayfarerLabs/agentworks/issues/788) and the now-closed
 [PR #789](https://github.com/WayfarerLabs/agentworks/pull/789) remain historical input.
 
+### Operator ruling, 2026-09-17
+
+On deferring guest cancellation from the buffered PoC, while keeping observation-only deadlines:
+
+> Yeah, I'm confortable deferring cancellation for now.
+
+<!-- cspell:ignore confortable -->
+
+### Implementation scope
+
 In scope for the eventual implementation:
 
 - The shared execution contract, all existing VM transport adapters, and native transport delivery

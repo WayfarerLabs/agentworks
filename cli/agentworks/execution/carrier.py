@@ -18,7 +18,7 @@ from agentworks.errors import ValidationError
 
 @dataclass(frozen=True)
 class Deadline:
-    """One monotonic budget, with None explicitly meaning unbounded."""
+    """One local observation budget, not guest cancellation; None is unbounded."""
 
     expires_at: float | None
 
@@ -58,11 +58,9 @@ class PreparedInvocation:
     """Literal bootstrap argv supplied by trusted execution preparation.
 
     Adapter-author callers can be outside static typing, so validate argv here.
-    The label must be an explicitly non-sensitive diagnostic description.
     """
 
     argv: tuple[str, ...] = field(repr=False)
-    label: str = "transport proof"
 
     def __post_init__(self) -> None:
         if (
