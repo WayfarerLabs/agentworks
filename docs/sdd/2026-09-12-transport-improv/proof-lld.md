@@ -1,7 +1,7 @@
 # Transport Boundary Proof
 
-Status: Buffered implementation validated; final checkpoint review pending. Broader joint proof
-gates remain open.
+Status: Joint buffered PoC accepted. Design reconciliation, broader interfaces and production gates
+remain open.
 
 ## Delivery and ownership
 
@@ -159,13 +159,55 @@ the same vectors for the SSH and QGA constructions, then their fault-injection a
 lanes. Report transport-only results separately from combined-tree evidence. An affected code or
 contract change invalidates the corresponding prior observations and requires retesting.
 
-The live reports below establish the measured native and SSH cells, not complete acceptance. The
-later reports close the measured Windows failure and add explicit destination-account default-shell
-evidence, separately from the eight fixed-interpreter vectors. The final-candidate report measures
-the strengthened sensitive vector and affected macOS drain behavior. The subsequent macOS delta
-report verifies the SSH-owned socket-fixture correction and a clean local suite. Broader
-shell/startup and identity/elevation coverage remains unproven. Live I/O is not implemented by the
-finite-input slice and cannot be enabled without its separate ownership proof.
+The live reports below establish the measured native and SSH cells. The later reports close the
+measured Windows failure and add explicit destination-account default-shell evidence, separately
+from the eight fixed-interpreter vectors. The final-candidate report measures the strengthened
+sensitive vector and affected macOS drain behavior. The subsequent macOS delta report verifies the
+SSH-owned socket-fixture correction and a clean local suite. Broader shell/startup and
+identity/elevation coverage remains unproven. Live I/O is not implemented by the finite-input slice
+and cannot be enabled without its separate ownership proof.
+
+### Joint buffered proof acceptance (2026-09-17)
+
+Transport accepts the joint finite-input proof at transport `931ad8ef` and SSH `bc2a0711`. The
+lead's disposable local combination is `2b1f1d39aff70ec2f0c148d2a9d34dedde9d39a5`, without conflict
+resolutions. Its entire `cli/` tree is identical to the tested SSH candidate, and its
+`cli/agentworks/` tree is identical to live-tested `1ccc304b`. The final transport delta from
+`e41a4482` changes only this evidence record and the plan. Closeout documentation does not create
+new runtime coverage or invalidate those comparisons.
+
+The
+[native delta disposition](https://github.com/WayfarerLabs/agentworks/pull/826#issuecomment-5718672799)
+explicitly carries its evidence forward and says no live retest is warranted. The
+[SSH/macOS report](https://github.com/WayfarerLabs/agentworks/pull/796#issuecomment-5718460281)
+already covers the combined implementation and the affected fixture retest. Requesting a further
+tester acknowledgment of a documentation-only local combination added no coverage; it is not an
+acceptance gate. Four authorized feedback rounds are complete, with no unresolved material finding.
+
+| Proof row                             | Applicable evidence and boundary                                                                                                                                                                                                                                                                                                                      |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Literal execution and shell bootstrap | Shared vectors preserve literal arguments, fixed interpreters, env and cwd. The lookup report measures account-default selection on SSH and QGA and unsupported-shell refusal. Execution uses the explicit connection identity, with no implicit sudo or demotion; this API exposes no identity-switch request. Login/interactive startup is refused. |
+| Source and finite input               | Shared vectors separate script source from stdin, preserve finite bytes and establish EOF. The revised sensitive case reports exit 37 with no retained bytes in all six final live cells; local mutation tests reject suppression without payload execution.                                                                                          |
+| Guest streams                         | Shared vectors and byte-range tests validate separate binary guest stdout/stderr framing. Raw carrier diagnostics remain distinct or mixed; discarded/suppressed output is not decoded guest-output evidence.                                                                                                                                         |
+| Outcomes and observation              | Exits 0/1/255, bounds, deadlines and interrupted observation retain observed facts. Fault tests cover lost observation and local cleanup without replay. SSH 255/drop ambiguity and lack of remote cancellation remain explicit.                                                                                                                      |
+| Readiness                             | Both carriers execute the shared bootstrap without helper installation or staging; reports record no observed carrier staging. Account-shell prerequisites are documented separately, not a guarantee against arbitrary startup hooks.                                                                                                                |
+| I/O ownership and failure             | Immutable bytes/EOF have no borrowed stream lifetime. Local SSH tests cover duplex pressure, EOF, short writes, input/output failures and descendant-held pipes; native tests cover owned-worker interruption and kill/reap. Live-source/terminal ownership remains required before advertising those modes.                                          |
+| Non-SSH shape                         | Real QGA exercises the same buffered boundary on PVE 8/9, including TLS, limits and readiness. The final exit-37 and account-default cases are newly measured on PVE 9 only; earlier unchanged-runtime PVE 8 evidence retains its original attribution.                                                                                               |
+
+The transport-owned two-row
+[applicability audit](https://github.com/WayfarerLabs/agentworks/pull/826#issuecomment-5718891752)
+also received an independent project review. PVE 8's unmeasured revised vector is accepted as a
+bounded-proof coverage limitation: the changed conformance assertion exercises shared bootstrap
+logic, not a per-major runtime branch, and both majors already have delivery, TLS and bounds
+evidence. This is not a fresh PVE 8 pass or a waiver of supported-version testing at production
+acceptance. Bookworm's out-of-band provisioning and TOFU qualifications remain unchanged.
+
+This acceptance lets both owners close their buffered PoC artifacts and reconcile their designs
+against the proven candidate. It does not complete FRD R3 privilege isolation, public-result
+interpretation, live I/O, files/jobs, workload cancellation, platform-host composition, production
+enablement or legacy deletion. The next gate is proof-informed design publication under the same
+artifact ownership, not unrestricted parallel implementation. Existing independent cleanup reports
+cover the live runs; the final delta assessment created no infrastructure.
 
 ### First live integration report (2026-09-17)
 

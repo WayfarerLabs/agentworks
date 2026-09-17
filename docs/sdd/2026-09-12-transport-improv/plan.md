@@ -1,8 +1,7 @@
 # Transport Improvements: Design and Delivery Sequence
 
-- Status: Buffered implementation validated; final checkpoint review pending; joint acceptance gates
-  remain open
-- Delivery vehicle: Merged design PR #795, followed by draft PoC PR #826, labeled
+- Status: Joint buffered PoC accepted; design reconciliation and production gates remain open
+- Delivery vehicle: Merged design PR #795, followed by transport PoC PR #826, labeled
   `sdd:transport-improv`
 - Requirements: [FRD](frd.md)
 - Architecture: [HLA](hla.md)
@@ -13,8 +12,8 @@ The required order is: settle the transport-owned small contract, prove it, reco
 build independently in parallel, validate complete workflows, then cut over and physically delete
 the old stack. The proof is a bounded joint slice, not permission to start the broad rebuild. This
 proof now has a transport-side implementation, local tests and successive joint live reports. The
-[proof evidence](proof-lld.md) separates measured cells from unresolved acceptance. No broad-build
-or production-cutover gate is completed by those measurements.
+[proof evidence](proof-lld.md) records acceptance of the finite-input slice and its limits. No
+broad-build or production-cutover gate is completed by those measurements.
 
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
@@ -46,7 +45,7 @@ waive the production workload-lifecycle gate below or permit automatic replay.
 - [x] Obtain the first joint live report on 2026-09-17 at SSH `1c32e415` containing transport
       `a570a2de`: all eight shared vectors passed on the measured SSH cells and native PVE 8/9. The
       [evidence record](proof-lld.md) preserves gaps and does not declare joint acceptance.
-- [ ] Close the authorized feedback rounds and retest affected behavior at the final pinned
+- [x] Close the authorized feedback rounds and retest affected behavior at the final pinned
       transport/SSH combination, with independent cleanup evidence, before proof merge readiness.
 - [x] Obtain the second joint live report on 2026-09-17 at transport `d75c0bd3` and SSH `1c32e415`:
       native TLS retesting, the Bash 5.1 floor and cleanup addendum are measured. The Windows SSH
@@ -64,11 +63,17 @@ suppression in all six cells and fresh macOS live/local-pipe evidence. At transp
 forward, rather than claiming fresh measurements. The affected macOS socket-fixture retest passed
 under normal and long temporary paths; its local execution suite now reports 255 passed, 45
 accounted platform-scoped skips and zero failures. The lead independently verified ancestry and
-runtime equivalence and ran the combined Linux suite, 296 passed and four skipped. The
-feedback-closeout checkbox remains pending the final checkpoint disposition. The
+runtime equivalence and ran the combined Linux suite, 296 passed and four skipped. The four
+authorized feedback rounds are closed. The final transport delta at `931ad8ef` is documentation
+only; its local combination with SSH `bc2a0711` at `2b1f1d39` has an identical `cli/` tree to the
+tested SSH candidate. The tester explicitly carried forward native evidence and found no need for
+another live retest. Transport accepts the joint buffered proof using those reports and verified
+tree equivalence, not an additional tester acknowledgment. The
 [proof evidence](proof-lld.md#final-macos-delta-and-unchanged-runtime-evidence-2026-09-17) records
-exact pins, independent cleanup and unchanged broader limitations. No broad joint-proof or
-production gate is completed here.
+exact pins, independent cleanup and unchanged broader limitations. The
+[acceptance disposition](proof-lld.md#joint-buffered-proof-acceptance-2026-09-17) maps the proof
+matrix to that evidence. Design reconciliation, the broader contract and production gates remain
+open; the SDD is not complete and must not be locked.
 
 ## Parallel ownership without overlapping edits
 
@@ -123,10 +128,18 @@ execution modules. This is not a full file/job implementation or a preliminary l
 | I/O ownership and failure             | Focused stream tests prove EOF, borrowed-stream lifetime, short writes, bounded flow control/cancellation and safe source/sink failure. Failure cannot become success, silent discard or confirmed remote cancellation.                                         |
 | Non-SSH shape                         | A bounded Proxmox QGA case exercises the same request/report contract, finite input, output limits and no-staging readiness. A fake alone does not establish live feasibility or supported-version coverage.                                                    |
 
-- [ ] Complete the proof matrix with observed evidence and a pinned candidate contract. A failed or
+- [x] Complete the proof matrix with observed evidence and a pinned candidate contract. A failed or
       unresolved shell/input/stream boundary blocks broad parallel implementation; revise the seam
       and repeat the affected cases. If the needed mechanism changes scope, return to the operator.
       This gate does not claim exact SSH exit/drop classification or full platform acceptance.
+
+This completion covers the defined buffered candidate: finite bytes/EOF, capture/discard and the
+authorized connection identity. The
+[acceptance disposition](proof-lld.md#joint-buffered-proof-acceptance-2026-09-17) records each row's
+applicable evidence. Optional live/terminal modes, scoped elevation and arbitrary startup hooks are
+not advertised or accepted by this slice. The specification and reconciliation tasks remain
+responsible for the broader interface before parallel implementation; neither this checkbox nor the
+PoC merge enables production use.
 
 ## 3. Reconcile designs and publish the implementation boundary
 
