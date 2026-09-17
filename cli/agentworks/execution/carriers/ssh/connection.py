@@ -120,7 +120,7 @@ def build_ssh_argv(connection: SSHConnection, invocation: PreparedInvocation) ->
         # https://github.com/openssh/openssh-portable/blob/V_8_5_P1/ssh.c#L2312-L2320
         # An explicit child of the validated regular identity file cannot load
         # a certificate, including the loader's automatic .pub probe.
-        f'CertificateFile="{_literal_path(connection.identity_file / "disabled-certificate")}"',
+        f'CertificateFile="{(connection.identity_file / "disabled-certificate").as_posix()}"',
         "PreferredAuthentications=publickey",
         "PKCS11Provider=none",
         "SecurityKeyProvider=none",
@@ -139,16 +139,16 @@ def build_ssh_argv(connection: SSHConnection, invocation: PreparedInvocation) ->
         "PermitLocalCommand=no",
         "EscapeChar=none",
         "ConnectionAttempts=1",
-        f'IdentityFile="{_literal_path(connection.identity_file)}"',
-        f'UserKnownHostsFile="{_literal_path(connection.known_hosts_file)}"',
+        f'IdentityFile="{connection.identity_file.as_posix()}"',
+        f'UserKnownHostsFile="{connection.known_hosts_file.as_posix()}"',
         (
             "IdentityAgent=none"
             if connection.agent_socket is None
-            else f'IdentityAgent="{_literal_path(Path(connection.agent_socket))}"'
+            else f'IdentityAgent="{Path(connection.agent_socket).as_posix()}"'
         ),
     ]
     if connection.revoked_host_keys is not None:
-        options.append(f'RevokedHostKeys="{_literal_path(connection.revoked_host_keys)}"')
+        options.append(f'RevokedHostKeys="{connection.revoked_host_keys.as_posix()}"')
     if connection.host_key_alias is not None:
         options.append(f"HostKeyAlias={connection.host_key_alias}")
     argv = [connection.ssh_executable, "-F", "none", "-T"]

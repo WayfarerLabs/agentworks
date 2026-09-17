@@ -33,6 +33,27 @@ not a server inventory or a live compatibility result. macOS/Windows execution, 
 behavior, platform-host and provider-inner clients, server/authentication combinations and
 initial-image prerequisites remain unmeasured here.
 
+## Local validation and review
+
+At implementation commit `6cf987ca`, the complete non-integration Python suite passed with 10,167
+passed and 7 skipped. Ruff lint/format, mypy, typer isolation, locked-SDD checks, rulesync drift,
+Python/Node website tests and deterministic builds at both site bases passed locally.
+
+Independent project and correctness reviewers found one material issue: positive Windows client
+crash statuses were incorrectly interpreted as guest completion. The correction limits established
+POSIX completion to 0 through 254, preserves other local statuses as unknown, and adds three
+portable mapping regressions plus a native Windows process-status test. The complexity review found
+no blocking complexity; its repeated path-validation simplification and stale checkpoint sentence
+were corrected. After those changes, the focused SSH suite passes 98 tests with the one native
+Windows case skipped on Linux. The exact corrected head and follow-up review results belong in the
+PR handoff.
+
+The repository file-lint gate currently fails solely on inherited transport-owned files at
+`81e5f6c3`: Prettier reports `cli/agentworks/execution/README.md` and
+`cli/tests/execution/README.md`, and cspell reports `asdict` twice in the latter. Markdown lint
+passes. These files are unchanged by SSH; transport #826 reports the same failing gate. This is an
+outstanding dependency, not a green-gate claim or authorization to edit the partner's artifacts.
+
 ## Outstanding acceptance
 
 The operator's integration tester owns the authorized live inventory, credentials, workload budget

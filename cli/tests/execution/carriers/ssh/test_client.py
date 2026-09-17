@@ -7,7 +7,7 @@ import os
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from subprocess import Popen
 from typing import Any
@@ -27,7 +27,7 @@ from agentworks.execution.carrier import (
     Provenance,
     Retention,
 )
-from agentworks.execution.carriers.ssh import _io
+from agentworks.execution.carriers.ssh import _io, client
 from agentworks.execution.carriers.ssh.client import SSHCarrier
 from agentworks.execution.carriers.ssh.connection import SSHConnection
 
@@ -106,6 +106,36 @@ def test_status_and_raw_stream_evidence(synthetic: SyntheticSSH, code: int) -> N
     assert report.stdout.complete and report.stderr.complete
     assert report.stdout.provenance == Provenance.CARRIER_STDOUT
     assert report.stderr.provenance == Provenance.MIXED_STDERR
+    synthetic.assert_closed()
+
+
+@pytest.mark.parametrize("status", [256, 0xC0000005, 0xC000013A])
+def test_native_status_outside_posix_exit_range_is_not_guest_completion(
+    synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    original = _io.run_process
+
+    def run(argv, **kwargs):
+        result = original(argv, **kwargs)
+        return result if argv[-1] == "-V" else replace(result, local_status=status, exit_status=status)
+
+    monkeypatch.setattr(client, "run_process", run)
+    report = synthetic.execute()
+    assert report.local_status == status
+    assert report.completion is None
+    assert report.dispatch == Dispatch.UNKNOWN
+    assert report.failure == Failure.OBSERVATION
+    synthetic.assert_closed()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows DWORD process status")
+def test_windows_process_status_preserves_unknown_completion(synthetic: SyntheticSSH) -> None:
+    synthetic.command = "import ctypes; ctypes.windll.kernel32.ExitProcess(0xC0000005)"
+    report = synthetic.execute()
+    assert report.local_status == 0xC0000005
+    assert report.completion is None
+    assert report.dispatch == Dispatch.UNKNOWN
+    assert report.failure == Failure.OBSERVATION
     synthetic.assert_closed()
 
 

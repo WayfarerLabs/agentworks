@@ -21,10 +21,11 @@ a preliminary migration of legacy callers.
 
 Delivery under this SDD has two phases: PR #796 carries the entire SSH portion of the joint PoC with
 these artifacts; the second SSH PR carries full implementation and its integration/retirement
-obligations. There is no separate SSH design PR to merge. The current artifact checkpoint requests
-feedback before PoC implementation and does not claim proof completion. Transport is the sole owner
-of the carrier contract and acceptance criteria; SSH contributes implementation and feasibility
-input. The [plan](plan.md) defines phase gates without maintaining a second shared contract.
+obligations. There is no separate SSH design PR to merge. The current implementation checkpoint
+requests feedback and live validation; it does not claim joint proof completion. Transport is the
+sole owner of the carrier contract and acceptance criteria; SSH contributes implementation and
+feasibility input. The [plan](plan.md) defines phase gates without maintaining a second shared
+contract.
 
 ## R1. Independent, reusable SSH delivery
 

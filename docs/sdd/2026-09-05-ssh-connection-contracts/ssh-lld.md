@@ -76,11 +76,11 @@ renew execution or establish guest cancellation. KeyboardInterrupt propagates af
 observed client exit, drainage has at most 0.1 seconds and still requires actual EOF for
 completeness. Inherited descendant handles cannot cause an unbounded drain.
 
-A natural nonnegative local exit other than 255 supplies prepared-invocation completion. Status 255
-and local signals leave that completion unknown; SSH adds no completion oracle. Dispatch is unknown
-once a client starts without stronger completion evidence, and not-sent only when local checks or
-spawning establish that no command process started. Output failure and partial capture remain
-visible even when completion is known. See OpenSSH's
+A natural local exit from 0 through 254 supplies POSIX prepared-invocation completion. Status 255,
+local signals and Windows native crash codes leave that completion unknown; SSH adds no completion
+oracle. Dispatch is unknown once a client starts without stronger completion evidence, and not-sent
+only when local checks or spawning establish that no command process started. Output failure and
+partial capture remain visible even when completion is known. See OpenSSH's
 [exit-status definition](https://man.openbsd.org/ssh#EXIT_STATUS).
 
 ## Proof and remaining work

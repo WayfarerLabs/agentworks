@@ -31,8 +31,8 @@ _VERSION = re.compile(rb"\AOpenSSH_(?:for_Windows_)?(\d+)\.(\d+)(?:p\d+)?(?:[,\s
 class SSHCarrier:
     """One command dispatch, without replay or claims about guest cancellation.
 
-    A nonnegative ssh status other than 255 establishes the prepared invocation's
-    completion. Status 255 and local signals leave guest completion unknown.
+    A status from 0 through 254 establishes the POSIX prepared invocation's
+    completion. Status 255, signals and Windows crash codes leave it unknown.
     Raw stderr mixes client diagnostics with the remote stderr channel.
     """
 
@@ -64,7 +64,7 @@ class SSHCarrier:
         result = run_process(argv, io=io, deadline=deadline)
         completion = (
             ExitStatus(code=result.exit_status)
-            if result.exit_status is not None and result.exit_status >= 0 and result.exit_status != 255
+            if result.exit_status is not None and 0 <= result.exit_status < 255
             else None
         )
         dispatch = (
