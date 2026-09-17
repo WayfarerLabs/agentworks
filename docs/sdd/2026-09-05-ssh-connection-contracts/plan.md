@@ -45,6 +45,21 @@ material only; it is not independent-carrier implementation or proof evidence. L
 now exercise the new buffered carrier. No live acceptance, production state change, full
 implementation or lockfile is claimed by this implementation checkpoint.
 
+Current dependency provenance lives in [poc-results.md](poc-results.md#revisions-and-delivery).
+Completed checkboxes below record the revisions used when their work happened, including the first
+candidate pin; they are historical records, not floating dependency declarations.
+
+## External feedback rounds
+
+- [x] Receive the full first live report for SSH `1c32e415`, its later combined-tree report on
+      transport, and the published complexity review. Remove `review-requested` and open round 1
+      under the operator's four-round allowance after the review window. Record findings and
+      dispositions on #796 before changing the implementation.
+- [ ] Complete round 1 policy and process regressions, investigate the real Windows timeout, update
+      measured evidence and limitations, and re-run private reviews and affected gates. Post exact
+      tester instructions before raising `review-requested` again. Windows completion and joint
+      acceptance remain open until measured; a synthetic or parser-only pass cannot close them.
+
 ## Baseline work
 
 - [x] Compare main `e440a28c` with the original `7c744828` baseline and transport proposal
@@ -97,7 +112,7 @@ implementation or lockfile is claimed by this implementation checkpoint.
 - [x] Run the proof's new-stack imports and tests with the transport-defined retirement modules
       unavailable. Audit dependency closure, including normal package initialization and fixtures;
       copied tests must not call legacy code to calculate expected results.
-- [ ] Record reproducible commands, pinned code/contract revisions, executable/server inventory,
+- [x] Record reproducible commands, pinned code/contract revisions, executable/server inventory,
       observed evidence, safe failure reports and independently verified cleanup in
       `poc-results.md`. Keep credentials and payload-bearing diagnostics out of retained evidence.
       Separate local fixtures from live observations and list all unsupported or untested cases.
