@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import base64
 import os
+import select
+import signal
 import subprocess
 import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -25,7 +28,12 @@ from agentworks.execution.preparation import (
 )
 
 
-def _run(prepared: PreparedExecution, *, env: dict[str, str] | None = None) -> tuple[int, DecodedOutput, bytes]:
+def _run(
+    prepared: PreparedExecution,
+    *,
+    env: dict[str, str] | None = None,
+    restore_signals: bool = True,
+) -> tuple[int, DecodedOutput, bytes]:
     """Launch only local fixture payloads, with a bounded observation budget."""
     if not sys.platform.startswith("linux"):
         pytest.skip("The bootstrap proof targets Linux /dev/fd and GNU tools")
@@ -36,6 +44,7 @@ def _run(prepared: PreparedExecution, *, env: dict[str, str] | None = None) -> t
         capture_output=True,
         timeout=10,
         env=env,
+        restore_signals=restore_signals,
         check=False,
     )
     decoded = decode_output(prepared, CapturedOutput(result.stdout, True, Provenance.CARRIER_STDOUT))
@@ -80,6 +89,96 @@ def test_helper_pipeline_failure_option_does_not_change_application_shell() -> N
     status, decoded, _ = _run(prepare(Script("false | true", Shell.fixed("bash"))))
     assert status == 0
     assert decoded.stdout_complete and decoded.stderr_complete
+
+
+@pytest.mark.parametrize("restore_signals", [True, False])
+@pytest.mark.parametrize("consume", [False, True])
+def test_payload_may_close_large_stdin_early(restore_signals: bool, consume: bool) -> None:
+    command = Command(("/usr/bin/head", "-c", "1")) if consume else Command(("/usr/bin/true",))
+    prepared = prepare(command, stdin=b"x" * 150_000)
+    status, decoded, _ = _run(prepared, restore_signals=restore_signals)
+    assert status == 0
+    assert decoded.stdout == (b"x" if consume else b"")
+    assert decoded.stdout_complete and decoded.stderr_complete
+    assert not decoded.bootstrap_failed
+
+
+def test_script_may_exit_before_consuming_all_source() -> None:
+    prepared = prepare(Script("exit 0\n#" + "x" * 150_000, Shell.fixed("sh")))
+    status, decoded, _ = _run(prepared)
+    assert status == 0
+    assert decoded.stdout_complete and decoded.stderr_complete
+
+
+def test_sensitive_payload_may_close_large_stdin_early() -> None:
+    prepared = prepare(Command(("/usr/bin/true",)), stdin=b"x" * 150_000, sensitive=True)
+    status, decoded, _ = _run(prepared)
+    assert status == 0
+    assert decoded.suppressed
+
+
+def _active_decoder(root_pid: int) -> int | None:
+    """Find only a decoder descended from this test's owned bootstrap."""
+    children_file = Path(f"/proc/{root_pid}/task/{root_pid}/children")
+    try:
+        children = children_file.read_text().split()
+    except FileNotFoundError:
+        return None
+    for child in children:
+        child_pid = int(child)
+        try:
+            argv = Path(f"/proc/{child_pid}/cmdline").read_bytes().split(b"\0")
+        except FileNotFoundError:
+            continue
+        if argv[:2] == [b"/usr/bin/base64", b"--decode"]:
+            return child_pid
+        descendant = _active_decoder(child_pid)
+        if descendant is not None:
+            return descendant
+    return None
+
+
+@pytest.mark.parametrize("producer", ["stdin", "source"])
+def test_killed_producer_cannot_report_successful_partial_delivery(producer: str) -> None:
+    if not sys.platform.startswith("linux"):
+        pytest.skip("Decoder fault injection requires Linux /proc")
+    source = "/bin/sleep 2; /bin/cat" if producer == "stdin" else "/bin/sleep 2\n#" + "x" * 150_000
+    prepared = prepare(Script(source, Shell.fixed("sh")), stdin=b"x" * 150_000 if producer == "stdin" else b"")
+    assert isinstance(prepared.io.input, FiniteInput)
+    with subprocess.Popen(
+        prepared.invocation.argv,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    ) as process:
+        try:
+            assert process.stdin is not None and process.stdout is not None
+            process.stdin.write(prepared.io.input.data)
+            process.stdin.close()
+            process.stdin = None
+            assert select.select([process.stdout], [], [], 2)[0]
+            prefix = process.stdout.readline()
+            assert prefix == prepared.token.encode() + b" B\n"
+            deadline = time.monotonic() + 2
+            decoder = None
+            while decoder is None and time.monotonic() < deadline:
+                decoder = _active_decoder(process.pid)
+                if decoder is None:
+                    time.sleep(0.005)
+            assert decoder is not None
+            os.kill(decoder, signal.SIGTERM)
+            stdout, _ = process.communicate(timeout=5)
+            decoded = decode_output(prepared, CapturedOutput(prefix + stdout, True, Provenance.CARRIER_STDOUT))
+            assert process.returncode == 125
+            assert decoded.bootstrap_failed
+            assert not decoded.stdout_complete and not decoded.stderr_complete
+            if producer == "stdin":
+                assert len(decoded.stdout) < 150_000
+        finally:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait(timeout=2)
 
 
 @pytest.mark.parametrize("code", [0, 1, 255])

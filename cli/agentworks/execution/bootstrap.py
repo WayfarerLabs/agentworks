@@ -1,11 +1,13 @@
 """No-staging Linux bootstrap for the bounded buffered execution proof.
 
-The helper needs Bash, GNU base64, env, and Linux /dev/fd. Account-shell
+The helper needs Bash, GNU base64/env, and Linux /dev/fd. Account-shell
 selection additionally needs getent and id. Its argv is constant: application
 arguments, source, environment, directory, and input arrive only through stdin.
 This is neither a completion protocol nor an isolation boundary for shell code.
 Private helper names use the unexported _agw_ namespace. Its parsing locale is
 restored before the application environment is applied.
+The parent observes both input producers. SIGPIPE permits a consumer to close
+early; other producer failures invalidate delivery even when the payload exits 0.
 """
 
 BOOTSTRAP_ARGV = (
@@ -93,6 +95,10 @@ _agw_encode_stream() {
     fi
 }
 
+_agw_decode_stream() {
+    printf '%s' "$1" 2>/dev/null | /usr/bin/env --default-signal=PIPE /usr/bin/base64 --decode
+}
+
 _agw_run_payload() {
     local _agw_executable _agw_account _agw_assignment
     if [[ $_agw_kind == script ]]; then
@@ -114,8 +120,7 @@ _agw_run_payload() {
         [[ ${#_agw_args[@]} -gt 0 ]] || _agw_fail
     fi
     [[ -z $_agw_directory ]] || cd -- "$_agw_directory" || _agw_fail
-    exec 5< <(printf '%s' "$_agw_source" | /usr/bin/base64 --decode)
-    exec 0< <(printf '%s' "$_agw_input" | /usr/bin/base64 --decode)
+    exec 0<&6 6<&-
     if [[ $_agw_kind == script ]]; then
         set -- "$_agw_executable" /dev/fd/5
     else
@@ -141,22 +146,38 @@ _agw_run_payload() {
     exec "$@"
 }
 
-export -n -f _agw_fail _agw_line _agw_decode _agw_encode_stream _agw_run_payload
+export -n -f _agw_fail _agw_line _agw_decode _agw_encode_stream _agw_decode_stream _agw_run_payload
+exec 5< <(_agw_decode_stream "$_agw_source")
+_agw_source_pid=$!
+exec 6< <(exec 5<&-; _agw_decode_stream "$_agw_input")
+_agw_input_pid=$!
 printf '%s B\n' "$_agw_token" >&7
 if [[ $_agw_sensitive == 1 ]]; then
     (_agw_run_payload) >/dev/null 2>/dev/null
     _agw_status=$?
 else
-    exec 8> >(_agw_encode_stream O >&7)
+    exec 8> >(exec 5<&- 6<&-; _agw_encode_stream O >&7)
     _agw_out_pid=$!
-    exec 9> >(exec 8>&-; _agw_encode_stream E >&7)
+    exec 9> >(exec 5<&- 6<&- 8>&-; _agw_encode_stream E >&7)
     _agw_err_pid=$!
     (_agw_run_payload) >&8 2>&9
     _agw_status=$?
-    exec 8>&- 9>&-
-    wait "$_agw_out_pid" || _agw_fail
-    wait "$_agw_err_pid" || _agw_fail
 fi
+exec 5<&- 6<&- 8>&- 9>&-
+_agw_producer_failed=0
+for _agw_pid in "$_agw_source_pid" "$_agw_input_pid"; do
+    wait "$_agw_pid"
+    _agw_producer_status=$?
+    case $_agw_producer_status in
+        0|141) ;;
+        *) _agw_producer_failed=1 ;;
+    esac
+done
+if [[ $_agw_sensitive == 0 ]]; then
+    wait "$_agw_out_pid" || _agw_producer_failed=1
+    wait "$_agw_err_pid" || _agw_producer_failed=1
+fi
+[[ $_agw_producer_failed == 0 ]] || _agw_fail
 exit "$_agw_status"
 """,
 )
