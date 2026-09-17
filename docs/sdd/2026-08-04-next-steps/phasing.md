@@ -228,13 +228,27 @@ off whenever bandwidth allows, on its own merits and its own schedule.
   published release body is inaccurate and needs a manual correction (issue #741); see
   `current-state.md`.
 
-- **0.19.0 is open as release PR #748, and its removal promise is already kept.** The 0.18 guide
-  states in three places that the `session resume` forms, `console attach --recreate`, and
-  `session list --no-status` are removed in 0.19. That promise binds the release _numbered_ 0.19.0,
-  so the removal had to land before the cut rather than after it, and it did: PR #752 merged
-  2026-09-06 and closed issue #720, and release-please regenerated #748 to carry the break. Recorded
-  because the sequencing generalizes: a removal promised for version N is unsatisfiable if the work
-  waits for `main` to declare N, since the release PR is cut from what is already on `main`.
+- **0.19.0 shipped 2026-09-16.** The largest release of this saga: wave 4's harness scope framework
+  and its agent-artifacts successor both landed, alongside the completed runnable alignment and the
+  session identity migration. Its published notes were rewritten by hand before the cut, from 180
+  generated entries to 24. The cause is the mechanism already recorded in this saga: every merged PR
+  contributes both its merge-commit summary and its internal commits, so the artifacts effort alone
+  rendered 27 implementation commits beside its own summary, burying the operator-visible changes.
+  Three changes requiring operator action appeared nowhere in the generated body: the session
+  identity migration, `session restart` now confirming before replacing a running session, and
+  `session start --all` selecting only stopped sessions.
+  - **The free-change window closed with this tag.** `harness_integrations`, the `artifact` command
+    spelling, and shell's `enabled_workarounds` were all reshaped at zero cost in the final week
+    because they had never shipped. They now have operators, and the same corrections cost
+    migrations from here.
+
+- **0.19.0's removal promise was kept before the cut.** The 0.18 guide states in three places that
+  the `session resume` forms, `console attach --recreate`, and `session list --no-status` are
+  removed in 0.19. That promise binds the release _numbered_ 0.19.0, so the removal had to land
+  before the cut rather than after it, and it did: PR #752 merged 2026-09-06 and closed issue #720,
+  and release-please regenerated #748 to carry the break. Recorded because the sequencing
+  generalizes: a removal promised for version N is unsatisfiable if the work waits for `main` to
+  declare N, since the release PR is cut from what is already on `main`.
 
 - **Later:** remaining waves map to releases as they prove out; no need to pin numbers now.
 
