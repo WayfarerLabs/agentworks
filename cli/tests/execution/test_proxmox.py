@@ -8,7 +8,8 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
@@ -178,6 +179,15 @@ def test_worker_credentials_use_only_stdin(monkeypatch: pytest.MonkeyPatch) -> N
     assert payload["connection"]["token_secret"] == "secret-canary"
     assert "secret-canary" not in repr(spawn.call_args)
     assert spawn.call_args.kwargs["stderr"] == subprocess.DEVNULL
+
+
+def test_ca_bundle_path_serializes_only_for_worker(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    process = stub_process(monkeypatch, b'{"data":{"pid":42}}')
+    bundle = tmp_path / "cluster CA.pem"
+    value = replace(connection(), ca_bundle=bundle)
+    assert value.ca_bundle == bundle
+    assert _ProxmoxWire(value).request("POST", "exec", body=b"{}", timeout=1) == {"pid": 42}
+    assert json.loads(process.communicate.call_args.args[0])["connection"]["ca_bundle"] == str(bundle)
 
 
 @pytest.mark.windows

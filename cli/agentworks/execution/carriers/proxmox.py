@@ -16,6 +16,7 @@ import time
 import urllib.parse
 from contextlib import suppress
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 
 from agentworks.errors import ValidationError
 from agentworks.execution.carrier import (
@@ -35,19 +36,23 @@ from agentworks.execution.carrier import (
 )
 
 _MAX_INPUT_BYTES = 65_536
-_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 
 
 @dataclass(frozen=True)
 class ProxmoxConnection:
-    """Explicit REST authority for one VM, without credential discovery."""
+    """Explicit REST authority for one VM, without credential discovery.
+
+    A CA bundle selects trusted issuers for this connection; omission uses the
+    workstation's normal TLS trust defaults. Hostname verification always applies.
+    Bundle loading is deferred to delivery, keeping construction passive.
+    """
 
     api_url: str
     node: str
     vmid: int
     token_id: str = field(repr=False)
     token_secret: str = field(repr=False)
-    verify_tls: bool = True
+    ca_bundle: Path | None = None
 
     def __post_init__(self) -> None:
         """Validate connection inputs supplied by the composition boundary."""
@@ -72,12 +77,13 @@ class ProxmoxConnection:
             raise ValidationError("Proxmox requires an HTTPS origin without user information")
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]*", self.node) or type(self.vmid) is not int or self.vmid <= 0:
             raise ValidationError("Proxmox requires a node and positive VM identifier")
-        if (
-            not self.token_id
-            or not self.token_secret
-            or any(char in self.token_id + self.token_secret for char in "\r\n")
+        if any(
+            not isinstance(token, str) or not token or "\r" in token or "\n" in token
+            for token in (self.token_id, self.token_secret)
         ):
             raise ValidationError("Proxmox requires a valid API token")
+        if self.ca_bundle is not None and (not isinstance(self.ca_bundle, Path) or "\0" in str(self.ca_bundle)):
+            raise ValidationError("Proxmox CA bundle must be a filesystem path")
 
 
 class _WireFailure(Exception):
@@ -93,9 +99,11 @@ class _ProxmoxWire:
     ) -> dict[str, object]:
         """Own one HTTP worker until completion, timeout or propagated interruption."""
         started = time.monotonic()
+        connection = asdict(self._connection)
+        connection["ca_bundle"] = str(self._connection.ca_bundle) if self._connection.ca_bundle is not None else None
         payload = json.dumps(
             {
-                "connection": asdict(self._connection),
+                "connection": connection,
                 "method": method,
                 "suffix": suffix,
                 "body": body.decode("ascii") if body is not None else None,
@@ -117,7 +125,7 @@ class _ProxmoxWire:
                     process.kill()
             process.communicate()
             raise
-        if process.returncode != 0 or len(encoded) > _MAX_RESPONSE_BYTES:
+        if process.returncode != 0:
             raise _WireFailure("Proxmox request or response failed")
         try:
             parsed = json.loads(encoded)
