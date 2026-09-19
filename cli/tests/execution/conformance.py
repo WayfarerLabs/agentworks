@@ -10,7 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from agentworks.execution.carrier import Carrier, Deadline, Dispatch, Failure, Retention
-from agentworks.execution.preparation import Command, Script, Shell, decode_output, prepare
+from agentworks.execution.models import Command, Script, Shell
+from agentworks.execution.preparation import decode_output, prepare
 
 
 @dataclass(frozen=True)
@@ -55,7 +56,7 @@ def check_buffered_contract(carrier: Carrier, *, seconds_per_case: float = 15.0)
         ),
         (
             "source-and-binary-input",
-            Script("printf '\\000\\377\\n'; /bin/cat; printf '\\200err\\n' >&2", Shell.fixed("sh")),
+            Script("printf '\\000\\377\\n'; /bin/cat; printf '\\200err\\n' >&2", Shell.SH),
             b"input\x00\xfe\n\n",
             {},
             None,
@@ -66,7 +67,7 @@ def check_buffered_contract(carrier: Carrier, *, seconds_per_case: float = 15.0)
         ),
         (
             "explicit-bash",
-            Script("v=(one two); printf '%s\\n' \"${v[1]}\"", Shell.fixed("bash")),
+            Script("v=(one two); printf '%s\\n' \"${v[1]}\"", Shell.BASH),
             b"",
             {},
             None,
@@ -77,7 +78,7 @@ def check_buffered_contract(carrier: Carrier, *, seconds_per_case: float = 15.0)
         ),
         (
             "environment-and-directory",
-            Script("printf '%s\\n' \"$AGW_PROOF_VALUE\"; pwd", Shell.fixed("sh")),
+            Script("printf '%s\\n' \"$AGW_PROOF_VALUE\"; pwd", Shell.SH),
             b"",
             {"AGW_PROOF_VALUE": "value\nwith 'quotes'"},
             "/",
@@ -88,7 +89,7 @@ def check_buffered_contract(carrier: Carrier, *, seconds_per_case: float = 15.0)
         ),
         (
             "eof-no-staging-readiness",
-            Script("/bin/cat; printf ready", Shell.fixed("sh")),
+            Script("/bin/cat; printf ready", Shell.SH),
             b"",
             {"TMPDIR": "/agw-proof-must-not-create"},
             None,
@@ -97,11 +98,11 @@ def check_buffered_contract(carrier: Carrier, *, seconds_per_case: float = 15.0)
             b"",
             0,
         ),
-        ("exit-1", Script("exit 1", Shell.fixed("sh")), b"", {}, None, False, b"", b"", 1),
-        ("exit-255", Script("exit 255", Shell.fixed("sh")), b"", {}, None, False, b"", b"", 255),
+        ("exit-1", Script("exit 1", Shell.SH), b"", {}, None, False, b"", b"", 1),
+        ("exit-255", Script("exit 255", Shell.SH), b"", {}, None, False, b"", b"", 255),
         (
             "sensitive-reflection",
-            Script("/bin/cat; printf private >&2; exit 37", Shell.fixed("sh")),
+            Script("/bin/cat; printf private >&2; exit 37", Shell.SH),
             secret,
             {"AGW_PROOF_SECRET": "synthetic-environment"},
             None,

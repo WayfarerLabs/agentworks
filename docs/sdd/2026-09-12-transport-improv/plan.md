@@ -1,6 +1,6 @@
 # Transport Improvements: Design and Delivery Sequence
 
-- Status: Joint buffered PoC accepted; staged delivery and permission activation design
+- Status: Additive implementation started from merged #830; production remains unchanged
 - Delivery vehicle: Design PR #830, then additive implementation, consumer migration PR(s), and
   final removal/activation PR; all labeled `sdd:transport-improv`
 - Requirements: [FRD](frd.md)
@@ -8,6 +8,9 @@
 - Proposed interfaces and layout: [Execution contract](execution-contract.md)
 - Active proof implementation: [Proof LLD and evidence](proof-lld.md)
 - Proposed lifecycle: [Execution profiles and supervisor design](execution-lifecycle-lld.md)
+- Shared I/O experiment: [Carrier I/O candidate](carrier-io-lld.md), pending joint review/proof
+- Detailed candidates: [Preparation and results](preparation-lld.md) and
+  [file operations](file-operations-lld.md), with their substrate decisions and proofs still open
 
 The required order is: settle the transport-owned small contract, prove it, reconcile both SDDs,
 build independently in parallel, validate complete workflows, add the new RunContext surface,
@@ -78,6 +81,56 @@ matrix to that evidence. Design reconciliation, the broader contract and product
 open; the SDD is not complete and must not be locked.
 
 ## Parallel ownership without overlapping edits
+
+### Active implementation, 2026-09-19
+
+The operator directed implementation after merging #830 at `cea5e852`. The additive delivery branch
+is `feat/transport-execution-stack`; it builds the complete new surface without migrating existing
+production consumers. SSH proceeds in its own lane. Development delegates use isolated working trees
+from the same published baseline; the transport lead integrates their reviewed work.
+
+The first bounded assignments complete the file-operation and invocation/result LLDs and refresh the
+RunContext/platform adoption inventory. These close implementation details already called out below,
+not another requirements phase or a new prerequisite design-only PR. The lead owns shared types,
+carrier-contract changes, composition and the overall plan. SSH implementation files and its SDD
+remain SSH-owned. Broad changes wait for their relevant detailed-design/proof gate; limited
+experiments and implementation of settled pieces stay outside production until acceptance.
+
+The cgroup/session ownership disposition remains required before overlapping lifecycle
+implementation. File, preparation and context work can proceed independently of that ruling.
+Recipient permissions and the successor core file ceiling stay inactive until final legacy removal,
+while operational safety and deliberately selected profile guarantees apply immediately.
+
+No new public feedback/fix allowance is inferred from the completed #830 review. A coherent
+checkpoint receives the normal private reviews and validation before a testing brief and
+`review-requested`; the additive implementation is marked ready only when its own gates pass.
+
+### Initial implementation checkpoint
+
+- [x] Extract immutable command/script values and explicit shell constants into `execution.models`,
+      update transport-owned proof consumers, and preserve the buffered carrier interface. Local
+      execution tests report 309 passed and four platform-scoped skips; production remains
+      unchanged.
+- [ ] Accept the preparation/result and file-operation LLDs after private review and disposition of
+      their helper/runtime, launch-evidence, cross-identity locking, and platform prerequisites.
+- [ ] Jointly accept and prove the carrier sink extension with the SSH owner before changing
+      `CarrierIO` or sensitive-output handling.
+- [ ] Complete the additive-surface gates below before exporting or wiring production RunContext
+      access. The models-only checkpoint is not additive-surface completion.
+
+At this checkpoint, runtime selection is a concrete decision rather than an assumed prerequisite.
+The baseline `PROVISIONING_PACKAGES` omits Python, while `INIT_SYSTEM_PACKAGES` installs it during
+Phase B; early native bootstrap and remote macOS host execution currently use shell-based paths. The
+operator has been asked whether to investigate an explicit early Python prerequisite instead of
+distributing native helper binaries. No selection or change to the supported platform contract is
+implied by that question. File-only no-staging readiness and exact direct-launch evidence must still
+pass their own proofs whichever substrate is selected.
+
+Private review also identified a filesystem confinement gap: held directory descriptors and a
+one-time link-count check do not establish safety against ancestor rename or later hard-link
+creation. The file LLD must settle and enforce the necessary trust/ownership conditions, or prove
+another mechanism, before implementation acceptance. Required destinations cannot be silently
+excluded to make the candidate pass. These are design gates, not permission to weaken R7.
 
 After the shared seam and LLD gates, the lead may charter bounded migration packages against one
 pinned contract. The following is an assignment plan, not a claim that developers are allocated:

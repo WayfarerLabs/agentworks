@@ -7,6 +7,32 @@
 
 ## Inventory and destination
 
+### Additive implementation inventory, 2026-09-19
+
+At merged #830 (`cea5e852`), the independent package contains only the accepted buffered proof: 11
+Python modules, with no target/access/file/job/profile implementation or production use. There are
+24 production `RunContext(` construction sites and no new execution-target accessors. These counts
+came from a source search, not runtime coverage.
+
+The additive composition work owns `capabilities/base.py` and these context-producing families: VM
+manager boundaries/lifecycle/nodes, agent lifecycle, session create/roll/lifecycle/scope, workspace
+create, VM inspection/power/status and doctor. They continue passing through the old targets
+unchanged while gaining separately supplied new targets. Composition binds the new targets from
+resolved connection/identity facts, never by wrapping a legacy target. Absent targets remain absent
+at preflight; adding accessors cannot activate a route or discover authority.
+
+The adapter inventory is local Lima, remote Lima's guest hop, WSL2, and Proxmox QGA, plus the
+separately owned SSH carrier used for canonical access, cloud-native access and placement hosts. The
+existing WSL2 platform hold (`capabilities/vm_platform/wsl2.py`) remains distinct from guest jobs.
+The QGA proof currently lives in `execution/carriers/proxmox.py`; moving it to the final plugin
+location first requires removing the plugin package's eager legacy-import dependency. Bypassing
+plugin initialization in a test is not proof of that independence.
+
+This refresh supplements the release-behavior baseline below. It does not mark any consumer migrated
+or establish the new lifecycle/file guarantees.
+
+### Release baseline
+
 The current delivery implementations are SSH, Lima, remote Lima, WSL2, and Proxmox QGA. AWS, Azure,
 and GCP reuse SSH for native access. The public abstraction has two tiers; `RunContext` currently
 delivers the richer tier only.

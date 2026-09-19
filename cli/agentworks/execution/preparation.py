@@ -25,46 +25,13 @@ from agentworks.execution.carrier import (
     Provenance,
     Retention,
 )
+from agentworks.execution.models import Command, Script
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
 MAX_ENVELOPE_BYTES = 262_144
 _RESERVED_ENV = frozenset({"BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS", "BASH_XTRACEFD"})
-
-
-@dataclass(frozen=True)
-class Shell:
-    """Explicit script interpreter and startup policy for this proof slice."""
-
-    name: str
-    login: bool = False
-    interactive: bool = False
-
-    @classmethod
-    def fixed(cls, name: str, *, login: bool = False, interactive: bool = False) -> Shell:
-        if name not in {"sh", "bash"}:
-            raise ValidationError("The Linux proof supports fixed sh and bash only")
-        return cls(name, login, interactive)
-
-    @classmethod
-    def user_default(cls, *, login: bool = False, interactive: bool = False) -> Shell:
-        return cls("user_default", login, interactive)
-
-
-@dataclass(frozen=True)
-class Command:
-    """Literal application argv, omitted from diagnostic representations."""
-
-    argv: tuple[str, ...] = field(repr=False)
-
-
-@dataclass(frozen=True)
-class Script:
-    """UTF-8 source with an intentional interpreter, independent of stdin."""
-
-    source: str = field(repr=False)
-    shell: Shell
 
 
 @dataclass(frozen=True)
@@ -118,15 +85,11 @@ def prepare(
     if not isinstance(stdin, bytes):
         raise ValidationError("Finite application input must be bytes")
     if isinstance(request, Command):
-        if not isinstance(request.argv, tuple) or not request.argv or not request.argv[0]:
-            raise ValidationError("A literal command requires a nonempty argv tuple")
         kind, shell, arguments, source = "command", "none", request.argv, b""
     elif isinstance(request, Script):
-        if not isinstance(request.shell, Shell) or request.shell.name not in {"sh", "bash", "user_default"}:
-            raise ValidationError("The Linux proof requires an explicit supported shell")
-        if request.shell.login or request.shell.interactive:
+        if request.login or request.interactive:
             raise ValidationError("Login and interactive startup are not proven by the buffered Linux slice")
-        kind, shell, arguments, source = "script", request.shell.name, (), _text(request.source)
+        kind, shell, arguments, source = "script", request.shell.value, (), _text(request.source)
     else:
         raise ValidationError("Preparation requires a literal command or explicit script")
     environment = dict(env or {})

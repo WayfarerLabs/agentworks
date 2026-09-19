@@ -66,9 +66,9 @@ initial slice refuses login/interactive startup. MacOS/Windows workstations, oth
 identity/elevation, live streams and terminals require their own evidence. An affected code or
 contract change requires retesting the corresponding observations.
 
-The eight vectors use fixed interpreters, not `Shell.user_default()`. Also exercise the supported
+The eight vectors use fixed interpreters, not `Shell.USER_DEFAULT`. Also exercise the supported
 destination-account default shell through each carrier. Independently record the destination UID and
-account-shell path, then prepare a harmless `/bin/cat` script with `Shell.user_default()`, finite
+account-shell path, then prepare a harmless `/bin/cat` script with `Shell.USER_DEFAULT`, finite
 binary stdin and `env={"SHELL": "/does/not/exist"}`. Require byte-exact output, complete guest
 streams, no framing/bootstrap failure, observed completion zero and no carrier failure. The invalid
 environment hint must not replace the real account lookup. The buffered proof supports sh/bash
