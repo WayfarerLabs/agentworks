@@ -341,6 +341,26 @@ Neither implementation can claim launch-interruption conformance from post-const
 tests. A supported ownership mechanism still needs design and host-specific proof; no supervisor or
 weaker interruption contract is selected by this finding. The production gate remains open.
 
+A follow-up Linux experiment at `cc40bca2`, independently repeated by the lead, explored deferred
+SIGINT without changing production code. A temporary non-raising handler recorded the signal; an
+injected checkpoint raised `KeyboardInterrupt` only after the pump entered its guarded region. The
+handler remained non-raising during cleanup and was restored before propagation. In each run, the 50
+and 200 microsecond timing groups produced 16 live baseline orphans in 16 trials, versus 16 cleaned
+and reaped candidate children. An outer subreaper verified direct ownership before killing and
+reaping a baseline orphan. A separate cleanup-time signal case also reaped its child before
+propagating. A native child's observed SIGINT mask/disposition remained unchanged.
+
+This is mechanism evidence, not an implementation choice. The fixture wrapped process creation to
+record returned PIDs and injected the checkpoint through a deadline adapter; neither belongs in a
+production API. A custom handler's identity was restored but its behavior was not preserved, and
+installing the temporary handler from a worker thread failed. The handler remains process-global
+despite lexical scope. A launch that never returns would defer Ctrl-C indefinitely; repeated
+signals, cleanup-failure evidence and supported Windows/macOS behavior remain unresolved. The
+[Python signal documentation](https://docs.python.org/3.12/library/signal.html#note-on-signal-handlers-and-exceptions)
+explains why asynchronous exceptions can interrupt ownership transitions. Any selected solution
+needs explicit interrupt ownership and safe checkpoints, not an incidental signal-handler change
+inside a carrier. No application-wide cancellation policy is adopted by this experiment.
+
 ## Native adapter audit, 2026-09-19
 
 The existing finite-input carrier boundary permits non-production adapter proofs without selecting
