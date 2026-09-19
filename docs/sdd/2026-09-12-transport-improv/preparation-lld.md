@@ -1,0 +1,525 @@
+# Invocation Preparation and Public Results
+
+- Status: Proposed production design; the bounded proof remains the only implementation
+- Governing requirements: [FRD](frd.md), especially R2-R5, R8-R11
+- Existing boundaries: [execution contract](execution-contract.md), [proof](proof-lld.md), and
+  [lifecycle](execution-lifecycle-lld.md)
+
+## Scope and decisions
+
+This design owns foreground invocation values, application preparation, the framed evidence that
+turns a carrier observation into an application result, and checked versus unchecked result
+behavior. It sits above the unchanged call shape of `Carrier.execute(...)`. It does not redesign an
+SSH connection, add a carrier-specific completion oracle, or own job identity, supervisor lifetime,
+stop, file publication, or RunContext composition.
+
+The production path keeps these distinctions:
+
+1. A `Command` is literal argv. A `Script` is UTF-8 source interpreted by an explicit `Shell`.
+2. Script source and application stdin are different byte sources and different guest descriptors.
+3. Carrier dispatch and raw remote command-chain completion are low-level evidence. Application
+   completion needs a validated terminal transcript plus the start evidence defined below.
+4. Output capture, discard, and suppression do not change how completion is proven.
+5. Preparation may use inline delivery or private staging. Readiness binds inline-only preparation
+   and therefore never stages, spools, launches a supervisor, or requests startup files.
+6. One public call launches the application at most once. Observation and verified fixed-offset
+   transfer may repeat; an ambiguous launch never does.
+
+The new package remains disconnected from production until the plan's additive-surface gates pass.
+The 2026-09-19 permission ruling also means this layer does not enforce or advertise new recipient
+grants or the new core file ceiling during coexistence. It still enforces request validity, bound
+identity and lifetime, actual guest permissions, requested profile guarantees, sensitivity,
+readiness restrictions, SSH trust, and truthful results from its first production use.
+
+## Facts at the current boundary
+
+The proof supplies literal bootstrap argv, finite input owned by `CarrierIO`, and framed stream
+evidence. Its `CarrierReport.completion` still describes the remote command chain, which can stop in
+an SSH account shell before bootstrap, while sensitive/discard currently removes every carrier byte.
+Its 256 KiB envelope and QGA's smaller measured limit are proof bounds, not production large-input
+support. It also lacks startup modes, shared identity change, spooling, and public results. Raw
+zero, stream-end markers, and absent retained bytes therefore never become public application
+success.
+
+## Public invocation values
+
+The first implementation increment extracts invocation-only values into
+`agentworks.execution.models`. It is a source move and value-shape improvement, not production
+enablement:
+
+```python
+class Shell(Enum):
+    SH = "sh"
+    BASH = "bash"
+    USER_DEFAULT = "user_default"
+
+@dataclass(frozen=True)
+class Command:
+    argv: tuple[str, ...] = field(repr=False)
+
+    def __init__(self, argv: list[str] | tuple[str, ...]) -> None: ...
+
+@dataclass(frozen=True)
+class Script:
+    source: str = field(repr=False)
+    shell: Shell
+    _: KW_ONLY
+    login: bool = False
+    interactive: bool = False
+```
+
+`Command` accepts only a caller list or tuple, requires a nonempty executable and string arguments,
+and snapshots an immutable tuple. `Script` requires text source, a real `Shell`, and keyword-only
+real booleans for its startup flags. Empty source is valid. Payload-bearing fields keep
+`repr=False`, and validation errors contain no rejected value. The current increment deliberately
+does not validate text encoding or NUL in these constructors. Preparation must reject NUL and
+strict-UTF-8 encoding failures for every command argument and script source before input is consumed
+or remote effects begin. Constructor-level semantic validation can be reconsidered later only as a
+separately compatible public-value change.
+
+Transport-owned proof code and tests import the values from `models` directly. `preparation.py`
+imports them normally, so the SSH-owned fresh-process test's existing
+`from agentworks.execution.preparation import Command` continues to work incidentally until its
+owner updates that import. There are no deprecated aliases, `Shell.fixed()`, `Shell.user_default()`,
+or compatibility constructors. The package root does not re-export the values as a supported public
+API until the complete new surface passes its gates.
+
+The target retains the contract's concise
+`run(Command | Script, *, profile, stdin, output, sudo, env, cwd, sensitive, deadline, check)`
+shape. `Input.eof()` is the default. `Input.bytes(data, sensitive=False)` accepts immutable bytes,
+including empty bytes, and always ends in EOF. `Input.sensitive(data)` cannot be downgraded.
+`Output.capture(max_bytes)` is the buffered mode in this LLD; `Output.discard()` retains no
+application bytes. Live streams and terminals keep their separate ownership gate.
+
+The effective sensitivity bit is the union of request-wide sensitivity, input sensitivity, and the
+bound environment's value provenance. No content scanning attempts to discover secrets. A caller may
+add sensitivity and may not clear a bound sensitive value.
+
+## Preparation pipeline
+
+`ExecutionAccess.run` delegates to one private pipeline. Each transition produces an immutable value
+and consumes the same monotonic `Deadline`:
+
+```text
+public request
+  -> validate invocation and options
+  -> bind final identity and effective sensitivity
+  -> select the known preparation substrate
+  -> compile manifest, bootstrap argv and frame decoder
+  -> deliver large private inputs when required
+  -> call Carrier.execute exactly once for the application launch
+  -> interpret validated frames plus CarrierReport
+  -> retrieve bounded spooled output when required
+  -> attempt owned cleanup
+  -> return or check the ExecutionResult
+```
+
+Validation occurs before local input is consumed and before remote effects. It rejects invalid text,
+relative or empty working directories, invalid environment names, protected helper names,
+unsupported shell/startup combinations, incompatible I/O/lifetime/profile choices, expired
+lifetimes, and an already-expired deadline. Authorization checks become an earlier target-layer
+transition only when the removal gate activates them.
+
+The pipeline receives a final composed environment, not unresolved config or secrets. Helper
+processes start with a fixed minimal environment. The payload starts from the composed map rather
+than inheriting the delivery process's `PATH`, loader variables, locale, or shell-control variables.
+Protected Agentworks keys have already been composed by the owning operation. Login or interactive
+startup may intentionally modify that payload environment according to the selected shell.
+
+The working directory is applied after the final identity is established and before the selected
+program or shell starts. A missing or inaccessible directory is a preparation failure with no
+application-start claim. Literal commands receive no application shell and execute argv directly.
+
+## Identity and elevation
+
+An execution target binds a workload account and a carrier delivery account. Neither is caller
+selectable. Preparation chooses one of three private identity plans:
+
+| Delivery and request                | Private plan                                                                                       |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Delivery already uses workload user | Enter the trusted bootstrap directly and verify the expected UID and primary/supplementary groups. |
+| Workload user requests granted root | Enter through fixed `sudo -n --` bootstrap argv, then verify UID 0 before reading payload fields.  |
+| Provider delivery starts as root    | Resolve the bound account and enter it with a fixed demotion helper, then verify its UID/groups.   |
+
+<!-- cspell:ignore setpriv -->
+
+The demotion candidate on Debian is `/usr/bin/setpriv` with an exact resolved UID, primary GID,
+initialized supplementary groups, and a reset helper environment. The account name and expected
+identity are trusted target data, never public request fields. If `setpriv` availability or group
+behavior cannot be established on every bootstrap image, the implementation must select and prove a
+different shared launcher before QGA demotion is enabled. It may not leave an ordinary call as root.
+
+The sudo wrapper consumes the same manifest from stdin after privilege change. Source, input, and
+environment never appear in sudo argv or environment assignments. A failure before the inner
+bootstrap's first trusted frame cannot be classified as sudo refusal from raw nonzero status or
+stderr: account shell, sudo, and bootstrap startup remain indistinguishable. It produces an unknown
+application outcome unless a separately proved trusted phase mechanism establishes more. There is no
+password prompt or fallback to non-elevated execution.
+
+`Shell.USER_DEFAULT` is resolved after this identity transition with the destination account
+database. It therefore selects root's shell for an elevated request and the demoted user's shell for
+provider-root delivery. The resolved absolute path is recorded in the private invocation plan before
+application start. Only the supported sh/bash paths are accepted initially; a configured zsh, fish,
+missing path, or non-executable object is an explicit interpreter refusal, not substitution.
+
+The bootstrap emits its identity-verified frame only after the transition and checks succeed. That
+frame proves what the trusted helper observed, not hostile same-user isolation. Guest root and a
+malicious workload remain outside this API boundary.
+
+## Shell and startup policy
+
+The Linux preparation substrate maps the typed choice after final identity selection:
+
+| Shell          | Non-login, non-interactive                           | Login, non-interactive        | Non-login, interactive   | Login, interactive               |
+| -------------- | ---------------------------------------------------- | ----------------------------- | ------------------------ | -------------------------------- |
+| `SH`           | `/bin/sh SOURCE_FD`                                  | `/bin/sh -l SOURCE_FD`        | `/bin/sh -i SOURCE_FD`   | `/bin/sh -l -i SOURCE_FD`        |
+| `BASH`         | `/bin/bash --noprofile --norc SOURCE_FD`             | `/bin/bash --login SOURCE_FD` | `/bin/bash -i SOURCE_FD` | `/bin/bash --login -i SOURCE_FD` |
+| `USER_DEFAULT` | Use the matching row for the resolved supported path | Same                          | Same                     | Same                             |
+
+`SOURCE_FD` is an inherited descriptor, not a command string or temporary pathname supplied by the
+caller. Application stdin is a separate descriptor installed as fd 0. Reading stdin in the script
+therefore never consumes source. A startup file selected by login/interactive semantics can read fd
+0, change environment or directory, print output, or fail before the script body. Those are explicit
+effects of requesting startup, not carrier behavior. The result records only the start and wait
+evidence actually established; it does not pretend to distinguish a profile failure from the script
+body unless the trusted bootstrap observed an exec failure before shell entry.
+
+For the non-login, non-interactive default, preparation removes `ENV`, `BASH_ENV`, `SHELLOPTS`,
+`BASHOPTS`, `BASH_XTRACEFD`, exported helper functions, and the private `_agw_` namespace before
+starting the application. The fixed Bash path adds `--noprofile --norc`. `SH` uses the supported
+system `/bin/sh` behavior and must be proved on each supported guest release. A PTY does not alter
+any row. Interactive without a PTY is permitted only after its separate shell behavior is proven; it
+may report the shell's normal lack-of-job-control diagnostics.
+
+Literal commands never use this table. Internal staging, supervisor, and file control commands also
+use fixed helper interpreters; they never inherit `USER_DEFAULT`, login, interactive, payload PATH,
+or loader settings.
+
+## Application evidence protocol
+
+Preparation assigns a fresh 128-bit invocation nonce before any dispatch. The nonce is not a secret
+and may appear in fixed bootstrap argv. It associates records with this attempt and prevents stale
+or incidental output from being accepted. It is not authentication against a malicious destination
+account, which can inspect its processes and forge its own output.
+
+The trusted bootstrap writes newline-delimited ASCII records to its control descriptor. Each record
+contains the protocol version, nonce, strictly increasing sequence number, record kind, decoded
+length, and canonical base64 body. A terminal record additionally carries a SHA-256 digest of the
+prior canonical records. Records have a fixed 8 KiB encoded maximum; binary application data is
+split into smaller frames. Length, alphabet, sequence, singleton, phase, digest, and terminal-order
+violations make the transcript invalid.
+
+The version-one production record kinds are:
+
+| Kind         | Meaning                                                                                               |
+| ------------ | ----------------------------------------------------------------------------------------------------- |
+| `READY`      | Manifest, final identity, cwd, environment, shell selection, and input descriptors are prepared.      |
+| `LAUNCHING`  | The helper is committing its one launch attempt. This does not prove successful exec.                 |
+| `STARTED`    | A mechanism with proved exec acknowledgment observed successful application entry.                    |
+| `STDOUT`     | Captured launch-chain bytes, promoted to application output only with application evidence.           |
+| `STDERR`     | Captured launch-chain bytes, promoted to application output only with application evidence.           |
+| `STREAM_END` | One stream ended, with total retained length, digest, and caller-bound truncation flag.               |
+| `WAITED`     | The launcher's observed wait fact and its precision: wait code, exact exit, or exact signal.          |
+| `FAILED`     | A closed non-sensitive trusted phase and code, with no payload or provider prose.                     |
+| `FINISHED`   | Terminal digest after the launcher and output handlers have been waited. Not application proof alone. |
+
+`LAUNCHING` is never mapped to `ApplicationState.STARTED`. A direct shell substrate may emit
+`STARTED` only after a proved close-on-exec acknowledgment or equivalent. Death between `LAUNCHING`
+and that acknowledgment therefore remains `UNKNOWN`, even if the application may have run. The
+managed supervisor may later supply an exact start fact through the same schema.
+
+The no-staging Linux experiment launches through fixed GNU `/usr/bin/env --` and records the shell's
+wait code. GNU env's reserved launcher codes can help test hypotheses, but cannot form the
+production contract: 125 through 127 collide with legitimate application exits, and shell encodings
+from 128 through 255 cannot distinguish a pre-exec signal from an application exit. A public
+invocation must support every application exit value, including 255, without downgrading a completed
+application to `UNKNOWN`. The direct substrate is therefore blocked until it has a real proved exec
+acknowledgment; no reserved-code subset is an accepted production-completion rule.
+
+Even after start is proved, a direct shell wait code does not distinguish explicit exit 143 from
+signal 15. It is represented as `WaitCode(143)`, never `ExitCode(143)` or `Signal(15)`. A managed
+supervisor may provide exact exit/signal precision. This is evidence precision, not a
+carrier-specific result type.
+
+`FINISHED` validates that the trusted launch transcript ended; application completion additionally
+requires the start evidence above. Valid application evidence can survive later carrier observation
+loss, while raw carrier completion without it never proves bootstrap or application completion. A
+conflict is a protocol failure. Frames captured before application proof are not returned as
+application stdout/stderr.
+
+Exact start acknowledgment remains a mechanism gate. The implementation must prove either a
+shell-available close-on-exec channel, a trusted supervisor record where that profile is allowed, or
+a base-image helper with a non-circular delivery story. Readiness cannot install or stage that
+helper. Until one option passes, the direct production path remains blocked rather than reducing
+exit-value coverage or acquiring a synthetic `STARTED` record.
+
+Application stdout and stderr can never inject control records because the bootstrap encodes them
+through dedicated descriptors. Raw account-shell output before bootstrap is not framed application
+output. The decoder discards it and records only a safe `foreign_output_seen` fact. This is robust
+against accidental hooks, not hostile same-user forgery.
+
+## Required carrier I/O extension
+
+Sensitive and discard modes require the pending [carrier I/O candidate](carrier-io-lld.md), or an
+equivalent jointly accepted seam. The method signature stays:
+
+```python
+carrier.execute(invocation, *, io=carrier_io, deadline=deadline)
+```
+
+After SSH consultation, preparation supplies `SinkOutput(stdout, stderr, require_live=False)`. Each
+destination is a bounded borrowed sink endpoint. The stdout endpoint is the transport-owned
+incremental frame decoder; the stderr endpoint is a bounded raw-discarding diagnostic sink. A QGA
+carrier may deliver its buffered response to the same endpoints after polling. `require_live=False`
+therefore says where output is delivered, not that the channel streams it live. Public direct
+streaming separately uses `require_live=True` and requires `ChannelFeatures.live_stdio` before
+dispatch.
+
+```python
+output = SinkOutput(
+    stdout=frame_decoder,
+    stderr=diagnostic_discard,
+    require_live=False,
+)
+```
+
+Carriers only pump raw chunks and report transport-level dispatch, local status, raw completion, and
+I/O failure. They do not parse frames, infer application status, or manufacture stream precision.
+Preparation owns the decoder and borrows it to the carrier through the sink endpoint. Writes are
+non-blocking and bounded, consume the same deadline, and stop before `execute` returns or raises. A
+sink failure maps to `Failure.OUTPUT` with partial carrier evidence and no replay.
+
+For sink delivery, a carrier never retains raw stdout/stderr bytes in `CarrierReport`, even for
+ordinary calls. It transiently forwards them and reports disposition `DELIVERED`, not `STREAMED`,
+because buffered QGA delivery is valid. The decoder incrementally keeps at most one 8 KiB record
+plus bounded control state. For ordinary capture it retains only decoded application frames,
+optionally in an owned 0600 workstation spool. For sensitive or discarded output it rejects any
+application data frame, retains only schema-validated control facts, and drops raw hook/reflection
+and mixed carrier stderr bytes. Thus a startup hook that echoes secret stdin cannot place that text
+in a result, exception, log, or carrier report.
+
+This changes the current meaning of `CarrierIO.sensitive`, whose proof implementation suppresses all
+bytes before a decoder can inspect them. The production sink mode must forward bytes transiently
+while forbidding raw retention. Existing `Capture`/`Discard` proof behavior can remain until the
+joint carrier change lands, but it cannot implement public results. The SSH and QGA lanes must run
+the same sink/decoder conformance tests before this seam is accepted.
+
+## Inline and staged delivery
+
+The public contract has no provider-size switch. Preparation chooses one of two private mechanisms
+without changing invocation meaning.
+
+### Inline path
+
+The inline manifest is canonical ASCII with base64 fields. It carries literal argv or source,
+composed environment, cwd, shell/startup selection, identity expectation, finite stdin, output
+policy, nonce, and field digests. Source and stdin decode into separate descriptors. The complete
+encoded manifest has one conservative transport-owned limit proven across every required carrier; 32
+KiB is the candidate, not an accepted constant until QGA whole-request testing confirms it.
+
+The bootstrap argv contains only fixed helper source, non-sensitive protocol constants, and the
+nonce. It contains no command argument, source, environment value, cwd, or stdin bytes. Inline
+delivery installs no guest file and uses no Python or Agentworks installation.
+
+### Private staging path
+
+If the manifest or requested capture exceeds the inline bound, normal execution allocates an
+operation-owned 0700 scratch directory under a core-selected root. The caller cannot name or retain
+it. Source, stdin, manifest, and ordinary captured streams are distinct 0600 objects. Sensitive
+objects may exist only for the active operation and are removed on every observed terminal path;
+uncertain cleanup is reported and remains owner debt rather than being declared absent.
+
+The private transfer substrate is below both public execution and FileAccess. It supports only
+create-owned-scratch, write-at-known-offset, verify length/digest, read-bounded-range, and
+remove-owned-scratch. It accepts no caller destination, shell fragment, callback, ownership, or
+mode. Therefore an upload implementation may reuse it without exposing command access, and a file
+helper may reuse its delivery without granting the recipient public `run`.
+
+Chunks use a conservative 24 KiB raw bound, an exact offset, total expected length, chunk SHA-256,
+and whole-object SHA-256. A lost chunk acknowledgement permits another control request only after
+the owned scratch identity and fixed range make the write demonstrably idempotent. Blind append,
+application relaunch, or fallback to another carrier is forbidden. Final whole-object verification
+precedes `LAUNCHING`.
+
+Captured stdout and stderr spool separately. Each spool keeps at most `max_bytes + 1`; helper
+readers drain the remainder so a caller retention bound does not send SIGPIPE to the workload. The
+extra byte proves caller-bound truncation. Completion frames contain safe sizes and digests, then
+the workstation retrieves fixed ranges under the original deadline. A timeout after a conclusive
+`WAITED`/`FINISHED` pair can retain known application completion with incomplete output. Provider
+output limits therefore reduce one observation chunk, not the application's supported output size.
+
+The default capture bound is 1 MiB per stream. It is a caller-visible retention bound, not a
+provider maximum. A caller can deliberately choose a larger finite bound. The implementation may
+spool locally to avoid holding the selected bound during transfer, but constructing the final public
+`bytes` allocates at most that caller-selected amount. Workflows expecting unbounded data use
+FileAccess rather than stdout.
+
+## Readiness and minimal substrate
+
+The composition root binds a private `PreparationPolicy.INLINE_ONLY` to preflight/runup readiness
+targets. It is not a public performance flag. This policy:
+
+- rejects MANAGED/CONTAINED launch, private scratch, output spooling, and an over-limit manifest;
+- rejects `login=True` or `interactive=True`;
+- uses EOF or finite inline stdin and a small finite capture bound;
+- runs no install, target realization, helper upload, or implicit probe before the invocation; and
+- returns a typed refusal before dispatch when the request cannot remain inline.
+
+This proves that Agentworks preparation adds no guest write. It does not prove an arbitrary caller's
+command is read-only, and it cannot prevent pre-existing SSH account hooks from running before the
+bootstrap.
+
+The Linux inline helper's current measured prerequisites are Bash 5.1+, GNU `env` and `base64`,
+`getent`, `id`, and `/dev/fd`. The staged Linux path additionally proposes `mktemp`, `chmod`, `dd`,
+`head`, `cat`, `wc`, `sha256sum`, and `rm`; sudo or setpriv is conditional on the identity plan.
+Every path is fixed by the substrate, not PATH lookup. Python, systemd, Tailscale, and an installed
+Agentworks helper are not prerequisites.
+
+Darwin platform-host preparation implements the same manifest, frames, and result interpreter in a
+separate preparation substrate selected when the host target is constructed. It is not an SSH
+carrier branch. The current Linux bootstrap cannot be relabeled Darwin-compatible: the measured Bash
+floor, GNU flags, account lookup, and process-substitution waits differ. The Darwin substrate must
+either prove the installed Bash 3.2/BSD-tool mechanism or justify a pre-delivered core helper that
+itself does not create a circular bootstrap dependency. Until that proof passes, production
+platform-host scripts and managed jobs remain blocked rather than downgraded.
+
+## Public result and check behavior
+
+`ExecutionResult` carries `DispatchEvidence`, application state, optional application status,
+separate `ExecutionOutput` values, an optional `ExecutionFailure`, and whether owned cleanup was
+confirmed. It does not compress those facts into a return code.
+
+`ApplicationState` is `NOT_STARTED`, `STARTED`, `COMPLETED`, or `UNKNOWN`. `NOT_STARTED` needs
+positive evidence, such as local refusal before dispatch or a trusted pre-launch `FAILED` frame.
+`STARTED` needs proved exec acknowledgment. `COMPLETED` needs a terminal transcript plus proved
+start. `UNKNOWN` covers every gap, including `LAUNCHING` alone and every direct wait without the
+required start evidence. `status` exists only for `COMPLETED` and is the honest union
+`WaitCode | ExitCode | Signal`; the direct shell path produces only `WaitCode`.
+
+`ExecutionOutput` contains retained bytes, `complete`, and retention
+`CAPTURED`/`DISCARDED`/`SUPPRESSED`. Intentional discard or suppression does not claim empty guest
+output and does not by itself make a completed zero result fail. Captured overflow returns the
+prefix up to the caller bound with `complete=False` and `failure=OUTPUT_LIMIT`. A transfer or frame
+failure similarly leaves partial bytes explicitly incomplete.
+
+`ExecutionFailure` is a closed transport-neutral fact such as `PREPARATION`, `DELIVERY`, `DEADLINE`,
+`OBSERVATION`, `PROTOCOL`, `INPUT`, `OUTPUT`, `OUTPUT_LIMIT`, or `CLEANUP`. Safe phase and target
+metadata may accompany it. Provider exception text, raw account output, payload values, remote
+scratch paths, and credentials never do.
+
+`result.ok` is true only when application completion is known, the exact exit or wait code is zero,
+no operational failure affects the requested semantics, and requested captured output is complete.
+It is never true for `STARTED` or `UNKNOWN`, and no unknown status is converted to zero.
+
+Request validation, unavailable optional features, expired target lifetime, control-flow
+interruption, and eventually activated authorization denials raise regardless of `check`. After an
+attempt begins:
+
+- `check=False` returns `ExecutionResult`, including known nonzero exit, timeout, delivery failure,
+  protocol failure, partial output, and uncertain dispatch.
+- `check=True` returns only an `ok` result. Otherwise it raises one checked-execution error carrying
+  the exact same safe immutable result.
+- `KeyboardInterrupt` and cancellation of the local caller propagate after bounded local cleanup;
+  neither is converted to a checked-execution error or guest cancellation claim.
+
+The minimal error addition is one `CheckedExecutionError(ExternalError)` with a `.result` attribute.
+The result's structured facts, rather than a growing exception subclass matrix, distinguish known
+guest failure from uncertainty and incomplete output. The lead must approve this base-class choice
+against CLI rendering before implementation. The exception message is safe fixed prose; renderers
+use result fields for detail.
+
+## Reuse by supervisor and file helpers
+
+The supervisor consumes the same validated invocation manifest, identity plan, sensitivity, and
+frame decoder. Its private launch control substitutes durable result/output storage for the direct
+bootstrap, but must emit the same application evidence schema. `run(..., profile=MANAGED)` can call
+private launch and wait without a public `start` grant. This LLD does not select unit identity,
+lease, stop, retention, or stale-reference mechanics owned by the lifecycle design.
+
+File helpers consume only the private scratch transfer and framed control-result mechanisms. Their
+operation schemas accept bytes, paths already authorized by their own layer, and fixed action enums,
+never `Command`, `Script`, public argv, or callbacks. Internal helper execution is authorized as
+part of the public file action. It neither exposes `ExecutionAccess` nor requires a recipient `run`
+grant. Core file catalog enforcement still activates only with legacy removal; safe object handling,
+sensitivity, identity, and truthful publication evidence are not deferred.
+
+## Implementation slices and focused tests
+
+The production implementation proceeds in reviewable slices without wiring RunContext early:
+
+1. Add `models.py`, move `Command`/`Script`/`Shell`, update all transport-owned proof imports and
+   constructors, and ask the SSH owner to update its one fresh-process import. No runtime behavior
+   or carrier type changes.
+2. Add result models and pure frame encoder/decoder tests. Mutated, reordered, duplicate, oversized,
+   wrong-nonce, truncated, and post-terminal records must never produce completion.
+3. After explicit SSH consultation, add the accepted sink output to `CarrierIO`; prove both carriers
+   only pump bytes, retain no raw sink-mode data, stop using endpoints before return, and preserve
+   partial carrier evidence on decoder failure/interruption.
+4. Replace the proof bootstrap with the production Linux inline protocol. Prove literal argv,
+   source/stdin separation, all byte values, env/cwd, identity verification, shell startup, exact
+   required start acknowledgment, wait 0/1/125/126/127/143/255 precision, bootstrap failure, and
+   account-hook noise.
+5. Add private staging and spooling. Prove boundary-minus/at/plus envelope and chunk sizes, large
+   source and finite stdin, exact offsets, short writes, lost chunk acknowledgment, whole digests,
+   output larger than a provider response, caller-bound truncation, partial retrieval, and owned
+   cleanup without application replay.
+6. Add target-level unchecked/checked interpretation. Mutate each evidence input independently so
+   raw zero, raw 255, stream ends, suppression, discard, or `STARTED` alone cannot become success.
+7. Run independence tests with every retirement module unavailable before any production wiring.
+
+Sensitive tests use synthetic canaries and inspect argv, environment, reports, exceptions, logger
+records, local spools, and guest scratch after cleanup. They require a distinctive nonzero terminal
+result so suppression without payload execution fails. Tests assert structured facts and behavior,
+not authored error prose.
+
+The readiness lane records guest scratch before and after and rejects any stage/spool helper call.
+It covers command and script output framing, EOF, over-limit refusal before dispatch, inherited
+`BASH_ENV`/`ENV`, and an SSH account hook that runs independently of preparation. Tests do not claim
+the hook itself is read-only.
+
+## Hypotheses and live-proof gates
+
+These claims require authorized live evidence before the public surface is wired:
+
+| Hypothesis                                                                            | Required evidence                                                                                                                                                                                                                                     |
+| ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The 32 KiB inline and 24 KiB raw chunk candidates fit every supported carrier request | Whole-request measurements through SSH and QGA on both supported Proxmox majors, including framing overhead and refusal before dispatch above the settled bound.                                                                                      |
+| Linux startup argv has the stated sh/bash behavior                                    | Fixed and user-default shells for all four login/interactive combinations on supported Debian/Ubuntu images, including startup failure, stdin use, output, cwd/env changes, and elevated root lookup.                                                 |
+| Direct launch has exact start evidence on the no-staging substrate                    | Prove the selected exec-acknowledgment mechanism on every no-staging image, including death before/during exec, GNU env reserved codes, pre-exec signal injection, and application exits 125/126/127/143/255. This is a hard implementation gate.     |
+| Shared identity transition is exact                                                   | SSH direct, passwordless sudo, QGA root demotion, supplementary groups, unavailable elevation, and proof that ordinary QGA execution never remains root.                                                                                              |
+| Decoder filtering is safe under real delivery                                         | Sensitive hook reflection, split/short reads, duplex pressure, 255/drop after proved `STARTED` plus `FINISHED`, drop before `FINISHED`, provider truncation, local interruption, and no raw retained bytes on Linux, macOS, and Windows workstations. |
+| Private staging handles provider limits without replay                                | Large source/stdin and multi-megabyte separate output through SSH and QGA, lost write/read acknowledgments, deadline at every phase, exact range verification, and independently observed guest cleanup.                                              |
+| Proposed Linux helper tools exist at bootstrap                                        | Base image, pre-Phase-B recovery, demoted admin, elevated root, and supported guest release inventory with fixed executable paths and versions.                                                                                                       |
+| Darwin can satisfy the same contract without hidden installation                      | Pre-guest Remote Lima host execution on supported macOS, explicit account-shell lookup, no-staging bounded readiness, binary source/input separation, large staging, disconnect behavior, and cleanup.                                                |
+
+No successful local fixture substitutes for these cells. A missing prerequisite is a production
+blocker or an operator disposition, not permission to report an optional feature or choose a weaker
+result.
+
+## API seam decisions before coding beyond value extraction
+
+The lead should settle these points with the named owner before assigning broader code:
+
+1. **Carrier sink extension, with SSH owner:** approve `SinkOutput`, its borrowed endpoint
+   lifecycle, `require_live` meaning, and `DELIVERED` report disposition. The `Carrier.execute`
+   signature stays unchanged, but current sensitive suppression semantics must change specifically
+   for sink mode.
+2. **Direct start evidence, with preparation and platform owners:** choose and prove the
+   close-on-exec, supervisor, or base-image-helper mechanism. This is a hard gate for the direct
+   production path, including readiness: reserved wait-code inference cannot replace it or reduce
+   the required application exit range.
+3. **Checked error base, with CLI owner:** approve one `CheckedExecutionError` carrying the
+   immutable result, including how the CLI renders known guest failure, uncertainty, and incomplete
+   output.
+4. **Demotion mechanism, with native carrier owner:** accept fixed `setpriv` plus its bootstrap
+   prerequisites or choose a different shared identity launcher before ordinary QGA use.
+5. **Cross-carrier inline/chunk constants, with SSH and native owners:** replace candidate values
+   with the largest conservative values established by whole-request proof. These remain private
+   limits.
+6. **Darwin preparation substrate, with platform owner:** prove the installed-tool design or approve
+   the cost and bootstrap story of a shipped helper. Do not make SSH parse application frames to
+   compensate.
+
+The models-only first increment does not depend on these decisions and does not authorize public
+exports, RunContext accessors, production consumers, grants, file catalog enforcement, or carrier
+changes.
