@@ -70,6 +70,8 @@ On lifecycle ownership and the earlier session-cgroup proposal:
 > Yeah, to be clear, 770 is going to change radically or even disappear entirely. I'm open to
 > either.
 
+On keeping the implementation together:
+
 > Tbh, I'm not sure it really makes sense to try to split the cgroup work. I'm inclined to have you
 > do it all here. But I'm open to other ideas as long as you can define the coordination solution.
 

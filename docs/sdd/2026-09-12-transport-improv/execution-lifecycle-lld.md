@@ -189,6 +189,7 @@ and safe early bootstrap without weakening the approved profile definitions.
 6. Migrate sessions and other jobs to the same implementation, preserving legacy-run uncertainty,
    consent and exact ownership. Then complete the existing full-stack cutover/deletion gates.
 
-This document supplies a reviewable contract and proof plan, not resolved syscall/FD, lease, sandbox
-or compatibility protocols. Those bounded details must be completed with evidence before enabling
-the relevant profile. The accepted buffered PoC proves none of these new lifecycle protections.
+This document supplies a reviewable contract and proof plan, not resolved system-call/FD, lease,
+sandbox or compatibility protocols. Those bounded details must be completed with evidence before
+enabling the relevant profile. The accepted buffered PoC proves none of these new lifecycle
+protections.
