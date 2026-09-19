@@ -136,10 +136,10 @@ Inspected on 2026-09-19: [PR #796](https://github.com/WayfarerLabs/agentworks/pu
 [HLA](https://github.com/WayfarerLabs/agentworks/blob/167980abf80aae11691e2a3f4f699db40ebf9f5f/docs/sdd/2026-09-05-ssh-connection-contracts/hla.md).
 This is the single current coordination pin; earlier pins in the buffered proof record remain
 historical evidence. The independent carrier supersedes #757's legacy consolidation. Its buffered
-PoC is accepted, while full implementation and migration remain Phase 2. Shared file semantics,
-profiles and lifecycle remain above SSH delivery. The OpenSSH 8.5 floor concerns builder-owned
-clients, not sshd; provider-inner clients need their own inventory. This inspection is design
-reconciliation, not new runtime evidence or ownership of the SSH artifacts.
+PoC is accepted and merged on main at `19629607`; full implementation and migration remain Phase 2.
+Shared file semantics, profiles and lifecycle remain above SSH delivery. The OpenSSH 8.5 floor
+concerns builder-owned clients, not sshd; provider-inner clients need their own inventory. This
+inspection is design reconciliation, not new runtime evidence or ownership of the SSH artifacts.
 
 ### Shipped file helpers and release impact
 
@@ -171,8 +171,10 @@ not `/opt/agentworks/harnesses` or a fictional session event pipe.
 
 The fine-grained recipient grant shape is an explicit future-facing contract choice. Today
 `RunContext` passes through targets (`capabilities/base.py:226-233`); the new stack introduces small
-bound grants so core callers and later plugins need not receive the whole core ceiling. This is not
-evidence of an existing consent system, nor permission to build one during transport replacement.
+bound grant shapes so core callers and later plugins need not receive the whole core ceiling. Under
+the [2026-09-19 ruling](frd.md#operator-rulings-2026-09-19), these remain groundwork during released
+old/new coexistence: production enforcement and security reliance wait for legacy removal. This is
+not evidence of an existing consent system, nor permission to build one during replacement.
 
 ### Managed foreground work and session containment
 

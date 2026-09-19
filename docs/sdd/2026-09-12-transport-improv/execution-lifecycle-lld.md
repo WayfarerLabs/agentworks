@@ -1,7 +1,8 @@
 # Execution Lifecycle and Protection Profiles
 
 - Status: Proposed design, 2026-09-18; no lifecycle or containment implementation claimed.
-- Governing direction: [FRD operator rulings](frd.md#operator-rulings-2026-09-18).
+- Governing direction: FRD operator rulings for [profiles](frd.md#operator-rulings-2026-09-18) and
+  [staged permission activation](frd.md#operator-rulings-2026-09-19).
 - Public API: [execution contract](execution-contract.md); delivery: [plan](plan.md).
 
 ## One API, separate concerns and explicit constraints
@@ -45,6 +46,13 @@ call only. Required native jobs use durable output and polling, not a pretend PT
 
 ## Protection hierarchy and grants
 
+Profile guarantees apply whenever the new API executes work. Recipient grant enforcement below is
+the post-removal design: during coexistence consumers explicitly choose profiles, but no new
+permission policy forces that choice or withholds DIRECT. Do not claim that a recipient must use
+cgroups while it can still reach legacy execution. Isolated proof tests may exercise future denials;
+production activation follows the [removal gate](migration-strategy.md#sequence-and-cutover-gates).
+Guest-side protections implementing a requested profile are not deferred recipient permissions.
+
 Proposed core profile names describe guarantees, not a selectable backend:
 
 | Profile                | Added promise                                                                                                                                      | What it does not promise                                                                                    |
@@ -80,10 +88,11 @@ not authority. A caller cannot adopt an arbitrary unit, widen a profile, pass ar
 properties, or obtain supervisor credentials through the API. File helpers may use internal delivery
 under narrow core authority without exposing execution; they accept data, never caller callbacks.
 Grants apply to the public action, not private reuse: implementing `run` with launch/wait machinery
-does not require the recipient to hold public `start` authority. Readiness composition separately
-withholds profiles requiring stateful supervisor launch. Such a request is denied before dispatch
-even through `run`; withholding `start` alone is insufficient. The approved DIRECT readiness path
-still forbids staging and requested shell startup.
+does not require the recipient to hold public `start` authority. Readiness's operational no-effects
+contract rejects profiles requiring stateful supervisor launch before dispatch even during
+coexistence and even through `run`; withholding `start` alone is insufficient. Its DIRECT path still
+forbids staging and requested shell startup. This invariant is independent of later recipient grant
+enforcement.
 
 ## Lifecycle, waiting and attachment
 

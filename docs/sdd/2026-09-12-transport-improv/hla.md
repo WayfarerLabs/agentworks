@@ -8,7 +8,7 @@
 
 ## Architectural decision
 
-Expose permission-scoped views of one bound guest execution target through `RunContext`. Put common
+Expose permission-ready views of one bound guest execution target through `RunContext`. Put common
 command, script, file, and job semantics above delivery adapters. Describe optional interaction as a
 feature of the selected channel. Required operations are implemented by every target, even when a
 carrier needs shared staging or polling to provide them.
@@ -17,13 +17,24 @@ This replaces the current execution-only/full inheritance split as the caller-fa
 does not erase physical differences between SSH, local VM tools, and a guest-agent API. There is no
 backend selection inside a command, and no generic capability registry to negotiate a route.
 
-Build this as a new stack alongside the current one, with separate internal entry points for
-development and validation. Settle and prove the contract before cutting over existing callers. SSH
-is part of that new stack, including its connection policy and subprocess implementation. Copy
-useful code where appropriate, but do not import, wrap, subclass, or call the legacy stack. Current
-callers inform the migration; the intended core/plugin workflows in FRD R11 determine what the new
-interface must express. New job observation or script facilities need not wait for an old caller to
-demonstrate a use that the old interface could not support.
+Build this as a new stack alongside the current one, then expose it through additive RunContext
+accessors before migrating callers in separate PRs and deleting legacy in a final PR. Settle and
+prove the contract before cutting over existing callers. SSH is part of that new stack, including
+its connection policy and subprocess implementation. Copy useful code where appropriate, but do not
+import, wrap, subclass, or call the legacy stack. Current callers inform the migration; the intended
+core/plugin workflows in FRD R11 determine what the new interface must express. New job observation
+or script facilities need not wait for an old caller to demonstrate a use that the old interface
+could not support.
+
+The [2026-09-19 ruling](frd.md#operator-rulings-2026-09-19) defers permission enforcement and
+security reliance until legacy removal. Grant, withholding and authorization language in this HLA
+describes the post-removal contract. Coexistence supplies the API structure and records deliberate
+consumer choices, not restricted recipients. This includes deferring the new core file allowlist's
+authorization checks; shipped legacy checks remain unchanged. Operational safety, SSH trust, guest
+permissions, identity/lifetime binding and the guarantees of an explicitly selected protection
+profile still apply from first use. Readiness remains read-only without staging. The
+[contract's activation boundary](execution-contract.md#delivery-stages-and-permission-activation)
+and [migration gates](migration-strategy.md#sequence-and-cutover-gates) define the distinction.
 
 ## Components and ownership
 
@@ -299,12 +310,12 @@ accepted buffered PoC does not establish those guarantees.
 ## RunContext integration
 
 Keep the existing accessor distinction between descriptive context and execution-bearing targets.
-`admin_target()` and `agent_target()` return a permission-scoped target view, or no target when that
-identity is unavailable or withheld. Their names describe identity, not a transport class. Each view
-provides passive accessors for execution and file interfaces; a missing grant can withhold an entire
-interface, while a bound action restriction can distinguish upload/download or observe/stop or exact
-profiles. The [contract proposal](execution-contract.md) gives the concrete shape. The selected
-route remains inspectable metadata, not a way to obtain an unrestricted handle.
+New `admin_execution_target()` and `agent_execution_target()` return a target view, or no target
+when that identity is unavailable or withheld. Their names describe identity, not a transport class.
+Each view provides passive accessors for execution and file interfaces; a missing grant can withhold
+an entire interface, while a bound action restriction can distinguish upload/download or
+observe/stop or exact profiles. The [contract proposal](execution-contract.md) gives the concrete
+shape. The selected route remains inspectable metadata, not a way to obtain an unrestricted handle.
 
 Bind recipient authority at context composition, independently from guest identity and channel
 features. VM admin access does not by itself grant API-performed root elevation. Supplied interfaces
@@ -312,7 +323,9 @@ check their bound action/elevation restrictions before preparation or effects, e
 account could perform the operation. Environment-derived views preserve or narrow these
 restrictions. Later job observation requires the fresh context's corresponding grant and job
 ownership; a reference cannot grant `stop`. Accessors expose existing decisions and perform no
-policy lookup.
+policy lookup. These recipient restrictions activate only after the old stack is removed. During
+coexistence, the legacy `admin_target()` and `agent_target()` retain their types and behavior; new
+accessors have stable names and never fall back to them.
 
 The owning operation supplies its prepared environment; consumers explicitly choose shell and
 protection policies per invocation within their bound grants. The target does not derive application
@@ -342,7 +355,7 @@ requesting an action without a grant produces an authorization refusal, not a ch
 
 Preserve `OperationScope` as descriptive data and `ScopedSecrets` as delivery of declared resolved
 names. This effort supplies the interface decomposition, core file ceiling and bound restriction
-checks; current core composition explicitly supplies its required access within that ceiling. A
+checks for activation at removal; coexistence only records intended access within that ceiling. A
 future plugin permission system selects narrower grants through registration requests and user
 approval, rather than being implemented here as roles, consent UI or a general evaluator. Capability
 consumers receive no public raw-carrier or unrestricted-target escape. This does not authorize
@@ -350,13 +363,14 @@ secret discovery through a factory hidden inside a capability. FRD R9 owns the l
 boundary: unrestricted user execution includes that account's guest authority, including configured
 sudo privileges, and hostile in-process plugin containment needs a separate security design.
 
-Migrate context constructors and consumers together, including VM boundaries, agent realization,
-session readiness/roll-forward, git-credential operations, and harness setup. Setup/readiness
-invocation types carry RunContext alongside their domain data instead of a raw runner. Resources
-obtain files/execution from its bound target views, with no NativeFiles or setup-runner facade. Core
-supplies trusted home/destination identity and bounded native inventory; file-only plugins do not
-acquire general exec merely for discovery. Native CLI operations that genuinely execute remain
-separately authorized. Readiness retains its no-staging/no-requested-startup policy.
+Add new context accessors first, then migrate consumers in owned batches, including VM boundaries,
+agent realization, session readiness/roll-forward, git-credential operations, and harness setup.
+Setup/readiness invocation types carry RunContext alongside their domain data instead of a raw
+runner. Resources obtain files/execution from its bound target views, with no NativeFiles or
+setup-runner facade. Core supplies trusted home/destination identity and bounded native inventory;
+file-only plugins do not acquire general exec merely for discovery. Native CLI operations that
+genuinely execute remain separately authorized. Readiness retains its
+no-staging/no-requested-startup policy.
 
 ## CLI and recovery composition
 
@@ -434,39 +448,43 @@ new name: local process status, observed guest status, and uncertainty remain di
 
 There is one SSH policy implementation within the new stack. Temporary independent old/new code
 during development is intentional; sharing the legacy builder to avoid that duplication would
-violate the removal requirement. Production stays on the old stack until cutover.
-Trust/configuration data migration is separately tested and does not call the old SSH runner or
-weaken trust checks.
+violate the removal requirement. Unmigrated production callers stay on the old stack; migrated
+callers use only the new stack for each operation. Trust/configuration data migration is separately
+tested and does not call the old SSH runner or weaken trust checks.
 
 ## Parallel build and cutover
 
 The order is mandatory: settle the small seam, prove it, reconcile both SDDs, build in parallel,
-validate complete workflows, then cut over and delete. The [plan](plan.md) owns the gate criteria.
-Only the bounded proof precedes proof-informed reconciliation; broad adapter/helper development
-waits. The buffered proof is accepted as recorded in the plan; this revision specifies the broader
-API and lifecycle gates without claiming they are implemented. The effort mandate remains the
-complete build, migration and deletion; new live proofs need concrete isolated test charters.
+validate complete workflows, add the new production surface, migrate callers, then delete legacy and
+activate permissions. The [plan](plan.md) owns the gate criteria. Only the bounded proof precedes
+proof-informed reconciliation; broad adapter/helper development waits. The buffered proof is
+accepted as recorded in the plan; this revision specifies the broader API and lifecycle gates
+without claiming they are implemented. The effort mandate remains the complete build, migration and
+deletion; new live proofs need concrete isolated test charters.
 
-Use the destination package structure for the new stack, with development/test composition roots
-that exercise its contracts while production factories and `RunContext` retain the old stack. Use an
-internal prototype context in those tests, not two public target types in the production context.
-Never dispatch a mutating workflow through both stacks to compare results.
+Use the destination package structure and validate it independently. The implementation PR adds the
+complete new RunContext surface alongside unchanged legacy accessors, without migrating existing
+callers. Construction/access stays passive; route activation and resource ownership stay with the
+composition root. Never dispatch a mutating workflow through both stacks to compare results.
 
 Prove the new layer against SSH, QGA, and placement-host differences early, then cover the remaining
 adapters and complete workflows. Integrate the new SSH carrier once its agreed seam is available.
-Only after the new stack's acceptance gates pass does a coherent cutover change factories, context
-producers/consumers, plugin delivery, and direct service entry points. Remove the old stack and
-temporary bridges in that cutover increment. The detailed gates and treatment of existing jobs are
-in the [migration strategy](migration-strategy.md).
+After the new surface's acceptance gates pass, separately reviewed migration PRs change consumers,
+plugin delivery and direct service entry points in coherent workflow batches. The final PR removes
+old accessors, factories, execution modules and temporary scaffolding, then activates the reviewed
+core grants and file ceiling with no legacy bypass left. Detailed gates and treatment of existing
+jobs are in the [migration strategy](migration-strategy.md).
 
 Independence is an acceptance gate before cutover: the new-stack tests must run with the retired
 modules unavailable. After cutover, the complete production build and workflows must still work
 after physical deletion of those modules. A compatibility facade that reaches back into them is not
 an acceptable intermediate implementation of the new stack.
 
-This permits development coexistence without a released old/new selector or two plugin execution
-APIs. The current PR publishes design only; implementation landing units are decided in the plan
-after the dependency and complete-cutover scope are known.
+This permits temporary released coexistence, not permanent support for two stacks or a runtime
+stack-selection flag. Consumers deliberately select the right operation, identity/elevation, shell,
+I/O, lifetime and profile. They cannot rely on permission isolation until removal. The current PR
+publishes design only so SSH and migration work can coordinate against main; implementation follows
+separately under the plan.
 
 ## Alternatives and remaining decisions
 

@@ -1,8 +1,8 @@
 # Transport Improvements: Design and Delivery Sequence
 
-- Status: Joint buffered PoC accepted; execution-profile design revision under review
-- Delivery vehicle: Merged design PR #795, followed by transport PoC PR #826, labeled
-  `sdd:transport-improv`
+- Status: Joint buffered PoC accepted; staged delivery and permission activation design
+- Delivery vehicle: Design PR #830, then additive implementation, consumer migration PR(s), and
+  final removal/activation PR; all labeled `sdd:transport-improv`
 - Requirements: [FRD](frd.md)
 - Architecture: [HLA](hla.md)
 - Proposed interfaces and layout: [Execution contract](execution-contract.md)
@@ -10,9 +10,10 @@
 - Proposed lifecycle: [Execution profiles and supervisor design](execution-lifecycle-lld.md)
 
 The required order is: settle the transport-owned small contract, prove it, reconcile both SDDs,
-build independently in parallel, validate complete workflows, then cut over and physically delete
-the old stack. The proof is a bounded joint slice, not permission to start the broad rebuild. This
-proof now has a transport-side implementation, local tests and successive joint live reports. The
+build independently in parallel, validate complete workflows, add the new RunContext surface,
+migrate consumers in separate PRs, then physically delete legacy and activate permissions. The proof
+is a bounded joint slice, not permission to start the broad rebuild. This proof now has a
+transport-side implementation, local tests and successive joint live reports. The
 [proof evidence](proof-lld.md) records acceptance of the finite-input slice and its limits. No
 broad-build or production-cutover gate is completed by those measurements.
 
@@ -92,9 +93,10 @@ pinned contract. The following is an assignment plan, not a claim that developer
 Every charter names exact files and tests; overlapping files remain with the lead or are handed off
 explicitly before another developer touches them. Separate working trees/branches share the pinned
 contract, not a mutable working tree. Cross-package requests return to the lead; only the lead
-integrates changes to common types and the production composition switch. Independent build and
-migration work can proceed in parallel without releasing two public stacks or moving final removal
-out of this effort. Refresh the inventory again at each integration boundary.
+integrates changes to common types and production composition. After additive delivery, migration
+batches may land independently against its pinned contract. Temporary released coexistence is
+explicitly authorized; final removal remains this effort's responsibility. Refresh the inventory at
+each integration boundary and prohibit new legacy consumers.
 
 ## 1. Specify the small contract and proof charter
 
@@ -167,13 +169,15 @@ PoC merge enables production use.
       Enumerate tools available during native bootstrap and on supported platform hosts; prove
       destination-side confinement rather than relying on a preflight path check. Define trusted
       ancestors/mounts, private staging/locks, root creation and fail-closed behavior.
-- [ ] Inventory required mutation destinations and actions for harness configuration, `/opt`
+- [ ] Inventory intended mutation destinations and actions for harness configuration, `/opt`
       provisioning, `/run` session objects, recovery and platform hosts. Review execution-bearing
       content and select explicit core allowlist entries, trusted dynamic-root resolution and
-      recipient subsets. No broad parent grant or public-exec workaround to make a caller pass.
+      recipient subsets for post-removal activation. Consumers choose the appropriate file API
+      rather than broad parent intents or public-exec workarounds to avoid a future restriction.
 - [ ] Finalize execution/file interfaces and separately granted actions/profiles, including the core
-      file ceiling. Keep registration requests, user consent, a general plugin policy evaluator and
-      hostile in-process plugin isolation out of scope. Map FRD R11's future workflows to tests.
+      file ceiling, with production enforcement deferred until legacy removal. Keep registration
+      requests, user consent, a general plugin policy evaluator and hostile in-process plugin
+      isolation out of scope. Map FRD R11's future workflows to tests.
 - [ ] Reconcile #796's pinned transport reference with the final reviewed contract and later
       file-only slice. SSH owns its artifact edits; shared file semantics and cutover stay here.
 
@@ -219,23 +223,45 @@ connection and trust only. Before broader lifecycle implementation, complete the
       selector, shared legacy runner, or duplicate mutation dispatch is allowed.
 - [ ] Specify and validate SSH state transition, concurrent-writer ownership and rollback evidence.
       Preserve configuration and complete trust records without importing old execution code.
-- [ ] Deliver a shared file-only vertical slice through SSH and native QGA, with commands/jobs
-      withheld: whole-file installation, privileged JSON merge preserving unrelated keys, approved
-      directory creation/metadata and conditional removal. Add a session-owned stale-socket case;
-      tmux creates sockets and no FIFO creation is required. Keep the initial small carrier proof
-      intact; this later slice gates broader file-consumer migration, not the independent SSH build.
-- [ ] Prove the file boundary with behavioral tests: default denial, exact-file/subtree scopes, root
-      versus parent authority, prefix collisions/traversal, links and concurrent substitution,
-      confined extraction, forbidden metadata/removal, and inability to widen grants. Cover
-      attempted helper redirection through caller environment, PATH or working directory,
-      cooperating writers, external-writer limits, malformed JSON, special-object refusal, sensitive
-      diagnostics, partial transfer/cleanup and uncertain publication. No runtime fallback may
-      expose commands to the file-only caller; unavailable safe mechanics block acceptance. Record
-      live target/platform evidence under an authorized charter. Adapt 0.19.0's boundary, settings,
-      generated-section/ACL, publication-checkpoint and native-inventory tests to new delivery;
-      copying tests does not establish the stronger race/concurrency promises by itself.
+- [ ] Deliver a shared file-only vertical slice through SSH and native QGA, without caller
+      command/job calls: whole-file installation, privileged JSON merge preserving unrelated keys,
+      approved directory creation/metadata and conditional removal. Add a session-owned stale-socket
+      case; tmux creates sockets and no FIFO creation is required. Keep the initial small carrier
+      proof intact; this later slice gates broader file-consumer migration, not the independent SSH
+      build. Restricted test composition can withhold execution; production permissions remain
+      inactive.
+- [ ] Prove file correctness from first use and the future permission boundary in isolated tests:
+      default denial, exact-file/subtree scopes, root versus parent authority, prefix
+      collisions/traversal, links and concurrent substitution, confined extraction, forbidden
+      metadata/removal, and inability to widen grants. Cover attempted helper redirection through
+      caller environment, PATH or working directory, cooperating writers, external-writer limits,
+      malformed JSON, special-object refusal, sensitive diagnostics, partial transfer/cleanup and
+      uncertain publication. No runtime fallback may expose commands to the file-only caller;
+      unavailable safe mechanics block acceptance. Record live target/platform evidence under an
+      authorized charter. Adapt 0.19.0's boundary, settings, generated-section/ACL,
+      publication-checkpoint and native-inventory tests to new delivery; copying tests does not
+      establish the stronger race/concurrency promises by itself.
 
-## 5. Validate complete workflows, cut over, and retire
+## 5. Add the complete new RunContext surface
+
+The [2026-09-19 ruling](frd.md#operator-rulings-2026-09-19) authorizes three delivery stages, not
+one all-callers cutover. PR #830 publishes this design only. The following implementation PR adds
+the new surface; migration and removal follow in their own PRs. Permissions are groundwork until
+removal: do not enforce new recipient grants or the successor core file ceiling, or rely on their
+isolation, in coexistence releases. Operational safety and selected profile guarantees still apply.
+
+- [ ] Add `admin_execution_target()` and `agent_execution_target()` to the existing RunContext,
+      returning the new target without changing legacy accessors or callers. Use permanent names, no
+      union target type, stack selector or forwarding adapter. Prove passive construction/access and
+      composition-owned lifetime, no new effects on existing callers, and independent new-stack
+      usability with legacy modules unavailable. Do not claim restricted recipient authority.
+- [ ] Validate complete provisioning, native recovery without Tailscale, plugin operations, files,
+      backup, host provisioning/rollback and interactive attachment through the new surface. Cover
+      required operations, optional refusal, sensitivity and supported workstation/platform
+      versions. Resolve trust-state writer ownership before new production use. Missing evidence
+      requires operator disposition, never a passing claim.
+
+## 6. Migrate consumers in owned workflow batches
 
 - [ ] Complete the
       [incident-derived behavior inventory](migration-strategy.md#incident-derived-behavior-inventory)
@@ -243,10 +269,11 @@ connection and trust only. Before broader lifecycle implementation, complete the
       replacement regression, required workstation/platform evidence, and explicit disposition. ADR
       0020, Windows stdin conversion and Git-for-Windows toolchain assumptions are seed cases, not
       an exhaustive inventory or a claim of new-stack validation.
-- [ ] Validate complete provisioning, native recovery without Tailscale, scoped plugin operations,
-      backup, host provisioning/rollback and interactive attachment through new internal entry
-      points. Cover required operations, optional refusal, sensitive data and supported workstation/
-      platform versions. Missing evidence requires operator disposition, never a passing claim.
+- [ ] Assign non-overlapping migration PRs for harness/artifacts, sessions/consoles and platform/CLI
+      consumers as needed. Each batch records legacy call sites, permanent new accessors, owner,
+      deliberate operation choices, intended grants/paths, regression/live evidence and surviving
+      state disposition. Prove complete production workflows per batch, with no fallback or
+      duplicate mutation. Keep unmigrated callers unchanged; freeze new legacy use.
 - [ ] Complete the [migration inventory and cutover gates](migration-strategy.md): retain #789's
       historical recovery intent without integrating its closed branch, audit caller
       shells/identity/I/O/lifetimes/grants and approved filesystem destinations, migrate
@@ -256,21 +283,31 @@ connection and trust only. Before broader lifecycle implementation, complete the
 - [ ] Replace `NativeFiles`, `files.runner`, exposed staging slots and raw setup/readiness runners
       with RunContext access. Preserve artifact ownership/checkpoints, JSON/TOML settings behavior,
       generated-section surroundings/metadata, session/run identities and restart confirmation.
-      Validate native inventory and identity discovery without granting exec to file-only plugins.
+      Validate native inventory and identity discovery without caller exec in file-only operations.
       Keep genuinely executable harness CLI work behind command access, not a disguised file API.
-- [ ] Switch factories, `RunContext` producers/consumers, plugins and direct services coherently;
-      prove real production workflows after physically deleting old execution modules and temporary
-      scaffolding. Transport owns this complete cutover, not just preference for the new runner.
-      Delete `agentworks.native_files` and its old policy at the same cutover; only the new
-      core-owned allowlist remains.
-
 - [ ] Migrate sessions and other jobs to the same supervisor. Preserve session UUID/run IDs,
       tmux/harness readiness, restart consent, legacy-run uncertainty and owned cleanup. Do not
       certify legacy detached descendants by moving only a surviving parent into a new cgroup.
 
-The default implementation landing unit contains the new stack and complete cutover together.
-Separating delivery later requires independently complete units and an explicit removal point, not
-releasing two public stacks. No checkbox above claims that the separately owned SSH work is done.
+## 7. Remove legacy and activate permissions
+
+- [ ] Require zero remaining legacy consumers, including direct/lazy imports and external plugin
+      entry points under the reviewed compatibility policy. Complete the behavior inventory and
+      surviving-job/state disposition before deleting their readers. Transport owns this final PR.
+- [ ] Physically delete legacy accessors, factories, the retirement packages including
+      `agentworks.native_files`, and temporary scaffolding. Prove installed-package startup and
+      complete production workflows without them. Retain operator trust/configuration and cleanup
+      evidence; replacing code never authorizes deleting that state.
+- [ ] Activate explicit core recipient grants and the successor file allowlist only with legacy
+      absent. Inventory all approved workflow actions/paths before activation, then prove restricted
+      file-only, observe-only, elevation and exact-profile views, denial before effects and no
+      indirect bypass. Keep operational failure, channel support and permission denial distinct.
+      This is not registration/consent or an in-process plugin sandbox. If either removal or
+      enforcement evidence fails, do not claim permission isolation or close the effort.
+
+Each stage is independently green and updates permanent collateral to the behavior it actually
+ships. Temporary coexistence has an explicit final removal owner and gate, not indefinite support
+for two APIs. No checkbox above claims that the separately owned SSH work is done.
 
 Future implementation satisfies FRD R1-R11 and promotes implemented contracts into permanent docs
 with the code that makes them true. Closeout requires evidence-backed validation, complete

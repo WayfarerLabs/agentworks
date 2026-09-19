@@ -91,6 +91,28 @@ granted actions, rather than separate command/job interface objects. File-only a
 separate. Guest workload protection is distinct from the in-process plugin isolation excluded below.
 The #770 requirement mapping and compatibility proofs remain explicit delivery gates.
 
+### Operator rulings, 2026-09-19
+
+On staged delivery and removal:
+
+> In my (possibly naive) way of thinking, this implementation work ends with expanding RunContext to
+> have this new surface in parallel with the old. This shouldn't break anything.
+>
+> Then there's another PR (or set of them) to migrate everything from old to new within RunContext
+> (as well as direct calls if they exist). Finally there's a PR to rip out the old.
+
+On permission timing and deliberate consumer choices:
+
+> Yeah, we're merely laying the groundwork for permissions. They shouldn't be enforced or otherwise
+> relied upon until the old is removed. The only thing is that the consumers should make concious
+> choices about what they should use for each operation.
+
+<!-- cspell:ignore concious -->
+
+These rulings supersede the earlier single-increment cutover and permission-enforcement timing in
+R7/R9/R10 and their acceptance scenarios, not the final-state requirements. The response and staged
+acceptance gates are in the [migration strategy](migration-strategy.md#sequence-and-cutover-gates).
+
 ### Implementation scope
 
 In scope for the eventual implementation:

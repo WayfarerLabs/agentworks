@@ -18,6 +18,31 @@ The [active proof LLD](proof-lld.md) records the buffered implementation subset,
 native adapter placement and evidence gaps. The proposed public and live-I/O interfaces below are
 not claims that the initial proof package implements them.
 
+## Delivery stages and permission activation
+
+The [2026-09-19 ruling](frd.md#operator-rulings-2026-09-19) makes production adoption additive:
+first expose the complete new surface alongside legacy RunContext access, then migrate consumers in
+separate PRs, then physically delete legacy. New code never calls old execution packages.
+`RunContext.admin_execution_target()` and `.agent_execution_target()` are the permanent new
+accessors. Existing `admin_target()` and `agent_target()` keep their legacy types and behavior until
+deletion; there is no union return type, runtime stack selector or fallback between stacks.
+
+Permission/grant language below specifies the **post-removal contract**. During coexistence, do not
+withhold interfaces, reject calls or advertise isolation on the basis of new recipient grants,
+including the new core file ceiling. Record intended actions, paths, elevation and profiles during
+consumer migration; these are review inputs for later activation, not enforced permissions. Existing
+legacy checks remain unchanged on legacy calls. This does not add a public permissions-disable
+switch or a shadow authorization service. Isolated tests can prove the future denial behavior, but
+production enforcement and any reliance on it wait for the removal gate.
+
+Operational invariants apply from the first new-stack release: bound identity/route and lifetime,
+explicit shell/elevation/profile selection, actual guest OS permissions, SSH trust, sensitivity,
+safe filesystem object handling and truthful outcomes. A requested MANAGED or CONTAINED profile must
+deliver its advertised protections even during coexistence; it does not confine other calls through
+the legacy API. Readiness's no-staging restriction remains an operation contract, not a deferred
+recipient permission. No claim of a file-only or profile-required recipient boundary is valid while
+legacy access remains.
+
 ## Caller contract
 
 Core and plugin consumers import public types from `agentworks.execution` and receive a scoped
@@ -58,15 +83,15 @@ with any safe reconciliation reference, never automatic relaunch. There is no an
 
 Shared keyword options are `profile`, `lifetime`, `sudo`, `env`, `cwd`, `stdin`, `output`,
 `sensitive`, and `deadline`. `run` also accepts `check`; `wait` accepts it when collecting a job
-result. Elevation is non-interactive and requires both the bound elevation grant and guest
-authority. A VM admin account alone does not authorize the API's `sudo=True` option. This does not
-block sudo invoked inside an otherwise allowed direct command under an account that already has that
-guest authority. Scripts explicitly select `Shell.SH`, `Shell.BASH` or `Shell.USER_DEFAULT`;
-`Script` options `login` and `interactive` separately select startup behavior. `profile` is also
-explicit. The [lifecycle design](execution-lifecycle-lld.md) defines independent invocation,
-observation, I/O, lifetime, protection and identity choices, their defaults and invalid
-combinations. Waiting does not require direct execution: `run` can wait for work launched inside a
-managed boundary.
+result. Elevation is non-interactive and requires guest authority; after permission activation it
+also requires the bound elevation grant. A VM admin account alone then does not authorize the API's
+`sudo=True` option. This does not block sudo invoked inside an otherwise allowed direct command
+under an account that already has that guest authority. Scripts explicitly select `Shell.SH`,
+`Shell.BASH` or `Shell.USER_DEFAULT`; `Script` options `login` and `interactive` separately select
+startup behavior. `profile` is also explicit. The [lifecycle design](execution-lifecycle-lld.md)
+defines independent invocation, observation, I/O, lifetime, protection and identity choices, their
+defaults and invalid combinations. Waiting does not require direct execution: `run` can wait for
+work launched inside a managed boundary.
 
 Finite byte input works on every target; omission means EOF, not inherited console input. `run` may
 explicitly select `Input.live(source)` for non-terminal piped or duplex work on a channel with
@@ -171,7 +196,7 @@ logic may be copied into the new implementation where useful. The
 [migration inventory](migration-strategy.md) owns the disposition of the shipped `NativeFiles`
 facade and its callers.
 
-### Permission-scoped access
+### Permission-scoped access after legacy removal
 
 The proposed view has two passive accessors. Their interfaces use the operation vocabulary above;
 the view itself has no forwarding `run`, `upload`, or other all-authority convenience methods.
@@ -195,12 +220,13 @@ not evidence of a shipped registration/consent mechanism. Core constructs them d
 policy DSL or redundant registry. A file-only view need not receive every path in the core ceiling.
 
 The composition root binds recipient, identity, route, permitted actions and elevation once before
-delivery. Core composition binds file grants within the core allowlist now. Future registration
-requests and user approval can select narrower grants, but that workflow is out of scope. A
-plugin-supplied name, `OperationScope`, or request flag cannot authorize it. No public accessor
-returns the unrestricted implementation or carrier. Derived environment/shell views preserve or
-narrow grants and lifetime. Grant selection and checks are distinct from channel features and guest
-OS permissions; authorized recovery composition still receives all required operations.
+delivery. Core composition binds file grants within the core allowlist at activation. Future
+registration requests and user approval can select narrower grants, but that workflow is out of
+scope. A plugin-supplied name, `OperationScope`, or request flag cannot authorize it. No public
+accessor returns the unrestricted implementation or carrier. Derived environment/shell views
+preserve or narrow grants and lifetime. Grant selection and checks are distinct from channel
+features and guest OS permissions; authorized recovery composition still receives all required
+operations.
 
 Checks govern the requested public action, not its private implementation steps. A granted upload
 may use internal command delivery for staging without exposing `ExecutionAccess`; a granted script
@@ -214,13 +240,13 @@ using shared launch/wait machinery does not require a public `start` grant. Exis
 recheck current authority and the bound job profile; possession of a reference is not a grant.
 
 The public surface does not expose SSH credentials, provider task IDs, or a carrier constructor.
-`RunContext.admin_target()` and `.agent_target()` become `ExecutionTarget | None` at cutover, with
-each supplied view scoped to that recipient. Context composition retains a non-sensitive absence
-reason distinguishing unavailable lifecycle state from withheld authority; the LLD specifies its
-representation. An absent interface is not a claim that the carrier cannot implement it.
-`RunContext` stays in `capabilities/base.py`; it is not cloned into the execution package. During
-development, test composition supplies targets without changing production context types. The
-composition root owns target/resource closure; retaining a target cannot extend its authorized
+`RunContext.admin_execution_target()` and `.agent_execution_target()` return
+`ExecutionTarget | None`, with each supplied view scoped to that recipient after activation. Context
+composition retains a non-sensitive absence reason distinguishing unavailable lifecycle state from
+withheld authority; the LLD specifies its representation. An absent interface is not a claim that
+the carrier cannot implement it. `RunContext` stays in `capabilities/base.py`; it is not cloned into
+the execution package. During coexistence, the new accessors sit beside unchanged legacy accessors.
+The composition root owns target/resource closure; retaining a target cannot extend its authorized
 lifetime. A later job observer receives a newly authorized target.
 
 ## Carrier contract
@@ -406,7 +432,7 @@ cli/agentworks/
       remote_lima.py            first platform consumer of reusable SSH host access
       wsl2.py                   new workstation-local carrier
   plugins/proxmox/execution.py  new QGA adapter, no legacy transport imports
-  capabilities/base.py         existing RunContext, updated at cutover
+  capabilities/base.py         existing RunContext, additive new accessors, then legacy removal
 
 cli/tests/
   execution/                   public behavior, helpers, dependency isolation
