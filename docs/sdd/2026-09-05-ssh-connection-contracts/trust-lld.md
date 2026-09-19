@@ -71,6 +71,9 @@ than claim durable refusal was established.
 
 ## Enrollment and endpoint changes
 
+The [enrollment LLD](enrollment-lld.md) defines the retained per-resource candidate, strict
+verification, recovery and explicit publication mechanism.
+
 Only composition's explicit creation provenance can authorize enrollment. It identifies the new
 resource and intended canonical host/port/lookup identity. A missing store, connection failure,
 changed address or newly created guest on an existing placement host is not provenance. Carrier
@@ -80,9 +83,10 @@ Enrollment uses a separately owned candidate primary file, exclusively created a
 alongside the complete applicable existing policy and revocations. A bounded installed-client
 operation may use `accept-new` only for that candidate. Existing mismatches and revocations still
 refuse. Keep any written key after authentication failure, observation loss or interruption;
-recovery must be strict against retained evidence, not a second first-contact attempt. Account
-startup hooks and a no-work authentication acknowledgment need explicit treatment in the enrollment
-implementation before it is enabled. A raw SSH status alone is not application proof.
+recovery must be strict against retained evidence, not a second first-contact attempt. The
+acknowledgment performs no requested application work; account startup hooks can still have side
+effects. A strict follow-up checks retained trust before the candidate is reported verified. A raw
+SSH status alone is not application proof.
 
 Endpoint recovery remains explicit: independently establish the intended resource, preserve prior
 trust/CA/revocation evidence, and bind the correct lookup identity. No automatic rekey, host-key
