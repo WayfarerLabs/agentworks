@@ -38,6 +38,8 @@ from agentworks.execution.carriers.ssh.trust import (
     trust_status,
 )
 
+pytestmark = pytest.mark.windows
+
 
 @dataclass
 class SyntheticEnrollment:
@@ -502,3 +504,18 @@ def test_installed_ssh_recovery_retains_mismatching_primary(local_sshd: LocalSSH
     with pytest.raises(SSHEnrollmentError):
         recover_enrollment(local_sshd.connection, provenance=local_sshd.provenance, deadline=Deadline.after(5))
     assert primary.read_bytes() == mismatch
+
+
+@pytest.mark.parametrize("interruption", [KeyboardInterrupt, SystemExit])
+def test_interruption_during_failed_attempt_flush_is_preserved(
+    synthetic: SyntheticEnrollment, monkeypatch: pytest.MonkeyPatch, interruption: type[BaseException]
+) -> None:
+    synthetic.action = lambda argv: _ProcessResult(True, 255, 255, CapturedOutput(), CapturedOutput(), None)
+
+    def interrupt_flush(candidate: enrollment.SSHEnrollmentCandidate) -> None:
+        raise interruption()
+
+    monkeypatch.setattr(enrollment, "_sync_candidate", interrupt_flush)
+    with pytest.raises(interruption):
+        synthetic.enroll()
+    assert (synthetic.directory / "known-hosts").exists()
