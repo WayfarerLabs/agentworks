@@ -69,6 +69,31 @@ and atomic manifest replacement. It requires an operator-controlled local parent
 not defend against hostile code running as the same local user. Windows ACL and crash-durability
 acceptance still requires native validation; POSIX permissions do not establish those properties.
 
+## New-resource enrollment
+
+The `enrollment` module provides `SSHCreationProvenance`, `enroll_new_target` and
+`recover_enrollment`. Only trusted creation-flow composition may assert a genuine new provider
+resource and its canonical endpoint. Ordinary carrier execution never enrolls. The new composition
+binding is still required before this maintenance API enables production use.
+
+Enrollment requires a managed bundle and a finite deadline. It reserves one private candidate
+beneath that bundle for the stable creation ID, records the endpoint and current generation, and
+creates the primary known-host file exclusively. It makes one first-contact acknowledgment using
+`accept-new`, followed by a separate strict acknowledgment to verify retained trust. Both consume
+the same deadline and perform no requested application work; account startup hooks can still have
+side effects. Successful authentication alone does not prove OpenSSH saved the host key.
+
+Every failed or interrupted attempt retains its directory and any learned key. An existing candidate
+can only use strict recovery against the recorded active generation. Blocked or changed policy,
+missing metadata and unknown keys refuse. Keep the original bundle and creation ID during recovery;
+changing them to obtain another first-contact attempt is not recovery.
+
+A successful `SSHEnrollmentCandidate` is verified evidence awaiting explicit complete-policy
+import/refresh, using its expected generation. It is not an enabled connection. Include every
+applicable existing CA/revocation source when publishing, reconcile stale policy explicitly and keep
+ordinary connections on the managed reference. Never replace that reference with cached generation
+paths. The candidate remains after publication as evidence.
+
 ## Delivery and forwarding
 
 `SSHCarrier.execute` dispatches once. Captured bytes preserve their provenance; client/guest mixed
