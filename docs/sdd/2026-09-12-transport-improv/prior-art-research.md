@@ -242,8 +242,8 @@ Implementation paths below are relative to `cli/agentworks/`.
 
 - `capabilities/vm_platform/cloud_init.py:16` omits Python from `PROVISIONING_PACKAGES` and adds it
   in Phase B through `INIT_SYSTEM_PACKAGES`. The shared bootstrap installs its supplied package list
-  at `bootstrap_script.py:117`. Moving the package earlier is a narrow new-VM integration point, not
-  proof that every existing VM or platform host has it.
+  at `capabilities/vm_platform/bootstrap_script.py:117`. Moving the package earlier is a narrow
+  new-VM integration point, not proof that every existing VM or platform host has it.
 - Existing-VM repair needs its own native bootstrap entry point, independent of the helper it
   installs. `native_files.py:241` currently recommends reinit when Python is absent, while
   `vms/manager/lifecycle.py:712` requires provisioned state and a valid Tailscale connection for
@@ -288,6 +288,23 @@ return, followed by wait status -9, although exec never occurred. Therefore neit
 nor EOF on its internal close-on-exec error pipe is positive application-start evidence. The
 preparation design must resolve that gate without synthesizing `STARTED` or reserving legitimate
 application exit values as launcher errors.
+
+A follow-up source review suggests a narrower foreground proof: an audited native CPython fork/exec
+path with no `preexec_fn`, an intact exec-error channel, and a genuine ordinary wait result for the
+owned child may establish completion retrospectively. It need not invent an earlier `STARTED` event.
+This is an inference from the
+[child-launch implementation](https://github.com/python/cpython/blob/v3.12.12/Modules/_posixsubprocess.c),
+not a guarantee of arbitrary subprocess configurations. It proves only the directly executed
+process, not script-body entry or descendant completion. Detached launch still needs positive
+acknowledgment, and signal death remains uncertain without independent start evidence.
+
+The actual-wait qualification matters:
+[CPython's wait implementation](https://github.com/python/cpython/blob/v3.12.12/Lib/subprocess.py)
+substitutes zero when child status is unavailable. Local CPython 3.12.13 probes reproduced this with
+ignored `SIGCHLD` and with a competing reaper. A separate probe reset `SIGCHLD` before launch and
+obtained exact-PID ordinary wait statuses for exits 0, 42, and 255; a second wait raised
+`ChildProcessError`. Missing wait evidence must remain unknown. This candidate requires a fixed,
+single-reaper helper and proof on supported interpreter builds before changing the preparation gate.
 
 ### Decisions still required
 
