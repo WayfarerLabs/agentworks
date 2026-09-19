@@ -22,9 +22,11 @@ effect.
 
 A private identity's sibling `.pub` file must match its independently extracted public fingerprint.
 This prevents a stale companion from selecting another key in the explicit agent. A directly
-selected public key remains usable with its explicit agent. A private envelope whose public part
-cannot be verified locally is refused when a sibling public key exists. No private-key decryption or
-passphrase prompt is added.
+selected public key remains usable with its explicit agent when it has no sibling of its own. A
+public identity with a sibling is refused: the lightweight identity reader cannot prove that OpenSSH
+will accept the complete direct encoding before its suffix fallback. A private envelope whose public
+part cannot be verified locally is refused when a sibling public key exists. No private-key
+decryption or passphrase prompt is added.
 
 Paths must be absolute native paths without OpenSSH expansion tokens, quotes or control characters.
 Trust paths also refuse symlink/reparse components and parent traversal. On macOS, select canonical
