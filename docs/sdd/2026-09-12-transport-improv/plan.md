@@ -118,6 +118,20 @@ checkpoint receives the normal private reviews and validation before a testing b
 - [ ] Complete the additive-surface gates below before exporting or wiring production RunContext
       access. The models-only checkpoint is not additive-surface completion.
 
+At this checkpoint, runtime selection is a concrete decision rather than an assumed prerequisite.
+The baseline `PROVISIONING_PACKAGES` omits Python, while `INIT_SYSTEM_PACKAGES` installs it during
+Phase B; early native bootstrap and remote macOS host execution currently use shell-based paths. The
+operator has been asked whether to investigate an explicit early Python prerequisite instead of
+distributing native helper binaries. No selection or change to the supported platform contract is
+implied by that question. File-only no-staging readiness and exact direct-launch evidence must still
+pass their own proofs whichever substrate is selected.
+
+Private review also identified a filesystem confinement gap: held directory descriptors and a
+one-time link-count check do not establish safety against ancestor rename or later hard-link
+creation. The file LLD must settle and enforce the necessary trust/ownership conditions, or prove
+another mechanism, before implementation acceptance. Required destinations cannot be silently
+excluded to make the candidate pass. These are design gates, not permission to weaken R7.
+
 After the shared seam and LLD gates, the lead may charter bounded migration packages against one
 pinned contract. The following is an assignment plan, not a claim that developers are allocated:
 
