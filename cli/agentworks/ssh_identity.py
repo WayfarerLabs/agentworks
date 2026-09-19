@@ -129,10 +129,19 @@ def read_private_ssh_identity(path: Path) -> SSHIdentity:
     raise _invalid("private identity uses an unrecognized envelope")
 
 
+def read_public_ssh_identity(path: Path) -> VerifiedSSHIdentity:
+    """Read one bounded public-key file without consulting companion files."""
+    try:
+        text = _read_bounded_file(path).decode("utf-8")
+    except UnicodeDecodeError:
+        raise _invalid("public identity is not valid UTF-8 text") from None
+    return parse_public_ssh_identity(text)
+
+
 def _read_bounded_file(path: Path) -> bytes:
     descriptor: int | None = None
     try:
-        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0))
         file_stat = os.fstat(descriptor)
         if not stat.S_ISREG(file_stat.st_mode):
             raise _unavailable("identity path is not a regular file")
