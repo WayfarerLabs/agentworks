@@ -48,6 +48,12 @@ system/default trust context. An explicit bundle selects that trust source, not 
 bypass. The API hostname must match the certificate; there is no server-name override. Redirects and
 ambient proxies are disabled, and provider exception text is not returned.
 
+`carriers/_subprocess.py` supplies a shared finite-input process pump with separate bounded outputs,
+explicit environment binding and bounded local cleanup. Its result records local process facts, with
+unknown stream provenance; each carrier owns interpretation as delivery evidence. It does not infer
+guest dispatch or termination. SSH still uses its private pump until its owning lane adapts the call
+sites and removes that copy; the shared module adds no streaming or terminal support.
+
 ## Observation and guest lifetime
 
 A deadline bounds local observation only. Ordinary guest commands and bootstrap descendants can

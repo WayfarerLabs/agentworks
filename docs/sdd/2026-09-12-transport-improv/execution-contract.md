@@ -422,6 +422,7 @@ cli/agentworks/
     diagnostics.py              safe execution diagnostics, no legacy SSHLogger
     carrier.py                  leaf carrier protocol and carrier-only values
     carriers/
+      _subprocess.py            bounded local process I/O; carrier owns evidence interpretation
       ssh/
         __init__.py             SSHCarrier and SSHConnection exports
         connection.py           explicit connection value and option policy
