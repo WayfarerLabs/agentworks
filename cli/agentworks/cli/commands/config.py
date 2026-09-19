@@ -137,7 +137,7 @@ def config_refresh_ssh_trust(
     ],
     revoked_host_keys: Annotated[Path | None, typer.Option(help="Complete replacement revocation snapshot.")] = None,
 ) -> None:
-    """Replace complete SSH policy; a failed refresh leaves the bundle blocked."""
+    """Replace complete SSH policy with admissions blocked during publication."""
     from agentworks.execution.carriers.ssh.trust_maintenance import refresh_ssh_trust
 
     refresh_ssh_trust(
