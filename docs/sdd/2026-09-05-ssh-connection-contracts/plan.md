@@ -11,12 +11,12 @@
 
 ## Delivery and ownership
 
-The SSH PoC in #796 is merged. The second SSH PR delivers the full independent carrier and
-connection/trust migration machinery for the new execution surface. Transport exposes that surface
-alongside the unchanged old SSH/transport path in RunContext, with both available and usable. It
-then leads consumer migration, removes legacy RunContext access, and deletes old transport. SSH
-waits during those stages except for issues needing its attention. A later operator request starts a
-separate PR to delete old SSH and close this SDD.
+The SSH PoC in #796 is merged. PR #832 on `feat/ssh-full-implementation` delivers the full
+independent carrier and connection/trust migration machinery for the new execution surface.
+Transport exposes that surface alongside the unchanged old SSH/transport path in RunContext, with
+both available and usable. It then leads consumer migration, removes legacy RunContext access, and
+deletes old transport. SSH waits during those stages except for issues needing its attention. A
+later operator request starts a separate PR to delete old SSH and close this SDD.
 
 The [2026-09-19 ruling](frd.md#operator-ruling-2026-09-19) supersedes the earlier two-PR retirement
 sequence. Implementation delivery may finish before migration and deletion; it does not finish the
@@ -28,7 +28,14 @@ Post integration-testing considerations before a checkpoint's `review-requested`
 private reviews first. Remove the label before fixes and wait for full integration reports before
 another iteration. Use ready when the complete green handoff has merge intent, with no checkpoint
 label. The four-round PoC allowance below is historical and exhausted, not a new implementation
-feedback budget. Contract changes or unexpected scope return to the operator.
+feedback budget. The operator authorized one artifact feedback/fix round on #832, followed by
+implementation on the same PR and up to three additional public feedback/fix rounds after its ready
+handoff. The artifact checkpoint at `66298c59` closed without a fix round: full tester and
+complexity reports passed the documents; the title finding assumed a design-only merge and was
+refuted by this single-PR scope. Its
+[disposition](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-5744746307) records
+the reports and removal of `review-requested` before implementation. Record each later handoff and
+budget disposition on #832. Contract changes or unexpected scope return to the operator.
 
 Transport solely owns the carrier contract, common types, acceptance criteria, shared preparation,
 public outcomes and proof harness. SSH owns its independent carrier, connection/trust migration,
