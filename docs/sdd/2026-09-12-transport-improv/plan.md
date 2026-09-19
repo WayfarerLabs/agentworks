@@ -255,6 +255,13 @@ PoC merge enables production use.
 
 ## 4. Build the independent stacks in parallel
 
+- [ ] Establish local process ownership through launch interruption on supported workstation hosts.
+      A real SIGINT probe on Linux CPython 3.12.13 left a child alive when `Popen` construction was
+      interrupted before returning its handle. Shared pump extraction and the existing SSH copy do
+      not satisfy this gate. Prove cleanup or obtain an explicit contract disposition before
+      claiming production interruption conformance; see the
+      [process-startup evidence](prior-art-research.md#local-process-startup-and-interruption).
+
 The transport lead owns shared profiles, supervisor lifecycle and session adoption. Migration
 delegates consume this implementation rather than building another launcher; SSH owns delivery,
 connection and trust only. Before broader lifecycle implementation, complete these additional gates:

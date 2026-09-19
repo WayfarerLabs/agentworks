@@ -318,6 +318,28 @@ still needs a proved macOS metadata implementation. It does not close the file L
 ancestor-rename, hard-link, cross-identity locking, or mount-confinement questions. Those remain
 independent acceptance gates.
 
+### Local process startup and interruption
+
+Private review of the shared workstation pump at `38c3fa2b` distinguished two startup limitations.
+The [Python subprocess documentation](https://docs.python.org/3.12/library/subprocess.html#subprocess.run)
+states that initial process creation cannot be interrupted on many platform APIs. The pump checks
+the same deadline before and after construction; it does not reset that budget. An OS call taking
+longer than the remaining budget is not evidence that the pump granted a fresh observation timeout.
+This is not a hard real-time guarantee over process creation.
+
+Local launch interruption is a separate, demonstrated ownership gap. On Linux CPython 3.12.13, a
+parent sent real SIGINT while the pump launched a valid 1.5 MB argument vector. The traceback placed
+the interruption in CPython's `self.pid = _fork_exec(...)`, before `Popen` returned. The child wrote
+its PID and remained alive after the interruption propagated. The probe driver independently killed
+and reaped that exact child. This did not replace `Popen` or its private launch function. The large
+argument vector widened the test window; ordinary carrier argv frequency and Windows/macOS behavior
+were not measured.
+
+The existing SSH pump shares this construction pattern, so extraction did not introduce the gap.
+Neither implementation can claim launch-interruption conformance from post-construction cleanup
+tests. A supported ownership mechanism still needs design and host-specific proof; no supervisor or
+weaker interruption contract is selected by this finding. The production gate remains open.
+
 ## Native adapter audit, 2026-09-19
 
 The existing finite-input carrier boundary permits non-production adapter proofs without selecting
