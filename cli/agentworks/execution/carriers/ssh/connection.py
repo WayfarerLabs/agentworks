@@ -10,6 +10,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
+from agentworks.ssh_identity import (
+    SSHIdentityReadError,
+    VerifiedSSHIdentity,
+    read_private_ssh_identity,
+    read_public_ssh_identity,
+)
 
 if TYPE_CHECKING:
     from agentworks.execution.carrier import PreparedInvocation
@@ -92,17 +98,42 @@ class SSHConnection:
 
 
 def validate_connection_files(connection: SSHConnection) -> None:
-    """Check caller-provided files at operation time without reading key material.
+    """Check files and public identity evidence at operation time.
 
-    OpenSSH remains responsible for parsing identity, trust and revocation data
-    and enforcing permissions. Its subsequent opens can still fail after this
-    availability check. Trust is never created, rewritten or enrolled here.
+    OpenSSH parses authentication/trust data and enforces permissions. Verify
+    companion public identity without decrypting private material so its .pub
+    fallback cannot select another agent key. Subsequent client opens can still
+    fail. Trust is never created, rewritten or enrolled here.
     """
     for path in (connection.identity_file, connection.known_hosts_file, connection.revoked_host_keys):
         if path is not None and (not path.is_file() or not os.access(path, os.R_OK)):
             raise ValidationError("SSH requires existing identity, known-host and optional revocation files")
     if connection.agent_socket is not None and not Path(connection.agent_socket).is_socket():
         raise ValidationError("SSH requires an existing explicit Unix-domain agent socket")
+    _validate_identity_sidecar(connection.identity_file)
+
+
+def _validate_identity_sidecar(identity_file: Path) -> None:
+    """Refuse a sibling public key that could select another identity from an agent.
+
+    OpenSSH tries IdentityFile.pub before extracting a private key's public part.
+    IdentitiesOnly does not fix a stale or substituted sibling public key.
+    """
+    sidecar = Path(str(identity_file) + ".pub")
+    if not sidecar.exists():
+        return
+    try:
+        # A directly configured public key wins before the .pub fallback.
+        try:
+            read_public_ssh_identity(identity_file)
+            return
+        except SSHIdentityReadError:
+            identity = read_private_ssh_identity(identity_file)
+        companion = read_public_ssh_identity(sidecar)
+    except SSHIdentityReadError:
+        raise ValidationError("SSH identity and sibling public key must be independently verifiable") from None
+    if not isinstance(identity, VerifiedSSHIdentity) or identity.fingerprint != companion.fingerprint:
+        raise ValidationError("SSH sibling public key does not verify against the configured identity")
 
 
 def build_ssh_argv(
