@@ -721,6 +721,11 @@ Merged work the ledger owes a line, recorded from the merges themselves.
   lifetime, Bookworm versus a required Trixie upgrade, and side-by-side pricing of restricted
   same-UID execution against per-run users. Its session-identity dependency is discharged, since
   `session_uuid` and `run_id` landed on `main` with PR #794; that lane has been told.
+  - **Closed 2026-09-19 without merging.** The operator ruled containment an execution option owned
+    by transport rather than a session feature, superseding this adoption. PR #770 was closed at
+    `2c406948` and the lane shut down. Its SDD never reached `main`; the surviving copy of its
+    requirements is transport's pinned verbatim snapshot at that same head, which is now the source
+    for the transfer its own header prescribes.
 - **Transport and SSH rebuild adopted** (PRs #795 and #796, adopted 2026-09-14 by operator ruling
   recorded in `target-state.md`). Two coordinated adjacent standalone children replacing the
   execution layer rather than cleaning it in place: transport-improv
@@ -825,6 +830,42 @@ Merged work the ledger owes a line, recorded from the merges themselves.
   effort adopted on 2026-09-14 landed its FRD and HLA; implementation began immediately on PR #826
   with the bounded shared carrier proof. Its SSH counterpart (PR #796) remains open. Waves 5 and 7
   build on the execution contract this defines, as recorded in `phasing.md`.
+- **The transport rebuild's joint buffered proof landed** (PRs #826, #796, and #830, merged
+  2026-09-17 through 2026-09-19). Both carriers are on `main` and the package is **unwired**: no
+  production module outside `cli/agentworks/execution/` references it, so the parallel stack exists
+  without touching any live execution path. That is the parallel-build ruling holding at the merge
+  boundary rather than only in design.
+  - **The independence constraint is enforced by a test, and the enforcement generalized before it
+    was needed.** `cli/tests/execution/test_independence.py` blocks the retired execution modules in
+    an isolated interpreter, imports the new package, and asserts none of them reached
+    `sys.modules`, matching submodules rather than only package roots. It originally imported three
+    named modules; the effort rewrote it to walk the package with `pkgutil` so "a present carrier
+    cannot silently evade this guard." Two days later SSH merged and was covered automatically, with
+    no edit to the test. Worth recording as the pattern: a guard that enumerates what it checks is a
+    checklist, and checklists go stale against the thing they guard.
+  - **Protection profiles publish what they do not provide.** `DIRECT`, `MANAGED`, and `CONTAINED`
+    are additive, and each states its guarantees beside an explicit column of what it does not give.
+    CONTAINED is marked proposed and is explicitly not a sandbox for the Python plugin itself. The
+    design refuses silent downgrade: an unavailable systemd cannot quietly grant a restricted plugin
+    DIRECT.
+  - **The effort recorded an operator ruling on permission timing** (in its own FRD, not in saga
+    artifacts): permissions are groundwork, not enforced or relied upon until the old stack is
+    removed, while consumers make conscious per-operation choices now. That second half is what
+    keeps the deferral safe, since unconsidered defaults would all become load-bearing on the day
+    enforcement turns on. The FRD states which of its own requirements this supersedes, the cutover
+    and enforcement timing in R7/R9/R10, and which it does not, the final-state requirements.
+  - **Resolved 2026-09-19: transport owns it.** The operator ruled that cgroups are a generic
+    execution option through the transport layer rather than session-specific machinery, closed PR
+    #770, and shut down that lane. The ruling and its rationale are in `target-state.md`. The
+    question as it stood before that ruling: #830 proposed that transport own shared systemd and
+    cgroup lifecycle and session adoption, mapping the session-cgroups effort's R1-R7. That effort
+    was adopted 2026-09-14 as an adjacent standalone child and its R1-R4 are the same subject.
+    Transport consumes the requirements through a pinned verbatim snapshot
+    (`inputs/session-cgroups-frd-2c406948.md`) that declares itself non-authoritative and states
+    that the session effort retains its charter until explicit operator disposition, so neither
+    effort has presumed the answer. The saga lead routed the question to both lanes and to the
+    operator on 2026-09-18, and the ruling followed on 2026-09-19. Both efforts handling it without
+    presuming an answer is why the ruling cost nothing to apply: no artifact had to be unwound.
 
 ### Efforts that ran without ledger entries (reconstructed 2026-09-06)
 
