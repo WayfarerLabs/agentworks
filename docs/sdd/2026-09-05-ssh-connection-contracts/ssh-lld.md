@@ -63,9 +63,11 @@ Operation-time checks now verify a private identity's sibling public file agains
 identity embedded in the configured key. OpenSSH tries the `.pub` companion before deriving that
 identity; `IdentitiesOnly=yes` alone cannot prevent a stale companion from selecting another agent
 key. A mismatch or unverifiable companion refuses before client dispatch. An explicitly configured
-public identity takes precedence over further suffix lookup, matching OpenSSH. The retained
-`ssh_identity` leaf performs bounded public-only parsing without decrypting private material. These
-new checks need their own authentication-offer evidence; the old PoC record is unchanged.
+public identity is supported only without its own sibling. The lightweight public fingerprint reader
+does not prove that OpenSSH will accept the complete direct encoding before suffix lookup; ambiguous
+public-file/sibling pairs refuse rather than selecting another identity. The retained `ssh_identity`
+leaf performs bounded public-only parsing without decrypting private material. These new checks need
+their own authentication-offer evidence; the old PoC record is unchanged.
 
 ## Process and evidence
 
