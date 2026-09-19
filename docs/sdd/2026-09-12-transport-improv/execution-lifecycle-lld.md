@@ -36,8 +36,8 @@ supported: independent lifetime rejects caller-owned live input or output pipes;
 real terminal channel. Initial `start` accepts only EOF/finite target-delivered input and
 target-owned capture/discard output. It rejects caller-owned live pipes and terminal endpoints
 before dispatch, rather than returning while borrowed streams have an undefined owner. `run` owns
-synchronous streaming until it returns; `attach` owns its terminal endpoint for the attachment call
-only. Required native jobs use durable output and polling, not a pretend PTY.
+synchronous streaming until it returns; `attach` borrows its terminal endpoint for the attachment
+call only. Required native jobs use durable output and polling, not a pretend PTY.
 
 ## Protection hierarchy and grants
 
