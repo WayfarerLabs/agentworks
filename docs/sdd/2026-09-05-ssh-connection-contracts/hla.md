@@ -1,7 +1,7 @@
 # Independent SSH Carrier: High-Level Architecture
 
-- Status: Joint buffered PoC accepted; full implementation and migration remain Phase 2
-- Updated: 2026-09-17
+- Status: PoC merged; full implementation, staged migration and final SSH retirement remain open
+- Updated: 2026-09-19
 - Requirements: [frd.md](frd.md)
 - Shared contract:
   [transport-owned carrier contract](../2026-09-12-transport-improv/execution-contract.md#carrier-contract)
@@ -18,7 +18,8 @@ models, platform selection or legacy runners.
 | SSH effort                     | Explicit connection/trust values and migration, isolated SSH/scp options, process delivery, keepalives and explicitly owned forwarding resources. |
 | Transport effort               | Sole ownership of the carrier contract/acceptance criteria, shared types, preparation, public semantics, other carriers and RunContext delivery.  |
 | Transport/platform integration | Apply reusable SSH policy in host access, Lima/provisioning and provider-inner paths; own management commands and route/VM holds.                 |
-| Transport cutover              | All production/plugin caller migration, state-transition coordination, workflow acceptance and physical legacy deletion.                          |
+| Transport cutover              | All production/plugin caller migration, state-transition coordination, legacy RunContext access removal and old transport deletion.               |
+| SSH retirement                 | Delete the old SSH stack after transport deletion and a later operator request; verify final SSH workflows and close this SDD.                    |
 
 Proposed SSH files are `connection.py`, `client.py`, `trust.py` and `forwarding.py` beneath that
 package, with exports in `__init__.py` and independent tests under
@@ -29,21 +30,37 @@ mandatory execute primitive. SSH supplies delivery and failure evidence for tran
 Its operations, policy and acceptance criteria have one definition there. An optimization cannot
 bypass shared destination checks or expose command access to a file-only consumer.
 
-## Two-phase construction
+## Staged delivery and retirement
 
-PR #796 delivers the complete SSH portion of the transport-defined PoC in the destination package,
-with independent fixtures and reproducible evidence through transport's harness. It exercises the
-real SSH binding without changing production factories, caller APIs or operator trust/configuration.
-Transport supplies the common contract, preparation and harness; SSH does not create temporary local
-copies of those components. If that code is not yet on main, use an explicit dependency on the
-transport PoC branch and integrate its pinned revision before accepting results.
+Merged PR #796 delivers the complete SSH portion of the transport-defined PoC in the destination
+package, with independent fixtures and reproducible evidence through transport's harness. It
+exercises the real SSH binding without changing production factories, caller APIs or operator
+trust/configuration. Transport supplies the common contract, preparation and harness; SSH does not
+create temporary local copies of those components. Both PoC implementations are now on main. The
+reviewed transport design in #830 supplies the post-proof contract; it does not implement its
+proposed profiles.
 
 After the combined proof passes and each owner reconciles its artifacts, the second SSH PR extends
 the proven code to the full R1-R5 implementation, configuration/trust migration and workflow
-integration. It also removes or promotes any proof-only scaffolding under SSH ownership. Full
-implementation coordinates with transport's coherent production switch and physical deletion;
-completing a leaf package alone does not complete this SDD. The [plan](plan.md) owns the delivery
-checklists and definitions of done. Neither phase is a separately merged design-only PR.
+integration. It also removes or promotes any proof-only scaffolding under SSH ownership. Transport
+adds the complete new surface to RunContext alongside unchanged legacy accessors, with both paths
+usable. Permanent `admin_execution_target()` and `agent_execution_target()` expose the new targets;
+`admin_target()` and `agent_target()` keep their old behavior during migration. Each consumer
+operation uses one path; there is no automatic fallback, dual mutation or runtime stack selector.
+
+The [operator ruling](frd.md#operator-ruling-2026-09-19) supersedes the earlier requirement to
+finish retirement in the second SSH PR. Transport leads consumer migration, then removes legacy
+RunContext access, then deletes old transport. SSH waits during those stages, responding to issues
+as needed. Only after those stages and a later operator request does SSH delete the old SSH stack.
+Implementation delivery does not depend on that later deletion, and this SDD remains unlocked until
+final SSH retirement and acceptance. The [plan](plan.md) owns the gates. SSH artifacts continue to
+ride the work rather than a separate design-only PR.
+
+Transport owns shared workload supervision and protection profiles above the carrier, including
+explicit cancellation and independent job lifetime. SSH supplies delivery, not a second supervisor.
+New recipient permission enforcement follows transport's removal gate; SSH trust, safe I/O and the
+guarantees of selected profiles apply from first use. Temporary coexistence is not permission
+isolation.
 
 ## Connection and policy
 
@@ -129,12 +146,14 @@ reuse. Copy/adapt useful implementation with provenance; do not copy automatic r
 text-normalizing result semantics.
 
 Run isolated new-stack tests with retirement modules unavailable, including normal package imports.
-Transport later proves installed production entry points after physical deletion. Trust/config data
-has its own transition and rollback policy; deleting code never licenses deleting operator evidence.
+Transport proves installed production entry points at its migration/removal stages; SSH repeats the
+applicable workflow and dependency checks when it later deletes legacy SSH. Trust/config data has
+its own transition and rollback policy; deleting code never licenses deleting operator evidence.
 
 Transport specifies the carrier contract and acceptance criteria with SSH feasibility input. Phase 1
 proves that definition and incorporates findings into each owner's artifacts; Phase 2 implements the
-full SSH response and supports transport's cutover. Contract amendments go to transport; SSH never
+full SSH response for additive delivery. Final SSH deletion follows transport's migration and
+removal stages under renewed operator direction. Contract amendments go to transport; SSH never
 publishes a matching copy. Unresolved feasibility blocks proof acceptance even though the baseline
 is merged. Only the SSH owner edits these artifacts.
 
