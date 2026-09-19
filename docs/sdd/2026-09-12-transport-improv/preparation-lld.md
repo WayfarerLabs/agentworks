@@ -13,23 +13,14 @@ behavior. It sits above the unchanged call shape of `Carrier.execute(...)`. It d
 SSH connection, add a carrier-specific completion oracle, or own job identity, supervisor lifetime,
 stop, file publication, or RunContext composition.
 
-The production path keeps these distinctions:
-
-1. A `Command` is literal argv. A `Script` is UTF-8 source interpreted by an explicit `Shell`.
-2. Script source and application stdin are different byte sources and different guest descriptors.
-3. Carrier dispatch and raw remote command-chain completion are low-level evidence. Application
-   completion needs a validated terminal transcript plus the start evidence defined below.
-4. Output capture, discard, and suppression do not change how completion is proven.
-5. Preparation may use inline delivery or private staging. Readiness binds inline-only preparation
-   and therefore never stages, spools, launches a supervisor, or requests startup files.
-6. One public call launches the application at most once. Observation and verified fixed-offset
-   transfer may repeat; an ambiguous launch never does.
+The [execution contract](execution-contract.md) owns invocation, stream separation, outcome,
+sensitivity and no-replay semantics. This LLD supplies their preparation mechanism. Preparation may
+use inline delivery or private staging. Readiness binds inline-only preparation and therefore never
+stages, spools, launches a supervisor, or requests startup files.
 
 The new package remains disconnected from production until the plan's additive-surface gates pass.
-The 2026-09-19 permission ruling also means this layer does not enforce or advertise new recipient
-grants or the new core file ceiling during coexistence. It still enforces request validity, bound
-identity and lifetime, actual guest permissions, requested profile guarantees, sensitivity,
-readiness restrictions, SSH trust, and truthful results from its first production use.
+The [delivery-stage contract](execution-contract.md#delivery-stages-and-permission-activation)
+distinguishes immediate operational safety from deferred recipient permission activation.
 
 ## Facts at the current boundary
 
@@ -43,39 +34,16 @@ success.
 
 ## Public invocation values
 
-The first implementation increment extracts invocation-only values into
-`agentworks.execution.models`. It is a source move and value-shape improvement, not production
-enablement:
+The invocation values and their boundary validation live in
+[`agentworks.execution.models`](../../../cli/agentworks/execution/models.py). The first increment
+replaces free-text shell names and factory constructors with three explicit enum members and places
+startup flags on `Script`. This intentionally changes the internal preparation API, not the buffered
+carrier ABI, and does not enable production use.
 
-```python
-class Shell(Enum):
-    SH = "sh"
-    BASH = "bash"
-    USER_DEFAULT = "user_default"
-
-@dataclass(frozen=True)
-class Command:
-    argv: tuple[str, ...] = field(repr=False)
-
-    def __init__(self, argv: list[str] | tuple[str, ...]) -> None: ...
-
-@dataclass(frozen=True)
-class Script:
-    source: str = field(repr=False)
-    shell: Shell
-    _: KW_ONLY
-    login: bool = False
-    interactive: bool = False
-```
-
-`Command` accepts only a caller list or tuple, requires a nonempty executable and string arguments,
-and snapshots an immutable tuple. `Script` requires text source, a real `Shell`, and keyword-only
-real booleans for its startup flags. Empty source is valid. Payload-bearing fields keep
-`repr=False`, and validation errors contain no rejected value. The current increment deliberately
-does not validate text encoding or NUL in these constructors. Preparation must reject NUL and
-strict-UTF-8 encoding failures for every command argument and script source before input is consumed
-or remote effects begin. Constructor-level semantic validation can be reconsidered later only as a
-separately compatible public-value change.
+The current increment deliberately does not validate text encoding or NUL in these constructors.
+Preparation must reject NUL and strict-UTF-8 encoding failures for every command argument and script
+source before input is consumed or remote effects begin. Constructor-level semantic validation can
+be reconsidered later only as a separately compatible public-value change.
 
 Transport-owned proof code and tests import the values from `models` directly. `preparation.py`
 imports them normally, so the SSH-owned fresh-process test's existing
@@ -215,7 +183,6 @@ The version-one production record kinds are:
 
 | Kind         | Meaning                                                                                                        |
 | ------------ | -------------------------------------------------------------------------------------------------------------- |
-| `READY`      | Manifest, final identity, cwd, environment, shell selection, and input descriptors are prepared.               |
 | `LAUNCHING`  | The helper is committing its one launch attempt. This does not prove successful exec.                          |
 | `STARTED`    | A mechanism with proved exec acknowledgment observed successful application entry.                             |
 | `STDOUT`     | Captured launch-chain bytes, promoted to application output only with application evidence.                    |
@@ -259,8 +226,8 @@ exit-value coverage or acquiring a synthetic `STARTED` record.
 
 Application stdout and stderr can never inject control records because the bootstrap encodes them
 through dedicated descriptors. Raw account-shell output before bootstrap is not framed application
-output. The decoder discards it and records only a safe `foreign_output_seen` fact. This is robust
-against accidental hooks, not hostile same-user forgery.
+output. The decoder discards it without retaining a diagnostic copy. This is robust against
+accidental hooks, not hostile same-user forgery.
 
 ## Required carrier I/O extension
 
@@ -364,8 +331,8 @@ FileAccess rather than stdout.
 
 ## Readiness and minimal substrate
 
-The composition root binds a private `PreparationPolicy.INLINE_ONLY` to preflight/runup readiness
-targets. It is not a public performance flag. This policy:
+The composition root binds a private `inline_only=True` constraint to preflight/runup readiness
+targets. It is not a public performance flag. This constraint:
 
 - rejects MANAGED/CONTAINED launch, private scratch, output spooling, and an over-limit manifest;
 - rejects `login=True` or `interactive=True`;
@@ -449,17 +416,17 @@ packaged helper asset is another operation-owned object delivered through the sa
 chunks and whole-object verification, not a file-specific bootstrap protocol. File operation schemas
 accept bytes, paths already authorized by their own layer, and fixed action enums, never `Command`,
 `Script`, public argv, or callbacks. Internal helper execution is authorized as part of the public
-file action. It neither exposes `ExecutionAccess` nor requires a recipient `run` grant. Core file
-catalog enforcement still activates only with legacy removal; safe object handling, sensitivity,
-identity, and truthful publication evidence are not deferred.
+file action. It neither exposes `ExecutionAccess` nor requires a recipient `run` grant. File policy
+composition follows the
+[file LLD](file-operations-lld.md#immediate-mechanics-versus-deferred-permission-activation).
 
 ## Implementation slices and focused tests
 
 The production implementation proceeds in reviewable slices without wiring RunContext early:
 
 1. Add `models.py`, move `Command`/`Script`/`Shell`, update all transport-owned proof imports and
-   constructors, and ask the SSH owner to update its one fresh-process import. No runtime behavior
-   or carrier type changes.
+   constructors, and ask the SSH owner to update its one fresh-process import. The internal
+   preparation API changes; buffered carrier runtime behavior and types do not.
 2. Add result models and pure frame encoder/decoder tests. Malformed, reordered, duplicate,
    oversized, wrong-nonce, missing-terminal, truncated, and post-terminal records must never produce
    completion. A valid `FINISHED` has no transcript checksum and still requires the preceding start,

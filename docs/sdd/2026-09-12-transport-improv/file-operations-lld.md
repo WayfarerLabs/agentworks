@@ -288,18 +288,12 @@ There is no recursive removal and no FIFO path.
 
 ## Immediate mechanics versus deferred permission activation
 
-The additive and consumer-migration releases enforce operational safety immediately: explicit
-destination and elevation, actual OS permissions, bounds, helper integrity, link/object/mount
-handling, metadata rules, cooperating-writer locks, sensitivity, and truthful outcomes. Existing
-legacy calls and their current checks remain unchanged. New code never dispatches a mutation through
-both stacks. The unproved confinement, cross-identity lock, helper, and no-staging candidates above
-are hard enablement gates, not behavior the additive release may assume.
-
-Those releases do **not** enforce or claim the new recipient grants or successor core allowlist.
-There is no allow-all toggle, shadow decision callback, compatibility policy service, or fallback to
-public execution. During coexistence the file service constructs an exact-operation confinement
-request from the explicit destination; migration records the intended recipient action, root,
-identity, elevation, owner/group/mode, and content risk outside runtime policy.
+The [delivery-stage contract](execution-contract.md#delivery-stages-and-permission-activation) owns
+permission timing and immediate operational guarantees. The unproved confinement, cross-identity
+lock, helper, and no-staging candidates above remain hard enablement gates. During coexistence the
+file service constructs an exact-operation confinement request from the explicit destination;
+migration records the intended recipient action, root, identity, elevation, owner/group/mode, and
+content risk outside runtime policy.
 
 At physical legacy removal, `file_policy.py` introduces the reviewed immutable catalog and bound
 recipient subsets into composition. The only values needed are exact-file versus subtree scope,

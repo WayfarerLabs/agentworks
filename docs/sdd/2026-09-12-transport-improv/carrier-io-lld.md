@@ -91,9 +91,9 @@ field on `PreparedInvocation` and no second stdin source. The terminal LLD must 
 handle shape and console-mode restoration with SSH's platform implementation before adding it to
 `CarrierIO`; the byte protocol above is not proof of terminal feasibility.
 
-Public `start` still refuses caller-owned live pipes and terminal endpoints. This work adds neither
-an asynchronous pump handle nor a new detached-job protocol. Attachment borrows its terminal only
-for that call and does not own the job lifetime.
+The [lifecycle design](execution-lifecycle-lld.md#lifecycle-waiting-and-attachment) owns public
+start/attachment constraints. This extension adds neither an asynchronous pump handle nor a new
+detached-job protocol.
 
 ## Joint proof and disposition
 
