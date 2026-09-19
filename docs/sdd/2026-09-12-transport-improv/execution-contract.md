@@ -35,7 +35,7 @@ execution.run(
     sudo=True,
 )
 execution.run(
-    Script(source, shell=Shell.USER_DEFAULT, startup=ShellStartup(login=True)),
+    Script(source, shell=Shell.USER_DEFAULT, login=True),
     profile=Protection.MANAGED,
     cwd=remote_directory,
 )
@@ -62,10 +62,11 @@ result. Elevation is non-interactive and requires both the bound elevation grant
 authority. A VM admin account alone does not authorize the API's `sudo=True` option. This does not
 block sudo invoked inside an otherwise allowed direct command under an account that already has that
 guest authority. Scripts explicitly select `Shell.SH`, `Shell.BASH` or `Shell.USER_DEFAULT`;
-`ShellStartup` separately selects login/interactive initialization. `profile` is also explicit. The
-[lifecycle design](execution-lifecycle-lld.md) defines independent invocation, observation, I/O,
-lifetime, protection and identity choices, their defaults and invalid combinations. Waiting does not
-require direct execution: `run` can wait for work launched inside a managed boundary.
+`Script` options `login` and `interactive` separately select startup behavior. `profile` is also
+explicit. The [lifecycle design](execution-lifecycle-lld.md) defines independent invocation,
+observation, I/O, lifetime, protection and identity choices, their defaults and invalid
+combinations. Waiting does not require direct execution: `run` can wait for work launched inside a
+managed boundary.
 
 Finite byte input works on every target; omission means EOF, not inherited console input. `run` may
 explicitly select `Input.live(source)` for non-terminal piped or duplex work on a channel with
@@ -391,8 +392,7 @@ cli/agentworks/
     files.py                    transfer, JSON updates, inventory, metadata and publication semantics
     file_policy.py              core allowlist, scoped file grants and confinement policy values
     jobs.py                     shared launch, lifetime, observation, stop and evidence
-    supervisors/
-      systemd.py                Linux managed-boundary mechanism, after lifecycle proof
+    systemd.py                  private Linux managed-boundary mechanism, after lifecycle proof
     diagnostics.py              safe execution diagnostics, no legacy SSHLogger
     carrier.py                  leaf carrier protocol and carrier-only values
     carriers/

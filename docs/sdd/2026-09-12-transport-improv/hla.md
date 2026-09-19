@@ -104,7 +104,7 @@ Ordinary literal commands must remain concise to call without constructing a gra
 
 Keep invocation form separate from interpreter policy. Both `run` and `start` accept literal
 `Command` or shell `Script` values without changing their semantics. Typed `Shell.SH`, `Shell.BASH`
-and `Shell.USER_DEFAULT` select the interpreter; separate `ShellStartup` options select login and
+and `Shell.USER_DEFAULT` select the interpreter; separate `Script` options select login and
 interactive initialization. A PTY implies neither. Arbitrary executable strings are not an escape
 from this reviewed interpreter set.
 
@@ -153,15 +153,15 @@ already known. Required methods have no unsupported default. The description is 
 or permission grant. Avoid calling these flags "capabilities" where that would confuse them with
 Agentworks' resource capability model.
 
-| Operation                                          | Canonical VM target                    | Native VM target                |
-| -------------------------------------------------- | -------------------------------------- | ------------------------------- |
-| Buffered commands/scripts, finite stdin, env, cwd  | Required                               | Required                        |
-| Bound identity and explicit permitted elevation    | Required                               | Required                        |
-| File management and confined mutation (FRD R7)     | Required                               | Required                        |
-| Managed detached start and observation             | Required                               | Required                        |
-| Managed cancellation request with truthful outcome | Required                               | Required                        |
-| Interactive terminal                               | Required for current sessions/consoles | Optional; absent on Proxmox QGA |
-| Direct live stdio streaming                        | Retained by current SSH channel        | Optional                        |
+| Operation                                             | Canonical VM target                    | Native VM target                |
+| ----------------------------------------------------- | -------------------------------------- | ------------------------------- |
+| Buffered commands/scripts, finite stdin, env, cwd     | Required                               | Required                        |
+| Bound identity and explicit permitted elevation       | Required                               | Required                        |
+| File management and confined mutation (FRD R7)        | Required                               | Required                        |
+| `start`/observation with independent managed lifetime | Required                               | Required                        |
+| `stop` with truthful owned-workload outcome           | Required                               | Required                        |
+| Interactive terminal                                  | Required for current sessions/consoles | Optional; absent on Proxmox QGA |
+| Direct live stdio streaming                           | Retained by current SSH channel        | Optional                        |
 
 Adapters may optimize file movement and job observation. An optimization cannot change the target
 contract or make a required operation depend on an optional method. Provider size limits are
@@ -277,8 +277,8 @@ and maps the requirements from #770 without editing that effort's artifacts.
 Core-owned profiles add guarantees: DIRECT provides ordinary execution semantics, MANAGED adds owned
 workload boundaries and whole-boundary stop, and proposed CONTAINED adds reviewed resistance to
 escape and indirect relaunch. Linux managed execution uses a system-owned systemd service/cgroup
-created before workload code starts. Cgroup ownership alone is not malicious-workload confinement. A
-future sandbox or jail must prove every inherited guarantee before satisfying a profile.
+created before workload code starts. The lifecycle profile table defines the guarantees and their
+limits; a future sandbox or jail must prove every inherited guarantee before satisfying a profile.
 
 Profiles are explicitly requested and independently granted. Missing authority refuses; missing
 mechanics refuses distinctly. Neither permits a weaker fallback. Required core bootstrap/recovery
@@ -311,7 +311,7 @@ features. VM admin access does not by itself grant API-performed root elevation.
 check their bound action/elevation restrictions before preparation or effects, even when the guest
 account could perform the operation. Environment-derived views preserve or narrow these
 restrictions. Later job observation requires the fresh context's corresponding grant and job
-ownership; a reference cannot grant cancellation. Accessors expose existing decisions and perform no
+ownership; a reference cannot grant `stop`. Accessors expose existing decisions and perform no
 policy lookup.
 
 The owning operation supplies its prepared environment; consumers explicitly choose shell and
@@ -388,17 +388,17 @@ that cannot distinguish a remote signal from connection loss reports the ambigui
 fabricating a signal. Command labels and job references remain safe to log.
 
 One deadline covers an operation's preparation, dispatch, and observation budget. A wait deadline
-does not cancel a process. A separate cancellation request has its own bounded observation. Retry
-policy remains at the layer that can prove whether repeated dispatch is safe.
+does not stop a process. A separate `stop` request has its own bounded observation. Retry policy
+remains at the layer that can prove whether repeated dispatch is safe.
 
 ## Coordination with the new SSH stack
 
 This boundary follows the SSH developer's feedback relayed by the operator and the independent
-carrier design in [PR #796](https://github.com/WayfarerLabs/agentworks/pull/796) at `2494f6e2`,
-which supersedes #757. It records this effort's integration plan, not an amendment to the SSH
-effort's owned artifacts or a claim that the seam is already proven. This supersedes integration of
-consolidated legacy SSH internals; both efforts must incorporate proof findings into their designs
-before broad parallel implementation begins.
+carrier design recorded in
+[the current SSH reference](prior-art-research.md#ssh-coordination-reference), which supersedes PR
+#757. It records this effort's integration plan, not an amendment to the SSH effort's owned
+artifacts. The buffered proof is accepted; broader contract reconciliation and full production
+implementation remain open. No preliminary consolidation of legacy SSH is required.
 
 The transport lead owns the carrier contract and acceptance criteria. SSH owns implementation and
 provides feasibility evidence; consultation does not divide contract ownership. Transport publishes

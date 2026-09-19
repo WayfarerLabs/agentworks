@@ -4,7 +4,7 @@
 - Governing direction: [FRD operator rulings](frd.md#operator-rulings-2026-09-18).
 - Public API: [execution contract](execution-contract.md); delivery: [plan](plan.md).
 
-## One API, independent decisions
+## One API, separate concerns and explicit constraints
 
 An authorized target exposes `execution()` and `files()`. `ExecutionAccess` owns both synchronous
 execution and job operations. `run` accepts `Command` or `Script` and returns an `ExecutionResult`;
@@ -12,21 +12,25 @@ execution and job operations. `run` accepts `Command` or `Script` and returns an
 addressable execution, not a duration threshold. Both entry points use the same preparation,
 authorization and lifecycle implementation. There is no parallel direct/cgroup/sandbox API family.
 
-| Dimension   | Explicit choice                                                                     | Independent of                           |
-| ----------- | ----------------------------------------------------------------------------------- | ---------------------------------------- |
-| Invocation  | Literal `Command` or `Script` with typed shell selection                            | Transport and protection profile         |
-| Observation | `run` waits; `start` returns after acknowledged launch; `wait` observes a reference | Whether execution has a managed boundary |
-| I/O         | EOF/finite/live input; bounded capture, discard, streaming or PTY                   | Waiting and shell startup                |
-| Lifetime    | `Lifetime.OPERATION` or `Lifetime.INDEPENDENT`                                      | Whether this particular call waits       |
-| Protection  | Named core-owned profile with additive guarantees                                   | Workload identity, shell and route       |
-| Identity    | Bound target user and separately granted elevation                                  | Privilege of the internal supervisor     |
+These concerns belong in one contract; they are not all new features or freely combinable knobs. In
+particular, composition binds identity, while a caller chooses invocation and permitted options.
 
-Every script selects `Shell.SH`, `Shell.BASH` or `Shell.USER_DEFAULT`. Separate `ShellStartup`
-options express login and interactive initialization; a PTY does not imply either. User-default
-lookup uses the actual destination execution identity after authorized elevation. Fixed constants
-mean fixed interpreter semantics, not an arbitrary executable path or the workstation shell. An
-arbitrary interpreter facility, if needed, requires its own reviewed shape; strings do not bypass
-the fixed set. Historical buffered PoC methods remain as measured until the implementation migrates.
+| Concern     | Where selected                                                      | Constraint                                                                                                                          |
+| ----------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Invocation  | Caller supplies literal `Command` or shell `Script`                 | Script selects an explicit interpreter; neither form selects a route or profile.                                                    |
+| Observation | Caller uses `run`, `start` or later `wait`                          | Waiting does not choose lifetime or protection; initial `start` has the I/O restrictions below.                                     |
+| I/O         | Caller selects granted input/output handling                        | Channel support, observation mode and lifetime constrain live pipes and PTYs; a PTY does not choose shell startup.                  |
+| Lifetime    | Caller selects `OPERATION` or `INDEPENDENT`                         | Independent lifetime requires MANAGED or stronger and target-owned I/O/evidence; both `run` and `start` may select either lifetime. |
+| Protection  | Caller explicitly selects an allowed core profile                   | Target prerequisites and identity must satisfy every promised guarantee; no automatic downgrade.                                    |
+| Identity    | Composition binds target user; caller may request granted elevation | No arbitrary per-call user selector; internal supervisor privilege does not elevate the workload.                                   |
+
+Every script selects `Shell.SH`, `Shell.BASH` or `Shell.USER_DEFAULT`. Separate `Script` keyword
+options `login` and `interactive` express startup behavior; a PTY does not imply either.
+User-default lookup uses the actual destination execution identity after authorized elevation. Fixed
+constants mean fixed interpreter semantics, not an arbitrary executable path or the workstation
+shell. An arbitrary interpreter facility, if needed, requires its own reviewed shape; strings do not
+bypass the fixed set. Historical buffered PoC methods remain as measured until the implementation
+migrates.
 
 `profile` is required on public `run` and `start`: selection cannot be hidden in context defaults.
 Lifetime defaults explicitly to `OPERATION`, input to EOF, output to bounded capture, and startup to
@@ -155,50 +159,70 @@ stacks. Sessions retain their domain lifecycle, tmux/harness readiness and resta
 the shared supervisor. The earlier [#770 draft](https://github.com/WayfarerLabs/agentworks/pull/770)
 is design input, not a second implementation assignment. Its disposition requires an explicit
 owner/operator handoff; this revision neither edits its artifacts nor closes its PR. Do not retire
-that record until every requirement below has a retained home or an explicit operator disposition.
+that record until its complete requirements have a designated home or explicit operator disposition.
+The sibling effort's charter remains in force; ownership disposition gates overlapping
+implementation, not just artifact retirement. Neither lane can settle the saga assignment by
+changing its own plan.
 
-The following mapping preserves the concerns in #770 at `2c406948`; it does not silently adopt every
-proposed mechanism or claim its open compatibility/security decisions are settled:
+The [verbatim source snapshot](inputs/session-cgroups-frd-2c406948.md) preserves #770's full FRD at
+`2c406948`, including threat model, acceptance cases, exclusions and rulings, independently of draft
+branch retention. It is review input, not a second evolving FRD or a new authority source. At an
+authorized transfer, reconcile the then-current source and carry the accepted text into its
+designated requirements home before retiring the old record. The table below is only a routing
+index; its labels neither replace nor narrow the source requirements.
 
-| #770 requirement               | Home in this effort and acceptance obligation                                                                                                                                               |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| R1, execution identity         | Shared supervisor/run binding; fork/exec, reparenting, detached children and added panes preserve association; no workload-controlled identity proof.                                       |
-| R2, complete termination       | Shared stop/rollback/restart and migration; concurrent fork/TERM resistance cannot yield a false empty claim; unrelated runs survive.                                                       |
-| R3, independent lifetime       | INDEPENDENT managed sessions; CLI/SSH loss preserves work, runtime-anchor death triggers target-side descendant cleanup.                                                                    |
-| R4, escape/relaunch resistance | CONTAINED proof: sibling tmux, user service managers, cron/at, SSH login, process injection, container daemons, writable startup state and inherited handles cannot launch outside the run. |
-| R5, usable sessions            | Session adoption preserves harnesses, grants, inspection and contained named-console agent shells. No new admin-session security claim or standalone companion-shell command.               |
-| R6, compatibility/migration    | Price Bookworm versus Trixie and actual kernel/systemd/WSL2 support; no silent downgrade or certification of untracked legacy descendants.                                                  |
-| R7, identity lookup            | Trusted VM-side Unix-socket test consumer authenticates live run membership with PID reuse, namespace, transferred-FD and revocation cases; no general permission service.                  |
+| Source requirement                          | Proposed implementation destination                        |
+| ------------------------------------------- | ---------------------------------------------------------- |
+| R1, execution identity                      | Shared supervisor/run identity binding                     |
+| R2, complete termination                    | Shared stop, rollback, restart and migration               |
+| R3, independent lifetime authority          | Target-owned session lifetime and runtime-anchor cleanup   |
+| R4, resistance to escape and relaunch       | CONTAINED enforcement and adversarial proof                |
+| R5, usable sessions and explicit boundaries | Session, harness and named-console adoption                |
+| R6, supported environments and migration    | Compatibility pricing and legacy-run transition            |
+| R7, foundation for permission checks        | Trusted VM-side membership lookup and socket test consumer |
+
+R7's process exit, PID reuse, namespace-relative identifiers, stale runs and unknown membership
+cases all remain required. Its acceptance table also includes transferred descriptors: ambiguous
+attribution must refuse. This does not promote a future service's per-request authorization,
+connection/descriptor-transfer protocol or revocation model into this effort. Account-shell lookup
+in the buffered PoC proves none of this run-membership authentication.
 
 CONTAINED needs a concrete access map and comparison of restricted same-UID execution with per-run
-users before selecting either. Root-owned cgroups alone do not close indirect execution channels.
+users before selecting either, against the profile guarantees above and the complete R4 source.
 Preserve existing home/workspace semantics or obtain operator disposition of demonstrated costs.
 General quotas, a jail product, broad egress policy and in-process Python-plugin isolation are not
 implied. The API must accommodate future profiles without claiming those mechanisms ship now.
 
-Non-systemd platform hosts, especially pre-VM macOS work, require a separately proved implementation
-of the applicable job guarantees. Do not label a process-group wrapper equivalent to a managed
-cgroup or promise Linux containment there. The implementation gate must resolve required host jobs
-and safe early bootstrap without weakening the approved profile definitions.
+Non-systemd placement hosts, including macOS before VM creation, still need MANAGED independent jobs
+for provisioning and rollback. They must supply all four added promises: identifiable workload
+ownership, ordinary descendant tracking, supervisor-owned stop and verified terminal emptiness, plus
+disconnect survival and retained job evidence. The mechanism is not selected or proven here; a
+process-group wrapper is acceptable only if it demonstrably satisfies those same promises. No
+Linux-specific containment claim is implied. DIRECT-only host support would drop required work and
+needs operator disposition, not a silent implementation shortcut.
 
-## Proof and delivery gates
+## Delivery sequence and proof criteria
 
-1. Review the profile guarantees, operation grants and #770 mapping; settle ownership disposition
-   before retiring any artifacts. Publish this design before broad lifecycle implementation.
-2. Prove system-owned launch through SSH and native QGA: finite sensitive input, binary output,
-   explicit identities/shells, foreground wait and independent background launch. Measure supported
-   Debian/systemd/kernel versions; capability detection is not a distro-name assumption.
-3. Prove local wait timeout versus explicit stop, lost acknowledgment reconciliation, runtime-anchor
-   death, concurrent forks, stale/reused identity, reboot, output retention and independently
-   checked cleanup. Settle OPERATION observer-loss detection before offering its stronger cleanup
-   promise.
-4. Prove CONTAINED escape refusal and R7 socket identity using an authorized adversarial test
-   charter, without exposing admin execution. Missing protection fails closed and blocks that
-   profile's use.
-5. Prove macOS host jobs and WSL2 power-lifetime behavior, plus no-staging readiness and recovery.
-   Required workflows cannot depend on optional terminal/live streaming support.
-6. Migrate sessions and other jobs to the same implementation, preserving legacy-run uncertainty,
-   consent and exact ownership. Then complete the existing full-stack cutover/deletion gates.
+First publish the reviewed design and settle the cross-effort ownership disposition before
+overlapping lifecycle implementation. Then complete these bounded proofs before enabling the
+corresponding behavior:
+
+| Proof                                       | Observable acceptance                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Linux managed launch over SSH and QGA       | Work starts inside the owned boundary under the requested identity/shell; sensitive input stays suppressed, ordinary binary streams remain exact, and foreground wait and independent launch both work on the recorded kernel/systemd versions.                                                                                        |
+| Lifecycle and failure evidence              | Lost acknowledgment reconciles without replay; wait timeout does not stop work; explicit stop, anchor death and OPERATION observer loss clean the owned descendants or report incomplete. Concurrent forks, stale identity, reboot and retained output cannot produce false completion or affect unrelated work.                       |
+| CONTAINED and membership identity           | Execute the complete source R4/R7 and acceptance cases under an authorized adversarial charter; escape/relaunch is denied or remains in the run, and ambiguous identity refuses. No general permission service is added.                                                                                                               |
+| macOS placement-host jobs                   | Launch actual host provisioning work before guest creation; disconnect the observer, re-observe the same job, stop ordinary detached descendants during rollback and independently verify the owned workload empty while unrelated work survives. Retain launch/output/completion evidence and exercise lost contact/stale references. |
+| WSL2 lifetime and native readiness/recovery | Measure work with the platform hold retained and released; do not imply a job reference owns power. Required readiness/recovery work runs without staging or requested startup; unsupported terminal/live I/O does not block it.                                                                                                       |
+
+After proof, migrate sessions and other jobs, preserving legacy-run uncertainty, consent and
+ownership. The plan's complete-workflow and physical-deletion checks are the migration acceptance
+criteria, not a checkbox asserting migration happened. A failed proof returns measured costs and
+alternatives for disposition before production enablement; it does not weaken a profile.
+
+The [test-bed gaps](prior-art-research.md#lifecycle-test-bed-gaps) are explicit inputs to each live
+charter. In particular, macOS workstation SSH results are not placement-host evidence, and buffered
+Bookworm/Trixie results are not kernel/systemd compatibility evidence.
 
 This document supplies a reviewable contract and proof plan, not resolved system-call/FD, lease,
 sandbox or compatibility protocols. Those bounded details must be completed with evidence before

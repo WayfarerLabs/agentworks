@@ -187,8 +187,11 @@ connection and trust only. Before broader lifecycle implementation, complete the
       protection and identity dimensions. Approve typed shell constants, exact additive profile
       grants and refusal without downgrade. The [lifecycle design](execution-lifecycle-lld.md)
       supplies the proposal, not implementation proof.
-- [ ] Reconcile #770 R1-R7 against the lifecycle mapping and obtain explicit owner/operator
-      disposition before retiring its artifacts or PR.
+- [ ] Reconcile the complete #770 requirements, threat model, acceptance cases and exclusions using
+      the [preserved input](inputs/session-cgroups-frd-2c406948.md), not the routing index as a
+      replacement FRD. Obtain explicit owner/operator disposition before overlapping lifecycle
+      implementation or artifact retirement; at transfer carry the accepted text into its designated
+      requirements home and reconcile any later source changes.
 - [ ] Complete and prove Linux supervisor launch through SSH and native QGA: protected identity,
       secret/source delivery, privilege changes, foreground wait, independent launch, output
       retention and terminal evidence. No workload code runs before boundary entry.
@@ -196,11 +199,16 @@ connection and trust only. Before broader lifecycle implementation, complete the
       runtime-anchor death, concurrent forks, stale identity and independently verified emptiness.
       Settle the OPERATION liveness/lease protocol before offering target-side cleanup.
 - [ ] Complete CONTAINED's access map, compare restricted same-UID and per-run-user designs, and
-      prove #770 escape/relaunch and trusted socket-identity cases. Cgroup ownership is not enough.
-      Record compatibility costs requiring operator disposition.
+      prove the complete #770 escape/relaunch and trusted socket-identity acceptance cases. Record
+      compatibility costs requiring operator disposition.
 - [ ] Resolve non-systemd macOS host jobs, Debian/kernel/systemd floors, WSL2 power lifetime and
       no-staging recovery. Required workflows block delivery when their guarantees cannot be met; no
-      profile downgrade or fabricated platform equivalence.
+      profile downgrade or fabricated platform equivalence. Use the
+      [observable proof criteria](execution-lifecycle-lld.md#delivery-sequence-and-proof-criteria)
+      and [reported test-bed gaps](prior-art-research.md#lifecycle-test-bed-gaps). For macOS host
+      jobs, prove all MANAGED ownership/tracking/stop/emptiness promises and independent lifetime;
+      workstation SSH evidence is insufficient. Price missing mechanics or infrastructure for
+      operator disposition rather than silently dropping required host work.
 
 - [ ] SSH effort builds `execution/carriers/ssh/` and its connection/trust migration. Transport
       builds common execution, scoped context delivery, files/jobs and other adapters, and applies

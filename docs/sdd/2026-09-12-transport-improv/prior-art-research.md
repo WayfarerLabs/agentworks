@@ -129,11 +129,17 @@ Registration-time requests and user approval remain deferred. These are design r
 evidence that existing helpers confine paths or that approved configuration cannot cause later
 execution.
 
-The SSH replacement design in [PR #796](https://github.com/WayfarerLabs/agentworks/pull/796) at
-`2494f6e2` supersedes the historical #757 design discussed above. Its independent carrier and
-proof-first assignment match this SDD; shared file semantics and the core allowlist remain with
-transport, not the SSH carrier. Its OpenSSH 8.5 floor concerns builder-owned clients, not sshd;
-provider-inner clients need their own inventory. Design alignment is not runtime proof.
+### SSH coordination reference
+
+Inspected on 2026-09-19: [PR #796](https://github.com/WayfarerLabs/agentworks/pull/796) at
+`167980abf80aae11691e2a3f4f699db40ebf9f5f`, especially its
+[HLA](https://github.com/WayfarerLabs/agentworks/blob/167980abf80aae11691e2a3f4f699db40ebf9f5f/docs/sdd/2026-09-05-ssh-connection-contracts/hla.md).
+This is the single current coordination pin; earlier pins in the buffered proof record remain
+historical evidence. The independent carrier supersedes #757's legacy consolidation. Its buffered
+PoC is accepted, while full implementation and migration remain Phase 2. Shared file semantics,
+profiles and lifecycle remain above SSH delivery. The OpenSSH 8.5 floor concerns builder-owned
+clients, not sshd; provider-inner clients need their own inventory. This inspection is design
+reconciliation, not new runtime evidence or ownership of the SSH artifacts.
 
 ### Shipped file helpers and release impact
 
@@ -187,18 +193,38 @@ through an outside service.
 
 Source: [kernel cgroup v2 documentation](https://docs.kernel.org/admin-guide/cgroup-v2.html).
 
-The #770
-[session requirements](https://github.com/WayfarerLabs/agentworks/blob/2c406948221a8990192e581a68f25802615e3ac5/docs/sdd/2026-09-06-session-cgroups/frd.md)
-are mapped in the [lifecycle design](execution-lifecycle-lld.md). That mapping preserves identity,
-whole-run termination, independent lifetime, escape resistance, usable sessions, compatibility and
-trusted VM-side identity lookup. It is not evidence that a particular same-UID or per-run-user
-mechanism is approved or works. Transport now owns the proposed shared lifecycle implementation;
-foreign-artifact disposition still requires an explicit handoff.
+The #770 [source snapshot](inputs/session-cgroups-frd-2c406948.md) is indexed by implementation
+destination in the [lifecycle design](execution-lifecycle-lld.md). The full source, not the short
+index, carries identity, whole-run termination, independent lifetime, escape resistance, usable
+sessions, compatibility and trusted VM-side identity lookup. It is not evidence that a particular
+same-UID or per-run-user mechanism is approved or works. Transport now owns the proposed shared
+lifecycle implementation; foreign-artifact disposition still requires an explicit handoff.
 
 These sources justify the design direction, not platform acceptance. Exact installed versions,
 privilege/FD behavior, account startup, secret exposure, macOS host jobs and WSL2 lifetime need the
 plan's proofs before enabling profiles. Linux systemd features cannot be inferred from a distro
 name.
+
+### Lifecycle test-bed gaps
+
+The
+[complete tester report on #830](https://github.com/WayfarerLabs/agentworks/pull/830#issuecomment-5739120200)
+validates the design documents, not the unimplemented profiles. Its inventory at this checkpoint is:
+
+- WSL2 has no live coverage in this effort. It needs the Tier 2 Windows bed, not the Tier 1 host
+  used for workstation SSH testing.
+- macOS was tested as an SSH client workstation, never as a placement host running jobs. Local Lima
+  and SSH-backed macOS host execution need their own applicable host-path evidence.
+- Bookworm/Trixie buffered execution passed, but kernel/systemd versions and lifecycle behavior were
+  not measured. Collect those versions and cases before claiming cgroup compatibility.
+- Authorized PVE 8.4.21 and 9.2.11 beds are single-node. No cluster or migration behavior is
+  implied; a new multi-node test would need a separate inventory and authorization.
+
+The same report confirms surviving guest work after observation timeout and a detached child after
+reported main completion. Those support separating waiting, exit and cleanup. Account-shell lookup
+and intermediary-refusal measurements inform honest outcome interpretation; they do not implement
+R7's run-membership identity lookup. Future live charters must name workstation and target axes,
+resource/cleanup limits and any newly required beds rather than inherit nonexistent coverage.
 
 ## Claims not relied upon
 

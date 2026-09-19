@@ -133,11 +133,12 @@ future selection mechanisms within the same ceiling.
 Develop against the [proposed carrier contract and destination layout](execution-contract.md). The
 proposed revised SSH assignment is a new carrier and connection/trust implementation under
 `execution/carriers/ssh/`, not consolidation of the old runner. This effort builds shared semantics
-and the other adapters, then composes the new SSH carrier. The independent-carrier design in #796 at
-`2494f6e2` supersedes #757's legacy consolidation; both SDDs still need reconciliation after the
-proof. No old execution code is called from the new stack, directly or indirectly. Copying useful
-code and tests is permitted. Transport owns applying reusable SSH policy in platform-host access,
-Lima adapters/provisioning and provider-inner paths; SSH owns the policy/guarantees and independent
+and the other adapters, then composes the new SSH carrier. The
+[current SSH reference](prior-art-research.md#ssh-coordination-reference) supersedes #757's legacy
+consolidation; broader contract reconciliation remains after the accepted buffered proof. No old
+execution code is called from the new stack, directly or indirectly. Copying useful code and tests
+is permitted. Transport owns applying reusable SSH policy in platform-host access, Lima
+adapters/provisioning and provider-inner paths; SSH owns the policy/guarantees and independent
 connection/trust migration.
 
 Old and new implementation code intentionally coexist during development; production continues using
