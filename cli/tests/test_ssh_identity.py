@@ -8,6 +8,7 @@ import os
 import shutil
 import struct
 import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -343,3 +344,27 @@ def test_real_native_openssh_key_matches_ssh_keygen_fingerprint(tmp_path: Path, 
     ).stdout.split()[1]
 
     assert read_private_ssh_identity(private_key) == VerifiedSSHIdentity(fingerprint)
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFO required")
+@pytest.mark.parametrize("reader", ["read_private_ssh_identity", "read_public_ssh_identity"])
+def test_identity_reader_refuses_fifo_without_waiting_for_writer(tmp_path: Path, reader: str) -> None:
+    fifo = tmp_path / "identity-fifo"
+    os.mkfifo(fifo)
+    script = """
+import sys
+from pathlib import Path
+from agentworks import ssh_identity
+try:
+    getattr(ssh_identity, sys.argv[1])(Path(sys.argv[2]))
+except ssh_identity.SSHIdentityReadError as error:
+    assert error.kind == "unavailable"
+else:
+    raise AssertionError("special file accepted as an identity")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, reader, str(fifo)],
+        capture_output=True,
+        timeout=5,
+    )
+    assert result.returncode == 0, result.stderr
