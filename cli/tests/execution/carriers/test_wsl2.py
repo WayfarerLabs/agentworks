@@ -221,15 +221,19 @@ def test_local_cleanup_status_is_never_promoted_to_completion(monkeypatch: pytes
 
 
 @pytest.mark.parametrize("failure", [Failure.INPUT, Failure.OUTPUT, Failure.OUTPUT_LIMIT])
-def test_io_failure_is_preserved_with_ambiguous_observed_status(
-    monkeypatch: pytest.MonkeyPatch, failure: Failure
+@pytest.mark.parametrize("status,completion", [(0, ExitStatus(code=0)), (23, None)])
+def test_io_failure_is_preserved_without_erasing_exact_completion(
+    monkeypatch: pytest.MonkeyPatch,
+    failure: Failure,
+    status: int,
+    completion: ExitStatus | None,
 ) -> None:
     report, _ = execute(
         monkeypatch,
-        process_result(local_status=23, exit_status=23, failure=failure),
+        process_result(local_status=status, exit_status=status, failure=failure),
     )
     assert report.dispatch == Dispatch.SENT
-    assert report.completion is None
+    assert report.completion == completion
     assert report.failure == failure
 
 
