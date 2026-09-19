@@ -33,7 +33,11 @@ Lifetime defaults explicitly to `OPERATION`, input to EOF, output to bounded cap
 non-login/non-interactive. A stronger profile never silently changes those choices. Channel, target
 and grant checks validate their combination before launch. Not every Cartesian combination is
 supported: independent lifetime rejects caller-owned live input or output pipes; a PTY requires a
-real terminal channel. Required native jobs use durable output and polling, not a pretend PTY.
+real terminal channel. Initial `start` accepts only EOF/finite target-delivered input and
+target-owned capture/discard output. It rejects caller-owned live pipes and terminal endpoints
+before dispatch, rather than returning while borrowed streams have an undefined owner. `run` owns
+synchronous streaming until it returns; `attach` owns its terminal endpoint for the attachment call
+only. Required native jobs use durable output and polling, not a pretend PTY.
 
 ## Protection hierarchy and grants
 
@@ -72,7 +76,10 @@ not authority. A caller cannot adopt an arbitrary unit, widen a profile, pass ar
 properties, or obtain supervisor credentials through the API. File helpers may use internal delivery
 under narrow core authority without exposing execution; they accept data, never caller callbacks.
 Grants apply to the public action, not private reuse: implementing `run` with launch/wait machinery
-does not require the recipient to hold public `start` authority.
+does not require the recipient to hold public `start` authority. Readiness composition separately
+withholds profiles requiring stateful supervisor launch. Such a request is denied before dispatch
+even through `run`; withholding `start` alone is insufficient. The approved DIRECT readiness path
+still forbids staging and requested shell startup.
 
 ## Lifecycle, waiting and attachment
 
@@ -82,13 +89,16 @@ Waiting deadlines remain observation bounds. A wait timeout returns safe partial
 managed reference; it does not claim termination or permit replay. `stop` is a separate operation,
 with a bounded graceful interval, escalation and a truthful terminal/uncertain result.
 
-OPERATION gives cleanup responsibility to the owning operation. Returning from `start` does not end
-that operation, but closing its context requests cleanup of its remaining work. For managed work,
-the target-side owner must also handle disappearance of the controlling operation; local `finally`
-alone is insufficient. The implementation proof must settle the operation-lease/liveness protocol,
-partition behavior and bounded cleanup before advertising this combination. DIRECT has only the
-ordinary operational stop guarantee: lost connectivity can leave termination uncertain. It cannot be
-substituted where target-enforced cleanup on observer loss is required.
+OPERATION gives cleanup responsibility to the owning operation's composition lifecycle. Returning
+from `start` does not end that operation; ending the owning operation requests cleanup of its
+remaining work. Derived, borrowed and observe-only views retain the original owner: closing those
+views never implicitly stops its work. Explicit `stop` still needs the caller's stop grant. For
+managed work, the target-side owner must also handle disappearance of the controlling operation;
+local `finally` alone is insufficient. The implementation proof must settle the
+operation-lease/liveness protocol, partition behavior and bounded cleanup before advertising this
+combination. DIRECT has only the ordinary operational stop guarantee: lost connectivity can leave
+termination uncertain. It cannot be substituted where target-enforced cleanup on observer loss is
+required.
 
 INDEPENDENT gives lifetime ownership to the resource/run rather than the initiating connection. It
 requires at least MANAGED and target-owned stdin delivery, output retention and completion records.
@@ -117,10 +127,11 @@ its explicitly authorized UID/groups. Keep source, stdin and secrets out of visi
 environment metadata, logs and world-readable staging. The secret-delivery/FD protocol needs proof
 with actual privilege changes; systemd invocation alone does not establish it.
 
-Carrier account hooks can execute before the trusted supervisor bootstrap. CONTAINED cannot rely on
-a workload-controlled SSH account shell or startup path to establish its own boundary. The proof
-must specify a trusted control identity/bootstrap and test that prerequisite through both carriers;
-payload shell initialization remains inside the boundary. A payload wrapper cannot undo prior hooks.
+Carrier account hooks can execute before the trusted supervisor bootstrap. Managed launch, including
+CONTAINED, cannot rely on a workload-controlled SSH account shell or startup path to establish its
+boundary. The proof must specify a trusted control identity/bootstrap and test that prerequisite
+through both carriers; payload shell initialization remains inside the boundary. A payload wrapper
+cannot undo prior hooks.
 
 Allocate a non-reused launch identity before dispatch. Trusted target state binds it to host/VM
 instance, boot incarnation, workload identity, resolved shell, profile revision and unit ownership.

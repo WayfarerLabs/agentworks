@@ -67,12 +67,15 @@ guest authority. Scripts explicitly select `Shell.SH`, `Shell.BASH` or `Shell.US
 lifetime, protection and identity choices, their defaults and invalid combinations. Waiting does not
 require direct execution: `run` can wait for work launched inside a managed boundary.
 
-Finite byte input works on every target; omission means EOF, not inherited console input. Foreground
-calls may explicitly select `Input.live(source)` for non-terminal piped or duplex work on a channel
-with direct live stdio. This does not allocate a PTY. The carrier pumps that source with the
-selected output sinks; an unsupported channel refuses before dispatch. Independent lifetime rejects
+Finite byte input works on every target; omission means EOF, not inherited console input. `run` may
+explicitly select `Input.live(source)` for non-terminal piped or duplex work on a channel with
+direct live stdio. This does not allocate a PTY. The carrier pumps that source with the selected
+output sinks; an unsupported channel refuses before dispatch. Independent lifetime rejects
 caller-owned live pipes: input and output must survive the initiating connection. Script source has
-its own delivery path and never consumes application stdin.
+its own delivery path and never consumes application stdin. Initial `start` uses only EOF/finite
+target-delivered input and target-owned capture/discard output; caller-owned live pipes and terminal
+endpoints are refused before dispatch. A later `attach` call can borrow a terminal for a supported
+durable endpoint without owning the job's lifetime.
 
 Output defaults to bounded capture, with explicit discard or direct-streaming modes. Effective
 sensitivity combines bound environment metadata, an input sensitivity marker, and the request-wide
