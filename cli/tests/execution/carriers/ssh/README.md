@@ -1,6 +1,6 @@
 <!-- cspell:ignore asdict pathlib -->
 
-# SSH proof tests and live handoff
+# SSH carrier tests and live handoff
 
 Run the local tests from `cli/`:
 
@@ -11,8 +11,10 @@ uv run pytest tests/execution/carriers/ssh/ -m 'not integration'
 The process fixtures use synthetic Python children and temporary files. The shared conformance
 fixture substitutes a local POSIX-shell executable for SSH, exercising the real quoting and pipe
 pump without authentication or a server. Installed-client tests parse `ssh -G` options and drive a
-real client against an owned loopback peer that refuses before authentication. Neither test
-establishes authenticated delivery or supported-platform evidence.
+real client against an owned loopback peer that refuses before authentication. Forwarding tests also
+start a fixture-owned loopback sshd when available and exercise authenticated delivery, listener
+refusal and cleanup. These local fixtures do not establish the supported workstation and provider
+matrix; report skips separately.
 
 For the operator's integration tester, combine the SSH and transport branches in a disposable local
 branch. Record both input commit IDs, the integrated commit, conflict resolutions and the installed
@@ -27,7 +29,7 @@ remote work when executed; select its values only from the tester's authorized c
 from dataclasses import asdict
 from pathlib import Path
 
-from agentworks.execution.carriers.ssh import SSHCarrier, SSHConnection
+from agentworks.execution.carriers.ssh import SSHCarrier, SSHConnection, SSHTrustFiles
 from tests.execution.conformance import check_buffered_contract
 
 carrier = SSHCarrier(
@@ -35,7 +37,7 @@ carrier = SSHCarrier(
         host="authorized-fixture.example",
         user="fixture",
         identity_file=Path("/absolute/fixture/identity"),
-        known_hosts_file=Path("/absolute/fixture/known_hosts"),
+        trust=SSHTrustFiles((Path("/absolute/fixture/known_hosts"),)),
         ssh_executable="/usr/bin/ssh",
     )
 )
@@ -98,3 +100,26 @@ before the bootstrap starts, so a status alone is not an application verdict. Ca
 needs the shared framing checks; suppressed output supplies no framing proof. Use the current shared
 sensitive vector, including its expected status, rather than treating empty retained output alone as
 proof that sensitive reflection ran.
+
+## Trust maintenance and forwarding fixtures
+
+Trust tests operate only on isolated snapshots and owned temporary destinations. They cover complete
+byte preservation, blocked/failed publication, interrupted maintenance, stale generation refusal,
+concurrent writers and integrity checks. They never read the operator's ambient trust or import it
+implicitly. Managed trust resolves at each operation, so reusing a carrier must not retain an old
+admission after a block or refresh. Raw trust files remain under their explicit maintenance owner.
+
+Forwarding's acknowledgment proves authenticated session establishment and successful local listener
+setup. It does not probe destination health. Its tests include occupied first/later listeners,
+separate address families, refused trust/authentication/command execution, and binary traffic.
+Record actual client/server versions and independently verify released listeners and fixture
+processes. Native Windows and macOS need their own observations; Linux loopback results do not
+establish their process or terminal behavior.
+
+Enrollment fixtures exercise actual first-contact writes followed by strict verification, CA and
+revocation policy, mismatches, failed-authentication key retention and strict recovery. Fault cases
+cover a positive acknowledgment without a saved key, partial metadata, changed policy, competing
+attempts and interruption. These use fixture-only creation IDs; they do not establish transport's
+production creation provenance or publication binding. Every test owns its server, identity, agent
+and policy files. Native platform persistence and cleanup still need the integration tester's
+separate observations.

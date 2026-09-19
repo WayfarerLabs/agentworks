@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-from agentworks.errors import ValidationError
+from agentworks.errors import StateError, ValidationError
 from agentworks.execution.carrier import (
     Capture,
     CapturedOutput,
@@ -18,7 +18,7 @@ from agentworks.execution.carrier import (
     Provenance,
 )
 from agentworks.execution.carriers.ssh._io import output_retention, run_process
-from agentworks.execution.carriers.ssh.connection import build_ssh_argv, validate_connection_files
+from agentworks.execution.carriers.ssh.connection import admit_connection, build_ssh_argv
 
 if TYPE_CHECKING:
     from agentworks.execution.carrier import Deadline, PreparedInvocation
@@ -48,19 +48,18 @@ class SSHCarrier:
         if deadline.expired:
             return _not_sent(io, Failure.DEADLINE)
         try:
-            validate_connection_files(self._connection)
-            argv = build_ssh_argv(self._connection, invocation)
-        except (OSError, ValidationError):
+            trust = admit_connection(self._connection)
+            argv = build_ssh_argv(self._connection, invocation, trust=trust)
+        except (OSError, StateError, ValidationError):
             return _not_sent(io, Failure.DISPATCH)
-        version = run_process(
-            [self._connection.ssh_executable, "-V"], io=CarrierIO(output=Capture(4096)), deadline=deadline
-        )
-        if version.failure is not None:
-            return _not_sent(io, version.failure)
-        match = _VERSION.match(version.stderr.data)
-        if version.exit_status != 0 or match is None or tuple(map(int, match.groups())) < (8, 5):
-            return _not_sent(io, Failure.DISPATCH)
+        if deadline.expired:
+            return _not_sent(io, Failure.DEADLINE)
+        version_failure = check_client_version(self._connection, deadline=deadline)
+        if version_failure is not None:
+            return _not_sent(io, version_failure)
 
+        if deadline.expired:
+            return _not_sent(io, Failure.DEADLINE)
         result = run_process(argv, io=io, deadline=deadline)
         completion = (
             ExitStatus(code=result.exit_status)
@@ -74,6 +73,17 @@ class SSHCarrier:
         if result.started and completion is None and failure is None:
             failure = Failure.OBSERVATION
         return CarrierReport(dispatch, completion, result.local_status, result.stdout, result.stderr, failure)
+
+
+def check_client_version(connection: SSHConnection, *, deadline: Deadline) -> Failure | None:
+    """Check the selected installed client within the original operation budget."""
+    version = run_process([connection.ssh_executable, "-V"], io=CarrierIO(output=Capture(4096)), deadline=deadline)
+    if version.failure is not None:
+        return version.failure
+    match = _VERSION.match(version.stderr.data)
+    if version.exit_status != 0 or match is None or tuple(map(int, match.groups())) < (8, 5):
+        return Failure.DISPATCH
+    return None
 
 
 def _not_sent(io: CarrierIO, failure: Failure) -> CarrierReport:

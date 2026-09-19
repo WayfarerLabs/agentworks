@@ -1,6 +1,6 @@
 # Buffered SSH Carrier
 
-Status: Joint buffered PoC accepted; full implementation and migration remain Phase 2.
+Status: Buffered PoC merged; full implementation is Phase 2, final old SSH deletion is Phase 3.
 
 ## Boundary
 
@@ -56,6 +56,18 @@ compatible POSIX account shell on the destination remains a prerequisite. SSH ca
 or account-shell startup behavior. Transport's current Linux Bash/base64 preparation requires
 neither guest Python nor filesystem staging. The shared bootstrap requires Bash 5.1 or newer;
 measured images and outstanding locations are recorded in [poc-results.md](poc-results.md).
+
+## Phase 2 identity validation
+
+Operation-time checks now verify a private identity's sibling public file against the public
+identity embedded in the configured key. OpenSSH tries the `.pub` companion before deriving that
+identity; `IdentitiesOnly=yes` alone cannot prevent a stale companion from selecting another agent
+key. A mismatch or unverifiable companion refuses before client dispatch. An explicitly configured
+public identity is supported only without its own sibling. The lightweight public fingerprint reader
+does not prove that OpenSSH will accept the complete direct encoding before suffix lookup; ambiguous
+public-file/sibling pairs refuse rather than selecting another identity. The retained `ssh_identity`
+leaf performs bounded public-only parsing without decrypting private material. These new checks need
+their own authentication-offer evidence; the old PoC record is unchanged.
 
 ## Process and evidence
 
@@ -114,7 +126,32 @@ diagnostic prose or adding another probe. Strict trust never becomes implicit en
 Windows, local status 1 after a deadline may be the result of killing the client; only the natural
 status observed before cleanup can establish completion.
 
+## Shared I/O integration checkpoint, 2026-09-19
+
+Transport implementation [PR #833](https://github.com/WayfarerLabs/agentworks/pull/833) at
+`6f20bdb5930ccf09c278c419acf784a65bc79dad` leaves `carrier.py` buffered-only. Its carrier I/O LLD is
+a candidate, not concrete live/terminal types. The bounded borrowed-endpoint approach fits the SSH
+pump's fair non-blocking pipe operations; exact endpoint and report types remain transport's to
+supply and accept through joint proof. SSH does not create substitute common types while waiting.
+
+Terminal integration additionally needs explicit borrowed handles and restoration ownership. The
+retained `terminal.guarded_terminal()` acts on process-global stdin/stdout and silently tolerates
+restoration failure, so it cannot be used unchanged as proof of restoring an arbitrary borrowed
+endpoint. Keep terminal mechanics separate from byte-stream pumping and resolve the native
+POSIX/Windows handle contract with transport before enabling the feature. Existing terminal
+constants/utilities remain reusable only with their dependency closure and behavior audited.
+
+Additive RunContext composition, platform endpoint fields and the genuine creation-flow provenance
+binding also remain transport-owned dependencies. Independent trust, identity and forwarding tests
+do not prove those integration steps. The implementation stays draft until the agreed combined head
+and supported-platform evidence satisfy the Phase 2 gate.
+
 ## Proof and remaining work
+
+The [configuration LLD](configuration-lld.md) specifies additive settings and composition. The
+[trust LLD](trust-lld.md) specifies Phase 2 import, refresh and operation admission. The
+[forwarding LLD](forwarding-lld.md) defines positive listener setup and owned resource lifetime.
+These are implementation designs, not evidence that those mechanisms are shipped or accepted.
 
 The [SSH test handoff](../../../cli/tests/execution/carriers/ssh/README.md) gives local commands and
 explicit live construction using the shared harness. Synthetic local executables test process I/O,
@@ -133,5 +170,10 @@ accepts the buffered boundary and maps its authoritative matrix to those results
 
 Full live-stream and terminal ownership, forwarding, production configuration/trust conversion,
 provider-inner policy and complete workstation/platform evidence remain tracked in
-[Phase 2](plan.md). The joint PoC acceptance matrix still belongs to transport; an unimplemented
-candidate mode or unmeasured prerequisite cannot be silently counted as a passed proof case.
+[Phase 2](plan.md#phase-2-full-ssh-implementation-in-the-second-pr). Transport then leads migration,
+legacy RunContext removal and old transport deletion while SSH waits and addresses issues. Final old
+SSH deletion waits for a later operator request in
+[Phase 3](plan.md#phase-3-remove-old-ssh-on-the-operators-later-request); this SDD remains unlocked
+until that retirement is accepted. The joint PoC acceptance matrix still belongs to transport; an
+unimplemented candidate mode or unmeasured prerequisite cannot be silently counted as a passed proof
+case.
