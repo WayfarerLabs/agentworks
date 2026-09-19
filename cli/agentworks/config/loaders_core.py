@@ -21,13 +21,12 @@ Split out of the former monolithic ``agentworks/config.py`` (see
 from __future__ import annotations
 
 import ipaddress
-import re
 from pathlib import Path
 
 from agentworks.config.models import DefaultsConfig, OperatorConfig, PathsConfig, TerminalConfig
 from agentworks.config.validation import validate_vm_workspaces
 from agentworks.errors import ConfigError, ValidationError
-from agentworks.execution.carriers.ssh.settings import SSHSettings, validate_literal_path
+from agentworks.execution.carriers.ssh.settings import SSHSettings, validate_literal_path, validate_ssh_executable
 from agentworks.naming import SSH_HOST_PREFIX_RE
 from agentworks.path_rendering import format_host_path
 from agentworks.terminal import CLEAR_ON_DETACH_CHOICES
@@ -260,8 +259,12 @@ def _load_ssh_settings(operator: dict[str, object], *, identity_file: Path) -> S
     executable = raw.get("ssh_executable", "ssh")
     if not isinstance(executable, str) or not executable:
         raise ConfigError("operator.ssh.ssh_executable must be a command name or absolute native path")
-    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", executable):
-        executable = str(_ssh_path(executable, "ssh_executable"))
+    try:
+        if executable.startswith("~"):
+            executable = str(Path(executable).expanduser())
+        validate_ssh_executable(executable)
+    except (ValueError, RuntimeError, ValidationError) as exc:
+        raise ConfigError("operator.ssh.ssh_executable must be a command name or absolute native path") from exc
     interval = raw.get("keepalive_interval", 15)
     count = raw.get("keepalive_count_max", 4)
     if type(interval) is not int or not 0 <= interval <= 2_147_483_647:

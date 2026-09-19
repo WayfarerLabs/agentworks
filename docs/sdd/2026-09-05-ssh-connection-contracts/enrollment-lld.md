@@ -42,9 +42,10 @@ saved. In particular,
 [OpenSSH can continue after failing to append a host key](https://github.com/openssh/openssh-portable/blob/V_8_5_P1/sshconnect.c#L1198-L1210).
 Flush the retained candidate and perform a separately bounded, strict-only acknowledgment through
 the same complete trust selection before reporting verification. Both connections consume the same
-original deadline. The second connection verifies trust; it does not replay an application command.
-Account startup hooks still execute and can have side effects. This operation performs no requested
-application work, rather than promising no remote side effects.
+original finite deadline; an unbounded deadline refuses before creating a candidate. The second
+connection verifies trust; it does not replay an application command. Account startup hooks still
+execute and can have side effects. This operation performs no requested application work, rather
+than promising no remote side effects.
 
 Authentication failure, unexpected output, timeout or interruption retains whatever OpenSSH wrote.
 Recovery resolves the managed reference again, requires the recorded generation to remain active,

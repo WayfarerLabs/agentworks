@@ -129,7 +129,6 @@ def test_split_acknowledgment_and_idempotent_close(synthetic: SyntheticForwardin
     [
         "os.write(1,b'wrong\\n'); sys.stdin.buffer.read()",
         "os.write(1,b'noise'+marker); sys.stdin.buffer.read()",
-        "os.write(1,marker+b'extra'); sys.stdin.buffer.read()",
         "os.write(1,b'x'*200000); sys.stdin.buffer.read()",
         "os.close(1); sys.stdin.buffer.read()",
         "sys.exit(255)",
@@ -139,6 +138,22 @@ def test_failed_acknowledgment_closes_resources(synthetic: SyntheticForwarding, 
     synthetic.script = script
     with pytest.raises(ForwardingError):
         synthetic.open()
+    synthetic.assert_closed()
+
+
+@pytest.mark.parametrize("split", [0, 5, 51])
+def test_acknowledgment_acceptance_is_independent_of_read_partition(synthetic: SyntheticForwarding, split: int) -> None:
+    synthetic.script = (
+        "data=marker+b'extra'; "
+        + (
+            f"os.write(1,data[:{split}]); time.sleep(.05); os.write(1,data[{split}:]); "
+            if split
+            else "os.write(1,data); "
+        )
+        + "sys.stdin.buffer.read()"
+    )
+    with synthetic.open() as resource:
+        assert resource._thread.is_alive()
     synthetic.assert_closed()
 
 
