@@ -57,6 +57,10 @@ def test_construction_and_serialization_are_passive(connection: SSHConnection, m
         ("port", 65536),
         ("port", True),
         ("port", "22"),
+        ("keepalive_interval", -1),
+        ("keepalive_interval", True),
+        ("keepalive_count_max", 0),
+        ("keepalive_count_max", 2_147_483_648),
         ("host_key_alias", "alias\nProxyCommand=bad"),
         ("agent_socket", "SSH_AUTH_SOCK"),
         ("agent_socket", "$SSH_AUTH_SOCK"),
@@ -194,6 +198,8 @@ def test_installed_openssh_parses_isolated_policy(connection: SSHConnection, tmp
         identity_file=tmp_path / "identity with 'quote' and #hash",
         revoked_host_keys=tmp_path / "revocations with spaces",
         host_key_alias="owned-alias",
+        keepalive_interval=7,
+        keepalive_count_max=3,
     )
     argv = build_ssh_argv(selected, PreparedInvocation(("true",)))
     # -G exits after configuration processing; it never establishes a connection.
@@ -210,6 +216,8 @@ def test_installed_openssh_parses_isolated_policy(connection: SSHConnection, tmp
     assert settings["identityagent"] == "none"
     assert settings["globalknownhostsfile"] == "none"
     assert settings["hostkeyalias"] == "owned-alias"
+    assert settings["serveraliveinterval"] == "7"
+    assert settings["serveralivecountmax"] == "3"
     assert settings["batchmode"] == "yes"
     assert settings["stricthostkeychecking"] in {"true", "yes"}
     assert settings["requesttty"] in {"false", "no"}
