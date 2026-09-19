@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.20.0](https://github.com/WayfarerLabs/agentworks/compare/v0.19.0...v0.20.0) (2026-09-19)
+
+
+### Features
+
+* **execution:** add independent bounded Proxmox proof carrier ([4c7bc86](https://github.com/WayfarerLabs/agentworks/commit/4c7bc86f93ed7ee9f50a85e0139d5b494e050760))
+* **execution:** add isolated SSH proof connection policy ([4057af3](https://github.com/WayfarerLabs/agentworks/commit/4057af3e1626d81dd354d658bff56cca9b01cbc0))
+* **execution:** define buffered proof carrier boundary ([68f4962](https://github.com/WayfarerLabs/agentworks/commit/68f4962de07ec07b041fe8c2dacaa8eb37864861))
+* **execution:** prove bounded no-staging preparation ([4ff8b22](https://github.com/WayfarerLabs/agentworks/commit/4ff8b224dd6927a4b5a77f4cd4dbcd7ab710f23c))
+* **execution:** prove the independent buffered carrier boundary ([292d436](https://github.com/WayfarerLabs/agentworks/commit/292d43658b155d92e35589966f7b67502ddb7c0c))
+* **ssh:** deliver buffered PoC with bounded process ownership ([156fc5e](https://github.com/WayfarerLabs/agentworks/commit/156fc5e64fe6ec3ee7106c9397c82a76c2d85276))
+* **ssh:** prove the independent SSH carrier ([1962960](https://github.com/WayfarerLabs/agentworks/commit/196296071b4183d5a6f8ba4cfbeac0acf1be1611))
+
+
+### Bug Fixes
+
+* **execution:** clarify raw completion evidence ([c539d91](https://github.com/WayfarerLabs/agentworks/commit/c539d917a8d2d092f0907ea5095f6958511e44de))
+* **execution:** close private review findings before proof handoff ([7eb79ff](https://github.com/WayfarerLabs/agentworks/commit/7eb79ffe195a344f814d11eaea71e491f94cb9ee))
+* **execution:** isolate bootstrap environment bookkeeping ([278820b](https://github.com/WayfarerLabs/agentworks/commit/278820b1ea1046c824c39c0aa396cd32b92fe260))
+* **execution:** observe bootstrap input producer failures ([63b5a72](https://github.com/WayfarerLabs/agentworks/commit/63b5a72ff602d6a5eb4173ba6e105f0dcdd8d147))
+* **execution:** reconcile the live proof and guard supplied carriers ([a899b88](https://github.com/WayfarerLabs/agentworks/commit/a899b88fa1dd8a9efeafb45aef21df09e215799b))
+* **execution:** require verified Proxmox TLS with scoped CA trust ([0b7a4ff](https://github.com/WayfarerLabs/agentworks/commit/0b7a4ff4c9959c4b773c769f96400a425bf849b0))
+* **execution:** retain shared input and output failure evidence ([2321c47](https://github.com/WayfarerLabs/agentworks/commit/2321c47fcc19cdfa7523f11af8bf667bd22a7590))
+* **execution:** sanitize invalid Proxmox connection origins ([3c35b0b](https://github.com/WayfarerLabs/agentworks/commit/3c35b0b5fad9fc87b7c6f33835708cf6ea6127aa))
+* **ssh:** isolate Windows client handle metadata ([6228d17](https://github.com/WayfarerLabs/agentworks/commit/6228d1788e6119444ae4e681befb2e2473e55c0e))
+* **ssh:** preserve uncertainty for native client crash statuses ([c336b92](https://github.com/WayfarerLabs/agentworks/commit/c336b921376dcde349f8539a32be690b1a4836ea))
+
+
+### Documentation
+
+* **execution:** align native completion evidence ([6617f6e](https://github.com/WayfarerLabs/agentworks/commit/6617f6e6c025cdca76551fa44fe61e377da1df41))
+* **ssh:** consume restored transport proof candidate ([7c7de41](https://github.com/WayfarerLabs/agentworks/commit/7c7de41d8cdc8b68f172f053c9f1bd6348173bd4))
+* **ssh:** distinguish remote status from bootstrap execution ([08deeaa](https://github.com/WayfarerLabs/agentworks/commit/08deeaad0e426977b3e98dcf303eaa19ec878137))
+* **ssh:** reconcile accepted buffered proof evidence ([21a4f12](https://github.com/WayfarerLabs/agentworks/commit/21a4f128877b6171a74d8bb4a86d55edb9d3d971))
+* **ssh:** reconcile first-round live evidence and tester follow-up ([2b60ab8](https://github.com/WayfarerLabs/agentworks/commit/2b60ab8f500a14bdba60e4843a76be9da28b2b86))
+* **ssh:** record authenticated Windows and shell proof results ([c5d68b3](https://github.com/WayfarerLabs/agentworks/commit/c5d68b3adf50d8e075b2af753deba4b34cd16af3))
+* **transport:** record live retest and remaining proof gates ([6687ef8](https://github.com/WayfarerLabs/agentworks/commit/6687ef88f2138c819600ff11fa777924f707d9d9))
+
 ## [0.19.0](https://github.com/WayfarerLabs/agentworks/compare/v0.18.0...v0.19.0) (2026-09-16)
 
 Harness integrations can now configure the VM, user, and workspace that a session runs in, and
