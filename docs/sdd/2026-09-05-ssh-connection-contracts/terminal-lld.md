@@ -84,7 +84,7 @@ parent interruption left raw mode behind until the parent restored it. Direct ch
 and the process descriptor count returned from four to four. The lead observed cleanup of 1.65-4.58
 ms and restoration of 0.003-0.014 ms; these measurements describe this fixture only. Changing size
 from 31 by 97 to 42 by 113 was visible when the synthetic child read it after input and an explicit
-SIGWINCH. That observation does not prove signal-driven SSH resize propagation. A separate
+`SIGWINCH`. That observation does not prove signal-driven SSH resize propagation. A separate
 descriptor-duplication experiment observed shared blocking-mode changes.
 
 The owned loopback sshd authenticated but could not establish a remote PTY in this sandbox: its
