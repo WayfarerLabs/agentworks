@@ -44,7 +44,9 @@ class WSL2Connection:
 class WSL2Carrier:
     """Deliver one prepared invocation through the bound local WSL client.
 
-    The local client's finite status is only candidate completion evidence.
+    A finite nonzero client status observes dispatch but is numerically
+    ambiguous between an ordinary exit and a signal. Only zero is candidate
+    exact completion evidence.
     Native Windows validation remains required before production adoption.
     """
 
@@ -71,13 +73,11 @@ class WSL2Carrier:
             deadline=deadline,
         )
         status = result.exit_status
-        # The pinned WSL client distinguishes its own failures with -1 and
-        # returns the service launch status. Only the guest exit range is
-        # candidate completion evidence until Windows-native proof closes.
-        completion = ExitStatus(code=status) if result.started and status is not None and 0 <= status <= 255 else None
-        dispatch = (
-            Dispatch.SENT if completion is not None else Dispatch.UNKNOWN if result.started else Dispatch.NOT_SENT
-        )
+        # WSL's init normalizes an ordinary exit but otherwise sends raw wait
+        # status. Nonzero exits and signals can therefore have the same value.
+        observed = result.started and status is not None and 0 <= status <= 255
+        completion = ExitStatus(code=0) if observed and status == 0 else None
+        dispatch = Dispatch.SENT if observed else Dispatch.UNKNOWN if result.started else Dispatch.NOT_SENT
         failure = result.failure
         if result.started and completion is None and failure is None:
             failure = Failure.OBSERVATION

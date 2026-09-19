@@ -171,14 +171,33 @@ def test_output_evidence_is_preserved_while_provenance_is_assigned(monkeypatch: 
     assert report.failure == Failure.OUTPUT_LIMIT
 
 
-@pytest.mark.parametrize("status", [0, 1, 255])
-def test_finite_guest_status_is_candidate_completion(monkeypatch: pytest.MonkeyPatch, status: int) -> None:
-    report, pump = execute(monkeypatch, process_result(local_status=status, exit_status=status))
+def test_zero_status_is_candidate_completion(monkeypatch: pytest.MonkeyPatch) -> None:
+    report, pump = execute(monkeypatch, process_result())
     assert report.dispatch == Dispatch.SENT
-    assert report.completion == ExitStatus(code=status)
-    assert report.local_status == status
+    assert report.completion == ExitStatus(code=0)
+    assert report.local_status == 0
     assert report.failure is None
     pump.assert_called_once()
+
+
+@pytest.mark.parametrize("status", [1, 255])
+def test_nonzero_finite_status_observes_dispatch_without_exact_completion(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    report, pump = execute(monkeypatch, process_result(local_status=status, exit_status=status))
+    assert report.dispatch == Dispatch.SENT
+    assert report.completion is None
+    assert report.local_status == status
+    assert report.failure == Failure.OBSERVATION
+    pump.assert_called_once()
+
+
+def test_status_15_collision_is_not_reported_as_exact_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+    report, _ = execute(monkeypatch, process_result(local_status=15, exit_status=15))
+    assert report.dispatch == Dispatch.SENT
+    assert report.completion is None
+    assert report.local_status == 15
+    assert report.failure == Failure.OBSERVATION
 
 
 @pytest.mark.parametrize("status", [None, -1, -15, 256, 4_294_967_295, 0xC0000005])
@@ -202,7 +221,7 @@ def test_local_cleanup_status_is_never_promoted_to_completion(monkeypatch: pytes
 
 
 @pytest.mark.parametrize("failure", [Failure.INPUT, Failure.OUTPUT, Failure.OUTPUT_LIMIT])
-def test_io_failure_does_not_erase_independently_observed_completion(
+def test_io_failure_is_preserved_with_ambiguous_observed_status(
     monkeypatch: pytest.MonkeyPatch, failure: Failure
 ) -> None:
     report, _ = execute(
@@ -210,7 +229,7 @@ def test_io_failure_does_not_erase_independently_observed_completion(
         process_result(local_status=23, exit_status=23, failure=failure),
     )
     assert report.dispatch == Dispatch.SENT
-    assert report.completion == ExitStatus(code=23)
+    assert report.completion is None
     assert report.failure == failure
 
 
