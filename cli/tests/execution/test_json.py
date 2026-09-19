@@ -241,26 +241,25 @@ def test_bounds_require_positive_plain_integers(bound_name: str, value: object) 
         transform_json(b"{}", None, strategy="replace", create=True, **limits)  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize(
-    "arguments",
-    [
-        {"source": bytearray(b"{}")},
-        {"existing": bytearray(b"{}")},
-        {"strategy": "invented"},
-        {"create": 1},
-    ],
-)
-def test_untyped_callers_cannot_cross_the_private_boundary(arguments: dict[str, object]) -> None:
-    values: dict[str, object] = {
-        "source": b"{}",
-        "existing": None,
-        "strategy": "replace",
-        "create": True,
-        **_LIMITS,
-        **arguments,
-    }
-    with pytest.raises(ValidationError):
-        transform_json(**values)  # type: ignore[arg-type]
+@pytest.mark.parametrize("stage", ["parse", "serialize"])
+@pytest.mark.parametrize("failure_type", [RecursionError, ValueError])
+def test_runtime_capacity_refusal_retains_no_payload_or_exception_chain(
+    monkeypatch: pytest.MonkeyPatch, stage: str, failure_type: type[Exception]
+) -> None:
+    def refuse(*args: object, **kwargs: object) -> Any:
+        raise failure_type("private-json-marker")
+
+    if stage == "parse":
+        monkeypatch.setattr(json, "loads", refuse)
+    else:
+        monkeypatch.setattr(json.JSONEncoder, "iterencode", refuse)
+
+    with pytest.raises(ValidationError) as caught:
+        _transform(b"{}", None, "replace")
+
+    assert "private-json-marker" not in repr(caught.value)
+    assert caught.value.__context__ is None
+    assert caught.value.__cause__ is None
 
 
 @pytest.mark.parametrize(

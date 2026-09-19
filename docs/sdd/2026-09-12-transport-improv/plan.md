@@ -106,6 +106,19 @@ No new public feedback/fix allowance is inferred from the completed #830 review.
 checkpoint receives the normal private reviews and validation before a testing brief and
 `review-requested`; the additive implementation is marked ready only when its own gates pass.
 
+The operator separately authorized up to three public feedback/fix rounds for #833. Round 1 began
+2026-09-19 at 20:35:58 UTC, after the initial handoff's one-hour collection window and the complete
+tester report. Its batch is the checkpoint tester report, the complexity review and its subsequent
+directory-depth retraction. The agreed documentation corrections are local; round closure and a new
+handoff remain pending private review and explicit publication approval. No second round has begun.
+
+SSH's implementation continues in #832. Its owner agreed to transport extracting the shared bounded
+subprocess pump, while SSH retains environment sanitation, carrier-specific report interpretation,
+call-site adaptation and combined regression evidence. The shared module is proposed at
+`execution/carriers/_subprocess.py`; the extraction does not accept the separate sink/terminal
+extensions. SSH also owns correcting its incidental preparation-module `Command` import when it
+integrates the new invocation values.
+
 ### Initial implementation checkpoint
 
 - [x] Extract immutable command/script values and explicit shell constants into `execution.models`,
@@ -139,7 +152,7 @@ pinned contract. The following is an assignment plan, not a claim that developer
 | Package                                       | Exclusive responsibility                                                                                                                                                            |
 | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Transport lead                                | Shared execution API/helpers/file policy, `capabilities/base.py`, composition boundaries, integration gates and final deletion.                                                     |
-| SSH developer                                 | `execution/carriers/ssh/`, connection/trust migration and associated tests, per #796.                                                                                               |
+| SSH developer                                 | `execution/carriers/ssh/`, connection/trust migration and associated tests, currently in #832.                                                                                      |
 | Optional harness/artifact migration developer | `harness_setup/`, harness setup/readiness invocation types, artifact publication/probes and harness plugin consumers; preserve domain behavior while replacing runner/file facades. |
 | Optional session migration developer          | Session/tmux/console consumers and tests; preserve session/run identity, restart consent, runtime evidence and owned cleanup.                                                       |
 | Optional platform/CLI migration developer     | Non-SSH adapters, VM exec/recovery, backup and workspace transfer consumers, with explicit per-file assignment before starting.                                                     |

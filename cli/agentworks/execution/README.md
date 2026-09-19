@@ -82,3 +82,17 @@ Run the local evidence from `cli/` with `uv run pytest tests/execution`. The reu
 `tests.execution.conformance` require an explicitly supplied carrier. Their local process oracle
 does not establish SSH or live Proxmox compatibility. The native carrier is isolated from the plugin
 registry because importing that registry currently loads legacy execution modules.
+
+## Private JSON transformation
+
+`_json.py` supplies the local, bounded transformation for file-operation composition. It preserves
+replace, skip-existing and both recursive object-merge strategies; arrays/scalars are atomic and
+JSON null is a value, not deletion. Source validation precedes every strategy, while replace and
+skip-existing do not parse old content. Byte and container-depth limits apply to parsed inputs and
+the proposed serialized result. These are rejection thresholds, not overrides of the interpreter's
+capacity. Standard-library nesting and integer-conversion limits can also cause a safe refusal even
+within caller-selected bounds; the implementation does not change process-global interpreter limits.
+
+The return is proposed publication bytes or `None` for skip-existing, not evidence of a filesystem
+change. Destination observation, file-kind safety, concurrency and atomic publication belong to the
+file service, which is not implemented or wired to production yet.

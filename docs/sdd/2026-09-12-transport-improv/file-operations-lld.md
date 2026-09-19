@@ -122,6 +122,22 @@ needs a later host-specific design.
 
 ## JSON semantics
 
+The private local transformation lives in
+[`execution/_json.py`](../../../cli/agentworks/execution/_json.py). It proposes bytes or a skip
+decision; it performs no destination I/O and does not establish publication, confinement, locking or
+FileAccess acceptance.
+
+Caller byte/depth limits are rejection thresholds, not an override of the interpreter's JSON
+capacity. The local implementation retains the standard-library nesting and integer-conversion
+safeguards described in the
+[Python JSON documentation](https://docs.python.org/3.12/library/json.html#implementation-limitations).
+Private review on CPython 3.12.13 reproduced refusal of a 4,301-digit integer and an encoding
+recursion failure at depth 998 despite larger caller limits. These are observations, not portable
+numeric caps. Diagnostics must not mislabel runtime capacity as proof of malformed input or a
+caller-byte-bound violation. No process-global limits are relaxed. If a required migrated workflow
+needs a refused document, that is an acceptance blocker requiring a supported mechanism or operator
+disposition, not a workflow silently dropped by this note.
+
 `update_json` validates the source as one finite UTF-8 JSON object before any target I/O. Duplicate
 keys, non-finite numbers, invalid UTF-8, non-object roots, and values beyond the call's byte/depth
 bounds are validation failures. Serialization is semantic and deterministic; original formatting is

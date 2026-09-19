@@ -17,12 +17,6 @@ type _JsonStrategy = Literal["replace", "merge-overwrite", "merge-preserve", "sk
 type _JsonValue = str | int | float | bool | None | list[_JsonValue] | dict[str, _JsonValue]
 type _JsonObject = dict[str, _JsonValue]
 
-_STRATEGIES: frozenset[str] = frozenset({"replace", "merge-overwrite", "merge-preserve", "skip-existing"})
-
-
-class _InvalidJson(Exception):
-    """Value-free signal for strict decoder callbacks."""
-
 
 def transform_json(
     source: bytes,
@@ -40,14 +34,7 @@ def transform_json(
     depth starts at one for the root object; nested arrays and objects each add
     one, while scalar leaves do not.
     """
-    _validate_arguments(
-        source,
-        existing,
-        strategy=strategy,
-        create=create,
-        max_bytes=max_bytes,
-        max_depth=max_depth,
-    )
+    _validate_limits(max_bytes=max_bytes, max_depth=max_depth)
     document = _parse_object(source, max_bytes=max_bytes, max_depth=max_depth)
 
     if existing is None:
@@ -62,28 +49,11 @@ def transform_json(
         current = _parse_object(existing, max_bytes=max_bytes, max_depth=max_depth)
         result = _merge(current, document) if strategy == "merge-overwrite" else _merge(document, current)
 
-    _validate_depth(result, max_depth=max_depth)
     return _serialize(result, max_bytes=max_bytes)
 
 
-def _validate_arguments(
-    source: object,
-    existing: object,
-    *,
-    strategy: object,
-    create: object,
-    max_bytes: object,
-    max_depth: object,
-) -> None:
-    """Validate the private boundary for callers outside static checking."""
-    if not isinstance(source, bytes):
-        raise ValidationError("JSON source must be bytes")
-    if existing is not None and not isinstance(existing, bytes):
-        raise ValidationError("Existing JSON content must be bytes or absent")
-    if not isinstance(strategy, str) or strategy not in _STRATEGIES:
-        raise ValidationError("JSON strategy is not supported")
-    if not isinstance(create, bool):
-        raise ValidationError("JSON create selection must be boolean")
+def _validate_limits(*, max_bytes: int, max_depth: int) -> None:
+    """Require positive finite rejection thresholds before parsing content."""
     if type(max_bytes) is not int or max_bytes <= 0:
         raise ValidationError("JSON byte bound must be a positive integer")
     if type(max_depth) is not int or max_depth <= 0:
@@ -103,16 +73,14 @@ def _parse_object(content: bytes, *, max_bytes: int, max_depth: int) -> _JsonObj
             parse_float=_finite_float,
             parse_constant=_reject_constant,
         )
-    except (UnicodeDecodeError, ValueError, RecursionError, _InvalidJson):
+    except (UnicodeDecodeError, ValueError, RecursionError):
         pass
     else:
         if isinstance(value, dict):
-            document = cast("_JsonObject", value)
-            _validate_depth(document, max_depth=max_depth)
-            return document
+            return cast("_JsonObject", value)
 
     # Raise outside the handler so decoder exceptions cannot retain content.
-    raise ValidationError("Invalid JSON object")
+    raise ValidationError("JSON object is invalid or exceeds parser capacity")
 
 
 def _validate_encoded_depth(content: bytes, *, max_depth: int) -> None:
@@ -142,7 +110,7 @@ def _unique_object(pairs: list[tuple[str, _JsonValue]]) -> _JsonObject:
     result: _JsonObject = {}
     for key, value in pairs:
         if key in result:
-            raise _InvalidJson
+            raise ValueError
         result[key] = value
     return result
 
@@ -150,22 +118,12 @@ def _unique_object(pairs: list[tuple[str, _JsonValue]]) -> _JsonObject:
 def _finite_float(value: str) -> float:
     number = float(value)
     if not math.isfinite(number):
-        raise _InvalidJson
+        raise ValueError
     return number
 
 
 def _reject_constant(_: str) -> Never:
-    raise _InvalidJson
-
-
-def _validate_depth(value: _JsonObject, *, max_depth: int) -> None:
-    pending: list[tuple[_JsonObject | list[_JsonValue], int]] = [(value, 1)]
-    while pending:
-        container, depth = pending.pop()
-        if depth > max_depth:
-            raise ValidationError("JSON value exceeds its depth bound")
-        children = container.values() if isinstance(container, dict) else container
-        pending.extend((child, depth + 1) for child in children if isinstance(child, (dict, list)))
+    raise ValueError
 
 
 def _merge(losing: _JsonObject, winning: _JsonObject) -> _JsonObject:
@@ -202,4 +160,4 @@ def _serialize(document: _JsonObject, *, max_bytes: int) -> bytes:
         if complete and len(content) < max_bytes:
             content.append(0x0A)
             return bytes(content)
-    raise ValidationError("JSON result exceeds its bound")
+    raise ValidationError("JSON result could not be encoded within the available limits")
