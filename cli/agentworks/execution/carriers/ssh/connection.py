@@ -1,4 +1,4 @@
-"""Explicit connection data and isolated OpenSSH policy for buffered delivery."""
+"""Explicit connection admission and isolated OpenSSH policy for every delivery mode."""
 
 from __future__ import annotations
 
@@ -7,38 +7,21 @@ import re
 from dataclasses import dataclass
 from ipaddress import IPv6Address
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from agentworks.errors import ValidationError
-from agentworks.ssh_identity import (
-    SSHIdentityReadError,
-    VerifiedSSHIdentity,
-    read_private_ssh_identity,
-    read_public_ssh_identity,
-)
+from agentworks.execution.carriers.ssh.settings import validate_literal_path
+from agentworks.execution.carriers.ssh.trust import ManagedSSHTrust, SSHTrustFiles, resolve_trust
 
 if TYPE_CHECKING:
     from agentworks.execution.carrier import PreparedInvocation
-
-
-def _literal_path(path: Path) -> str:
-    # OpenSSH expands tokens after parsing quotes. Refuse that policy rather
-    # than turning a configured filename into another file or environment lookup.
-    value = path.as_posix()
-    if (
-        not path.is_absolute()
-        or any(char in value for char in '%$"\\')
-        or any(ord(c) < 32 or ord(c) == 127 for c in value)
-    ):
-        raise ValidationError("SSH paths must be absolute native paths without expansion tokens or control characters")
-    return value
 
 
 @dataclass(frozen=True)
 class SSHConnection:
     """Resolved input from an adapter author; construction does no filesystem I/O.
 
-    The proof accepts pre-provisioned trust, literal DNS/IP hosts, POSIX account
+    Connections accept explicit trust, literal DNS/IP hosts, POSIX account
     names, and explicit filesystem paths. An absent agent disables agent use.
     Unsupported path expansion and account policies fail before dispatch.
     """
@@ -46,11 +29,10 @@ class SSHConnection:
     host: str
     user: str
     identity_file: Path
-    known_hosts_file: Path
+    trust: SSHTrustFiles | ManagedSSHTrust
     port: int = 22
     host_key_alias: str | None = None
     agent_socket: str | None = None
-    revoked_host_keys: Path | None = None
     ssh_executable: str = "ssh"
     keepalive_interval: int = 15
     keepalive_count_max: int = 4
@@ -76,18 +58,19 @@ class SSHConnection:
             or not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.:-]*", self.host_key_alias)
         ):
             raise ValidationError("SSH host key alias must be a literal lookup name")
-        for path in (self.identity_file, self.known_hosts_file):
-            if not isinstance(path, Path):
-                raise ValidationError("SSH files must be native Path values")
-            _literal_path(path)
-        if self.revoked_host_keys is not None:
-            if not isinstance(self.revoked_host_keys, Path):
-                raise ValidationError("SSH revocation file must be a native Path value")
-            _literal_path(self.revoked_host_keys)
+        if not isinstance(self.identity_file, Path):
+            raise ValidationError("SSH identity must be a native Path value")
+        validate_literal_path(self.identity_file)
+        if isinstance(self.trust, SSHTrustFiles):
+            _validate_trust_paths(self.trust)
+        elif isinstance(self.trust, ManagedSSHTrust):
+            validate_literal_path(self.trust.directory)
+        else:
+            raise ValidationError("SSH trust must be explicit files or an owned managed bundle")
         if self.agent_socket is not None:
             if not isinstance(self.agent_socket, str):
                 raise ValidationError("SSH agent socket must be an absolute native path")
-            _literal_path(Path(self.agent_socket))
+            validate_literal_path(Path(self.agent_socket))
         if (
             not isinstance(self.ssh_executable, str)
             or not self.ssh_executable
@@ -97,20 +80,29 @@ class SSHConnection:
             raise ValidationError("SSH executable must be an explicit command name or native path")
 
 
-def validate_connection_files(connection: SSHConnection) -> None:
-    """Check files and public identity evidence at operation time.
+def _validate_trust_paths(trust: SSHTrustFiles) -> None:
+    for path in trust.known_hosts:
+        validate_literal_path(path)
+    if trust.revoked_host_keys is not None:
+        validate_literal_path(trust.revoked_host_keys)
 
-    OpenSSH parses authentication/trust data and enforces permissions. Verify
-    companion public identity without decrypting private material so its .pub
-    fallback cannot select another agent key. Subsequent client opens can still
-    fail. Trust is never created, rewritten or enrolled here.
+
+def admit_connection(connection: SSHConnection) -> SSHTrustFiles:
+    """Validate identity and freshly admit one immutable trust selection.
+
+    Managed policy is resolved on every operation. OpenSSH parses authentication
+    and trust data and enforces permissions when it opens the admitted files.
+    Local filesystem calls are synchronous; callers recheck their deadline
+    after admission and before dispatch. Trust is never enrolled here.
     """
-    for path in (connection.identity_file, connection.known_hosts_file, connection.revoked_host_keys):
-        if path is not None and (not path.is_file() or not os.access(path, os.R_OK)):
-            raise ValidationError("SSH requires existing identity, known-host and optional revocation files")
+    if not connection.identity_file.is_file() or not os.access(connection.identity_file, os.R_OK):
+        raise ValidationError("SSH requires an existing readable identity file")
     if connection.agent_socket is not None and not Path(connection.agent_socket).is_socket():
         raise ValidationError("SSH requires an existing explicit Unix-domain agent socket")
     _validate_identity_sidecar(connection.identity_file)
+    trust = resolve_trust(connection.trust)
+    _validate_trust_paths(trust)
+    return trust
 
 
 def _validate_identity_sidecar(identity_file: Path) -> None:
@@ -119,6 +111,13 @@ def _validate_identity_sidecar(identity_file: Path) -> None:
     OpenSSH tries IdentityFile.pub before extracting a private key's public part.
     IdentitiesOnly does not fix a stale or substituted sibling public key.
     """
+    from agentworks.ssh_identity import (
+        SSHIdentityReadError,
+        VerifiedSSHIdentity,
+        read_private_ssh_identity,
+        read_public_ssh_identity,
+    )
+
     sidecar = Path(str(identity_file) + ".pub")
     if not sidecar.exists():
         return
@@ -140,21 +139,46 @@ def build_ssh_argv(
     connection: SSHConnection,
     invocation: PreparedInvocation,
     *,
+    trust: SSHTrustFiles,
+    terminal: bool = False,
+    local_forwards: tuple[str, ...] = (),
+) -> list[str]:
+    """Build strict delivery argv using this operation's admitted trust selection."""
+    return _build_argv(
+        connection, invocation, trust=trust, host_key_checking="yes", terminal=terminal, local_forwards=local_forwards
+    )
+
+
+def _build_enrollment_argv(
+    connection: SSHConnection, invocation: PreparedInvocation, *, trust: SSHTrustFiles
+) -> list[str]:
+    """Build first enrollment argv after the caller validates an exclusive candidate."""
+    return _build_argv(connection, invocation, trust=trust, host_key_checking="accept-new")
+
+
+def _build_argv(
+    connection: SSHConnection,
+    invocation: PreparedInvocation,
+    *,
+    trust: SSHTrustFiles,
+    host_key_checking: Literal["yes", "accept-new"],
     terminal: bool = False,
     local_forwards: tuple[str, ...] = (),
 ) -> list[str]:
     """Serialize literal argv through a POSIX account shell, without doing I/O.
 
-    Account-shell compatibility and startup behavior are proof preconditions.
+    Account-shell compatibility and startup behavior are delivery preconditions.
     The caller owns stdin (pipe or DEVNULL), deadline and executable version
     checks. Forward specifications come from the owned forwarding operation's
     validated values; they are -L operands, never arbitrary client options.
     No option here steals input or introduces application shell policy.
     """
+    _validate_trust_paths(trust)
+    known_hosts = " ".join(f'"{path.as_posix()}"' for path in trust.known_hosts)
     options = [
         # Authentication, trust and input overrides.
         "BatchMode=yes",
-        "StrictHostKeyChecking=yes",
+        f"StrictHostKeyChecking={host_key_checking}",
         "GlobalKnownHostsFile=none",
         "UpdateHostKeys=no",
         "CheckHostIP=no",
@@ -192,15 +216,15 @@ def build_ssh_argv(
         f"ServerAliveCountMax={connection.keepalive_count_max}",
         # Explicit caller selections.
         f'IdentityFile="{connection.identity_file.as_posix()}"',
-        f'UserKnownHostsFile="{connection.known_hosts_file.as_posix()}"',
+        f"UserKnownHostsFile={known_hosts}",
         (
             "IdentityAgent=none"
             if connection.agent_socket is None
             else f'IdentityAgent="{Path(connection.agent_socket).as_posix()}"'
         ),
     ]
-    if connection.revoked_host_keys is not None:
-        options.append(f'RevokedHostKeys="{connection.revoked_host_keys.as_posix()}"')
+    if trust.revoked_host_keys is not None:
+        options.append(f'RevokedHostKeys="{trust.revoked_host_keys.as_posix()}"')
     if connection.host_key_alias is not None:
         options.append(f"HostKeyAlias={connection.host_key_alias}")
     argv = [connection.ssh_executable, "-F", "none", "-tt" if terminal else "-T"]
