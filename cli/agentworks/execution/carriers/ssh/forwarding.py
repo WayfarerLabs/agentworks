@@ -6,6 +6,7 @@ import os
 import re
 import secrets
 import subprocess
+import time
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv6Address
 from threading import Event, Thread
@@ -92,7 +93,6 @@ class OwnedForwarding:
         self._status: int | None = None
         self._cleaned = False
         self._thread = Thread(target=self._drain, name="ssh-forwarding")
-        self._thread.start()
 
     def __enter__(self) -> Self:
         return self
@@ -105,9 +105,19 @@ class OwnedForwarding:
     def close(self) -> None:
         """End owned stdin, then kill/reap locally within the cleanup allowance."""
         self._stop.set()
+        join_until = time.monotonic() + _JOIN_SECONDS
         # The worker uses only nonblocking pipe reads, an interruptible 10ms
         # poll and the shared bounded kill/reap. Joining leaves no drainer alive.
-        self._thread.join(timeout=_JOIN_SECONDS)
+        try:
+            self._thread.join(timeout=_JOIN_SECONDS)
+        except RuntimeError:
+            # Thread.start can be interrupted before Python publishes its
+            # started state, even when a native worker may still appear.
+            # Stop is already set, so that worker cannot begin pipe reads.
+            self._cleaned = _cleanup(self._process)
+            if not self._done.wait(max(0.0, join_until - time.monotonic())):
+                raise ForwardingError(Failure.OBSERVATION, self._process.returncode) from None
+            self._thread.join(timeout=max(0.0, join_until - time.monotonic()))
         if self._thread.is_alive():
             raise ForwardingError(Failure.OBSERVATION, self._process.returncode)
         if not self._cleaned:
@@ -244,6 +254,8 @@ def open_local_forwards(
             assert pipe is not None
             os.set_blocking(pipe.fileno(), False)
         resource = OwnedForwarding(process, (marker + "\n").encode("ascii"))
+        # Retain ownership before starting: Thread.start itself can interrupt.
+        resource._thread.start()
         resource._await_ready(deadline)
         return resource
     except BaseException as error:
@@ -252,6 +264,6 @@ def open_local_forwards(
                 error.add_note("Local SSH forwarding cleanup did not complete within its bound.")
         else:
             resource._close_preserving(error)
-        if isinstance(error, OSError):
+        if isinstance(error, (OSError, RuntimeError)):
             raise ForwardingError(Failure.OBSERVATION, process.returncode) from None
         raise
