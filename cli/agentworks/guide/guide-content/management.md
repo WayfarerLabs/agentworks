@@ -31,6 +31,41 @@ edit existing operator-owned declarations with `agw resource edit KIND/NAME`.
 Workstation settings and enabled system plugins remain in the operator configuration and can be
 changed with `agw config edit`.
 
+## Maintain SSH trust
+
+The explicit SSH path uses an owned trust bundle selected by `[operator.ssh].trust_store`.
+`agw config describe-ssh-trust DIRECTORY` shows its state, generation, policy authority, and source
+attribution without loading operator configuration or a database. An available maintenance state
+does not prove that a target will authenticate or that every policy file is intact; each new SSH
+operation checks its selected policy. These commands do not change the trust used by older SSH
+callers or manual SSH aliases.
+
+When authorized to establish this policy, use `agw config import-ssh-trust --help` to create a new
+bundle from explicit, complete known-host snapshots, with `--authority` identifying their
+responsible maintainer and `--revoked-host-keys` supplying a complete revocation snapshot when
+applicable. Use absolute native paths, with no symbolic links in the paths. Keep all source
+snapshots stable during maintenance. Import preserves their bytes, including comments, hashed names,
+certificate authorities, and revocations; it never discovers files or rewrites the sources or your
+configuration. Configure `trust_store` explicitly after a successful import. If policy ownership or
+completeness is uncertain, inspect the sources with their maintainer and leave the current
+configuration unchanged.
+
+When authorized to replace superseded policy, first inspect its current generation. Use
+`agw config block-ssh-trust DIRECTORY --expected-generation GENERATION` to refuse new operations
+through that bundle while retaining its evidence. Already admitted operations can continue. Then use
+`agw config refresh-ssh-trust --help` to publish **all** replacement known-host snapshots and the
+revocation snapshot with the observed generation and authority. Omitting `--revoked-host-keys` means
+that the replacement has no revocation file. Refresh blocks admission before copying and only
+reactivates the bundle after complete publication. It does not enroll an unknown host or clear a
+mismatch. If replacement policy is unavailable, leave the bundle blocked.
+
+After a refusal or interrupted maintenance, inspect the bundle before retrying. A stale generation
+requires a fresh inspection, not an unconditional overwrite. The literal generation `none` is only
+for recovery of an initial partial import that has never published a generation. Failed work retains
+its files as evidence; do not delete the bundle to bypass a trust refusal. If storage cannot record
+blocking durably, stop new use of the bundle and repair storage before continuing. Use each
+command's `--help` for its current arguments.
+
 ## Operate live instances
 
 The `vm`, `workspace`, `agent`, `session`, and `console` groups own their live state. Begin with
