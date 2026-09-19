@@ -71,6 +71,21 @@ def _identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
     return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
 
 
+def _snapshot_chunks(source: BinaryIO, remaining: int) -> Iterator[bytes]:
+    """An appending writer cannot extend this read beyond the initial file size."""
+    while remaining:
+        chunk = source.read(min(remaining, 256 * 1024))
+        if not chunk:
+            raise StateError("SSH trust file became shorter while reading; supply a stable snapshot")
+        remaining -= len(chunk)
+        yield chunk
+
+
+def _verify_snapshot(source: BinaryIO, path: Path, before: os.stat_result) -> None:
+    if _identity(before) != _identity(os.fstat(source.fileno())) or _identity(before) != _identity(path.lstat()):
+        raise StateError("SSH trust file changed while reading; supply a stable snapshot")
+
+
 def copy_file(source_path: Path, destination: Path) -> str:
     """Copy complete bytes from a caller-owned stable snapshot, refusing observed change."""
     digest = hashlib.sha256()
@@ -78,23 +93,22 @@ def copy_file(source_path: Path, destination: Path) -> str:
         before = os.fstat(source.fileno())
         descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
         with os.fdopen(descriptor, "wb") as target:
-            while chunk := source.read(256 * 1024):
+            for chunk in _snapshot_chunks(source, before.st_size):
                 target.write(chunk)
                 digest.update(chunk)
             target.flush()
             os.fsync(target.fileno())
-        if _identity(before) != _identity(os.fstat(source.fileno())) or _identity(before) != _identity(
-            source_path.lstat()
-        ):
-            raise StateError("SSH trust source changed during import; supply a stable snapshot")
+        _verify_snapshot(source, source_path, before)
     return digest.hexdigest()
 
 
 def file_hash(path: Path, *, owned: bool = True) -> str:
     digest = hashlib.sha256()
     with read_file(path, owned=owned) as source:
-        while chunk := source.read(256 * 1024):
+        before = os.fstat(source.fileno())
+        for chunk in _snapshot_chunks(source, before.st_size):
             digest.update(chunk)
+        _verify_snapshot(source, path, before)
     return digest.hexdigest()
 
 
