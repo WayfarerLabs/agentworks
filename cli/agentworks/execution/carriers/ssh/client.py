@@ -70,20 +70,10 @@ class SSHCarrier:
             argv = build_ssh_argv(self._connection, invocation)
         except (OSError, ValidationError):
             return _not_sent(io, Failure.DISPATCH)
-        version = run_process(
-            [self._connection.ssh_executable, "-V"],
-            io=CarrierIO(output=Capture(4096)),
-            deadline=deadline,
-            custody=custody,
-            env=_child_environment(),
-        )
-        if version.failure is not None:
-            return _not_sent(io, version.failure)
-        if not custody.settled:
-            return _not_sent(io, Failure.OBSERVATION)
-        match = _VERSION.match(version.stderr.data)
-        if version.exit_status != 0 or match is None or tuple(map(int, match.groups())) < (8, 5):
-            return _not_sent(io, Failure.DISPATCH)
+        version_failure = check_client_version(self._connection, deadline=deadline, custody=custody)
+        if version_failure is not None:
+            return _not_sent(io, version_failure)
+
 
         result = run_process(argv, io=io, deadline=deadline, custody=custody, env=_child_environment())
         completion = (
@@ -122,6 +112,19 @@ def _child_environment() -> dict[str, str] | None:
         for name, value in os.environ.items()
         if name.upper() not in ("C28FC6F98A2C44ABBBD89D6A3037D0D9_POSIX_FD_STATE", "OPENSSH_STDIO_MODE")
     }
+
+
+def check_client_version(connection: SSHConnection, *, deadline: Deadline, custody: LocalDeliveryCustody) -> Failure | None:
+    """Check the selected installed client within the original operation budget."""
+    version = run_process([connection.ssh_executable, "-V"], io=CarrierIO(output=Capture(4096)), deadline=deadline, custody=custody, env=_child_environment())
+    if version.failure is not None:
+        return version.failure
+    if not custody.settled:
+        return Failure.OBSERVATION
+    match = _VERSION.match(version.stderr.data)
+    if version.exit_status != 0 or match is None or tuple(map(int, match.groups())) < (8, 5):
+        return Failure.DISPATCH
+    return None
 
 
 def _not_sent(io: CarrierIO, failure: Failure) -> CarrierReport:
