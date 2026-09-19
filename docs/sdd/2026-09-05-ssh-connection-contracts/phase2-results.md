@@ -69,6 +69,24 @@ forwarding correction was independently reproduced with a normally scheduled wor
 held beyond the cleanup allowance. Mutation tests confirmed the strict enrollment follow-up,
 managed-file integrity and forwarding interruption regressions detect removed safeguards.
 
+## Windows CI correction
+
+Hosted Windows CI at `369a1859` exposed false stable-file snapshot refusals and an enrollment test
+that expected native path spelling in OpenSSH options. Code
+`ee6301679a5cb61309937b6114a12785d1823d0b` corrects both. CPython 3.13.15's
+[pathname query](https://github.com/python/cpython/blob/v3.13.15/Modules/posixmodule.c#L2073) and
+[descriptor query](https://github.com/python/cpython/blob/v3.13.15/Python/fileutils.c#L1035) give
+`ctime` different meanings on Windows. The correction keeps complete descriptor before/after
+metadata checks, path device/inode/size/mtime checks and POSIX path change-time equality.
+
+All three independent correction reviews are clean. Mutation experiments show the regressions catch
+the original mismatch and removal of descriptor or pathname protection. The corrected full local
+suite passed **10,433 tests with 12 skips**; full mypy and Ruff passed. All
+[hosted checks](https://github.com/WayfarerLabs/agentworks/actions/runs/35468781056) passed,
+including Python 3.12/3.13/3.14 and Windows Python 3.13 (**461 passed, 25 skipped**). This
+establishes the correction on Windows CI; it does not supply terminal, provider or
+production-composition evidence.
+
 ## Remaining integration and acceptance
 
 Transport [#833](https://github.com/WayfarerLabs/agentworks/pull/833), observed at

@@ -215,8 +215,10 @@ local validation separately from the remaining shared integration and platform a
       migration, not the Phase 1 carrier proof.
 - [ ] Reconcile current consumer risks with transport's migration inventory, including bootstrap
       tools, sensitive discovery, ownership/cleanup checkpoints and activation behavior. Transport
-      owns those caller changes. Retire `main-comparison.md` after recording the disposition of
-      every material risk in this plan or the relevant LLD; retain the truthful baseline checkboxes.
+      owns those caller changes. Use the
+      [current risk disposition](migration-strategy.md#current-migration-risk-disposition),
+      retaining the historical comparison pointer and truthful baseline checkboxes. Source
+      reconciliation does not complete the required workflow evidence.
 - [ ] Deliver connection/trust migration and rollback evidence before the first new production use.
       Resolve old/new writer ownership and config compatibility while both stacks remain usable; no
       duplicate mutation dispatch or permanent bridge. Shared job/plugin migration stays with
