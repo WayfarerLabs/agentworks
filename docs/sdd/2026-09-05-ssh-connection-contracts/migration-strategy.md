@@ -7,14 +7,11 @@
 
 ## Baselines and destination
 
-The published SSH design at `2694d31a` proposed interface-preserving isolation/consolidation. Local
-work through `2f11662d` includes explicit connection settings and a shared legacy builder; it was
-not pushed as an implementation handoff. That local code and its earlier fixtures may inform the new
-implementation but do not establish its independence or semantics. Refresh the production inventory
-against main before preparing cutover rather than assuming this branch is deployed. The
-[2026-09-16 main comparison](main-comparison.md) records the current baseline and new consumers.
-Core delivery code is unchanged from the original baseline; artifact publication, discovery and
-session cleanup expand the transport-owned migration inventory.
+The production baseline is `cea5e8523aac05edfc3a99a940d7cfb4d71fe32f` (merged transport design PR
+#830), verified against main on 2026-09-19. PR #832 adds the SSH implementation; it has not migrated
+production callers. The [historical source comparison](main-comparison.md) remains accessible for
+the completed baseline records. Current risk dispositions are below; transport owns the complete
+consumer inventory and refreshes it before each migration batch.
 
 | Existing surface                                                  | Destination and owner                                                                                                                 |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
@@ -72,11 +69,11 @@ command. Runtime value ownership belongs to SSH; transport owns composition and 
 
 The [configuration LLD](configuration-lld.md) specifies additive `[operator.ssh]` settings for the
 new path while retaining `operator.ssh_private_key` and all legacy readers. The
-[trust LLD](trust-lld.md) defines explicit owned policy import/refresh. These are implementation
-designs, not shipped schema or conversion claims. Platform placement fields remain transport-owned
-and need agreement before their integration. A representative desired connection is a literal
-host/user/identity/port plus explicit trust sources, not an alias interpreted through the operator's
-SSH configuration.
+[trust LLD](trust-lld.md) defines explicit owned policy import/refresh. Their independent
+implementation is recorded in [Phase 2 evidence](phase2-results.md); production conversion remains
+unproved. Platform placement fields remain transport-owned and need agreement before their
+integration. A representative desired connection is a literal host/user/identity/port plus explicit
+trust sources, not an alias interpreted through the operator's SSH configuration.
 
 Operators supply values hidden in existing aliases; migration does not run ssh -G, evaluate Match
 clauses or discover arbitrary routing policy. Identity selection is independent of agent selection:
@@ -147,6 +144,28 @@ and session restore/cleanup in that inventory. Preserve ownership records and pa
 checkpoints while replacing their command/copy calls with shared execution and file operations. The
 later file-only slice precedes broader file-consumer migration, while the Phase 1 carrier proof
 still precedes the full Phase 2 SSH implementation.
+
+## Current migration risk disposition
+
+Checked against code at `ee630167` and transport's
+[migration inventory](../2026-09-12-transport-improv/migration-strategy.md#release-behaviors-that-the-cutover-must-preserve).
+This replaces the working risk list in the historical comparison. An assigned owner or a passing
+buffered proof does not close an unimplemented migration gate.
+
+| Risk and current source                                                                                                                                                                                               | Disposition and acceptance gate                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bootstrap tools: `capabilities/vm_platform/cloud_init.py:16-27`, `vms/initializer/driver.py:550-551`, `native_files.py:241-246`                                                                                       | Python is installed during initialization, after initial SSH use. Transport owns early preparation and package installation without a circular helper prerequisite, including platform-host userspace. SSH preserves the one-attempt prepared-byte boundary. Buffered guest proof does not prove every bootstrap or host combination; this remains an additive integration gate.                                                                                          |
+| Sensitive discovery: `harness_setup/inputs.py:67`, `plugins/claude/harness_integration.py:219-229`, `artifacts/native/probe.py:402-435`                                                                               | The old probe passes resolved environment through login startup and then needs parsed output. Transport's inventory replaces this with trusted identity/environment composition and bounded file observation. The exact sensitive collector/discovery path still needs reflection and useful-result evidence before consumer conversion; no SSH output exemption or relabeling of secrets is permitted.                                                                   |
+| Trust maintenance and rollback                                                                                                                                                                                        | [Trust maintenance](trust-lld.md), [configuration](configuration-lld.md) and [enrollment](enrollment-lld.md) now name the maintenance authority, complete-policy refresh, blocked admission, retained candidates and strict recovery. Their independent implementation and fixtures pass. Production writer ownership, genuine creation provenance, publication and rollback still require transport composition and isolated-copy workflow evidence before new-path use. |
+| Shared I/O, shell startup and status ambiguity                                                                                                                                                                        | The [accepted buffered proof](poc-results.md#joint-acceptance-and-remaining-scope) covers only its recorded cells. Raw mixed stderr, status 255 and one-attempt behavior stay in the carrier report; transport interprets prepared control evidence. Live borrowed endpoints, sensitive transient collection, terminal restoration and platform prerequisites remain joint implementation/proof gates.                                                                    |
+| File publication and lifecycle ownership: `native_files.py:250-428`, `artifacts/publication.py:71-217`, `harness_setup/dispatch.py:179-238`, `artifacts/session.py:215-232`, `sessions/manager/_lifecycle.py:898-995` | Transport's file and lifecycle migration must preserve conditional publication, metadata, confirmed-effect checkpoints, restart ordering and retained cleanup uncertainty. SSH supplies truthful delivery/failure evidence and never retries an uncertain mutation. These callers remain on the old stack until their owning migration batches pass.                                                                                                                      |
+| Activation maps: `capabilities/harness_integration/activations.py:24-65`                                                                                                                                              | Current configuration merges and removes map entries. Transport fixtures and consumer conversion must use that model; SSH does not interpret activations. Successor permission enforcement remains subject to the operator's removal-stage ruling.                                                                                                                                                                                                                        |
+
+The older comparison's legacy-alias, byte-normalization and type-dependency observations are also
+accounted for: explicit endpoint/trust conversion is specified above; new carrier results retain
+bytes; and independence tests refuse legacy execution imports. Those checks do not establish
+provider-inner isolation, complete caller migration or permission activation. Transport owns the
+full incident-derived inventory; this table records SSH's cross-lane obligations without copying it.
 
 ## Required evidence
 
