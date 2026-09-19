@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from agentworks.errors import ValidationError
-from agentworks.execution.carriers.ssh.settings import validate_literal_path
+from agentworks.execution.carriers.ssh.settings import validate_literal_path, validate_ssh_executable
 from agentworks.execution.carriers.ssh.trust import ManagedSSHTrust, SSHTrustFiles, resolve_trust
 
 if TYPE_CHECKING:
@@ -71,13 +71,7 @@ class SSHConnection:
             if not isinstance(self.agent_socket, str):
                 raise ValidationError("SSH agent socket must be an absolute native path")
             validate_literal_path(Path(self.agent_socket))
-        if (
-            not isinstance(self.ssh_executable, str)
-            or not self.ssh_executable
-            or self.ssh_executable.startswith("-")
-            or any(ord(c) < 32 or ord(c) == 127 for c in self.ssh_executable)
-        ):
-            raise ValidationError("SSH executable must be an explicit command name or native path")
+        validate_ssh_executable(self.ssh_executable)
 
 
 def _validate_trust_paths(trust: SSHTrustFiles) -> None:
@@ -122,12 +116,10 @@ def _validate_identity_sidecar(identity_file: Path) -> None:
     if not sidecar.exists():
         return
     try:
-        # A directly configured public key wins before the .pub fallback.
-        try:
-            read_public_ssh_identity(identity_file)
-            return
-        except SSHIdentityReadError:
-            identity = read_private_ssh_identity(identity_file)
+        # A public file cannot prove OpenSSH will accept its entire encoding.
+        # Refuse an ambiguous public-file/sibling pair instead of allowing a
+        # client parse failure to select another key through suffix lookup.
+        identity = read_private_ssh_identity(identity_file)
         companion = read_public_ssh_identity(sidecar)
     except SSHIdentityReadError:
         raise ValidationError("SSH identity and sibling public key must be independently verifiable") from None

@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 from agentworks.errors import ValidationError
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def validate_literal_path(path: Path) -> str:
@@ -26,6 +24,15 @@ def validate_literal_path(path: Path) -> str:
     ):
         raise ValidationError("SSH paths must be absolute native paths without expansion tokens or control characters")
     return value
+
+
+def validate_ssh_executable(value: str) -> None:
+    """Validate an explicitly selected installed client at config/adapter boundaries."""
+    if not isinstance(value, str) or not value:
+        raise ValidationError("SSH executable must be a command name or absolute native path")
+    if re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", value):
+        return
+    validate_literal_path(Path(value))
 
 
 @dataclass(frozen=True)
