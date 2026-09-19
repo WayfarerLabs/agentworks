@@ -324,12 +324,13 @@ The existing finite-input carrier boundary permits non-production adapter proofs
 the new helper runtime. It does not authorize production wiring or settle the sink extension.
 
 The
-[Lima v2.0.3 shell implementation](https://github.com/lima-vm/lima/blob/d2ef7c5111d80e07c6d76172bcba9c4c7cd50557/cmd/limactl/shell.go#L188-L228)
-adds login startup even with an explicit `--shell`. The same version returns without dispatch when
-the instance is stopped and start was not requested. Thus a thin `limactl shell` wrapper neither
-honors our preparation-controlled startup policy nor turns local zero into evidence of dispatch.
-Native Lima needs provider discovery composed with the shared SSH policy and delivery, or another
-proved mechanism; no legacy wrapper should be copied as the new carrier.
+[Lima v2.0.3 shell implementation](https://github.com/lima-vm/lima/blob/f1e8803c3c475c176a5ff94cf145762281b51419/cmd/limactl/shell.go#L204-L229)
+adds login startup even with an explicit `--shell`. The same version
+[returns without dispatch](https://github.com/lima-vm/lima/blob/f1e8803c3c475c176a5ff94cf145762281b51419/cmd/limactl/shell.go#L107-L121)
+when the instance is stopped and start was not requested. Thus a thin `limactl shell` wrapper
+neither honors our preparation-controlled startup policy nor turns local zero into evidence of
+dispatch. Native Lima needs provider discovery composed with the shared SSH policy and delivery, or
+another proved mechanism; no legacy wrapper should be copied as the new carrier.
 
 The
 [WSL command parser at a366853f](https://github.com/microsoft/WSL/blob/a366853fa06b46b0797a5d359321a870a6aafce0/src/windows/common/WslClient.cpp#L1803-L1842)
