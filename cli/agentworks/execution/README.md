@@ -17,14 +17,15 @@ stream whose EOF cannot be established within the carrier's collection bound. `O
 distinct capture-limit outcome. These local failures preserve independently observed completion and
 partial-stream evidence; none establishes guest cancellation or permits replay.
 
-`preparation.py` prepares literal commands and explicit sh/bash scripts, ordinary environment/cwd
-and finite input. Source, environment and input are encoded into stdin, not process arguments. The
-Linux bootstrap needs Bash 5.1 or newer, GNU base64/env and `/dev/fd`; destination account-shell
-lookup also needs getent/id. It uses no installed guest helper, Python or staging files. Login and
-interactive startup are explicitly refused by this proof subset. Preparation accepts at most 256 KiB
-of encoded input; carriers can impose smaller documented delivery limits. Bash's saved
-process-substitution waits require the 5.1 floor; local fault-injection evidence currently covers
-Bash 5.2.15, not every version at or above that floor.
+`models.py` defines immutable literal commands and scripts with explicit `Shell.SH`, `Shell.BASH` or
+`Shell.USER_DEFAULT` selection and separate startup flags. `preparation.py` consumes those values
+with ordinary environment/cwd and finite input. Source, environment and input are encoded into
+stdin, not process arguments. The Linux bootstrap needs Bash 5.1 or newer, GNU base64/env and
+`/dev/fd`; destination account-shell lookup also needs getent/id. It uses no installed guest helper,
+Python or staging files. Login and interactive startup are explicitly refused by this proof subset.
+Preparation accepts at most 256 KiB of encoded input; carriers can impose smaller documented
+delivery limits. Bash's saved process-substitution waits require the 5.1 floor; local
+fault-injection evidence currently covers Bash 5.2.15, not every version at or above that floor.
 
 The bootstrap waits for source and stdin producers as well as output encoders. Unexpected producer
 failure invalidates delivery even if the command exits zero. Intentional early input closure is
