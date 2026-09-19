@@ -346,9 +346,9 @@ SIGINT without changing production code. A temporary non-raising handler recorde
 injected checkpoint raised `KeyboardInterrupt` only after the pump entered its guarded region. The
 handler remained non-raising during cleanup and was restored before propagation. In each run, the 50
 and 200 microsecond timing groups produced 16 live baseline orphans in 16 trials, versus 16 cleaned
-and reaped candidate children. An outer subreaper verified direct ownership before killing and
-reaping a baseline orphan. A separate cleanup-time signal case also reaped its child before
-propagating. A native child's observed SIGINT mask/disposition remained unchanged.
+and reaped candidate children. An outer process adopted each baseline orphan and verified direct
+ownership before killing and reaping it. A separate cleanup-time signal case also reaped its child
+before propagating. A native child's observed SIGINT mask/disposition remained unchanged.
 
 This is mechanism evidence, not an implementation choice. The fixture wrapped process creation to
 record returned PIDs and injected the checkpoint through a deadline adapter; neither belongs in a
