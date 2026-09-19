@@ -6,9 +6,9 @@ deadline; killing and reaping the local process gets at most 0.5 seconds more.
 That allowance never resumes execution. Process results establish neither guest
 dispatch nor target termination.
 
-Cleanup owns a process only after Popen returns. A control-flow interruption
-during construction can leave a child without a returned handle; this pump does
-not yet satisfy the launch-interruption cleanup contract.
+Cleanup is guarded only after process construction and loop-state initialization.
+An earlier control-flow interruption can leave a child alive, including without
+a returned handle; this pump does not satisfy the launch-interruption contract.
 """
 
 from __future__ import annotations

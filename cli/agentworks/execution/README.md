@@ -54,12 +54,12 @@ unknown stream provenance; each carrier owns interpretation as delivery evidence
 guest dispatch or termination. SSH still uses its private pump until its owning lane adapts the call
 sites and removes that copy; the shared module adds no streaming or terminal support.
 
-The pump owns cleanup after `Popen` returns, not throughout process construction. A real SIGINT
-probe on Linux with CPython 3.12.13 interrupted construction after child creation and left that
-local child alive without a returned handle. Launch-interruption ownership remains an unresolved
-production gate, including for the existing SSH copy. A deadline consumes startup time but cannot
-interrupt an OS process-creation call that has not returned; it is not a hard real-time bound over
-that call.
+The cleanup guard covers the I/O loop, not process construction or the intervening initialization. A
+real SIGINT probe on Linux with CPython 3.12.13 interrupted construction after child creation and
+left that local child alive without a returned handle. Launch-interruption ownership remains an
+unresolved production gate, including for the existing SSH copy. A deadline consumes startup time
+but cannot interrupt an OS process-creation call that has not returned; it is not a hard real-time
+bound over that call.
 
 ## Observation and guest lifetime
 
