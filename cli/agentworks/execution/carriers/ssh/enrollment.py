@@ -223,8 +223,14 @@ def _maintain(
                 except BaseException as error:
                     try:
                         _sync_candidate(candidate)
-                    except BaseException:
-                        error.add_note("SSH enrollment evidence could not be flushed; inspect retained storage")
+                    except BaseException as flush_error:
+                        note = "SSH enrollment evidence could not be flushed; inspect retained storage"
+                        if isinstance(flush_error, (KeyboardInterrupt, SystemExit)) and not isinstance(
+                            error, (KeyboardInterrupt, SystemExit)
+                        ):
+                            flush_error.add_note(note)
+                            raise
+                        error.add_note(note)
                     raise
             else:
                 _verify_document(directory, provenance, generation)
