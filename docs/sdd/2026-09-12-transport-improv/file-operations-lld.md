@@ -28,11 +28,10 @@ dependency, check-then-rename conflict window, public runner, mutable staging sl
 string allowlist are not carried forward.
 
 The first slice needs one small file helper, invoked as a subprocess through the new `Carrier`.
-Shell built-ins do not expose the required descriptor-relative object handling, while Python is
-unavailable before Phase B on some required paths. A packaged native executable is one candidate,
-not an approved technology choice; prerequisite/runtime alternatives and their phase availability
-must be compared before implementation. In every case, the helper is a closed operation protocol,
-not a daemon, agent, remote execution escape, or general file-policy engine.
+Shell built-ins do not expose the required descriptor-relative object handling. An early Python
+prerequisite and a packaged native executable are unresolved candidates; the requested operator
+decision is still pending, so this LLD selects neither. In every case, the helper is a closed
+operation protocol, not a daemon, agent, remote execution escape, or general file-policy engine.
 
 Directory transfer and confined extraction remain required by R7 but are deliberately outside this
 first slice. Their absence blocks complete R7 acceptance, not delivery of the file-only vertical
@@ -147,43 +146,27 @@ their resource domains and use snapshot plus `Match`; FileAccess accepts no tran
 
 ## Helper deployment and protocol
 
-The leading candidate is a small native program with no language runtime or network access: package
-digest-pinned artifacts for Linux `x86_64`/`aarch64` and both macOS architectures, built against the
-oldest supported ABI/OS. This is a substantial unapproved build and distribution cost. Before
-selection, the lead and operator must compare it with an already-established prerequisite
-runtime/helper and with deferring operations unavailable before that prerequisite. Any selection
-must prove phase availability, descriptor APIs, compiler/provenance pipeline, package layout,
+The helper substrate is not selected. Early Python must prove its pre-Phase-B installation and
+descriptor APIs. A native candidate must prove its compiler/provenance pipeline, package layout,
 supported ABI/OS/CPU, and macOS execution behavior. Runtime download, on-target compilation, and a
-legacy-helper fallback are outside this design.
+legacy-helper fallback are outside this design. File operations do not implicitly install a runtime;
+provisioning an early Python prerequisite is a separate pending operator decision.
 
-For the native candidate, `execution/file_helper.py` would own an operation-lifetime
-`HelperSession`:
-
-1. Select the asset from core-observed OS/architecture; caller input cannot select it.
-2. Create an unpredictable mode-0700 directory under `/run/agentworks/file-ops` for elevated Debian,
-   the bound user's `.cache/agentworks/file-ops` for ordinary Debian, or
-   `Library/Caches/Agentworks/file-ops` under the bound macOS home.
-3. Fixed `/bin/sh` bootstrap source writes numbered base64 parts, privately concatenates/decodes
-   them, verifies the packaged SHA-256 with an absolute tool, chmods 0700, and atomically names the
-   helper. Ambiguity abandons that directory; never append/replay into it.
-4. An absolute-path `hello` under a clean core environment must match version, digest, OS/CPU,
-   effective identity, and features. Close removes only recorded objects; failure records cleanup
-   debt without hiding the primary outcome.
-
-The bootstrap tool matrix is explicit: Debian needs `/bin/sh`, `/bin/mkdir`, `/bin/cat`,
-`/bin/chmod`, `/bin/rm`, `/usr/bin/base64 -d`, `/usr/bin/sha256sum`, and `/usr/bin/uname`; macOS
-needs the same basic absolute tools, `/usr/bin/base64 -D`, `/usr/bin/shasum -a 256`, and
-`/usr/bin/uname`. No `PATH`, startup file, Python, Phase B package, Tailscale route, or caller
-cwd/env is used. Missing tools, a `noexec` scratch root, unsupported architecture, digest mismatch,
-or helper feature mismatch refuses before destination mutation. These paths and tool spellings are
-design inputs, not evidence: clean Debian 12/13 images and supported macOS host versions still need
-live proof.
+Whichever candidate is selected, `execution/file_helper.py` owns an operation-lifetime
+`HelperSession`. Helper delivery reuses the preparation LLD's private scratch transfer: a
+core-selected helper is written at exact offsets into operation-owned scratch and length/digest
+verified. It does not add a numbered-part/base64 deployment state machine. The shared 24 KiB raw
+chunk is a candidate pending SSH/QGA whole-request proof, not a file-layer constant. A native
+candidate also needs a proved fixed finalization step that makes only the verified owned object
+executable. An absolute-path `hello` under the clean core environment must match version, digest,
+OS/CPU, effective identity, and features. Close removes only recorded objects; uncertain cleanup is
+owner debt and never hides the primary outcome.
 
 Every exchange is one `Carrier.execute` with literal absolute argv. Its ASCII `AGWF1` envelope has a
 32-hex request ID, one closed operation, unique named base64/decimal fields, and a terminator. The
 response must match the ID and contain closed status/phase values. Strict field/line/decoded/total
-bounds and a 32 KiB raw chunk keep it below QGA's 65,536-byte input cap. No request value becomes
-argv or shell source; fixed bootstrap source cannot be reused for file operations.
+bounds inherit the preparation substrate's proved carrier limits. No request value becomes argv or
+shell source; fixed preparation bootstrap source cannot be reused for file operations.
 
 The existing buffered carrier cannot safely carry this protocol as written: sensitive input makes it
 suppress the response, while ordinary `Capture` can flow toward public execution results. Reuse the
@@ -205,25 +188,45 @@ chunks come from a private complete spool, not repeated reads of a changing sour
 the end-to-end size/digest too. No helper operation accepts executable names, arbitrary flags,
 environment, cwd, source text, callbacks, or a destination outside its single request.
 
+### No-staging readiness gate
+
+Preparation readiness permits no helper deployment, private scratch, spool, or new lock state.
+FileAccess may expose only bounded `read_file` and `stat` there, and only through an
+already-available trusted substrate proved to meet file confinement, object, sensitivity, and
+truthful-result rules within the inline bound. The staged helper described above cannot satisfy this
+gate. Without such a substrate, an optional call refuses before dispatch, while a required workflow
+must establish its prerequisite before entering readiness. Relocation to a staging-capable phase is
+allowed only when the existing workflow contract permits it; a mandatory readiness read that cannot
+remain no-write is a delivery gate requiring operator decision. Absence never authorizes public
+execution or silent removal of a required workflow. The early-Python versus native-helper decision
+remains open.
+
 ## Confinement and filesystem mechanics
 
 All target operations occur in the helper process. Host-side normalization and later grant checks
-are early refusals, never the security mechanism.
+are early refusals, never the security mechanism. The mechanics below are candidates, not an
+approved confinement design, until the ancestry and hard-link gates in this section are proved.
 
-- Walk absolute ancestors from an open root descriptor and retain directory descriptors through the
-  mutation. Linux uses `openat2` with `RESOLVE_BENEATH`, `RESOLVE_NO_SYMLINKS`,
-  `RESOLVE_NO_MAGICLINKS`, and, once below a trusted policy root, `RESOLVE_NO_XDEV`. macOS walks one
-  component at a time with `openat(..., O_NOFOLLOW | O_DIRECTORY)`, comparing object and filesystem
-  identity before the final operation. Unsupported safe primitives are a platform blocker, not a
-  string-prefix fallback.
-- During coexistence an existing mount on the exact path is explicit, but a mount change during the
-  call fails. After activation, bind the approved root mount and reject descendant crossings.
-  Network filesystems or filesystems lacking local rename/lock semantics are unsupported proof
-  obligations.
-- Open regular leaves with no-follow and nonblocking flags, then verify by descriptor. Reject every
-  symlink, magic link, device, FIFO, and unexpected socket. Reject regular files with link count
-  other than one, preventing a hard-link alias from carrying reads or mutations outside the named
-  location.
+- The lookup candidate walks absolute ancestors from an open root descriptor. Linux uses `openat2`
+  with `RESOLVE_BENEATH`, `RESOLVE_NO_SYMLINKS`, `RESOLVE_NO_MAGICLINKS`, and, once below a trusted
+  policy root, `RESOLVE_NO_XDEV`. macOS walks one component at a time with
+  `openat(..., O_NOFOLLOW | O_DIRECTORY)`, comparing object and filesystem identity before the final
+  operation. These primitives constrain lookup; they do not prove that a held directory remains
+  below the trusted root.
+- A directory FD remains a stable reference when its directory is renamed, including outside the
+  trusted tree, as documented by Linux
+  [`open(2)`](https://man7.org/linux/man-pages/man2/open.2.html). A final path check cannot close
+  the next rename or mount race. Before this candidate is approved, every supported platform/path
+  must either enforce trusted-ancestor rename and mount invariants for the operation or use another
+  proved mechanism. Required ordinary-user destinations cannot be silently excluded when that proof
+  fails.
+- Open regular leaves with no-follow and nonblocking flags, then verify by descriptor. Reject links,
+  devices, FIFOs, and unexpected sockets at observation. `st_nlink == 1` is not perpetual: a
+  same-user actor can add a hard link or rename/swap the leaf before elevated `fchown`/`fchmod`, so
+  the held inode may become reachable outside the grant. Rechecking does not close the system-call
+  race. Held-inode metadata, existing-directory convergence, and exposed staging in a link-capable
+  parent therefore share the hard confinement gate above; no existing open/no-follow primitive is
+  claimed to solve it.
 - Publication creates a sibling staging inode, writes and verifies all bytes, applies metadata,
   syncs the staged file, revalidates the destination condition, and uses descriptor-relative rename.
   Create-only uses Linux `renameat2(RENAME_NOREPLACE)` and macOS `renameatx_np(RENAME_EXCL)`; lack
@@ -247,28 +250,27 @@ component but cannot finish metadata convergence.
 
 ## Cooperating writers and honest limits
 
-Every new-stack read, stat, list, JSON update, publication, directory, metadata, and removal call
-must participate in a canonical lock scope derived from the composition-bound machine target and
-normalized path, not effective identity or a caller-selected root. Reads/snapshots take a shared
-target lock. Mutations take shared ancestor locks and an exclusive target lock. A directory
-inventory takes an exclusive target lock, so cooperating descendant operations block on their shared
-ancestor lock and cannot produce a torn inventory. Locks are acquired root-to-leaf and
-deadline-bounded.
+All cooperating helper filesystem transactions on one machine use one identity-neutral, exclusive
+machine-level lock. There is no path hierarchy or shared-lock protocol. Acquisition and the critical
+section obey the caller's deadline. Upload bytes may reach verified private scratch before locking;
+publication then locks, rechecks the condition, and renames. A read locks until its immutable
+snapshot is materialized, then transfers chunks outside the lock. Stat releases after observation;
+list materializes its bounded result before release. Inventory remains a bounded set of
+observations, not a globally coherent filesystem view.
 
-That rule intentionally requires ordinary-user and elevated helpers touching the same path to
-coordinate. A per-user cache lock cannot satisfy it. A stable, identity-neutral lock namespace or a
-single broker identity is only a candidate: its safe creation, permissions, lifecycle, collision
-resistance, and operation before permission activation remain unproved on Debian and macOS. The
-migration inventory must find every cross-identity path, and no affected consumer may migrate until
-one protocol is proven. Excluding a required admin/user workflow needs operator disposition.
+Ordinary-user and elevated helpers must open the same lock. A per-user cache cannot satisfy that
+contract. Safe creation, permissions, lifecycle, and availability of an identity-neutral namespace
+before permission activation remain unproved on Debian and macOS. The migration inventory must find
+every cross-identity path, and no affected consumer may migrate until the protocol is proven.
+Excluding a required admin/user workflow needs operator disposition.
 
 `Match` is atomic only with respect to those cooperating writers: the helper compares the revision
-and renames while holding their exclusive lock. A non-cooperating process ignores the lock. No
+and renames while holding the transaction lock. A non-cooperating process ignores the lock. No
 portable Debian/macOS primitive atomically compares an observed arbitrary destination revision and
 replaces or unlinks that same revision. Therefore an external writer can race the final check and
-rename/unlink window. The helper still prevents path escape, link following, and special-object
-blocking, but it cannot promise external-writer compare-and-swap. Create-only no-replace remains
-atomic where the named filesystem supports the platform primitive.
+rename/unlink window. Subject to the unresolved confinement gates, the helper refuses observed links
+and special objects, but it cannot promise external-writer compare-and-swap. Create-only no-replace
+remains atomic where the named filesystem supports the platform primitive.
 
 This limit is visible in documentation and tests. It is acceptable only where domain ownership or
 service coordination makes external writers non-adversarial. Tmux/session code must coordinate
@@ -290,7 +292,8 @@ The additive and consumer-migration releases enforce operational safety immediat
 destination and elevation, actual OS permissions, bounds, helper integrity, link/object/mount
 handling, metadata rules, cooperating-writer locks, sensitivity, and truthful outcomes. Existing
 legacy calls and their current checks remain unchanged. New code never dispatches a mutation through
-both stacks.
+both stacks. The unproved confinement, cross-identity lock, helper, and no-staging candidates above
+are hard enablement gates, not behavior the additive release may assume.
 
 Those releases do **not** enforce or claim the new recipient grants or successor core allowlist.
 There is no allow-all toggle, shadow decision callback, compatibility policy service, or fallback to
@@ -343,38 +346,47 @@ generated sections, and native inventory, but drive only the new API/helper.
    missing/empty/malformed input, duplicate keys, finite numbers, UTF-8, and literal `null` on both
    winning sides. Replace and skip-existing must not parse old bytes or disclose values.
 2. **Paths/objects:** cover ancestor/leaf links, Linux magic links, hard links, traversal/prefix
-   collisions, devices, nonblocking FIFO refusal, sockets, directories, mount changes, and
-   synchronized ancestor/leaf swaps. No race may escape the held directory.
+   collisions, devices, nonblocking FIFO refusal, sockets, directories, and mount changes. Race
+   fixtures rename a held ancestor outside the root and add a hard link before held-inode metadata;
+   acceptance requires enforced invariants or another proved mechanism on every required path.
 3. **Publication/metadata:** cover every condition, chunk/partial failures, byte and digest checks,
    pre-visibility metadata, Linux and macOS ACL/xattrs, BSD-flag refusal, lost acknowledgment,
    in-place metadata partial effects, and cleanup debt. Every pre-rename publication failure leaves
    the old inode unchanged.
 4. **Concurrency/lifecycle:** multiprocess whole-file and JSON writers preserve unique keys and
-   conflict on stale snapshots; inventory does not tear; lock waits are bounded. Directory tests
-   cover exact creation, limits/order, empty removal, and no implicit parents/recursive delete.
-   Remove a real tmux socket only after liveness proves absence; replacement yields conflict or
-   uncertainty. An external writer fixture demonstrates, but does not overclaim, the non-CAS limit.
+   conflict on stale snapshots under the machine transaction lock; lock waits are bounded and
+   immutable snapshot/chunk transfer occurs outside it. Directory tests cover bounded inventory,
+   limits/order, exact creation, empty removal, and no implicit parents/recursive delete. Remove a
+   real tmux socket only after liveness proves absence; replacement yields conflict or uncertainty.
+   An external writer fixture demonstrates, but does not overclaim, the non-CAS limit.
 5. **Carrier/bootstrap:** prove `SinkOutput` on SSH and QGA with reflected input,
-   malformed/truncated envelopes, bounded parser state, no raw response retention, exact offsets,
-   identity/digest/features, missing tools, `noexec`, cleanup interruption, and startup with legacy
-   unavailable.
+   malformed/truncated envelopes, bounded parser state, and no raw retention. Prove shared private
+   scratch helper delivery, the candidate 24 KiB bound, exact offsets/digests, native finalization
+   if selected, cleanup interruption, and startup with legacy unavailable.
 6. **Live/permissions:** before enablement, run SSH/QGA on clean pre-Phase-B Debian 12/13 for both
    CPUs and SSH on each supported macOS/CPU, recording tools, filesystems, rename/locks, metadata,
-   scratch, identity, chunks, and faults. Separately test future grants in isolation, coexistence
-   non-enforcement/unchanged legacy checks, then removal-time activation with no bypass.
+   scratch, identity, chunks, and faults. No-staging readiness tests prove already-available bounded
+   read/stat or refusal with no deploy/spool/lock creation. Separately test future grants in
+   isolation, coexistence non-enforcement/unchanged legacy checks, then removal-time activation.
 
 ## Open gates and compatibility costs
 
 The following are not established by source inspection and must remain open in the lead's plan:
 
-- select a helper technology and prove its pre-Phase-B availability; if native is selected, approve
-  its build, packaging, provenance, ABI/OS/architecture, and macOS execution cost;
+- obtain the pending early-Python versus native-helper decision and prove the selection's
+  pre-Phase-B availability; if native is selected, approve its build, packaging, provenance,
+  ABI/OS/architecture, executable-finalization, and macOS execution cost;
 - jointly prove the carrier I/O LLD's `SinkOutput` on SSH and QGA without raw response retention;
-- measure clean-image bootstrap tools and executable scratch roots, including early QGA recovery and
-  macOS placement hosts;
+- reuse and prove preparation's private scratch transfer and candidate 24 KiB bound; do not add a
+  file-specific deployment protocol;
+- prove a no-staging, already-available bounded read/stat substrate for every readiness workflow;
+  establish a prerequisite earlier only where the workflow contract permits, otherwise treat a
+  mandatory no-write read as a delivery gate requiring operator decision;
 - inventory finite transfer sizes, network/nonlocal filesystems, and every path written by multiple
   effective identities or adversarial external writers; prove a cross-identity lock protocol for
   required admin/user workflows;
+- prove enforced trusted-ancestor rename/mount and hardlink-add invariants, or another confinement
+  mechanism, for every required ordinary and elevated destination;
 - decide the supported macOS minimum and Windows-local download publication design;
 - complete directory transfer/confined extraction before claiming full R7;
 - inventory the exact future core catalog and recipient subsets before removal; and
