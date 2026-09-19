@@ -184,6 +184,9 @@ Coordinate integration and landing order with transport's complete additive RunC
 consumer migration and retirement do not gate this implementation PR. SSH does not take ownership of
 transport's files, shared supervision or consumer migration.
 
+The [implementation progress record](phase2-results.md) pins the completed independent code and
+local validation separately from the remaining shared integration and platform acceptance.
+
 ### Complete the carrier and migration
 
 - [ ] Finish the SSH LLD for R1-R5: complete connection validation, installed-client/path policy,
