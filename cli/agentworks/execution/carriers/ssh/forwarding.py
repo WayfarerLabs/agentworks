@@ -11,11 +11,11 @@ from ipaddress import IPv4Address, IPv6Address
 from threading import Event, Thread
 from typing import TYPE_CHECKING
 
-from agentworks.errors import ConnectivityError, ValidationError
+from agentworks.errors import ConnectivityError, StateError, ValidationError
 from agentworks.execution.carrier import Failure, PreparedInvocation
 from agentworks.execution.carriers.ssh._io import _child_environment, _cleanup
 from agentworks.execution.carriers.ssh.client import check_client_version
-from agentworks.execution.carriers.ssh.connection import build_ssh_argv, validate_connection_files
+from agentworks.execution.carriers.ssh.connection import admit_connection, build_ssh_argv
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -211,13 +211,22 @@ def open_local_forwards(
         raise ValidationError("SSH forwarding requires at least one explicit local forward")
     if deadline.expired:
         raise ForwardingError(Failure.DEADLINE)
-    validate_connection_files(connection)
+    try:
+        trust = admit_connection(connection)
+    except (OSError, StateError, ValidationError):
+        raise ForwardingError(Failure.DISPATCH) from None
+    if deadline.expired:
+        raise ForwardingError(Failure.DEADLINE)
     failure = check_client_version(connection, deadline=deadline)
     if failure is not None:
         raise ForwardingError(failure)
+    if deadline.expired:
+        raise ForwardingError(Failure.DEADLINE)
     marker = f"agw-forward-ready-{secrets.token_hex(16)}"
     invocation = PreparedInvocation(("sh", "-c", f"printf '%s\\n' '{marker}'; IFS= read -r _; exit 0"))
-    argv = build_ssh_argv(connection, invocation, local_forwards=tuple(forward._operand() for forward in requests))
+    argv = build_ssh_argv(
+        connection, invocation, trust=trust, local_forwards=tuple(forward._operand() for forward in requests)
+    )
     if deadline.expired:
         raise ForwardingError(Failure.DEADLINE)
     try:

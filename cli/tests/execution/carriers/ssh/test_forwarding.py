@@ -11,7 +11,7 @@ import sys
 import threading
 import time
 from collections.abc import Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from ipaddress import IPv4Address, IPv6Address
 from pathlib import Path
 from typing import Any
@@ -20,9 +20,17 @@ import pytest
 
 from agentworks.errors import ValidationError
 from agentworks.execution.carrier import Deadline, Failure
-from agentworks.execution.carriers.ssh import forwarding
-from agentworks.execution.carriers.ssh.connection import SSHConnection
+from agentworks.execution.carriers.ssh import _io, forwarding
+from agentworks.execution.carriers.ssh.connection import SSHConnection, admit_connection
 from agentworks.execution.carriers.ssh.forwarding import ForwardingError, LocalForward, open_local_forwards
+from agentworks.execution.carriers.ssh.trust import (
+    SSHTrustFiles,
+    block_trust,
+    import_trust,
+    refresh_trust,
+    resolve_trust,
+    trust_status,
+)
 
 pytestmark = pytest.mark.windows
 
@@ -50,10 +58,11 @@ class SyntheticForwarding:
 
 @pytest.fixture
 def synthetic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[SyntheticForwarding]:
+    tmp_path = tmp_path.resolve()
     identity, trust = tmp_path / "identity", tmp_path / "trust"
     identity.write_bytes(b"synthetic")
     trust.write_bytes(b"synthetic")
-    value = SyntheticForwarding(SSHConnection("fixture.invalid", "fixture", identity, trust))
+    value = SyntheticForwarding(SSHConnection("fixture.invalid", "fixture", identity, SSHTrustFiles((trust,))))
     original = subprocess.Popen
 
     def spawn(argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
@@ -212,7 +221,7 @@ def test_read_error_closes_owned_client(synthetic: SyntheticForwarding, monkeypa
     def fail(fd: int, size: int) -> bytes:
         raise OSError("unretained diagnostic")
 
-    monkeypatch.setattr(forwarding.os, "read", fail)
+    monkeypatch.setattr(os, "read", fail)
     with pytest.raises(ForwardingError) as caught:
         resource.wait()
     assert caught.value.failure == Failure.OUTPUT
@@ -230,7 +239,7 @@ def test_pipe_setup_error_closes_before_returning(
     def fail(fd: int, blocking: bool) -> None:
         raise OSError("unretained diagnostic")
 
-    monkeypatch.setattr(forwarding.os, "set_blocking", fail)
+    monkeypatch.setattr(os, "set_blocking", fail)
     with pytest.raises(ForwardingError) as caught:
         synthetic.open()
     assert caught.value.failure == Failure.OBSERVATION
@@ -241,7 +250,7 @@ def test_delayed_cleanup_reports_uncertainty_within_join_bound(
     synthetic: SyntheticForwarding, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     release = threading.Event()
-    original = forwarding._cleanup
+    original = _io._cleanup
 
     def delayed(process: subprocess.Popen[bytes]) -> bool:
         release.wait(timeout=5)
@@ -283,6 +292,7 @@ def test_setup_failure_releases_partial_owned_listener(synthetic: SyntheticForwa
 
 @pytest.fixture
 def local_sshd(tmp_path: Path) -> Iterator[SSHConnection]:
+    tmp_path = tmp_path.resolve()
     """Owned keys and foreground server on loopback; never read operator SSH state."""
     if sys.platform != "linux":
         pytest.skip("Local unprivileged sshd fixture requires Linux")
@@ -319,7 +329,9 @@ def local_sshd(tmp_path: Path) -> Iterator[SSHConnection]:
                 if time.monotonic() >= deadline:
                     pytest.fail("Owned sshd did not become available")
                 time.sleep(0.01)
-        yield SSHConnection("127.0.0.1", pwd.getpwuid(os.getuid()).pw_name, identity, trust, port=port)
+        yield SSHConnection(
+            "127.0.0.1", pwd.getpwuid(os.getuid()).pw_name, identity, SSHTrustFiles((trust,)), port=port
+        )
     finally:
         server.kill()
         server.wait(timeout=2)
@@ -411,8 +423,9 @@ def test_installed_ssh_ipv6_success_cannot_hide_ipv4_failure(local_sshd: SSHConn
 @pytest.mark.integration
 @pytest.mark.parametrize("refusal", ["trust", "identity", "exec"])
 def test_installed_ssh_refusal_releases_requested_port(local_sshd: SSHConnection, refusal: str) -> None:
+    assert isinstance(local_sshd.trust, SSHTrustFiles)
     if refusal == "trust":
-        local_sshd.known_hosts_file.write_bytes(b"")
+        local_sshd.trust.known_hosts[0].write_bytes(b"")
     else:
         authorized = local_sshd.identity_file.parent / "authorized"
         if refusal == "identity":
@@ -424,3 +437,74 @@ def test_installed_ssh_refusal_releases_requested_port(local_sshd: SSHConnection
         open_local_forwards(local_sshd, [_forward(port)], deadline=Deadline.after(5))
     with socket.socket() as released:
         released.bind(("127.0.0.1", port))
+
+
+@pytest.mark.parametrize("refusal", ["blocked", "corrupt"])
+def test_each_forward_admits_current_managed_policy(
+    synthetic: SyntheticForwarding, tmp_path: Path, refusal: str
+) -> None:
+    bundle = import_trust(tmp_path.resolve() / "managed", sources=synthetic.connection.trust, authority="fixture")
+    synthetic.connection = replace(synthetic.connection, trust=bundle)
+    first = resolve_trust(bundle)
+    with synthetic.open():
+        assert f'UserKnownHostsFile="{first.known_hosts[0].as_posix()}"' in synthetic.calls[-1]
+    source = tmp_path.resolve() / "replacement"
+    source.write_bytes(b"replacement policy")
+    refresh_trust(
+        bundle,
+        sources=SSHTrustFiles((source,)),
+        authority="fixture",
+        expected_generation=trust_status(bundle).generation,
+    )
+    second = resolve_trust(bundle)
+    with synthetic.open():
+        assert f'UserKnownHostsFile="{second.known_hosts[0].as_posix()}"' in synthetic.calls[-1]
+    assert first != second
+    if refusal == "blocked":
+        block_trust(bundle, expected_generation=trust_status(bundle).generation)
+    else:
+        second.known_hosts[0].write_bytes(b"corrupt policy")
+    calls = len(synthetic.calls)
+    with pytest.raises(ForwardingError) as error:
+        synthetic.open()
+    assert error.value.failure == Failure.DISPATCH
+    assert len(synthetic.calls) == calls
+    synthetic.assert_closed()
+
+
+@pytest.mark.parametrize("stage", ["admission", "version"])
+def test_forwarding_checks_expiry_after_local_work(
+    synthetic: SyntheticForwarding, monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    clock = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    original = admit_connection
+
+    def admit(connection: SSHConnection) -> SSHTrustFiles:
+        trust = original(connection)
+        if stage == "admission":
+            clock[0] = 2.0
+        return trust
+
+    def version(connection: SSHConnection, *, deadline: Deadline) -> None:
+        clock[0] = 2.0
+
+    monkeypatch.setattr(forwarding, "admit_connection", admit)
+    monkeypatch.setattr(forwarding, "check_client_version", version)
+    with pytest.raises(ForwardingError) as error:
+        synthetic.open(seconds=1)
+    assert error.value.failure == Failure.DEADLINE
+    assert synthetic.calls == []
+
+
+@pytest.mark.parametrize("interruption", [KeyboardInterrupt, SystemExit])
+def test_forwarding_admission_preserves_control_flow(
+    synthetic: SyntheticForwarding, monkeypatch: pytest.MonkeyPatch, interruption: type[BaseException]
+) -> None:
+    def interrupt(connection: SSHConnection) -> SSHTrustFiles:
+        raise interruption()
+
+    monkeypatch.setattr(forwarding, "admit_connection", interrupt)
+    with pytest.raises(interruption):
+        synthetic.open()
+    assert synthetic.calls == []
