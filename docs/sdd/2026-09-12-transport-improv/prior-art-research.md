@@ -176,6 +176,43 @@ the [2026-09-19 ruling](frd.md#operator-rulings-2026-09-19), these remain ground
 old/new coexistence: production enforcement and security reliance wait for legacy removal. This is
 not evidence of an existing consent system, nor permission to build one during replacement.
 
+### File confinement investigation, 2026-09-19
+
+An independent caller audit at `8239c97a` confirms that required destinations include user-owned
+home directories, group-writable workspace roots, and tmux socket directories. See
+`harness_setup/lifecycle.py:190-199,229-238`, `workspaces/backends/vm.py:78-83`, and
+`sessions/tmux.py:263-302,355-383` under `cli/agentworks/`. Absolute configuration-directory
+overrides are also shipped behavior, documented in
+[`native-harness-setup`](../../guides/native-harness-setup.md). Restricting the implementation to
+root-owned configuration trees would therefore omit required workflows.
+
+A local unprivileged probe on Linux 6.1.0-52 arm64 reproduced two deterministic interleavings in an
+owned temporary directory. It opened an approved directory with `O_DIRECTORY | O_NOFOLLOW`, moved it
+beneath an outside sibling, then created a file through the held descriptor: publication occurred at
+the moved location. Separately, it opened a regular file, checked that its link count was one, added
+an outside hard link, and called `fchmod` on the held descriptor: the outside alias acquired the
+changed mode. Fresh-inode replacement afterward preserved that alias's old bytes. These are
+mechanism counterexamples, not a live-carrier test or a demonstrated exploit of the proposed helper,
+which is not implemented. All fixture objects were removed by the temporary-directory owner.
+
+Linux [`openat2`](https://man7.org/linux/man-pages/man2/openat2.2.html) constrains path resolution;
+it does not make a later operation through a held descriptor an atomic absolute-path check. The
+[Landlock documentation](https://docs.kernel.org/userspace-api/landlock.html) describes rules that
+can follow relocated hierarchies, existing-descriptor rights, and metadata operations such as
+`chmod`, `chown`, and extended-attribute changes that it does not restrict. Inference: adding
+Landlock around this helper would not by itself establish the file contract's complete path and
+metadata confinement. This investigation did not run Landlock or prove an alternative on macOS.
+
+The accepted FRD excludes guest root, not hostile target-user processes. Cooperating-writer locks
+cannot constrain an unrelated process that can rename an ancestor or create an alias. Running the
+helper without elevation avoids adding root authority but does not establish a narrower recipient's
+path grant. The
+[file LLD's confinement gate](file-operations-lld.md#confinement-and-filesystem-mechanics) therefore
+remains open. Preserve it unless the operator explicitly changes the threat boundary; neither the
+future permission-enforcement date nor the in-process plugin trust limitation waives safe object
+handling. A solution retaining hostile same-user actors must establish enforced namespace/identity
+restrictions for these required writable paths, not merely repeat validation.
+
 ### Managed foreground work and session containment
 
 The upstream systemd v252 manual describes transient services, synchronous pipe/PTY operation and
