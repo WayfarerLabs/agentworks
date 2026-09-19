@@ -673,7 +673,7 @@ def test_installed_ssh_owns_fresh_pipe_handles(
             assert not peer.is_alive()
 
 
-@pytest.mark.parametrize("refusal", ["blocked", "corrupt"])
+@pytest.mark.parametrize("refusal", ["blocked", "corrupt", "nested_manifest"])
 def test_each_command_admits_current_managed_policy(synthetic: SyntheticSSH, tmp_path: Path, refusal: str) -> None:
     connection = synthetic.carrier._connection
     bundle = import_trust(tmp_path.resolve() / "managed", sources=connection.trust, authority="fixture")
@@ -696,6 +696,8 @@ def test_each_command_admits_current_managed_policy(synthetic: SyntheticSSH, tmp
     assert first.known_hosts[0].read_bytes() == b"synthetic trust"
     if refusal == "blocked":
         block_trust(bundle, expected_generation=trust_status(bundle).generation)
+    elif refusal == "nested_manifest":
+        (bundle.directory / "state.json").write_bytes(b"[" * 10_000 + b"]" * 10_000)
     else:
         second.known_hosts[0].write_bytes(b"corrupt policy")
     previous_calls = len(synthetic.calls)

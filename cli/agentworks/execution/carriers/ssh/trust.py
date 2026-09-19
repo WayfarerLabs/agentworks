@@ -150,7 +150,7 @@ def _load(directory: Path) -> _Manifest:
         ):
             raise ValueError
         return _Manifest(SSHTrustStatus(generation, blocked, authority, sources), tuple(hashes), revoked_hash)
-    except (ValueError, TypeError, ValidationError) as error:
+    except (ValueError, TypeError, RecursionError, ValidationError) as error:
         raise TrustBlockedError("SSH trust manifest is malformed; repair complete policy before use") from error
 
 

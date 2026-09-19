@@ -73,3 +73,7 @@ Source grounding:
 [listener creation](https://github.com/openssh/openssh-portable/blob/V_8_5_P1/channels.c), and
 [ExitOnForwardFailure](https://man.openbsd.org/ssh_config#ExitOnForwardFailure). These establish the
 mechanism to test, not acceptance of our implementation or platform coverage.
+
+The readiness marker must be the first stdout bytes. Once it is complete, later stdout is discarded,
+including a suffix delivered in the same pipe read. Pipe chunk boundaries do not alter acceptance;
+wrong markers and preceding output still refuse.

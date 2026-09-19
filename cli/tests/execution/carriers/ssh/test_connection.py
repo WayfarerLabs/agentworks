@@ -67,6 +67,10 @@ def test_construction_and_serialization_are_passive(connection: SSHConnection, m
         ("agent_socket", "SSH_AUTH_SOCK"),
         ("agent_socket", "$SSH_AUTH_SOCK"),
         ("ssh_executable", ""),
+        ("ssh_executable", "./ssh"),
+        ("ssh_executable", "relative/ssh"),
+        ("ssh_executable", "~/bin/ssh"),
+        ("ssh_executable", "-ssh"),
         ("ssh_executable", "ssh\0bad"),
         ("identity_file", None),
         ("trust", "relative"),
@@ -156,12 +160,17 @@ def test_sibling_key_cannot_select_another_identity(
     selected = replace(connection, identity_file=identity)
     admit_connection(selected)
     Path(str(identity) + ".pub").write_bytes(Path(str(second) + ".pub").read_bytes())
-    if public_identity:
-        # OpenSSH uses the explicitly selected public file before suffix lookup.
+    with pytest.raises(ValidationError):
         admit_connection(selected)
-    else:
-        with pytest.raises(ValidationError):
-            admit_connection(selected)
+
+
+def test_truncated_public_identity_cannot_fall_back_to_sibling(connection: SSHConnection) -> None:
+    assert isinstance(connection.trust, SSHTrustFiles)
+    connection.trust.known_hosts[0].touch()
+    connection.identity_file.write_bytes(b"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5\n")
+    Path(str(connection.identity_file) + ".pub").write_bytes(b"retained sibling")
+    with pytest.raises(ValidationError):
+        admit_connection(connection)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX account-shell serialization")

@@ -168,12 +168,10 @@ class OwnedForwarding:
                             return
                     progressed |= bool(chunk)
                     if pipe is self._process.stdout and not self._ready.is_set():
-                        # Bound retention to the acknowledgment, including when
-                        # a startup hook writes an arbitrarily large chunk.
-                        if len(received) + len(chunk) > len(self._marker):
-                            self._failure = Failure.INVALID_RESPONSE
-                            return
-                        received.extend(chunk)
+                        # Require the marker first, then discard later stdout.
+                        # A pipe read may contain both; chunk boundaries must
+                        # not change acceptance or increase retained bytes.
+                        received.extend(chunk[: len(self._marker) - len(received)])
                         if not self._marker.startswith(received):
                             self._failure = Failure.INVALID_RESPONSE
                             return
