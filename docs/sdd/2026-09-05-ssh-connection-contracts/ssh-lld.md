@@ -116,7 +116,8 @@ status observed before cleanup can establish completion.
 
 ## Proof and remaining work
 
-The [trust LLD](trust-lld.md) specifies Phase 2 import, refresh and operation admission. The
+The [configuration LLD](configuration-lld.md) specifies additive settings and composition. The
+[trust LLD](trust-lld.md) specifies Phase 2 import, refresh and operation admission. The
 [forwarding LLD](forwarding-lld.md) defines positive listener setup and owned resource lifetime.
 These are implementation designs, not evidence that those mechanisms are shipped or accepted.
 
