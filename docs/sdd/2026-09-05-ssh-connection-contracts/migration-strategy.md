@@ -70,11 +70,11 @@ The reusable SSHConnection contains host, user, port, configured identity, indep
 agent, trust-file references and optional lookup alias/revocation source. It contains no VM state or
 command. Runtime value ownership belongs to SSH; transport owns composition and integration.
 
-The existing local proposal of operator defaults under `[operator.ssh]` and explicit placement
-fields is a candidate storage mapping, not a newly shipped schema or finalized conversion format.
-Current main still uses `operator.ssh_private_key` and alias-based platform-host placement; it has
-no `[operator.ssh]` connection/trust schema. Freeze config spellings, paths and refusal guidance in
-the SSH LLD before build/cutover. A representative desired connection is a literal
+The [configuration LLD](configuration-lld.md) specifies additive `[operator.ssh]` settings for the
+new path while retaining `operator.ssh_private_key` and all legacy readers. The
+[trust LLD](trust-lld.md) defines explicit owned policy import/refresh. These are implementation
+designs, not shipped schema or conversion claims. Platform placement fields remain transport-owned
+and need agreement before their integration. A representative desired connection is a literal
 host/user/identity/port plus explicit trust sources, not an alias interpreted through the operator's
 SSH configuration.
 
