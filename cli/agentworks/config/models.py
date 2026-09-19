@@ -17,6 +17,7 @@ from agentworks.secrets import SecretConfig
 from agentworks.source_location import SourceLocation
 
 if TYPE_CHECKING:
+    from agentworks.execution.carriers.ssh.settings import SSHSettings
     from agentworks.resources.registry import Registry
     from agentworks.terminal import ClearOnDetach
 
@@ -38,6 +39,7 @@ class OperatorConfig:
     # whose SSH traffic egresses somewhere detection cannot see (VPN
     # split tunnels, proxies, CGNAT).
     ssh_allow_cidrs: list[str] = field(default_factory=list)
+    ssh: SSHSettings | None = None
 
 
 @dataclass(frozen=True)
