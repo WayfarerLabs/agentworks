@@ -22,12 +22,11 @@ local config/resource commands remain available during migration.
 | `keepalive_count_max` | Positive unanswered probe count, default 4.                                                |
 
 Expand user paths deliberately at the configuration boundary, retaining native absolute paths in the
-values passed to SSH. Reject nonliteral OpenSSH expansion tokens, control characters and ambiguous
-quoting. No arbitrary client options, proxy selection, algorithm list or alias evaluation is
-accepted. The execution minimum stays OpenSSH 8.5 and is checked at operation time. An explicitly
-selected agent can sign only for the configured identity; it cannot contribute another identity.
-Platform-specific endpoints require supported installed-client behavior and native evidence before
-being advertised.
+values passed to SSH. Reject OpenSSH expansion tokens, control characters and ambiguous quoting. No
+arbitrary client options, proxy selection, algorithm list or alias evaluation is accepted. The
+execution minimum stays OpenSSH 8.5 and is checked at operation time. An explicitly selected agent
+can sign only for the configured identity; it cannot contribute another identity. Platform-specific
+endpoints require supported installed-client behavior and native evidence before being advertised.
 
 Keep `operator.ssh_private_key`, `ssh_public_key`, generated manual aliases and other existing
 fields/readers intact. The default identity comes from an already explicit setting, not key
