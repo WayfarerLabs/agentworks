@@ -115,3 +115,11 @@ separate address families, refused trust/authentication/command execution, and b
 Record actual client/server versions and independently verify released listeners and fixture
 processes. Native Windows and macOS need their own observations; Linux loopback results do not
 establish their process or terminal behavior.
+
+Enrollment fixtures exercise actual first-contact writes followed by strict verification, CA and
+revocation policy, mismatches, failed-authentication key retention and strict recovery. Fault cases
+cover a positive acknowledgment without a saved key, partial metadata, changed policy, competing
+attempts and interruption. These use fixture-only creation IDs; they do not establish transport's
+production creation provenance or publication binding. Every test owns its server, identity, agent
+and policy files. Native platform persistence and cleanup still need the integration tester's
+separate observations.
