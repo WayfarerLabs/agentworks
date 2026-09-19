@@ -197,13 +197,17 @@ Configuration splits into two surfaces:
 
 Settings sections (`config.toml`, permanent):
 
-- `[operator]` -- SSH keys (required), additional authorized keys, SSH config management
-- `[paths]` -- VM workspace, VS Code workspace file, and backup directories
+- `[operator]`: SSH keys (required), additional authorized keys, SSH config management
+- `[operator.ssh]`: optional explicit policy for the independent SSH adapter; required
+  `trust_store`, optional `identity_file`, `agent_socket`, `ssh_executable` and keepalive settings.
+  It does not change existing callers or enable the new RunContext path. Prepare owned policy
+  through [trust maintenance](command-reference.md#config) before new-path use.
+- `[paths]`: VM workspace, VS Code workspace file, and backup directories
 - `[terminal]`: local screen behavior on detach (`clear_on_detach`: `auto` / `always` / `never`)
 - `[defaults]`: `site`, the default vm-site for `vm create`
 - `[database]`: automatic pre-migration backup policy (safe default: enabled)
-- `[session.config]` -- session defaults (history limit)
-- `[secret_config]` -- active secret source chain; its `sources` key names `secret-source` resources
+- `[session.config]`: session defaults (history limit)
+- `[secret_config]`: active secret source chain; its `sources` key names `secret-source` resources
 - `[plugins]`: the plugin-subsystem namespace; its `system` key is the opt-in list of enabled system
   plugins (see [System Plugins](#system-plugins) below)
 
