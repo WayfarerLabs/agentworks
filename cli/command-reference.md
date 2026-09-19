@@ -1418,10 +1418,12 @@ Trust maintenance requires explicit absolute paths and does not load operator co
 database. Import and refresh accept `--revoked-host-keys PATH` for the complete revocation snapshot.
 Refresh sources must include all applicable policy, not just changed records. Omission of the
 revocation option selects no revocation file in the replacement policy. `--expected-generation`
-comes from describe; `none` only identifies an incomplete initial import. A failed refresh retains
-evidence and blocks new admission; an already admitted connection can continue. Pause source writers
-or supply stable snapshots. These commands do not modify their source files, rewrite configuration,
-enroll unknown targets or enable the new execution stack. See
+comes from describe; `none` only identifies an incomplete initial import. Refresh blocks admission
+before copying; stale-generation refusal leaves the state unchanged. Inspect maintenance state after
+failure. If storage could not establish durable blocking, stop new use and repair it. An already
+admitted connection can continue. Pause source writers or supply stable snapshots. These commands do
+not modify their source files, rewrite configuration, enroll unknown targets or enable the new
+execution stack. See
 [SSH policy ownership](agentworks/execution/carriers/ssh/README.md#trust-ownership).
 
 ### Resource Graph

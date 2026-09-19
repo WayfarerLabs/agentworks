@@ -523,3 +523,40 @@ def test_forwarding_admission_preserves_control_flow(
     with pytest.raises(interruption):
         synthetic.open()
     assert synthetic.calls == []
+
+
+@pytest.mark.parametrize("after_start", [False, True])
+@pytest.mark.parametrize("interruption", [KeyboardInterrupt, SystemExit])
+def test_thread_start_interruption_retains_worker_ownership(
+    synthetic: SyntheticForwarding,
+    monkeypatch: pytest.MonkeyPatch,
+    after_start: bool,
+    interruption: type[BaseException],
+) -> None:
+    original_start = threading.Thread.start
+    original_drain = forwarding.OwnedForwarding._drain
+    workers: list[threading.Thread] = []
+
+    def delayed_drain(self: forwarding.OwnedForwarding) -> None:
+        time.sleep(0.05)
+        original_drain(self)
+
+    def interrupt_start(self: threading.Thread) -> None:
+        workers.append(self)
+        if after_start:
+            original_start(self)
+        raise interruption()
+
+    monkeypatch.setattr(threading.Thread, "start", interrupt_start)
+    monkeypatch.setattr(forwarding.OwnedForwarding, "_drain", delayed_drain)
+    try:
+        with pytest.raises(interruption) as caught:
+            synthetic.open()
+        assert not any(worker.is_alive() for worker in workers)
+        if not after_start:
+            assert caught.value.__notes__
+        synthetic.assert_closed()
+    finally:
+        for worker in workers:
+            if worker.ident is not None:
+                worker.join(timeout=2)
