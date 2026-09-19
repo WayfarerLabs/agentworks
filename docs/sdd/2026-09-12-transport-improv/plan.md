@@ -1,6 +1,6 @@
 # Transport Improvements: Design and Delivery Sequence
 
-- Status: Joint buffered PoC accepted; staged delivery and permission activation design
+- Status: Additive implementation started from merged #830; production remains unchanged
 - Delivery vehicle: Design PR #830, then additive implementation, consumer migration PR(s), and
   final removal/activation PR; all labeled `sdd:transport-improv`
 - Requirements: [FRD](frd.md)
@@ -78,6 +78,29 @@ matrix to that evidence. Design reconciliation, the broader contract and product
 open; the SDD is not complete and must not be locked.
 
 ## Parallel ownership without overlapping edits
+
+### Active implementation, 2026-09-19
+
+The operator directed implementation after merging #830 at `cea5e852`. The additive delivery branch
+is `feat/transport-execution-stack`; it builds the complete new surface without migrating existing
+production consumers. SSH proceeds in its own lane. Development delegates use isolated worktrees
+from the same published baseline; the transport lead integrates their reviewed work.
+
+The first bounded assignments complete the file-operation and invocation/result LLDs and refresh the
+RunContext/platform adoption inventory. These close implementation details already called out below,
+not another requirements phase or a new prerequisite design-only PR. The lead owns shared types,
+carrier-contract changes, composition and the overall plan. SSH implementation files and its SDD
+remain SSH-owned. Broad changes wait for their relevant detailed-design/proof gate; limited
+experiments and implementation of settled pieces stay unwired until production acceptance.
+
+The cgroup/session ownership disposition remains required before overlapping lifecycle
+implementation. File, preparation and context work can proceed independently of that ruling.
+Recipient permissions and the successor core file ceiling stay inactive until final legacy removal,
+while operational safety and deliberately selected profile guarantees apply immediately.
+
+No new public feedback/fix allowance is inferred from the completed #830 review. A coherent
+checkpoint receives the normal private reviews and validation before a testing brief and
+`review-requested`; the additive implementation is marked ready only when its own gates pass.
 
 After the shared seam and LLD gates, the lead may charter bounded migration packages against one
 pinned contract. The following is an assignment plan, not a claim that developers are allocated:
