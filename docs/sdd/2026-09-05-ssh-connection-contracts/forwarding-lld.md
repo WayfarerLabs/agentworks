@@ -38,8 +38,8 @@ Keep the client stdin pipe open. Require exactly the expected line on stdout bef
 resource. Bound startup output and drain both pipes fairly; noise, wrong acknowledgment, early
 exit/EOF, source/sink error or deadline expiration fails setup with bounded local cleanup. No
 arbitrary server diagnostic text is parsed. Continue draining/discarding diagnostics during the
-resource lifetime so backpressure cannot stop the client. Do not retain payload-bearing exception
-text or unbounded logs.
+resource lifetime so full output pipes cannot stop the client. Do not retain payload-bearing
+exception text or unbounded logs.
 
 OpenSSH initializes local forwarding and checks listener failures before opening the remote session.
 Its acknowledgment therefore establishes local listener setup and an authenticated remote session,
