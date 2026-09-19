@@ -7,11 +7,13 @@
 
 ## Baselines and destination
 
-The production baseline is `cea5e8523aac05edfc3a99a940d7cfb4d71fe32f` (merged transport design PR
-#830), verified against main on 2026-09-19. PR #832 adds the SSH implementation; it has not migrated
-production callers. The [historical source comparison](main-comparison.md) remains accessible for
-the completed baseline records. Current risk dispositions are below; transport owns the complete
-consumer inventory and refreshes it before each migration batch.
+The production baseline is transport design
+[PR #830](https://github.com/WayfarerLabs/agentworks/pull/830), commit
+`cea5e8523aac05edfc3a99a940d7cfb4d71fe32f`, verified against main on 2026-09-19. PR #832 adds the
+SSH implementation; it has not migrated production callers. The
+[historical source comparison](main-comparison.md) remains accessible for the completed baseline
+records. Current risk dispositions are below; transport owns the complete consumer inventory and
+refreshes it before each migration batch.
 
 | Existing surface                                                  | Destination and owner                                                                                                                 |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
