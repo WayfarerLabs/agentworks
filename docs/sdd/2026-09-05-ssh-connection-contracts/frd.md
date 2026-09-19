@@ -27,6 +27,14 @@ sole owner of the carrier contract and acceptance criteria; SSH contributes impl
 feasibility input. The [plan](plan.md) defines phase gates without maintaining a second shared
 contract.
 
+## Operator ruling, 2026-09-19
+
+> Yes, we want to have both paths (new ssh/transport and old ssh/transport) operating in parallel,
+> both available/usable in the RunContext, then migrate, then remove from RunContext, then delete
+> old transport, and finally delete old ssh. So yeah, this SDD should note that and you'll basically
+> be idle (unless any issues come up) while the migrate, RunContext edit, and transport deletion
+> happen. You'll then be asked to remove the old ssh stack.
+
 ## R1. Independent, reusable SSH delivery
 
 Build without importing, wrapping, subclassing or calling legacy execution code, directly or

@@ -1,7 +1,7 @@
 # Independent SSH Carrier: Migration Strategy
 
 - Status: Proposed transition, not a completed conversion or acceptance record
-- Updated: 2026-09-17
+- Updated: 2026-09-19
 - Requirements: [frd.md](frd.md)
 - Shared cutover: [transport migration](../2026-09-12-transport-improv/migration-strategy.md)
 
@@ -18,30 +18,51 @@ session cleanup expand the transport-owned migration inventory.
 
 | Existing surface                                                  | Destination and owner                                                                                                                 |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Legacy SSH runner, transport wrapper and scattered options        | Independent SSH carrier and policy; SSH owns the replacement, transport owns caller cutover.                                          |
+| Legacy SSH runner, transport wrapper and scattered options        | SSH owns the replacement and final old SSH deletion; transport owns caller migration and old transport deletion.                      |
 | Operator config and alias-only host placement                     | Explicit connection inputs; SSH specifies reusable schema/trust migration, transport applies it at factories and platform boundaries. |
 | Operator/owned trust records and credentials                      | Preserved data under explicit policy, not retired implementation.                                                                     |
 | Application wrappers, results/logging, files and detached helpers | Shared execution semantics owned by transport, not copied into a new SSH-specific API.                                                |
 | Lima host commands and provider-inner delivery                    | Platform-owned consumers of reusable SSH policy, not SSH configuration or special cases.                                              |
 
 There is no preliminary legacy consolidation release. Complete the independent replacement in Phase
-2 after the joint proof and reconciliation, validate internal workflows, then switch production and
-physically remove the old execution stack in the transport-owned cutover. Do not introduce a
-permanent bridge, runtime old/new selector, or a second mutation for comparison.
+2 after the joint proof and reconciliation, expose both paths through RunContext, then migrate and
+retire in the order below. Do not introduce a permanent bridge, runtime old/new selector, or a
+second mutation for comparison.
 
 ## Phase boundaries
 
-PR #796 carries the complete SSH PoC and these artifacts. It uses isolated explicit connection and
-trust inputs and exercises the transport-defined proof without migrating production callers or
-operator state. The second SSH PR implements the complete connection/trust transition and remaining
-carrier behavior after proof acceptance. Both phases belong to this SDD; there is no intervening SSH
-design-only merge.
+Merged PR #796 carries the complete SSH PoC and these artifacts. It uses isolated explicit
+connection and trust inputs and exercises the transport-defined proof without migrating production
+callers or operator state. The second SSH PR implements the complete connection/trust transition and
+remaining carrier behavior after proof acceptance. A later operator-requested SSH retirement PR
+deletes the old SSH stack and completes this same SDD. There is no intervening SSH design-only
+merge.
 
 Transport owns the common implementation and production cutover dependencies. Stack on those
 branches when they are actual dependencies, using pinned revisions for proof and workflow evidence.
 Before a phase is ready to merge, its dependency must be available in the landing order and the
-combined state must pass its gates. This does not permit a second public execution stack or a leaf
-implementation handoff that silently drops cutover obligations.
+combined state must pass its gates. The implementation PR can land before consumer migration and
+physical retirement; its acceptance proves the complete new path while preserving old behavior.
+
+The [operator ruling](frd.md#operator-ruling-2026-09-19) establishes this order:
+
+1. Deliver complete new SSH/transport functionality through RunContext alongside the usable old
+   SSH/transport path. Keep legacy accessor types and behavior unchanged; new permanent accessors
+   expose the new targets. Resolve trust/config writer ownership before either new production use or
+   conversion, not at the end of coexistence.
+2. Transport leads migration of production/plugin consumers, including direct calls, in owned
+   batches. Each operation deliberately selects one path; both remain available during migration.
+3. After all consumers migrate, transport removes the old surface from RunContext.
+4. Transport deletes the old transport stack and verifies workflows with that code absent. The old
+   SSH stack remains until its separate retirement; absence from RunContext alone is not deletion.
+5. On a later operator request, SSH deletes the old SSH stack, proves installed workflows and
+   dependency independence, and completes the SDD acceptance record.
+
+SSH is normally idle during steps 2-4 except for issues requiring SSH work. Their completion does
+not automatically authorize step 5. The SDD stays unlocked throughout. Trust, credentials,
+configuration and retained cleanup evidence are preserved data, not part of code deletion. New
+recipient grants remain unenforced during coexistence under the transport contract; strict trust and
+operational safety are immediate requirements.
 
 ## Configuration shape and compatibility
 
@@ -101,9 +122,10 @@ mutating rekey or accept whichever host answers.
 ## Writer ownership, cutover and rollback
 
 Proof and conversion tests use isolated copies, not operator trust stores or concurrent production
-writers. Before cutover, identify old/new writers, serialize or quiesce the transition, and preserve
-original configuration and trust evidence. Resolve exact locking/publication mechanics in the SSH
-LLD with the transport-owned cutover; no unproven concurrency claim belongs in this draft.
+writers. Before the first new production use, identify old/new writers, serialize or quiesce any
+shared-state transition, and preserve original configuration and trust evidence. Resolve exact
+locking/publication mechanics in the SSH LLD with the transport-owned cutover; no unproven
+concurrency claim belongs in this draft.
 
 For each copied trust or revocation source, the LLD also names its post-cutover authority and
 maintenance path: who supplies CA rotations and revocation updates, how owned copies are refreshed,
@@ -117,13 +139,14 @@ snapshot merely to restore old code. If safe rollback cannot preserve evidence a
 choose an operator-approved forward repair. Credential material is not copied into job references.
 
 Transport inventories all production/plugin consumers and surviving detached work, settles their
-migration/compatibility policy, and deletes legacy modules only after complete new-stack workflow
-validation. SSH supplies its migration and isolation evidence; it does not claim to dispose jobs or
-complete that cross-stack cutover on its own. Include current native artifact publication,
-inspection, retirement and session restore/cleanup in that inventory. Preserve ownership records and
-partial-failure checkpoints while replacing their command/copy calls with shared execution and file
-operations. The later file-only slice precedes broader file-consumer migration, while the Phase 1
-carrier proof still precedes the full Phase 2 SSH implementation.
+migration/compatibility policy, removes legacy RunContext access, and deletes old transport only
+after complete new-stack workflow validation. SSH later deletes old SSH on operator request. SSH
+supplies its migration and isolation evidence; it does not claim to dispose jobs or complete that
+cross-stack cutover on its own. Include current native artifact publication, inspection, retirement
+and session restore/cleanup in that inventory. Preserve ownership records and partial-failure
+checkpoints while replacing their command/copy calls with shared execution and file operations. The
+later file-only slice precedes broader file-consumer migration, while the Phase 1 carrier proof
+still precedes the full Phase 2 SSH implementation.
 
 ## Required evidence
 

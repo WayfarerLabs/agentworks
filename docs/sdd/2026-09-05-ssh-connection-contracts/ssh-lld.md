@@ -1,6 +1,6 @@
 # Buffered SSH Carrier
 
-Status: Joint buffered PoC accepted; full implementation and migration remain Phase 2.
+Status: Buffered PoC merged; full implementation is Phase 2, final old SSH deletion is Phase 3.
 
 ## Boundary
 
@@ -133,5 +133,10 @@ accepts the buffered boundary and maps its authoritative matrix to those results
 
 Full live-stream and terminal ownership, forwarding, production configuration/trust conversion,
 provider-inner policy and complete workstation/platform evidence remain tracked in
-[Phase 2](plan.md). The joint PoC acceptance matrix still belongs to transport; an unimplemented
-candidate mode or unmeasured prerequisite cannot be silently counted as a passed proof case.
+[Phase 2](plan.md#phase-2-full-ssh-implementation-in-the-second-pr). Transport then leads migration,
+legacy RunContext removal and old transport deletion while SSH waits and addresses issues. Final old
+SSH deletion waits for a later operator request in
+[Phase 3](plan.md#phase-3-remove-old-ssh-on-the-operators-later-request); this SDD remains unlocked
+until that retirement is accepted. The joint PoC acceptance matrix still belongs to transport; an
+unimplemented candidate mode or unmeasured prerequisite cannot be silently counted as a passed proof
+case.
