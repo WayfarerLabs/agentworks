@@ -321,7 +321,8 @@ independent acceptance gates.
 ### Local process startup and interruption
 
 Private review of the shared workstation pump at `38c3fa2b` distinguished two startup limitations.
-The [Python subprocess documentation](https://docs.python.org/3.12/library/subprocess.html#subprocess.run)
+The
+[Python subprocess documentation](https://docs.python.org/3.12/library/subprocess.html#subprocess.run)
 states that initial process creation cannot be interrupted on many platform APIs. The pump checks
 the same deadline before and after construction; it does not reset that budget. An OS call taking
 longer than the remaining budget is not evidence that the pump granted a fresh observation timeout.
