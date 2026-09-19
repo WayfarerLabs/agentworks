@@ -26,6 +26,7 @@ from agentworks.execution.carrier import (
     Provenance,
 )
 from agentworks.execution.carriers.ssh import SSHCarrier, SSHConnection
+from agentworks.execution.carriers.ssh.trust import SSHTrustFiles
 from tests.execution.conformance import check_buffered_contract
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Shared bootstrap requires Linux userspace")
@@ -33,6 +34,7 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Shared bootstra
 
 @pytest.fixture
 def local_binding(tmp_path: Path) -> SSHConnection:
+    tmp_path = tmp_path.resolve()
     executable = tmp_path / "ssh-fixture"
     executable.write_text(
         f"#!{sys.executable}\n"
@@ -51,7 +53,7 @@ def local_binding(tmp_path: Path) -> SSHConnection:
         host="fixture.invalid",
         user="fixture",
         identity_file=identity,
-        known_hosts_file=trust,
+        trust=SSHTrustFiles((trust,)),
         ssh_executable=str(executable),
     )
 
@@ -114,13 +116,14 @@ class BlockRetired(importlib.abc.MetaPathFinder):
 
 sys.meta_path.insert(0, BlockRetired())
 from agentworks.execution.carriers.ssh import SSHCarrier, SSHConnection
+from agentworks.execution.carriers.ssh.trust import SSHTrustFiles
 from agentworks.execution.carrier import Deadline
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.preparation import Command, prepare, decode_output
 
 connection = SSHConnection(
     host="fixture.invalid", user="fixture", ssh_executable=sys.argv[1],
-    identity_file=Path(sys.argv[2]), known_hosts_file=Path(sys.argv[3]),
+    identity_file=Path(sys.argv[2]), trust=SSHTrustFiles((Path(sys.argv[3]),)),
 )
 prepared = prepare(Command(("/bin/cat",)), stdin=b"\x00\xff\r\n")
 custody = LocalDeliveryCustody()
@@ -141,6 +144,7 @@ if output.stdout != b"\x00\xff\r\n" or not output.stdout_complete:
 if any(name in sys.modules for name in retired):
     raise AssertionError("SSH fixture loaded legacy execution")
 """
+    assert isinstance(local_binding.trust, SSHTrustFiles)
     result = subprocess.run(
         [
             sys.executable,
@@ -149,7 +153,7 @@ if any(name in sys.modules for name in retired):
             script,
             local_binding.ssh_executable,
             str(local_binding.identity_file),
-            str(local_binding.known_hosts_file),
+            str(local_binding.trust.known_hosts[0]),
         ],
         capture_output=True,
         timeout=20,
