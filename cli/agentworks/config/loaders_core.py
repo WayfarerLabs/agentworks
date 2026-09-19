@@ -21,11 +21,13 @@ Split out of the former monolithic ``agentworks/config.py`` (see
 from __future__ import annotations
 
 import ipaddress
+import re
 from pathlib import Path
 
 from agentworks.config.models import DefaultsConfig, OperatorConfig, PathsConfig, TerminalConfig
 from agentworks.config.validation import validate_vm_workspaces
-from agentworks.errors import ConfigError
+from agentworks.errors import ConfigError, ValidationError
+from agentworks.execution.carriers.ssh.settings import SSHSettings, validate_literal_path
 from agentworks.naming import SSH_HOST_PREFIX_RE
 from agentworks.path_rendering import format_host_path
 from agentworks.terminal import CLEAR_ON_DETACH_CHOICES
@@ -68,8 +70,8 @@ def _warn_unexpected_keys(
     the decoders they lived in. Every caller left is something else: the
     settings sections ([operator], [terminal], [secret_config],
     [session.config]), where the soft convention is the deliberate one
-    (doctor wants every issue in the file, not the first). [plugins]
-    departs from it on purpose and says why at ``_load_plugins``.
+    (doctor wants every issue in the file, not the first). [plugins] and
+    [operator.ssh] depart from it on purpose; their loaders explain why.
 
     So this expires when the settings sections themselves become models
     (FR14), which is its own effort, not with the last kind decoder.
@@ -97,6 +99,7 @@ _OPERATOR_KEYS = {
     "ssh_agent_host_prefix",
     "extra_ssh_public_keys",
     "ssh_allow_cidrs",
+    "ssh",
 }
 
 _TERMINAL_KEYS = {"clear_on_detach"}
@@ -216,6 +219,62 @@ def _load_operator(
         ssh_agent_host_prefix=agent_host_prefix,
         extra_ssh_public_keys=extra_keys,
         ssh_allow_cidrs=allow_cidrs,
+        ssh=_load_ssh_settings(raw, identity_file=priv),
+    )
+
+
+def _ssh_path(value: object, key: str) -> Path:
+    """Expand and validate a native literal path at the TOML input boundary."""
+    if not isinstance(value, str) or not value:
+        raise ConfigError(f"operator.ssh.{key} must be a non-empty path string")
+    try:
+        path = Path(value).expanduser()
+        validate_literal_path(path)
+    except (ValueError, RuntimeError, ValidationError) as exc:
+        raise ConfigError(
+            f"operator.ssh.{key} must be an absolute native path without expansion tokens or controls"
+        ) from exc
+    return path
+
+
+def _load_ssh_settings(operator: dict[str, object], *, identity_file: Path) -> SSHSettings | None:
+    """Load optional explicit SSH policy without inspecting workload files.
+
+    Unknown keys are errors here: ignoring a misspelled trust or authentication
+    option could make a connection use a policy the operator did not intend.
+    The surrounding legacy operator section retains its warning convention.
+    """
+    if "ssh" not in operator:
+        return None
+    raw = operator["ssh"]
+    if not isinstance(raw, dict):
+        raise ConfigError("[operator.ssh] must be a table")
+    _raise_unexpected_keys(
+        raw,
+        {"trust_store", "identity_file", "agent_socket", "ssh_executable", "keepalive_interval", "keepalive_count_max"},
+        "operator.ssh",
+    )
+    trust_store = _ssh_path(_require(raw, "trust_store", "operator.ssh"), "trust_store")
+    identity = _ssh_path(raw.get("identity_file", str(identity_file)), "identity_file")
+    agent_socket = str(_ssh_path(raw["agent_socket"], "agent_socket")) if "agent_socket" in raw else None
+    executable = raw.get("ssh_executable", "ssh")
+    if not isinstance(executable, str) or not executable:
+        raise ConfigError("operator.ssh.ssh_executable must be a command name or absolute native path")
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", executable):
+        executable = str(_ssh_path(executable, "ssh_executable"))
+    interval = raw.get("keepalive_interval", 15)
+    count = raw.get("keepalive_count_max", 4)
+    if type(interval) is not int or not 0 <= interval <= 2_147_483_647:
+        raise ConfigError("operator.ssh.keepalive_interval must be a nonnegative client integer")
+    if type(count) is not int or not 1 <= count <= 2_147_483_647:
+        raise ConfigError("operator.ssh.keepalive_count_max must be a positive client integer")
+    return SSHSettings(
+        trust_store=trust_store,
+        identity_file=identity,
+        agent_socket=agent_socket,
+        ssh_executable=executable,
+        keepalive_interval=interval,
+        keepalive_count_max=count,
     )
 
 
