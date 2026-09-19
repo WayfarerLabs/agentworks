@@ -125,6 +125,30 @@ def test_agent_endpoint_is_explicit_and_must_be_a_socket(connection: SSHConnecti
             validate_connection_files(selected)
 
 
+@pytest.mark.windows
+@pytest.mark.parametrize("public_identity", [False, True])
+def test_sibling_key_cannot_select_another_identity(
+    connection: SSHConnection, tmp_path: Path, public_identity: bool
+) -> None:
+    keygen = shutil.which("ssh-keygen")
+    if keygen is None:
+        pytest.skip("Identity selection check needs installed ssh-keygen")
+    first, second = tmp_path / "first", tmp_path / "second"
+    for key in (first, second):
+        subprocess.run([keygen, "-q", "-t", "ed25519", "-N", "", "-f", str(key)], check=True, timeout=10)
+    connection.known_hosts_file.touch()
+    identity = Path(str(first) + ".pub") if public_identity else first
+    selected = replace(connection, identity_file=identity)
+    validate_connection_files(selected)
+    Path(str(identity) + ".pub").write_bytes(Path(str(second) + ".pub").read_bytes())
+    if public_identity:
+        # OpenSSH uses the explicitly selected public file before suffix lookup.
+        validate_connection_files(selected)
+    else:
+        with pytest.raises(ValidationError):
+            validate_connection_files(selected)
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX account-shell serialization")
 def test_remote_arguments_round_trip_through_real_shell(connection: SSHConnection) -> None:
     args = ("", "simple", "two words", "quote'and\"double", "a\nb", "$(exit 99)", "; exit 98", "*", "\\", "café")
