@@ -63,6 +63,32 @@ On deferring guest cancellation from the buffered PoC, while keeping observation
 
 <!-- cspell:ignore confortable -->
 
+### Operator rulings, 2026-09-18
+
+On lifecycle ownership and the earlier session-cgroup proposal:
+
+> Yeah, to be clear, 770 is going to change radically or even disappear entirely. I'm open to
+> either.
+
+> Tbh, I'm not sure it really makes sense to try to split the cgroup work. I'm inclined to have you
+> do it all here. But I'm open to other ideas as long as you can define the coordination solution.
+
+On shell selection:
+
+> So totally agreed on the shell constants.
+
+On independent execution dimensions and additive protection profiles:
+
+> Yeah, that totally makes sense. And your dimensions are better I think. And yes, the execution
+> boundary should just be an escalating set of profiles. You're basically just layering in
+> additional protections.
+
+The response to these rulings is in the [lifecycle design](execution-lifecycle-lld.md) and revised
+[execution contract](execution-contract.md). They propose unified execution access with separately
+granted actions, rather than separate command/job interface objects. File-only access remains
+separate. Guest workload protection is distinct from the in-process plugin isolation excluded below.
+The #770 requirement mapping and compatibility proofs remain explicit delivery gates.
+
 ### Implementation scope
 
 In scope for the eventual implementation:

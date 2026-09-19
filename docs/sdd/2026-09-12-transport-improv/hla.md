@@ -1,9 +1,10 @@
 # Transport Improvements: High-Level Architecture
 
-- Status: Design baseline for publication; implementation remains unproven
+- Status: Post-proof design revision; public API, files and lifecycle implementation remain open
 - Requirements: [FRD](frd.md)
 - Supporting work: [Prior art](prior-art-research.md), [migration](migration-strategy.md),
-  [proposed contract and package layout](execution-contract.md), [plan](plan.md)
+  [proposed contract and package layout](execution-contract.md),
+  [execution lifecycle and profiles](execution-lifecycle-lld.md), [plan](plan.md)
 
 ## Architectural decision
 
@@ -42,8 +43,9 @@ Proxmox-specific delivery stays in the Proxmox plugin. The
 dependency direction, and deletion test for the old stack.
 
 The composition root binds which interfaces and actions a recipient receives. The target implements
-all required semantics, while command, file, and job access are separately exposed views, not
-separate execution implementations. Transport feature descriptions never stand in for permissions.
+all required semantics. Execution and file access are separate views; command and job actions within
+execution remain independently granted, as do profiles, identity/elevation, lifetime and I/O.
+Transport feature descriptions never stand in for permissions.
 
 ### SSH-backed VM platform access
 
@@ -70,19 +72,23 @@ policy at those platform boundaries; the SSH effort owns the reusable policy and
 
 ## Public target contract
 
-The proposed operation vocabulary is `run`, `script`, `start`, file operations, and `interactive`,
-exposed through the scoped command/file/job interfaces rather than an all-authority target. The
+The proposed operation vocabulary is `run`, `start`, job observation/control, terminal attachment
+and file operations, exposed through scoped execution/file interfaces. The
 [contract proposal](execution-contract.md) gives callable shapes for review; the behavioral division
 is the design:
 
-- `run` takes a program and literal argument sequence and waits for completion.
-- `script` takes explicit script content and waits for completion. It shares execution options with
-  `run`, including an independent stdin payload.
-- `start` accepts either command form and returns a managed job reference after launch
-  acknowledgement. Waiting is a subsequent operation.
+- `run` takes a literal `Command` or an explicit `Script` and waits for completion.
+- `start` accepts either invocation form and returns an addressable job reference after launch
+  acknowledgement. Waiting is a subsequent operation; asynchronous return does not select lifetime.
 - File operations transfer/read/write content, merge JSON, inspect bounded inventories, and manage
   directories, permitted metadata and conditional removal under bound filesystem grants.
-- `interactive` attaches a terminal only when that optional feature is present.
+- Terminal I/O and `attach` are optional channel features, independent of lifetime or shell startup.
+
+Invocation, observation, I/O, lifetime, protection and identity are independent choices with
+validated combinations, not six separate API families. A caller explicitly selects an allowed
+core-owned protection profile. Managed foreground execution uses the same supervisor as background
+jobs; direct execution remains available for appropriate ordinary commands and minimal recovery. The
+[lifecycle design](execution-lifecycle-lld.md) defines guarantees, grants and proof gates.
 
 Foreground execution captures output by default. An explicit direct-streaming mode is available on
 supporting channels; ordinary CLI execution preserves its current streaming experience there. On
@@ -96,18 +102,18 @@ Ordinary literal commands must remain concise to call without constructing a gra
 
 ### Shell policy
 
-Keep invocation form separate from interpreter policy. `run` executes literal argv; `script` names
-source and a shell policy; `start` accepts either form without changing its semantics. Shell policy
-selects a fixed interpreter (`sh`, `bash`, or a supported explicit executable) or the destination
-execution user's configured default shell, with separate login and interactive startup choices.
-Names and exact Python signatures belong in the execution LLD.
+Keep invocation form separate from interpreter policy. Both `run` and `start` accept literal
+`Command` or shell `Script` values without changing their semantics. Typed `Shell.SH`, `Shell.BASH`
+and `Shell.USER_DEFAULT` select the interpreter; separate `ShellStartup` options select login and
+interactive initialization. A PTY implies neither. Arbitrary executable strings are not an escape
+from this reviewed interpreter set.
 
-Every script call supplies that policy or uses an explicit default bound by its owning operation.
-There is no transport-selected interpreter. A shell choice without startup modifiers means
-non-login, non-interactive startup. Shared preparation isolates unsolicited startup hooks where the
-supported interpreter permits it; the LLD must enumerate supported interpreters and their startup
-behavior rather than promise identical flags for every shell. A missing interpreter or unsupported
-startup combination fails before payload execution; it does not fall back to another shell.
+Every script explicitly supplies its interpreter policy. There is no transport-selected interpreter.
+A shell choice without startup modifiers means non-login, non-interactive startup. Shared
+preparation isolates unsolicited startup hooks where the supported interpreter permits it; the LLD
+must enumerate supported interpreters and their startup behavior rather than promise identical flags
+for every shell. A missing interpreter or unsupported startup combination fails before payload
+execution; it does not fall back to another shell.
 
 Resolve a user-shell request from the destination account after choosing execution identity. For
 elevated execution it selects root's configured shell; requesting Bash explicitly still selects Bash
@@ -261,53 +267,44 @@ rather than claiming a safe pathname sanitizes command hooks. Registration-time 
 user approval are deferred. Their future role is to select grants within the same core ceiling, not
 introduce another filesystem implementation or a bypass.
 
-## Detached jobs and lifetimes
+## Execution profiles and job lifetimes
 
-Managed jobs are a shared execution facility, replacing `remote_exec.py` and hand-built `nohup` call
-sites. The initial implementation direction is a small staged wrapper on the execution host using
-existing userspace detachment and process-group mechanisms, with identity-private records for
-launch, stdout/stderr, and completion. It is not a service scheduler or replacement for sessions.
+Transport owns one shared lifecycle facility for commands, jobs and session process trees. SSH and
+native carriers deliver prepared control operations; neither owns a detached-job protocol. The
+[lifecycle design](execution-lifecycle-lld.md) replaces the earlier process-group-wrapper proposal
+and maps the requirements from #770 without editing that effort's artifacts.
 
-Each launch has a fresh identifier. An explicit existing reference means observe that launch;
-identical command text or a reused pathname does not. The wrapper publishes launch/completion facts
-atomically. A reference binds the actual execution host, execution identity, boot incarnation, and
-job, without secrets or an embedded connection. Managed guest targets additionally bind VM instance
-identity; placement-host jobs do not invent a VM identity. PID alone is insufficient proof of
-ownership. The owning resource operation stores references needed across invocations; the exact
-storage belongs in its LLD, not a new general job registry.
+Core-owned profiles add guarantees: DIRECT provides ordinary execution semantics, MANAGED adds owned
+workload boundaries and whole-boundary stop, and proposed CONTAINED adds reviewed resistance to
+escape and indirect relaunch. Linux managed execution uses a system-owned systemd service/cgroup
+created before workload code starts. Cgroup ownership alone is not malicious-workload confinement. A
+future sandbox or jail must prove every inherited guarantee before satisfying a profile.
 
-Starting, waiting, observing output, requesting cancellation, and disposing artifacts are separate
-operations. Waiting never deletes the evidence needed for another authorized observer. Cancellation
-checks job ownership and targets the job's process group with appropriate privilege, then observes
-termination. A missing response remains uncertainty. The LLD must handle a wrapper exiting early,
-ordinary descendants surviving it, stale records, PID reuse, and concurrent observers.
+Profiles are explicitly requested and independently granted. Missing authority refuses; missing
+mechanics refuses distinctly. Neither permits a weaker fallback. Required core bootstrap/recovery
+has an explicitly approved policy, not an automatic exception granted to restricted recipients.
 
-The composition root holds platform activation and transient routes around each active operation. A
-returned job reference may outlive that span; its live target cannot. Subsequent observation binds
-the reference to a fresh target through a new operation context. Native route rules can close after
-launch because detachment severs the job's stdio dependency on that connection.
+`run` waits and `start` returns a reference; either can use a managed boundary. OPERATION and
+INDEPENDENT choose lifetime separately. Independent work needs managed ownership and target-owned
+I/O/evidence. A wait timeout is not stop. Stop verifies ownership and descendant cleanup, not just
+the main PID's exit. References survive connections, but require newly authorized targets for later
+observation. Retention and abandoned-work cleanup remain the resource owner's responsibility.
 
-Platform power lifetime is separate. In particular, WSL2's existing hold depends on a workstation
-process. A job reference cannot promise to keep a distro alive after the owning CLI exits. The
-initial contract guarantees disconnect survival while the VM remains running; operations requiring
-completion keep the platform hold while waiting. Native background launch on WSL2 and the effect of
-idle shutdown need a live feasibility check before implementation design is accepted. Explicit
-operator stop always wins; no new power-management daemon is implied.
-
-Retention belongs to the owning operation: initialization can resume an identified job, backup can
-collect and dispose its archive job, and logout can release client observation without pretending to
-have confirmed remote completion. The job design must include cleanup for abandoned internal
-fire-and-forget work so a new public handle does not turn into indefinite guest debris.
+Platform power lifetime remains separate. WSL2 holds, non-systemd macOS host jobs and early
+bootstrap need their own measured acceptance cases; required operations cannot be made optional or
+relabeled as weaker profiles to pass. The lifecycle proof gates include lost launch acknowledgment,
+observer loss, anchor death, stale identity, descendant cleanup and containment escape paths. The
+accepted buffered PoC does not establish those guarantees.
 
 ## RunContext integration
 
 Keep the existing accessor distinction between descriptive context and execution-bearing targets.
 `admin_target()` and `agent_target()` return a permission-scoped target view, or no target when that
 identity is unavailable or withheld. Their names describe identity, not a transport class. Each view
-provides passive accessors for command, file and job interfaces; a missing grant can withhold an
-entire interface, while a bound action restriction can distinguish upload/download or
-observe/cancel. The [contract proposal](execution-contract.md) gives the concrete shape. The
-selected route remains inspectable metadata, not a way to obtain an unrestricted handle.
+provides passive accessors for execution and file interfaces; a missing grant can withhold an entire
+interface, while a bound action restriction can distinguish upload/download or observe/stop or exact
+profiles. The [contract proposal](execution-contract.md) gives the concrete shape. The selected
+route remains inspectable metadata, not a way to obtain an unrestricted handle.
 
 Bind recipient authority at context composition, independently from guest identity and channel
 features. VM admin access does not by itself grant API-performed root elevation. Supplied interfaces
@@ -317,11 +314,11 @@ restrictions. Later job observation requires the fresh context's corresponding g
 ownership; a reference cannot grant cancellation. Accessors expose existing decisions and perform no
 policy lookup.
 
-The owning operation can bind explicit shell defaults alongside its prepared environment. Context
-consumers can inspect those defaults and override shell policy deliberately per invocation. The
-target does not derive application policy from its route; accessing the target performs no account
-lookup. Readiness targets retain the shell-policy preparation constraints above and do not stage
-scripts, even when a later operation context will use an explicitly selected login shell.
+The owning operation supplies its prepared environment; consumers explicitly choose shell and
+protection policies per invocation within their bound grants. The target does not derive application
+policy from its route; accessing the target performs no account lookup. Readiness targets retain the
+shell-policy preparation constraints above and do not stage scripts, even when a later operation
+context will use an explicitly selected login shell.
 
 The orchestrator decides whether an admin target uses canonical or native access before delivering
 the context. Do not add an accessor that looks up arbitrary VMs, accepts a route override, or builds
@@ -356,7 +353,7 @@ sudo privileges, and hostile in-process plugin containment needs a separate secu
 Migrate context constructors and consumers together, including VM boundaries, agent realization,
 session readiness/roll-forward, git-credential operations, and harness setup. Setup/readiness
 invocation types carry RunContext alongside their domain data instead of a raw runner. Resources
-obtain files/commands from its bound target views, with no NativeFiles or setup-runner facade. Core
+obtain files/execution from its bound target views, with no NativeFiles or setup-runner facade. Core
 supplies trusted home/destination identity and bounded native inventory; file-only plugins do not
 acquire general exec merely for discovery. Native CLI operations that genuinely execute remain
 separately authorized. Readiness retains its no-staging/no-requested-startup policy.
@@ -417,6 +414,7 @@ on `main` before proof; later reconciliation records what the proof actually est
 | Application shell policy, commands/scripts, environment, cwd, elevation, sensitive-data policy         | `transport-improv`                            |
 | Common targets, optional features, files/jobs, results/errors and safe command retry policy            | `transport-improv`                            |
 | File-only provisioning, structured updates, core allowlist and destination-side confinement            | `transport-improv`                            |
+| Shared profiles, supervisor/job lifecycle, session adoption and #770 requirement reconciliation        | `transport-improv`                            |
 | `RunContext` production cutover and core/plugin consumer migration                                     | `transport-improv`                            |
 | Final target composition and full-stack production cutover                                             | `transport-improv`, using the new SSH carrier |
 
@@ -445,9 +443,9 @@ weaken trust checks.
 The order is mandatory: settle the small seam, prove it, reconcile both SDDs, build in parallel,
 validate complete workflows, then cut over and delete. The [plan](plan.md) owns the gate criteria.
 Only the bounded proof precedes proof-informed reconciliation; broad adapter/helper development
-waits. The current PR publishes the operator-authorized design baseline, not proof results. The
-effort mandate remains the complete build, migration and deletion; live proof still needs a concrete
-isolated test charter.
+waits. The buffered proof is accepted as recorded in the plan; this revision specifies the broader
+API and lifecycle gates without claiming they are implemented. The effort mandate remains the
+complete build, migration and deletion; new live proofs need concrete isolated test charters.
 
 Use the destination package structure for the new stack, with development/test composition roots
 that exercise its contracts while production factories and `RunContext` retain the old stack. Use an
@@ -481,8 +479,8 @@ contract would push required file/script/job mechanics back into callers. The pr
 those operations common while making the small set of real optional I/O features explicit.
 
 Before implementation, finalize the proposed request/result signatures, readiness no-staging
-enforcement, job storage/ownership/retention and process-group protocol, shell startup/lookup
-behavior, transfer bounds, file confinement/concurrency/metadata policy, and WSL2 lifetime evidence.
-Review the proposed integration seam with the SSH developer and re-inventory then-current callers
-before implementation. The new API remains driven by the execution contract rather than by
-preserving the old runner's structure.
+enforcement, profile guarantees and supervisor lifetime/ownership/retention protocols, shell
+startup/lookup behavior, transfer bounds, file confinement/concurrency/metadata policy, and WSL2
+lifetime evidence. Review the proposed integration seam with the SSH developer and re-inventory
+then-current callers before implementation. The new API remains driven by the execution contract
+rather than by preserving the old runner's structure.

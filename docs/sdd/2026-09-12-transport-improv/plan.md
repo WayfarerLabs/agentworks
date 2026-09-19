@@ -1,12 +1,13 @@
 # Transport Improvements: Design and Delivery Sequence
 
-- Status: Joint buffered PoC accepted; design reconciliation and production gates remain open
+- Status: Joint buffered PoC accepted; execution-profile design revision under review
 - Delivery vehicle: Merged design PR #795, followed by transport PoC PR #826, labeled
   `sdd:transport-improv`
 - Requirements: [FRD](frd.md)
 - Architecture: [HLA](hla.md)
 - Proposed interfaces and layout: [Execution contract](execution-contract.md)
 - Active proof implementation: [Proof LLD and evidence](proof-lld.md)
+- Proposed lifecycle: [Execution profiles and supervisor design](execution-lifecycle-lld.md)
 
 The required order is: settle the transport-owned small contract, prove it, reconcile both SDDs,
 build independently in parallel, validate complete workflows, then cut over and physically delete
@@ -170,13 +171,36 @@ PoC merge enables production use.
       provisioning, `/run` session objects, recovery and platform hosts. Review execution-bearing
       content and select explicit core allowlist entries, trusted dynamic-root resolution and
       recipient subsets. No broad parent grant or public-exec workaround to make a caller pass.
-- [ ] Finalize scoped command/file/job interfaces and bound restrictions, including the core file
-      ceiling. Keep registration requests, user consent, a general plugin policy evaluator and
-      hostile-code isolation out of scope. Map FRD R11's future workflows to tests.
+- [ ] Finalize execution/file interfaces and separately granted actions/profiles, including the core
+      file ceiling. Keep registration requests, user consent, a general plugin policy evaluator and
+      hostile in-process plugin isolation out of scope. Map FRD R11's future workflows to tests.
 - [ ] Reconcile #796's pinned transport reference with the final reviewed contract and later
       file-only slice. SSH owns its artifact edits; shared file semantics and cutover stay here.
 
 ## 4. Build the independent stacks in parallel
+
+The transport lead owns shared profiles, supervisor lifecycle and session adoption. Migration
+delegates consume this implementation rather than building another launcher; SSH owns delivery,
+connection and trust only. Before broader lifecycle implementation, complete these additional gates:
+
+- [ ] Review unified execution/file access and independent invocation, observation, I/O, lifetime,
+      protection and identity dimensions. Approve typed shell constants, exact additive profile
+      grants and refusal without downgrade. The [lifecycle design](execution-lifecycle-lld.md)
+      supplies the proposal, not implementation proof.
+- [ ] Reconcile #770 R1-R7 against the lifecycle mapping and obtain explicit owner/operator
+      disposition before retiring its artifacts or PR.
+- [ ] Complete and prove Linux supervisor launch through SSH and native QGA: protected identity,
+      secret/source delivery, privilege changes, foreground wait, independent launch, output
+      retention and terminal evidence. No workload code runs before boundary entry.
+- [ ] Prove lost-acknowledgment reconciliation, wait timeout versus stop, observer-loss cleanup,
+      runtime-anchor death, concurrent forks, stale identity and independently verified emptiness.
+      Settle the OPERATION liveness/lease protocol before offering target-side cleanup.
+- [ ] Complete CONTAINED's access map, compare restricted same-UID and per-run-user designs, and
+      prove #770 escape/relaunch and trusted socket-identity cases. Cgroup ownership is not enough.
+      Record compatibility costs requiring operator disposition.
+- [ ] Resolve non-systemd macOS host jobs, Debian/kernel/systemd floors, WSL2 power lifetime and
+      no-staging recovery. Required workflows block delivery when their guarantees cannot be met; no
+      profile downgrade or fabricated platform equivalence.
 
 - [ ] SSH effort builds `execution/carriers/ssh/` and its connection/trust migration. Transport
       builds common execution, scoped context delivery, files/jobs and other adapters, and applies
@@ -231,6 +255,10 @@ PoC merge enables production use.
       scaffolding. Transport owns this complete cutover, not just preference for the new runner.
       Delete `agentworks.native_files` and its old policy at the same cutover; only the new
       core-owned allowlist remains.
+
+- [ ] Migrate sessions and other jobs to the same supervisor. Preserve session UUID/run IDs,
+      tmux/harness readiness, restart consent, legacy-run uncertainty and owned cleanup. Do not
+      certify legacy detached descendants by moving only a surviving parent into a new cgroup.
 
 The default implementation landing unit contains the new stack and complete cutover together.
 Separating delivery later requires independently complete units and an explicit removal point, not

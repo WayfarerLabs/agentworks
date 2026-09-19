@@ -1,6 +1,6 @@
 # Transport Improvements: Prior Art
 
-- Inspected: 2026-09-16 against v0.19.0; original investigation began 2026-09-12
+- Inspected: v0.19.0 inventory on 2026-09-16; lifecycle research added 2026-09-18
 - Scope: Design input, not live provider validation
 
 ## Findings
@@ -168,6 +168,38 @@ The fine-grained recipient grant shape is an explicit future-facing contract cho
 bound grants so core callers and later plugins need not receive the whole core ceiling. This is not
 evidence of an existing consent system, nor permission to build one during transport replacement.
 
+### Managed foreground work and session containment
+
+The upstream systemd v252 manual describes transient services, synchronous pipe/PTY operation and
+waiting for completion. This supports foreground managed execution without equating cgroups with
+detachment. Service and scope launch have different parent/environment behavior; default start
+acknowledgment is not proof that the application executed. Agentworks still needs its own launch and
+outcome evidence.
+
+Sources: [systemd-run v252](https://github.com/systemd/systemd/blob/v252/man/systemd-run.xml),
+[systemd kill policy v252](https://github.com/systemd/systemd/blob/v252/man/systemd.kill.xml).
+
+Kernel cgroup v2 documentation specifies inherited membership, subtree population observation and
+subtree kill. Moving a parent does not move its existing descendants. Decision: launch inside the
+owned boundary, distinguish main-process exit from emptiness, and do not certify legacy sessions by
+moving a surviving parent. These primitives do not by themselves stop same-user indirect execution
+through an outside service.
+
+Source: [kernel cgroup v2 documentation](https://docs.kernel.org/admin-guide/cgroup-v2.html).
+
+The #770
+[session requirements](https://github.com/WayfarerLabs/agentworks/blob/2c406948221a8990192e581a68f25802615e3ac5/docs/sdd/2026-09-06-session-cgroups/frd.md)
+are mapped in the [lifecycle design](execution-lifecycle-lld.md). That mapping preserves identity,
+whole-run termination, independent lifetime, escape resistance, usable sessions, compatibility and
+trusted VM-side identity lookup. It is not evidence that a particular same-UID or per-run-user
+mechanism is approved or works. Transport now owns the proposed shared lifecycle implementation;
+foreign-artifact disposition still requires an explicit handoff.
+
+These sources justify the design direction, not platform acceptance. Exact installed versions,
+privilege/FD behavior, account startup, secret exposure, macOS host jobs and WSL2 lifetime need the
+plan's proofs before enabling profiles. Linux systemd features cannot be inferred from a distro
+name.
+
 ## Claims not relied upon
 
 - A common API makes every backend interactive.
@@ -182,6 +214,9 @@ evidence of an existing consent system, nor permission to build one during trans
 - Path-prefix validation or a preflight symlink check establishes mutation-time confinement.
 - Atomic file replacement prevents lost updates or makes a directory tree transactional.
 - Withholding public exec prevents trusted file helpers from using internal command delivery.
+- Cgroup ownership alone prevents hostile code from launching through outside same-user services.
+- Foreground, PTY and operation-bound lifetime are the same choice.
+- A stronger profile may silently replace the caller's requested execution or lifetime policy.
 
 ## Open evidence
 

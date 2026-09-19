@@ -1,6 +1,6 @@
 # Transport Improvements: Proposed Contract and Package Layout
 
-- Status: Design baseline for publication, not a shipped or proven API
+- Status: Post-proof design revision; public API and lifecycle profiles are not shipped
 - Governing requirements: [FRD](frd.md), especially R2-R6, R9-R11
 - Architecture and ownership: [HLA](hla.md)
 
@@ -11,8 +11,8 @@ settles this seam with SSH implementation input, then the efforts pass the
 sole owner of the carrier contract and acceptance criteria. SSH owns its new carrier implementation
 and raises feasibility concerns to transport; it does not maintain a second contract. Unresolved
 feasibility still blocks proof acceptance, and requirement changes return to the operator. Neither
-implementation imports the legacy execution stack. Publishing this baseline precedes the proof and
-does not claim that the implementation boundary has been demonstrated.
+implementation imports the legacy execution stack. The buffered proof is accepted; it does not
+demonstrate the broader public API or lifecycle guarantees proposed here.
 
 The [active proof LLD](proof-lld.md) records the buffered implementation subset, shared framing,
 native adapter placement and evidence gaps. The proposed public and live-I/O interfaces below are
@@ -21,45 +21,58 @@ not claims that the initial proof package implements them.
 ## Caller contract
 
 Core and plugin consumers import public types from `agentworks.execution` and receive a scoped
-`ExecutionTarget` view from `RunContext`. The view provides optional command, file and job
-interfaces as described below; it is not an unrestricted runner. These examples assume the owning
-operation has checked that `commands` and `jobs` were supplied. They propose names and argument
-forms, not executable code or a second command language:
+`ExecutionTarget` view from `RunContext`. The view provides optional execution and file interfaces;
+execution actions remain independently granted. These examples assume the owning operation has
+checked that `execution` was supplied. They propose names and argument forms, not executable code or
+a second command language:
 
 ```python
-commands.run(["tool", "--name", name], check=True)
-commands.script(source, shell=Shell.fixed("bash"), stdin=Input.sensitive(secret_bytes), sudo=True)
-commands.script(source, shell=Shell.user_default(login=True), cwd=remote_directory)
-commands.run(["tool"], stdin=Input.live(source_stream), output=Output.stream(out_sink, err_sink))
-job = jobs.start(Script(source, shell=Shell.fixed("sh")), sudo=True)
-status = jobs.observe(job)
-result = jobs.wait(job, deadline=deadline)
-jobs.cancel(job, deadline=cancel_deadline)
-jobs.dispose(job)
+execution.run(Command(["tool", "--name", name]), profile=Protection.DIRECT, check=True)
+execution.run(
+    Script(source, shell=Shell.BASH),
+    profile=Protection.MANAGED,
+    stdin=Input.sensitive(secret_bytes),
+    sudo=True,
+)
+execution.run(
+    Script(source, shell=Shell.USER_DEFAULT, startup=ShellStartup(login=True)),
+    profile=Protection.MANAGED,
+    cwd=remote_directory,
+)
+job = execution.start(
+    Script(source, shell=Shell.SH),
+    profile=Protection.MANAGED,
+    lifetime=Lifetime.INDEPENDENT,
+)
+status = execution.observe(job)
+result = execution.wait(job, deadline=deadline)
+execution.stop(job, deadline=stop_deadline)
+execution.dispose(job)
 ```
 
-`run(argv, ...)` is literal execution; `script(source, shell=..., ...)` is shell execution. Both
-wait for completion and return `ExecutionResult`.
-`start(Command(argv) | Script(source, shell), ...)` uses the same options but returns a
-credential-free `JobRef` after launch acknowledgement. A lost acknowledgement produces an
-uncertain-start outcome with any safe reconciliation reference, never automatic relaunch. There is
-no anonymous `background=True` or caller-written `nohup` requirement.
+`run(Command(argv) | Script(source, shell=...), ...)` waits for completion and returns
+`ExecutionResult`. `start` accepts the same invocation and options but returns a credential-free
+`JobRef` after launch acknowledgement. A lost acknowledgement produces an uncertain-start outcome
+with any safe reconciliation reference, never automatic relaunch. There is no anonymous
+`background=True` or caller-written `nohup` requirement.
 
-Shared keyword options are `sudo`, `env`, `cwd`, `stdin`, `output`, `sensitive`, and `deadline`.
-Foreground calls also accept `check`; `wait` accepts it when collecting a job result. Elevation is
-non-interactive and requires both the bound elevation grant and guest authority. A VM admin account
-alone does not authorize the API's `sudo=True` option. This does not block sudo invoked inside an
-otherwise allowed command under an account that already has that guest authority. Shell defaults are
-absent unless deliberately bound by the operation; a script without either an explicit policy or
-that bound default is rejected. `Shell` separates interpreter choice from login and interactive
-startup as specified in the HLA.
+Shared keyword options are `profile`, `lifetime`, `sudo`, `env`, `cwd`, `stdin`, `output`,
+`sensitive`, and `deadline`. `run` also accepts `check`; `wait` accepts it when collecting a job
+result. Elevation is non-interactive and requires both the bound elevation grant and guest
+authority. A VM admin account alone does not authorize the API's `sudo=True` option. This does not
+block sudo invoked inside an otherwise allowed direct command under an account that already has that
+guest authority. Scripts explicitly select `Shell.SH`, `Shell.BASH` or `Shell.USER_DEFAULT`;
+`ShellStartup` separately selects login/interactive initialization. `profile` is also explicit. The
+[lifecycle design](execution-lifecycle-lld.md) defines independent invocation, observation, I/O,
+lifetime, protection and identity choices, their defaults and invalid combinations. Waiting does not
+require direct execution: `run` can wait for work launched inside a managed boundary.
 
 Finite byte input works on every target; omission means EOF, not inherited console input. Foreground
 calls may explicitly select `Input.live(source)` for non-terminal piped or duplex work on a channel
 with direct live stdio. This does not allocate a PTY. The carrier pumps that source with the
-selected output sinks; an unsupported channel refuses before dispatch. Detached launch rejects live
-input, since its input must be delivered independently of the initiating connection. Script source
-has its own delivery path and never consumes application stdin.
+selected output sinks; an unsupported channel refuses before dispatch. Independent lifetime rejects
+caller-owned live pipes: input and output must survive the initiating connection. Script source has
+its own delivery path and never consumes application stdin.
 
 Output defaults to bounded capture, with explicit discard or direct-streaming modes. Effective
 sensitivity combines bound environment metadata, an input sensitivity marker, and the request-wide
@@ -71,15 +84,15 @@ execution identity, not the workstation SSH process. A deadline is one monotonic
 preparation and observation; omission follows the explicitly bound operation policy, not a
 carrier-selected timeout or retry default.
 
-| Surface                                                                       | Proposed behavior                                                                                                               |
-| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `features`, identity/route metadata                                           | Passive values from the bound target; no connection or authority discovery.                                                     |
-| `read_file`, `stat`, `write_file`, `upload`, `download`                       | Bounded bytes or explicit paths, metadata and publication policy; file reads are separately granted.                            |
-| `upload_directory`, `download_directory`                                      | Explicit merge/replace choice, confined paths and extraction; no implicit recursive deletion.                                   |
-| `update_json`, `list_directory`, `ensure_directory`, `set_metadata`, `remove` | Structured updates, bounded inventory and filesystem lifecycle under core-approved paths/actions; no command grant required.    |
-| `observe`, `read_output`, `wait`                                              | Separate status, bounded cursor-based output reads, and waiting for a known job; observing never deletes its records.           |
-| `cancel`, `dispose`                                                           | Request cancellation with truthful confirmation, or dispose owned terminal-job artifacts; neither guesses authority from a PID. |
-| `interactive(invocation, ...)`                                                | Explicit command or shell invocation with terminal attachment; optional feature, not an implicit login-shell selector.          |
+| Surface                                                                       | Proposed behavior                                                                                                                       |
+| ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `features`, identity/route metadata                                           | Passive values from the bound target; no connection or authority discovery.                                                             |
+| `read_file`, `stat`, `write_file`, `upload`, `download`                       | Bounded bytes or explicit paths, metadata and publication policy; file reads are separately granted.                                    |
+| `upload_directory`, `download_directory`                                      | Explicit merge/replace choice, confined paths and extraction; no implicit recursive deletion.                                           |
+| `update_json`, `list_directory`, `ensure_directory`, `set_metadata`, `remove` | Structured updates, bounded inventory and filesystem lifecycle under core-approved paths/actions; no command grant required.            |
+| `observe`, `read_output`, `wait`                                              | Separate status, bounded cursor-based output reads, and waiting for a known job; observing never deletes its records.                   |
+| `stop`, `dispose`                                                             | Request owned-workload termination with truthful confirmation, or dispose terminal-job artifacts; neither guesses authority from a PID. |
+| Terminal I/O and `attach(job, terminal=...)`                                  | Optional terminal launch/attachment, distinct from lifetime, shell startup and authorization to launch additional work.                 |
 
 `ExecutionResult` carries available guest exit status, byte output and completeness, and the outcome
 facts needed to distinguish failure, timeout, and uncertainty. A typed execution error carries the
@@ -156,14 +169,13 @@ facade and its callers.
 
 ### Permission-scoped access
 
-The proposed view has three passive accessors. Their interfaces use the operation vocabulary above;
+The proposed view has two passive accessors. Their interfaces use the operation vocabulary above;
 the view itself has no forwarding `run`, `upload`, or other all-authority convenience methods.
 
-| View accessor                                    | Exposed operations when granted                                                                          |
-| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
-| `commands()` returning `CommandAccess` or `None` | `run`, `script`, `interactive`, subject to the bound action and elevation restrictions.                  |
-| `files()` returning `FileAccess` or `None`       | R7 file/JSON/directory operations, with independently bound read, mutation, metadata and removal grants. |
-| `jobs()` returning `JobAccess` or `None`         | `start`, observation/output/wait, cancellation and disposal, independently granted for owned jobs.       |
+| View accessor                                       | Exposed operations when granted                                                                                                                   |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `execution()` returning `ExecutionAccess` or `None` | `run`, `start`, observation/output/wait, `stop`, `attach` and disposal; actions, profiles, lifetime, I/O and elevation are independently granted. |
+| `files()` returning `FileAccess` or `None`          | R7 file/JSON/directory operations, with independently bound read, mutation, metadata and removal grants.                                          |
 
 These are small typed interfaces over shared execution mechanics, not new transport subclasses or a
 generic permissions registry. Withhold a whole interface when none of its actions is granted. For a
@@ -187,12 +199,15 @@ narrow grants and lifetime. Grant selection and checks are distinct from channel
 OS permissions; authorized recovery composition still receives all required operations.
 
 Checks govern the requested public action, not its private implementation steps. A granted upload
-may use internal command delivery for staging without exposing `CommandAccess`; a granted script may
-stage source without exposing `FileAccess`. Internal helpers cannot be requested as a back door to
-arbitrary execution through a file-only interface. Validate that boundary, not that no internal
+may use internal command delivery for staging without exposing `ExecutionAccess`; a granted script
+may stage source without exposing `FileAccess`. Internal helpers cannot be requested as a back door
+to arbitrary execution through a file-only interface. Validate that boundary, not that no internal
 command was used. As FRD R9 states, an arbitrary foreground or detached execution grant already
 conveys the execution account's guest authority, including filesystem and configured sudo powers;
-these in-process views are not a plugin sandbox.
+these in-process views are not a plugin sandbox. The proposed CONTAINED profile adds reviewed
+guest-side protections, not Python-plugin isolation. Authorize the requested public action: `run`
+using shared launch/wait machinery does not require a public `start` grant. Existing-job operations
+recheck current authority and the bound job profile; possession of a reference is not a grant.
 
 The public surface does not expose SSH credentials, provider task IDs, or a carrier constructor.
 `RunContext.admin_target()` and `.agent_target()` become `ExecutionTarget | None` at cutover, with
@@ -367,11 +382,14 @@ cli/agentworks/
     __init__.py                 scoped target, access interfaces and caller values
     models.py                   command, shell, input/output, result and job values
     target.py                   bound execution mechanics and target view
-    access.py                   typed command/file/job access and bound restrictions
+    access.py                   execution/file access with independently bound action restrictions
+    profiles.py                 core protection guarantees and exact profile grants
     preparation.py              identity, shell, env/cwd and helper preparation
     files.py                    transfer, JSON updates, inventory, metadata and publication semantics
     file_policy.py              core allowlist, scoped file grants and confinement policy values
-    jobs.py                     shared job protocol and observation
+    jobs.py                     shared launch, lifetime, observation, stop and evidence
+    supervisors/
+      systemd.py                Linux managed-boundary mechanism, after lifecycle proof
     diagnostics.py              safe execution diagnostics, no legacy SSHLogger
     carrier.py                  leaf carrier protocol and carrier-only values
     carriers/

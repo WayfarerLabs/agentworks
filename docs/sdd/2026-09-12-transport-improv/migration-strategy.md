@@ -1,6 +1,6 @@
 # Transport Improvements: Migration Outline
 
-- Status: Design baseline; contract proof, design reconciliation, parallel build, complete cutover
+- Status: Buffered proof accepted; broader API/profile reconciliation precedes complete cutover
 - Baseline: v0.19.0, `e440a28c49935df722e4e80685ef12f6d8247ff8`, inspected 2026-09-16
 - Release delta reviewed: `7c744828..e440a28c`; file helpers, artifacts, harness facets and session
   lifecycle
@@ -57,7 +57,7 @@ switch, never both policies for one mutation.
 Retain domain code, not the execution facade: artifact capture, routing, native discovery rules,
 generated sections, ownership records and application checkpoints remain in their existing owners.
 Setup/readiness invocations carry RunContext alongside descriptive inputs instead of a raw runner;
-resources use its bound command/file interfaces directly. Remove access through `files.runner`,
+resources use its bound execution/file interfaces directly. Remove access through `files.runner`,
 public staging slots and alternate file wrappers. Actual marketplace/plugin installation may still
 require command access; file-only must describe the operation's authority honestly.
 
@@ -165,7 +165,9 @@ workflows on isolated resources, never by sending one production request down bo
    recovery with Tailscale unavailable, plugin operations, backup, and interactive attachment.
    Validate new context delivery independently while the production context still uses the old API.
 5. Prepare and validate the complete caller cutover against the settled contract. Audit every call's
-   invocation form, shell/startup policy, identity, environment, stdio, deadline, and job lifetime.
+   invocation form, typed shell/startup policy, identity, environment, stdio, deadline, protection
+   profile and job lifetime. `execution.run(Command | Script)` waits; `execution.start` returns a
+   reference without implicitly selecting independent lifetime. Both use the same granted profile.
    Audit each consumer's needed action interfaces, file locations/metadata and elevation, not merely
    its admin/agent identity. Resolve surviving legacy work, SSH configuration/trust state, and the
    external plugin compatibility policy before switching.
@@ -181,11 +183,11 @@ shell-policy coverage, and supported workstation/platform live evidence. Missing
 operator disposition; a successful SSH fixture alone cannot satisfy it.
 
 Implementation can use successive commits and internal test harnesses on its feature branch. The
-current delivery publishes the reviewed design baseline before proof, without claiming a proven
-implementation boundary. The default implementation landing unit contains the new stack and complete
-cutover together; splitting it later requires independently complete units and an explicit removal
-point. Temporary coexistence during development is not a promise to release two public APIs or a
-runtime selection flag.
+design revision follows the accepted buffered proof; broader lifecycle/file acceptance remains open.
+The default implementation landing unit contains the new stack and complete cutover together;
+splitting it later requires independently complete units and an explicit removal point. Temporary
+coexistence during development is not a promise to release two public APIs or a runtime selection
+flag.
 
 ## Existing jobs and compatibility
 
@@ -210,6 +212,19 @@ native routes; registration consent and a general plugin permission evaluator ar
 prerequisites.
 
 ### Jobs and plugin compatibility
+
+Sessions adopt the [shared supervisor and profile design](execution-lifecycle-lld.md), not a second
+cgroup implementation. Preserve session UUID/run identity and resource-domain readiness while moving
+launch, observation and stop below it. Map #770's requirements and resolve ownership before retiring
+that proposal. Audit each consumer's required profile, action, identity, lifetime and I/O grants,
+including read-only job observers and file-only resources. Guest containment is not an in-process
+plugin sandbox.
+
+Existing sessions do not gain containment by moving their parent into a unit. Untracked detached
+descendants require an explicit legacy-run disposition: authorized shutdown/recreation or retained
+uncertainty, never a false clean certification. Preserve restart consent and do not broaden an
+operation's cleanup targets to unrelated same-user work. Non-systemd placement-host jobs and WSL2
+power lifetime must pass their own gates before production cutover.
 
 The two in-tree production `run_detached` callers do not implement intentional cross-invocation
 reuse of a completed result: Lima provisioning passes `reuse_completed=False`
