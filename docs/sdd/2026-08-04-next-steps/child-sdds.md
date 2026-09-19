@@ -721,6 +721,11 @@ Merged work the ledger owes a line, recorded from the merges themselves.
   lifetime, Bookworm versus a required Trixie upgrade, and side-by-side pricing of restricted
   same-UID execution against per-run users. Its session-identity dependency is discharged, since
   `session_uuid` and `run_id` landed on `main` with PR #794; that lane has been told.
+  - **Closed 2026-09-19 without merging.** The operator ruled containment an execution option owned
+    by transport rather than a session feature, superseding this adoption. PR #770 was closed at
+    `2c406948` and the lane shut down. Its SDD never reached `main`; the surviving copy of its
+    requirements is transport's pinned verbatim snapshot at that same head, which is now the source
+    for the transfer its own header prescribes.
 - **Transport and SSH rebuild adopted** (PRs #795 and #796, adopted 2026-09-14 by operator ruling
   recorded in `target-state.md`). Two coordinated adjacent standalone children replacing the
   execution layer rather than cleaning it in place: transport-improv
@@ -849,15 +854,18 @@ Merged work the ledger owes a line, recorded from the merges themselves.
     keeps the deferral safe, since unconsidered defaults would all become load-bearing on the day
     enforcement turns on. The FRD states which of its own requirements this supersedes, the cutover
     and enforcement timing in R7/R9/R10, and which it does not, the final-state requirements.
-  - **Open and unresolved: who owns the cgroup lifecycle.** #830 proposes that transport own shared
-    systemd and cgroup lifecycle and session adoption, mapping the session-cgroups effort's R1-R7.
-    That effort was adopted 2026-09-14 as an adjacent standalone child and its R1-R4 are the same
-    subject. Transport consumes the requirements through a pinned verbatim snapshot
+  - **Resolved 2026-09-19: transport owns it.** The operator ruled that cgroups are a generic
+    execution option through the transport layer rather than session-specific machinery, closed PR
+    #770, and shut down that lane. The ruling and its rationale are in `target-state.md`. The
+    question as it stood before that ruling: #830 proposed that transport own shared systemd and
+    cgroup lifecycle and session adoption, mapping the session-cgroups effort's R1-R7. That effort
+    was adopted 2026-09-14 as an adjacent standalone child and its R1-R4 are the same subject.
+    Transport consumes the requirements through a pinned verbatim snapshot
     (`inputs/session-cgroups-frd-2c406948.md`) that declares itself non-authoritative and states
     that the session effort retains its charter until explicit operator disposition, so neither
     effort has presumed the answer. The saga lead routed the question to both lanes and to the
-    operator on 2026-09-18; it remains open. Nothing in the saga artifacts records a scope change,
-    because none has been ruled.
+    operator on 2026-09-18, and the ruling followed on 2026-09-19. Both efforts handling it without
+    presuming an answer is why the ruling cost nothing to apply: no artifact had to be unwound.
 
 ### Efforts that ran without ledger entries (reconstructed 2026-09-06)
 

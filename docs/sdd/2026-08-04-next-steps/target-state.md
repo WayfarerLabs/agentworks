@@ -459,6 +459,27 @@ The loop needs the smol-dev gate to be safe: the operator names the area, the lo
 operator blesses before anything is deleted. Without that gate it wanders, and it re-litigates
 choices that were already settled deliberately.
 
+**Containment is an execution option, not a session feature (operator, 2026-09-19).** Cgroups are a
+generic execution option provided through the transport layer, which sessions then use, rather than
+session-specific machinery. The session-cgroups effort is closed and its lane shut down; the work
+continues in the transport-improv SDD. This supersedes the 2026-09-14 ruling that adopted
+session-cgroups as an adjacent standalone child.
+
+The rationale is recorded because it generalizes: the question was whether containment is a property
+of the session as a resource or of execution itself. Once the transport rework made execution a
+first-class owned layer, the session-specific framing became the narrower special case of something
+the execution layer has to provide anyway.
+
+**A preservation consequence, recorded because it is easy to miss.** PR #770 never merged, so
+`docs/sdd/2026-09-06-session-cgroups/` is not on `main`. The only copy of those requirements on
+`main` is the transport effort's pinned snapshot,
+`docs/sdd/2026-09-12-transport-improv/inputs/session-cgroups-frd-2c406948.md`, captured verbatim at
+`2c406948`, which is the exact head at which the effort closed. Nothing was lost, and that is luck
+rather than design: the snapshot existed to let transport consume requirements without editing
+another effort's artifacts, and it became the surviving record by accident. Its own header
+anticipates this disposition and says to "carry accepted requirements into their designated home
+before retiring either record." That transfer is now live work for the transport effort.
+
 ### Observability (destinations 5 and 6)
 
 The universal event vocabulary is Agentworks-owned and independently versioned; ACP is a projection,
