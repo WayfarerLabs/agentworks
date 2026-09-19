@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from contextlib import suppress
 
 import pytest
 
@@ -1290,7 +1291,8 @@ def test_escaped_helper_descendant_cannot_hold_response_capture_open(tmp_path: P
         while not escaped_pid.exists() and time.monotonic() < deadline:
             time.sleep(0.01)
         if escaped_pid.exists():
-            os.killpg(int(escaped_pid.read_text()), signal.SIGKILL)
+            with suppress(ProcessLookupError):
+                os.killpg(int(escaped_pid.read_text()), signal.SIGKILL)
     assert elapsed < 1
     assert result.returncode != 0
     assert result.stdout == ""
