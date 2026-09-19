@@ -116,11 +116,11 @@ OpenSSH facilities before proposing framing. An inner payload cannot undo hooks 
 sshd/account-shell startup. Supported bootstrap combinations and refusal behavior must be explicit;
 no broad implementation begins while these boundaries remain unresolved.
 
-The [main comparison](main-comparison.md) identifies a bootstrap constraint: Python is installed
-during initialization, after SSH is already in use. Initial delivery, package installation and
-no-staging readiness cannot assume that prerequisite is present. Transport owns helper preparation
-and must identify which lifecycle stages can use which tools; SSH does not install them or infer
-platform-host prerequisites from an initialized guest.
+The [migration risk disposition](migration-strategy.md#current-migration-risk-disposition) records a
+bootstrap constraint: Python is installed during initialization, after SSH is already in use.
+Initial delivery, package installation and no-staging readiness cannot assume that prerequisite is
+present. Transport owns helper preparation and must identify which lifecycle stages can use which
+tools; SSH does not install them or infer platform-host prerequisites from an initialized guest.
 
 ## SSH-backed platform access
 
