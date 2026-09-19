@@ -34,7 +34,15 @@ from agentworks.execution.carrier import (
 )
 from agentworks.execution.carriers.ssh import _io, client
 from agentworks.execution.carriers.ssh.client import SSHCarrier
-from agentworks.execution.carriers.ssh.connection import SSHConnection
+from agentworks.execution.carriers.ssh.connection import SSHConnection, admit_connection
+from agentworks.execution.carriers.ssh.trust import (
+    SSHTrustFiles,
+    block_trust,
+    import_trust,
+    refresh_trust,
+    resolve_trust,
+    trust_status,
+)
 
 pytestmark = pytest.mark.windows
 
@@ -61,11 +69,12 @@ class SyntheticSSH:
 
 @pytest.fixture
 def synthetic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    tmp_path = tmp_path.resolve()
     key = tmp_path / "identity"
     known_hosts = tmp_path / "known_hosts"
     key.write_bytes(b"synthetic identity")
     known_hosts.write_bytes(b"synthetic trust")
-    connection = SSHConnection("synthetic.example", "user", key, known_hosts)
+    connection = SSHConnection("synthetic.example", "user", key, SSHTrustFiles((known_hosts,)))
     value = SyntheticSSH(SSHCarrier(connection))
     original = subprocess.Popen
 
@@ -636,7 +645,7 @@ def test_installed_ssh_owns_fresh_pipe_handles(
                     "127.0.0.1",
                     "fixture",
                     key,
-                    trust,
+                    SSHTrustFiles((trust,)),
                     port=listener.getsockname()[1],
                     ssh_executable=executable,
                 )
@@ -662,3 +671,74 @@ def test_installed_ssh_owns_fresh_pipe_handles(
                 pass
             peer.join(timeout=6)
             assert not peer.is_alive()
+
+
+@pytest.mark.parametrize("refusal", ["blocked", "corrupt"])
+def test_each_command_admits_current_managed_policy(synthetic: SyntheticSSH, tmp_path: Path, refusal: str) -> None:
+    connection = synthetic.carrier._connection
+    bundle = import_trust(tmp_path.resolve() / "managed", sources=connection.trust, authority="fixture")
+    synthetic.carrier = SSHCarrier(replace(connection, trust=bundle))
+    first = resolve_trust(bundle)
+    assert synthetic.execute().failure is None
+    assert f'UserKnownHostsFile="{first.known_hosts[0].as_posix()}"' in synthetic.calls[-1]
+    source = tmp_path.resolve() / "replacement"
+    source.write_bytes(b"complete replacement policy")
+    refresh_trust(
+        bundle,
+        sources=SSHTrustFiles((source,)),
+        authority="fixture",
+        expected_generation=trust_status(bundle).generation,
+    )
+    second = resolve_trust(bundle)
+    assert second != first
+    assert synthetic.execute().failure is None
+    assert f'UserKnownHostsFile="{second.known_hosts[0].as_posix()}"' in synthetic.calls[-1]
+    assert first.known_hosts[0].read_bytes() == b"synthetic trust"
+    if refusal == "blocked":
+        block_trust(bundle, expected_generation=trust_status(bundle).generation)
+    else:
+        second.known_hosts[0].write_bytes(b"corrupt policy")
+    previous_calls = len(synthetic.calls)
+    report = synthetic.execute()
+    assert report.dispatch == Dispatch.NOT_SENT
+    assert report.failure == Failure.DISPATCH
+    assert len(synthetic.calls) == previous_calls
+    synthetic.assert_closed()
+
+
+@pytest.mark.parametrize("stage", ["admission", "version"])
+def test_expiry_during_local_checks_prevents_dispatch(
+    synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    clock = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    original = admit_connection
+
+    def admit(connection: SSHConnection) -> SSHTrustFiles:
+        trust = original(connection)
+        if stage == "admission":
+            clock[0] = 2.0
+        return trust
+
+    def version(connection: SSHConnection, *, deadline: Deadline) -> None:
+        clock[0] = 2.0
+
+    monkeypatch.setattr(client, "admit_connection", admit)
+    monkeypatch.setattr(client, "check_client_version", version)
+    report = synthetic.execute(seconds=1)
+    assert report.dispatch == Dispatch.NOT_SENT
+    assert report.failure == Failure.DEADLINE
+    assert synthetic.calls == []
+
+
+@pytest.mark.parametrize("interruption", [KeyboardInterrupt, SystemExit])
+def test_admission_preserves_control_flow(
+    synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch, interruption: type[BaseException]
+) -> None:
+    def interrupt(connection: SSHConnection) -> SSHTrustFiles:
+        raise interruption()
+
+    monkeypatch.setattr(client, "admit_connection", interrupt)
+    with pytest.raises(interruption):
+        synthetic.execute()
+    assert synthetic.calls == []
