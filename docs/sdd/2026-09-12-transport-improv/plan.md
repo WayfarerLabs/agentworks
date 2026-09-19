@@ -109,8 +109,9 @@ checkpoint receives the normal private reviews and validation before a testing b
 The operator separately authorized up to three public feedback/fix rounds for #833. Round 1 began
 2026-09-19 at 20:35:58 UTC, after the initial handoff's one-hour collection window and the complete
 tester report. Its batch is the checkpoint tester report, the complexity review and its subsequent
-directory-depth retraction. The agreed documentation corrections are local; round closure and a new
-handoff remain pending private review and explicit publication approval. No second round has begun.
+directory-depth retraction. The agreed documentation corrections and the separate JSON work unit
+passed project, complexity and correctness review at `ac18444f`. Round closure and a new handoff
+remain pending explicit publication approval. No second round has begun.
 
 SSH's implementation continues in #832. Its owner agreed to transport extracting the shared bounded
 subprocess pump, while SSH retains environment sanitation, carrier-specific report interpretation,
@@ -125,6 +126,10 @@ integrates the new invocation values.
       update transport-owned proof consumers, and preserve the buffered carrier interface. Local
       execution tests report 309 passed and four platform-scoped skips; production remains
       unchanged.
+- [x] Implement the private local JSON transformation with the four shipped strategies, literal
+      null, strict input checks and byte/depth bounds. At `ac18444f`, all 69 focused cases and the
+      three private review lanes pass. This returns proposed bytes or a skip decision only; no
+      filesystem publication, FileAccess wiring or permission boundary is claimed.
 - [ ] Accept the preparation/result and file-operation LLDs after private review and disposition of
       their helper/runtime, launch-evidence, cross-identity locking, and platform prerequisites.
 - [ ] Jointly accept and prove the carrier sink extension with the SSH owner before changing
