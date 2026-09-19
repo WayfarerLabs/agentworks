@@ -204,24 +204,26 @@ account, which can inspect its processes and forge its own output.
 
 The trusted bootstrap writes newline-delimited ASCII records to its control descriptor. Each record
 contains the protocol version, nonce, strictly increasing sequence number, record kind, decoded
-length, and canonical base64 body. A terminal record additionally carries a SHA-256 digest of the
-prior canonical records. Records have a fixed 8 KiB encoded maximum; binary application data is
-split into smaller frames. Length, alphabet, sequence, singleton, phase, digest, and terminal-order
-violations make the transcript invalid.
+length, and canonical base64 body. Records have a fixed 8 KiB encoded maximum; binary application
+data is split into smaller frames. Length, alphabet, sequence, singleton, phase, and terminal-order
+violations make the transcript invalid. There is no transcript-wide checksum: the nonce, sequence,
+closed grammar, and strict terminal ordering already identify and delimit the attempt, while a hash
+would not authenticate a same-user helper. Stream digests remain solely to verify reconstructed
+stream bytes.
 
 The version-one production record kinds are:
 
-| Kind         | Meaning                                                                                               |
-| ------------ | ----------------------------------------------------------------------------------------------------- |
-| `READY`      | Manifest, final identity, cwd, environment, shell selection, and input descriptors are prepared.      |
-| `LAUNCHING`  | The helper is committing its one launch attempt. This does not prove successful exec.                 |
-| `STARTED`    | A mechanism with proved exec acknowledgment observed successful application entry.                    |
-| `STDOUT`     | Captured launch-chain bytes, promoted to application output only with application evidence.           |
-| `STDERR`     | Captured launch-chain bytes, promoted to application output only with application evidence.           |
-| `STREAM_END` | One stream ended, with total retained length, digest, and caller-bound truncation flag.               |
-| `WAITED`     | The launcher's observed wait fact and its precision: wait code, exact exit, or exact signal.          |
-| `FAILED`     | A closed non-sensitive trusted phase and code, with no payload or provider prose.                     |
-| `FINISHED`   | Terminal digest after the launcher and output handlers have been waited. Not application proof alone. |
+| Kind         | Meaning                                                                                                        |
+| ------------ | -------------------------------------------------------------------------------------------------------------- |
+| `READY`      | Manifest, final identity, cwd, environment, shell selection, and input descriptors are prepared.               |
+| `LAUNCHING`  | The helper is committing its one launch attempt. This does not prove successful exec.                          |
+| `STARTED`    | A mechanism with proved exec acknowledgment observed successful application entry.                             |
+| `STDOUT`     | Captured launch-chain bytes, promoted to application output only with application evidence.                    |
+| `STDERR`     | Captured launch-chain bytes, promoted to application output only with application evidence.                    |
+| `STREAM_END` | One stream ended, with total retained length, digest, and caller-bound truncation flag.                        |
+| `WAITED`     | The launcher's observed wait fact and its precision: wait code, exact exit, or exact signal.                   |
+| `FAILED`     | A closed non-sensitive trusted phase and code, with no payload or provider prose.                              |
+| `FINISHED`   | The one terminal record, after the launcher and output handlers have been waited. Not application proof alone. |
 
 `LAUNCHING` is never mapped to `ApplicationState.STARTED`. A direct shell substrate may emit
 `STARTED` only after a proved close-on-exec acknowledgment or equivalent. Death between `LAUNCHING`
@@ -241,11 +243,13 @@ signal 15. It is represented as `WaitCode(143)`, never `ExitCode(143)` or `Signa
 supervisor may provide exact exit/signal precision. This is evidence precision, not a
 carrier-specific result type.
 
-`FINISHED` validates that the trusted launch transcript ended; application completion additionally
-requires the start evidence above. Valid application evidence can survive later carrier observation
-loss, while raw carrier completion without it never proves bootstrap or application completion. A
-conflict is a protocol failure. Frames captured before application proof are not returned as
-application stdout/stderr.
+`FINISHED` is accepted only once, after the required wait and stream-end records, with no subsequent
+record. It is strict terminal evidence that the trusted helper reached that phase, not a
+self-authenticating checksum, and application completion additionally requires the start evidence
+above. Valid application evidence can survive later carrier observation loss, while raw carrier
+completion without it never proves bootstrap or application completion. A missing, duplicate,
+out-of-order, or post-terminal record is a protocol failure. Frames captured before application
+proof are not returned as application stdout/stderr.
 
 Exact start acknowledgment remains a mechanism gate. The implementation must prove either a
 shell-available close-on-exec channel, a trusted supervisor record where that profile is allowed, or
@@ -313,9 +317,9 @@ without changing invocation meaning.
 
 The inline manifest is canonical ASCII with base64 fields. It carries literal argv or source,
 composed environment, cwd, shell/startup selection, identity expectation, finite stdin, output
-policy, nonce, and field digests. Source and stdin decode into separate descriptors. The complete
-encoded manifest has one conservative transport-owned limit proven across every required carrier; 32
-KiB is the candidate, not an accepted constant until QGA whole-request testing confirms it.
+policy, and nonce. Source and stdin decode into separate descriptors. The complete encoded manifest
+has one conservative transport-owned limit proven across every required carrier; 32 KiB is the
+candidate, not an accepted constant until QGA whole-request testing confirms it.
 
 The bootstrap argv contains only fixed helper source, non-sensitive protocol constants, and the
 nonce. It contains no command argument, source, environment value, cwd, or stdin bytes. Inline
@@ -332,14 +336,18 @@ uncertain cleanup is reported and remains owner debt rather than being declared 
 The private transfer substrate is below both public execution and FileAccess. It supports only
 create-owned-scratch, write-at-known-offset, verify length/digest, read-bounded-range, and
 remove-owned-scratch. It accepts no caller destination, shell fragment, callback, ownership, or
-mode. Therefore an upload implementation may reuse it without exposing command access, and a file
-helper may reuse its delivery without granting the recipient public `run`.
+mode. File helper asset delivery must consume this same substrate, bounds, and integrity protocol;
+it does not define a second numbered-part bootstrap or an independent chunk size. File upload may
+also reuse the substrate without exposing command access. Neither use grants the recipient public
+`run`.
 
 Chunks use a conservative 24 KiB raw bound, an exact offset, total expected length, chunk SHA-256,
 and whole-object SHA-256. A lost chunk acknowledgement permits another control request only after
 the owned scratch identity and fixed range make the write demonstrably idempotent. Blind append,
 application relaunch, or fallback to another carrier is forbidden. Final whole-object verification
-precedes `LAUNCHING`.
+precedes `LAUNCHING` or execution of a delivered file-helper asset. This shared delivery mechanism
+does not select the file helper's runtime technology or prove that technology available before Phase
+B; that decision remains a separate implementation gate.
 
 Captured stdout and stderr spool separately. Each spool keeps at most `max_bytes + 1`; helper
 readers drain the remainder so a caller retention bound does not send SIGPIPE to the workload. The
@@ -436,12 +444,14 @@ bootstrap, but must emit the same application evidence schema. `run(..., profile
 private launch and wait without a public `start` grant. This LLD does not select unit identity,
 lease, stop, retention, or stale-reference mechanics owned by the lifecycle design.
 
-File helpers consume only the private scratch transfer and framed control-result mechanisms. Their
-operation schemas accept bytes, paths already authorized by their own layer, and fixed action enums,
-never `Command`, `Script`, public argv, or callbacks. Internal helper execution is authorized as
-part of the public file action. It neither exposes `ExecutionAccess` nor requires a recipient `run`
-grant. Core file catalog enforcement still activates only with legacy removal; safe object handling,
-sensitivity, identity, and truthful publication evidence are not deferred.
+File helpers consume only the private scratch transfer and framed control-result mechanisms. A
+packaged helper asset is another operation-owned object delivered through the same fixed-offset
+chunks and whole-object verification, not a file-specific bootstrap protocol. File operation schemas
+accept bytes, paths already authorized by their own layer, and fixed action enums, never `Command`,
+`Script`, public argv, or callbacks. Internal helper execution is authorized as part of the public
+file action. It neither exposes `ExecutionAccess` nor requires a recipient `run` grant. Core file
+catalog enforcement still activates only with legacy removal; safe object handling, sensitivity,
+identity, and truthful publication evidence are not deferred.
 
 ## Implementation slices and focused tests
 
@@ -450,8 +460,10 @@ The production implementation proceeds in reviewable slices without wiring RunCo
 1. Add `models.py`, move `Command`/`Script`/`Shell`, update all transport-owned proof imports and
    constructors, and ask the SSH owner to update its one fresh-process import. No runtime behavior
    or carrier type changes.
-2. Add result models and pure frame encoder/decoder tests. Mutated, reordered, duplicate, oversized,
-   wrong-nonce, truncated, and post-terminal records must never produce completion.
+2. Add result models and pure frame encoder/decoder tests. Malformed, reordered, duplicate,
+   oversized, wrong-nonce, missing-terminal, truncated, and post-terminal records must never produce
+   completion. A valid `FINISHED` has no transcript checksum and still requires the preceding start,
+   wait, and stream evidence.
 3. After explicit SSH consultation, add the accepted sink output to `CarrierIO`; prove both carriers
    only pump bytes, retain no raw sink-mode data, stop using endpoints before return, and preserve
    partial carrier evidence on decoder failure/interruption.
@@ -462,7 +474,8 @@ The production implementation proceeds in reviewable slices without wiring RunCo
 5. Add private staging and spooling. Prove boundary-minus/at/plus envelope and chunk sizes, large
    source and finite stdin, exact offsets, short writes, lost chunk acknowledgment, whole digests,
    output larger than a provider response, caller-bound truncation, partial retrieval, and owned
-   cleanup without application replay.
+   cleanup without application replay. Exercise the identical transfer implementation and settled
+   chunk bound for file helper asset delivery; no second numbered-part/bootstrap path is permitted.
 6. Add target-level unchecked/checked interpretation. Mutate each evidence input independently so
    raw zero, raw 255, stream ends, suppression, discard, or `STARTED` alone cannot become success.
 7. Run independence tests with every retirement module unavailable before any production wiring.
@@ -516,7 +529,10 @@ The lead should settle these points with the named owner before assigning broade
 5. **Cross-carrier inline/chunk constants, with SSH and native owners:** replace candidate values
    with the largest conservative values established by whole-request proof. These remain private
    limits.
-6. **Darwin preparation substrate, with platform owner:** prove the installed-tool design or approve
+6. **File-helper runtime technology, with file and initialization owners:** select and prove the
+   helper technology and its phase availability. Reusing private transfer answers delivery only; it
+   does not establish an early Python prerequisite or select a native executable.
+7. **Darwin preparation substrate, with platform owner:** prove the installed-tool design or approve
    the cost and bootstrap story of a shipped helper. Do not make SSH parse application frames to
    compensate.
 
