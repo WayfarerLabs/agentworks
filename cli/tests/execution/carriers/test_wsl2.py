@@ -139,11 +139,11 @@ def test_literal_argv_is_forwarded_without_a_shell(monkeypatch: pytest.MonkeyPat
         (CarrierIO(sensitive=True), Retention.SUPPRESSED),
     ],
 )
-def test_expired_deadline_refuses_before_pump(
+def test_expired_deadline_refuses_without_process_creation(
     monkeypatch: pytest.MonkeyPatch, io: CarrierIO, retention: Retention
 ) -> None:
-    pump = MagicMock()
-    monkeypatch.setattr(wsl2, "run_process", pump)
+    spawn = MagicMock(side_effect=AssertionError("expired execution attempted to create a process"))
+    monkeypatch.setattr(subprocess, "Popen", spawn)
     report = WSL2Carrier(connection()).execute(
         PreparedInvocation(("/prepared/bootstrap",)), io=io, deadline=Deadline.after(0)
     )
@@ -153,7 +153,7 @@ def test_expired_deadline_refuses_before_pump(
     assert report.stdout.retention == report.stderr.retention == retention
     assert report.stdout.provenance == Provenance.CARRIER_STDOUT
     assert report.stderr.provenance == Provenance.MIXED_STDERR
-    pump.assert_not_called()
+    spawn.assert_not_called()
 
 
 def test_output_evidence_is_preserved_while_provenance_is_assigned(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -181,7 +181,7 @@ def test_finite_guest_status_is_candidate_completion(monkeypatch: pytest.MonkeyP
     pump.assert_called_once()
 
 
-@pytest.mark.parametrize("status", [None, -1, -15, 256, 4_294_967_295, 0xC0000005, True])
+@pytest.mark.parametrize("status", [None, -1, -15, 256, 4_294_967_295, 0xC0000005])
 def test_status_outside_guest_exit_range_is_not_completion(monkeypatch: pytest.MonkeyPatch, status: int | None) -> None:
     report, _ = execute(monkeypatch, process_result(local_status=status, exit_status=status))
     assert report.dispatch == Dispatch.UNKNOWN

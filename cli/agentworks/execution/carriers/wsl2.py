@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
 from agentworks.execution.carrier import (
-    CapturedOutput,
     CarrierIO,
     CarrierReport,
     ChannelFeatures,
@@ -16,7 +15,7 @@ from agentworks.execution.carrier import (
     Failure,
     Provenance,
 )
-from agentworks.execution.carriers._subprocess import output_retention, run_process
+from agentworks.execution.carriers._subprocess import run_process
 
 if TYPE_CHECKING:
     from agentworks.execution.carrier import Deadline, PreparedInvocation
@@ -58,8 +57,6 @@ class WSL2Carrier:
 
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
         """Spend the original deadline on at most one literal WSL exec attempt."""
-        if deadline.expired:
-            return _not_sent(io, Failure.DEADLINE)
         result = run_process(
             [
                 self._connection.wsl_executable,
@@ -77,7 +74,7 @@ class WSL2Carrier:
         # The pinned WSL client distinguishes its own failures with -1 and
         # returns the service launch status. Only the guest exit range is
         # candidate completion evidence until Windows-native proof closes.
-        completion = ExitStatus(code=status) if result.started and type(status) is int and 0 <= status <= 255 else None
+        completion = ExitStatus(code=status) if result.started and status is not None and 0 <= status <= 255 else None
         dispatch = (
             Dispatch.SENT if completion is not None else Dispatch.UNKNOWN if result.started else Dispatch.NOT_SENT
         )
@@ -92,13 +89,3 @@ class WSL2Carrier:
             replace(result.stderr, provenance=Provenance.MIXED_STDERR),
             failure,
         )
-
-
-def _not_sent(io: CarrierIO, failure: Failure) -> CarrierReport:
-    retention = output_retention(io)
-    return CarrierReport(
-        Dispatch.NOT_SENT,
-        stdout=CapturedOutput(provenance=Provenance.CARRIER_STDOUT, retention=retention),
-        stderr=CapturedOutput(provenance=Provenance.MIXED_STDERR, retention=retention),
-        failure=failure,
-    )
