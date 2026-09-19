@@ -228,6 +228,79 @@ and intermediary-refusal measurements inform honest outcome interpretation; they
 R7's run-membership identity lookup. Future live charters must name workstation and target axes,
 resource/cleanup limits and any newly required beds rather than inherit nonexistent coverage.
 
+## Early Python investigation, 2026-09-19
+
+The operator authorized investigation, not installation or a new runtime requirement. This audit
+uses implementation head `ae444f53`. The recommendation is to pursue a standard-library helper with
+an explicit early prerequisite, subject to the adoption and proof decisions below. Python removes
+some shell-level parsing and process-control difficulties; it does not establish confinement or
+prove that an application entered its executable.
+
+### Availability and adoption
+
+Implementation paths below are relative to `cli/agentworks/`.
+
+- `capabilities/vm_platform/cloud_init.py:16` omits Python from `PROVISIONING_PACKAGES` and adds it
+  in Phase B through `INIT_SYSTEM_PACKAGES`. The shared bootstrap installs its supplied package list
+  at `bootstrap_script.py:117`. Moving the package earlier is a narrow new-VM integration point, not
+  proof that every existing VM or platform host has it.
+- Existing-VM repair needs its own native bootstrap entry point, independent of the helper it
+  installs. `native_files.py:241` currently recommends reinit when Python is absent, while
+  `vms/manager/lifecycle.py:712` requires provisioned state and a valid Tailscale connection for
+  reinit. That advice is insufficient for native recovery when canonical access is broken. The
+  replacement must not call legacy transport code to solve this dependency.
+- SSH-backed platform access is a separate adoption case. Lima's current readiness check at
+  `capabilities/vm_platform/lima.py:193` checks workstation tools, not a host Python prerequisite.
+  New guest packages cannot supply the runtime for host jobs executed before guest creation.
+  Requiring an explicitly provisioned interpreter on macOS hosts needs an operator decision and its
+  own validation; readiness must not install a package manager or Python implicitly.
+- Package installation requires an available package source. An offline target lacking Python cannot
+  acquire it merely because the carrier works. Installation failure must remain an explicit
+  bootstrap failure, with an actionable recovery path, not an automatic canonical-route fallback.
+
+The distribution packages currently use Python 3.11 on
+[Bookworm](https://packages.debian.org/bookworm/python3) and Python 3.13 on
+[Trixie](https://packages.debian.org/trixie/python3). A helper compatible with the 3.11 standard
+library could use both distributions' maintained packages without copying the workstation CLI's
+runtime floor onto the guest. This is a compatibility proposal, not an instruction to install an old
+upstream release or a selected minimum.
+
+### Local mechanism evidence
+
+A disposable probe on Debian 12, Linux arm64, CPython 3.11.2 used a constant `python3 -I -S -B -c`
+helper and a capped binary request envelope. The
+[interpreter options](https://docs.python.org/3/using/cmdline.html) isolate Python environment and
+module lookup, skip site initialization, and disable bytecode writes. They do not sanitize the
+operating-system loader environment or certify arbitrary helper code as read-only.
+
+The measured cases separated short shell source on an inherited pipe from application stdin,
+round-tripped all 256 byte values, and kept stderr separate. Ordinary exits 0, 1, 125, 126, 127,
+143, and 255 remained distinct from a nonexistent executable. Request markers were absent from the
+bounded completion record. A timed-out child group was killed and reaped in this local case.
+
+This is not carrier or platform acceptance: the probe used Linux `/proc/self/fd`, buffered output,
+short input, and an extra local status pipe. It did not exercise QGA, SSH, macOS, a guest,
+elevation, large transfers, or detached ownership. It created no guest staging files and installed
+nothing, but that does not prove the full no-staging readiness path.
+
+One counterexample is decisive: killing the child with SIGKILL in `preexec_fn` allowed `Popen` to
+return, followed by wait status -9, although exec never occurred. Therefore neither `Popen` return
+nor EOF on its internal close-on-exec error pipe is positive application-start evidence. The
+preparation design must resolve that gate without synthesizing `STARTED` or reserving legitimate
+application exit values as launcher errors.
+
+### Decisions still required
+
+Before selecting this substrate, settle the authorized bootstrap/adoption path for new guests,
+existing native-recovery targets, and supported platform hosts. Then prove no-staging invocation and
+exact result interpretation through the actual carriers, including launch interruption.
+
+The [OS module documentation](https://docs.python.org/3/library/os.html) describes
+platform-dependent descriptor APIs and Linux-only extended-attribute APIs. A Python helper therefore
+still needs a proved macOS metadata implementation. It does not close the file LLD's
+ancestor-rename, hard-link, cross-identity locking, or mount-confinement questions. Those remain
+independent acceptance gates.
+
 ## Claims not relied upon
 
 - A common API makes every backend interactive.
