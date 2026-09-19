@@ -7,6 +7,7 @@ import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import BinaryIO
 
 import pytest
@@ -126,3 +127,67 @@ def test_successful_snapshot_digest_matches_all_bytes(tmp_path: Path) -> None:
     assert files.copy_file(source, destination) == expected
     assert files.file_hash(destination) == expected
     assert destination.read_bytes() == content
+
+
+@pytest.mark.parametrize("platform", ["win32", "linux"])
+@pytest.mark.parametrize("change", [None, "st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns"])
+def test_snapshot_path_comparison_respects_platform_timestamp_meaning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str, change: str | None
+) -> None:
+    source = tmp_path.resolve() / "source"
+    source.write_bytes(b"stable policy")
+    with source.open("rb") as reader:
+        before = os.fstat(reader.fileno())
+        attributes = {name: getattr(before, name) for name in ("st_mtime_ns", "st_ctime_ns")}
+        sequence = list(before)
+        if change in {"st_dev", "st_ino", "st_size"}:
+            index = {"st_dev": 2, "st_ino": 1, "st_size": 6}[change]
+            sequence[index] += 1
+        elif change is not None:
+            attributes[change] += 1
+        current = os.stat_result(sequence, attributes)
+        monkeypatch.setattr(Path, "lstat", lambda self: current)
+        monkeypatch.setattr(files, "sys", SimpleNamespace(platform=platform))
+        if change is None or (platform == "win32" and change == "st_ctime_ns"):
+            files._verify_snapshot(reader, source, before)
+        else:
+            with pytest.raises(StateError):
+                files._verify_snapshot(reader, source, before)
+
+
+@pytest.mark.parametrize("platform", ["win32", "linux"])
+def test_snapshot_refuses_descriptor_change_time_even_when_path_is_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str
+) -> None:
+    source = tmp_path.resolve() / "source"
+    source.write_bytes(b"stable policy")
+    with source.open("rb") as reader:
+        before = os.fstat(reader.fileno())
+        after = os.stat_result(before, {"st_mtime_ns": before.st_mtime_ns, "st_ctime_ns": before.st_ctime_ns + 1})
+        monkeypatch.setattr(os, "fstat", lambda descriptor: after)
+        monkeypatch.setattr(Path, "lstat", lambda self: before)
+        monkeypatch.setattr(files, "sys", SimpleNamespace(platform=platform))
+        with pytest.raises(StateError):
+            files._verify_snapshot(reader, source, before)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows capture handles refuse replacement before snapshot validation")
+@pytest.mark.parametrize("operation", ["copy", "hash"])
+def test_snapshot_refuses_replaced_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str) -> None:
+    source = tmp_path.resolve() / "source"
+    source.write_bytes(b"original policy")
+    replacement = source.with_name("replacement")
+    replacement.write_bytes(b"replacement key")
+    chunks = files._snapshot_chunks
+
+    def replace_after_read(reader: BinaryIO, remaining: int) -> Iterator[bytes]:
+        yield from chunks(reader, remaining)
+        os.replace(replacement, source)
+
+    monkeypatch.setattr(files, "_snapshot_chunks", replace_after_read)
+    with pytest.raises(StateError):
+        if operation == "copy":
+            files.copy_file(source, source.with_name("copy"))
+        else:
+            files.file_hash(source, owned=False)
+    assert source.read_bytes() == b"replacement key"

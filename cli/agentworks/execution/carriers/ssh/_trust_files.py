@@ -82,7 +82,17 @@ def _snapshot_chunks(source: BinaryIO, remaining: int) -> Iterator[bytes]:
 
 
 def _verify_snapshot(source: BinaryIO, path: Path, before: os.stat_result) -> None:
-    if _identity(before) != _identity(os.fstat(source.fileno())) or _identity(before) != _identity(path.lstat()):
+    current = path.lstat()
+    # CPython on Windows reports change time from fstat, but preserves creation
+    # time in pathname stat's ctime. Keep the descriptor change-time comparison;
+    # only compare fields with matching meanings across descriptor/path queries.
+    same_path = (
+        os.path.samestat(before, current)
+        and before.st_size == current.st_size
+        and before.st_mtime_ns == current.st_mtime_ns
+        and (sys.platform == "win32" or before.st_ctime_ns == current.st_ctime_ns)
+    )
+    if _identity(before) != _identity(os.fstat(source.fileno())) or not same_path:
         raise StateError("SSH trust file changed while reading; supply a stable snapshot")
 
 
