@@ -395,10 +395,10 @@ remains at the layer that can prove whether repeated dispatch is safe.
 
 This boundary follows the SSH developer's feedback relayed by the operator and the independent
 carrier design recorded in
-[the current SSH reference](prior-art-research.md#ssh-coordination-reference), which supersedes PR
-#757. It records this effort's integration plan, not an amendment to the SSH effort's owned
-artifacts. The buffered proof is accepted; broader contract reconciliation and full production
-implementation remain open. No preliminary consolidation of legacy SSH is required.
+[the current SSH reference](prior-art-research.md#ssh-coordination-reference), which supersedes the
+old consolidation proposal. It records this effort's integration plan, not an amendment to the SSH
+effort's owned artifacts. The buffered proof is accepted; broader contract reconciliation and full
+production implementation remain open. No preliminary consolidation of legacy SSH is required.
 
 The transport lead owns the carrier contract and acceptance criteria. SSH owns implementation and
 provides feasibility evidence; consultation does not divide contract ownership. Transport publishes
