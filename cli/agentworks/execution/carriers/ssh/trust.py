@@ -158,7 +158,10 @@ def _blocked(directory: Path, manifest: _Manifest) -> _Manifest:
     blocked = replace(manifest, status=replace(manifest.status, blocked=True))
     try:
         files.write_state(directory, blocked.document())
-    except BaseException as error:
+    except (KeyboardInterrupt, SystemExit) as error:
+        error.add_note("SSH trust blocking was interrupted; quiesce new use until maintenance state is verified")
+        raise
+    except Exception as error:
         raise TrustBlockUnprovenError(
             "SSH trust could not durably record blocked policy; quiesce new use and repair storage"
         ) from error
@@ -182,11 +185,17 @@ def _publish(directory: Path, blocked: _Manifest, sources: SSHTrustFiles, author
         status = SSHTrustStatus(generation, False, authority, sources)
         files.write_state(directory, _Manifest(status, hashes, revoked_hash).document())
         return status
-    except BaseException:
+    except BaseException as error:
         # Publication can replace the manifest and then fail its directory
         # flush. Re-establish blocking even in that uncertain case. Keep every
         # generation and partial file as evidence, including interrupted input.
-        _blocked(directory, blocked)
+        try:
+            _blocked(directory, blocked)
+        except BaseException as blocking_error:
+            if isinstance(error, (KeyboardInterrupt, SystemExit)):
+                error.add_note("SSH trust blocking could not be established; quiesce new use and repair storage")
+                raise error from blocking_error
+            raise
         raise
 
 
