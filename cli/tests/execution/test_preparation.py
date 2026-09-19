@@ -13,13 +13,11 @@ import pytest
 
 from agentworks.errors import ValidationError
 from agentworks.execution.carrier import CapturedOutput, FiniteInput, Provenance, Retention
+from agentworks.execution.models import Command, Script, Shell
 from agentworks.execution.preparation import (
     MAX_ENVELOPE_BYTES,
-    Command,
     DecodedOutput,
     PreparedExecution,
-    Script,
-    Shell,
     decode_output,
     prepare,
 )
@@ -59,7 +57,7 @@ def test_literal_arguments_preserve_boundaries_and_have_no_shell_interpretation(
     assert decoded.stdout_complete and decoded.stderr_complete
 
 
-@pytest.mark.parametrize("shell", [Shell.fixed("sh"), Shell.fixed("bash")])
+@pytest.mark.parametrize("shell", [Shell.SH, Shell.BASH])
 def test_script_source_and_finite_binary_input_are_separate(shell: Shell) -> None:
     payload = bytes(range(256)) * 256 + b"\r\n\n"
     prepared = prepare(
@@ -73,17 +71,17 @@ def test_script_source_and_finite_binary_input_are_separate(shell: Shell) -> Non
 
 
 def test_absent_input_is_eof_and_empty_script_succeeds() -> None:
-    status, decoded, _ = _run(prepare(Script("cat; printf done", Shell.fixed("sh"))))
+    status, decoded, _ = _run(prepare(Script("cat; printf done", Shell.SH)))
     assert status == 0
     assert decoded.stdout == b"done"
-    status, decoded, _ = _run(prepare(Script("", Shell.fixed("bash"))))
+    status, decoded, _ = _run(prepare(Script("", Shell.BASH)))
     assert status == 0
     assert decoded.stdout == decoded.stderr == b""
     assert decoded.stdout_complete and decoded.stderr_complete
 
 
 def test_helper_pipeline_failure_option_does_not_change_application_shell() -> None:
-    status, decoded, _ = _run(prepare(Script("false | true", Shell.fixed("bash"))))
+    status, decoded, _ = _run(prepare(Script("false | true", Shell.BASH)))
     assert status == 0
     assert decoded.stdout_complete and decoded.stderr_complete
 
@@ -101,7 +99,7 @@ def test_payload_may_close_large_stdin_early(restore_signals: bool, consume: boo
 
 
 def test_script_may_exit_before_consuming_all_source() -> None:
-    prepared = prepare(Script("exit 0\n#" + "x" * 150_000, Shell.fixed("sh")))
+    prepared = prepare(Script("exit 0\n#" + "x" * 150_000, Shell.SH))
     status, decoded, _ = _run(prepared)
     assert status == 0
     assert decoded.stdout_complete and decoded.stderr_complete
@@ -116,7 +114,7 @@ def test_sensitive_payload_may_close_large_stdin_early() -> None:
 
 @pytest.mark.parametrize("code", [0, 1, 255])
 def test_bootstrap_returns_payload_status_without_encoding_a_completion_claim(code: int) -> None:
-    status, decoded, _ = _run(prepare(Script(f"printf observed; exit {code}", Shell.fixed("sh"))))
+    status, decoded, _ = _run(prepare(Script(f"printf observed; exit {code}", Shell.SH)))
     assert status == code
     assert decoded.stdout == b"observed"
     assert decoded.stdout_complete and decoded.stderr_complete
@@ -127,7 +125,7 @@ def test_env_and_cwd_apply_to_payload_without_overwriting_bootstrap_state(tmp_pa
     environment = dict.fromkeys(keys, "not-the-bootstrap-value")
     environment["MESSAGE"] = "quotes ' \" and newline\n\n"
     prepared = prepare(
-        Script('printf "%s\\0%s\\0%s" "$MESSAGE" "$source" "$PWD"', Shell.fixed("sh")),
+        Script('printf "%s\\0%s\\0%s" "$MESSAGE" "$source" "$PWD"', Shell.SH),
         env=environment,
         cwd=str(tmp_path),
     )
@@ -143,7 +141,7 @@ def test_account_shell_is_resolved_at_destination_not_from_shell_environment() -
 
     shell = pwd.getpwuid(os.getuid()).pw_shell
     prepared = prepare(
-        Script('printf "%s" "$0"', Shell.user_default()),
+        Script('printf "%s" "$0"', Shell.USER_DEFAULT),
         env={"SHELL": "/does/not/exist"},
     )
     status, decoded, _ = _run(prepared)
@@ -162,7 +160,7 @@ def test_internal_locale_does_not_change_payload_environment(inherited: str | No
     environment.pop("LC_ALL", None)
     if inherited is not None:
         environment["LC_ALL"] = inherited
-    prepared = prepare(Script('printf "%s:%s" "${LC_ALL+x}" "${LC_ALL-}"', Shell.fixed("sh")))
+    prepared = prepare(Script('printf "%s:%s" "${LC_ALL+x}" "${LC_ALL-}"', Shell.SH))
     status, decoded, _ = _run(prepared, env=environment)
     assert status == 0
     assert decoded.stdout == (b":" if inherited is None else b"x:" + inherited.encode())
@@ -170,7 +168,7 @@ def test_internal_locale_does_not_change_payload_environment(inherited: str | No
 
 def test_explicit_payload_locale_wins_over_inherited_and_internal_locale() -> None:
     environment = {**os.environ, "LC_ALL": "C"}
-    prepared = prepare(Script('printf "%s" "$LC_ALL"', Shell.fixed("sh")), env={"LC_ALL": "POSIX"})
+    prepared = prepare(Script('printf "%s" "$LC_ALL"', Shell.SH), env={"LC_ALL": "POSIX"})
     status, decoded, _ = _run(prepared, env=environment)
     assert status == 0
     assert decoded.stdout == b"POSIX"
@@ -200,7 +198,7 @@ def test_inherited_reserved_exports_cannot_expose_helper_payload_or_functions() 
     environment = {**os.environ, **dict.fromkeys((f"_agw_{name}" for name in reserved), "inherited-value")}
     environment["BASH_FUNC__agw_fail%%"] = "() { printf inherited-function; }"
     canary = b"synthetic-input-canary"
-    prepared = prepare(Script("/usr/bin/env -0", Shell.fixed("bash")), stdin=canary)
+    prepared = prepare(Script("/usr/bin/env -0", Shell.BASH), stdin=canary)
     status, decoded, _ = _run(prepared, env=environment)
     assert status == 0
     assert canary not in decoded.stdout
@@ -215,7 +213,7 @@ def test_no_staging_and_inherited_bash_env_does_not_run(tmp_path: Path) -> None:
     staging = tmp_path / "staging"
     staging.mkdir()
     environment = {**os.environ, "BASH_ENV": str(hook), "ENV": str(hook), "TMPDIR": str(staging)}
-    prepared = prepare(Script("printf ready", Shell.fixed("bash")), cwd=str(staging))
+    prepared = prepare(Script("printf ready", Shell.BASH), cwd=str(staging))
     status, decoded, _ = _run(prepared, env=environment)
     assert status == 0
     assert decoded.stdout == b"ready"
@@ -226,7 +224,7 @@ def test_no_staging_and_inherited_bash_env_does_not_run(tmp_path: Path) -> None:
 def test_sensitive_source_environment_and_input_are_not_arguments_or_retained_output() -> None:
     secret = "sensitive-canary-26c8e2"
     prepared = prepare(
-        Script(f'printf "%s" "{secret}"; printf "%s" "$SECRET" >&2; cat', Shell.fixed("bash")),
+        Script(f'printf "%s" "{secret}"; printf "%s" "$SECRET" >&2; cat', Shell.BASH),
         stdin=secret.encode(),
         env={"SECRET": secret},
         sensitive=True,
@@ -243,7 +241,7 @@ def test_sensitive_source_environment_and_input_are_not_arguments_or_retained_ou
 
 
 def test_sensitive_script_trace_is_suppressed_on_the_guest() -> None:
-    prepared = prepare(Script("set -x; printf sensitive-trace", Shell.fixed("bash")), sensitive=True)
+    prepared = prepare(Script("set -x; printf sensitive-trace", Shell.BASH), sensitive=True)
     status, decoded, raw = _run(prepared)
     assert status == 0
     assert b"sensitive-trace" not in raw
@@ -268,7 +266,7 @@ def test_readonly_shell_environment_assignment_failure_is_recorded() -> None:
 @pytest.mark.parametrize("login,interactive", [(True, False), (False, True), (True, True)])
 def test_unproven_startup_modes_are_refused(login: bool, interactive: bool) -> None:
     with pytest.raises(ValidationError):
-        prepare(Script("exit 0", Shell.fixed("bash", login=login, interactive=interactive)))
+        prepare(Script("exit 0", Shell.BASH, login=login, interactive=interactive))
 
 
 @pytest.mark.parametrize("key", ["BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS", "BASH_XTRACEFD", "_agw_assignment"])
@@ -281,7 +279,7 @@ def test_input_envelope_is_bounded_and_payload_has_no_diagnostic_representation(
     with pytest.raises(ValidationError):
         prepare(Command(("/usr/bin/cat",)), stdin=b"x" * MAX_ENVELOPE_BYTES)
     assert "canary" not in repr(Command(("canary",)))
-    assert "canary" not in repr(Script("canary", Shell.fixed("sh")))
+    assert "canary" not in repr(Script("canary", Shell.SH))
 
 
 @pytest.mark.parametrize("argument", ["contains\0nul", "invalid\ud800unicode"])

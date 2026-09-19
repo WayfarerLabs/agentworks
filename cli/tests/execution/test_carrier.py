@@ -102,12 +102,13 @@ def test_local_status_does_not_manufacture_completion() -> None:
 
 @pytest.mark.parametrize("field", ["source", "environment", "arguments"])
 def test_invalid_sensitive_text_does_not_retain_a_codec_exception(field: str) -> None:
-    from agentworks.execution.preparation import Command, Script, Shell, prepare
+    from agentworks.execution.models import Command, Script, Shell
+    from agentworks.execution.preparation import prepare
 
     value = "synthetic-private-payload\ud800"
     with pytest.raises(ValidationError) as failure:
         if field == "source":
-            prepare(Script(value, Shell.fixed("sh")), sensitive=True)
+            prepare(Script(value, Shell.SH), sensitive=True)
         elif field == "environment":
             prepare(Command(("/bin/true",)), env={"PRIVATE": value}, sensitive=True)
         else:
