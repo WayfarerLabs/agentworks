@@ -175,18 +175,71 @@ def test_expired_deadline_does_not_spawn(monkeypatch: pytest.MonkeyPatch) -> Non
     assert not result.stdout.complete and not result.stderr.complete
 
 
-def test_deadline_preserves_partial_evidence_and_reaps(children: list[subprocess.Popen[bytes]]) -> None:
-    started = time.monotonic()
-    result = execute(
-        "import sys,time; sys.stdout.write('partial'); sys.stdout.flush(); "
-        "sys.stderr.write('diagnostic'); sys.stderr.flush(); time.sleep(30)",
-        seconds=0.2,
+def test_deadline_preserves_partial_evidence_and_reaps(
+    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    markers = {b"partial", b"diagnostic"}
+    observed: set[bytes] = set()
+    original_read = _subprocess._Output.read
+    spawn = subprocess.Popen
+
+    def read(output: _subprocess._Output, pipe: Any) -> bool:
+        progressed = original_read(output, pipe)
+        observed.update(marker for marker in markers if marker in output.data)
+        return progressed
+
+    def delayed_startup(argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
+        time.sleep(0.3)
+        return spawn(argv, **kwargs)
+
+    deadline = Deadline.after(10)
+    monkeypatch.setattr(_subprocess._Output, "read", read)
+    monkeypatch.setattr(subprocess, "Popen", delayed_startup)
+    monkeypatch.setattr(Deadline, "expired", property(lambda value: observed == markers or value.remaining() == 0))
+    result = run_process(
+        [
+            sys.executable,
+            "-c",
+            "import sys,time; sys.stdout.write('partial'); sys.stdout.flush(); "
+            "sys.stderr.write('diagnostic'); sys.stderr.flush(); time.sleep(30)",
+        ],
+        io=CarrierIO(),
+        deadline=deadline,
     )
-    assert time.monotonic() - started < 2
+    assert observed == markers
     assert result.failure == Failure.DEADLINE
     assert result.stdout.data == b"partial"
     assert result.stderr.data == b"diagnostic"
     assert not result.stdout.complete and not result.stderr.complete
+    assert result.local_status is not None
+    assert result.exit_status is None
+    assert_closed(children)
+
+
+def test_deadline_budget_includes_process_startup(
+    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    startup_offset = 0.0
+    monotonic = time.monotonic
+    spawn = subprocess.Popen
+
+    def complete_startup(argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
+        nonlocal startup_offset
+        child = spawn(argv, **kwargs)
+        startup_offset = 2.0
+        return child
+
+    monkeypatch.setattr(time, "monotonic", lambda: monotonic() + startup_offset)
+    deadline = Deadline.after(1)
+    monkeypatch.setattr(subprocess, "Popen", complete_startup)
+    result = run_process(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        io=CarrierIO(),
+        deadline=deadline,
+    )
+    assert result.started
+    assert result.failure == Failure.DEADLINE
+    assert result.stdout.data == result.stderr.data == b""
     assert result.local_status is not None
     assert result.exit_status is None
     assert_closed(children)
