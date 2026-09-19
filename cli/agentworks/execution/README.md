@@ -61,6 +61,15 @@ unresolved production gate, including for the existing SSH copy. A deadline cons
 but cannot interrupt an OS process-creation call that has not returned; it is not a hard real-time
 bound over that call.
 
+`carriers/wsl2.py` is a private buffered candidate bound to an explicit local WSL executable,
+distribution and delivery user. It sends literal prepared argv through `--exec`, without selecting
+an application shell or discovering a route. Its candidate report treats observed client statuses 0
+through 255 as completion, including 255; absent, negative and out-of-range statuses remain
+uncertain. Independently known completion survives a local I/O failure. This interpretation is based
+on WSL client source, not native Windows acceptance. The carrier is not registered or wired into
+production. Real WSL argument/byte fidelity, status interpretation, interruption and distribution
+lifetime still require proof, and the shared pump's launch-interruption gap applies.
+
 ## Observation and guest lifetime
 
 A deadline bounds local observation only. Ordinary guest commands and bootstrap descendants can

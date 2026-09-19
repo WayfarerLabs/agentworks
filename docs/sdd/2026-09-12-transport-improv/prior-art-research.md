@@ -364,6 +364,16 @@ exit 255, interruption, and VM power lifetime. Reusing the current bounded subpr
 coordination with its SSH owner: non-SSH adapters should neither import SSH-private I/O nor grow a
 second copy of it. These are implementation inputs, not completed adapter acceptance.
 
+The private `carriers/wsl2.py` candidate uses that literal `--exec` path and the transport-owned
+shared pump. The same pinned source initializes WSL client failure to -1 at lines 1554-1557, returns
+the service launch result at lines 654-693, and maps caught failures to -1 at lines 1923-1927. Its
+proposed interpretation accepts only independently observed integer statuses 0 through 255 as
+command-chain completion, preserving 255 rather than borrowing SSH's ambiguity rule. Negative
+statuses, the Windows unsigned representation 4294967295 and other out-of-range statuses remain
+uncertain. Unit mapping tests do not prove these distinctions against supported shipped WSL clients.
+The carrier remains outside production composition pending the live cases above and the shared
+launch-interruption ownership gate.
+
 ## Claims not relied upon
 
 - A common API makes every backend interactive.
